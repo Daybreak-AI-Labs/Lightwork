@@ -131,7 +131,7 @@
         stop.addEventListener("click", async function () {
           if (busy) return; busy = true; var captured = generation;
           try {
-            var accepted = global.mvConfirm ? await global.mvConfirm("Stop future creation of “" + row.title + "”? PDFs already created are not withdrawn.", {title:"Stop recurring reports", confirmLabel:"Stop future creation"}) : false;
+            var accepted = global.mvConfirm ? await global.mvConfirm("Stop future creation of “" + row.title + "”? PDFs already created are not withdrawn.", {title:"Stop recurring reports", okText:"Stop future creation"}) : false;
             if (!accepted || captured !== generation) return;
             await request("/"+encodeURIComponent(row.definition)+"/stop", {context:context, revision:row.revision, confirmed:true});
             tell("Future report creation stopped. Existing PDFs remain separate."); await refreshList();

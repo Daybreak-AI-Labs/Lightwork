@@ -23,6 +23,7 @@ Work
 		Task map
 		3D plan view
 		My background work
+	Business details
 	Approvals
 		Approvals
 		Action Center

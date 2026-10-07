@@ -21,5 +21,6 @@ ROWS = [
     ("Approval challenges", "Contestations d’approbation", "Einwände gegen Genehmigungen", "承認への異議", "对批准的质疑"),
     ("Instructions used in real work", "Instructions utilisées dans le travail réel", "In echter Arbeit verwendete Anweisungen", "実際の作業で使われた指示", "实际工作中使用的指令"),
     ("Build a task mapping", "Créer une correspondance de tâches", "Eine Aufgabenzuordnung erstellen", "タスクの対応付けを作成", "建立任务映射"),
+    ("Business details", "Informations métier", "Geschäftsangaben", "業務の詳細", "业务详情"),
     # Bound Chat controls are in i18n_journey_chat_review.
 ]

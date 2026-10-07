@@ -1711,7 +1711,7 @@ def pin_preset(role: str | None, allowed) -> list[str]:
 AREAS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("Ask", "/chat", ("Ask", "Conversations", "Start from a template", "My companion")),
     ("Home", "/today", ("Home",)),
-    ("Work", "/goals", ("Tasks", "Approvals", "Results", "Projects", "Workflows", "Automations",
+    ("Work", "/goals", ("Tasks", "Business details", "Approvals", "Results", "Projects", "Workflows", "Automations",
                         "Code changes", "Promise reviews", "Shared decision reviews",
                         "Hand over a team's work")),
     ("Agents", "/workforce", ("Workforce", "Build an agent", "Skills", "Tools", "Knowledge", "Learning",

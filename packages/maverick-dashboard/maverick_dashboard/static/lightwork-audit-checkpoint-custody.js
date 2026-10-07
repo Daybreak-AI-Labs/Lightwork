@@ -27,13 +27,14 @@
     throw new Error('This browser could not retain the Original request reference. No new copy was started.'); } };
   async function request(path, body) {
     if (accessLost) throw unavailable();
-    const options = {credentials:'same-origin', cache:'no-store', headers:{'Accept':'application/json'}};
-    if (body !== undefined) { options.method = 'POST'; options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(body); }
-    const response = await fetch(api + path, options);
-    if (response.status === 401 || response.status === 403) { clearPrivate(); throw unavailable(response.status); }
-    let value; try { value = await response.json(); } catch (_) { throw new Error('The saved outcome could not be read. Keep this request and read Original.'); }
+    const options = {cache:'no-store', onAccess:clearPrivate,
+      messages:{unreadable:'The saved outcome could not be read. Keep this request and read Original.'},
+      serverDetail:'The request could not be confirmed. Read Original before trying again.'};
+    if (body !== undefined) { options.method = 'POST'; options.body = body; }
+    let value;
+    try { value = await window.mvFetchJSON(api + path, options, 'read the checkpoint copy'); }
+    catch (error) { if (error.accessChanged) throw unavailable(error.status); throw error; }
     if (accessLost) throw unavailable();
-    if (!response.ok) { const error = new Error(typeof value.detail === 'string' ? value.detail : 'The request could not be confirmed. Read Original before trying again.'); error.status = response.status; throw error; }
     return value;
   }
   function lock(value) {
@@ -72,7 +73,7 @@
       entry.append(button('Read full review and Original', async () => show(await request('/' + row.id + '/original'))));
       list.append(entry);
     });
-    if (!value.requests.length) list.append(node('p', 'No independent copies have been requested yet.'));
+    if (!value.requests.length) list.append(node('p', 'No independent copies have been requested yet. Choose your saved Amazon account above, then choose Review a checkpoint copy.'));
     return value;
   }
   function show(row) {

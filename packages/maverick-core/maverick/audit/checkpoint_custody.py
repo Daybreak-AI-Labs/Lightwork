@@ -286,7 +286,7 @@ class RetainedCheckpoints:
                 raise CustodyUnconfirmed
             self.guard()
             return locator
-        except Exception as exc:
+        except Exception as exc:  # failure-policy: fail_closed -- any error after PUT is an unknown outcome, never success or retry
             raise CustodyUnconfirmed("The upload may have happened. Read the original retained result; do not repeat this request.") from exc
 
 
