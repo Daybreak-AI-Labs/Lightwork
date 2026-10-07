@@ -21,6 +21,43 @@ class DecisionInput(StrictInput):
     proposal: str = Field(pattern=r"^[0-9a-f]{16}$")
 
 
+def _suggestion_state(request):
+    from maverick import config
+
+    from .app import require_page_visible
+    from .draft_api import context_for
+
+    auth.require_global_permission(request, "admin")
+    require_page_visible(request, "/learned")
+    context = context_for(request)
+    if config.config_source_errors(include_tenant=True):
+        raise HTTPException(503, "Current learning settings are unavailable. Review All settings before suggesting a change.")
+    settings = harness_refine._settings()
+    auth.require_global_permission(request, "admin")
+    require_page_visible(request, "/learned")
+    if context_for(request) != context:
+        raise HTTPException(409, "Your account or workspace changed. Reload Learned before continuing.")
+    return {"context": context, "enabled": settings["enable"], "approval_required": settings["require_approval"]}
+
+
+def suggestion_snapshot(request, _selection):
+    state = _suggestion_state(request)
+    return Snapshot(digest(state), "Current instruction-suggestion access and settings",
+                    "Open the existing Suggest a change form. Your entered text stays private and is kept; opening makes no suggestion or AI call.",
+                    details={"instruction_suggestion_form": {"context": state["context"]}},
+                    blocked="Suggested instruction changes are off. Turn them on in All settings first." if not state["enabled"] else "")
+
+
+def suggestion_prepare(request, _selection, _arguments):
+    state = _suggestion_state(request)
+    if not state["enabled"]:
+        raise HTTPException(409, "Suggested instruction changes are off. Turn them on in All settings first.")
+    if _suggestion_state(request) != state:
+        raise HTTPException(409, "Instruction settings changed during this check. Refresh before opening the form.")
+    return Preview("Open Suggest a change and enter what went wrong, the proposed instructions and why they may help. Sending a suggestion does not apply it.",
+                   native={"instruction_suggestion_form": {"context": state["context"]}})
+
+
 def _state(request):
     auth.require_global_permission(request, "admin")
     rows = harness_refine.list_proposals()
@@ -129,7 +166,11 @@ def decision_recover(request, _selection, arguments, prepared, _operation, *, un
 
 def entries():
     common = {"family": "learning", "direct_ui": "/learned", "pages": ("/learned",)}
-    result = [Adapter("learning.instruction_decisions", "Review instruction changes", input_model=EmptyInput,
+    result = [Adapter("learning.instruction_suggestion_form", "Suggest an instruction change", input_model=EmptyInput,
+                      snapshot=suggestion_snapshot, prepare=suggestion_prepare,
+                      direct_ui="/learned#llp-propose-box", family="learning", pages=("/learned",),
+                      aliases=("suggest a learning improvement", "open instruction suggestion", "suggest a change")),
+              Adapter("learning.instruction_decisions", "Review instruction changes", input_model=EmptyInput,
                       snapshot=review_snapshot, prepare=review_prepare,
                       aliases=("show instruction changes", "review improvement decisions"), **common)]
     for undo, identifier, label in ((False, "apply", "Apply an approved instruction change"),

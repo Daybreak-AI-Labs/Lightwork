@@ -131,19 +131,27 @@
       <div class="section-head">
         <h2 id="ekko-recording-heading" tabindex="-1">Record activity</h2>
       </div>
-      <p class="ekko-note">Ekko learns from activity recorded on an enrolled device. Record it here from an activity file
-        exported by a guided recording, or, when Lightwork runs on Windows, from which allowed app is in front. Only the
-        apps and details your enrollment allows are kept; everything else is skipped.</p>
+      <p class="ekko-note">Ekko can notice which allowed app is in front on the computer where Lightwork is installed.
+        Recording is available on Windows, Mac and supported Linux desktops. Only the apps and details your enrollment
+        allows are kept; everything else is skipped. Recording uses the computer where Lightwork is installed, including
+        when you open this page from another device.</p>
+      <p id="ekko-rec-availability" class="ekko-note" role="status" aria-live="polite">Checking whether this computer can record activity…</p>
       <label class="ekko-consent" for="ekko-rec-consent">
         <input id="ekko-rec-consent" type="checkbox">
         <span>I understand Ekko records only the allowed apps and actions, and I can pause or stop at any time.</span>
       </label>
-      <label for="ekko-rec-file"><strong>Activity file</strong></label>
-      <input class="input" id="ekko-rec-file" type="file" accept=".jsonl,.txt,application/json,text/plain">
       <div class="ekko-controls">
-        <button class="btn btn--primary" type="button" id="ekko-rec-import">Record from this file</button>
-        <button class="btn" type="button" id="ekko-rec-watch" hidden>Record the app in front on this computer</button>
+        <button class="btn btn--primary" type="button" id="ekko-rec-watch" hidden>Start app recording</button>
+        <button class="btn btn--ghost" type="button" id="ekko-rec-check">Check recording status</button>
       </div>
+      <details style="margin-top: var(--space-3);">
+        <summary>Import an existing activity recording (optional)</summary>
+        <p class="ekko-note">Already have an activity recording? Import it here using the same enrollment limits.
+          Your administrator must allow detailed recording for this option.</p>
+        <label for="ekko-rec-file"><strong>Activity file</strong></label>
+        <input class="input" id="ekko-rec-file" type="file" accept=".jsonl,.txt,application/json,text/plain">
+        <button class="btn" type="button" id="ekko-rec-import">Record from this file</button>
+      </details>
       <p id="ekko-rec-msg" class="muted" role="status" aria-live="polite"></p>
     </section>
 
@@ -342,10 +350,7 @@
     }
   }
 
-  function renderStatus(status) {
-    current = status;
-    fillDevices();
-    document.getElementById('ekko-workflows-off').hidden = !!status.workflows_enabled;
+  function renderWatching(status) {
     var session = status.session;
     var collectorState = status.collector_state || 'waiting';
     var state = (!status.enabled) ? 'idle'
@@ -378,6 +383,20 @@
 
     setText('ekko-stat-events', status.event_count);
     setText('ekko-stat-collector', collectorWord(collectorState));
+    document.getElementById('ekko-watch').hidden = !enrolled;
+    var activeState = session ? session.state : '';
+    document.getElementById('ekko-start').hidden = !(status.enabled && enrolled && !['running', 'paused'].includes(activeState));
+    document.getElementById('ekko-pause').hidden = activeState !== 'running';
+    document.getElementById('ekko-resume').hidden = activeState !== 'paused';
+    document.getElementById('ekko-stop').hidden = !['running', 'paused'].includes(activeState);
+  }
+
+  function renderStatus(status) {
+    current = status;
+    fillDevices();
+    document.getElementById('ekko-workflows-off').hidden = !!status.workflows_enabled;
+    renderWatching(status);
+    var enrolled = !!(status.enrollment && status.enrollment.active);
     setText('ekko-stat-apps', status.allowed_apps.length);
     setText('ekko-stat-retention', status.retention_days + ' days');
     setText('ekko-capture-level', status.capture_level === 'application_metadata'
@@ -402,12 +421,6 @@
     }
 
     renderEnroll(status, enrolled);
-    document.getElementById('ekko-watch').hidden = !enrolled;
-    var activeState = session ? session.state : '';
-    document.getElementById('ekko-start').hidden = !(status.enabled && enrolled && !['running', 'paused'].includes(activeState));
-    document.getElementById('ekko-pause').hidden = activeState !== 'running';
-    document.getElementById('ekko-resume').hidden = activeState !== 'paused';
-    document.getElementById('ekko-stop').hidden = !['running', 'paused'].includes(activeState);
   }
 
   function stepText(step) {
@@ -466,6 +479,15 @@
     } catch (e) { mvToast(e.message, {error: true}); }
   }
 
+  document.addEventListener('lightwork:ekko-recording-status', function (event) {
+    var status = event.detail;
+    if (status && status.device_id === device()) {
+      current.session = status.session;
+      current.collector_state = status.collector_state;
+      renderWatching(status);
+    }
+  });
+
   function chooseDevice(id) {
     if (!DEVICE_RE.test(id)) {
       mvToast('Device names can use letters, numbers, dots, dashes, colons and underscores.', {error: true});
@@ -513,7 +535,7 @@
     var days = Number(document.getElementById('ekko-enroll-days').value);
     var names = apps.map(appName).join(', ');
     if (!(await mvConfirm('Enroll this device so Ekko may notice ' + names + ' for ' + days +
-        ' days? Nothing is watched until you press “Start watching”.', {okText: 'Enroll'}))) return;
+        ' days? Nothing is recorded until you start a recorder.', {okText: 'Enroll'}))) return;
     var btn = document.getElementById('ekko-enroll-go');
     btn.disabled = true; msg.textContent = 'Enrolling…';
     try {

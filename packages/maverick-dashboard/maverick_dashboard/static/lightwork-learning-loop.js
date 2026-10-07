@@ -8,7 +8,7 @@
   if (!root) return;
   var API = '/api/v1/learning-loop';
   var admin = root.getAttribute('data-admin') === '1';
-  var instructionContext = '', instructionPending = null, instructionBusy = false, instructionLocked = false, instructionHistory = [];
+  var instructionContext = '', instructionPending = null, instructionBusy = false, instructionLocked = false, instructionHistory = [], suggestionBusy = false;
   function $(id) { return document.getElementById(id); }
   function say(id, text) { window.mvStatus($(id), String(text || '')); }
   function el(tag, cls, text) {
@@ -254,6 +254,7 @@
       });
       var box = $('llp-propose-box');
       if (box) box.hidden = !data.enabled;
+      return data;
     }).catch(async function (failure) {
       if (instructionLocked) return;
       var rows = $('llp-ref-rows');
@@ -334,10 +335,33 @@
   function applyChange(p, b) { return decideInstruction(p, b, false); }
   function undoChange(p, b) { return decideInstruction(p, b, true); }
   var form = $('llp-propose');
+  function suggestionStamp() {
+    return form ? JSON.stringify(['target', 'title', 'failure', 'change', 'rationale'].map(function (key) {
+      return form.elements.namedItem(key).value;
+    })) : '';
+  }
+  window.LightworkLearningInstructions = {
+    openSuggestion: async function (context, isCurrent) {
+      if (!form || !admin || instructionLocked || instructionBusy || suggestionBusy ||
+          !/^[a-f0-9]{64}$/.test(context) || (typeof isCurrent === 'function' && !isCurrent())) return false;
+      var entered = suggestionStamp(), current = await loadRefinements();
+      if (!current || instructionLocked || !current.can_manage || !current.enabled ||
+          current.context !== context || instructionContext !== context ||
+          (typeof isCurrent === 'function' && !isCurrent())) return false;
+      if (suggestionStamp() !== entered) {
+        say('llp-ref-msg', 'Your suggestion changed while access was checked. It was kept; open the form again when ready.');
+        return false;
+      }
+      $('llp-propose-box').open = true;
+      $('llp-title').focus();
+      return true;
+    }
+  };
   if (form) {
     form.addEventListener('submit', async function (event) {
       event.preventDefault();
-      if (instructionLocked || instructionBusy || instructionPending) { showPending(); return; }
+      if (instructionLocked || instructionBusy || suggestionBusy || instructionPending) { showPending(); return; }
+      if (!instructionContext) { say('llp-ref-msg', 'Wait for current suggestions to load before sending. Your entered text is kept.'); return; }
       var f = new FormData(form);
       var body = {};
       ['target', 'title', 'failure', 'change', 'rationale'].forEach(function (k) { body[k] = String(f.get(k) || '').trim(); });
@@ -346,19 +370,27 @@
         return;
       }
       var submit = form.querySelector('button[type=submit]');
+      var submitted = suggestionStamp(), bound = instructionContext;
+      suggestionBusy = true;
+      instructionBusy = true;
       if (submit) submit.disabled = true;
       say('llp-ref-msg', 'Sending your suggestion…');
       try {
         var out = await post('/refinements', body);
-        if (instructionLocked) return;
-        say('llp-ref-msg', out.needs_approval
+        if (instructionLocked || bound !== instructionContext) return;
+        var unchanged = suggestionStamp() === submitted;
+        var savedMessage = out.needs_approval
           ? 'Suggestion saved. It now waits for approval on the Approvals page; then apply it here.'
-          : 'Suggestion saved. You can apply it from the list.');
-        form.reset();
+          : 'Suggestion saved. You can apply it from the list.';
+        say('llp-ref-msg', savedMessage + (unchanged ? '' : ' Your newer suggestion is kept in the form and has not been sent.'));
+        if (unchanged) form.reset();
+        instructionBusy = false;
         await loadRefinements();
       } catch (failure) {
         if (!instructionLocked) say('llp-ref-msg', await problem(failure, 'save the suggestion'));
       } finally {
+        suggestionBusy = false;
+        instructionBusy = false;
         if (submit) submit.disabled = instructionLocked;
       }
     });

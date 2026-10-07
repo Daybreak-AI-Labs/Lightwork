@@ -1,10 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules, copy_metadata
+import sys
 
 # Retain the tokenizer's Rust extension and native-wheel resources. The
 # reviewed vocabulary is core package data; no first-use download is needed.
 _token_data, _token_binaries, _token_imports = collect_all('tiktoken')
+_desktop_data, _desktop_binaries, _desktop_imports = [], [], []
+_desktop_packages = ('objc', 'CoreFoundation', 'Foundation', 'AppKit') if sys.platform == 'darwin' else (
+    ('Xlib',) if sys.platform.startswith('linux') else ())
+for _package in _desktop_packages:
+    _data, _binaries, _imports = collect_all(_package)
+    _desktop_data += _data
+    _desktop_binaries += _binaries
+    _desktop_imports += _imports
 
 # Bundle the .dist-info metadata so `maverick version` can read the
 # installed package versions from inside the frozen binary.
@@ -13,7 +22,7 @@ _token_data, _token_binaries, _token_imports = collect_all('tiktoken')
 # the gRPC contract, and environment-hunter Sigma rules.  Hidden imports alone
 # do not make those resources available in a frozen binary.
 _datas = (
-    _token_data
+    _token_data + _desktop_data
     + collect_data_files('maverick')
     + collect_data_files('maverick_dashboard')
     + collect_data_files('maverick_shield')
@@ -45,7 +54,7 @@ for _dist in (
 a = Analysis(
     ['pyinstaller_entry.py'],
     pathex=[],
-    binaries=_token_binaries,
+    binaries=_token_binaries + _desktop_binaries,
     datas=_datas,
     hiddenimports=[
         'sqlite3',
@@ -69,7 +78,7 @@ a = Analysis(
         # its native libpq implementation dynamically. Their hooks retain DLLs.
         'sqlalchemy.dialects.sqlite',
         'sqlalchemy.dialects.postgresql.psycopg',
-    ] + _token_imports + collect_submodules('maverick')
+    ] + _token_imports + _desktop_imports + collect_submodules('maverick')
       # The maverick_* siblings are separate top-level packages imported only
       # inside function bodies (cli.py: `from maverick_dashboard...`), which
       # PyInstaller's static analysis doesn't follow -- so collect_submodules('maverick')

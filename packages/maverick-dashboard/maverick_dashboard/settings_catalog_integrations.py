@@ -113,6 +113,8 @@ _ROUTE_FILES = (("image", "Picture"), ("audio", "Sound recording"), ("video", "V
 
 
 def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
+    from maverick.image_edit_models import CHOICES, MAX_MODEL_LENGTH, MODEL_PATTERN
+
     plan_cells = (
         C("features", "What the plan includes", "picks", choices=_plan_features(),
           max_items=128),
@@ -122,6 +124,15 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           minimum=0, maximum=10000, integer=True, unit="tasks", default=0),
     )
     return (
+        *(S("image_edit", field, label,
+            "Copy the model name from its Replicate page, with a version if you want to "
+            "keep using that version. Leave empty to keep the built-in choice. A choice "
+            "set on the server takes priority. Hosted image edits use your connected "
+            "Replicate account and may cost money; saving this choice makes no image.",
+            "text", "AI models", "", "maverick.tools.image_edit", subgroup="Images",
+            env=(env,), pattern=MODEL_PATTERN, max_length=MAX_MODEL_LENGTH,
+            aliases="image picture edit inpaint variation upscale replicate")
+          for field, env, label in CHOICES),
         # ------------------------------------------------ plans and billing
         S("billing", "enforce_plan_caps", "Hold workspaces to their plan's daily limit",
           "A workspace without a daily spending limit of its own uses the daily limit of its "

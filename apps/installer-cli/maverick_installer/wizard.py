@@ -4757,6 +4757,28 @@ def _pick_swarm_scale(advanced: dict[str, Any]) -> None:
                 default="16"), default=16))
 
 
+def _pick_image_edit_models() -> dict[str, str]:
+    """The same optional model choices offered after installation."""
+    from maverick.image_edit_models import CHOICES, validate_model
+
+    if not _q_confirm(
+        "Choose models for hosted image edits now? You can change them later in "
+        "All settings > AI models > Images. Replicate image edits may cost money; "
+        "setup makes no images.", default=False,
+    ):
+        return {}
+    choices = {}
+    for field, _env, label in CHOICES:
+        while True:
+            value = _q_text(label + " (blank keeps the built-in choice)", default="").strip()
+            try:
+                choices[field] = validate_model(value)
+                break
+            except ValueError as exc:
+                console.print(str(exc), style="yellow")
+    return choices
+
+
 def pick_advanced() -> dict[str, Any]:
     """Configure advanced reasoning, learning, and governance features.
 
@@ -4766,6 +4788,7 @@ def pick_advanced() -> dict[str, Any]:
     """
     console.print()
     advanced: dict[str, Any] = {
+        "image_edit": _pick_image_edit_models(),
         "cost_aware": _q_confirm(
             "Cost-aware routing? Use the cheapest capable model per role to cut spend.",
             default=False,
@@ -8764,6 +8787,19 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if not advanced:
         return []
     lines: list[str] = []
+    image_edit = advanced.get("image_edit")
+    if image_edit:
+        from maverick.image_edit_models import CHOICES, validate_model
+
+        if not isinstance(image_edit, dict) or set(image_edit) - {row[0] for row in CHOICES}:
+            raise ValueError("Image model choices are not in the supported form.")
+        image_lines = []
+        for field, _env, _label in CHOICES:
+            value = validate_model(image_edit.get(field, ""))
+            if value:
+                image_lines.append(field + " = " + _toml_str(value))
+        if image_lines:
+            lines.extend(["", "[image_edit]", *image_lines])
     # These governed-learning sections are default-on in the kernel. Preserve a
     # deliberate "no" from the advanced wizard instead of silently omitting the
     # table (which would now mean on). True choices are emitted with their richer

@@ -74,8 +74,10 @@ cat > dist/nuitka-build/_entry.py <<'PY'
 # Compiled entry point — identical to the `maverick` console script
 # ([project.scripts] maverick = "maverick.cli:main").
 import sys
-from maverick.cli import main
+import multiprocessing
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    from maverick.cli import main
     sys.exit(main())
 PY
 
@@ -86,8 +88,14 @@ echo ">> [5/6] compile with Nuitka (standalone + onefile, C backend)"
 #   a11y/report assets, packaged specialist packs) inside the binary.
 # --nofollow-import-to excludes test trees so the binary stays lean and no test
 #   fixtures ride along.
+DESKTOP_INCLUDES=()
+case "$(uname)" in
+  Darwin) DESKTOP_INCLUDES=(--include-package=objc --include-package=CoreFoundation --include-package=Foundation --include-package=AppKit) ;;
+  Linux) DESKTOP_INCLUDES=(--include-package=Xlib) ;;
+esac
 python -m nuitka \
   --standalone --onefile \
+  "${DESKTOP_INCLUDES[@]}" \
   --output-dir=dist/nuitka-build \
   --output-filename="$OUT" \
   --include-package=maverick \
