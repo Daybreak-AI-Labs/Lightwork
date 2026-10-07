@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+from maverick_dashboard.app import static_url
 
 
 def _client():
@@ -88,7 +89,7 @@ def test_settings_has_bounded_sections_keyboard_tabs_and_search(monkeypatch, tmp
         assert f'data-settings-tab="{group}"' in text
         assert f'data-settings-group="{group}"' in text
     # The arrow, Home and End keys come from the shared tab bar's script.
-    assert 'data-mv-tabs="panels"' in text and '<script src="/static/lightwork-tabs.js" defer></script>' in text
+    assert 'data-mv-tabs="panels"' in text and f'<script src="{static_url("lightwork-tabs.js")}" defer></script>' in text
     assert "applySearch" in text
     assert "data-settings-search-item" in text
 
