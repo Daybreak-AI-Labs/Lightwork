@@ -23,7 +23,11 @@ def test_learning_mutations_confirm_targets_and_recover_for_retry():
     assert "sw.label + '” for this deployment? ' + impact" in source
     assert "Scheduled and triggered workflows may start running" in source
     assert "Disable automatic rollback of workflow regressions?" in source
-    assert "Disable automatic application of workflow improvements?" in source
+    # Automatic application of workflow improvements was retired: suggestions
+    # now wait for complete human review, so no unconfirmed toggle may return.
+    assert "lrn-auto-apply" not in source
+    assert "wire('lrn-auto-evolve', 'auto_evolve');" in source
+    assert "Workflow suggestions require your review." in source
     assert "Stop these experiments? Results so far are kept." in source
     assert source.count("if (btn.dataset.inFlight === 'true') return;") >= 5
     assert source.count("btn.setAttribute('aria-busy', 'true')") >= 5
@@ -58,16 +62,23 @@ def test_workforce_deploy_is_single_flight_and_surfaces_response_details():
 def test_agent_factory_deploy_and_reset_mutations_are_guarded():
     source = _source("agents.html")
     overrides = _static("lightwork-agent-override-changes.js")
+    drafts = _static("lightwork-specialist-drafts.js")
+    from maverick_dashboard import specialist_drafts
 
     # Both team buttons use the reviewed, single-flight team client.
     assert source.count("await window.LWDepartmentTeamUpdates.open(") == 2
     assert "function beginMutation(button)" in source
     assert "if (button.dataset.inFlight === 'true') return false;" in source
-    assert "if (!beginMutation(saveBtn)) return;" in source
-    assert "Its allowed actions, steps and independence settings take effect for everyone who uses it" in source
     assert "if (failure.unreadable) throw new Error('The result could not be confirmed. Refresh the page to check.');" in source
     assert "plainError(failure, 'reach Lightwork')" in source
-    assert "finishMutation(saveBtn)" in source
+    # Save has no direct write path: it opens the complete reviewed draft
+    # decision, and refuses outright when that client is unavailable.
+    assert "if (window.LWSpecialistDrafts) { await window.LWSpecialistDrafts.reviewEntered('save'); return; }" in source
+    assert "The complete draft controls are unavailable. Refresh Agent Factory before saving." in source
+    assert "I reviewed every setting and consequence above." in drafts
+    assert "if (!consent.checked || busy || reviewed !== value || current !== generation) return;" in drafts
+    assert "lock(true); apply.disabled = true;" in drafts
+    assert "Publishing or restoring changes new work" in specialist_drafts.NOTICE
     # Reset and removal go through a reviewed, consented, single-flight change.
     assert "'Review reset to the built-in definition'" in overrides
     assert "if (busy || !consent.checked || started !== generation) return" in overrides

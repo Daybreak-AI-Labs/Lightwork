@@ -109,8 +109,23 @@ def test_deleted_workspace_cannot_adopt_old_membership_or_payload(purge, monkeyp
     rbac.set_tenant_role("former", "user:old", "admin")
     root = data_dir(tenant="former")
     (root / "synthetic.txt").write_text("old private fixture", encoding="utf-8")
-    removed = client.request("DELETE", f"/api/v1/admin/tenants/former?purge={str(purge).lower()}")
+    if purge:
+        # Remove never erases in one step: erasure is a separate reviewed action.
+        shortcut = client.request("DELETE", "/api/v1/admin/tenants/former?purge=true")
+        assert shortcut.status_code == 409, shortcut.text
+        assert "Review erasure" in shortcut.json()["detail"]
+        assert (root / "synthetic.txt").exists()
+        assert rbac.get_tenant_role("former", "user:old") == "admin"
+    removed = client.request("DELETE", "/api/v1/admin/tenants/former")
     assert removed.status_code == 204, removed.text
+    if purge:
+        review = client.post("/api/v1/workspace-erasure/review", json={"workspace": "former"})
+        assert review.status_code == 200, review.text
+        erased = client.post("/api/v1/workspace-erasure/apply",
+                             json={"token": review.json()["token"], "confirmed": True})
+        assert erased.status_code == 200, erased.text
+        assert erased.json()["status"] == "confirmed"
+        assert not (root / "synthetic.txt").exists()
     refused = client.post("/api/v1/admin/tenants", json={"id": "former"})
     assert refused.status_code == 409
     assert "history" in refused.json()["detail"]

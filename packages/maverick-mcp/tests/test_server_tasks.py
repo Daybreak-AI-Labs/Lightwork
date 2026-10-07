@@ -576,31 +576,46 @@ def test_run_loop_pushes_status_notification(monkeypatch):
     monkeypatch.setattr(s, "_task_runner", lambda n, a: _ok(f"done {n}"))
     out = io.StringIO()
     monkeypatch.setattr(sys, "stdout", out)
-    monkeypatch.setattr(sys, "stdin", io.StringIO("".join(json.dumps(m) + "\n" for m in [
+
+    def status_notification():
+        for line in out.getvalue().splitlines():
+            try:
+                message = json.loads(line) if line.strip() else {}
+            except json.JSONDecodeError:
+                continue
+            if message.get("method") == "notifications/tasks/status":
+                return message
+        return None
+
+    class _ConnectedStdin:
+        """The client stays connected until the push arrives (or 10 s pass).
+
+        Pushes are stdio-only: once stdin reaches EOF the session is closed
+        and a later completion is deliberately not written to the pipe, so an
+        immediate EOF would race the worker."""
+
+        def __init__(self, messages):
+            self._lines = [json.dumps(m) + "\n" for m in messages]
+
+        def readline(self):
+            if self._lines:
+                return self._lines.pop(0)
+            deadline = time.monotonic() + 10
+            while status_notification() is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            return ""
+
+    monkeypatch.setattr(sys, "stdin", _ConnectedStdin([
         {"jsonrpc": "2.0", "id": 1, "method": "initialize",
          "params": {"protocolVersion": "2025-11-25",
                     "capabilities": {"tasks": {"requests": {"tools": {"call": {}}}}}}},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "maverick_start", "arguments": {"title": "go"},
                     "task": {"ttl": 60000}}},
-    ])))
+    ]))
     s.run()
     try:
-        # The worker completes + notifies asynchronously; poll for the push.
-        notif = None
-        for _ in range(200):
-            msgs = []
-            for line in out.getvalue().splitlines():
-                if line.strip():
-                    try:
-                        msgs.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
-            notif = next((m for m in msgs
-                          if m.get("method") == "notifications/tasks/status"), None)
-            if notif is not None:
-                break
-            time.sleep(0.01)
+        notif = status_notification()
         assert notif is not None, "no notifications/tasks/status was pushed"
         assert notif["params"]["status"] == "completed"
     finally:

@@ -61,6 +61,9 @@ DOCUMENTED_STATUS_GATES: dict[str, set[int]] = {
     "/notifications": {403},
     "/access-requests": {403},
     "/devices": {403},
+    # Human conversation handoff binds every view to the named person who
+    # takes or shares the conversation (human_conversation_handoffs.authority).
+    "/human-conversations": {403},
     # Employee activation is also switched off by default.
     "/get-started/employee": {403},
     # Owned-rule and learning-review pages show only the signed-in person's

@@ -508,6 +508,7 @@ def test_operate_opener_can_close_after_distinct_admin_approval(environment) -> 
         evidence = client.put(
             f"{API}/cases/case-close/sources/crm/phases/{phase}/evidence/evidence-{phase}",
             json={
+                "manual_attestation": True,
                 "status": "complete",
                 "provider_evidence_sha256": "d" * 64,
                 "record_count": 1,
@@ -520,6 +521,7 @@ def test_operate_opener_can_close_after_distinct_admin_approval(environment) -> 
     redaction = client.put(
         f"{API}/cases/case-close/sources/crm/phases/redact/evidence/evidence-redact",
         json={
+            "manual_attestation": True,
             "status": "complete",
             "provider_evidence_sha256": "e" * 64,
             "record_count": 1,

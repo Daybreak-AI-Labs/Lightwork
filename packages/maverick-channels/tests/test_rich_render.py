@@ -68,14 +68,18 @@ def test_plain_text_passes_through(tmp_path):
     assert inner.sent == [("u1", "no rich content")]
 
 
-def test_rich_text_appends_artifact_path(tmp_path):
+def test_rich_text_without_file_transport_never_sends_a_server_path(tmp_path):
+    # Without a file hand-off the reply is kept intact and the limitation is
+    # explained; a server-local artifact path is never sent as if it were a link.
     inner = _Chan()
     ch = rr.RichRenderChannel(inner, out_dir=tmp_path)
     asyncio.run(ch.send("u1", _MATHY))
     (uid, text), = inner.sent
     assert uid == "u1"
-    assert "[rendered: 2 math + 0 diagram block(s)]" in text
-    assert ".html" in text
+    assert text.startswith(_MATHY)
+    assert "This chat cannot attach a rendered copy." in text
+    assert ".html" not in text and str(tmp_path) not in text
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_rich_text_with_deliver_hook(tmp_path):
@@ -95,11 +99,17 @@ def test_rich_text_with_deliver_hook(tmp_path):
 
 def test_render_failure_falls_back_to_plain(tmp_path, monkeypatch):
     inner = _Chan()
+    delivered: list = []
+
+    async def deliver(user_id, path):
+        delivered.append((user_id, path))
+
     monkeypatch.setattr(rr, "write_artifact",
                         lambda *a, **k: (_ for _ in ()).throw(OSError("disk")))
-    ch = rr.RichRenderChannel(inner, out_dir=tmp_path)
+    ch = rr.RichRenderChannel(inner, deliver=deliver, out_dir=tmp_path)
     asyncio.run(ch.send("u1", _MATHY))
     assert inner.sent == [("u1", _MATHY)]  # reply never lost
+    assert delivered == []
 
 
 def test_wrapper_proxies_inner_attributes(tmp_path):

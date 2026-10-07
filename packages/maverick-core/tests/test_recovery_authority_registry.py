@@ -576,3 +576,19 @@ def test_privacy_queue_and_callback_leases_are_held(tmp_path: Path) -> None:
     assert ("privacy_remediation", "leased") in unresolved
     assert ("privacy_discovery_job", "queued") not in unresolved
     assert ("privacy_remediation", "queued") not in unresolved
+
+
+def test_installation_passphrases_and_link_signing_key_are_protected_authority() -> None:
+    """Colleague sign-in passphrases and the mute-link signing key are retained
+    restore blockers, never ordinary data, replayed state or discarded bytes."""
+    expected = {
+        "dashboard-passphrases.json": "dashboard_local_passphrases",
+        "notification-links/signing.key": "notification_link_signing_key",
+    }
+    for relative, policy in expected.items():
+        assert authority_policy(relative, is_sqlite=False) == policy
+        assert authority_policy(relative.upper(), is_sqlite=False) == policy
+        assert GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES[relative] == policy
+        assert relative not in DISCARD_BEFORE_PUBLICATION_AUTHORITY_SAMPLES
+    assert authority_policy("notification-links/signing.key.lock", is_sqlite=False) is None
+    assert authority_policy("other/signing.key", is_sqlite=False) is None

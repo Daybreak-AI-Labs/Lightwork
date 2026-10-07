@@ -458,7 +458,9 @@ def test_legacy_retention_refuses_invalid_or_unbounded_directory(isolated, monke
     elif invalid_entry == "directory":
         (directory / ("a" * 64)).mkdir()
     else:
-        for index in range(delivery.MAX_ATTACHMENTS):
+        # A receipt may own inbound and reply attachments (2 x the per-message
+        # cap); one more entry than that is unbounded.
+        for index in range(2 * delivery.MAX_ATTACHMENTS):
             (directory / f"{index:064x}").write_bytes(b"keep")
     with pytest.raises(ValueError, match="Invalid channel attachment"):
         delivery.DeliveryJournal().compact_delivered()

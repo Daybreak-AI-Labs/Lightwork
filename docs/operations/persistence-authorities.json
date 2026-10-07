@@ -176,26 +176,26 @@
     }
   },
   "counts": {
-    "governed": 81,
-    "artifact": 52,
+    "governed": 131,
+    "artifact": 54,
     "a2a": 4,
-    "preferences": 7,
-    "learning": 58,
-    "sqlite_domain": 80,
-    "configuration": 70,
-    "read_projection": 22,
+    "preferences": 8,
+    "learning": 60,
+    "sqlite_domain": 82,
+    "configuration": 74,
+    "read_projection": 24,
     "coordinator": 1,
-    "audit": 25,
-    "transient": 23,
-    "business_records": 14,
-    "execution": 41,
-    "recovery": 10,
+    "audit": 26,
+    "transient": 26,
+    "business_records": 22,
+    "execution": 45,
+    "recovery": 12,
     "derived": 16,
-    "composition": 58,
+    "composition": 61,
     "external": 18,
-    "key_custody": 2,
+    "key_custody": 3,
     "storage_primitive": 10,
-    "world": 4,
+    "world": 5,
     "mixed_api": 8,
     "knowledge": 4,
     "draft": 3,
@@ -14699,7 +14699,13 @@
       "purpose": "Write-once (WORM) export of closed audit day-files.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
+      "governed_namespaces": [
+        {
+          "namespace": "audit-action-reviews",
+          "line": 666,
+          "recovery_policy": "audit_maintenance_request_authority"
+        }
+      ],
       "literal_path_hints": [
         ".ndjson",
         "WORM object name must be YYYY-MM-DD.ndjson",
@@ -14732,6 +14738,12 @@
           "function": "build_sink",
           "kind": "data_dir",
           "expression": "data_dir('audit')"
+        },
+        {
+          "line": 666,
+          "function": "_release_attempts",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('audit-action-reviews', 'AAR', 'audit_action_review')"
         }
       ]
     },
@@ -26751,6 +26763,2980 @@
           "sample_path": "dashboard/goal-feedback-v2.ndjson",
           "recovery_policy": null,
           "disposition": "Ordinary tenant customer data, without independent execution authority. Retain old deployment-global feedback unread; restoring or matching identifiers does not authorize adopting its lineage."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/approval_challenges.py",
+      "contract": "transient",
+      "owner": "packages/maverick-core/maverick/approval_challenges.py",
+      "purpose": "Closed, modeled approval-race challenges and a disposable native receiver.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 215,
+          "function": "check_native",
+          "kind": "write_text",
+          "expression": "(home / 'config.toml').write_text('[approval]\\nrequire_acknowledgement = false\\n', encoding='utf-8')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/comments.py",
+      "contract": "sqlite_domain",
+      "owner": "packages/maverick-core/maverick/comments.py",
+      "purpose": "Comments and @mentions on tasks, runs, approvals and policies (NOT-4).",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "comments.sqlite3"
+      ],
+      "observed_mechanism_markers": {
+        "create_table": 1
+      },
+      "source_sites": [
+        {
+          "line": 58,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('collaboration', 'comments.sqlite3')"
+        },
+        {
+          "line": 71,
+          "function": "_connect",
+          "kind": "connect",
+          "expression": "sqlite3.connect(str(path), timeout=10)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/compliance_history.py",
+      "contract": "business_records",
+      "owner": "packages/maverick-core/maverick/compliance_history.py",
+      "purpose": "When each compliance protection was last checked, and its history (ADM-6).",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "control-history.json"
+      ],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 1
+      },
+      "source_sites": [
+        {
+          "line": 28,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('compliance', 'control-history.json')"
+        },
+        {
+          "line": 50,
+          "function": "record",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 62,
+          "function": "record",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(path, json.dumps(result, separators=(',', ':')).encode(), mode=384)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/departments.py",
+      "contract": "business_records",
+      "owner": "packages/maverick-core/maverick/departments.py",
+      "purpose": "Department bundles: the specialist packs as deployable teams.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1
+      },
+      "source_sites": [
+        {
+          "line": 388,
+          "function": "deploy_department",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(fleets_dir(tenant=target_tenant) / f'{fleet.name}.json')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/dsar_export_handoff.py",
+      "contract": "artifact",
+      "owner": "packages/maverick-core/maverick/dsar_export_handoff.py",
+      "purpose": "Officer-recorded handoff of an exact collected package; never remote delivery proof.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 3,
+        "outbox": 2
+      },
+      "source_sites": [
+        {
+          "line": 37,
+          "function": "_artifact",
+          "kind": "data_dir",
+          "expression": "data_dir('dsar_requests')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/generated_tool_removal.py",
+      "contract": "learning",
+      "owner": "packages/maverick-core/maverick/generated_tool_removal.py",
+      "purpose": "Owned generated-source lifecycle inspection; never import generated code.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1
+      },
+      "source_sites": [
+        {
+          "line": 62,
+          "function": "inspect",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/instruction_capture.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/instruction_capture.py",
+      "purpose": "Explicit, owner-bound capture of one successful model instruction dispatch.",
+      "referenced_store_owners": [
+        ".governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "instruction-captures",
+          "line": 25,
+          "recovery_policy": "instruction_capture_permission_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "atomic_replace": 4,
+        "cross_process_lock": 3,
+        "revision": 12
+      },
+      "source_sites": [
+        {
+          "line": 25,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('instruction-captures', 'ISC', 'instruction_capture', required_backend='local')"
+        },
+        {
+          "line": 36,
+          "function": "_hint",
+          "kind": "data_dir",
+          "expression": "data_dir('instruction-capture-hints', 'goal-' + str(goal_id))"
+        },
+        {
+          "line": 59,
+          "function": "authorize",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(hint, strict=True)"
+        },
+        {
+          "line": 104,
+          "function": "_authorize",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(hint, 'armed:' + identity)"
+        },
+        {
+          "line": 174,
+          "function": "record_dispatch",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_hint(reviewed['goal_id']), strict=True)"
+        },
+        {
+          "line": 179,
+          "function": "record_dispatch",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(_hint(reviewed['goal_id']), 'consumed:' + reviewed['id'])"
+        },
+        {
+          "line": 211,
+          "function": "record_dispatch",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_hint(current['goal_id']), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/knowledge_source_readers.py",
+      "contract": "transient",
+      "owner": "packages/maverick-core/maverick/knowledge_source_readers.py",
+      "purpose": "Bounded remote document reads through the installed connection/SSRF gates.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 12
+      },
+      "source_sites": [
+        {
+          "line": 310,
+          "function": "document",
+          "kind": "write_bytes",
+          "expression": "path.write_bytes(raw)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/knowledge_sources.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/knowledge_sources.py",
+      "purpose": "Saved remote Knowledge sources using native records, ingestion and registry.",
+      "referenced_store_owners": [
+        ".governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "knowledge-remote-sources",
+          "line": 26,
+          "recovery_policy": "knowledge_remote_source_authority"
+        },
+        {
+          "namespace": "knowledge-source-refreshes",
+          "line": 27,
+          "recovery_policy": "knowledge_source_refresh_execution_authority"
+        },
+        {
+          "namespace": "knowledge-source-snapshots",
+          "line": 28,
+          "recovery_policy": "knowledge_source_snapshot_authority"
+        },
+        {
+          "namespace": "knowledge-source-decisions",
+          "line": 29,
+          "recovery_policy": "knowledge_source_decision_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 18
+      },
+      "source_sites": [
+        {
+          "line": 26,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('knowledge-remote-sources', 'KNS', 'knowledge_remote_source')"
+        },
+        {
+          "line": 27,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('knowledge-source-refreshes', 'KNJ', 'knowledge_source_refresh')"
+        },
+        {
+          "line": 28,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('knowledge-source-snapshots', 'KNV', 'knowledge_source_snapshot')"
+        },
+        {
+          "line": 29,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('knowledge-source-decisions', 'KNO', 'knowledge_source_decision')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/llm.py",
+      "contract": "composition",
+      "owner": "packages/maverick-core/maverick/llm.py",
+      "purpose": "Multi-provider LLM facade.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 1163,
+          "function": "_price_scope",
+          "kind": "data_dir",
+          "expression": "data_dir()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/notification_unsubscribe.py",
+      "contract": "key_custody",
+      "owner": "packages/maverick-core/maverick/notification_unsubscribe.py",
+      "purpose": "One-action mute and unsubscribe from inside a notification (NOT-2).",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "notification-links/signing.key"
+      ],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 1,
+        "revision": 1
+      },
+      "source_sites": [
+        {
+          "line": 36,
+          "function": "_secret",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 44,
+          "function": "_secret",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 52,
+          "function": "_secret",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(path, value, mode=384)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "notification-links/signing.key",
+          "recovery_policy": "notification_link_signing_key",
+          "disposition": "Installation-level link-signing key custody. A restored copy is retained and blocks startup; a rolled-back key must not re-authorize old mute/unsubscribe links."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/policy_suggestions.py",
+      "contract": "sqlite_domain",
+      "owner": "packages/maverick-core/maverick/policy_suggestions.py",
+      "purpose": "Suggested edits to policy documents, accepted or rejected by a person (NOT-4).",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "policy_suggestions.sqlite3"
+      ],
+      "observed_mechanism_markers": {
+        "create_table": 1
+      },
+      "source_sites": [
+        {
+          "line": 85,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('collaboration', 'policy_suggestions.sqlite3')"
+        },
+        {
+          "line": 97,
+          "function": "_connect",
+          "kind": "connect",
+          "expression": "sqlite3.connect(str(path), timeout=10)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/practice.py",
+      "contract": "world",
+      "owner": "packages/maverick-core/maverick/practice.py",
+      "purpose": "Practice mode: try agents, tasks and approvals without touching real systems.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "world.db",
+        "outbox.jsonl"
+      ],
+      "observed_mechanism_markers": {
+        "outbox": 6
+      },
+      "source_sites": [
+        {
+          "line": 164,
+          "function": "world_path",
+          "kind": "data_dir",
+          "expression": "data_dir('practice', 'world.db', tenant=tenant)"
+        },
+        {
+          "line": 174,
+          "function": "_outbox_path",
+          "kind": "data_dir",
+          "expression": "data_dir('practice', 'outbox.jsonl')"
+        },
+        {
+          "line": 196,
+          "function": "record",
+          "kind": "write_text",
+          "expression": "path.write_text('\\n'.join(lines[-_OUTBOX_MAX:]) + '\\n', encoding='utf-8')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/provider_spend_sqlite.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/provider_spend_sqlite.py",
+      "purpose": "Transactional local provider accounting with a retained JSON migration source.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 4,
+        "begin_immediate": 2,
+        "create_table": 4
+      },
+      "source_sites": [
+        {
+          "line": 81,
+          "function": "_publish_seal",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(seal_path(legacy), _digest_file(database) + '\\n', mode=384)"
+        },
+        {
+          "line": 94,
+          "function": "_connect",
+          "kind": "connect",
+          "expression": "sqlite3.connect(str(database), timeout=15, isolation_level=None)"
+        },
+        {
+          "line": 109,
+          "function": "guarded",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(legacy, strict=True)"
+        },
+        {
+          "line": 137,
+          "function": "_populate",
+          "kind": "commit",
+          "expression": "connection.commit()"
+        },
+        {
+          "line": 147,
+          "function": "_build_staged",
+          "kind": "connect",
+          "expression": "sqlite3.connect(str(stage), isolation_level=None)"
+        },
+        {
+          "line": 175,
+          "function": "ensure",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(legacy, strict=True)"
+        },
+        {
+          "line": 176,
+          "function": "ensure",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(database.with_suffix('.sqlite3.init'), strict=True)"
+        },
+        {
+          "line": 186,
+          "function": "ensure",
+          "kind": "atomic_create_text",
+          "expression": "atomic_create_text(marker, 'provider accounting sqlite v1\\n')"
+        },
+        {
+          "line": 214,
+          "function": "read_bucket",
+          "kind": "commit",
+          "expression": "connection.commit()"
+        },
+        {
+          "line": 253,
+          "function": "read_status",
+          "kind": "commit",
+          "expression": "connection.commit()"
+        },
+        {
+          "line": 306,
+          "function": "find_receipts",
+          "kind": "commit",
+          "expression": "connection.commit()"
+        },
+        {
+          "line": 316,
+          "function": "mutate",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(legacy, strict=True)"
+        },
+        {
+          "line": 427,
+          "function": "mutate",
+          "kind": "commit",
+          "expression": "connection.commit()"
+        },
+        {
+          "line": 462,
+          "function": "load",
+          "kind": "commit",
+          "expression": "connection.commit()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/recovery_visibility.py",
+      "contract": "transient",
+      "owner": "packages/maverick-core/maverick/recovery_visibility.py",
+      "purpose": "Complete bounded paired-history diagnostics on isolated native approvals.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 62,
+          "function": "check",
+          "kind": "write_text",
+          "expression": "(home / 'config.toml').write_text('[approval]\\nrequire_acknowledgement = false\\n', encoding='utf-8')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/runtime_policy_recovery.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/runtime_policy_recovery.py",
+      "purpose": "Exact deployment-policy custody and non-replayable reviewed restoration.",
+      "referenced_store_owners": [
+        ".governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "runtime-policy-copies",
+          "line": 51,
+          "recovery_policy": "runtime_policy_copy_authority"
+        },
+        {
+          "namespace": "runtime-policy-requests",
+          "line": 49,
+          "recovery_policy": "runtime_policy_restore_request_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 1,
+        "revision": 5
+      },
+      "source_sites": [
+        {
+          "line": 49,
+          "function": "store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('runtime-policy-requests', 'RPR', 'runtime_policy_request', authority_scope='deployment_global')"
+        },
+        {
+          "line": 51,
+          "function": "store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('runtime-policy-copies', 'RPC', 'runtime_policy_copy', authority_scope='deployment_global')"
+        },
+        {
+          "line": 172,
+          "function": "restore",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(native.overrides_path(), strict=True)"
+        },
+        {
+          "line": 212,
+          "function": "restore",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(native.overrides_path(), text, effect_guard=current, newline='')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/spending_alerts.py",
+      "contract": "business_records",
+      "owner": "packages/maverick-core/maverick/spending_alerts.py",
+      "purpose": "In-app alerts as spending nears a workspace or per-person spending limit.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "spending-limit-alerts.json"
+      ],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 1
+      },
+      "source_sites": [
+        {
+          "line": 75,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('spending-limit-alerts.json')"
+        },
+        {
+          "line": 131,
+          "function": "observe",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 142,
+          "function": "observe",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps({'format': _FORMAT, 'alerts': alerts}, sort_keys=True))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/usability_survey.py",
+      "contract": "preferences",
+      "owner": "packages/maverick-core/maverick/usability_survey.py",
+      "purpose": "Optional in-product usability survey: SUS each quarter, one ease question after top tasks.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 1
+      },
+      "source_sites": [
+        {
+          "line": 92,
+          "function": "store_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 119,
+          "function": "_locked",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 122,
+          "function": "_locked",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(store_path())"
+        },
+        {
+          "line": 150,
+          "function": "_write",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/usage_measures.py",
+      "contract": "business_records",
+      "owner": "packages/maverick-core/maverick/usage_measures.py",
+      "purpose": "Optional, name-free usage measures for the research kit (ONB-1, AI-13).",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 1
+      },
+      "source_sites": [
+        {
+          "line": 52,
+          "function": "store_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 80,
+          "function": "_save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(store_path(), json.dumps(data, sort_keys=True))"
+        },
+        {
+          "line": 91,
+          "function": "_edit",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(store_path())"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/web_vitals.py",
+      "contract": "business_records",
+      "owner": "packages/maverick-core/maverick/web_vitals.py",
+      "purpose": "Optional field Core Web Vitals: how fast pages load and respond for real visitors.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 1
+      },
+      "source_sites": [
+        {
+          "line": 82,
+          "function": "store_path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 119,
+          "function": "_locked",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 122,
+          "function": "_locked",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(store_path())"
+        },
+        {
+          "line": 165,
+          "function": "record",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(store_path(), json.dumps(data, sort_keys=True))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/agent_changelog.py",
+      "contract": "audit",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/agent_changelog.py",
+      "purpose": "A short record of changes to each agent, so people can see when the AI changed.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "agent-changelog.ndjson"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 38,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('dashboard', 'agent-changelog.ndjson')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/agent_override_changes.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/agent_override_changes.py",
+      "purpose": "Review exact agent definitions before the existing native override removal.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "agent-override-removal-requests",
+          "line": 44,
+          "recovery_policy": "agent_override_change_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 1
+      },
+      "source_sites": [
+        {
+          "line": 44,
+          "function": "_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('agent-override-removal-requests', 'AOR', 'agent_override_removal_request')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/applicability_regions.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/applicability_regions.py",
+      "purpose": "Owner-scoped, source-bound finite answer routing and original custody.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "local-rule-applicability",
+          "line": 58,
+          "recovery_policy": "applicability_regions_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 8
+      },
+      "source_sites": [
+        {
+          "line": 58,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('local-rule-applicability', 'APR', 'applicability_regions', required_backend='local')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/approval_challenges_api.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/approval_challenges_api.py",
+      "purpose": "Reviewed practice challenges, exact export consent and isolated native checks.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "approval-challenges",
+          "line": 68,
+          "recovery_policy": "approval_challenge_execution_authority"
+        },
+        {
+          "namespace": "approval-challenge-removals",
+          "line": 73,
+          "recovery_policy": "approval_challenge_removal_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "revision": 32
+      },
+      "source_sites": [
+        {
+          "line": 68,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('approval-challenges', 'ACP', 'approval_challenge', required_backend='local')"
+        },
+        {
+          "line": 73,
+          "function": "removals",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('approval-challenge-removals', 'ACR', 'approval_challenge_removal', required_backend='local')"
+        },
+        {
+          "line": 81,
+          "function": "_record_lock",
+          "kind": "data_dir",
+          "expression": "data_dir('approval-challenge-operation-locks', identity + '.lock')"
+        },
+        {
+          "line": 83,
+          "function": "_record_lock",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/audit_action_service.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/audit_action_service.py",
+      "purpose": "Exact audit maintenance reviews and original results for page and Copilot.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "audit-action-reviews",
+          "line": 40,
+          "recovery_policy": "audit_maintenance_request_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "revision": 4
+      },
+      "source_sites": [
+        {
+          "line": 40,
+          "function": "store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('audit-action-reviews', 'AAR', 'audit_action_review')"
+        },
+        {
+          "line": 67,
+          "function": "_destination",
+          "kind": "data_dir",
+          "expression": "data_dir('audit', 'worm', 'store')"
+        },
+        {
+          "line": 86,
+          "function": "_sources",
+          "kind": "data_dir",
+          "expression": "data_dir('audit')"
+        },
+        {
+          "line": 98,
+          "function": "_sources",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 141,
+          "function": "current",
+          "kind": "data_dir",
+          "expression": "data_dir('audit')"
+        },
+        {
+          "line": 159,
+          "function": "_bound_row",
+          "kind": "data_dir",
+          "expression": "data_dir('audit')"
+        },
+        {
+          "line": 257,
+          "function": "inventory",
+          "kind": "data_dir",
+          "expression": "data_dir('audit')"
+        },
+        {
+          "line": 261,
+          "function": "inventory",
+          "kind": "data_dir",
+          "expression": "data_dir('audit')"
+        },
+        {
+          "line": 267,
+          "function": "inventory",
+          "kind": "data_dir",
+          "expression": "data_dir('audit')"
+        },
+        {
+          "line": 382,
+          "function": "guard",
+          "kind": "data_dir",
+          "expression": "data_dir('audit')"
+        },
+        {
+          "line": 447,
+          "function": "_unknown_copies",
+          "kind": "data_dir",
+          "expression": "data_dir('audit')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/automation_imports.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/automation_imports.py",
+      "purpose": "Reviewed native automation translation, bounded connection reads and originals.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "automation-import-requests",
+          "line": 66,
+          "recovery_policy": "automation_import_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 2,
+        "revision": 7
+      },
+      "source_sites": [
+        {
+          "line": 66,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('automation-import-requests', 'AIR', 'automation_imports', required_backend='local')"
+        },
+        {
+          "line": 87,
+          "function": "policy",
+          "kind": "data_dir",
+          "expression": "data_dir()"
+        },
+        {
+          "line": 442,
+          "function": "apply",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(templates.user_templates_dir() / (item['name'] + '.md'), strict=True)"
+        },
+        {
+          "line": 577,
+          "function": "activate",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(templates.user_templates_dir() / (value['payload']['template_name'] + '.md'), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/channel_test_requests.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/channel_test_requests.py",
+      "purpose": "Reviewed one-sentence chat checks using native intake and original custody.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "channel-test-requests",
+          "line": 63,
+          "recovery_policy": "channel_test_dispatch_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 2
+      },
+      "source_sites": [
+        {
+          "line": 63,
+          "function": "store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('channel-test-requests', 'CHT', 'channel_test_request')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/commitment_capability_store.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/commitment_capability_store.py",
+      "purpose": "Linked Promise capability learning with scoped sources and exact originals.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "commitment-capability",
+          "line": 26,
+          "recovery_policy": "commitment_capability_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "revision": 8
+      },
+      "source_sites": [
+        {
+          "line": 26,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('commitment-capability', 'CCL', 'commitment_capability', required_backend='local')"
+        },
+        {
+          "line": 93,
+          "function": "_parent_guard",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/commitment_economic_alternatives_store.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/commitment_economic_alternatives_store.py",
+      "purpose": "Owned Promise economics, complete current-source admission and originals.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "commitment-economic-alternatives",
+          "line": 27,
+          "recovery_policy": "commitment_economic_alternatives_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 4,
+        "revision": 6
+      },
+      "source_sites": [
+        {
+          "line": 27,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('commitment-economic-alternatives', 'CEA', 'commitment_economic_alternatives', required_backend='local')"
+        },
+        {
+          "line": 52,
+          "function": "_writer",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 54,
+          "function": "_writer",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(own._store._dir() / '.economic-admission', strict=True)"
+        },
+        {
+          "line": 231,
+          "function": "_reserve",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._dir() / '.namespace-admission', strict=True)"
+        },
+        {
+          "line": 232,
+          "function": "_reserve",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._path(prepared['id']), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/company_saml_materials.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/company_saml_materials.py",
+      "purpose": "Uploaded SAML documents in encrypted deployment custody, never public files.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "company-saml-materials",
+          "line": 27,
+          "recovery_policy": "company_saml_credential_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "atomic_replace": 1
+      },
+      "source_sites": [
+        {
+          "line": 27,
+          "function": "store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('company-saml-materials', 'SMD', 'company_saml_material', authority_scope='deployment_global')"
+        },
+        {
+          "line": 147,
+          "function": "materialized",
+          "kind": "atomic_write_text",
+          "expression": "file_lock.atomic_write_text(path, value, mode=384)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/company_saml_setup.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/company_saml_setup.py",
+      "purpose": "Ordinary protected SAML setup; real tests never enable sign-in or grant roles.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "company-saml-setups",
+          "line": 38,
+          "recovery_policy": "company_saml_setup_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 8
+      },
+      "source_sites": [
+        {
+          "line": 38,
+          "function": "store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('company-saml-setups', 'SST', 'company_saml_setup', authority_scope='deployment_global')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/company_signin_migration.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/company_signin_migration.py",
+      "purpose": "Reviewed local-owner migration and narrowly retained OIDC recovery.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "company-signin-migrations",
+          "line": 45,
+          "recovery_policy": "company_signin_migration_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 5
+      },
+      "source_sites": [
+        {
+          "line": 45,
+          "function": "store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('company-signin-migrations', 'CSM', 'company_signin_migration', authority_scope='deployment_global')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/company_signin_tests.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/company_signin_tests.py",
+      "purpose": "A real provider sign-in check that never changes current sign-in or roles.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "company-signin-tests",
+          "line": 30,
+          "recovery_policy": "company_signin_test_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 30,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('company-signin-tests', 'CST', 'company_signin_test')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/competence_transport.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/competence_transport.py",
+      "purpose": "Owner-reviewed structural sharing and guarded local rule qualification.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "portable-competence-requests",
+          "line": 50,
+          "recovery_policy": "portable_competence_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 4
+      },
+      "source_sites": [
+        {
+          "line": 50,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('portable-competence-requests', 'PCR', 'portable_competence', required_backend='local')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/compliance_owners.py",
+      "contract": "business_records",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/compliance_owners.py",
+      "purpose": "Who owns each compliance protection that needs action, and by when.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "compliance-control-owners.json"
+      ],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 1
+      },
+      "source_sites": [
+        {
+          "line": 37,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('compliance-control-owners.json')"
+        },
+        {
+          "line": 74,
+          "function": "save",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 82,
+          "function": "save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps({'format': _FORMAT, 'controls': controls}, sort_keys=True))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/consent_publication_withdrawal.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/consent_publication_withdrawal.py",
+      "purpose": "Reviewed banner withdrawal and exact native accepted-request readback.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "consent-withdrawal-requests",
+          "line": 51,
+          "recovery_policy": "consent_withdrawal_request_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 2
+      },
+      "source_sites": [
+        {
+          "line": 51,
+          "function": "_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('consent-withdrawal-requests', 'CWR', 'consent_withdrawal_request')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/department_team_updates.py",
+      "contract": "business_records",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/department_team_updates.py",
+      "purpose": "Exact saved-team previews and original-actor receipts; no work is dispatched.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 2,
+        "revision": 11
+      },
+      "source_sites": [
+        {
+          "line": 112,
+          "function": "review",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(fleets_dir(tenant=tenant) / (name + '.json'), strict=True)"
+        },
+        {
+          "line": 177,
+          "function": "apply",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(fleets_dir(tenant=tenant) / (name + '.json'), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/design_tokens.py",
+      "contract": "artifact",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/design_tokens.py",
+      "purpose": "The design tokens in lightwork.css, exported in the Design Tokens",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 94,
+          "function": "main",
+          "kind": "write_text",
+          "expression": "EXPORT.write_text(text, encoding='utf-8')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/encryption_maintenance.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/encryption_maintenance.py",
+      "purpose": "Exact, reviewed local encryption maintenance shared by Settings and Copilot.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "encryption-maintenance",
+          "line": 27,
+          "recovery_policy": "encryption_maintenance_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "revision": 12,
+        "outbox": 1
+      },
+      "source_sites": [
+        {
+          "line": 27,
+          "function": "store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('encryption-maintenance', 'EMR', 'encryption_maintenance', required_backend='local', authority_scope='deployment_global')"
+        },
+        {
+          "line": 39,
+          "function": "fence",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 41,
+          "function": "fence",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/flow_requalification.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/flow_requalification.py",
+      "purpose": "Native reviewed reuse of exact pure rule components on a retained real case.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "local-rule-requalification",
+          "line": 32,
+          "recovery_policy": "rule_requalification_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 6
+      },
+      "source_sites": [
+        {
+          "line": 32,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('local-rule-requalification', 'FRQ', 'rule_requalification', required_backend='local')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/flow_run_feedback.py",
+      "contract": "business_records",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/flow_run_feedback.py",
+      "purpose": "One-tap feedback on flow run results.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "flow-run-feedback.json"
+      ],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 1
+      },
+      "source_sites": [
+        {
+          "line": 28,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('dashboard', 'flow-run-feedback.json')"
+        },
+        {
+          "line": 53,
+          "function": "record",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path)"
+        },
+        {
+          "line": 56,
+          "function": "record",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(kept[-MAX_RATINGS:], sort_keys=True))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/generated_tool_removal.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/generated_tool_removal.py",
+      "purpose": "Exact, owner-bound stopping and cleanup of native generated tools.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "generated-tool-removals",
+          "line": 25,
+          "recovery_policy": "generated_tool_removal_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 4,
+        "revision": 4
+      },
+      "source_sites": [
+        {
+          "line": 25,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('generated-tool-removals', 'GTR', 'generated_tool_removal', required_backend='local')"
+        },
+        {
+          "line": 73,
+          "function": "_owned",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(STORE._backend()._store._path(identifier), strict=True)"
+        },
+        {
+          "line": 235,
+          "function": "_writer",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(engine.target(prepared['source']['name']), strict=True)"
+        },
+        {
+          "line": 237,
+          "function": "_writer",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._dir() / '.namespace-admission', strict=True)"
+        },
+        {
+          "line": 237,
+          "function": "_writer",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._path(prepared['id']), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/governed_rule_evolution.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/governed_rule_evolution.py",
+      "purpose": "Owned executable rule/check-order evolution with exact native custody.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "governed-rule-evolution",
+          "line": 29,
+          "recovery_policy": "governed_rule_evolution_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 3,
+        "revision": 15
+      },
+      "source_sites": [
+        {
+          "line": 29,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('governed-rule-evolution', 'GRE', 'governed_rule_evolution', required_backend='local')"
+        },
+        {
+          "line": 62,
+          "function": "_writer",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._dir() / '.evolution-admission', strict=True)"
+        },
+        {
+          "line": 275,
+          "function": "_reserve",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._dir() / '.namespace-admission', strict=True)"
+        },
+        {
+          "line": 275,
+          "function": "_reserve",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._path(row['id']), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/installation_security.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/installation_security.py",
+      "purpose": "Focused installation policy controls over the canonical settings writer.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "installation-security-attempts",
+          "line": 61,
+          "recovery_policy": "installation_security_request_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 15,
+        "outbox": 1
+      },
+      "source_sites": [
+        {
+          "line": 61,
+          "function": "receipts",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('installation-security-attempts', 'ISC', 'installation_security_attempt', authority_scope='deployment_global')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/knowledge_request_browse.py",
+      "contract": "read_projection",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/knowledge_request_browse.py",
+      "purpose": "Current request batches with private, authority-bound positions.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 25,
+          "function": "_purpose",
+          "kind": "data_dir",
+          "expression": "data_dir()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/learned_skill_changes.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/learned_skill_changes.py",
+      "purpose": "Exact reviewed learned-skill changes and read-only original results.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "learned-skill-change-requests",
+          "line": 42,
+          "recovery_policy": "learned_skill_change_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 1
+      },
+      "source_sites": [
+        {
+          "line": 42,
+          "function": "_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learned-skill-change-requests', 'LSC', 'learned_skill_change_request')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/learning_conflicts.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/learning_conflicts.py",
+      "purpose": "Reviewed native meaning checks; interrupted requests never dispatch twice.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "learning-conflict-requests",
+          "line": 26,
+          "recovery_policy": "learning_check_admission_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 15
+      },
+      "source_sites": [
+        {
+          "line": 26,
+          "function": "_requests",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning-conflict-requests', 'LCC', 'learning_conflict_request', authority_scope='deployment_global')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/learning_distinctions.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/learning_distinctions.py",
+      "purpose": "Source-bound native discovery; no new consent, AI calls or publication.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "learning-distinction-requests",
+          "line": 45,
+          "recovery_policy": "learning_distinction_admission_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 15
+      },
+      "source_sites": [
+        {
+          "line": 45,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning-distinction-requests', 'LDR', 'learning_distinction_request')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/learning_flywheel.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/learning_flywheel.py",
+      "purpose": "Exact reviewed flywheel admission; native jobs retain the actual outcome.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "learning-flywheel-requests",
+          "line": 32,
+          "recovery_policy": "learning_flywheel_admission_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 2,
+        "revision": 16
+      },
+      "source_sites": [
+        {
+          "line": 32,
+          "function": "_requests",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning-flywheel-requests', 'LFW', 'learning_flywheel_request', authority_scope='deployment_global')"
+        },
+        {
+          "line": 63,
+          "function": "_artifact",
+          "kind": "data_dir",
+          "expression": "data_dir(name)"
+        },
+        {
+          "line": 80,
+          "function": "_artifact",
+          "kind": "data_dir",
+          "expression": "data_dir(name)"
+        },
+        {
+          "line": 87,
+          "function": "_source",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(store.path, strict=True)"
+        },
+        {
+          "line": 311,
+          "function": "effects",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(source.path, strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/learning_holdout_setup_api.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/learning_holdout_setup_api.py",
+      "purpose": "Ordinary reviewed location and one-time native unseen-question record setup.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "learning-holdout-requests",
+          "line": 46,
+          "recovery_policy": "learning_holdout_setup_authority"
+        },
+        {
+          "namespace": "learning-holdout-initializations",
+          "line": 50,
+          "recovery_policy": "learning_holdout_initialization_authority"
+        }
+      ],
+      "literal_path_hints": [
+        "self-coaching-unseen-checks.sqlite3"
+      ],
+      "observed_mechanism_markers": {
+        "revision": 16
+      },
+      "source_sites": [
+        {
+          "line": 46,
+          "function": "_requests",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning-holdout-requests', 'LHO', 'learning_holdout_request', authority_scope='deployment_global')"
+        },
+        {
+          "line": 50,
+          "function": "_anchors",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning-holdout-initializations', 'LHI', 'learning_holdout_initialization', authority_scope='deployment_global')"
+        },
+        {
+          "line": 67,
+          "function": "_state",
+          "kind": "data_dir",
+          "expression": "data_dir('self-coaching-unseen-checks.sqlite3', tenant=None)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/learning_job_observations.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/learning_job_observations.py",
+      "purpose": "Bounded encrypted observations; OS custody belongs to existing job threads.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "learning_job_observations",
+          "line": 33,
+          "recovery_policy": "learning_original_observation_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "revision": 1
+      },
+      "source_sites": [
+        {
+          "line": 33,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning_job_observations', 'lj', 'learning_task_observations', authority_scope='deployment_global')"
+        },
+        {
+          "line": 42,
+          "function": "_root",
+          "kind": "data_dir",
+          "expression": "data_dir('learning_job_custody', tenant=None)"
+        },
+        {
+          "line": 80,
+          "function": "acquire",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(root / 'admission', strict=True)"
+        },
+        {
+          "line": 215,
+          "function": "write",
+          "kind": "atomic_create_text",
+          "expression": "atomic_create_text(_root() / 'observations-established', 'learning-observations-v1')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/learning_passes.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/learning_passes.py",
+      "purpose": "Reviewed native self-coaching passes with durable original admission custody.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "learning-pass-requests",
+          "line": 47,
+          "recovery_policy": "learning_pass_admission_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 2,
+        "revision": 15
+      },
+      "source_sites": [
+        {
+          "line": 47,
+          "function": "_requests",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning-pass-requests', 'LPR', 'learning_pass_request', authority_scope='deployment_global')"
+        },
+        {
+          "line": 55,
+          "function": "_recent",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 164,
+          "function": "_state",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(Path(path))"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/learning_pending_cases_api.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/learning_pending_cases_api.py",
+      "purpose": "Reviewed use or rejection of the existing self-coaching suggestions.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "learning-pending-requests",
+          "line": 109,
+          "recovery_policy": "learning_question_decision_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 16
+      },
+      "source_sites": [
+        {
+          "line": 109,
+          "function": "_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning-pending-requests', 'LPR', 'learning_pending_request')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/learning_test_cases_api.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/learning_test_cases_api.py",
+      "purpose": "Ordinary reviewed questions in the existing shared self-coaching corpus.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "learning-case-setup-requests",
+          "line": 220,
+          "recovery_policy": "learning_case_setup_authority"
+        },
+        {
+          "namespace": "learning-case-requests",
+          "line": 327,
+          "recovery_policy": "learning_case_write_authority"
+        }
+      ],
+      "literal_path_hints": [
+        "self-coaching-questions.json"
+      ],
+      "observed_mechanism_markers": {
+        "revision": 43
+      },
+      "source_sites": [
+        {
+          "line": 161,
+          "function": "setup_state",
+          "kind": "data_dir",
+          "expression": "data_dir('self-coaching-questions.json', tenant=None)"
+        },
+        {
+          "line": 220,
+          "function": "_setup_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning-case-setup-requests', 'LCS', 'learning_case_setup_request')"
+        },
+        {
+          "line": 327,
+          "function": "_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning-case-requests', 'LCA', 'learning_case_request')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/local_flow_comparisons.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/local_flow_comparisons.py",
+      "purpose": "Owner-authorized native paired replays of retained real rule-only work.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "local-flow-comparisons",
+          "line": 49,
+          "recovery_policy": "local_flow_comparison_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 17
+      },
+      "source_sites": [
+        {
+          "line": 49,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('local-flow-comparisons', 'FCP', 'local_flow_comparison', required_backend='local')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/local_flow_promotions.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/local_flow_promotions.py",
+      "purpose": "Installed release adapter for bounded rule-only taught workflows.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "local-flow-release-targets",
+          "line": 71,
+          "recovery_policy": "local_flow_release_target_authority"
+        },
+        {
+          "namespace": "local-flow-release-effects",
+          "line": 75,
+          "recovery_policy": "local_flow_release_effect_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 26
+      },
+      "source_sites": [
+        {
+          "line": 71,
+          "function": "_records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('local-flow-release-targets', 'LFT', 'local_flow_release', required_backend='local')"
+        },
+        {
+          "line": 75,
+          "function": "_effects",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('local-flow-release-effects', 'LFX', 'local_flow_release_effect', required_backend='local')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/local_passphrases.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/local_passphrases.py",
+      "purpose": "Passphrases for invited colleagues, so they can sign back in.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "dashboard-passphrases.json"
+      ],
+      "observed_mechanism_markers": {
+        "atomic_replace": 1,
+        "cross_process_lock": 3
+      },
+      "source_sites": [
+        {
+          "line": 53,
+          "function": "path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 126,
+          "function": "_write",
+          "kind": "atomic_write_text",
+          "expression": "file_lock.atomic_write_text(path(), json.dumps({'schema': _SCHEMA, 'accounts': accounts}, sort_keys=True), mode=384)"
+        },
+        {
+          "line": 145,
+          "function": "store",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 146,
+          "function": "store",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(path(), strict=True)"
+        },
+        {
+          "line": 180,
+          "function": "login",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 181,
+          "function": "login",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(path(), strict=True)"
+        },
+        {
+          "line": 196,
+          "function": "login",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(path(), strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "dashboard-passphrases.json",
+          "recovery_policy": "dashboard_local_passphrases",
+          "disposition": "Installation-level colleague sign-in credentials. A restored copy is retained and blocks startup pending current identity reconciliation; it is never silently adopted or discarded."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/local_runtime_service.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/local_runtime_service.py",
+      "purpose": "Reviewed operation of the existing local Launcher; no downloads or shell.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "operations.json"
+      ],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 6,
+        "revision": 7
+      },
+      "source_sites": [
+        {
+          "line": 58,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('local-runtime', 'operations.json', tenant=None)"
+        },
+        {
+          "line": 106,
+          "function": "_save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(_path(), json.dumps(value, sort_keys=True, allow_nan=False))"
+        },
+        {
+          "line": 162,
+          "function": "model_choices",
+          "kind": "data_dir",
+          "expression": "data_dir('models')"
+        },
+        {
+          "line": 266,
+          "function": "state",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_path(), strict=True)"
+        },
+        {
+          "line": 370,
+          "function": "receipt",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_path(), strict=True)"
+        },
+        {
+          "line": 404,
+          "function": "apply",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_path(), strict=True)"
+        },
+        {
+          "line": 498,
+          "function": "health",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_path(), strict=True)"
+        },
+        {
+          "line": 514,
+          "function": "health",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_path(), strict=True)"
+        },
+        {
+          "line": 529,
+          "function": "shutdown",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(_path(), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/manual_skill_removal.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/manual_skill_removal.py",
+      "purpose": "Remove one exact manually installed skill; absence is never a receipt.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "manual-skill-removal-requests",
+          "line": 36,
+          "recovery_policy": "manual_skill_removal_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 11
+      },
+      "source_sites": [
+        {
+          "line": 36,
+          "function": "_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('manual-skill-removal-requests', 'MSR', 'manual_skill_removal_request')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/model_answer_scoring.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/model_answer_scoring.py",
+      "purpose": "Reviewed ordinary answers for the packaged deterministic task sets.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "model-answer-score-requests",
+          "line": 211,
+          "recovery_policy": "answer_score_admission_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 10
+      },
+      "source_sites": [
+        {
+          "line": 211,
+          "function": "_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('model-answer-score-requests', 'MAS', 'model_answer_score_request')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/operator_acquisition.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/operator_acquisition.py",
+      "purpose": "Private owned teaching-question policies, current consent and exact originals.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "operator-acquisition",
+          "line": 31,
+          "recovery_policy": "operator_acquisition_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 3,
+        "revision": 11
+      },
+      "source_sites": [
+        {
+          "line": 31,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('operator-acquisition', 'OAC', 'operator_acquisition', required_backend='local')"
+        },
+        {
+          "line": 98,
+          "function": "_writer",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._dir() / '.acquisition-admission', strict=True)"
+        },
+        {
+          "line": 329,
+          "function": "_reserve",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._dir() / '.namespace-admission', strict=True)"
+        },
+        {
+          "line": 329,
+          "function": "_reserve",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._path(row['id']), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/personal_alert_tests.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/personal_alert_tests.py",
+      "purpose": "One reviewed private test, with an owner-bound original and no blind resend.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "personal-alert-tests",
+          "line": 24,
+          "recovery_policy": "personal_alert_test_dispatch_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 1
+      },
+      "source_sites": [
+        {
+          "line": 24,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('personal-alert-tests', 'PAT', 'personal_alert_test')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/private_task_computation_store.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/private_task_computation_store.py",
+      "purpose": "Owned native-file local checks, one fixed outward result and retained originals.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "private-task-computation",
+          "line": 35,
+          "recovery_policy": "private_task_computation_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "revision": 10,
+        "begin_immediate": 1
+      },
+      "source_sites": [
+        {
+          "line": 35,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('private-task-computation', 'PTC', 'private_task_computation', required_backend='local')"
+        },
+        {
+          "line": 71,
+          "function": "_writer",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._dir() / '.fixed-source-admission', strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/procedure_interactions.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/procedure_interactions.py",
+      "purpose": "Current-source joint local rule checks with durable original custody.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "procedure-interaction-requests",
+          "line": 45,
+          "recovery_policy": "procedure_interactions_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 6
+      },
+      "source_sites": [
+        {
+          "line": 45,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('procedure-interaction-requests', 'PJI', 'procedure_interactions', required_backend='local')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/product_operations_personal_data.py",
+      "contract": "read_projection",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/product_operations_personal_data.py",
+      "purpose": "My Data native journeys through the same closed, reviewed Copilot registry.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 16
+      },
+      "source_sites": [
+        {
+          "line": 217,
+          "function": "_deletion_scope",
+          "kind": "data_dir",
+          "expression": "experience_preferences.data_dir('experience-preferences')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/recovery_visibility.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/recovery_visibility.py",
+      "purpose": "Reviewed native local practices with owner-bound original custody.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "recovery-visibility-practices",
+          "line": 47,
+          "recovery_policy": "recovery_visibility_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 2
+      },
+      "source_sites": [
+        {
+          "line": 47,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('recovery-visibility-practices', 'RVP', 'recovery_visibility_practice')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/request_program.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/request_program.py",
+      "purpose": "Current native case grants and encrypted original request-local calculations.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "request-specific-programs",
+          "line": 49,
+          "recovery_policy": "request_program_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 7
+      },
+      "source_sites": [
+        {
+          "line": 49,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('request-specific-programs', 'RSP', 'request_program', required_backend='local')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/retention_maintenance.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/retention_maintenance.py",
+      "purpose": "Ordinary retention review and read-only interruption recovery.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "revision": 5
+      },
+      "source_sites": [
+        {
+          "line": 42,
+          "function": "preview",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(native._path(identity), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/reward_model_training.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/reward_model_training.py",
+      "purpose": "Reviewed local preference training with one atomic model/result publication.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "reward-training-requests",
+          "line": 199,
+          "recovery_policy": "ranking_training_admission_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 8,
+        "outbox": 6
+      },
+      "source_sites": [
+        {
+          "line": 110,
+          "function": "_source",
+          "kind": "data_dir",
+          "expression": "data_dir('outbox')"
+        },
+        {
+          "line": 199,
+          "function": "_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('reward-training-requests', 'RMT', 'reward_training_request')"
+        },
+        {
+          "line": 319,
+          "function": "model_bytes",
+          "kind": "data_dir",
+          "expression": "data_dir('outbox')"
+        },
+        {
+          "line": 324,
+          "function": "model_bytes",
+          "kind": "data_dir",
+          "expression": "data_dir('outbox')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/runtime_policy_recovery_ops.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/runtime_policy_recovery_ops.py",
+      "purpose": "Protected full safety-settings review and actor-owned original outcomes.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "revision": 1
+      },
+      "source_sites": [
+        {
+          "line": 131,
+          "function": "review",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(core.native.overrides_path(), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/saml.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/saml.py",
+      "purpose": "SAML 2.0 SP browser SSO (via pysaml2).",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "atomic_replace": 1
+      },
+      "source_sites": [
+        {
+          "line": 199,
+          "function": "certificates",
+          "kind": "atomic_write_bytes",
+          "expression": "file_lock.atomic_write_bytes(path, pem_format(cert), mode=384)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/settings_catalog_requests.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/settings_catalog_requests.py",
+      "purpose": "Complete protected catalog review and actor-bound original save outcomes.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "settings-catalog-requests",
+          "line": 47,
+          "recovery_policy": "settings_catalog_request_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 1
+      },
+      "source_sites": [
+        {
+          "line": 47,
+          "function": "_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('settings-catalog-requests', 'SCR', 'settings_catalog_request')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/shared_decision_evidence_store.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/shared_decision_evidence_store.py",
+      "purpose": "Owner-scoped finite decision reviews, shared budgets and original receipts.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "shared-decision-evidence",
+          "line": 24,
+          "recovery_policy": "decision_evidence_permission_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 2,
+        "revision": 18
+      },
+      "source_sites": [
+        {
+          "line": 24,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('shared-decision-evidence', 'SDE', 'shared_decision_evidence')"
+        },
+        {
+          "line": 619,
+          "function": "_reserve_create",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._dir() / '.namespace-admission', strict=True)"
+        },
+        {
+          "line": 619,
+          "function": "_reserve_create",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(backend._store._path(row['id']), strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/specialist_drafts.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/specialist_drafts.py",
+      "purpose": "Complete specialist drafts, bounded answer checks, and reviewed publication.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "specialist-drafts",
+          "line": 23,
+          "recovery_policy": "specialist_draft_publication_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "revision": 9
+      },
+      "source_sites": [
+        {
+          "line": 23,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('specialist-drafts', 'SPD', 'specialist_draft')"
+        },
+        {
+          "line": 373,
+          "function": "apply",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(domain.user_dir() / f\"{prepared['name']}.toml\", strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/specialist_test_sets.py",
+      "contract": "learning",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/specialist_test_sets.py",
+      "purpose": "Customer-owned, tool-free answer checks for the current specialist instructions.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "cases-and-runs.json"
+      ],
+      "observed_mechanism_markers": {
+        "atomic_replace": 2,
+        "cross_process_lock": 1,
+        "revision": 9
+      },
+      "source_sites": [
+        {
+          "line": 33,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('specialist-tests', 'cases-and-runs.json')"
+        },
+        {
+          "line": 52,
+          "function": "_with_store",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path.with_suffix('.lock'), strict=True)"
+        },
+        {
+          "line": 58,
+          "function": "_with_store",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(path, json.dumps(value, ensure_ascii=False, allow_nan=False), encoding='utf-8', effect_guard=effect_guard)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/trc_setup_api.py",
+      "contract": "composition",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/trc_setup_api.py",
+      "purpose": "Guided saved-account source setup and legacy configured-source controls.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "continuous-evidence.sqlite3"
+      ],
+      "observed_mechanism_markers": {
+        "revision": 5,
+        "schema_version": 2
+      },
+      "source_sites": [
+        {
+          "line": 296,
+          "function": "_source_store",
+          "kind": "data_dir",
+          "expression": "data_dir('tech_risk_compliance', 'continuous-evidence.sqlite3', tenant=tenant)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/trc_stock_evidence_composition.py",
+      "contract": "composition",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/trc_stock_evidence_composition.py",
+      "purpose": "Production composition for stock continuous-evidence collectors.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "continuous-evidence.sqlite3"
+      ],
+      "observed_mechanism_markers": {
+        "revision": 7
+      },
+      "source_sites": [
+        {
+          "line": 261,
+          "function": "native_source_store",
+          "kind": "data_dir",
+          "expression": "data_dir('tech_risk_compliance', 'continuous-evidence.sqlite3', tenant=tenant_id)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/vendor_profile.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/vendor_profile.py",
+      "purpose": "One current registered vendor view over existing lifecycle and risk authorities.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "vendor-profile-decisions",
+          "line": 20,
+          "recovery_policy": "vendor_profile_decision_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 10
+      },
+      "source_sites": [
+        {
+          "line": 20,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('vendor-profile-decisions', 'VPD', 'vendor_profile_decision')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/viewpoints_requests.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/viewpoints_requests.py",
+      "purpose": "Owned, reviewed viewpoints admission and durable original answer custody.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "viewpoints-requests",
+          "line": 35,
+          "recovery_policy": "viewpoints_request_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 11
+      },
+      "source_sites": [
+        {
+          "line": 35,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('viewpoints-requests', 'VPR', 'viewpoints_request')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/webhook_settings_recovery.py",
+      "contract": "recovery",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/webhook_settings_recovery.py",
+      "purpose": "Private publication evidence for recovering one reviewed signing-key change.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "atomic_replace": 3,
+        "revision": 13
+      },
+      "source_sites": [
+        {
+          "line": 61,
+          "function": "_save",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(_path(row['id']), blob)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/work_restructuring.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/work_restructuring.py",
+      "purpose": "Original custody and current permission for bounded local grouped work.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "local-work-restructuring",
+          "line": 52,
+          "recovery_policy": "work_restructuring_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 7
+      },
+      "source_sites": [
+        {
+          "line": 52,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('local-work-restructuring', 'FWR', 'work_restructuring', required_backend='local')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/workflow_step_checks.py",
+      "contract": "governed",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/workflow_step_checks.py",
+      "purpose": "One reviewed pure taught step, with durable original outcome custody.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [
+        {
+          "namespace": "workflow-step-checks",
+          "line": 48,
+          "recovery_policy": "workflow_step_check_source_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 2
+      },
+      "source_sites": [
+        {
+          "line": 48,
+          "function": "records",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('workflow-step-checks', 'WSC', 'workflow_step_check')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/workspace_erasure.py",
+      "contract": "recovery",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/workspace_erasure.py",
+      "purpose": "One reviewed native retired-workspace erasure; UI and Copilot share it.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 6
+      },
+      "source_sites": [
+        {
+          "line": 78,
+          "function": "_guard",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 108,
+          "function": "prepare",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
         }
       ]
     }
