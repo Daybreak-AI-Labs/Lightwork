@@ -70,14 +70,17 @@ def test_agent_built_here_is_never_called_a_specialist_in_its_editor(client):
         "max_risk": "low", "allow_tools": ["read_file"]})
     page = client.get("/agents?name=acme_quote_helper").text
     editor = editor_column(page)
-    assert "Edit an agent" in editor and "Save agent" in editor
+    # Saving keeps a kind-neutral draft; the heading and copy name the kind.
+    assert "Edit an agent" in editor and "Save draft" in editor
+    assert "changing the agent people use" in editor
     assert stray_specialist(editor) == []
 
 
 def test_builtin_pack_is_a_specialist_in_its_editor(client):
     page = client.get(f"/agents?name={_builtin()}").text
     editor = editor_column(page)
-    assert "Tailor a specialist" in editor and "Save specialist" in editor
+    assert "Tailor a specialist" in editor and "Save draft" in editor
+    assert "changing the specialist people use" in editor
     assert "This agent" not in editor and "Save agent" not in editor
     assert 'data-kind="specialist"' in page
 
@@ -87,7 +90,7 @@ def test_customized_builtin_stays_a_specialist_in_its_editor(client):
     name = _builtin()
     write_override(name, {"description": "Tuned for this workspace."})
     editor = editor_column(client.get(f"/agents?name={name}").text)
-    assert "Tailor a specialist" in editor and "Save specialist" in editor
+    assert "Tailor a specialist" in editor and "Save draft" in editor
     assert "Customized" in editor
 
 
