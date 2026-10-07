@@ -45,7 +45,7 @@
       <div class="bnd-stat"><div class="v">{{ b.chain.kinds | length }}</div><div class="l">Kinds of event</div></div>
     </div>
     {% if b.chain.files %}
-    <div class="bnd-scroll">
+    <div class="bnd-scroll" tabindex="0" role="region" aria-label="Activity log verification by day">
     <table>
       <thead><tr><th scope="col">Day</th><th scope="col">Events</th>
         <th scope="col">Result</th><th scope="col">Problems found</th></tr></thead>
@@ -74,7 +74,7 @@
   <div class="section-head"><h2>Approvals: who decided and how many agreed</h2></div>
   <div class="panel">
     {% if b.approvals %}
-    <div class="bnd-scroll">
+    <div class="bnd-scroll" tabindex="0" role="region" aria-label="Recorded approval decisions">
     <table>
       <thead><tr><th scope="col">Action</th><th scope="col">Risk</th>
         <th scope="col">Decision</th><th scope="col">Requested by</th>
@@ -104,7 +104,7 @@
   <div class="section-head"><h2>Assessments and decisions</h2></div>
   <div class="panel">
     {% if b.assessments %}
-    <div class="bnd-scroll">
+    <div class="bnd-scroll" tabindex="0" role="region" aria-label="Assessment decisions">
     <table>
       <thead><tr><th scope="col">Questionnaire</th><th scope="col">Subject</th>
         <th scope="col">Risk before → after fixes</th><th scope="col">Status</th>

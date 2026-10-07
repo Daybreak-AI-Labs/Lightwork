@@ -1,5 +1,62 @@
 # Post-install operation coverage
 
+October 7 privacy outcome follow-through: manually handled correction, opt-out,
+objection and similar requests no longer become Answered through an unsupported
+fulfillment call. Ordinary action/response review requires the action and affected
+systems, answer date and proof; the separate confirmation uses the existing native
+close writer with the exact current revision and an immutable original identity.
+Copilot opens the same controls without changing or sending anything. An actual
+opt-out confirmation recovered its original after an interrupted reply and reload
+with one outcome, while another review with identical fields did not qualify as
+that original. Changed revisions and genuine current-role withdrawal refused.
+Legacy unproved manual fulfillment remains unanswered and its deadline stays
+active. These are operator-recorded statements, not independent verification of
+external corrections or requester receipt; the generalized rectification module
+is not exposed by this delivery.
+
+October 7 discovery follow-through: Data discovery offers a reviewed update from
+one independently approved report to a named existing dataset. The ordinary form
+and Copilot preserve the selected report and dataset, show current and proposed
+observed categories, and require a separate confirmation. Business purpose is
+unchanged. Current source, approval, target edition, owner, workspace and deadline
+are rechecked at native writer boundaries. An actual saved update recovered its
+original after an interrupted reply with one application and one target revision.
+A source pause refused a new application, including after a SQLite writer wait.
+Source withdrawal permits only a minimal original status with no findings;
+admitted unconfirmed attempts remain retained without automatic replay. Choices
+are explicitly bounded to the latest fifty scans and first five hundred datasets.
+This uses synthetic local reports, not a live external scan or provider acceptance.
+
+October 7 Chat and attention follow-through: ordinary Chat offers an installed,
+ready model and supported thinking depth for one task. The exact selection reaches
+native admission, the normal runner, queued messages, saved drafts, retries and
+Copilot's complete task review. It changes no workspace defaults. Specialist
+settings, approved backups, required approvals and spending limits still apply.
+Missing readiness, unsupported depth, changed review or withdrawn access refuse
+new work. Native admissions and routing used no live model completion. Attention
+now opens pending continuous-evidence sources through their complete existing
+independent review, retaining the selected item and filters. Current role changes
+clear private items. This is evidence-source coverage, not every governance
+family. Workflow alerts retain a native Problems only choice through ordinary
+Save and Publish; failures, spending limits and uncertain outcomes qualify,
+while completion and approval waits do not. Ordinary narrow-layout reviews and
+native alert selection were exercised without delivering an external message.
+
+October 7 sign-in limits follow-through: Settings > All settings and its existing
+reviewed Copilot operations now expose company sign-in length and browser
+inactivity, with an installer setup choice. Defaults preserve existing behavior;
+the configured company limit can shorten an original sign-in, never extend it.
+Current own-session checks apply the latest installation policy. Explicit browser
+activity extends only the inactivity deadline; background refresh/status requests
+do not. An observed expired session is retained as ended and cannot be revived by
+later activity or relaxing the policy. Sign-in warnings and renewal show the
+effective deadline. Signed native HTTP exercised an active session, unchanged
+background reads, explicit activity, expired activity refusal, current company
+limits, cross-origin refusal, wrong-subject refusal and legacy-cookie refusal
+when inactivity tracking is required. This uses controlled isolated session
+timestamps; it does not qualify a real identity-provider sign-in or browser event
+delivery. Existing All settings authority, review and audit remain the writer.
+
 ## October 6 product completion batch
 
 | Customer operation | Complete controls | Result and boundary |
@@ -2334,3 +2391,49 @@ The native ordinary form saved an owned FRED account, and the stock lazy tool us
 Each supported saved code block has its own labelled Copy code action. Current answers, prose/code files and retained earlier messages use exact native selected-source and result-release checks immediately before local copying. The complete rendered snippet, including whitespace, tabs and Unicode, must match that current source. Changed, unavailable or unapproved content refuses the copy. Earlier retained messages remain available while newer work runs. An unavailable clipboard offers selectable text and never falsely says Copied. Copilot opens these same controls without copying or executing code, keeping the message draft.
 
 Selected historical Markdown and Word downloads now resolve the exact retained turn through the existing owner-, thread- and tenant-scoped reader. The previous latest-two-hundred lookup stopped finding earlier answers after a longer conversation, including answers loaded by the ordinary history pager. A native signed download after 201 later turns returned the complete original in both formats and refused a turn from another conversation. The ordinary all-turn reader keeps its existing separate limit. Actual current/historical clipboard and Copilot journeys preserved the composer; a fixture-injected clipboard rejection exercised selectable fallback. No browser permission or external code execution is claimed.
+
+## Actual connected-agent safeguard activity (UX160)
+
+Governance's **Actual safeguard activity** and Copilot read protected native connector attempts and their exact originals. The retained record precedes connector entry; current agent, independently approved system declaration and native policy authority are checked again at the physical boundary. Returned results, accepted requests, stopped sends and unknown effects remain distinct. An interrupted post-effect receipt update stays unconfirmed, and original readback never sends again. Current permission loss clears private activity; disabling new checks does not erase authorized originals.
+
+The default governance loop now reconciles actual inventory, declarations, model risk, runtime policy, retained enforcement and evidence, with independent generations for complete source material, expiry and removal. A local native connector exercised successful reads, an uncertain write, current-authority withdrawal during a writer wait and failed post-effect recording; the ordinary controls worked at phone width. Reads are bounded to 10,000 enforcement records and 5,000 governance assets. This qualification establishes local execution and readback, not external custody, outside-effect rollback or large-inventory latency.
+
+## Reviewed notification and consent delivery
+
+Vendor intelligence offers named saved recipients, withdrawal and complete recipient/message review before the existing send. Copilot opens the same protected recipient controls without saving or sending. Addresses remain encrypted and bound to immutable recipient identities. A changed or withdrawn recipient stops a send at the mail boundary; an uncertain send stays unconfirmed and is not automatically repeated. Native mail qualification used fictional transports, including withdrawal during sign-in and a post-send disconnect, rather than a live mailbox.
+
+Consent delivery now has ordinary named key and destination choices, complete Save review, original-result recovery, pause and explicit automatic-delivery setup. The supervised worker starts and stops with the installed dashboard; automatic sending is off by default. Enabling it admits only future changes after the saved starting point, checks current key/destination editions and authority again at sending, and retains uncertainty without blind replay. These local signed-receiver journeys do not establish delivery or reconciliation in a customer's external business application.
+
+## Complete pending reviews in Attention
+
+Attention includes actual pending vendor lifecycle, DROP authority, Trust Center authority and privacy disclosure reviews, with current access, independent reviewer requirements and explicit coverage limits. The existing native approval screens now expose the complete questionnaire/rules or permitted authority details before their separate approval actions. No extra approval writer was introduced. Native readback and a 320-pixel browser journey qualified current source removal, disabled modules and access withdrawal; fictional Trust references do not qualify outside enrollment or a regulatory outcome.
+
+## Backup key names visible in recovery
+
+New backups sign the complete bounded list of excluded on-disk key file names alongside their payload manifest. Workspace recovery shows that verified list after creation, import and inspection. Saved installation points retain their capture-time list in signed metadata and show it beside update recovery controls. Key contents stay separate; older copies explicitly report an unrecorded list, and an update authorization without a saved copy is not presented as one. Invalid key paths and oversized retained records refuse without replacing existing recovery metadata. Actual isolated archives and signed installation readback qualified the native behavior; controller projection qualified visibility and access clearing. Separate vault custody, browser layout and application-update execution were not part of this change.
+
+## Saved compliance forms become usable questionnaires
+
+No-code Studio can open a supported saved form in the ordinary questionnaire builder. Complete questions, answer choices and supported conditional framework/control rules survive the import, full review and separate Save. Immutable native questionnaire provenance retains the exact Studio edition; source changes or unsupported meaning refuse instead of silently dropping content. The creator cannot publish their own version. A different authorized administrator reads its complete saved questions and rules before the existing Publish action. A lost Save response recovered the original single version, and that published version was consumed by the actual native assessment. This connects the supported questionnaire path; it does not configure arbitrary evidence collectors or external report adapters.
+
+## Actual local research execution
+
+Research connects a saved program and currently approved text snapshots to the installed isolated container runner. A different administrator reads every program file, input permission, execution limit and expected result before approving the exact run; Start remains separate. The existing research record retains original progress, output checks, actual timing and cleanup. No image is downloaded and no program falls back to execution on the host. Unsupported training, model execution, remote data and unverifiable data constraints refuse before execution.
+
+An ordinary local journey ran a saved program in the cached Python container, checked its output, retained actual input bytes and Docker timing, and verified cleanup. A lost successful Start reply recovered that original without a second Start. This establishes the supported local execution path, without claiming a novel learning algorithm or measured customer benefit.
+
+Stop now reads the current revision while retaining the same manifest, attempt and worker before its native compare-and-set, so progress updates do not make the visible button stale. An actually started sleeping program was cancelled, cleanup was verified and its Docker container was absent. Stop before launch also retains the runner's observed cleanup without inventing execution timing or a score. Current reviewer withdrawal refused private Original, Stop and Copilot access under the same signed session.
+
+## Supported incoming phone functions
+
+All settings includes a guided incoming-call setup for Vapi and Retell, saved assistant and caller choices, protected credentials, service restart and the real product receiver address when the request has a public HTTPS origin. Supported named function requests return native results in each provider's expected shape; informational transcripts and status events start no work. The existing channel journal owns each original, bound to provider, assistant, call and invocation rather than the current check-key bytes. Rotation and a service restart do not repeat the same task. Changed input, changed caller permission, source ownership withdrawal and enterprise phone-only requests refuse through current native controls. An uncertain entered task retains an unknown original without automatic replay. Bland's outbound path remains available; inbound Bland is unsupported.
+
+Actual dashboard-to-channel-to-Agent journeys completed two local tasks and exercised restart, originals, current access and 320-pixel ordinary setup/Copilot draft preservation. Model responses were supplied locally. No live phone provider, spoken delivery or externally reachable installation was qualified.
+
+## Keyboard access to maps and remaining wide tables
+
+The Goal Map's interactive SVG is exposed as a group, retaining its named keyboard-operable task buttons. Remaining wide tables in the agent control plane, audit binder, obligations, partner listings, control report and AI assurance now have focusable, named scrolling regions, including the dynamically created agent-access table. The embedded analytics code area is also focusable. Existing repaired security/code tables and the plan/history main headings remain in place. These are compact semantic repairs; they do not certify every screen-reader and browser combination.
+
+## Current external-agent discovery
+
+The agent card now advertises the installed A2A 0.3 task contract and its actual current authentication requirement, with plain product descriptions and no published credential. Native discovery, unauthenticated refusal and authenticated readback were exercised without starting a task. Existing All settings controls manage the shared key, public address and limits; enabling the service is explicitly marked as requiring a restart. This corrects inaccurate discovery and setup guidance; it does not claim A2A 1.0 conformance.

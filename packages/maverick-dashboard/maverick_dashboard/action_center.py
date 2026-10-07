@@ -287,6 +287,28 @@ def _vendor_reconciliation_source(
         return [], [{"kind": "vendor_reconciliation", "status": "unavailable"}]
 
 
+def _evidence_source_approvals(source: Callable[[], dict] | None):
+    if source is None:
+        return [], []
+    try:
+        result = source()
+        if (not isinstance(result, dict) or result.get("coverage") not in {
+                "current", "partial", "disabled"} or result.get("limit") != 64
+                or not isinstance(result.get("items"), list) or len(result["items"]) > 64):
+            raise ValueError("Evidence source approvals are unavailable")
+        items = []
+        for row in result["items"]:
+            items.append(_item("evidence_source_approval", row["id"],
+                "Review evidence source: " + _bounded_text(row["title"], limit=100),
+                href="/compliance/continuous-evidence#trc-sources",
+                updated_at=_timestamp(row["updated_at"]), version=row["version"],
+                reason="Another administrator saved this source setup. Review its account and checks before approving; collection starts separately."))
+        return items, [{"kind": "evidence_source_approval", "status": result["coverage"],
+                        "limit": 64}]
+    except Exception:
+        return [], [{"kind": "evidence_source_approval", "status": "unavailable"}]
+
+
 def _owned_task_attention(world, principal, task_allowed=None):
     """Private task questions and recovery never inherit a fleet-wide view."""
     items, coverage = [], []
@@ -410,12 +432,41 @@ def _assessment_source(assessments, assessment_allowed, principal):
         coverage.append({"kind": "assessment", "status": "unavailable"})
     return items, coverage
 
+
+def _governance_sources(source):
+    kinds = {"lifecycle_review", "drop_authority_review", "trust_center_review", "disclosure_review"}
+    if source is None:
+        return [], []
+    try:
+        result = source()
+        if (not isinstance(result, dict) or set(result) != {"items", "coverage"}
+                or not isinstance(result["items"], list) or len(result["items"]) > 6 * 99
+                or not isinstance(result["coverage"], list) or len(result["coverage"]) != len(kinds)
+                or {row["kind"] for row in result["coverage"]} != kinds
+                or any(row["status"] not in {"current", "partial", "disabled", "denied", "unavailable"}
+                       or row["limit"] != 99 for row in result["coverage"])):
+            raise ValueError("Current governance reviews are unavailable")
+        items = []
+        for row in result["items"]:
+            if row["kind"] not in kinds or not row["href"].startswith("/") or row["href"].startswith("//"):
+                raise ValueError("Current governance review destination is unavailable")
+            items.append(_item(row["kind"], row["key"], _bounded_text(row["title"], limit=500),
+                href=row["href"], due_at=_timestamp(row["due_at"], optional=True),
+                updated_at=_timestamp(row["updated_at"]), version=row["version"],
+                reason=_bounded_text(row["reason"])))
+        return items, result["coverage"]
+    except Exception:
+        return [], [{"kind": kind, "status": "unavailable", "limit": 99} for kind in sorted(kinds)]
+
+
 def collect(world, *, principal: str | None, owner: str | None,
             specs: list[dict] | Callable[[], list[dict]],
             assessments: Callable[[], list[dict]], assessment_allowed: Callable[[dict], bool],
             project_reviews: Callable[[], list[dict]] | None = None,
             vendor_reconciliations: Callable[[], dict] | None = None,
             connection_attention: Callable[[], dict] | None = None,
+            evidence_source_approvals: Callable[[], dict] | None = None,
+            governance_reviews: Callable[[], dict] | None = None,
             flow_approvals: Callable[[], dict] | None = None,
             approval_allowed: Callable[[object], bool] | None = None,
             task_allowed: Callable[[object], bool] | None = None,
@@ -473,6 +524,12 @@ def collect(world, *, principal: str | None, owner: str | None,
     )
     items.extend(reconciliations)
     coverage.extend(reconciliation_coverage)
+    evidence_items, evidence_coverage = _evidence_source_approvals(evidence_source_approvals)
+    items.extend(evidence_items)
+    coverage.extend(evidence_coverage)
+    review_items, review_coverage = _governance_sources(governance_reviews)
+    items.extend(review_items)
+    coverage.extend(review_coverage)
     for row in items:
         row["overdue"] = bool(row["due_at"] and row["due_at"] <= now)
         row["assignment"] = "mine" if principal and row["owner"] == principal else "available"

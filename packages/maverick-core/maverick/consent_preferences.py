@@ -3603,6 +3603,12 @@ class ConsentPreferenceStore:
                 evaluated_at=evaluated,
             )
 
+    def outbox_watermark(self, tenant_id: str) -> int:
+        """Current native sequence for an explicit future-only subscription."""
+        tenant = self._tenant(tenant_id)
+        with self._connect() as conn:
+            return int(conn.execute("SELECT COALESCE(MAX(sequence),0) FROM consent_outbox WHERE tenant=?", (tenant,)).fetchone()[0])
+
     def read_outbox(
         self,
         tenant_id: str,

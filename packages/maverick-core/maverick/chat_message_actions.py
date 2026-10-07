@@ -162,6 +162,8 @@ def create(world, reviewed, *, token, message, answer_only, caps, admission, bef
     """One atomic native goal/turn/attachment/receipt admission; never dispatch."""
     store = SubmissionStore(world)
     selected = next(row for row in reviewed["goals"] if row["id"] == reviewed["goal_id"])
+    from .task_model_selection import recorded
+    task_selection = recorded(world, reviewed["goal_id"])
     fingerprints = [{key: item[key] for key in ("filename", "mime", "size_bytes", "sha256")}
                     for item in reviewed["files"]]
     request = {"source": digest(reviewed), "message": message, "answer_only": answer_only,
@@ -174,7 +176,8 @@ def create(world, reviewed, *, token, message, answer_only, caps, admission, bef
         chat_prior=reviewed["prior"], before_create=before_create,
         attachment_records=[AttachmentAdmission(item["filename"], item["mime"], item["size_bytes"],
             item["sha256"], item["path"]) for item in reviewed["files"]],
-        submission_detail={"alternative": {"source_goal_ids": [row["id"] for row in reviewed["goals"]],
+        submission_detail={**({"task_model_selection": task_selection} if task_selection is not None else {}),
+            "alternative": {"source_goal_ids": [row["id"] for row in reviewed["goals"]],
             "source_goal": reviewed["goal_id"], "action": reviewed["action"],
             "source_sha256": digest(reviewed), "answer_only": answer_only,
             "caps": caps, "admission": admission,

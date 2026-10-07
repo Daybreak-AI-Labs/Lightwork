@@ -99,6 +99,10 @@ def _configured_level(role: str, pack_default: str | None = None) -> str | None:
     the built-in role profile, then a pack-authored ``effort`` (both only when
     ``[effort] enabled`` -- so a pack's tier never turns the feature on, it only
     right-sizes it once an operator has)."""
+    from .task_model_selection import current_effort
+    task_effort = current_effort()
+    if task_effort:
+        return task_effort
     role_l = (role or "").strip().lower()
     env_role = os.environ.get(f"MAVERICK_EFFORT_{role_l.upper()}")
     if env_role:

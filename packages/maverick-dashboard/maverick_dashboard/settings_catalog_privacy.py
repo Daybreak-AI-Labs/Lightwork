@@ -1340,6 +1340,10 @@ def _consent_limit_rows(S) -> tuple:
           minimum=1, maximum=3650, integer=True, unit="days", weaker="higher",
           none_text="No limit", warning="Consent reports will be able to include older records."),
 
+        S(f"{_CP}.delivery.worker", "enable", "Run automatic consent delivery",
+          "Runs only separately reviewed future-delivery subscriptions saved on Consent delivery. "
+          "Turning this on does not authorize any destination or replay an unconfirmed send.",
+          "toggle", _P, False, "maverick_dashboard.consent_delivery_managed_api", subgroup=delivery),
         S(f"{_CP}.delivery", "max_attempts", "Tries before a delivery stops",
           "How many times each consent change is sent to a delivery destination before it "
           "stops and is flagged. It is also the most a destination may choose, and it applies "

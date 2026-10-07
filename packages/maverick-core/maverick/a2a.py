@@ -1,13 +1,13 @@
 """A2A (Agent2Agent) discovery: serve a standards-shaped Agent Card.
 
-The A2A protocol (Linux Foundation, v1.0 — crossed 150+ orgs and went to
-production in 2026) lets agents discover and describe each other. The
+The installed JSON-RPC task surface uses A2A's 0.3 message and task shapes.
+The discovery card advertises that version and current authentication. The
 foundational primitive is the **Agent Card**, a JSON document served at
 ``/.well-known/agent-card.json`` describing who the agent is and what it
 can do.
 
-This module makes Lightwork *discoverable* as an A2A agent: a pure
-``build_agent_card()`` (fully unit-testable, no server) plus a ``mount()``
+This module makes Lightwork *discoverable* as an A2A agent: a
+``build_agent_card()`` (no task execution) plus a ``mount()``
 that registers the well-known route on the FastAPI app.
 
 Off by default: the card is an outward-facing description of a local agent,
@@ -26,7 +26,7 @@ import os
 from typing import Any
 from urllib.parse import urlparse
 
-A2A_PROTOCOL_VERSION = "1.0"
+A2A_PROTOCOL_VERSION = "0.3.0"
 
 # Default public base URL; overridable so a card served behind a reverse
 # proxy advertises the right address.
@@ -82,47 +82,51 @@ def _version() -> str:
 _SKILLS: list[dict[str, Any]] = [
     {
         "id": "execute-goal",
-        "name": "Execute a long-horizon goal",
+        "name": "Complete a business task",
         "description": (
-            "Give Lightwork a goal; a swarm of specialist sub-agents plans, "
-            "runs in parallel, and verifies the result -- under a hard "
-            "budget cap, with every step screened by a safety layer."
+            "Plan and carry out permitted work with specialist AI workers and connected tools. "
+            "Review requirements and spending limits remain in force."
         ),
         "tags": ["autonomy", "multi-agent", "long-horizon", "safety"],
     },
     {
         "id": "research",
         "name": "Research and synthesize",
-        "description": "Search across sources, verify, and synthesize a cited answer.",
+        "description": "Find information and prepare an answer with available sources.",
         "tags": ["research", "web", "synthesis"],
     },
     {
         "id": "code",
         "name": "Write and test code",
-        "description": "Implement, run, and verify code changes in a sandbox.",
+        "description": "Prepare code changes and run permitted checks in installed isolated execution tools.",
         "tags": ["code", "sandbox"],
     },
 ]
 
 
 def build_agent_card(base_url: str | None = None) -> dict[str, Any]:
-    """Return an A2A v1.0-shaped Agent Card for this Lightwork instance.
+    """Return the installed A2A 0.3 card and native authentication requirements.
 
-    Pure function -- no I/O beyond reading the version/base-url config -- so
-    it can be unit-tested and embedded wherever needed.
+    Reads the same current authentication decision as the task endpoint.
+    Discovery starts no task and publishes no credential.
     """
     url = _base_url(base_url)
+    from .a2a_tasks import TaskEngine
+
+    security = [{"lightworkBearer": []}]
+    if TaskEngine().auth_error(None) is None:
+        security.insert(0, {})
     return {
         "protocolVersion": A2A_PROTOCOL_VERSION,
         "name": "Lightwork",
         "description": (
-            "An open-source recursive multi-agent swarm that runs long-horizon "
-            "work locally -- your models, a hard budget cap, safety baked in."
+            "Lightwork coordinates specialist AI workers, company knowledge and connected tools. "
+            "Work follows configured permissions, review requirements and spending limits."
         ),
         "url": f"{url}/a2a/v1",
         "version": _version(),
         "provider": {
-            "organization": "Lightwork",
+            "organization": "Daybreak AI Labs",
             "url": "https://github.com/Daybreak-AI-Labs/Lightwork",
         },
         "capabilities": {
@@ -134,6 +138,10 @@ def build_agent_card(base_url: str | None = None) -> dict[str, Any]:
         },
         "defaultInputModes": ["text/plain"],
         "defaultOutputModes": ["text/plain"],
+        "preferredTransport": "JSONRPC",
+        "securitySchemes": {"lightworkBearer": {"type": "http", "scheme": "bearer",
+                           "description": "An approved shared or individual Lightwork agent access key."}},
+        "security": security,
         "skills": list(_SKILLS),
     }
 
@@ -217,7 +225,7 @@ def mount(app: Any) -> None:
     async def _agent_card() -> dict[str, Any]:
         return build_agent_card()
 
-    # Canonical A2A v1.0 location, plus the pre-1.0 alias some clients still probe.
+    # Canonical discovery location and the legacy alias some clients still probe.
     app.add_api_route("/.well-known/agent-card.json", _agent_card, methods=["GET"])
     app.add_api_route("/.well-known/agent.json", _agent_card, methods=["GET"])
 

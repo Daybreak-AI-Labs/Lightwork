@@ -101,12 +101,14 @@ def publish_batch(world, goal_id, records):
 
 
 async def submit(world, files, *, token, owner, title, description, parent_id=None, domain="", project_id=None,
-                 chat_text=None, chat_root_id=None, connection_references=None):
+                 chat_text=None, chat_root_id=None, connection_references=None, task_selection=None, effect_guard=None):
     async with stage_uploads(files) as records:
         files_manifest = manifest(records)
         fingerprint_values = [title, description, parent_id, domain, project_id, files_manifest]
         if connection_references:
             fingerprint_values.append(connection_references)
+        if task_selection is not None:
+            fingerprint_values.append({"task_model_selection": task_selection})
         fingerprint = hashlib.sha256(json.dumps(fingerprint_values,
                                                 sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         store = SubmissionStore(world)
@@ -115,7 +117,9 @@ async def submit(world, files, *, token, owner, title, description, parent_id=No
                                               title=title, description=description, manifest=files_manifest,
                                               parent_id=parent_id, domain=domain, project_id=project_id,
                                               chat_text=chat_text, chat_root_id=chat_root_id,
-                                              connection_references=connection_references)
+                                              connection_references=connection_references,
+                                              submission_detail={"task_model_selection": task_selection} if task_selection is not None else None,
+                                              effect_guard=effect_guard)
         except SubmissionConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if receipt["state"] in {"dispatching", "dispatched"}:

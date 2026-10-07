@@ -1,5 +1,5 @@
 """Same-origin questionnaire builder and original accepted-receipt reads."""
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
@@ -25,6 +25,18 @@ async def catalog(request: Request):
 @router.get("/source")
 async def source(request: Request, identity: str = ""):
     return await run_in_threadpool(native.source, request, identity)
+
+
+@router.get("/studio-sources")
+async def studio_sources(request: Request, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return await run_in_threadpool(native.studio_sources, request)
+
+
+@router.get("/studio-form")
+async def studio_form(request: Request, response: Response, studio: str, form: str):
+    response.headers["Cache-Control"] = "no-store"
+    return await run_in_threadpool(native.studio_form, request, studio, form)
 
 
 @router.post("/review")

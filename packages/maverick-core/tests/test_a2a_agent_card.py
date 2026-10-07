@@ -24,7 +24,7 @@ def test_card_has_required_a2a_fields(_clean):
                 "capabilities", "defaultInputModes", "defaultOutputModes",
                 "skills"):
         assert key in card, f"missing A2A field: {key}"
-    assert card["protocolVersion"] == "1.0"
+    assert card["protocolVersion"] == "0.3.0"
     assert card["name"] == "Lightwork"
     assert isinstance(card["skills"], list) and card["skills"]
     for skill in card["skills"]:
@@ -71,6 +71,6 @@ def test_route_served_when_enabled(_clean, monkeypatch):
     assert r.status_code == 200
     body = r.json()
     assert body["name"] == "Lightwork"
-    assert body["protocolVersion"] == "1.0"
+    assert body["protocolVersion"] == "0.3.0"
     # legacy alias also served
     assert client.get("/.well-known/agent.json").status_code == 200

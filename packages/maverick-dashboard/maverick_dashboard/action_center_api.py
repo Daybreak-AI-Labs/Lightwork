@@ -95,6 +95,38 @@ def _vendor_reconciliation_rows(request) -> dict:
     return {"items": rows, "complete": complete}
 
 
+def _evidence_source_approvals(request) -> dict:
+    """Current managed setups that this administrator can independently review."""
+    from maverick import trc_continuous_evidence as evidence
+
+    from . import auth
+    from .trc_setup_api import _source_access, _source_store, managed_definition_guard
+
+    with auth.fresh_configuration():
+        if (not auth.has_global_permission(request, "admin")
+                or not auth.suite_allowed(request, "it_grc") or not evidence.enabled()):
+            return {"items": [], "coverage": "disabled", "limit": 64}
+        _evidence, store, _owner, context = _source_store(request)
+        definitions = store.list_source_definitions(limit=65)
+        actor = store._actor_sha256()
+        items = []
+        for definition in definitions[:64]:
+            if definition.state != "pending" or definition.created_by_sha256 == actor:
+                continue
+            guard = managed_definition_guard(request, definition)
+            if guard is not None:
+                guard()
+            items.append({"id": definition.definition_id,
+                          "title": definition.source_manifest["label"],
+                          "updated_at": definition.created_at,
+                          "version": [definition.version, definition.integrity_sha256]})
+    with auth.fresh_configuration():
+        if _source_access(request)[3] != context:
+            raise HTTPException(409, "Your access or workspace changed. Refresh Action Center.")
+    return {"items": items, "coverage": "partial" if len(definitions) > 64 else "current",
+            "limit": 64}
+
+
 def _model(request):
     from maverick.assessment import custom_template_records, list_saved
 
@@ -138,9 +170,14 @@ def _model(request):
     def connection_attention():
         from .connection_dependencies import connection_attention as owned_connections
         return owned_connections(request)
+    def governance_reviews():
+        from .action_center_governance_sources import collect
+        return collect(request)
     return action_center.collect(_world(), principal=principal, owner=goal_owner_filter(request),
         specs=specs, assessments=list_saved, assessment_allowed=allowed,
         project_reviews=project_reviews, vendor_reconciliations=vendor_reconciliations,
+        evidence_source_approvals=lambda: _evidence_source_approvals(request),
+        governance_reviews=governance_reviews,
         connection_attention=connection_attention,
         flow_approvals=lambda: pending_for_request(request, limit=action_center.SOURCE_LIMIT),
         approval_allowed=lambda row: (
@@ -161,6 +198,12 @@ async def _snapshot(request):
         preference = await run_in_threadpool(action_center.preferences, context)
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Attention preferences are unavailable; no read or snooze state was changed.") from exc
+    from . import auth
+
+    with auth.fresh_configuration():
+        require_enabled(request)
+        if context_for(request) != context:
+            raise HTTPException(409, "Your account or workspace changed. Reload current decisions.")
     return action_center.apply_preferences({**model, "context": context}, preference, now=time.time())
 
 
@@ -169,6 +212,8 @@ async def inbox(request: Request, response: Response,
                 kind: Literal[
                     "all", "approval", "signoff", "assessment", "project_review",
                     "vendor_reconciliation", "task_attention", "connection_attention",
+                    "evidence_source_approval",
+                    "lifecycle_review", "drop_authority_review", "trust_center_review", "disclosure_review",
                 ] = "all",
                 view: Literal["active", "unread", "snoozed", "overdue", "all"] = "active",
                 assignment: Literal["all", "mine", "available"] = "all",

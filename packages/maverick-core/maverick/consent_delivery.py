@@ -7,9 +7,9 @@ key-ID rotation/revocation, canonical signed envelopes, and an injectable HTTP
 transport seam.  The default transport uses the repository's DNS-pinned SSRF
 guard and never follows redirects.
 
-Only opaque identifiers, bounded consent choices, digests, and an HTTPS origin
-are retained.  Signing key material is deliberately absent from the schema and
-is supplied at send time by a signer protocol.
+Opaque identifiers, bounded consent choices, digests, and an HTTPS origin are
+retained. Ordinary signing keys and future subscriptions use sealed records in
+the existing metadata authority; plaintext keys are never stored or returned.
 """
 
 from __future__ import annotations
@@ -84,6 +84,7 @@ _RETRY_ERROR_CODES = frozenset(
         "authentication_rejected",
         "contract_rejected",
         "unexpected_status",
+        "delivery_unconfirmed",
     }
 )
 _PROHIBITED_KEYS = frozenset(
@@ -694,6 +695,9 @@ def _validated_request_headers(request: SignedDeliveryRequest) -> dict[str, str]
 class HTTPSConsentDeliveryTransport:
     """Real DNS-pinned HTTPS transport; tests should inject a fake transport."""
 
+    def __init__(self, *, before_effect=None):
+        self._before_effect = before_effect
+
     def post(
         self,
         request: SignedDeliveryRequest,
@@ -726,53 +730,61 @@ class HTTPSConsentDeliveryTransport:
 
         try:
             with safe_client(request.url, timeout=timeout, require_public=True) as client:
-                with client.stream(
-                    "POST",
-                    request.url,
-                    headers=headers,
-                    content=request.body,
-                ) as response:
-                    declared = response.headers.get("content-length")
-                    if declared is not None:
-                        try:
-                            declared_length = int(declared)
-                        except ValueError:
-                            raise ConsentDeliveryTransportError(
-                                "delivery response Content-Length is invalid"
-                            ) from None
-                        if declared_length < 0 or declared_length > maximum:
-                            raise ConsentDeliveryTransportError(
-                                "delivery response exceeds its byte bound"
-                            )
-                    digest = hashlib.sha256()
-                    observed = 0
-                    for chunk in response.iter_bytes():
-                        observed += len(chunk)
-                        if observed > maximum:
-                            raise ConsentDeliveryTransportError(
-                                "delivery response exceeds its byte bound"
-                            )
-                        digest.update(chunk)
-                    retry_after: float | None = None
-                    raw_retry = response.headers.get("retry-after")
-                    if raw_retry is not None:
-                        try:
-                            candidate = float(raw_retry)
-                        except ValueError:
-                            candidate = -1.0
-                        if 0 <= candidate <= _MAX_RETRY_AFTER_SECONDS:
-                            retry_after = candidate
-                    return DeliveryResponse(
-                        status_code=int(response.status_code),
-                        retry_after_seconds=retry_after,
-                        response_sha256=digest.hexdigest(),
-                    )
-        except ConsentDeliveryTransportError:
+                from .authority_effects import authority_effect_fence
+                with authority_effect_fence() if self._before_effect else contextlib.nullcontext():
+                    if self._before_effect is not None:
+                        self._before_effect(request)
+                    return self._post(client, request, headers, maximum)
+        except (ConsentDeliveryTransportError, ConsentDeliveryRevoked):
             raise
         except Exception as exc:
             raise ConsentDeliveryTransportError(
                 "consent delivery transport failed or was blocked"
             ) from exc
+
+    @staticmethod
+    def _post(client, request, headers, maximum):
+        with client.stream(
+            "POST",
+            request.url,
+            headers=headers,
+            content=request.body,
+        ) as response:
+            declared = response.headers.get("content-length")
+            if declared is not None:
+                try:
+                    declared_length = int(declared)
+                except ValueError:
+                    raise ConsentDeliveryTransportError(
+                        "delivery response Content-Length is invalid"
+                    ) from None
+                if declared_length < 0 or declared_length > maximum:
+                    raise ConsentDeliveryTransportError(
+                        "delivery response exceeds its byte bound"
+                    )
+            digest = hashlib.sha256()
+            observed = 0
+            for chunk in response.iter_bytes():
+                observed += len(chunk)
+                if observed > maximum:
+                    raise ConsentDeliveryTransportError(
+                        "delivery response exceeds its byte bound"
+                    )
+                digest.update(chunk)
+            retry_after: float | None = None
+            raw_retry = response.headers.get("retry-after")
+            if raw_retry is not None:
+                try:
+                    candidate = float(raw_retry)
+                except ValueError:
+                    candidate = -1.0
+                if 0 <= candidate <= _MAX_RETRY_AFTER_SECONDS:
+                    retry_after = candidate
+            return DeliveryResponse(
+                status_code=int(response.status_code),
+                retry_after_seconds=retry_after,
+                response_sha256=digest.hexdigest(),
+            )
 
 
 class ConsentDeliveryStore:
@@ -1810,6 +1822,9 @@ class ConsentDeliveryStore:
             ) <= now:
                 state = "cancelled"
                 error_code = "lease_expired_cancelled"
+            elif row["last_error_code"] == "delivery_unconfirmed":
+                state = "dead_letter"
+                error_code = "delivery_unconfirmed"
             elif int(row["attempts"]) >= min(int(row["max_attempts"]), most_attempts):
                 state = "dead_letter"
                 error_code = "lease_expired_max_attempts"
@@ -1854,6 +1869,7 @@ class ConsentDeliveryStore:
         worker_id: str,
         limit: int = 10,
         lease_seconds: float = 60.0,
+        destination_ids: tuple[str, ...] | None = None,
     ) -> tuple[DeliveryClaim, ...]:
         """CAS-claim due messages while preserving destination/profile order."""
 
@@ -1868,6 +1884,10 @@ class ConsentDeliveryStore:
         )
         now = self._now()
         lease_until = now + lease
+        selected = None if destination_ids is None else _closed_tuple(destination_ids, "destination_ids", maximum=64)
+        if selected is not None:
+            selected = tuple(_opaque(value, "destination_id") for value in selected)
+        selection_sql = "" if selected is None else " AND m.destination_id IN (" + ",".join("?" for _ in selected) + ")"
         with self._connect() as connection:
             try:
                 self._begin(connection)
@@ -1915,10 +1935,11 @@ class ConsentDeliveryStore:
                             AND earlier.profile_sequence<m.profile_sequence
                             AND earlier.state IN ('queued','leased','dead_letter')
                       )
+                    """ + selection_sql + """
                     ORDER BY m.sequence
                     LIMIT ?
                     """,
-                    (tenant, now, now, bounded_limit),
+                    (tenant, now, now, *(selected or ()), bounded_limit),
                 ).fetchall()
                 claims: list[DeliveryClaim] = []
                 for row in rows:
@@ -2314,7 +2335,7 @@ class ConsentDeliveryStore:
             try:
                 self._begin(connection)
                 row = connection.execute(
-                    "SELECT state,lease_token,revision FROM delivery_messages "
+                    "SELECT state,lease_token,revision,last_error_code FROM delivery_messages "
                     "WHERE tenant=? AND message_id=?",
                     (claim.tenant_id, claim.message_id),
                 ).fetchone()
@@ -2335,12 +2356,13 @@ class ConsentDeliveryStore:
                     state = "cancelled"
                     cancelled_at: float | None = now
                 else:
-                    state = "queued"
+                    state = "dead_letter" if row["last_error_code"] == "delivery_unconfirmed" else "queued"
                     cancelled_at = None
                 connection.execute(
                     "UPDATE delivery_messages SET state=?,lease_owner=NULL,lease_token=NULL,"
                     "lease_until=NULL,destination_revision=NULL,signing_key_id=NULL,"
-                    "cancelled_at=?,last_error_code='authorization_changed',"
+                    "cancelled_at=?,last_error_code=CASE WHEN last_error_code='delivery_unconfirmed' "
+                    "THEN last_error_code ELSE 'authorization_changed' END,"
                     "revision=revision+1,updated_at=? WHERE tenant=? AND message_id=? "
                     "AND state='leased' AND lease_token=? AND revision=?",
                     (
@@ -2424,6 +2446,8 @@ class ConsentDeliveryStore:
                     raise ConsentDeliveryNotFound("delivery message does not exist")
                 if row["state"] != "dead_letter":
                     raise ConsentDeliveryConflict("message is not a dead letter")
+                if row["last_error_code"] == "delivery_unconfirmed":
+                    raise ConsentDeliveryConflict("The receiving system must confirm this update before it can be sent again.")
                 if int(row["revision"]) != expected:
                     raise ConsentDeliveryConflict("message revision changed")
                 if row["destination_status"] != "active" or row["active_key_id"] is None:
@@ -2749,6 +2773,116 @@ class ConsentDeliveryStore:
                 self._rollback(connection)
                 raise
 
+    def managed_record(self, tenant_id: str, kind: str, reference: str) -> dict | None:
+        """Read one exact sealed key/subscription; no credential is public."""
+        from . import crypto_at_rest
+        tenant, ref = self._tenant(tenant_id), _opaque(reference, "reference")
+        if kind not in {"key", "subscription"}:
+            raise ConsentDeliveryValidationError("managed record kind is invalid")
+        key = "managed." + _sha256(tenant) + "." + kind + "." + _sha256(ref)
+        with self._connect() as connection:
+            row = connection.execute("SELECT value FROM delivery_meta WHERE key=?", (key,)).fetchone()
+        if row is None:
+            return None
+        try:
+            if not crypto_at_rest.is_sealed_str(row["value"]):
+                raise ValueError
+            record = json.loads(crypto_at_rest.unseal_from_str(row["value"]))
+            if (record["tenant"] != tenant or record["kind"] != kind or record["reference"] != ref
+                    or not isinstance(record["revision"], int) or record["revision"] < 1):
+                raise ValueError
+            return record
+        except (ValueError, TypeError, KeyError, crypto_at_rest.EncryptionUnavailable) as exc:
+            raise ConsentDeliveryConfigError("Saved delivery setup could not be verified.") from exc
+
+    def managed_save(self, tenant_id: str, kind: str, reference: str, material: dict,
+                     *, expected_revision: int, idempotency_key: str, before_effect=None) -> dict:
+        """Existing sealed metadata + immutable receipt; no parallel journal."""
+        from . import crypto_at_rest
+        tenant, ref = self._tenant(tenant_id), _opaque(reference, "reference")
+        if kind not in {"key", "subscription"} or not isinstance(material, dict):
+            raise ConsentDeliveryValidationError("managed delivery setup is invalid")
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0:
+            raise ConsentDeliveryValidationError("setup revision is invalid")
+        request = {"kind": kind, "reference": ref, "material": material, "expected_revision": expected_revision}
+        request_hash = _sha256(request)
+        _raw, operation = self._idempotency(idempotency_key)
+        key = "managed." + _sha256(tenant) + "." + kind + "." + _sha256(ref)
+        with self._connect() as connection:
+            try:
+                self._begin(connection)
+                prior = self._idempotent_result(connection, tenant=tenant, namespace="managed."+kind,
+                    key_sha256=operation, request_sha256=request_hash)
+                if prior is not None:
+                    connection.execute("COMMIT")
+                    return prior
+                row = connection.execute("SELECT value FROM delivery_meta WHERE key=?", (key,)).fetchone()
+                if row is not None and not crypto_at_rest.is_sealed_str(row["value"]):
+                    raise ConsentDeliveryConfigError("Saved setup could not be verified.")
+                previous = None if row is None else json.loads(crypto_at_rest.unseal_from_str(row["value"]))
+                if previous is not None and (previous["tenant"], previous["kind"], previous["reference"]) != (tenant, kind, ref):
+                    raise ConsentDeliveryConfigError("Saved setup could not be verified.")
+                revision = 0 if previous is None else previous["revision"]
+                if revision != expected_revision or (kind == "key" and revision):
+                    raise ConsentDeliveryConflict("Saved setup changed. Review its current edition again.")
+                if before_effect is not None:
+                    before_effect()
+                now = self._now()
+                record = {"tenant": tenant, "kind": kind, "reference": ref, "revision": revision+1, "material": material}
+                sealed = crypto_at_rest.seal_to_str(_canonical(record).decode("ascii"))
+                if not crypto_at_rest.is_sealed_str(sealed):
+                    raise ConsentDeliveryConfigError("Delivery setup could not be protected.")
+                connection.execute("INSERT INTO delivery_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, sealed))
+                result = {"kind": kind, "reference": ref, "revision": revision+1, "saved": True}
+                self._audit(connection, tenant=tenant, event_type="managed_setup_saved", subject_id=ref,
+                    details={"kind": kind, "revision": revision+1}, now=now)
+                self._save_idempotency(connection, tenant=tenant, namespace="managed."+kind,
+                    key_sha256=operation, request_sha256=request_hash, result=result, now=now)
+                if before_effect is not None:
+                    before_effect()
+                connection.execute("COMMIT")
+                return result
+            except BaseException:
+                self._rollback(connection)
+                raise
+
+    def managed_original(self, tenant_id: str, request: dict, idempotency_key: str) -> dict | None:
+        tenant = self._tenant(tenant_id)
+        _raw, operation = self._idempotency(idempotency_key)
+        with self._connect() as connection:
+            return self._idempotent_result(connection, tenant=tenant, namespace="managed."+request["kind"],
+                key_sha256=operation, request_sha256=_sha256(request))
+
+    def managed_keys(self, tenant_id: str) -> list[dict]:
+        """Named choices only; secrets never enter the public inventory."""
+        from . import crypto_at_rest
+        tenant = self._tenant(tenant_id)
+        prefix = "managed." + _sha256(tenant) + ".key."
+        with self._connect() as connection:
+            rows = connection.execute("SELECT value FROM delivery_meta WHERE key LIKE ? ORDER BY key LIMIT 1001", (prefix+"%",)).fetchall()
+        if len(rows) > 1000:
+            raise ConsentDeliveryConfigError("Saved signing keys exceed the supported inventory bound.")
+        result = []
+        for row in rows:
+            record = json.loads(crypto_at_rest.unseal_from_str(row["value"]))
+            current = self.managed_record(tenant, "key", record["reference"])
+            if current is None:
+                raise ConsentDeliveryConfigError("Saved signing key changed during the read.")
+            result.append({"key_id": current["reference"], "label": current["material"]["label"], "saved": True})
+        return result
+
+    def mark_managed_send(self, claim: DeliveryClaim) -> None:
+        """Before physical send, persist uncertainty so a crash never replays."""
+        with self._connect() as connection:
+            try:
+                self._begin(connection)
+                self._claim_row(connection, claim, now=self._now())
+                connection.execute("UPDATE delivery_messages SET last_error_code='delivery_unconfirmed' WHERE tenant=? AND message_id=?", (claim.tenant_id, claim.message_id))
+                connection.execute("COMMIT")
+            except BaseException:
+                self._rollback(connection)
+                raise
+
     def privacy_posture(self, tenant_id: str) -> dict[str, Any]:
         """Inspect retained JSON keys and schema columns without returning values."""
 
@@ -2791,6 +2925,7 @@ class ConsentDeliveryStore:
             "prohibited_payload_keys": tuple(prohibited),
             "prohibited_schema_columns": tuple(prohibited_columns),
             "key_material_persisted": False,
+            "managed_key_custody": "sealed metadata; never plaintext",
             "privacy_check_passed": not prohibited and not prohibited_columns,
         }
 
@@ -2806,12 +2941,18 @@ class ConsentDeliveryDispatcher:
         transport: DeliveryTransport | None = None,
         timeout_seconds: float = 10.0,
         max_response_bytes: int = _MAX_RESPONSE_BYTES,
+        before_effect=None,
+        hold_unknown: bool = False,
     ) -> None:
         if not isinstance(store, ConsentDeliveryStore):
             raise ConsentDeliveryConfigError("store must be a ConsentDeliveryStore")
         if not hasattr(signer, "sign") or not callable(signer.sign):
             raise ConsentDeliveryConfigError("signer is invalid")
-        selected_transport = transport or HTTPSConsentDeliveryTransport()
+        self._before_effect = before_effect
+        self._hold_unknown = hold_unknown
+        self._active_claim = None
+        selected_transport = transport or HTTPSConsentDeliveryTransport(
+            before_effect=self._physical_boundary if before_effect is not None or hold_unknown else None)
         if not hasattr(selected_transport, "post") or not callable(selected_transport.post):
             raise ConsentDeliveryConfigError("transport is invalid")
         self._store = store
@@ -2827,6 +2968,17 @@ class ConsentDeliveryDispatcher:
             "max_response_bytes",
             maximum=_MAX_RESPONSE_BYTES,
         )
+
+    def _physical_boundary(self, request):
+        claim = self._active_claim
+        if claim is None or (request.tenant_id, request.message_id, request.destination_id, request.key_id) != (
+                claim.tenant_id, claim.message_id, claim.destination_id, claim.signing_key_id):
+            raise ConsentDeliveryRevoked("The reviewed delivery source changed.")
+        if self._before_effect is not None:
+            self._before_effect(claim)
+        self._store.authorize_claim(claim)
+        if self._hold_unknown:
+            self._store.mark_managed_send(claim)
 
     def _record_failure(
         self,
@@ -2868,6 +3020,7 @@ class ConsentDeliveryDispatcher:
         worker_id: str,
         limit: int = 10,
         lease_seconds: float = 60.0,
+        destination_ids: tuple[str, ...] | None = None,
     ) -> dict[str, int]:
         """Claim, sign, reauthorize, send, and transition a bounded batch."""
 
@@ -2876,6 +3029,7 @@ class ConsentDeliveryDispatcher:
             worker_id=worker_id,
             limit=limit,
             lease_seconds=lease_seconds,
+            destination_ids=destination_ids,
         )
         result = {
             "claimed": len(claims),
@@ -2886,6 +3040,8 @@ class ConsentDeliveryDispatcher:
         }
         for claim in claims:
             try:
+                if self._before_effect is not None:
+                    self._before_effect(claim)
                 request = self._store.build_signed_request(claim, self._signer)
                 # A signer may rotate/revoke external custody while it works.
                 # Re-check after signing and immediately before transport I/O.
@@ -2909,16 +3065,24 @@ class ConsentDeliveryDispatcher:
                     )
                 continue
             try:
+                self._active_claim = claim
+                self._physical_boundary(request)
                 response = self._transport.post(
                     request,
                     timeout_seconds=self._timeout,
                     max_response_bytes=self._max_response_bytes,
                 )
+                if self._before_effect is not None:
+                    self._before_effect(claim)
+            except (ConsentDeliveryRevoked, ConsentDeliveryLeaseLost):
+                self._release_invalidated(result, claim)
+                continue
             except Exception:
                 failure = self._record_failure(
                     result,
                     claim,
-                    error_code="transport_error",
+                    error_code="delivery_unconfirmed" if self._hold_unknown else "transport_error",
+                    permanent=self._hold_unknown,
                 )
                 if failure is not None:
                     result["retry_scheduled"] += int(failure["state"] == "queued")
@@ -2930,7 +3094,7 @@ class ConsentDeliveryDispatcher:
                 failure = self._record_failure(
                     result,
                     claim,
-                    error_code="contract_rejected",
+                    error_code="delivery_unconfirmed" if self._hold_unknown else "contract_rejected",
                     permanent=True,
                 )
                 if failure is not None:
@@ -2951,12 +3115,14 @@ class ConsentDeliveryDispatcher:
                 else:
                     result["delivered"] += 1
             elif status in {408, 425, 429} or 500 <= status < 600:
-                code = "rate_limited" if status == 429 else "remote_unavailable"
+                code = "delivery_unconfirmed" if self._hold_unknown else (
+                    "rate_limited" if status == 429 else "remote_unavailable")
                 failure = self._record_failure(
                     result,
                     claim,
                     error_code=code,
                     retry_after_seconds=response.retry_after_seconds,
+                    permanent=self._hold_unknown,
                 )
                 if failure is not None:
                     result["retry_scheduled"] += int(failure["state"] == "queued")

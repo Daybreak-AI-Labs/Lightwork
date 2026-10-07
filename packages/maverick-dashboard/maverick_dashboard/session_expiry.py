@@ -4,9 +4,9 @@ Pages carry the signed session's end time so ``lightwork-session.js`` can warn
 before it ends and offer to stay signed in. A local (passphrase) sign-in is
 kept going here: the session is replaced by a new one of the usual length and
 the old one is ended, so the Sessions page still lists exactly one. A company
-(OIDC or SAML) sign-in is never extended by Lightwork: its length is the
-identity provider's policy, so "Stay signed in" signs in there again and comes
-back to the same page.
+(OIDC or SAML) sign-in keeps its original ceiling and current shorter
+installation limit. Activity can extend only the inactivity deadline. "Stay
+signed in" returns to the company provider when the absolute sign-in is ending.
 """
 from __future__ import annotations
 
@@ -43,9 +43,30 @@ def _payload(request: Request) -> tuple[dict, str] | None:
         return None
 
 
-def _ends(payload: dict) -> int | None:
+def _ends(payload: dict, *, company: bool = False) -> int | None:
+    from . import session_registry
+    from .session_policy import company_ttl, idle_minutes
+    from .session_revocation import is_revoked
+
     value = payload.get("exp")
-    return int(value) if isinstance(value, (int, float)) and value > time.time() else None
+    if not isinstance(value, (int, float)) or is_revoked(payload.get("sub", ""), payload.get("iat")):
+        return None
+    try:
+        sid = payload.get("sid")
+        if sid:
+            row = session_registry.current(sid, principal=f"user:{payload.get('sub')}")
+            if row is None:
+                return None
+            value = min(value, row.effective_end)
+        elif idle_minutes():
+            return None
+        elif company:
+            value = min(value, float(payload["iat"]) + company_ttl(12 * 3600))
+        return int(value) if value > time.time() else None
+    except (KeyError, TypeError, ValueError, OSError):
+        return None
+    except session_registry.SessionStoreError:
+        return None
 
 
 def sign_in_path() -> str:
@@ -67,10 +88,12 @@ def sign_in_path() -> str:
 def page_session(request: Request) -> dict | None:
     """For the page shell: the session's end, the server clock and how to keep it."""
     found = _payload(request)
-    ends = _ends(found[0]) if found else None
+    ends = _ends(found[0], company=found[1] == "company") if found else None
     if ends is None:
         return None
-    return {"expires_at": ends, "now": int(time.time()),
+    from .session_policy import idle_minutes
+
+    return {"expires_at": ends, "now": int(time.time()), "idle_minutes": idle_minutes(),
             "renew": "renew" if found[1] == "local" else "sign-in", "sign_in": sign_in_path()}
 
 
@@ -80,8 +103,30 @@ def session_status(request: Request) -> JSONResponse:
     found = page_session(request)
     if found is None:
         return JSONResponse({"signed_in": False}, headers=_HEADERS)
+    from .session_policy import idle_minutes
+
     return JSONResponse({"signed_in": True, "expires_at": found["expires_at"], "now": found["now"],
-                         "renew": found["renew"]}, headers=_HEADERS)
+                         "renew": found["renew"], "idle_minutes": idle_minutes()}, headers=_HEADERS)
+
+
+@router.post("/auth/session/activity")
+def record_activity(request: Request) -> JSONResponse:
+    """Keep this active signed browser session current; never renew an ended one."""
+    from . import session_registry
+    from .app import _require_same_origin
+
+    _require_same_origin(request)
+    found = _payload(request)
+    if found is None or _ends(found[0], company=found[1] == "company") is None or not found[0].get("sid"):
+        raise HTTPException(401, "Your sign-in has ended. Sign in again to continue.")
+    client = getattr(request, "client", None)
+    session_registry.touch(found[0]["sid"], activity=True,
+                           ip=str(getattr(client, "host", "") or ""),
+                           user_agent=request.headers.get("user-agent", ""))
+    ends = _ends(found[0], company=found[1] == "company")
+    if ends is None:
+        raise HTTPException(401, "Your sign-in has ended. Sign in again to continue.")
+    return JSONResponse({"expires_at": ends, "now": int(time.time())}, headers=_HEADERS)
 
 
 @router.post("/auth/session/renew")
@@ -93,7 +138,7 @@ def renew_session(request: Request) -> JSONResponse:
 
     _require_same_origin(request)
     found = _payload(request)
-    if found is None or _ends(found[0]) is None:
+    if found is None or _ends(found[0], company=found[1] == "company") is None:
         raise HTTPException(401, "Your sign-in has ended. Sign in again to continue.")
     if found[1] != "local":
         return JSONResponse({"renew": "sign-in", "sign_in": sign_in_path()}, status_code=409, headers=_HEADERS)
@@ -112,6 +157,9 @@ def renew_session(request: Request) -> JSONResponse:
 
     ttl = session_ttl_seconds()
     minted = verify_session(token, local_session_secret()) or {}
-    response = JSONResponse({"expires_at": int(minted.get("exp") or time.time() + ttl)}, headers=_HEADERS)
+    effective = _ends(minted)
+    if effective is None:
+        raise HTTPException(401, "Your sign-in has ended. Sign in again to continue.")
+    response = JSONResponse({"expires_at": effective}, headers=_HEADERS)
     _set_cookie(response, SESSION_COOKIE, token, max_age=ttl, secure=_cookie_secure(request))
     return response

@@ -140,6 +140,14 @@
     required data-error-required="{{ ut('Describe the task first, for example: Summarise this week’s open invoices.') }}"
     {% if not compose_form %}autofocus{% endif %}
   >{{ prefill_title or '' }}</textarea>
+  <details data-task-model-controls>
+    <summary>{{ ui('AI for this task') }}</summary>
+    <label>{{ ui('AI model') }}<select class="select" name="task_model" disabled><option value="">{{ ui('Use workspace settings') }}</option></select></label>
+    <label>{{ ui('Thinking depth') }}<select class="select" name="task_effort" disabled><option value="">{{ ui('Use the model’s usual thinking depth') }}</option></select></label>
+    <input type="hidden" name="task_model_context" value="">
+    <p class="muted" role="status">{{ ui('Reading available AI choices…') }}</p>
+    <button type="button" class="btn btn--ghost">{{ ui('Refresh AI choices') }}</button>
+  </details>
   <details{% if prefill_description %} open{% endif %}>
     <summary>{{ ui('Add details') }}</summary>
     <textarea lang="und" dir="auto" data-user-content
@@ -224,6 +232,7 @@
 
 {% block scripts_extra %}
 <script src="/static/lightwork-file-selection.js" defer></script>
+<script src="/static/lightwork-task-model-selection.js" defer></script>
 {% if can_create_goal %}<script src="/static/lightwork-viewpoints.js" defer></script>{% endif %}
 <script>
   function chatCopy(node, source, values) { if (window.LightworkI18n) window.LightworkI18n.set(node, source, values); else node.textContent = source.replace(/\{(\w+)\}/g, function (_, key) { return (values || {})[key] === undefined ? '{' + key + '}' : values[key]; }); }

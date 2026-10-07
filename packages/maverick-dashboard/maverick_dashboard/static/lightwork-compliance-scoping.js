@@ -107,9 +107,53 @@
   }
 
   // ---- questionnaires -----------------------------------------------------
-  function publishQuestionnaire(q) {
-    R.confirm('Approve “' + questionnaireName(q.questionnaire_id, q.version) + '” for use? It can then be used for assessments and can no longer be changed.', 'Approve').then(function (ok) {
-      if (!ok) return;
+  function showQuestionnaireReview(q, parent) {
+    var labels = q.display_names || {}, questions = {};
+    function named(ref) { return labels[ref] || R.human(String(ref || '').replace(/^ref:/, '')); }
+    function add(tag, text, host) { var node = R.el(tag, '', text); host.appendChild(node); return node; }
+    (q.questions || []).forEach(function (item) { questions[item.question_id] = item; });
+    function condition(c) {
+      if (!c) return 'Always';
+      var question = questions[c.question_id], value = c.value;
+      if (!question) return 'Unavailable question · approval is paused';
+      var answer = typeof value === 'boolean' ? (value ? 'Yes' : 'No') : typeof value === 'number' ? String(value) :
+        (Array.isArray(value) ? value : [value]).map(named).join(' / ');
+      return named(question.question_ref) + ' ' + ({equals: 'is', not_equals: 'is not', contains: 'includes', in: 'is any of', greater_or_equal: 'is at least', less_or_equal: 'is at most'}[c.operator] || R.human(c.operator)) + ' ' + answer;
+    }
+    var kinds = {boolean: 'Yes or no', integer: 'Whole number', single_choice: 'Choose one', multi_choice: 'Choose several', opaque_ref: 'Named item'};
+    if (q.studio_source && q.studio_source.studio_id) add('p', 'Imported from Compliance studio: ' + R.human(q.studio_source.studio_id) + ' · ' + R.human(q.studio_source.form_id) + ' · version ' + q.studio_source.version + '. This questionnaire is a separate immutable version.', parent);
+    q.questions.forEach(function (item, index) {
+      var card = add('section', undefined, parent); card.className = 'panel cs-stack';
+      add('h4', (index + 1) + '. ' + named(item.question_ref), card);
+      add('p', DOMAINS[item.domain] + ' · ' + (kinds[item.answer_type] || R.human(item.answer_type)) + ' · ' + (item.required ? 'Answer required' : 'Optional answer'), card);
+      if (item.options.length) add('p', 'Choices: ' + item.options.map(named).join(' / '), card);
+      add('p', 'Appears: ' + condition(item.condition), card);
+    });
+    q.rules.forEach(function (item, index) {
+      var card = add('section', undefined, parent); card.className = 'panel cs-stack';
+      add('h4', 'Rule ' + (index + 1) + ' · ' + named(item.framework_ref), card);
+      add('p', 'Controls: ' + item.control_refs.map(named).join(' / '), card);
+      if (item.overlap_refs.length) add('p', 'Shared requirements: ' + item.overlap_refs.map(named).join(' / '), card);
+      add('p', 'Reason: ' + named(item.reason_code), card);
+      add('p', 'Applies: ' + (item.conditions.length ? item.conditions.map(condition).join(' AND ') : 'Always'), card);
+    });
+  }
+  async function publishQuestionnaire(q) {
+    var full;
+    try { full = await R.call('GET', API + '/questionnaires/' + encodeURIComponent(q.questionnaire_id) + '/versions/' + q.version); }
+    catch (f) { fail(f, 'read the questionnaire for approval'); return; }
+    if (full.revision !== q.revision || full.status !== 'pending_review') { say('This saved version changed. Refresh its current details before approving it.'); return; }
+    var message = document.getElementById('mv-confirm-msg'), dialog = document.getElementById('mv-confirm');
+    if (!message || !dialog || typeof dialog.showModal !== 'function' || dialog.open) { say('The complete approval review is unavailable. Keep this saved version and reopen its full controls before approving.'); return; }
+    var answer = R.confirm('Review every question, choice and scope rule in “' + questionnaireName(q.questionnaire_id, q.version) + '” below. Approving makes this exact saved version available for new assessments. A different administrator from its creator must approve it. Existing assessments keep their original version.', 'Approve for use');
+    var detail = null, current = true;
+    function invalidate() { current = false; if (detail) detail.remove(); if (dialog.open) dialog.dispatchEvent(new Event('cancel', {cancelable: true})); }
+    var events = ['lightwork:account-context-changed', 'lightwork:workspace-changed', 'lightwork:copilot-context-changed'];
+    events.forEach(function (event) { document.addEventListener(event, invalidate); }); window.addEventListener('lightwork:context-changed', invalidate);
+    if (dialog.open) { detail = document.createElement('div'); message.insertAdjacentElement('afterend', detail); showQuestionnaireReview(full, detail); }
+    var ok;
+    try { ok = await answer; } finally { if (detail) detail.remove(); events.forEach(function (event) { document.removeEventListener(event, invalidate); }); window.removeEventListener('lightwork:context-changed', invalidate); }
+      if (!ok || !current) return;
       R.call('POST', API + '/questionnaires/' + encodeURIComponent(q.questionnaire_id) + '/versions/' + q.version + '/publish',
         { expected_revision: q.revision, idempotency_key: R.newKey() })
         .then(function () { say('Questionnaire approved.'); return load(); })
@@ -117,7 +161,6 @@
           if (f && f.status === 403) { say('A different administrator from the person who added it must approve it.'); return; }
           fail(f, 'approve the questionnaire');
         });
-    });
   }
 
   document.getElementById('cs-add-questionnaire').addEventListener('click', function () { window.LightworkComplianceQuestionnaire.open(); });

@@ -207,6 +207,7 @@
   async function loadRegistry() {
     try {
       const value = await window.mvFetchJSON('/api/v1/research', {cache: 'no-store'});
+      if (value.context !== root.dataset.context) return;
       registry = {datasets: value.registry?.datasets || [], models: value.registry?.models || [], runs: value.governed_runs || []};
       renderPurposes();
       renderExperiments();

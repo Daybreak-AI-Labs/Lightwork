@@ -49,6 +49,8 @@
 
 <p id="gov-flash" role="status" aria-live="polite" class="muted"></p>
 
+{% include "_runtime_enforcement.html" %}
+
 <section class="panel" aria-labelledby="gov-attention-title">
   <div class="section-head"><h2 id="gov-attention-title">Needs attention</h2>
     <button class="btn btn--ghost" type="button" id="gov-refresh-attention">Refresh</button></div>
@@ -1407,4 +1409,5 @@
 })();
 </script>
 <script src="/static/lightwork-grc-recovery.js" defer></script>
+<script src="/static/lightwork-runtime-enforcement.js" defer></script>
 {% endblock %}

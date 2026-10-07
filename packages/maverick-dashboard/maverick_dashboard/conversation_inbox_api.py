@@ -83,13 +83,16 @@ def _context(request, context):
 
 
 def submit_native(request, goal_id, *, context, operation_id, mode, text, files=(), item_id=None,
-                  expected_revision=None, keep_files=(), independent_context="none", expected_generation=0, expected_snapshot=""):
+                  expected_revision=None, keep_files=(), independent_context="none", expected_generation=0, expected_snapshot="", task_model="", task_effort="", task_model_context=""):
     with authority_effect_fence():
         _context(request, context)
         inbox = service(request)
+        from .task_model_selection_api import selection
+        task_selection = selection(request, task_model, task_effort, task_model_context)
         item = inbox.submit(goal_id, operation_id=operation_id, mode=mode, text=text, files=files,
                             item_id=item_id, expected_revision=expected_revision, keep_files=keep_files,
-                            independent_context=independent_context, expected_generation=expected_generation, expected_snapshot=expected_snapshot)
+                            independent_context=independent_context, expected_generation=expected_generation, expected_snapshot=expected_snapshot,
+                            task_selection=task_selection)
         result = {**state(request, goal_id), "item": item, "received": True}
     from .conversation_inbox_scheduler import wake
     wake()
@@ -100,7 +103,8 @@ def submit_native(request, goal_id, *, context, operation_id, mode, text, files=
 async def submit(request: Request, goal_id: int, context: str = Form(...), operation_id: str = Form(...),
                  mode: str = Form(...), text: str = Form(...), files: list[UploadFile] = File(default=[]),
                  item_id: str = Form(""), expected_revision: int | None = Form(None),
-                 keep_files: str = Form("[]"), independent_context: str = Form("none"), expected_generation: int = Form(0), expected_snapshot: str = Form("")):
+                 keep_files: str = Form("[]"), independent_context: str = Form("none"), expected_generation: int = Form(0), expected_snapshot: str = Form(""),
+                 task_model: str = Form(""), task_effort: str = Form(""), task_model_context: str = Form("")):
     _context(request, context)
     _translate(lambda: service(request).target(goal_id))
     try:
@@ -124,7 +128,8 @@ async def submit(request: Request, goal_id: int, context: str = Form(...), opera
                     upload.content_type or "application/octet-stream", bytes(content)))
         return await run_in_threadpool(_translate, lambda: submit_native(request, goal_id, context=context,
             operation_id=operation_id, mode=mode, text=text, files=selected, item_id=item_id or None,
-            expected_revision=expected_revision, keep_files=retained, independent_context=independent_context, expected_generation=expected_generation, expected_snapshot=expected_snapshot))
+            expected_revision=expected_revision, keep_files=retained, independent_context=independent_context, expected_generation=expected_generation, expected_snapshot=expected_snapshot,
+            task_model=task_model, task_effort=task_effort, task_model_context=task_model_context))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

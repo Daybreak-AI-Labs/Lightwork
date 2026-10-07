@@ -39,6 +39,67 @@
   function human(v) { return window.mvHuman ? window.mvHuman(v) : String(v); }
   function on(id, handler) { var el = $(id); if (el) el.addEventListener('click', handler); }
 
+  // Keep only the encrypted native review, never personal outcome fields, in
+  // the browser. An uncertain Close is read back; it is not sent again.
+  var closePointerKey = 'lightwork:privacy-outcome-original:' + requestId;
+  var closePending = null, closeBusy = false;
+  try { closePending = JSON.parse(sessionStorage.getItem(closePointerKey) || 'null'); } catch (_) { /* The native reader still refuses malformed custody. */ }
+  function retainClose(value) {
+    closePending = value;
+    try { if (value) sessionStorage.setItem(closePointerKey, JSON.stringify(value)); else sessionStorage.removeItem(closePointerKey); } catch (_) { /* The current page still keeps the original. */ }
+    if ($('dsar-close-original')) $('dsar-close-original').hidden = !value;
+  }
+  retainClose(closePending);
+  async function originalClose() {
+    if (!closePending || closeBusy) return;
+    closeBusy = true;
+    try {
+      var result = await call('POST', base + encodeURIComponent(requestId) + '/handling/original', { token: closePending.token });
+      say(result.message + (result.audit_pending ? ' The activity receipt is still pending; the outcome itself is saved.' : ''));
+      if (result.confirmed) { retainClose(null); reloadSoon(); }
+      else $('dsar-close-fresh-review').hidden = result.new_review_available !== true;
+    } catch (failure) { fail(failure, 'read the original outcome'); }
+    finally { closeBusy = false; }
+  }
+  on('dsar-close-original', originalClose);
+  on('dsar-close-fresh-review', function () {
+    ask('The native reader confirmed that the old review expired without a saved outcome. Start a new review of the current request? Nothing will run or close yet.', 'Start a fresh review').then(function (ok) {
+      if (!ok) return; retainClose(null); $('dsar-close-fresh-review').hidden = true; closeRequest(false);
+    });
+  });
+  async function reviewAndClose(body, recordOnly) {
+    if (closePending) { say('Read the earlier original outcome before preparing another close. Nothing new was sent.'); return; }
+    if (closeBusy) return;
+    closeBusy = true;
+    try {
+      var review = await call('POST', base + encodeURIComponent(requestId) + '/handling/review', { outcome: body });
+      if (!review || typeof review.token !== 'string' || !review.outcome || typeof review.summary !== 'string') throw new Error('The complete outcome review could not be read.');
+      if (!await ask(review.summary, recordOnly ? 'Record the reviewed outcome' : 'Close with this statement')) return;
+      retainClose({ token: review.token });
+      try {
+        var result = await call('POST', base + encodeURIComponent(requestId) + '/close', Object.assign({}, review.outcome, { review_token: review.token }));
+        if (!result || result.status !== 'closed' || !result.outcome || !result.outcome.operation_id || !Object.keys(review.outcome).every(function (key) { return result.outcome[key] === review.outcome[key]; })) throw new Error('The exact saved outcome could not be confirmed.');
+        retainClose(null);
+        var cleanup = result.export_cleanup;
+        say(cleanup && cleanup.status === 'failed' ? cleanup.message : 'Your reviewed outcome statement was recorded.'); reloadSoon();
+      } catch (_) { say('The outcome reply could not be confirmed. Read original outcome; Close will not be sent again automatically.'); }
+    } catch (failure) { failPlain(failure, 'review the complete outcome'); }
+    finally { closeBusy = false; }
+  }
+  window.LightworkDSARHandling = { openReview: async function (_selection, options) {
+    options = options || {};
+    var current = options.isCurrent || function () { return true; };
+    if (!current() || !/^[a-f0-9]{64}$/.test(options.context || '') || location.pathname !== '/privacy/dsar/' + requestId) return false;
+    try {
+      var fresh = await call('GET', base + encodeURIComponent(requestId) + '/handling');
+      if (!current() || fresh.context !== options.context || fresh.outcome_recorded) return false;
+      var control = $('dsar-handle') || $('dsar-close') || $('dsar-record-outcome');
+      if (!control) return false;
+      // Focus the existing control. No form is replaced and no write starts.
+      control.scrollIntoView({ block: 'center', behavior: 'auto' }); control.focus(); return current();
+    } catch (_) { say('Current access to the privacy outcome controls could not be confirmed. Your entries are kept.'); return false; }
+  } };
+
   // Where the "Completed" notice's secure link comes from, by page state.
   var LINK_HELP = {
     ready: 'Create it under "3. Send them a secure link" below, then paste it here.',
@@ -236,8 +297,10 @@
     return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate());
   }
   function closeRequest(recordOnly) {
+    if (closePending) { say('Read the earlier original outcome first. Nothing new was sent.'); return; }
     var title = recordOnly ? 'Record how it was answered' : 'Close this request';
     var erasure = page.getAttribute('data-kind') === 'erasure';
+    var actionNeeded = ['access', 'portability', 'erasure'].indexOf(page.getAttribute('data-kind')) < 0;
     var hint = page.getAttribute('data-answer-hint') || '';
     var unconfirmed = page.getAttribute('data-identity') === 'unverified';
     var chosen = '';
@@ -245,7 +308,7 @@
       { key: 'kind', label: 'What happened?', type: 'select', required: true, default: 'answered',
         help: unconfirmed ? 'Their identity is not confirmed. Confirm it before sending them their data or deleting it.' : undefined,
         options: [
-        { value: 'answered', label: erasure ? 'We answered them (data erased, or kept for a lawful reason)' : 'We sent them the answer' },
+        { value: 'answered', label: erasure ? 'We answered them (data erased, or kept for a lawful reason)' : actionNeeded ? 'We completed the requested action and sent the answer' : 'We sent them the answer' },
         { value: 'refused', label: 'We refused, with a lawful reason' },
         { value: 'withdrawn', label: 'They withdrew the request' },
         { value: 'no_response', label: 'Closed without an answer' }
@@ -255,6 +318,8 @@
       chosen = first.kind || 'answered';
       var fields = [];
       if (chosen === 'answered' || chosen === 'refused') {
+        if (chosen === 'answered' && actionNeeded) fields.push({ key: 'note', label: 'What was changed or stopped, and in which systems?', type: 'text', required: true,
+          help: 'Describe work already completed. Saving this statement does not change a connected system.' });
         fields.push({ key: 'answered_on', label: 'Date the answer was sent', type: 'date', required: true, default: localDay() });
         if (chosen === 'answered' && erasure) {
           fields.push({ key: 'erasure', label: 'What happened to their data?', type: 'select', required: true, default: 'erased', options: [
@@ -280,11 +345,7 @@
         say('Add the lawful reason for keeping their data, then try again.');
         return;
       }
-      return call('POST', base + encodeURIComponent(requestId) + '/close', body).then(function (result) {
-        var cleanup = result && result.export_cleanup;
-        say(cleanup && cleanup.status === 'failed' ? cleanup.message : (recordOnly ? 'Recorded.' : 'Request closed.'));
-        reloadSoon();
-      });
+      return reviewAndClose(body, recordOnly);
     }).catch(function (f) { failPlain(f, recordOnly ? 'record the answer' : 'close the request'); });
   }
   // A closed access or portability request whose saved export could not be
@@ -304,6 +365,7 @@
     closeRequest(false);
   });
   on('dsar-record-outcome', function () { closeRequest(true); });
+  on('dsar-handle', function () { closeRequest(false); });
   if (location.hash === '#close' && $('dsar-close') && page.getAttribute('data-status') !== 'closed') closeRequest(false);
 
   // Erasure: pick the matching person (by their identifier) and erase.

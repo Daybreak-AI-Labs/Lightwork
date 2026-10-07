@@ -1084,6 +1084,7 @@ def all_settings_page(
 
     from .saml import _session_secret, saml_enabled
     from .settings_catalog_requests import authority
+    from .voice_receiver_api import setup as voice_setup
 
     return _app().templates.TemplateResponse(request, "settings_all.html", {
         "groups": groups,
@@ -1098,6 +1099,7 @@ def all_settings_page(
         "oidc_login_active": login_enabled(),
         "saml_login_active": saml_enabled() and bool(_session_secret()),
         "settings_request_context": authority(request),
+        "voice_setup": voice_setup(request),
     })
 
 

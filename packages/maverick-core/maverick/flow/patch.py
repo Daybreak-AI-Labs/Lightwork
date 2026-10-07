@@ -34,7 +34,7 @@ PATCH_OPS = frozenset({"add_node", "remove_node", "set_field", "set_flow_field",
 
 _ROUTE_FIELDS = frozenset({"next", "if_true", "if_false", "on_error", "on_expire"})
 _FLOW_FIELDS = frozenset({
-    "name", "start", "notify", "max_seconds", "max_dollars", "schedule",
+    "name", "start", "notify", "notify_on", "max_seconds", "max_dollars", "schedule",
     "timezone", "max_concurrent", "inputs",
 })
 _NODE_FIELDS = frozenset({

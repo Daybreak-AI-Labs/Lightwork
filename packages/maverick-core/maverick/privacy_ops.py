@@ -2782,9 +2782,7 @@ def read_dsar_export(request_id: str) -> tuple[dict, str] | None:
 def dsar_response_pending(record: dict) -> bool:
     """Collected data remains response work until an answer is actually recorded."""
     status = record.get("status")
-    active = status in ("open", "unverified", "awaiting_erasure") or (
-        status == "fulfilled" and record.get("kind") in ("access", "portability")
-    )
+    active = status in ("open", "unverified", "awaiting_erasure", "fulfilled")
     return active and dsar_answer(record) is None
 
 
@@ -3341,13 +3339,16 @@ def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
     ``access`` / ``portability``: runs :func:`maverick.dsar.export_subject_data`
     and stores the bundle (counts recorded on the request). ``erasure``: never
     destructive from here -- returns structured arguments for an authenticated
-    operator workflow (the CLI carries the confirmation flow, knowledge-plane
-    scrub, and audit trail). No shell command is constructed or executed."""
+    operator workflow. Other rights require the action, answer date and proof
+    to be recorded through :func:`close_dsar`; no action is inferred from a
+    button click. No shell command is constructed or executed."""
     changed = False
     invalid = False
 
     def _fulfill(record: dict) -> None:
         nonlocal changed, invalid
+        if record.get("kind") not in ("access", "portability", "erasure"):
+            raise ValueError("Record what was changed or stopped, when the answer was sent, and where its proof is kept before closing this request.")
         if _secure_erasure_handoff(record):
             _queue_audit(record, "secure_erasure_handoff", fulfilled_by)
             changed = True
@@ -3394,18 +3395,6 @@ def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
                 "export_schema": _DSAR_EXPORT_SCHEMA,
                 "artifact_sha256": artifact_sha256,
             }
-            _queue_audit(record, "fulfill", fulfilled_by)
-            changed = True
-            return
-
-        if record.get("kind") != "erasure":
-            # Correction, opt-out, objection and the like are carried out by
-            # an operator in the systems concerned; the tracker records that
-            # a named person marked them answered.
-            record["status"] = "fulfilled"
-            record["fulfilled_at"] = time.time()
-            record["fulfilled_by"] = _actor_label(fulfilled_by)
-            record["fulfillment"] = {"handled": "manually"}
             _queue_audit(record, "fulfill", fulfilled_by)
             changed = True
             return
@@ -3484,6 +3473,11 @@ def _dsar_outcome(record: dict, outcome: object, *, actor: str, now: float) -> d
     if not reference:
         raise ValueError("Say where the proof of the answer is kept.")
     result.update(answered_on=day, reference=reference)
+    if result["kind"] == "answered" and record.get("kind") not in {"access", "portability", "erasure"}:
+        action = text("note", 2000)
+        if not action:
+            raise ValueError("Describe what was changed or stopped and which systems were covered.")
+        result["note"] = action
     lawful_basis = text("lawful_basis", 2000)
     if result["kind"] == "refused" and not lawful_basis:
         raise ValueError("Give the lawful reason for refusing.")
@@ -3503,8 +3497,8 @@ def dsar_answer(record: dict) -> dict | None:
     """The answer on record for a request, or ``None`` when there is none.
 
     Counted: an outcome recorded when closing (``answered`` or ``refused``),
-    a request a named person marked answered, whether or not it was closed
-    afterwards (data collection and deletion preparation are not answers), and a
+    (data collection, deletion preparation and an old manual-fulfillment marker
+    are not answers), and a
     refusal or completion notice that was actually sent (a completion for a
     deletion request still needs its erasure result). Returns
     ``{"kind", "on"}`` with the UTC day of the answer."""
@@ -3514,8 +3508,6 @@ def dsar_answer(record: dict) -> dict | None:
             return {"kind": outcome["kind"], "on": str(outcome["answered_on"])}
         return None
     erasure = record.get("kind") == "erasure"
-    if record.get("fulfilled_at") and record.get("kind") not in {"access", "portability", "erasure"}:
-        return {"kind": "answered", "on": _utc_day(record["fulfilled_at"])}
     emails = (record.get("public_form") or {}).get("emails") or []
     for entry in emails if isinstance(emails, list) else ():
         if not isinstance(entry, dict) or entry.get("sent") is not True:
@@ -3527,26 +3519,60 @@ def dsar_answer(record: dict) -> dict | None:
     return None
 
 
-def close_dsar(request_id: str, *, closed_by: str = "", outcome: dict | None = None) -> dict | None:
+def dsar_close_original(record: dict, *, operation_id: str, reviewed_revision: int,
+                        actor: str, outcome: dict) -> dict | None:
+    """Read one exact immutable outcome receipt, without changing anything."""
+    saved = record.get("outcome")
+    if (not isinstance(saved, dict) or saved.get("operation_id") != operation_id
+            or saved.get("reviewed_revision") != reviewed_revision
+            or saved.get("recorded_by") != _actor_label(actor)):
+        return None
+    fields = {key: value for key, value in saved.items()
+              if key not in {"operation_id", "reviewed_revision", "recorded_by", "recorded_at"}}
+    return dict(saved) if fields == outcome else None
+
+
+def _dsar_close_review_revision(operation_id, expected_revision, outcome):
+    if operation_id and (re.fullmatch(r"[a-f0-9]{32}", operation_id) is None or outcome is None or expected_revision is None):
+        raise ValueError("Keep the complete reviewed outcome before closing this request.")
+    return _DSAR._expected_revision(expected_revision)
+
+
+def close_dsar(request_id: str, *, closed_by: str = "", outcome: dict | None = None,
+               operation_id: str = "", expected_revision: int | None = None,
+               effect_guard=None) -> dict | None:
     """Close a request, recording what happened when ``outcome`` is given.
 
     A request closed without an outcome can have it recorded later, once;
     a recorded outcome is never rewritten."""
     changed = closed = False
+    expected_revision = _dsar_close_review_revision(operation_id, expected_revision, outcome)
 
     def _close(r: dict) -> None:
         nonlocal changed, closed
         now = time.time()
+        recorded = None if outcome is None else _dsar_outcome(r, outcome, actor=closed_by, now=now)
+        if operation_id:
+            fields = {key: value for key, value in recorded.items() if key not in {"recorded_by", "recorded_at"}}
+            if (r.get("outcome") or {}).get("operation_id") == operation_id:
+                if dsar_close_original(r, operation_id=operation_id, reviewed_revision=expected_revision,
+                                       actor=closed_by, outcome=fields) is None:
+                    raise RecordConflict("This original outcome belongs to different reviewed details.")
+                return
+            recorded.update(operation_id=operation_id, reviewed_revision=expected_revision)
+        if expected_revision is not None and r.get("revision", 0) != expected_revision:
+            raise RecordConflict("This privacy request changed. Read it again before reviewing its outcome.")
+        if effect_guard is not None:
+            effect_guard()
         if r.get("status") == "closed":
             if outcome is None:
                 return
             if r.get("outcome"):
                 raise RecordConflict("the outcome of this request is already on record")
-            r["outcome"] = _dsar_outcome(r, outcome, actor=closed_by, now=now)
+            r["outcome"] = recorded
             _queue_audit(r, "record_outcome", closed_by)
             changed = True
             return
-        recorded = None if outcome is None else _dsar_outcome(r, outcome, actor=closed_by, now=now)
         _secure_erasure_handoff(r)
         r["status"] = "closed"
         r["closed_at"] = now
@@ -3560,7 +3586,7 @@ def close_dsar(request_id: str, *, closed_by: str = "", outcome: dict | None = N
         _queue_audit(r, "close", closed_by)
         changed = closed = True
 
-    saved = _DSAR.update(request_id, _close)
+    saved = _DSAR.update(request_id, _close, effect_guard=effect_guard)
     if saved is not None and (
         changed or isinstance(saved.get("_audit_pending"), (dict, list))
     ):

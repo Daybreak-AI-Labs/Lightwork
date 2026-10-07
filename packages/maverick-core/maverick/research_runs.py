@@ -407,6 +407,7 @@ class ResearchDispatchRequest:
     datasets: tuple[DatasetMaterializationSpec, ...]
     model: ModelExecutionSpec | None
     resource_caps: ResearchResourceCaps
+    plan: dict | None = None
     schema: str = DISPATCH_REQUEST_SCHEMA
 
 
@@ -549,6 +550,7 @@ class ResearchRuns:
             Callable[[str, str, int], AbstractContextManager[object]] | None
         ) = None,
         promotion_study_resolver: Callable[[ResearchStudyContext], object] | None = None,
+        review_authority_resolver: Callable[[str, str], ResearchWorkerAuthority] | None = None,
     ) -> None:
         from .authority_effects import authority_effect_fence
 
@@ -566,6 +568,18 @@ class ResearchRuns:
         self.effect_fence = effect_fence or authority_effect_fence
         self.shared_effect_guard = shared_effect_guard
         self.promotion_study_resolver = promotion_study_resolver
+        self.review_authority_resolver = review_authority_resolver
+
+    def _can_review(self, tenant, principal):
+        if self.review_authority_resolver is None:
+            return False
+        try:
+            current = self.review_authority_resolver(tenant, principal)
+        except PermissionError:
+            return False
+        if type(current) is not ResearchWorkerAuthority or current.tenant != tenant or current.principal != principal:
+            raise PermissionError("current research reviewer authority is unavailable")
+        return True
 
     @staticmethod
     def _record_id(tenant: str, run_id: str) -> str:
@@ -840,6 +854,8 @@ class ResearchRuns:
             "dataset_refs": manifest["dataset_refs"],
             "model_ref": manifest["model_ref"],
         }
+        if manifest.get("program_id") is not None:
+            material["program_id"] = manifest["program_id"]
         material["binding_sha256"] = _digest(material)
         return material
 
@@ -960,6 +976,7 @@ class ResearchRuns:
         model_ref: ResearchAssetRef | None,
         resource_caps: ResearchResourceCaps,
         metric_protocol_sha256: str,
+        program_id: str | None = None,
     ) -> dict:
         """Create an immutable plan without reading or materializing dataset bytes."""
 
@@ -1027,6 +1044,8 @@ class ResearchRuns:
                     "metric_protocol_sha256",
                 ),
             }
+            if program_id is not None:
+                manifest["program_id"] = _identifier(program_id, "program_id")
             manifest_sha256 = _digest(manifest)
             now = self.store.authoritative_time()
             attempt = {
@@ -1219,6 +1238,7 @@ class ResearchRuns:
             "datasets": [asdict(item) for item in dataset_specs],
             "model": None if model_spec is None else asdict(model_spec),
             "resource_caps": manifest["resource_caps"],
+            "plan": dict(manifest),
         }
         return ResearchDispatchRequest(
             tenant=str(record["tenant"]),
@@ -1233,6 +1253,7 @@ class ResearchRuns:
             datasets=dataset_specs,
             model=model_spec,
             resource_caps=ResearchResourceCaps(**manifest["resource_caps"]),
+            plan=dict(manifest),
         )
 
     @staticmethod
@@ -1373,6 +1394,9 @@ class ResearchRuns:
                 with self._effect_context(canonical, exact_run_id, attempt_number):
                     current = self._record(canonical, exact_run_id)
                     attempt = self._attempt(current)
+                    preflight = getattr(self.effect_adapter, "validate_start", None)
+                    if callable(preflight):
+                        preflight(self, current, actor)
                     binding, datasets, model = self._resolve_binding(
                         canonical,
                         current["manifest"],
@@ -1442,6 +1466,10 @@ class ResearchRuns:
                         request,
                     )
                     dispatched_at = self.store.authoritative_time()
+                    dispatched_source = self._record(canonical, exact_run_id)
+                    if (dispatched_source["manifest_sha256"] != claimed["manifest_sha256"] or
+                            self._attempt(dispatched_source).get("worker_authority") != asdict(worker_authority)):
+                        raise ResearchRunConflict("research source changed during execution")
 
                     def record_dispatch(record: dict) -> None:
                         selected = self._attempt(record)
@@ -1467,13 +1495,14 @@ class ResearchRuns:
                     saved = self.store.update(
                         claimed["id"],
                         record_dispatch,
-                        expected_revision=claimed["revision"],
+                        expected_revision=dispatched_source["revision"],
                         actor=actor,
                         action="research.run.dispatch",
                     )
                     if saved is None:
                         raise ResearchRunInterrupted("research run disappeared after dispatch")
-                    return self._view(saved)
+                    finish = getattr(self.effect_adapter, "finish", None)
+                    return finish(self, saved, actor) if callable(finish) else self._view(saved)
             except (KeyboardInterrupt, SystemExit):
                 raise
             except ResearchMaterializationUnavailable:
@@ -1802,6 +1831,68 @@ class ResearchRuns:
                 raise ResearchRunNotFound("research run was not found in this tenant")
             return self._view(saved)
 
+    def approve_execution(self, tenant, principal, run_id, *, expected_revision, review_sha256, review):
+        """Retain an independent exact execution review in the existing attempt."""
+        canonical, actor = canonical_tenant_id(tenant), _actor(principal, "reviewer")
+        _sha(review_sha256, "execution review")
+        with tenant_scope(tenant=canonical), self.effect_fence():
+            current = self._record(canonical, run_id)
+            if current["created_by"] == actor or current["status"] != "queued":
+                raise ResearchRunConflict("A different administrator must review a waiting run")
+            binding = review(current, actor)
+            if not isinstance(binding, dict) or _digest(binding) != review_sha256:
+                raise ResearchRunConflict("The complete review changed. Read it again")
+            authority = self._worker_authority(canonical, actor)
+            approval = {"review_sha256": review_sha256, "binding": binding,
+                        "reviewer": actor, "authority": asdict(authority),
+                        "expires_at": self.store.authoritative_time()+900}
+            def mutate(record):
+                if record["status"] != "queued" or record["manifest_sha256"] != current["manifest_sha256"]:
+                    raise ResearchRunConflict("The waiting run changed")
+                self._attempt(record)["execution_approval"] = approval
+                self._attempt(record)["events"].append(_event(self._attempt(record)["events"],
+                    state="queued", recorded_at=self.store.authoritative_time(), actor=actor,
+                    details={"execution_review_sha256": review_sha256}))
+                if review(record, actor) != binding or self._worker_authority(canonical, actor) != authority:
+                    raise ResearchRunConflict("Execution review authority changed")
+            saved = self.store.update(current["id"], mutate, expected_revision=expected_revision,
+                actor=actor, action="research.run.approve_execution")
+            return self._view(saved)
+
+    def execution_observation(self, tenant, actor, run_id, evidence):
+        """Trusted controller facts only; no synthetic completion or new ledger."""
+        current = self._record(tenant, run_id)
+        if self._attempt(current).get("worker_authority", {}).get("principal") != actor:
+            raise ResearchRunConflict("This execution belongs to another owner")
+        def mutate(record):
+            selected = self._attempt(record)
+            if record["status"] != "running":
+                raise ResearchRunConflict("This execution is no longer active")
+            selected["execution"] = dict(evidence)
+            selected["events"].append(_event(selected["events"], state="running",
+                recorded_at=self.store.authoritative_time(), actor=actor,
+                details={"execution_state": evidence["state"], "execution_sha256": _digest(evidence)}))
+        return self.store.update(current["id"], mutate, expected_revision=current["revision"],
+            actor=actor, action="research.run.execution_observation")
+
+    def stop_execution(self, tenant, principal, run_id, *, expected_revision):
+        """Request bounded cleanup; the actual execution owner alone may stop it."""
+        canonical, actor = canonical_tenant_id(tenant), _actor(principal, "execution owner")
+        with tenant_scope(tenant=canonical):
+            current = self._record(canonical, run_id)
+            authority = self._worker_authority(canonical, actor)
+            if current["status"] != "running" or self._attempt(current).get("worker_authority") != asdict(authority):
+                raise ResearchRunConflict("Only the current execution owner can stop this running attempt")
+            def mutate(record):
+                if record["status"] != "running" or self._worker_authority(canonical, actor) != authority:
+                    raise ResearchRunConflict("The execution changed before Stop")
+                self._attempt(record)["stop_requested"] = True
+                self._attempt(record)["events"].append(_event(self._attempt(record)["events"],
+                    state="running", recorded_at=self.store.authoritative_time(), actor=actor,
+                    details={"stop_requested": True, "cleanup_confirmed": False}))
+            return self._view(self.store.update(current["id"], mutate, expected_revision=expected_revision,
+                actor=actor, action="research.run.request_stop"))
+
     def cancel(
         self,
         tenant: str,
@@ -2008,10 +2099,13 @@ class ResearchRuns:
         with tenant_scope(tenant=canonical):
             record = self._record(canonical, exact_run_id)
             self._authority(canonical, actor)
-            if record.get("created_by") != actor:
+            if record.get("created_by") != actor and not self._can_review(canonical, actor):
                 raise ResearchRunNotFound("research run was not found in this tenant")
             result = self._view(record)
             result["cost_summary"] = self._cost_summary(record["attempts"])
+            self._authority(canonical, actor)
+            if record.get("created_by") != actor and not self._can_review(canonical, actor):
+                raise PermissionError("current research reviewer authority changed")
             return result
 
     def list(
@@ -2027,6 +2121,7 @@ class ResearchRuns:
             raise ValueError(f"limit must be between 1 and {_MAX_LIST}")
         with tenant_scope(tenant=canonical):
             self._authority(canonical, actor)
+            reviewer = self._can_review(canonical, actor)
             # The store is tenant-scoped but contains runs from multiple named
             # researchers. Scan the bounded namespace before applying the
             # creator filter so another researcher's newer rows cannot hide the
@@ -2034,7 +2129,7 @@ class ResearchRuns:
             rows = self.store.list(limit=_MAX_RUNS)
             result = []
             for row in rows:
-                if row.get("tenant") != canonical or row.get("created_by") != actor:
+                if row.get("tenant") != canonical or (row.get("created_by") != actor and not reviewer):
                     continue
                 record = self._record(canonical, str(row["run_id"]))
                 view = self._view(record)
@@ -2042,6 +2137,9 @@ class ResearchRuns:
                 result.append(view)
                 if len(result) >= limit:
                     break
+            self._authority(canonical, actor)
+            if reviewer and not self._can_review(canonical, actor):
+                raise PermissionError("current research reviewer authority changed")
             return result
 
     def export(
@@ -2057,7 +2155,10 @@ class ResearchRuns:
         exact_run_id = _identifier(run_id, "run_id")
         with tenant_scope(tenant=canonical):
             record = self._record(canonical, exact_run_id)
-            self._current_submitter(record, actor)
+            if record.get("created_by") == actor:
+                self._current_submitter(record, actor)
+            elif not self._can_review(canonical, actor):
+                raise ResearchRunNotFound("research run was not found in this tenant")
             latest = self._attempt(record)
             stored = latest.get("registry_binding")
             current, _datasets, _model = self._resolve_binding(
@@ -2084,6 +2185,9 @@ class ResearchRuns:
                     ),
                 },
             }
+            self._authority(canonical, actor)
+            if record.get("created_by") != actor and not self._can_review(canonical, actor):
+                raise PermissionError("current research reviewer authority changed")
             return _canonical(payload)
 
     def admit_promotion(

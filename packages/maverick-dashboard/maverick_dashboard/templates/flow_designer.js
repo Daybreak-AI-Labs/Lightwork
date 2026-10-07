@@ -142,6 +142,7 @@
       var field = document.getElementById(pair[0]); if (field) field.value = state[pair[1]];
     });
     var notify = document.getElementById('fd-notify'); if (notify) notify.checked = !!state.notify;
+    if (document.getElementById('fd-notify-on')) document.getElementById('fd-notify-on').value = state.notify_on || 'all';
     var brief = document.getElementById('fd-nl'); if (brief) brief.value = payload.brief || '';
     proposals = {}; impacts = {}; runState = {}; runCursor = null;
     renderCrumbs(); syncScheduleControls(); render(); renderProps();
@@ -186,6 +187,7 @@
       name: nameInput.value,
       inputs: flowInputs,
       notify: !!((document.getElementById('fd-notify') || {}).checked),
+      notify_on: ((document.getElementById('fd-notify-on') || {}).value || 'all'),
       max_seconds: ((document.getElementById('fd-maxsec') || {}).value || ''),
       max_dollars: ((document.getElementById('fd-maxdollars') || {}).value || ''),
       schedule: ((document.getElementById('fd-schedule') || {}).value || ''),
@@ -255,6 +257,7 @@
     });
     var notify = document.getElementById('fd-notify');
     snapshot._editorSettings.notify = !!(notify && notify.checked);
+    snapshot._editorSettings.notify_on = (document.getElementById('fd-notify-on') || {}).value || 'all';
     return FDRecipeInputs.flowText(snapshot);
   }
   // An explicit creation receipt can bind the exact unsaved history that
@@ -307,6 +310,7 @@
       if (field) field.value = settings[pair[1]] == null ? '' : settings[pair[1]];
     });
     var notify = document.getElementById('fd-notify'); if (notify) notify.checked = !!settings.notify;
+    if (document.getElementById('fd-notify-on')) document.getElementById('fd-notify-on').value = settings.notify_on || 'all';
     syncScheduleControls();
     var samplePanel = document.getElementById('fd-test-data');
     if (samplePanel) samplePanel.hidden = rootFlow.learned_recipe != null;
@@ -1226,8 +1230,13 @@
           function (v) { pushHistory(); n.retry_backoff = parseFloat(v) || 0; describeRetryWait(); });
         retryChoice.setAttribute('aria-describedby', retryHelp.id);
         fails.appendChild(field('First wait between tries', retryChoice)); describeRetryWait(); fails.appendChild(retryHelp);
-        fails.appendChild(field('Give up after', select(String(Math.round(n.timeout || 0)), durationOptions(n.timeout, 'No time limit'),
+        fails.appendChild(field(n.kind === 'action' ? 'Expected wait' : 'Give up after', select(String(Math.round(n.timeout || 0)), durationOptions(n.timeout, n.kind === 'action' ? 'No wait target' : 'No time limit'),
           function (v) { n.timeout = parseFloat(v) || 0; })));
+        if (n.kind === 'action') {
+          var timeoutHelp = document.createElement('p'); timeoutHelp.className = 'muted';
+          timeoutHelp.textContent = 'This does not stop an action already in progress. Lightwork waits for its recorded outcome so a completed action is not mistaken for a failure and repeated.';
+          fails.appendChild(timeoutHelp);
+        }
       }
       fails.appendChild(field('Then go to', select(n.on_error || '', stepChoices(n, 'Stop the run'), function (v) { n.on_error = v || null; render(); })));
       if (n.retries || n.timeout || n.on_error) fails.open = true;
@@ -1459,6 +1468,7 @@
       learned_recipe: rootFlow.learned_recipe, recipe_lineage: rootFlow.recipe_lineage,
       recipe_teaching: rootFlow.recipe_teaching, _fdEvidence: rootFlow._fdEvidence });
     out.notify = !!(notifyEl && notifyEl.checked);
+    out.notify_on = (document.getElementById('fd-notify-on') || {}).value || 'all';
     out.max_seconds = parseFloat((document.getElementById('fd-maxsec') || {}).value) || 0;
     out.max_dollars = parseFloat((document.getElementById('fd-maxdollars') || {}).value) || 0;
     out.schedule = ((document.getElementById('fd-schedule') || {}).value || '').trim();
@@ -1643,6 +1653,7 @@
       published_version: parseInt(f.published_version, 10) || 0,
       published_revision: String(f.published_revision || '') };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
+    if (document.getElementById('fd-notify-on')) document.getElementById('fd-notify-on').value = f.notify_on || 'all';
     var mdEl = document.getElementById('fd-maxdollars'); if (mdEl) mdEl.value = f.max_dollars || '';
     var schEl = document.getElementById('fd-schedule'); if (schEl) schEl.value = f.schedule || '';
     syncScheduleControls();

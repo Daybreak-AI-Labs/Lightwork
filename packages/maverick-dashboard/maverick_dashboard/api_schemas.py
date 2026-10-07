@@ -228,6 +228,9 @@ class GoalIn(BaseModel):
     director_profile: str | None = Field(None, max_length=40)
     knowledge_context: KnowledgeContextIn | None = None
     connection_references: list[dict[str, str]] = Field(default_factory=list, max_length=100)
+    task_model: str = Field(default="", max_length=128)
+    task_effort: Literal["", "low", "medium", "high", "xhigh", "max"] = ""
+    task_model_context: str = Field(default="", max_length=64)
 
 
 class GoalOut(BaseModel):
@@ -1130,6 +1133,7 @@ class DsarCloseIn(BaseModel):
     erasure: str = Field("", pattern="^(|erased|not_erased)$")
     lawful_basis: str = Field("", max_length=2000)
     note: str = Field("", max_length=2000)
+    review_token: str = Field("", max_length=2097152)
 
 
 class IncidentIn(BaseModel):

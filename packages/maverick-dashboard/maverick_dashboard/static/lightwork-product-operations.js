@@ -263,6 +263,83 @@
               ? function (isCurrent) { return questionCheckControls.open(questionCheckReview.context, isCurrent); } : null);
           return;
         }
+        if (entry[0] === 'action_center_form') {
+          var attentionReview = entry[1], attentionControls = window.LightworkActionCenter;
+          if (!attentionReview || Array.isArray(attentionReview) ||
+              Object.keys(attentionReview).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(attentionReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open current decisions needing attention',
+            '/action-center#ac-items',
+            attentionControls && typeof attentionControls.open === 'function'
+              ? function (isCurrent) { return attentionControls.open(attentionReview.context, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'privacy_data_use_bridge_form') {
+          var discoveryUseReview = entry[1], discoveryUseControls = window.LightworkDiscoveryDataUse;
+          if (!discoveryUseReview || Array.isArray(discoveryUseReview) ||
+              Object.keys(discoveryUseReview).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(discoveryUseReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Review findings for a saved dataset',
+            '/privacy/data-discovery#pddb-root',
+            discoveryUseControls && typeof discoveryUseControls.openReview === 'function'
+              ? function (isCurrent) { return discoveryUseControls.openReview(discoveryUseReview.context, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'third_party_alert_setup_form') {
+          var vendorAlertReview = entry[1], vendorAlertControls = window.LightworkThirdPartyAlerts;
+          if (!vendorAlertReview || Array.isArray(vendorAlertReview) ||
+              Object.keys(vendorAlertReview).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(vendorAlertReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open vendor-alert recipient setup',
+            '/third-party/intelligence#tpi-recipient-setup',
+            vendorAlertControls && typeof vendorAlertControls.openReview === 'function'
+              ? function (isCurrent) { return vendorAlertControls.openReview(vendorAlertReview.context, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'consent_delivery_review') {
+          var consentDeliveryReview = entry[1], consentDeliveryControls = window.LightworkConsentDelivery;
+          if (!consentDeliveryReview || Array.isArray(consentDeliveryReview) ||
+              Object.keys(consentDeliveryReview).sort().join(',') !== 'context,scope' ||
+              consentDeliveryReview.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(consentDeliveryReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open complete consent delivery controls',
+            '/consent/delivery#cd-managed',
+            consentDeliveryControls && typeof consentDeliveryControls.openReview === 'function'
+              ? function (isCurrent) { return consentDeliveryControls.openReview({}, {isCurrent: isCurrent, context: consentDeliveryReview.context}); } : null);
+          return;
+        }
+        if (entry[0] === 'research_execution_review') {
+          var researchExecutionReview = entry[1], researchExecutionControls = window.LightworkResearchExecution;
+          if (!researchExecutionReview || Array.isArray(researchExecutionReview) ||
+              Object.keys(researchExecutionReview).sort().join(',') !== 'context,scope' ||
+              researchExecutionReview.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(researchExecutionReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Open complete research run controls',
+            '/research#research-run-form',
+            researchExecutionControls && typeof researchExecutionControls.openReview === 'function'
+              ? function (isCurrent) { return researchExecutionControls.openReview({}, {isCurrent: isCurrent, context: researchExecutionReview.context}); } : null);
+          return;
+        }
+        if (entry[0] === 'runtime_enforcement_form') {
+          var safeguardReview = entry[1], safeguardControls = window.LightworkRuntimeEnforcement;
+          if (!safeguardReview || Array.isArray(safeguardReview) ||
+              Object.keys(safeguardReview).join(',') !== 'context' ||
+              !/^[a-f0-9]{64}$/.test(safeguardReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Read actual safeguard activity',
+            '/security/governance#runtime-enforcement',
+            safeguardControls && typeof safeguardControls.open === 'function'
+              ? function (isCurrent) { return safeguardControls.open(safeguardReview.context, isCurrent); } : null);
+          return;
+        }
+        if (entry[0] === 'dsar_handling_review') {
+          var privacyHandlingReview = entry[1], privacyHandlingControls = window.LightworkDSARHandling;
+          if (!privacyHandlingReview || Array.isArray(privacyHandlingReview) ||
+              Object.keys(privacyHandlingReview).sort().join(',') !== 'context,scope' ||
+              privacyHandlingReview.scope !== 'current_page' || !/^[a-f0-9]{64}$/.test(privacyHandlingReview.context || '')) return;
+          protectedControls(node('dd', undefined, list), 'Review the complete action and response',
+            window.location.pathname + '#dsar-status',
+            privacyHandlingControls && typeof privacyHandlingControls.openReview === 'function'
+              ? function (isCurrent) { return privacyHandlingControls.openReview({}, {isCurrent: isCurrent, context: privacyHandlingReview.context}); } : null);
+          return;
+        }
         if (entry[0] === 'learning_task_question_review') {
           var taskQuestionReview = entry[1], taskQuestionControls = window.LightworkLearningQuestions;
           if (!taskQuestionReview || Array.isArray(taskQuestionReview) ||

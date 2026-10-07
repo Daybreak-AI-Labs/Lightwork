@@ -34,6 +34,8 @@ def _state(request, selection):
     status = STATUSES.get(record["status"], "Review the current request")
     if record["status"] == "fulfilled" and record.get("kind") in {"access", "portability"}:
         status = "Data collected"
+    elif record["status"] == "fulfilled" and service.dsar_answer(record) is None:
+        status = "Action and response not documented"
     details = {
         "Request": KINDS.get(record.get("kind"), "Other privacy request"),
         "Current state": status,

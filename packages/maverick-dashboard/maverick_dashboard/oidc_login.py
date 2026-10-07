@@ -361,11 +361,21 @@ def session_claims(payload: dict, request: Request, *, via: str) -> dict | None:
     if via == "session" and idp_email:
         claims["idp_email"] = idp_email
     if not isinstance(sid, str) or not sid:
+        from .session_policy import company_ttl, idle_minutes
+
+        try:
+            if idle_minutes():
+                return None  # Legacy cookies cannot establish current activity.
+            if via == "session" and _now() >= float(payload["iat"]) + company_ttl(_SESSION_TTL):
+                return None
+        except (KeyError, TypeError, ValueError, OSError):
+            return None
         return claims
     from . import session_registry
 
     try:
-        if session_registry.status(sid) is not True:
+        record = session_registry.current(sid, principal=f"user:{payload.get('sub')}")
+        if record is None:
             return None
     except session_registry.SessionStoreError:
         return None
@@ -643,9 +653,12 @@ async def auth_callback(request: Request):
     # (5) success: set the signed session cookie, clear the tx cookie, redirect.
     return_to = _safe_return_to(tx.get("return_to"))
     try:
+        from .session_policy import company_ttl
+
+        ttl = company_ttl(_SESSION_TTL)
         session_cookie = mint_browser_session(
             request, sub=principal.sub, secret=cfg.session_secret, via="session",
-            mfa=mfa, ttl=_SESSION_TTL,
+            mfa=mfa, ttl=ttl,
             extra={"oidc_issuer": principal.issuer,
                    "oidc_audience": principal.audience,
                    "idp_email": _oidc_invite_email(principal.claims or {})},
@@ -673,7 +686,7 @@ async def auth_callback(request: Request):
     response = RedirectResponse(return_to, status_code=303)
     _set_cookie(
         response, SESSION_COOKIE, session_cookie,
-        max_age=_SESSION_TTL, secure=_cookie_secure(request),
+        max_age=ttl, secure=_cookie_secure(request),
     )
     _clear_cookie(response, TX_COOKIE)
     return response

@@ -104,11 +104,21 @@ def execute_record(record_id, item_id=None):
                         str(snapshot.get(key) or "") for key in ("title", "description", "result"))
                 manifest = [{key: row[key] for key in ("filename", "mime", "size_bytes", "sha256")} for row in item["files"]]
                 try:
-                    receipt = store.create(token=token, fingerprint=digest([item["text"], item.get("snapshot"), manifest, item["mode"]]),
+                    from maverick.task_model_selection import validate as validate_model
+                    task_selection = validate_model(item.get("task_model_selection"))
+                    fingerprint_values = [item["text"], item.get("snapshot"), manifest, item["mode"]]
+                    if task_selection is not None:
+                        fingerprint_values.append(task_selection)
+                    def before_admission(target_id=item["target_id"], choice=task_selection):
+                        current_authority(world.get_goal(target_id))
+                        validate_model(choice)
+                    receipt = store.create(token=token, fingerprint=digest(fingerprint_values),
                         owner=root.owner, title=item["text"].splitlines()[0][:200], description=text, manifest=manifest,
                         parent_id=root.id if item["mode"] == "queue" else None,
                         domain=root.domain or "", project_id=root.project_id,
-                        chat_text=text, chat_root_id=root.id if item["mode"] == "queue" else None)
+                        chat_text=text, chat_root_id=root.id if item["mode"] == "queue" else None,
+                        submission_detail={"task_model_selection": task_selection} if task_selection is not None else None,
+                        effect_guard=before_admission)
                     item = inbox.transition(item["target_id"], item["id"], revision=item["revision"], state="dispatching",
                                             goal=receipt["goal_id"], message="A durable task draft exists; selected evidence is being admitted.")
                     publish_files(world, receipt["goal_id"], item["files"])

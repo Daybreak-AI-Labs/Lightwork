@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
+from .authority_effects import authority_effect_fence
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -1090,7 +1091,7 @@ class PrivacyDataDiscoveryStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -1207,7 +1208,7 @@ class PrivacyDataDiscoveryStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -2334,7 +2335,7 @@ class PrivacyDataDiscoveryStore:
             "expected_finding_revision": expected,
             "prepared_by": preparer,
         }
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -2534,7 +2535,7 @@ class PrivacyDataDiscoveryStore:
             "approved_by": approver,
         }
         callback_update: ReviewedClassification | None = None
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -2935,7 +2936,7 @@ class PrivacyDataDiscoveryStore:
         actor = _opaque(actor_ref, "actor_ref")
         moment = _finite_time(self._clock() if now is None else now, "now")
         request = {"action": "purge_expired", "cutoff": moment, "actor_ref": actor}
-        with self._connect() as connection:
+        with authority_effect_fence(), self._connect() as connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request

@@ -1225,6 +1225,8 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_conversation_inbox_scheduler)
         from .knowledge_sources_scheduler import start_knowledge_sources_scheduler
         await run_in_threadpool(start_knowledge_sources_scheduler)
+        from .consent_delivery_scheduler import start_consent_delivery_scheduler
+        await run_in_threadpool(start_consent_delivery_scheduler)
         _warm_goal_runtime()
         try:
             from maverick_dashboard.security_api import start_hunter_scheduler
@@ -2060,6 +2062,23 @@ app.include_router(chat_code_controls_router)
 from .learning_question_checks_api import router as learning_question_checks_router  # noqa: E402
 
 app.include_router(learning_question_checks_router)
+from .task_model_selection_api import router as task_model_selection_router  # noqa: E402
+
+app.include_router(task_model_selection_router)
+from .privacy_discovery_data_use_api import (  # noqa: E402
+    router as privacy_discovery_data_use_router,
+)
+
+app.include_router(privacy_discovery_data_use_router, prefix="/api/v1")
+from .consent_delivery_managed_api import router as consent_delivery_managed_router  # noqa: E402
+from .dsar_handling_api import router as dsar_handling_router  # noqa: E402
+from .runtime_enforcement_api import router as runtime_enforcement_router  # noqa: E402
+from .voice_receiver_api import router as voice_receiver_router  # noqa: E402
+
+app.include_router(dsar_handling_router)
+app.include_router(runtime_enforcement_router, prefix="/api/v1")
+app.include_router(consent_delivery_managed_router, prefix="/api/v1")
+app.include_router(voice_receiver_router)
 app.include_router(generated_tool_removal_api.router)
 app.include_router(access_key_requests_api.router, prefix="/api/v1")
 app.include_router(consent_publication_withdrawal_api.router, prefix="/api/v1")
@@ -11328,11 +11347,18 @@ async def chat_send(
     director_profile: str = Form(""),
     connection_references: str = Form(""),
     composer_mode: str = Form(""),
+    task_model: str = Form(""),
+    task_effort: str = Form(""),
+    task_model_context: str = Form(""),
 ) -> RedirectResponse:
     _require_same_origin(request)
     require_permission(request, "operate")
     require_provider_or_400()
     check_goal_rate_limit(request)
+    from .task_model_selection_api import effect_guard as task_ai_guard
+    from .task_model_selection_api import selection as select_task_ai
+
+    task_selection = select_task_ai(request, task_model, task_effort, task_model_context)
     from maverick.template_connections import validate as validate_connections
     try:
         if len(connection_references) > 200000:
@@ -11384,7 +11410,9 @@ async def chat_send(
 
     receipt = await submit(w, files, token=request.headers.get("Idempotency-Key") or submission_key or secrets.token_urlsafe(24),
                            owner=owner, title=title, description=description,
-                           chat_text=chat_text, connection_references=refs)
+                           chat_text=chat_text, connection_references=refs,
+                           task_selection=task_selection,
+                           effect_guard=task_ai_guard(request, task_selection, task_model_context))
     goal_id = receipt["goal_id"]
     if director is not None and receipt.get("created"):
         from maverick.director_mode import record
@@ -11405,6 +11433,9 @@ async def chat_reply(
     message: str = Form(...),
     files: list[UploadFile] = File(default=[]),
     submission_key: str = Form(""),
+    task_model: str = Form(""),
+    task_effort: str = Form(""),
+    task_model_context: str = Form(""),
 ) -> RedirectResponse:
     """Continue a chat. The message becomes the next goal in the same thread
     (parent_id = the root goal) and runs inside the thread's conversation, so
@@ -11413,6 +11444,10 @@ async def chat_reply(
     require_permission(request, "operate")
     require_provider_or_400()
     check_goal_rate_limit(request)
+    from .task_model_selection_api import effect_guard as task_ai_guard
+    from .task_model_selection_api import selection as select_task_ai
+
+    task_selection = select_task_ai(request, task_model, task_effort, task_model_context)
     w = _world()
     parent = w.get_goal(goal_id)
     if parent is None:
@@ -11449,6 +11484,8 @@ async def chat_reply(
         domain=root.domain or "",
         project_id=root.project_id,
         chat_text=message, chat_root_id=root_id,
+        task_selection=task_selection,
+        effect_guard=task_ai_guard(request, task_selection, task_model_context),
     )
     new_id = receipt["goal_id"]
     conversation_id = _submission_conversation(w, receipt)
@@ -13832,6 +13869,9 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-markdown.js")
 @app.get("/static/lightwork-chat-code-actions.js")
 @app.get("/static/lightwork-learning-question-checks.js")
+@app.get("/static/lightwork-task-model-selection.js")
+@app.get("/static/lightwork-privacy-discovery-data-use.js")
+@app.get("/static/lightwork-runtime-enforcement.js")
 @app.get("/static/lightwork-draft-recovery.css")
 @app.get("/static/lightwork-ai-cloud-agent-governance.js")
 @app.get("/static/lightwork-governance-agents.js")

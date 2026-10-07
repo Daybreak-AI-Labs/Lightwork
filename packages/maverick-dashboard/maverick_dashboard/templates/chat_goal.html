@@ -665,6 +665,14 @@
     <form id="answer-form" class="ask__row" method="post" action="/chat/goal/{{ goal.id }}/reply" enctype="multipart/form-data">
       <fieldset id="composer-controls" style="display: contents;"{% if not can_operate %} disabled{% endif %}>
       <input type="hidden" name="submission_key" value="{{ submission_key }}" />
+      <details data-task-model-controls style="flex-basis: 100%; min-width: 0;">
+        <summary>{{ ui('AI for the next task') }}</summary>
+        <label>{{ ui('AI model') }}<select class="select" name="task_model" disabled><option value="">{{ ui('Use workspace settings') }}</option></select></label>
+        <label>{{ ui('Thinking depth') }}<select class="select" name="task_effort" disabled><option value="">{{ ui('Use the model’s usual thinking depth') }}</option></select></label>
+        <input type="hidden" name="task_model_context" value="">
+        <p class="muted" role="status">{{ ui('Reading available AI choices…') }}</p>
+        <button type="button" class="btn btn--ghost">{{ ui('Refresh AI choices') }}</button>
+      </details>
       <label id="answer-input-label" class="sr-only" for="answer-input">{{ ui("Your answer to the agent's question, or your next message") }}</label>
       <textarea id="answer-input" lang="und" dir="auto" data-user-content name="message" rows="1" required
                 placeholder="{{ ut('Lightwork is working… you can type while you wait' if run_open|default(true) else 'Message Lightwork…') }}"
@@ -694,6 +702,7 @@
 {% endblock %}
 {% block scripts_extra %}
 <script src="/static/lightwork-thread-history.js" defer></script>
+<script src="/static/lightwork-task-model-selection.js" defer></script>
 <script src="/static/lightwork-conversation-inbox.js" defer></script>
 <script src="/static/lightwork-task-authority.js" defer></script>
 <script src="/static/lightwork-file-selection.js" defer></script>

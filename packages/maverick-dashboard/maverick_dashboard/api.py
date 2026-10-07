@@ -1691,6 +1691,15 @@ def _create_goal(
     """Native launch authority shared with reviewed Copilot task starts."""
     require_permission(request, "operate")
     _check_effect_guard(effect_guard)
+    from .task_model_selection_api import effect_guard as model_effect_guard
+    from .task_model_selection_api import selection as model_selection
+    task_selection = model_selection(request, payload.task_model, payload.task_effort, payload.task_model_context,
+                                     request_identity=idempotency_key)
+    original_guard = effect_guard
+    def current_start_guard():
+        _check_effect_guard(original_guard)
+        model_effect_guard(request, task_selection, payload.task_model_context)()
+    effect_guard = current_start_guard
     require_provider_or_400()
     # Shared sliding-window cap across /chat/send + this route, so a
     # runaway loop can't spawn unbounded (paid) goals.
@@ -1756,6 +1765,7 @@ def _create_goal(
         receipt = reserve_api(w, key=idem_key, owner=caller_principal(request) or "",
             payload=payload, title=title, description=description, domain=domain,
             connection_references=connection_refs,
+            task_selection=task_selection,
             caps={"max_dollars": max_dollars, "max_wall_seconds": max_wall_seconds, "max_depth": max_depth},
             **({"effect_guard": effect_guard} if effect_guard is not None else {}))
         goal_id = receipt["goal_id"]
@@ -4816,11 +4826,14 @@ async def fulfill_dsar_request(request: Request, request_id: str) -> dict:
     the API never constructs or executes a shell command."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(
-        ops.fulfill_dsar,
-        request_id[:64],
-        fulfilled_by=_request_actor(request),
-    )
+    try:
+        record = await run_in_threadpool(
+            ops.fulfill_dsar,
+            request_id[:64],
+            fulfilled_by=_request_actor(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="no such open request")
     return record
@@ -4880,11 +4893,12 @@ async def close_dsar_request(request: Request, request_id: str,
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     try:
+        from .dsar_handling_api import close
         record = await run_in_threadpool(
-            ops.close_dsar,
+            close,
+            request,
             request_id[:64],
-            closed_by=_request_actor(request),
-            outcome=None if body is None else body.model_dump(),
+            body,
         )
     except ops.RecordConflict as exc:
         raise HTTPException(

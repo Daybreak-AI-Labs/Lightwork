@@ -471,8 +471,14 @@
         <div id="fd-step-check-result" style="min-width:0;overflow-wrap:anywhere;"></div>
       </section>
       <label class="fdx-mini" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-        <input type="checkbox" id="fd-notify" /> Tell me when it needs approval or finishes
+        <input type="checkbox" id="fd-notify" /> Send alerts for this workflow
       </label>
+      <label class="fdx-mini" for="fd-notify-on">Which updates?</label>
+      <select class="input" id="fd-notify-on">
+        <option value="all">Approvals, problems and completion</option>
+        <option value="problems">Problems only</option>
+      </select>
+      <p class="fdx-mini">Problems include failed runs, spending limits and uncertain actions. Alerts use the service set up in Settings. Save and publish this workflow to change its alerts.</p>
     </div>
   </aside>
   </div>

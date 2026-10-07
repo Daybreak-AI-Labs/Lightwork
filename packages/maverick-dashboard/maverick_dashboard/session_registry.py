@@ -72,10 +72,22 @@ class SessionRecord:
 
     @property
     def active(self) -> bool:
-        return self.revoked_at is None and self.expires_at > time.time()
+        return self.revoked_at is None and self.effective_end > time.time()
+
+    @property
+    def effective_end(self) -> float:
+        from .session_policy import effective_end
+
+        try:
+            return effective_end(expires_at=self.expires_at, issued_at=self.issued_at,
+                                 last_seen=self.last_seen, via=self.via)
+        except (TypeError, ValueError, OSError) as exc:
+            raise SessionStoreError("Sign-in limits cannot be read.") from exc
 
     def as_dict(self) -> dict:
         data = asdict(self)
+        data["original_expires_at"] = self.expires_at
+        data["expires_at"] = self.effective_end
         data["active"] = self.active
         return data
 
@@ -152,29 +164,36 @@ def status(sid: str) -> bool | None:
     """``True`` active, ``False`` revoked or expired, ``None`` unknown."""
     if not sid:
         return None
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT revoked_at, expires_at FROM sessions WHERE sid = ?", (sid,)
-        ).fetchone()
-    if row is None:
-        return None
-    revoked_at, expires_at = row
-    return revoked_at is None and float(expires_at) > time.time()
+    record = get(sid)
+    return record.active if record else None
 
 
-def touch(sid: str, *, ip: str = "", user_agent: str = "") -> None:
+def touch(sid: str, *, ip: str = "", user_agent: str = "", activity: bool = False) -> None:
     """Refresh last-seen (at most once a minute per session; never raises)."""
     if not sid:
         return
+    from .session_policy import idle_minutes
+
+    try:
+        idle = idle_minutes()
+    except (TypeError, ValueError, OSError):
+        return
+    if idle and not activity:
+        return  # Background requests never extend the inactivity limit.
     now = time.time()
     summary = user_agent_summary(user_agent) if user_agent else ""
     try:
         with _connect() as conn:
+            if idle or activity:
+                rows = _rows(conn, "WHERE sid = ?", (sid,))
+                if not rows or not rows[0].active:
+                    return  # A late heartbeat cannot revive an ended session.
             conn.execute(
                 "UPDATE sessions SET last_seen = ?, ip = COALESCE(NULLIF(?, ''), ip), "
                 "user_agent = CASE WHEN ? = '' THEN user_agent ELSE ? END "
                 "WHERE sid = ? AND last_seen < ?",
-                (now, str(ip or ""), summary, summary, sid, now - _TOUCH_INTERVAL_SECONDS),
+                (now, str(ip or ""), summary, summary, sid,
+                 now - min(_TOUCH_INTERVAL_SECONDS, idle * 15) if idle else now - _TOUCH_INTERVAL_SECONDS),
             )
     except SessionStoreError:
         return
@@ -207,6 +226,23 @@ def get(sid: str) -> SessionRecord | None:
     with _connect() as conn:
         rows = _rows(conn, "WHERE sid = ?", (sid,))
     return rows[0] if rows else None
+
+
+def current(sid: str, *, principal: str) -> SessionRecord | None:
+    """Read current own authority and retain an observed time-limit expiry."""
+    with _connect() as conn:
+        rows = _rows(conn, "WHERE sid = ? AND principal = ?", (sid, principal))
+        if not rows:
+            return None
+        record = rows[0]
+        if record.active:
+            return record
+        if record.revoked_at is None:
+            conn.execute(
+                "UPDATE sessions SET revoked_at = ?, revoked_by = 'sign-in time limit' "
+                "WHERE sid = ? AND revoked_at IS NULL", (time.time(), sid),
+            )
+        return None
 
 
 def revoke(sid: str, *, by: str) -> SessionRecord | None:

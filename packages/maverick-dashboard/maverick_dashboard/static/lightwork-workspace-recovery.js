@@ -82,6 +82,36 @@
     channelEvent("controls");
   }
   function clearReview() { review = null; get("review").hidden = true; get("review-text").textContent = ""; get("confirm").checked = false; }
+  function clearExcludedKeys() {
+    get("excluded-keys").hidden = true;
+    get("excluded-keys-status").textContent = "";
+    get("excluded-keys-list").replaceChildren();
+  }
+  function keyListMessage(keys) {
+    return !Array.isArray(keys) ? "This older copy did not record which key files were left out. Check your separately saved keys before relying on it."
+      : keys.length ? "Key files left out of this copy:"
+        : "No separate on-disk key files were recorded as left out when this copy was made. Keys held by an outside service are not included in this check.";
+  }
+  function renderExcludedKeys(row) {
+    get("excluded-keys").hidden = false;
+    get("excluded-keys-status").textContent = keyListMessage(row.withheld_key_files);
+    list("excluded-keys-list", Array.isArray(row.withheld_key_files) ? row.withheld_key_files : []);
+  }
+  function renderInstallationKeys(points) {
+    points = points.filter(function (row) { return row.snapshot_saved === true; });
+    get("installation-key-custody").hidden = !points.length;
+    var target = get("installation-key-custody-list"); target.replaceChildren();
+    points.forEach(function (row) {
+      var entry = document.createElement("li"), title = document.createElement("p");
+      title.textContent = "Saved update copy " + row.id.slice(0, 8) + ": " + keyListMessage(row.withheld_key_files); entry.appendChild(title);
+      if (Array.isArray(row.withheld_key_files) && row.withheld_key_files.length) {
+        var keys = document.createElement("ul");
+        row.withheld_key_files.forEach(function (name) { var item = document.createElement("li"); item.textContent = name; keys.appendChild(item); });
+        entry.appendChild(keys);
+      }
+      target.appendChild(entry);
+    });
+  }
   function clearConfirmations() {
     clearReview();
     clearIdentityTransition();
@@ -119,6 +149,7 @@
   function clearPrivateState() {
     channelDrafts.clear();
     accessDenied = true; state = null; installationPoints = []; nativeReview = null; clearConfirmations(); clearEvidence(); clearReconciliation();
+    clearExcludedKeys(); renderInstallationKeys([]);
     root.querySelectorAll("input, textarea").forEach(function (input) { if (input.type !== "checkbox") input.value = ""; });
     root.querySelectorAll("select, ul").forEach(function (element) { element.replaceChildren(); });
     ["identity", "last-restore", "key-status", "encryption-status", "result", "bootstrap-status", "installation-result", "installation-retention-status", "installation-native-review"].forEach(function (id) { get(id).textContent = ""; });
@@ -147,7 +178,7 @@
       throw new Error(accessMessage);
     }
     if (!response.ok) {
-      clearConfirmations(); clearEvidence();
+      clearConfirmations(); clearEvidence(); clearExcludedKeys();
       var error = await response.json().catch(function () { return {}; });
       throw new Error(plainDetail(error.detail, response));
     }
@@ -731,7 +762,7 @@
   }
   async function load(selected) {
     channelCurrent = false;
-    clearEvidence();
+    clearEvidence(); clearExcludedKeys(); renderInstallationKeys([]);
     nativeReview = null;
     get("installation-native-review").textContent = "";
     get("installation-confirm").checked = false;
@@ -769,6 +800,7 @@
         var option = document.createElement("option"); option.value = item.id; option.textContent = item.new_version + " → " + item.old_version + " · " + item.id.slice(0, 8); get("installation-point").appendChild(option);
       });
       installationPoints = installation.recovery_points || [];
+      renderInstallationKeys(installationPoints);
       var option = document.createElement("option"); option.value = ""; option.textContent = "Choose a point to retire"; get("installation-retire-point").appendChild(option);
       var phase = { authorized: "Unused authorization", prepared: "Update prepared", applying: "Update in progress", incomplete: "Recovery unfinished", upgraded: "Completed upgrade", rolled_back: "Completed rollback", retired: "Retirement cleanup pending" };
       list("installation-retention-list", installationPoints.map(function (item) {
@@ -1071,15 +1103,15 @@
   on("key-download", async function () { await request("key/download", { confirm: true }, "Lightwork-recovery-key.txt"); say("Recovery key download started."); });
   on("encryption-download", async function () { if (!get("encryption-confirm").checked) return; await request("encryption-keys/download", { confirm: true, confirm_shared_keys: true }, "Lightwork-local-encryption-keys.zip"); get("encryption-confirm").checked = false; say("Local encryption key download started. Store these sensitive shared keys separately from snapshots."); });
   on("key-import", async function () { var key = get("key-input").value.trim(); if (!key) throw new Error("Enter your existing recovery key."); await request("key", { confirm: true, key: key }, "Lightwork-recovery-key.txt"); get("key-input").value = ""; await load(); say("Recovery key imported."); });
-  on("create", async function () { clearReview(); say("Creating and verifying a snapshot…"); var row = await request("snapshots", { confirm: true }); await load(row.id); say("Snapshot created and verified. Export a copy outside this computer."); });
-  on("import", async function () { clearReview(); var file = get("file").files[0]; if (!file) throw new Error("Select a snapshot archive."); if (file.size > state.max_archive_bytes) throw new Error("This archive exceeds the in-app size limit."); say("Importing and verifying the archive…"); var row = await request("import", file); get("file").value = ""; await load(row.id); say("Snapshot imported and verified."); });
-  on("inspect", async function () { say("Checking the signature and every archived file…"); var row = await request(path("inspect"), {}); get("result").textContent = "Signature and all " + row.file_count + " files verified" + (row.created_at ? " · Made " + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.created_at) : new Date(row.created_at * 1000).toLocaleString()) : "") + " · Lightwork " + row.application_version + " · " + row.compatibility; say("Snapshot verification finished."); });
+  on("create", async function () { clearReview(); clearExcludedKeys(); say("Creating and verifying a snapshot…"); var row = await request("snapshots", { confirm: true }); await load(row.id); renderExcludedKeys(row); say("Snapshot created and verified. Export a copy outside this computer."); });
+  on("import", async function () { clearReview(); clearExcludedKeys(); var file = get("file").files[0]; if (!file) throw new Error("Select a snapshot archive."); if (file.size > state.max_archive_bytes) throw new Error("This archive exceeds the in-app size limit."); say("Importing and verifying the archive…"); var row = await request("import", file); get("file").value = ""; await load(row.id); renderExcludedKeys(row); say("Snapshot imported and verified."); });
+  on("inspect", async function () { clearExcludedKeys(); say("Checking the signature and every archived file…"); var row = await request(path("inspect"), {}); renderExcludedKeys(row); get("result").textContent = "Signature and all " + row.file_count + " files verified" + (row.created_at ? " · Made " + (window.LightworkI18n ? window.LightworkI18n.formatDate(row.created_at) : new Date(row.created_at * 1000).toLocaleString()) : "") + " · Lightwork " + row.application_version + " · " + row.compatibility; say("Snapshot verification finished."); });
   on("download", async function () { await request(path("download"), {}, "Lightwork-snapshot-" + get("snapshot").value + ".tgz"); say("Verified snapshot download started. Store it securely."); });
   on("drill", async function () { clearDrillReport(); say("Restoring into a temporary workspace and checking the result…"); var row = await request(path("drill"), { confirm: true }); get("result").textContent = row.file_count + " files restored and checked in " + row.elapsed_seconds + " seconds. Your live workspace was not changed. External stores were not tested."; say("Local restore test passed. View the last restore test to review and download its saved evidence."); });
   on("retire", async function () { if (!get("retire-confirm").checked) return; var row = await request(path("inspect"), {}); await request(path("retire"), { confirm: true, sha256: row.sha256 }); get("retire-confirm").checked = false; clearReview(); await load(); say("The selected local snapshot was retired."); });
   on("prepare", async function () { clearReview(); say("Verifying the selected snapshot and preparing its recovery point…"); var row = await request(path("prepare"), { confirm: true }); if (typeof row.review !== "string" || row.target !== state.target || ["ordinary", "virgin_bootstrap"].indexOf(row.restore_mode) === -1) throw new Error("The restore review does not match this workspace. Refresh and try again."); review = row; var virgin = row.restore_mode === "virgin_bootstrap"; get("review-text").textContent = "Restore " + row.file_count + " files to workspace " + row.tenant + " on Lightwork " + row.application_version + ". " + (virgin ? "The signed empty installation is the recovery point, and restored work will remain held for reconciliation." : "A verified safety snapshot is saved first.") + " This review expires in five minutes."; get("confirm-text").textContent = virgin ? "I reviewed the empty target and snapshot, and authorize restoring it with all queued and uncertain work held." : "I reviewed the workspace and snapshot, and understand that newer local work will be replaced."; get("review").hidden = false; say("Review the restore details. No files have been restored yet."); });
   on("restore", async function () { if (!review || !get("confirm").checked) return; var selected = review, snapshot = get("snapshot").value; clearReview(); say("Restoring the reviewed snapshot and checking the result…"); var result = await request("restore", { review: selected.review, target: selected.target, confirm: true }); if (result.restored !== true || result.post_restore_verified !== true || ["completed", "reconciliation_required"].indexOf(result.state) === -1) throw new Error("Restore confirmation was incomplete. Remain in recovery mode and review the safety snapshot."); state.live_restore_available = false; await load(snapshot); say(result.state === "reconciliation_required" ? "Workspace files were restored and checked. Review every held item below before normal use." : "Workspace restored and checked. Return to the desktop menu when you are ready to restart normal work."); });
-  get("snapshot").addEventListener("change", function () { clearReview(); clearEvidence(); get("retire-confirm").checked = false; get("result").textContent = ""; controls(); });
+  get("snapshot").addEventListener("change", function () { clearReview(); clearEvidence(); clearExcludedKeys(); get("retire-confirm").checked = false; get("result").textContent = ""; controls(); });
   get("confirm").addEventListener("change", controls);
   get("retire-confirm").addEventListener("change", controls);
   get("encryption-confirm").addEventListener("change", controls);

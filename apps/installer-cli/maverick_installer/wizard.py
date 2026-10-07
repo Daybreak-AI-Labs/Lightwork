@@ -1111,7 +1111,7 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
     elif ch_id == "voice":
         provider = (
             _q_text(
-                "  Voice provider (vapi, retell, bland)",
+                "  Phone service (vapi or retell for conversations; bland for outgoing calls only)",
                 default="vapi",
             )
             .strip()
@@ -1129,20 +1129,24 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
         # / ${BLAND_API_KEY} that the user was never asked to enter.
         envs.add(key_env)
         cfg["api_key"] = "${" + key_env + "}"
-        # Inbound webhook auth is Vapi-shaped today; keep the token ref.
+        # Existing installation secret name; both supported services use the
+        # same explicitly configured private Bearer check key.
         cfg["webhook_token"] = "${VAPI_WEBHOOK_TOKEN}"
         cfg["phone_number"] = _q_text(
-            "  Phone number (E.164, optional)",
+            "  Phone number (starts with + and the country code, optional)",
             default="",
         )
         cfg["assistant_id"] = _q_text(
-            "  Assistant/agent ID (optional)",
+            "  Saved assistant ID from Vapi, or saved agent ID from Retell",
             default="",
         )
         cfg["port"] = _safe_int(
             _q_text("  Webhook port", default="8770"),
             default=8770,
         )
+        console.print("  Finish the provider's function form in Settings > All settings > Set up phone conversations. "
+                      "The hosted Lightwork address receives supported requests; no transcript notification starts work. "
+                      "A permitted number does not grant company sign-in or a role.")
     elif ch_id == "whatsapp":
         cfg["account_sid"] = "${TWILIO_ACCOUNT_SID}"
         cfg["auth_token"] = "${TWILIO_AUTH_TOKEN}"
@@ -1181,7 +1185,7 @@ def _channel_allowlist(ch_id: str, cfg: dict[str, Any]) -> None:
             )
     elif ch_id == "voice":
         raw = _q_text(
-            "  Allowed caller numbers (E.164, comma-separated; blank = any authenticated caller)",
+            "  Permitted caller numbers (+countrycode, comma-separated; blank refuses all callers)",
             default="",
         )
         callers = _csv_list(raw)
@@ -2281,6 +2285,10 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             "disabled until separately enrolled.",
             default=False,
         )
+        consent_delivery_worker = consent_delivery and _q_confirm(
+            "Run automatic consent delivery for subscriptions separately reviewed in Lightwork? "
+            "No destination is authorized by this installation choice.", default=False,
+        )
         consent_destination_config: dict[str, Any] | None = None
         if consent_delivery and _q_confirm(
             "Configure named Salesforce, Marketo, Adobe Experience Platform, "
@@ -2528,6 +2536,7 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             **({"native_sdk": consent_native_sdk} if consent_native_sdk is not None else {}),
             "delivery": {
                 "enable": consent_delivery,
+                "worker": {"enable": bool(consent_delivery_worker)},
                 **(
                     {"destinations": consent_destination_config}
                     if consent_destination_config is not None
@@ -4491,6 +4500,16 @@ def pick_sign_in_security(sso_enabled: bool) -> dict[str, Any]:
         "default.[/dim]"
     )
     result: dict[str, Any] = {}
+    if _q_confirm("Set browser sign-in time limits? You can change them later in Settings.", default=False):
+        result["idle_minutes"] = max(0, min(1440, _safe_int(
+            _q_text("  Sign out inactive browsers after (minutes, zero turns the limit off)", default="30"),
+            default=30,
+        )))
+        if sso_enabled:
+            result["company_hours"] = max(0, min(168, _safe_int(
+                _q_text("  Maximum company sign-in length (hours, zero keeps the existing limit)", default="8"),
+                default=8,
+            )))
     if sso_enabled and _q_confirm(
         "Require sign-in with a second factor?", default=False
     ):
@@ -7445,8 +7464,10 @@ def pick_a2a() -> tuple[dict[str, Any], list[str]]:
         "  [dim]A2A serves an agent card at /.well-known/agent-card.json and a "
         "task endpoint at /a2a/v1 (on `maverick dashboard`). Budget is clamped "
         "to operator caps; a bearer token is required. A2A goals run under a "
-        "tool ceiling (max_risk=medium by default -- edit [a2a].max_risk to "
-        'tighten to "low" or open to "high"/"none").[/dim]'
+        "tool ceiling (medium by default). After installation, use All settings > "
+        "Security > Requests from other agents to manage its password, public "
+        "address, tool permissions and limits. External agents issues individual "
+        "access keys.[/dim]"
     )
     return {"enabled": True, "max_risk": "medium"}, ["MAVERICK_A2A_TOKEN"]
 
@@ -9876,6 +9897,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append('# sp_cert_file = ""   # to sign AuthnRequests / decrypt')
         lines.append('# sp_key_file = ""')
     security = advanced.get("sign_in_security") or {}
+    if isinstance(security, dict) and any(key in security for key in ("company_hours", "idle_minutes")):
+        lines.append("")
+        lines.append("[auth.sessions]")
+        for key in ("company_hours", "idle_minutes"):
+            if key in security:
+                _emit_kv(lines, key, int(security[key]))
     if isinstance(security, dict) and security.get("require"):
         # Second factor at sign-in + step-up for sensitive actions. Read by
         # maverick.config.get_auth_mfa (the dashboard's mfa_policy).

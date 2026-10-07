@@ -138,16 +138,58 @@
       { label: "Written by", value: function (t) { return words(t.authored_by); } },
       { label: "Next step", value: function (t) { return t.state === "approved" ? "Ready for assessments" : t.state === "retired" ? "No longer used" : t.needs_named_author ? "Write a new version after sign-in" : t.authored_by === state.me ? "Another administrator must approve" : "A different administrator can approve"; } },
     ], state.templates, [
+      { label: "Read questionnaire", run: function (t) { reviewTemplate(t, false); } },
       { label: "Approve", kind: "primary", when: function (t) { return canAdmin && state.namedSignin && state.me && !t.needs_named_author && t.authored_by !== state.me && t.state === "pending_approval"; }, run: approveTemplate },
       { label: "New version", when: function (t) { return state.namedSignin && t.version === latestVersion(t.template_id); }, run: function (t) { openTemplateForm(t); } },
     ], { text: "No questionnaires yet. Write your first one; a different administrator approves it before use.", action: state.namedSignin ? { label: "New questionnaire", run: function () { openTemplateForm(null); } } : null });
   }
   function approveTemplate(t) {
-    R.confirm("Approve \"" + words(t.title_ref) + "\" version " + t.version + "? It can then be used for assessments. You can't approve a questionnaire you wrote yourself.", "Approve").then(function (ok) {
-      if (!ok) { return; }
+    reviewTemplate(t, true).then(function (current) {
+      if (!current) { return; }
       api("POST", "/templates/" + encodeURIComponent(t.template_id) + "/versions/" + t.version + "/approve",
-        { expected_revision: t.revision, idempotency_key: R.newKey() }).then(function () { say("Questionnaire approved."); loadAll(); }, fail("approve the questionnaire"));
+        { expected_revision: current.revision, idempotency_key: R.newKey() }).then(function () { say("Questionnaire approved."); loadAll(); }, fail("approve the questionnaire"));
     });
+  }
+
+  function questionnaireText(t) {
+    var labels = { question_id: "Question", domain: "Area", prompt_ref: "Question wording", response_type: "Answer type", required: "Must be answered", options: "Choices", condition: "Only ask when", operator: "Comparison", value: "Answer", risk_rules: "Risk checks", severity: "Risk level", reason_code: "Reason", recommendation_code: "Recommended next step", task_code: "Follow-up task", minimum_severity: "Minimum risk level" };
+    var count = 0;
+    var meanings = {boolean: "Yes or no", single_choice: "Choose one answer", multi_choice: "Choose all that apply", integer: "Whole number", text_ref: "Written answer", equals: "Is", not_equals: "Is not", contains: "Includes", in: "Is one of", greater_or_equal: "Is at least", less_or_equal: "Is at most"};
+    function lines(value, indent, field) {
+      if (++count > 30000 || indent.length > 30) throw new Error("The complete questionnaire could not be shown. Nothing was approved.");
+      if (Array.isArray(value)) return value.length ? value.map(function (v, i) { return indent + (i + 1) + ".\n" + lines(v, indent + "  ", field); }).join("\n") : indent + "None";
+      if (value && typeof value === "object") return Object.keys(value).map(function (key) {
+        if (!labels[key]) throw new Error("This questionnaire has a rule this view cannot explain. Nothing was approved.");
+        return indent + labels[key] + ":\n" + lines(value[key], indent + "  ", key);
+      }).join("\n");
+      return indent + (value === null ? "No condition" : value === true ? "Yes" : value === false ? "No" : typeof value === "number" ? String(value) : field === "value" ? String(value) : (field === "response_type" || field === "operator") && meanings[value] ? meanings[value] : words(value));
+    }
+    return words(t.title_ref) + " · version " + t.version + "\n\nQuestions\n" + lines(t.questions, "") + "\n\nFollow-up rules\n" + lines(t.mitigation_rules, "") + "\n\nWritten by: " + words(t.authored_by) + "\nKeep this version until: " + R.when(t.retained_until);
+  }
+
+  function reviewTemplate(t, approve) {
+    var generation = reviewGeneration;
+    return api("GET", "/templates/" + encodeURIComponent(t.template_id) + "/versions/" + t.version).then(function (current) {
+      if (generation !== reviewGeneration) return null;
+      if (current.revision !== t.revision || current.integrity_sha256 !== t.integrity_sha256) { loadAll(); throw new Error("The questionnaire changed. Read the current version before approving."); }
+      var text = questionnaireText(current) + (approve ? "\n\nApprove this exact questionnaire for assessments? You cannot approve your own work." : "\n\nThis is a read-only view. No approval will be recorded.");
+      return fullReview(text, approve ? "Approve this questionnaire" : "Close").then(function (ok) { return approve && ok && generation === reviewGeneration ? current : null; });
+    }).catch(function (error) { say(error.status ? R.errorText(error, "read the questionnaire") : error.message); return null; });
+  }
+
+  var reviewGeneration = 0, reviewing = false;
+  function clearReview() {
+    reviewGeneration += 1;
+    if (reviewing) { var cancel = document.getElementById("mv-confirm-cancel"); if (cancel) cancel.click(); }
+  }
+  [window, document].forEach(function (target) { ["lightwork:workspace-changed", "lightwork:account-context-changed"].forEach(function (name) { target.addEventListener(name, clearReview); }); });
+  function fullReview(text, label) {
+    var dialog = document.getElementById("mv-confirm"), message = document.getElementById("mv-confirm-msg");
+    if (dialog && dialog.open) return Promise.resolve(false);
+    var previous = message ? message.style.cssText : "";
+    var answer = R.confirm(text, label); reviewing = true;
+    if (message) { message.style.whiteSpace = "pre-wrap"; message.style.overflowWrap = "anywhere"; message.style.maxHeight = "60vh"; message.style.overflowY = "auto"; }
+    return answer.finally(function () { reviewing = false; if (message) { message.textContent = ""; message.style.cssText = previous; } });
   }
 
   var templateForm = document.getElementById("tpl-template-form");

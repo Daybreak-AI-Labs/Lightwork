@@ -40,7 +40,7 @@
       <li>A scan only covers the source and limits you set. Finding nothing does not prove there is no personal data.</li>
       <li>Text, web pages, spreadsheets saved as text and similar files are read. PDFs, Office files, images, archives, audio and video are listed as not read, never treated as checked.</li>
       <li>Lightwork keeps only fingerprints and counts of what it finds, never the personal data itself.</li>
-      <li>Approved findings only update Lightwork&rsquo;s own data map. Nothing is changed in the scanned systems.</li>
+      <li>Approved findings update Lightwork&rsquo;s own data map. You can separately review and confirm their use in a saved Data Use dataset. Nothing is changed in the scanned systems.</li>
     </ul>
   </details>
 
@@ -112,6 +112,8 @@
   <div class="panel" id="pdd-work"><p class="muted">Loading…</p></div>
   {% endif %}
 
+  {% include "_privacy_discovery_data_use.html" %}
+
   <div class="panel pdd-actions">
     {% if privacy_data_discovery_can_audit %}
     <button type="button" class="btn btn--ghost" id="pdd-verify">Check the activity history is intact</button>
@@ -129,4 +131,5 @@
 {% block scripts_extra %}
 <script src="/static/lightwork-record-workflows.js" defer></script>
 <script src="/static/lightwork-privacy-data-discovery.js" defer></script>
+<script src="/static/lightwork-privacy-discovery-data-use.js" defer></script>
 {% endblock %}
