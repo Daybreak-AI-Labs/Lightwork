@@ -17,6 +17,7 @@
 </div>
 <p id="trc-live-status" role="status" aria-live="polite"></p>
 <p class="muted">Collected evidence shows what was checked; it isn't a compliance certificate and doesn't prove every system is covered.</p>
+<p class="muted">After downtime, Lightwork requests the elapsed period in one collection, within the source's collection limits, then continues the configured schedule.</p>
 
 {% if not trc_continuous_evidence_enabled %}
 {{ module_gate('tech_risk_compliance.continuous_evidence', 'Continuous evidence',

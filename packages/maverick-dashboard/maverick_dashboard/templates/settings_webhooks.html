@@ -2,25 +2,39 @@
 {% block title %}Webhooks · Lightwork{% endblock %}
 {% block content %}
 {% from "_back_link.html" import back_link with context %}
-<style>
+<style nonce="{{ csp_style_nonce|default('') }}">
   #wh-page .input { box-sizing: border-box; width: 100%; max-width: 100%; }
   #wh-page label { display: block; margin-block: var(--space-2); }
   #wh-page .row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
   #wh-page table td, #wh-page table th { vertical-align: top; overflow-wrap: anywhere; }
   #wh-page .status-dead { color: var(--danger, #c33); font-weight: var(--font-semibold); }
   #wh-page .status-delivered { color: var(--success); }
+  #wh-events { border: 0; margin: var(--space-3) 0; padding: 0; min-width: 0; }
+  #wh-event-list { max-height: 20rem; overflow-y: auto; padding-inline: var(--space-2); }
+  #wh-event-list label { display: flex; gap: var(--space-2); align-items: flex-start; }
+  #wh-event-list input { flex-shrink: 0; margin-top: .25em; }
+  @media (max-width: 640px) {
+    #wh-page .table, #wh-page .table tbody, #wh-page .table tr { display: block; width: 100%; min-width: 0; box-sizing: border-box; }
+    #wh-page .table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+    #wh-page .table tbody tr { padding-block: var(--space-3); border-bottom: 1px solid var(--border); }
+    #wh-page .table td { display: grid; grid-template-columns: minmax(5rem, .4fr) minmax(0, 1fr); gap: var(--space-2); width: 100%; min-width: 0; box-sizing: border-box; }
+    #wh-page .table td::before { content: attr(data-label); color: var(--muted); font-weight: var(--font-semibold); }
+    #wh-page .table td:last-child { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    #wh-page .table td:last-child::before { flex-basis: 100%; }
+    #wh-page .table .btn { max-width: 100%; white-space: normal; }
+  }
 </style>
 <div id="wh-page">
   <p class="muted" style="margin-bottom: var(--space-2);">{{ back_link('/settings', 'Settings') }}</p>
   <h1 class="page-title">Webhooks</h1>
-  <p class="page-subtitle">Send a signed message to another system when something happens to a request, incident, assessment, vendor contract, approval or policy. Each delivery is logged and retried up to five times over about an hour; after that it is marked dead until you retry it.</p>
+  <p class="page-subtitle">Send an update to another system when something happens to a task, request, incident, assessment, vendor contract, approval or policy. A saved signing secret lets the receiving system verify who sent it. Each delivery is logged and retried up to five times over about an hour; after that it needs your attention before another try.</p>
   <p id="wh-msg" role="status" aria-live="polite" class="muted"></p>
 
   <div class="section-head"><h2>Subscriptions</h2></div>
   <div class="panel" id="wh-subs-panel">
     <p class="muted" id="wh-legacy" hidden></p>
     <table class="table" id="wh-subs" hidden>
-      <thead><tr><th scope="col">Address</th><th scope="col">Events</th><th scope="col">Description</th><th scope="col">Signed</th><th scope="col">On</th><th scope="col">Actions</th></tr></thead>
+      <thead><tr><th scope="col">Address</th><th scope="col">Events</th><th scope="col">Description</th><th scope="col">Own signing secret</th><th scope="col">On</th><th scope="col">Actions</th></tr></thead>
       <tbody></tbody>
     </table>
     <p class="muted" id="wh-subs-empty">No subscriptions yet. Add one above to send events to another system.</p>
@@ -34,9 +48,20 @@
       <input class="input" id="wh-url" type="url" required maxlength="2048" placeholder="https://example.com/lightwork-hook">
       <label for="wh-desc">Description</label>
       <input class="input" id="wh-desc" type="text" maxlength="500" placeholder="What this connection is for">
-      <label for="wh-events">Events (comma-separated; * for all, dsar.* for a family)</label>
-      <input class="input" id="wh-events" type="text" maxlength="2000" value="*" aria-describedby="wh-events-help">
-      <p id="wh-events-help" class="muted">Choose from the list below.</p>
+      <fieldset id="wh-events" aria-describedby="wh-events-help">
+        <legend>Updates to send</legend>
+        <label><input type="checkbox" name="wh-event" value="*" checked> All updates</label>
+        <p id="wh-events-help" class="muted">All updates includes every supported update, including ones added later. Group choices also include future updates in that group. Choose individual updates to receive only those named.</p>
+        <details id="wh-event-picker">
+          <summary id="wh-event-summary">Choose specific updates</summary>
+          <div id="wh-event-list">
+            <div id="wh-event-groups"></div>
+            {% for e in events %}<label><input type="checkbox" name="wh-event" value="{{ e.type }}" data-event-family="{{ e.type.split('.')[0] if '.' in e.type else '' }}"> {{ e.description|replace('goal', 'task')|replace('gated result', 'result')|replace('gated deliverable', 'result') }}</label>{% endfor %}
+            <div id="wh-event-legacy"></div>
+          </div>
+        </details>
+        <p id="wh-event-legacy-help" class="muted" hidden>A previously saved choice is outside today's list. It is kept unless you remove it; if it is no longer supported, saving will explain what needs attention.</p>
+      </fieldset>
       <label for="wh-secret">Signing secret (leave empty to keep the current one)</label>
       <input class="input" id="wh-secret" type="password" autocomplete="new-password" maxlength="4096">
       <label><input type="checkbox" id="wh-enabled" checked> Turned on</label>
@@ -52,7 +77,7 @@
     <div class="row">
       <label for="wh-filter-status" style="margin:0">Show</label>
       <select class="input" id="wh-filter-status" style="width:auto">
-        <option value="">All</option><option value="pending">Waiting or retrying</option><option value="delivered">Delivered</option><option value="dead">Dead</option>
+        <option value="">All</option><option value="pending">Waiting or retrying</option><option value="delivered">Delivered</option><option value="dead">Needs attention</option>
       </select>
       <button type="button" class="btn" id="wh-refresh">Refresh</button>
     </div>
@@ -63,16 +88,7 @@
     <p class="muted" id="wh-deliveries-empty">No deliveries yet. Each event sent to a subscription appears here.</p>
   </div>
 
-  <div class="section-head"><h2>Events you can subscribe to</h2></div>
-  <div class="panel">
-    <table class="table">
-      <thead><tr><th scope="col">Event</th><th scope="col">Record</th><th scope="col">Meaning</th></tr></thead>
-      <tbody>
-      {% for e in events %}<tr><td><code>{{ e.type }}</code></td><td>{{ e.record }}</td><td>{{ e.description }}</td></tr>{% endfor %}
-      </tbody>
-    </table>
-    <p class="muted">Every message is signed with the subscription's secret (or the installation's signing secret for the configured address list). The message format and how to check the signature are in docs/webhooks.md.</p>
-  </div>
+  <p class="muted">Messages use a subscription's own signing secret when one is saved. The installation's configured address list uses the installation signing secret. Without the applicable secret, a message is unsigned. Check the receiving system's requirements before turning a subscription on.</p>
   <noscript>Enable browser scripting to manage subscriptions and see deliveries.</noscript>
 </div>
 {% endblock %}
@@ -86,12 +102,87 @@
   var when = function (t) { return window.mvTimeAbsolute(t) || '—'; };
   // Failures read as plain sentences; a validation reply that is already one is kept.
   var fail = function (action) {
-    return function (e) { say((e.status === 400 || e.status === 422) && window.mvPlainDetail(e.detail) || window.mvErrorText(e, action)); };
+    return function (e) {
+      var detail = window.mvPlainDetail(e.detail);
+      if (e.status === 400 && typeof e.detail === 'string' && /^unknown event(?: family)?:/.test(e.detail)) {
+        say('An update choice is no longer supported. Choose a current update or remove the previously saved choice before saving. Your draft is kept.');
+        return;
+      }
+      say((e.status === 400 || e.status === 422) && detail || window.mvErrorText(e, action));
+    };
   };
   function req(method, url, body) {
     return window.mvFetchJSON(url, { method: method, body: body }).then(function (j) { return j || {}; });
   }
+  function eventInputs() { return Array.from($('wh-events').querySelectorAll('input[name="wh-event"]')); }
+  function chosenEvents() { return eventInputs().filter(function (input) { return input.checked; }).map(function (input) { return input.value; }); }
+  function eventSummary() {
+    var chosen = chosenEvents();
+    $('wh-event-summary').textContent = chosen.includes('*') ? 'Choose specific updates' : chosen.length + ' update choices selected';
+  }
+  var familyLabels = { dsar: 'All privacy request updates', incident: 'All incident updates',
+    assessment: 'All assessment updates', vendor: 'All vendor updates', approval: 'All approval updates',
+    policy: 'All policy updates', webhook: 'All connection test updates', deliverable: 'All result approval updates' }, families = {};
+  eventInputs().forEach(function (input) {
+    var family = input.getAttribute('data-event-family');
+    if (!family || families[family]) return;
+    families[family] = true;
+    var label = document.createElement('label'), control = document.createElement('input');
+    control.type = 'checkbox'; control.name = 'wh-event'; control.value = family + '.*';
+    label.appendChild(control); label.appendChild(document.createTextNode(familyLabels[family] || 'All updates of this kind'));
+    $('wh-event-groups').appendChild(label);
+  });
+  $('wh-events').addEventListener('change', function (event) {
+    var input = event.target;
+    if (input.name !== 'wh-event') return;
+    if (input.checked) eventInputs().forEach(function (other) {
+      if (other !== input && (input.value === '*' || other.value === '*')) other.checked = false;
+    });
+    eventSummary();
+  });
+  function chooseEvents(values) {
+    $('wh-event-legacy').replaceChildren(); $('wh-event-legacy-help').hidden = true;
+    eventInputs().forEach(function (input) { input.checked = false; });
+    values.forEach(function (value) {
+      var input = eventInputs().find(function (candidate) { return candidate.value === value; });
+      if (!input) {
+        var label = document.createElement('label'); input = document.createElement('input');
+        input.type = 'checkbox'; input.name = 'wh-event'; input.value = value;
+        label.appendChild(input); label.appendChild(document.createTextNode('Previously saved update choice'));
+        $('wh-event-legacy').appendChild(label); $('wh-event-legacy-help').hidden = false;
+      }
+      input.checked = true;
+    });
+    $('wh-event-picker').open = !values.includes('*'); eventSummary();
+  }
+  var contextChanged = false;
+  window.addEventListener('lightwork:context-changed', function () { contextChanged = true; });
+  window.LightworkWebhookSubscriptions = { openReview: async function (selection, options) {
+    var current = options && options.isCurrent, context = options && options.context;
+    if (contextChanged || location.pathname !== '/settings/webhooks/manage' ||
+        (selection && Object.keys(selection).length) || !/^[a-f0-9]{64}$/.test(context || '') ||
+        (current && !current())) return false;
+    var checked = await req('POST', '/api/v1/copilot/product-operations/catalog', {
+      page: '/settings/webhooks/manage', selection: {}
+    });
+    if (contextChanged || checked.context !== context || (current && !current()) ||
+        !(checked.operations || []).some(function (row) {
+          return row.id === 'connections.webhook_subscription_status' && row.available;
+        })) return false;
+    // Only move focus. Addresses, secret and current edit choices stay private
+    // in the existing form; this read never saves or sends an event.
+    $('wh-url').focus(); $('wh-form').scrollIntoView({ block: 'center' });
+    say('Review your subscription in this form before saving. Your entered choices were kept.');
+    return true;
+  } };
   function cell(tr, text, cls) { var td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td); return td; }
+  function rowLabels(tr, labels) { Array.from(tr.children).forEach(function (td, index) { td.setAttribute('data-label', labels[index]); }); }
+  function eventLabel(value) {
+    if (value === '*') return 'All updates';
+    if (value.endsWith('.*') && familyLabels[value.slice(0, -2)]) return familyLabels[value.slice(0, -2)];
+    var choice = eventInputs().find(function (input) { return input.value === value && input.getAttribute('data-event-family') !== null; });
+    return choice ? choice.parentElement.textContent.trim() : 'Previously saved update choice';
+  }
   function button(label, onClick) { var b = document.createElement('button'); b.type = 'button'; b.className = 'btn'; b.textContent = label; b.addEventListener('click', onClick); return b; }
   function loadSubs() {
     return req('GET', '/api/v1/webhooks/subscriptions').then(function (d) {
@@ -105,8 +196,8 @@
       }
       rows.forEach(function (s) {
         var tr = document.createElement('tr');
-        cell(tr, s.url); cell(tr, (s.events || []).join(', ')); cell(tr, s.description || '');
-        cell(tr, s.secret_set ? 'Yes' : 'No'); cell(tr, s.enabled ? 'On' : 'Off');
+        cell(tr, s.url); cell(tr, (s.events || []).map(eventLabel).join('; ')); cell(tr, s.description || '');
+        cell(tr, s.secret_set ? 'Saved' : 'Not saved'); cell(tr, s.enabled ? 'On' : 'Off');
         var actions = document.createElement('td');
         actions.appendChild(button('Edit', function () { edit(s); }));
         actions.appendChild(button(s.enabled ? 'Turn off' : 'Turn on', function () {
@@ -118,25 +209,27 @@
             .then(function (r) { var dl = r.delivery || {}; say('Test event ' + dl.status + (dl.last_status_code ? ' (HTTP ' + dl.last_status_code + ')' : '') + (dl.last_error ? ': ' + dl.last_error : '.')); loadDeliveries(); })
             .catch(fail('send the test event'));
         }));
-        tr.appendChild(actions); tbody.appendChild(tr);
+        tr.appendChild(actions); rowLabels(tr, ['Address', 'Updates', 'Description', 'Own signing secret', 'On', 'Actions']); tbody.appendChild(tr);
       });
     }).catch(fail('load the subscriptions'));
   }
   function edit(s) {
     $('wh-id').value = s.id; $('wh-url').value = s.url; $('wh-desc').value = s.description || '';
-    $('wh-events').value = (s.events || ['*']).join(', '); $('wh-secret').value = ''; $('wh-enabled').checked = !!s.enabled;
+    chooseEvents(s.events || ['*']); $('wh-secret').value = ''; $('wh-enabled').checked = !!s.enabled;
     $('wh-form-title').textContent = 'Edit subscription'; $('wh-cancel').hidden = false; $('wh-url').focus();
   }
   function reset() {
-    $('wh-id').value = ''; $('wh-form').reset(); $('wh-events').value = '*'; $('wh-enabled').checked = true;
+    $('wh-id').value = ''; $('wh-form').reset(); chooseEvents(['*']); $('wh-enabled').checked = true;
     $('wh-form-title').textContent = 'Add a subscription'; $('wh-cancel').hidden = true;
   }
   $('wh-cancel').addEventListener('click', reset);
   $('wh-form').addEventListener('submit', function (ev) {
     ev.preventDefault();
+    var events = chosenEvents();
+    if (!events.length) { say('Choose at least one update, or choose All updates, before saving.'); $('wh-event-picker').open = true; return; }
     var id = $('wh-id').value;
     var body = { url: $('wh-url').value.trim(), description: $('wh-desc').value.trim(),
-      events: $('wh-events').value.trim() || '*', enabled: $('wh-enabled').checked };
+      events: events, enabled: $('wh-enabled').checked };
     if ($('wh-secret').value || !id) { body.secret = $('wh-secret').value; }
     var p = id ? req('PATCH', '/api/v1/webhooks/subscriptions/' + encodeURIComponent(id), body)
                : req('POST', '/api/v1/webhooks/subscriptions', body);
@@ -151,8 +244,8 @@
       $('wh-deliveries').hidden = rows.length === 0; $('wh-deliveries-empty').hidden = rows.length !== 0;
       rows.forEach(function (r) {
         var tr = document.createElement('tr');
-        cell(tr, when(r.created_at)); cell(tr, r.event_type); cell(tr, r.url);
-        cell(tr, r.status === 'pending' ? (r.attempts ? 'retrying' : 'waiting') : r.status, 'status-' + r.status);
+        cell(tr, when(r.created_at)); cell(tr, eventLabel(r.event_type)); cell(tr, r.url);
+        cell(tr, r.status === 'pending' ? (r.attempts ? 'Retrying' : 'Waiting') : r.status === 'dead' ? 'Needs attention' : r.status === 'delivered' ? 'Delivered' : 'Status needs review', 'status-' + r.status);
         cell(tr, esc(r.attempts));
         cell(tr, (r.last_status_code ? 'HTTP ' + r.last_status_code : (r.last_error || '—')) + (r.last_latency_ms ? ' · ' + r.last_latency_ms + ' ms' : '') + (r.last_response ? ' · ' + r.last_response.slice(0, 80) : ''));
         cell(tr, r.status === 'pending' ? when(r.next_attempt_at) : '—');
@@ -163,7 +256,7 @@
               .then(function () { say('Retried.'); loadDeliveries(); }).catch(fail('retry the delivery'));
           }));
         }
-        tr.appendChild(actions); tbody.appendChild(tr);
+        tr.appendChild(actions); rowLabels(tr, ['When', 'Update', 'Address', 'Status', 'Attempts', 'Last result', 'Next try', 'Actions']); tbody.appendChild(tr);
       });
     }).catch(fail('load the deliveries'));
   }

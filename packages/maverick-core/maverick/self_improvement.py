@@ -1737,10 +1737,14 @@ class PromotionLedger:
     JSONL stream fsynced under a strict cross-process lock. Missing, stale, or
     malformed projections are rebuilt from the journal; journal corruption and
     lock/commit failures fail closed with :class:`PromotionLedgerError`.
+
+    History is retained without a lifetime receipt ceiling by default. An
+    explicitly supplied ``max_records`` keeps the legacy bound on committed
+    receipts plus unresolved reservations; it never deletes older receipts.
     """
 
     path: Path | None = None
-    max_records: int = 1000
+    max_records: int | None = None
     _records: dict[str, PromotionRecord] = field(default_factory=dict)
     _transactions: dict[str, PromotionTransaction] = field(default_factory=dict)
     _audit_pending: dict[str, dict[str, Any]] = field(
@@ -1750,8 +1754,11 @@ class PromotionLedger:
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
     def __post_init__(self) -> None:
-        if self.max_records < 0:
-            raise ValueError("max_records must be >= 0")
+        if self.max_records is not None and (
+                isinstance(self.max_records, bool)
+                or not isinstance(self.max_records, int)
+                or self.max_records < 0):
+            raise ValueError("max_records must be None or a nonnegative integer")
         if self.path is not None:
             self.path = Path(self.path)
             self._refresh()
@@ -1780,7 +1787,8 @@ class PromotionLedger:
                         or any(tx.record.id == rec.id for tx in transactions.values())):
                     raise PromotionLedgerError(f"promotion record {rec.id!r} already exists")
                 reservations = sum(tx.state == "prepared" for tx in transactions.values())
-                if len(records) + reservations >= self.max_records:
+                if (self.max_records is not None
+                        and len(records) + reservations >= self.max_records):
                     raise PromotionLedgerError("promotion ledger retention limit reached")
 
                 if self.path is not None:
@@ -1873,7 +1881,8 @@ class PromotionLedger:
                     raise PromotionLedgerError(
                         f"artifact {before.identity!r} has an unresolved promotion transaction")
                 reservations = sum(tx.in_doubt for tx in transactions.values())
-                if len(records) + reservations >= self.max_records:
+                if (self.max_records is not None
+                        and len(records) + reservations >= self.max_records):
                     raise PromotionLedgerError("promotion ledger retention limit reached")
 
                 if self.path is not None:

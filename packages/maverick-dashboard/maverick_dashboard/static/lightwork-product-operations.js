@@ -210,6 +210,18 @@
               ? function (isCurrent) { return discoveryControls.openReview({}, {isCurrent: isCurrent}); } : null);
           return;
         }
+        if (entry[0] === 'webhook_subscription_review') {
+          var webhookReview = entry[1], webhookControls = window.LightworkWebhookSubscriptions;
+          var webhookContext = catalog && catalog.context;
+          if (!webhookReview || Array.isArray(webhookReview) ||
+              Object.keys(webhookReview).join(',') !== 'scope' || webhookReview.scope !== 'current_page' ||
+              typeof webhookContext !== 'string' || !/^[a-f0-9]{64}$/.test(webhookContext)) return;
+          protectedControls(node('dd', undefined, list), 'Open the complete update controls',
+            '/settings/webhooks/manage#wh-form',
+            webhookControls && typeof webhookControls.openReview === 'function'
+              ? function (isCurrent) { return webhookControls.openReview({}, {isCurrent: isCurrent, context: webhookContext}); } : null);
+          return;
+        }
         if (entry[0] === 'channels_people') {
           var channelPeople = entry[1], channelStarted = generation, channelSelection = JSON.stringify(context());
           if (!channelPeople || Array.isArray(channelPeople) || Object.keys(channelPeople).sort().join(',') !== 'channel,context' ||

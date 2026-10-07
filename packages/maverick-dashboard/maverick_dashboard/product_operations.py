@@ -271,6 +271,7 @@ def _adapter_modules():
         product_operations_vendor_profile,
         product_operations_viewpoints,
         product_operations_webhook_recovery,
+        product_operations_webhook_subscriptions,
         product_operations_work_restructuring,
         product_operations_workflow_explanation,
         product_operations_workflows,
@@ -389,6 +390,7 @@ def _adapter_modules():
         product_operations_workspace_people,
         product_operations_work_restructuring,
         product_operations_webhook_recovery,
+        product_operations_webhook_subscriptions,
         product_operations_viewpoints,
     )
 

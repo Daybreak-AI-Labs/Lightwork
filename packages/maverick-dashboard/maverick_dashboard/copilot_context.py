@@ -1433,28 +1433,28 @@ _CONTEXTS = tuple(
         _registered(
             path="/compliance/continuous-evidence",
             summary=(
-                "Operate exact continuous-evidence definitions, enrollments, bounded collection "
-                "cycles, digest-only observations, change alerts, recovery, and integrity."
+                "Collect evidence from approved sources, review what was checked, "
+                "and follow changes to your controls."
             ),
             capabilities=(
-                "Run the local SOC 2 observer and configured read-only AWS Security Hub, AWS Config, Azure Defender, Azure Policy, Google Cloud Security Command Center, GitHub security-stream, and Okta posture collectors.",
-                "Inspect each source's setup and approval, its scans, recorded observations, alerts, retention, and integrity.",
-                "Run one bounded server-authorized scheduler cycle or let the configured leased scheduler operate across active workspaces.",
+                "Collect from configured AWS, Azure, Google Cloud, GitHub and Okta sources, plus Lightwork's own security checks.",
+                "Use each source's Set up, Approve, Start collecting, Pause and Resume controls.",
+                "Review recent collections and evidence changes, retry failed collections, and check retained records.",
             ),
             boundaries=(
-                "The browser cannot choose a workspace, provider origin, asset scope, source selector, credential reference, transport, or raw provider payload.",
-                "Readiness resolves no credential value and performs no provider network request; collection rechecks the exact approved definition and active enrollment for every scan.",
-                "A configured source or successful observation does not prove estate completeness, control effectiveness, compliance, certification, licensed access, or live provider/customer acceptance.",
+                "A different administrator must approve a source's setup before collection starts.",
+                "Checking setup does not collect from an outside service. Collection checks the current approval and access again.",
+                "Evidence shows what was checked. It does not prove every system is covered, that a control works, or that the company is certified.",
             ),
             next_steps=(
-                "Refresh readiness and resolve every missing stock source manifest or credential reference.",
-                "Register and independently approve the exact collector definition, then create the matching workspace enrollment using its current integrity digest.",
-                "Run a bounded cycle, inspect incomplete/retry/dead-letter state, verify integrity, and obtain live provider and customer acceptance before relying on coverage.",
+                "Refresh Sources and review which connections are ready.",
+                "Choose Set up, ask another administrator to Approve, then use Start collecting to choose the schedule and keep period.",
+                "Use Collect evidence now for due work, then review incomplete collections and recorded changes before relying on the evidence.",
             ),
             suggested_questions=(
-                "Which stock collector source is not ready?",
-                "What authority is rechecked before provider I/O?",
-                "What does a successful observation not prove?",
+                "How do I start collecting from a source?",
+                "Why does setup need another administrator's approval?",
+                "What does collected evidence tell us?",
             ),
         ),
         _registered(
@@ -2133,6 +2133,15 @@ def context_for_page(page: object) -> CopilotPageContext:
             boundaries=("Only an approved mapping can support a task plan.", "This page records your team's choices; it does not supply licensed framework text."),
             next_steps=("Choose a final scope, then the work status, responsible role and evidence cadence.", "Review the exact mapping and ask another authorized person to approve it."),
             suggested_questions=("Which controls need tasks?", "How do I prepare this scope's mapping?"),
+        )
+    if path == "/settings/webhooks/manage":
+        return CopilotPageContext(
+            path=path, title="Work updates",
+            summary="Choose which saved task events send updates to another approved service, and read retained delivery states.",
+            capabilities=("Read current subscription and recent delivery counts.", "Open the same complete update form from Copilot while keeping entered choices."),
+            boundaries=("These controls require current administrator access.", "Waiting for your answer is separate from completed work. A queued update or service acceptance does not prove arrival."),
+            next_steps=("Choose the events you need, including waiting questions or completed work, then review the full destination and signing setup in the protected form.", "Read retained deliveries before deciding whether to retry an update."),
+            suggested_questions=("Read current work updates", "Open the complete update controls"),
         )
     if path == "/settings/local-ai":
         return CopilotPageContext(
