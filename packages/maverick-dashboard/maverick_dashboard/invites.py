@@ -56,26 +56,40 @@ class ExistingAccountError(ValueError):
 
 def existing_local_account(email: str) -> bool:
     """Whether accepting a local invitation for ``email`` would take over an
-    existing identity: a colleague passphrase (or one being reset), the
-    installation owner, a configured bootstrap admin, a stored role or any
-    workspace membership.
+    existing identity: any identity source that already knows ``user:<email>``.
 
     Accepting a local invitation sets a passphrase and signs in as
-    ``user:<email>``, so any of these would let whoever holds the link become
-    that person. Unreadable state counts as existing (fail closed).
+    ``user:<email>``, so whoever holds the link would become that person. The
+    sources are the colleague passphrase (or one being reset), the installation
+    owner, a configured bootstrap admin, a stored role, any workspace
+    membership, an explicit department grant, and the SCIM roster: a user the
+    IdP has bound to this principal (active, deactivated or retired) or a role
+    that its groups confer. A workspace invitation writes no installation role,
+    so a role a SCIM group confers would otherwise pass straight to the invited
+    session.
+
+    The SCIM binding is the same strict one that grants access (the IdP's
+    ``externalId`` or the record id); a user known only by name or email carries
+    no access and is invited as usual. Unreadable state counts as existing
+    (fail closed). It is checked when the invitation is made and again when it
+    is redeemed.
     """
-    from . import local_passphrases, passphrase_resets, rbac
+    from maverick.suite_grants import get_grant, is_admin_principal
+
+    from . import auth, local_passphrases, passphrase_resets, rbac, scim_groups
 
     email = (email or "").strip().lower()
     principal = "user:" + email
     try:
-        from maverick.suite_grants import is_admin_principal
-
         return bool(local_passphrases.has_account(email) or local_passphrases.owner_of(email)
                     or passphrase_resets.pending_for(email)
                     or is_admin_principal(principal)
                     or rbac.get_stored_role(principal) is not None
-                    or rbac.has_tenant_membership(principal))
+                    or rbac.has_tenant_membership(principal)
+                    or get_grant(principal) is not None
+                    or scim_groups.active_for_principal(principal) is not None
+                    # Not the default: a SCIM group role, or an unreadable source (None).
+                    or auth.global_role_for_principal(principal) != rbac.default_role())
     except Exception:
         return True
 
