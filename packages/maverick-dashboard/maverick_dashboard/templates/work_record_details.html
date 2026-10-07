@@ -43,14 +43,14 @@
       <p>{{ ui("Add up to 12 stages in the order your team uses them. A stage is a business label; it does not change execution or approval.") }}</p>
       <div id="wrd-definition-stages"></div>
       <button id="wrd-add-stage" class="btn btn--ghost" type="button">{{ ui("Add a business stage") }}</button>
-      <div class="wrd-actions"><button id="wrd-definition-review" class="btn btn--primary" type="submit">{{ ui("Review category setup") }}</button><button id="wrd-definition-reset" class="btn btn--ghost" type="button">{{ ui("Use saved setup") }}</button></div>
+      <div class="wrd-actions"><button id="wrd-definition-review" class="btn" type="submit">{{ ui("Review category setup") }}</button><button id="wrd-definition-reset" class="btn btn--ghost" type="button">{{ ui("Use saved setup") }}</button></div>
     </form>
   </section>
   <section id="wrd-review" class="panel" hidden aria-labelledby="wrd-review-heading">
     <h2 id="wrd-review-heading" tabindex="-1">{{ ui("Review your change") }}</h2>
     <p id="wrd-review-note"></p>
     <div id="wrd-review-details"></div>
-    <div class="wrd-actions"><button id="wrd-save" class="btn btn--primary" type="button">{{ ui("Save reviewed change") }}</button><button id="wrd-cancel" class="btn btn--ghost" type="button">{{ ui("Cancel review") }}</button></div>
+    <div class="wrd-actions"><button id="wrd-save" class="btn" type="button">{{ ui("Save reviewed change") }}</button><button id="wrd-cancel" class="btn btn--ghost" type="button">{{ ui("Cancel review") }}</button></div>
   </section>
 </div>
 <style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
