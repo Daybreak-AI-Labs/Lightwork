@@ -44,6 +44,8 @@ function html() {
       <input name="confirm" type="checkbox"><button type="submit">model</button>
     </form>
     <form id="research-run-form">
+      <select name="program_id" id="research-program-choice" required><option value="">Loading saved programs…</option></select>
+      <p id="research-program-notice"></p>
       <input name="run_id" required><input name="run_version" value="v1" required><input name="experiment_id" required>
       <input name="experiment_version" value="v1" required><input name="purpose" required>
       <select name="action"><option value="analyze">analyze</option><option value="train">train</option></select>
@@ -56,6 +58,7 @@ function html() {
       <input name="currency" value="USD" required><input name="metric_protocol_sha256" pattern="[a-f0-9]{64}" required>
       <input name="confirm" type="checkbox" required><button type="submit">run</button>
     </form>
+    <p id="research-original-status" role="status" aria-live="polite"></p><button type="button" id="research-read-original" hidden>Read original run</button>
   </div>`;
 }
 
@@ -130,11 +133,13 @@ test('renders explicit synthetic provenance and exact incomplete cost without en
   const ui = await fixture(async () => value);
   assert.match(ui.document.getElementById('research-registry-items').textContent, /Generated test data/);
   assert.match(ui.document.getElementById('research-governed-runs').textContent, /USD 1.25/);
-  assert.match(ui.document.getElementById('research-governed-runs').textContent, /provider report pending/);
+  assert.match(ui.document.getElementById('research-governed-runs').textContent, /some resource use has no verified financial price/);
+  assert.match(ui.document.getElementById('research-governed-runs').textContent, /Storage · Unknown · not known yet \(Provider report pending\)/);
   assert.equal(ui.document.querySelector('#research-registry-items img'), null);
   const start = [...ui.document.querySelectorAll('#research-governed-runs button')]
     .find(button => button.textContent === 'Start run');
-  assert.equal(start.disabled, true);
+  // No independent approval and no execution: Start is not offered at all.
+  assert.equal(start, undefined);
   assert.match(ui.document.getElementById('research-materialization-state').textContent, /blocked before data access/i);
   ui.dom.window.close();
 });
@@ -174,25 +179,32 @@ test('registers a synthetic dataset with sorted purposes and explicit generator 
 
 test('plans then queues an exact approved version with CAS', async () => {
   const mutations = [];
+  const program = {id:'baseline-program', label:'Baseline program', experiment_id:'baseline', experiment_version:'v1',
+    code_revision:'a'.repeat(40), code_sha256:'1'.repeat(64), environment_id:'local', environment_version:'v1',
+    environment_sha256:'2'.repeat(64), metric_protocol_sha256:'3'.repeat(64)};
   const ui = await fixture(async (url, options) => {
     if (options.method === 'POST') {
       mutations.push({url, body:JSON.parse(options.body)});
       return options && url.endsWith('/governed-runs') ? run({status:'planned', revision:1}) : run();
     }
+    if (url.endsWith('/execution-options')) return {context:CONTEXT, available:true, programs:[program], detail:'Ready.'};
     return overview({governed_runs:[]});
   });
   const form = ui.document.getElementById('research-run-form');
-  form.elements.run_id.value = 'run-ui'; form.elements.experiment_id.value = 'baseline';
-  form.elements.purpose.value = 'product_research'; form.elements.code_revision.value = 'a'.repeat(40);
-  form.elements.code_sha256.value = '1'.repeat(64); form.elements.environment_id.value = 'local';
-  form.elements.environment_version.value = 'v1'; form.elements.environment_sha256.value = '2'.repeat(64);
-  form.elements.seed.value = '11'; form.elements.metric_protocol_sha256.value = '3'.repeat(64);
+  // The code, setup and result check come from the chosen saved program.
+  form.elements.program_id.value = 'baseline-program';
+  form.elements.program_id.dispatchEvent(new ui.window.Event('change', {bubbles:true}));
+  assert.equal(form.elements.code_sha256.value, '1'.repeat(64));
+  form.elements.run_id.value = 'run-ui'; form.elements.purpose.value = 'product_research';
+  form.elements.seed.value = '11';
   form.elements.dataset_refs.options[0].selected = true; form.elements.confirm.checked = true;
   form.dispatchEvent(new ui.window.Event('submit', {bubbles:true, cancelable:true}));
   await settle();
   assert.equal(mutations.length, 2);
   assert.equal(mutations[0].url, '/api/v1/research/governed-runs');
   assert.deepEqual(mutations[0].body.dataset_refs, [dataset().reference]);
+  assert.equal(mutations[0].body.program_id, 'baseline-program');
+  assert.equal(mutations[0].body.environment_sha256, '2'.repeat(64));
   assert.deepEqual(mutations[1], {url:'/api/v1/research/governed-runs/run-1/queue',
     body:{context:CONTEXT, confirm:true, expected_revision:1}});
   ui.dom.window.close();
@@ -200,8 +212,13 @@ test('plans then queues an exact approved version with CAS', async () => {
 
 test('known failed attempts expose an in-app retry bound to the current revision', async () => {
   let retry;
-  const failed = run({status:'failed', revision:7,
+  const failed = run({status:'failed', revision:7, can_manage:true,
     attempts:[{...run().attempts[0], status:'failed'}]});
+  // Only the person who manages the run is offered the retry.
+  const other = await fixture(async () => overview({governed_runs:[{...failed, can_manage:false}]}));
+  assert.equal([...other.document.querySelectorAll('#research-governed-runs button')]
+    .find(item => item.textContent === 'Try again'), undefined);
+  other.dom.window.close();
   const ui = await fixture(async (url, options) => {
     if (url.endsWith('/retry')) { retry = JSON.parse(options.body); return run({status:'planned', revision:8}); }
     return overview({governed_runs:[failed]});
