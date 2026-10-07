@@ -51,7 +51,7 @@ def customer(tmp_path, monkeypatch):
     monkeypatch.setattr(oauth, "_jira_sites", lambda *a: [{
         "id": CLOUD, "url": SITE, "scopes": oauth.PROFILES["jira-cloud"]["scopes"],
     }])
-    monkeypatch.setattr(oauth, "_provider_identity", lambda provider, token: {
+    monkeypatch.setattr(oauth, "_provider_identity", lambda provider, token, **_identity_inputs: {
         "provider": provider,
         "subject": "fixture-account",
         "display_name": "Fixture Account",

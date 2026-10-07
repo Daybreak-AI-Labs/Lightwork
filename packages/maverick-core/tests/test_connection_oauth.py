@@ -28,7 +28,7 @@ def isolated(tmp_path, monkeypatch):
     config.config_path().write_text("[connections]\nenable=true\n[oauth]\nvault=true\n")
     monkeypatch.setattr(oauth, "_post_token", lambda *a, **k: pytest.fail("Unexpected provider token request"))
     monkeypatch.setattr(oauth, "_jira_sites", lambda *a, **k: pytest.fail("Unexpected provider site request"))
-    monkeypatch.setattr(oauth, "_provider_identity", lambda provider, token: {
+    monkeypatch.setattr(oauth, "_provider_identity", lambda provider, token, **_identity_inputs: {
         "provider": provider, "subject": "fixture-account", "display_name": "Fixture Account",
         "email": "fixture@example.test",
         **({"email_verified": True, "hosted_domain": "example.test"} if provider == "google"
@@ -224,7 +224,7 @@ def test_refresh_cannot_replace_the_connected_provider_account(monkeypatch):
         "access_token": "different-account-access", "refresh_token": "rotated-refresh",
         "expires_in": 3600, "scope": " ".join(oauth.PROFILES["google-drive"]["scopes"]),
     })
-    monkeypatch.setattr(oauth, "_provider_identity", lambda *a: {
+    monkeypatch.setattr(oauth, "_provider_identity", lambda *a, **_identity_inputs: {
         "provider": "google", "subject": "different-account", "display_name": "Other Account",
         "email": "other@example.test", "email_verified": True, "hosted_domain": "example.test",
     })
@@ -389,7 +389,7 @@ def test_identity_failure_consumes_consent_without_saving_connection(monkeypatch
     })
     monkeypatch.setattr(
         oauth, "_provider_identity",
-        lambda *a: (_ for _ in ()).throw(ValueError("synthetic identity failure")),
+        lambda *a, **_identity_inputs: (_ for _ in ()).throw(ValueError("synthetic identity failure")),
     )
     with pytest.raises(ValueError, match="identity failure"):
         oauth.finish(

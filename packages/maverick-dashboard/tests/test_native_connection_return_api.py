@@ -80,7 +80,7 @@ def test_native_callback_requires_reviewed_registration_and_exact_profile(client
     monkeypatch.setattr(connection_oauth, "_post_token", lambda *a: calls.append(a) or {
         "access_token": "synthetic-access", "refresh_token": "synthetic-refresh", "expires_in": 3600,
     })
-    monkeypatch.setattr(connection_oauth, "_provider_identity", lambda *a: {
+    monkeypatch.setattr(connection_oauth, "_provider_identity", lambda *a, **_identity_inputs: {
         "provider": "google", "subject": "native-fixture-account",
         "display_name": "Native Fixture", "email": "native@example.test",
         "email_verified": True, "hosted_domain": "example.test",
