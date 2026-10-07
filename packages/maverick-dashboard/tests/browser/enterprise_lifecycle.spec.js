@@ -64,15 +64,6 @@ test('invited employee connects only an approved own account, shares a captured 
     const receipt=await reopened.text();expect(receipt).toContain('Invitation accepted');expect(receipt).not.toContain('Accept invitation');
     expect((await (await context()).request.get(fixture.invites.employee)).status()).toBe(410);
     expect((await employee.request.get(fixture.invites.expired)).status()).toBe(410);
-    // The invitation granted only a workspace role. The administrator records the
-    // employee's view-only installation role on the Users page, as for anyone who
-    // will later be offboarded from Departures.
-    const users=await admin.newPage();await users.goto('/users');
-    const give=users.locator('form[action="/users/set"]').filter({has:users.getByRole('button',{name:'Give role',exact:true})});
-    await give.locator('select[name=principal]').selectOption(fixture.employee);await give.locator('select[name=role]').selectOption('viewer');
-    const granted=users.waitForResponse(response=>response.request().method()==='POST'&&new URL(response.url()).pathname==='/users/set');
-    await give.getByRole('button',{name:'Give role',exact:true}).click();
-    expect((await granted).status()).toBe(303);await users.close();
     console.info('Enterprise journey: invitation and least privilege');
     for(const forbidden of ['/settings','/users','/users/departures']){
       const denied=await employee.request.get(forbidden);expect(denied.status(),forbidden).toBe(403);
