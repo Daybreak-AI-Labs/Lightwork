@@ -408,6 +408,33 @@ def pinned_overrides():
         _PINNED_OVERRIDES.reset(token)
 
 
+@contextlib.contextmanager
+def reviewed_ratings(ratings: dict[str, str]):
+    """Apply operator-reviewed ratings for otherwise *unrated* names in the block.
+
+    An external agent's tool names are its own, so its enrollment carries the
+    operator's rating for each. Those ratings only fill the unrated high
+    floor; a name Lightwork (or ``[security.tool_risk]``) already classifies
+    keeps that classification, so an enrollment can never down-rate it.
+    """
+    base = _current_overrides(None)
+
+    def unrated(name: str) -> bool:
+        # A namespaced name inherits its namespace's rating (upward only), so
+        # a classified namespace counts as rated too.
+        namespace = name.split(".", 1)[0]
+        return not (tool_risk_is_classified(name, base)
+                    or tool_risk_is_classified(namespace, base))
+
+    extra = {name: level for name, level in (ratings or {}).items()
+             if level in RISK_LEVELS and unrated(name)}
+    token = _PINNED_OVERRIDES.set({**extra, **base})
+    try:
+        yield
+    finally:
+        _PINNED_OVERRIDES.reset(token)
+
+
 def _current_overrides(overrides: dict[str, str] | None) -> dict[str, str]:
     if overrides is not None:
         return overrides
