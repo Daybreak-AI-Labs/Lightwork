@@ -103,7 +103,10 @@ def test_recall_failure_is_fail_safe(ctx, store, monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("recall blew up")
 
+    # The agent recalls through recall_addendum_with_sources (the guidance and
+    # its permitted sources together); break both public entry points.
     monkeypatch.setattr(sh, "recall_addendum", _boom)
+    monkeypatch.setattr(sh, "recall_addendum_with_sources", _boom)
     agent = _agent(ctx, "model-x")          # must not raise
     assert _NEEDLE not in agent.system
 
