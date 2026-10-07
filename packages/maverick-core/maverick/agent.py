@@ -1708,6 +1708,7 @@ class Agent:
         domain_effort: str | None = None,
         autonomy=None,
         is_goal_root: bool = False,
+        domain_models: dict[str, str] | None = None,
     ):
         self.ctx = ctx
         self.role = role
@@ -1746,6 +1747,10 @@ class Agent:
         # parent's domain so a Rung-2 sector seal catches the whole sub-tree.
         # None == unsectored (the orchestrator and ad-hoc agents).
         self.domain = domain if domain is not None else getattr(parent, "domain", None)
+        # Profile spawns replace the map, including an explicit empty map.
+        # Ordinary supporting agents inherit a private copy, never global state.
+        self._domain_models = dict(domain_models if domain_models is not None
+                                   else getattr(parent, "_domain_models", {}) or {})
         # Per-agent autonomy profile (the agent-as-employee authority dial,
         # maverick.agent_autonomy). The factory's spawn-from-profile sets it from
         # the pack's [autonomy] block; a child inherits its parent's so a sub-tree
@@ -1806,11 +1811,11 @@ class Agent:
         # Otherwise recall_addendum(self.model) raises AttributeError, the
         # addendum's except swallows it, and the learned guidance is silently
         # dropped from every prompt -- the feature becomes a no-op.
-        self.model = model_override or model_for_role(role)
+        self.model = model_override or model_for_role(role, domain_models=self._domain_models)
         # Cascaded routing ([models] cascade): a role with no model of its own
         # starts its turns on a cheaper model and moves to self.model on the
         # kernel's low-confidence signals (see _cascade_turn_model).
-        self._cascade_draft = None if model_override else _cascade_draft(role, self.model)
+        self._cascade_draft = None if model_override or role in self._domain_models else _cascade_draft(role, self.model)
         self._cascade_escalated = False
         self.tools = self._build_tools()
         self.system = self._build_system()

@@ -1,5 +1,99 @@
 # Product changes delivered on October 6
 
+UX518: Learning's actual threads participate in coordinated dashboard shutdown.
+New admission closes, cooperative safe points/Budget hooks receive stop, and
+joins share one deadline. Noncancellable work retains truthful running custody
+and Original; restart waits for its exit. Native encrypted jobs qualified
+cooperative drain, bounded noncooperative return, degraded supervision, closed
+admission, clean reopen and a held late admission that executes nothing. No
+provider call, forced thread kill or arbitrary-callback deadline is claimed.
+
+UX658, specialist portion: current named published specialists are available in
+encrypted personal Preferences and typed Copilot. Untouched Chat/task forms
+prefill the saved name; explicit handoffs, restored drafts and deliberate blank
+choices win. An unavailable name stays visible without silent substitution.
+Native reviewed source metadata and current authority are checked after
+encryption before the atomic writer. One actual specialist-default save with a
+lost reply recovered through pure Original; another person's read was refused,
+and source change at the writer prevented replacement. Typed Cancel, Unicode
+blank-choice restoration and zero-request changed-dialog refusal passed. The
+fixture also made one harmless unchanged reviewed name save. Together with the
+model/depth repair and existing answer-style controls this covers the original
+preference portions, without publishing a specialist or pinning future work.
+
+Specialist work follow-through: Chat selects a named published specialist;
+Agent Factory opens it separately from unsaved edits, and Copilot reviews its
+complete published definition. Current source/suite/access checks guard native
+admission and dispatch claim after attachment waits. Exact Chat submission and
+draft restoration retain the selected name; explicit task AI choices survive.
+Two admitted fictional tasks reached isolated worker boundaries, same-key
+typed replay admitted no second task, and staging/companion/access withdrawal
+refused stale work. The fresh ordinary handoff passed without another admission.
+No paid execution or full unpublished-profile Try is established; the existing
+orchestrator uses current published settings when work begins.
+
+Learning shorthand follow-through: the reviewed sample and counting method are
+captured before each ordinary confirmation. Changed choices or an account/
+workspace event refuse the request and preserve entered work. Unchanged review
+uses the same captured body. The finite production request builders qualified
+three refusals without admitting work or making a provider call; this is a UI
+continuity repair, not measured shorthand improvement or an original-ID closure.
+
+UX644, connected-service portion: ordinary complete editing and typed Copilot
+retain named configured services through reviewed Save, separate publication
+and exact Original. Real specialist construction binds exact current connected
+services while retaining parent access, denials, risk rules and empty-list
+inheritance. Source withdrawal, corrupt configuration, complete access clearing
+and the final phone layout passed. One fictional local transport write and
+post-lock refusal exercised the native registry. Selection does not connect a
+service; no external delivery or in-flight cancellation is claimed.
+
+UX658, model portion: encrypted personal Preferences and typed Copilot now
+select a current permitted Chat model and supported thinking depth. Untouched
+new composers prefill it; explicit or recovered choices and newer drafts win.
+Native checks after writer waits refuse withdrawn access/model policy. One
+actual lost-reply Save recovered without replay, with separate-user isolation,
+complete reset review, private clearing and the 320-pixel form qualified.
+Only the latest native save per scope can be confirmed by Original. The default
+specialist portion is qualified separately above.
+
+UX644, model portion: the ordinary complete editor and typed Copilot Save now
+retain usable specialist and supporting-part AI choices. Complete review and
+answer-check preparation resolve the entered map; actual specialist spawns and
+supporting agents use private copied maps while explicit task/installation
+choices and current model policy keep priority. The complete renderer preserves
+legitimate custom role names, the overlay safely quotes those keys, and an
+explicit empty map clears inherited choices. The connected-service portion is
+qualified separately above; these witnesses do not establish provider quality.
+
+UX610: Studio lists the first approved installed evidence definition without an
+existing blueprint. Named source, supported result and control choices retain
+their exact computed edition/fingerprint bindings. Complete ordinary review,
+protected Copilot handoff, Keep editing and pure Original preserve drafts.
+Current approved source/control editions and signed authority are checked at
+the actual final native writer boundary. One ordinary lost-reply Save retained
+one version; role/source withdrawal after native BEGIN refused another write.
+Phone layout, refresh and private clearing passed. This is setup qualification,
+not collector execution, provider delivery or publication; existing custom
+adapter declarations retain their distinct contract.
+
+Practice admission follow-through: complete native objective/round/current-model
+review binds the exact account, workspace, settings and deadline. Newer drafts
+and withdrawn signed authority refuse Start. An original reference is retained
+before submission; exact encrypted task readback survives a lost reply, reload,
+expired review and changed settings without another admission. One actual
+disabled-engine task spent nothing and changed no code; it establishes custody
+and recovery, not successful self-improvement or a pinned future model.
+
+F01 observation follow-through: release-specific indexed reads and 200-record
+pages find relevant real terminal runs beyond a newer unrelated prefix. Each
+selected observation comes from the owner-bound canonical checkpoint, with
+flow/release/state/dry-run checks. The existing 1,000-observation ceiling now
+applies to relevant runs; an index preview cannot authorize a saved canary
+verdict. Native publication, real run, assessment and restoration passed with
+1,001 newer unrelated records and zero unrelated result hydration. Local
+rule-only support and failure criteria remain unchanged.
+
 Learning continuity follow-through: native model-planning replies bind the exact
 current choices and account/workspace, and recheck current signed access after
 the read. An older result cannot replace changed choices. Protected Copilot

@@ -75,6 +75,10 @@
   .fld{ margin: 0 0 var(--space-4); }
   .fld > label{ display: block; font-weight: var(--font-semibold); margin-bottom: var(--space-2); }
   .fld .sub{ font-weight: var(--font-normal); color: var(--muted); }
+  #agent-model-choices, #agent-tool-services{ min-inline-size: 0; border: 0; padding: 0; margin: var(--space-4) 0; }
+  #agent-model-choices legend, #agent-tool-services legend{ font-weight: var(--font-semibold); margin-bottom: var(--space-2); }
+  #agent-model-choices > label{ display: block; margin-bottom: var(--space-2); }
+  @media (max-width: 560px){ .topbar__controls{ column-gap: var(--space-0-5); } }
   .af-card input[type="text"], .af-card textarea, .af-card select{
     width: 100%; min-width: 0; max-width: 100%; background: var(--surface-sunken); border: 1px solid var(--border); color: var(--text);
     border-radius: var(--radius-md); padding: 0.55rem 0.7rem; font: inherit;
@@ -388,6 +392,10 @@
       <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-generation="{{ selected.generation if selected else 'new' }}" data-creating="{{ '1' if creating else '' }}" data-has-base="{{ '1' if selected and selected.base_allow_tools is not none else '0' }}" data-base-allow="{{ selected.base_allow_tools | join(' ') if selected and selected.base_allow_tools is not none else '' }}" data-base-risk="{{ selected.base_max_risk or '' if selected else '' }}" data-kind="{{ kind_word }}" data-mv-validate>
         {# CTL-3: the shared form-field pattern -- each problem next to its field and in a summary that takes focus. #}
         {% from "_form_field.html" import error_summary %}{{ error_summary('agent-form-errors') }}
+        {% if published_work_available %}
+        <p><a class="btn btn--ghost" id="agent-published-work" href="/chat?specialist={{ selected.name | urlencode }}">Work with this specialist</a></p>
+        <p class="muted">Opens a new message with this published specialist selected. Starting work uses its published settings, spending limits, permitted sources and approval rules. Unsaved edits and unpublished drafts are kept separate.</p>
+        {% endif %}
         {% if creating %}
         <div class="fld">
           <label for="f-new-id">Short name <span class="sub">— filled in from the name below; change it if you like</span></label>
@@ -415,6 +423,18 @@
           <p class="sub" id="agent-actions-error" role="alert" hidden></p>
         </div>
 
+        <fieldset class="fld" id="agent-tool-services">
+          <legend>Connected tool services</legend>
+          <p class="sub">Choose the services this {{ kind_word }} may use. Your team’s permissions and approval rules still apply.</p>
+          <div id="agent-tool-service-choices"></div>
+          <p class="sub"><a href="/mcp">Manage connections</a></p>
+          <details>
+            <summary>Setup and access limits</summary>
+            <p class="sub">Configured services are checked when new work starts. Choosing one does not connect or test it. Their actions are high risk unless an administrator changes that classification; this {{ kind_word }}’s risk limits and blocked actions still apply.</p>
+            <p class="sub" id="agent-tool-service-status" role="status">Reading the current service choices…</p>
+          </details>
+        </fieldset>
+
         <div class="fld">
           <label>Guardrails <span class="sub">— the safety limits it works within</span></label>
           <div class="guard-row">
@@ -439,10 +459,13 @@
             <button type="button" class="switch" id="g-approval" aria-pressed="false"
                     aria-label="Include final human review instructions"></button>
           </div>
-          <div class="guard-row">
-            <span class="tt">Model <small>Runs on your configured model; set per role in Settings.</small></span>
-            <a class="model-badge" href="/settings">● Model · Settings</a>
-          </div>
+          <fieldset class="fld" id="agent-model-choices">
+            <legend>AI choices</legend>
+            <label for="f-model">This {{ kind_word }}</label>
+            <select id="f-model" class="input" aria-describedby="agent-model-help"></select>
+            <p class="sub" id="agent-model-help">Choose the AI this {{ kind_word }} uses. Leave a choice at the workspace setting to follow your shared preferences. A choice made for a specific task or by your installation administrator takes priority; the complete review shows the AI used for answer checks.</p>
+            <details><summary>AI for supporting work</summary><p class="sub">Choose an AI for each supporting part when this {{ kind_word }} delegates work. Another specialist uses its own choices.</p><div id="agent-supporting-models"></div></details>
+          </fieldset>
         </div>
 
         {% set auto = selected.autonomy if selected else none %}
@@ -749,6 +772,7 @@
         set('f-persona', d.persona);
         set('f-allow', (d.allow_tools || []).join(' '));
         set('f-deny', (d.deny_tools || []).join(' '));
+        if (Array.isArray(d.mcp_servers)) form.dataset.toolServices = JSON.stringify(d.mcp_servers);
         if (d.max_risk) {
           set('f-risk', d.max_risk);
           var seg = document.getElementById('risk-seg');
@@ -1151,6 +1175,27 @@
       const idInput = document.getElementById('f-new-id');
       const msg = document.getElementById('agent-msg');
       let retainedDraftName = '';
+      let editorPrivateLocked = false;
+      let serviceDraft = {{ selected.mcp_servers | tojson if selected else '[]' }};
+      if (form.dataset.toolServices) { try { serviceDraft = JSON.parse(form.dataset.toolServices); } catch (_) {} }
+      let serviceChoices = null;
+      function renderServices() {
+        const host = document.getElementById('agent-tool-service-choices'); host.replaceChildren();
+        const rows = new Map((serviceChoices || []).map(row => [row.value, row]));
+        serviceDraft.forEach(name => { if (!rows.has(name)) rows.set(name, {value: name, label: name.replace(/[_-]/g, ' ') + (serviceChoices ? ' · Setup unavailable' : ' · Setup not yet checked'), available: false}); });
+        rows.forEach(row => {
+          const label = document.createElement('label'), choice = document.createElement('input');
+          choice.type = 'checkbox'; choice.value = row.value; choice.checked = serviceDraft.includes(row.value);
+          choice.disabled = editorPrivateLocked || (!row.available && !choice.checked); label.style.display = 'block';
+          label.append(choice, document.createTextNode(' ' + row.label)); host.append(label);
+          choice.addEventListener('change', () => {
+            serviceDraft = choice.checked ? [...serviceDraft, row.value] : serviceDraft.filter(name => name !== row.value);
+            renderServices(); host.dispatchEvent(new Event('input', {bubbles: true}));
+          });
+        });
+        document.getElementById('agent-tool-service-status').textContent = serviceChoices === null ? 'Refresh the complete draft to read current service choices.' : rows.size ? 'Your entered selections are kept when service choices refresh. Unavailable saved services can be removed.' : 'No tool services are configured. Add one in Tool servers, then refresh this draft.';
+      }
+      renderServices();
       // The target agent name: the pre-selected pack, or (new mode) the id typed
       // in. Normalized to the lowercase/underscore shape packs use.
       function targetName() {
@@ -1158,6 +1203,42 @@
         if (retainedDraftName && idInput.value.trim() === retainedDraftName) return retainedDraftName;
         return (idInput ? idInput.value : '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
       }
+      const modelOptions = {{ model_options | default([]) | tojson }};
+      const modelRoles = {{ model_roles | default([]) | tojson }};
+      let modelDraft = {{ selected.models | tojson if selected else '{}' }};
+      function modelSelect(field, value) {
+        field.replaceChildren(new Option('Use the workspace choice', ''));
+        modelOptions.forEach(([spec, label]) => field.add(new Option(label, spec)));
+        if (value && !modelOptions.some(([spec]) => spec === value)) {
+          const retained = new Option('Saved choice · ' + value.split(':').pop().replace(/[-_]/g, ' '), value); retained.disabled = true; field.add(retained);
+        }
+        field.value = value || '';
+      }
+      function applyModels(models) {
+        modelDraft = {...(models || {})};
+        modelSelect(document.getElementById('f-model'), modelDraft[targetName()]);
+        const host = document.getElementById('agent-supporting-models'); host.replaceChildren();
+        const roles = new Map(modelRoles.map(row => [row.role, row.label]));
+        Object.keys(modelDraft).forEach(role => { if (!roles.has(role)) roles.set(role, role.replace(/[_.-]/g, ' ')); });
+        let index = 0;
+        roles.forEach((label, role) => {
+          if (role === targetName()) return;
+          const row = document.createElement('div'); row.className = 'fld';
+          const title = document.createElement('label'), choice = document.createElement('select');
+          choice.id = 'f-supporting-model-' + index++; choice.className = 'input'; choice.dataset.modelRole = role;
+          title.htmlFor = choice.id; title.textContent = label; modelSelect(choice, modelDraft[role]); row.append(title, choice); host.append(row);
+        });
+      }
+      function gatherModels() {
+        const models = {...modelDraft};
+        document.querySelectorAll('#agent-supporting-models [data-model-role]').forEach(choice => {
+          if (choice.value) models[choice.dataset.modelRole] = choice.value; else delete models[choice.dataset.modelRole];
+        });
+        const role = targetName(), choice = document.getElementById('f-model').value;
+        if (role) { if (choice) models[role] = choice; else delete models[role]; }
+        return models;
+      }
+      applyModels(modelDraft);
       const words = (s) => s.split(/\s+/).filter(Boolean);
       function show(text, ok) { if (window.mvStatus) window.mvStatus(msg, text, {error: !ok}); else msg.textContent = text; msg.style.color = ok ? 'var(--accent)' : 'var(--danger)'; }
       function fieldMessage(field, text) {
@@ -1315,6 +1396,8 @@
           deny_tools: words(document.getElementById('f-deny').value),
           max_risk: document.getElementById('f-risk').value,
           workflow: gatherWorkflow(),
+          models: gatherModels(),
+          mcp_servers: [...serviceDraft],
           ...(autonomy ? { autonomy } : {}),
         };
       }
@@ -1451,11 +1534,23 @@
       let loadedDraftProfile = null;
       window.LWSpecialistDraftEditor = {
         name: targetName,
-        identify: name => { if (creating && idInput && !idInput.value.trim()) { retainedDraftName = name; idInput.value = name; idTouched = true; } },
-        get: () => ({...(loadedDraftProfile || {}), ...payload()}),
+        identify: name => { if (!editorPrivateLocked && creating && idInput && !idInput.value.trim()) { retainedDraftName = name; idInput.value = name; idTouched = true; } },
+        get: () => { if (editorPrivateLocked) throw new Error('Reopen Agent Factory after current access is restored.'); return {...(loadedDraftProfile || {}), ...payload()}; },
+        toolServices: value => { if (editorPrivateLocked || !Array.isArray(value?.choices)) return false; serviceChoices = value.choices; renderServices(); return true; },
+        clearPrivate: () => {
+          editorPrivateLocked = true; loadedDraftProfile = null; modelDraft = {}; serviceDraft = []; serviceChoices = null; retainedDraftName = ''; form.dataset.name = '';
+          document.getElementById('agent-tool-service-choices').replaceChildren(); document.getElementById('agent-tool-service-status').textContent = '';
+          form.querySelectorAll('input, textarea, select').forEach(field => { field.value = ''; if ('checked' in field) field.checked = false; });
+          document.getElementById('f-model').replaceChildren(); document.getElementById('agent-supporting-models').replaceChildren(); stepsEl.replaceChildren();
+          form.querySelectorAll('input, textarea, select, button').forEach(field => { field.disabled = true; }); form.hidden = true;
+          show('Your account, workspace or access changed. Reopen Agent Factory after access is restored.', false);
+        },
         apply: value => {
+          if (editorPrivateLocked) return false;
           if (creating && idInput) { retainedDraftName = value.name; idInput.value = value.name; idTouched = true; }
           loadedDraftProfile = structuredClone(value);
+          serviceDraft = [...(value.mcp_servers || [])]; renderServices();
+          applyModels(value.models);
           document.getElementById('f-description').value = value.description;
           document.getElementById('f-persona').value = value.persona;
           document.getElementById('f-allow').value = value.allow_tools.join(' ');

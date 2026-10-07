@@ -17,7 +17,7 @@
     document.querySelectorAll('form[action="/chat/send"], #answer-form').forEach(function (form) {
       if (form.dataset.draftReady) return;
       form.dataset.draftReady = 'true';
-      var fields = Array.from(form.querySelectorAll('[name="title"], [name="description"], [name="message"], [name="connection_references"], [name="task_model"], [name="task_effort"]'));
+      var fields = Array.from(form.querySelectorAll('[name="title"], [name="description"], [name="message"], [name="connection_references"], [name="task_model"], [name="task_effort"], [name="domain"]'));
       var sent = false;
       function read() {
         var value = {};

@@ -522,6 +522,7 @@ def _explicit_model_for_role(
     role: str,
     *,
     config: dict[str, Any] | None = None,
+    domain_models: Mapping[str, str] | None = None,
 ) -> str | None:
     """Resolve operator-pinned model authority without live routing probes.
 
@@ -542,6 +543,8 @@ def _explicit_model_for_role(
     global_override = os.environ.get("MAVERICK_MODEL_OVERRIDE")
     if global_override:
         return global_override
+    if domain_models and (selected := domain_models.get(role)):
+        return require_model_allowed(selected)
     try:
         from .config import get_role_model
 
@@ -570,7 +573,7 @@ def _explicit_model_for_role(
     return None
 
 
-def _resolve_model_for_role(role: str) -> str:
+def _resolve_model_for_role(role: str, *, domain_models: Mapping[str, str] | None = None) -> str:
     """Return the model spec for a role (may be 'provider:id' or bare id).
 
     Resolution order:
@@ -579,20 +582,21 @@ def _resolve_model_for_role(role: str) -> str:
       2. Global override `MAVERICK_MODEL_OVERRIDE` (set by the CLI's
          `maverick --model <id>` flag) -- an explicit, run-wide choice that
          beats config so the documented flag actually applies to every agent.
-      3. ``~/.maverick/config.toml`` -> ``[models]`` -> role
-      4. Dashboard role/default pin from ``runtime-overrides.toml``
-      5. Local-first router (opt-in)
-      6. Cost-aware router (opt-in: `MAVERICK_COST_ROUTING=1` or
+      3. The current specialist's explicit choice for this role
+      4. ``~/.maverick/config.toml`` -> ``[models]`` -> role
+      5. Dashboard role/default pin from ``runtime-overrides.toml``
+      6. Local-first router (opt-in)
+      7. Cost-aware router (opt-in: `MAVERICK_COST_ROUTING=1` or
          `[routing] cost_aware = true`) -- among the user's configured
          providers, the cheapest one at the role's capability tier.
-      7. ``ROLE_MODELS`` defaults, optionally energy-adjusted
-      8. ``DEFAULT_MODEL``
+      8. ``ROLE_MODELS`` defaults, optionally energy-adjusted
+      9. ``DEFAULT_MODEL``
 
-    The user's explicit choices (1-4) always win; the router only gets a
-    say when no model was pinned, and it returns None (defers to 7) unless
+    The user's explicit choices (1-5) always win; the router only gets a
+    say when no model was pinned, and it returns None (defers to 8) unless
     the operator opted in. This keeps "users own model choice" intact.
     """
-    explicit = _explicit_model_for_role(role)
+    explicit = _explicit_model_for_role(role, domain_models=domain_models)
     if explicit:
         return explicit
     # Local-first (opt-in, off by default). When [system] local_first is on and
@@ -663,6 +667,7 @@ def offline_model_for_role(
     role: str,
     *,
     config: dict[str, Any] | None = None,
+    domain_models: Mapping[str, str] | None = None,
 ) -> str:
     """Resolve the deterministic route used by offline readiness checks.
 
@@ -671,17 +676,17 @@ def offline_model_for_role(
     live cost routing, and battery state.  Those mutable probes belong to
     ``maverick doctor``; preflight must remain deterministic and network-free.
     """
-    explicit = _explicit_model_for_role(role, config=config)
+    explicit = _explicit_model_for_role(role, config=config, domain_models=domain_models)
     final = explicit or ROLE_MODELS.get(role, DEFAULT_MODEL)
     return _apply_allowed_model_policy(final)
 
 
-def model_for_role(role: str) -> str:
+def model_for_role(role: str, *, domain_models: Mapping[str, str] | None = None) -> str:
     """Resolve the live model route and enforce the admin hard allow-list."""
     from .cost.router_v3 import clear_choice
 
     clear_choice()
-    return _apply_allowed_model_policy(_resolve_model_for_role(role))
+    return _apply_allowed_model_policy(_resolve_model_for_role(role, domain_models=domain_models))
 
 
 def _capture_routing_credit(model: str):

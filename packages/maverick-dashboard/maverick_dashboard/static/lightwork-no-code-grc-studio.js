@@ -539,22 +539,30 @@
 
   // ---------- collectors and destinations to choose from ----------
   var sources = { collectors: [], destinations: [], listed: false, loaded: false };
+  function collectorKey(item) { return item.collector_id + ":" + item.collector_version + ":" + item.collector_integrity_sha256; }
+  function selectedCollector() { var key = $("grcs-collector-choice").value; return sources.collectors.find(function (item) { return collectorKey(item) === key; }); }
   async function loadSources() {
+    var current = draftGeneration;
     try {
       var payload = await request("/sources");
+      if (current !== draftGeneration) { return; }
+      if (draftContext && payload.context !== draftContext) { privateBoundary(); throw problem("Your account, workspace or access changed. Read the current evidence choices again."); }
       sources = {
         collectors: Array.isArray(payload.collectors) ? payload.collectors.filter(function (item) {
           return item && ID.test(String(item.collector_id || "")) && Number.isSafeInteger(item.collector_version) &&
-            item.collector_version > 0 && FINGERPRINT.test(String(item.collector_integrity_sha256 || ""));
+            item.collector_version > 0 && FINGERPRINT.test(String(item.collector_integrity_sha256 || "")) &&
+            typeof item.label === "string" && Array.isArray(item.outputs) && Array.isArray(item.controls);
         }) : [],
         destinations: Array.isArray(payload.destinations) ? payload.destinations.filter(function (item) {
           return item && PROJECTION_LABEL[item.target_kind] && ID.test(String(item.target_id || "")) &&
             Number.isSafeInteger(item.target_revision) && item.target_revision > 0;
         }) : [],
         listed: payload.destinations_listed === true,
-        loaded: true
+        loaded: true, notice: payload.collectors_notice || ""
       };
     } catch (error) {
+      if (current !== draftGeneration) { return; }
+      if (error && (error.status === 401 || error.status === 403)) { privateBoundary(); return; }
       sources = { collectors: [], destinations: [], listed: false, loaded: false };
     }
     fillCollectorChoices();
@@ -564,19 +572,28 @@
     var select = $("grcs-collector-choice");
     var note = $("grcs-collector-note");
     fillSelect(select, sources.collectors.map(function (item, index) {
-      return { value: String(index), label: human(item.collector_id) + " (version " + item.collector_version + ")" };
-    }), sources.collectors.length ? "Choose a collector" : "No collectors linked yet");
-    note.textContent = sources.collectors.length ? "" : (sources.loaded
-      ? "No collectors are linked in this workspace yet. Ask your administrator which collector to use, then enter it under Technical details."
-      : "The list of collectors could not be loaded. Refresh the page to try again.");
-    useCollector();
+      return { value: collectorKey(item), label: item.label + " · approved version " + item.collector_version };
+    }), sources.collectors.length ? "Choose an approved source" : "No approved sources available");
+    note.textContent = sources.notice || (sources.collectors.length ? "" : (sources.loaded
+      ? "Set up an evidence source in Continuous evidence and have a different administrator approve it. It will appear here before its first blueprint link."
+      : "Current evidence choices could not be verified. Your entered blueprint is kept; refresh the current choices before adding a link."));
+    useCollector(true);
   }
-  function useCollector() {
-    var item = sources.collectors[Number($("grcs-collector-choice").value)];
-    if ($("grcs-collector-choice").value === "" || !item) { return; }
-    $("grcs-collector-id").value = item.collector_id;
-    $("grcs-collector-version").value = String(item.collector_version);
-    $("grcs-collector-digest").value = item.collector_integrity_sha256;
+  function useCollector(keepChoices) {
+    var item = selectedCollector(), field = $("grcs-source-path"), controls = $("grcs-control-refs");
+    var kept = keepChoices === true ? Array.from(controls.querySelectorAll("input:checked")).map(function (input) { return input.value; }) : [];
+    $("grcs-collector-id").value = item ? item.collector_id : "";
+    $("grcs-collector-version").value = item ? String(item.collector_version) : "";
+    $("grcs-collector-digest").value = item ? item.collector_integrity_sha256 : "";
+    if (keepChoices !== true) { field.value = ""; }
+    fillSelect(field, item ? item.outputs.map(function (output) { return { value: output.path.join(","), label: output.label }; }) : [], "Choose a result field");
+    controls.replaceChildren(el("legend", null, "Controls this link supports"));
+    (item ? item.controls : []).forEach(function (control) {
+      var label = el("label", "grcs-check"), input = document.createElement("input");
+      input.type = "checkbox"; input.value = control.value; input.checked = kept.indexOf(control.value) >= 0;
+      label.append(input, el("span", null, control.label)); controls.appendChild(label);
+    });
+    if (!item || !item.controls.length) { controls.appendChild(el("p", "muted", item ? "This source has no supported named controls for a blueprint link." : "Choose a source first.")); }
   }
   function fillTargetChoices() {
     var select = $("grcs-projection-target");
@@ -923,7 +940,7 @@
     renderList("grcs-binding-list", composerState.collector_bindings.map(function (item, index) {
       return listItem(human(item.binding_id) + " — fills " + item.field_mappings.map(function (mapping) { return human(mapping.target_field_id); }).join(", "),
         "Remove evidence link " + human(item.binding_id), function () { composerState.collector_bindings.splice(index, 1); });
-    }), "No evidence links yet. Link a collector above to gather evidence.");
+    }), "No evidence links yet. Choose an approved source above to link its recorded results.");
     refreshSelectors();
     toggleFieldType();
     toggleActionType();
@@ -1078,22 +1095,25 @@
     var object = needObject("grcs-binding-object");
     var bindingId = slug($("grcs-binding-name").value, "the evidence link");
     var collector = String($("grcs-collector-id").value || "").trim();
-    if (!ID.test(collector)) { throw problem("Choose a collector from the list."); }
+    var source = selectedCollector();
+    if (!source || !ID.test(collector)) { throw problem("Choose a current approved source from the list."); }
     var version = Number($("grcs-collector-version").value);
-    if (!Number.isSafeInteger(version) || version < 1) { throw problem("Choose a collector from the list, or enter its version as a whole number under Technical details."); }
+    if (!Number.isSafeInteger(version) || version < 1) { throw problem("Choose a current approved source from the list."); }
     var fingerprint = String($("grcs-collector-digest").value || "").trim().toLowerCase();
-    if (!FINGERPRINT.test(fingerprint)) { throw problem("Choose a collector from the list. The details entered by hand are incomplete."); }
+    if (!FINGERPRINT.test(fingerprint)) { throw problem("The current approved source could not be verified. Refresh its choices before adding this link."); }
     var target = needField(object, "grcs-mapping-target", "the field to fill");
     var path = String($("grcs-source-path").value || "").split(",").map(function (item) { return item.trim(); }).filter(Boolean);
     if (!path.length || path.length > 16 || path.some(function (item) { return !ID.test(item); })) {
-      throw problem("Enter where the value comes from, for example: findings, severity.");
+      throw problem("Choose a result field from this source.");
     }
+    if (!source.outputs.some(function (output) { return output.path.join(",") === path.join(","); })) { throw problem("Choose a current named result field from this source."); }
     var mapping = { source_path: path, target_field_id: target.field_id, mode: $("grcs-mapping-mode").value === "append" ? "append" : "replace" };
-    var controls = listOf($("grcs-control-refs").value, "control", 512, 1);
+    var controls = Array.from($("grcs-control-refs").querySelectorAll("input:checked")).map(function (input) { return input.value; });
+    if (!controls.length || controls.some(function (control) { return !source.controls.some(function (row) { return row.value === control; }); })) { throw problem("Choose at least one supported named control."); }
     var existing = composerState.collector_bindings.find(function (item) { return item.binding_id === bindingId; });
     if (existing) {
       if (existing.object_id !== object.object_id || existing.collector_id !== collector || existing.collector_version !== version || existing.collector_integrity_sha256 !== fingerprint) {
-        throw problem("The evidence link “" + human(bindingId) + "” uses a different collector. Use a different link name.");
+        throw problem("The evidence link “" + human(bindingId) + "” uses a different source. Use a different link name.");
       }
       if (existing.field_mappings.some(function (item) { return item.target_field_id === target.field_id; })) { throw problem("This evidence link already fills “" + human(target.label_ref) + "”."); }
       existing.field_mappings.push(mapping);

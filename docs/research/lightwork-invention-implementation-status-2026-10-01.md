@@ -1,5 +1,21 @@
 # Invention register: implementation status
 
+October 7 operating follow-through: F01 release status and canary assessment
+find the selected activation's relevant retained runs beyond newer unrelated
+history, using indexed 200-record pages and canonical owner-bound checkpoint
+reads before storing a verdict. The 1,000 ceiling applies to relevant real
+terminal runs; misleading disposable previews cannot supply acceptance evidence.
+Native publication, execution, canary and restoration passed while retaining
+local rule-only support and the existing failure criteria.
+
+F04/F05's code-practice Start now binds the complete reviewed objective/rounds,
+current account/workspace/settings and deadline, checks signed authority after
+the audit wait, and uses existing encrypted task custody for exact Original
+without replay. One disabled-engine no-op established admission and lost-reply
+recovery, not actual self-improvement, evaluator evolution or a pinned future
+model. These are operating repairs; research dispositions and counts remain
+unchanged.
+
 October 7 Learning follow-through: F04/F05's ordinary model planning discards
 recommendations for obsolete choices and rechecks native current access after
 the read. Protected Copilot opens the complete existing code-practice form and

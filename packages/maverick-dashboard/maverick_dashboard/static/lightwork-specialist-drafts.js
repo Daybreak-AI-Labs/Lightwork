@@ -3,7 +3,7 @@
   const API = '/api/v1/specialist-drafts';
   const first = ['Decision', 'Complete draft', 'Currently used definition', 'AI used for answer checks'];
   const last = ['Limits and consequences', 'If the response is lost'];
-  const optional = ['Fictional sample request', 'Every saved question and passing condition', 'Publication tests', 'Reason for publishing without a complete passing check', 'Earlier unconfirmed decisions'];
+  const optional = ['Selected tool services', 'Tool-service limits', 'Fictional sample request', 'Every saved question and passing condition', 'Publication tests', 'Reason for publishing without a complete passing check', 'Earlier unconfirmed decisions'];
   function node(tag, text, parent) { const value = document.createElement(tag); if (text !== undefined) value.textContent = text; if (parent) parent.append(value); return value; }
   function display(parent, value, limits, depth) {
     if (--limits.nodes < 0 || depth > 12) throw new Error('The complete specialist review exceeds its supported display limit. Nothing can be confirmed.');
@@ -19,7 +19,7 @@
     else throw new Error('The complete specialist review contains an unsupported value.');
   }
   function renderReview(host, changes) {
-    if (!Array.isArray(changes) || changes.length < 6 || changes.length > 11 || JSON.stringify(changes).length > 1200000 ||
+    if (!Array.isArray(changes) || changes.length < 6 || changes.length > 13 || JSON.stringify(changes).length > 1200000 ||
         changes.some(row => !row || Object.keys(row).sort().join('|') !== 'after|label' || typeof row.label !== 'string') ||
         first.some((label, index) => changes[index].label !== label) || last.some((label, index) => changes[changes.length - 2 + index].label !== label) ||
         changes.slice(4, -2).some(row => !optional.includes(row.label)) || new Set(changes.map(row => row.label)).size !== changes.length) {
@@ -106,7 +106,7 @@
   const root = document.querySelector('[data-specialist-drafts]');
   if (!root) return;
   const form = document.getElementById('agent-form'), editor = () => window.LWSpecialistDraftEditor;
-  let generation = 0, state = null, busy = false, reviewed = null, pending = '', draftChanged = false;
+  let generation = 0, accessGeneration = 0, state = null, busy = false, reviewed = null, pending = '', draftChanged = false;
   const status = root.querySelector('[data-sd-status]'), review = root.querySelector('[data-sd-review]'), result = root.querySelector('[data-sd-result]');
   const draft = root.querySelector('[data-sd-draft]'), earlier = root.querySelector('[data-sd-earlier]'), originals = root.querySelector('[data-sd-original]');
   const title = root.querySelector('[data-sd-title]'), task = root.querySelector('[data-sd-task]'), reason = root.querySelector('[data-sd-reason]');
@@ -116,18 +116,19 @@
   function name() { return editor()?.name() || form?.dataset.name || ''; }
   function lock(value) { busy = value; buttons.forEach(button => { button.disabled = value || (!state && button.dataset.sdAction !== 'refresh'); }); root.setAttribute('aria-busy', String(value)); }
   function invalidate() { reviewed = null; review.replaceChildren(); }
-  function clear() { generation++; state = null; reviewed = null; pending = ''; draftChanged = false; acknowledge.checked = false; [review, result].forEach(host => host.replaceChildren()); [draft, earlier, originals].forEach(select => select.replaceChildren()); [title, task, reason].forEach(field => { field.value = ''; }); root.hidden = true; status.textContent = ''; lock(false); }
+  function clear() { generation++; accessGeneration++; editor()?.clearPrivate?.(); state = null; reviewed = null; pending = ''; draftChanged = false; acknowledge.checked = false; [review, result].forEach(host => host.replaceChildren()); [draft, earlier, originals].forEach(select => select.replaceChildren()); [title, task, reason].forEach(field => { field.value = ''; }); root.hidden = true; status.textContent = ''; lock(false); }
   async function request(path, body, expected) {
+    const currentAccess = accessGeneration;
     let response, data;
     try { response = await fetch(API + path, {method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers: body === undefined ? {} : {'Content-Type': 'application/json'}, ...(body === undefined ? {} : {body: JSON.stringify(body)})}); data = await response.json(); }
     catch (_) { throw new Error('The reply could not be confirmed. Read the original decision before submitting another request.'); }
-    if (expected !== generation) throw new Error('The current specialist view changed.');
-    if ([401, 403].includes(response.status)) { clear(); throw new Error('Your current access no longer permits this specialist view. Reopen it after access is restored.'); }
+    if ([401, 403].includes(response.status) && currentAccess === accessGeneration) { clear(); throw new Error('Your current access no longer permits this specialist view. Reopen it after access is restored.'); }
+    if (expected !== generation || currentAccess !== accessGeneration) throw new Error('The current specialist view changed.');
     if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'This specialist decision is unavailable. Your entered draft has been kept.');
     return data;
   }
   function choices(select, rows) { const selected = select.value; select.replaceChildren(); const blank = node('option', 'Choose…', select); blank.value = ''; rows.forEach(row => { const item = node('option', row.label, select); item.value = row.value; }); if (rows.some(row => row.value === selected)) select.value = selected; }
-  function useState(value) { state = value; root.hidden = false; choices(draft, value.drafts); choices(earlier, value.earlier); choices(originals, value.originals); lock(false); }
+  function useState(value) { state = value; editor()?.toolServices?.(value.tool_services); root.hidden = false; choices(draft, value.drafts); choices(earlier, value.earlier); choices(originals, value.originals); lock(false); }
   async function bootstrapDraft(current, selected) {
     if (form?.dataset.creating !== '1' || name() || draftChanged || !/^SPD-[a-f0-9]{32}$/.test(selected || '')) return null;
     const saved = await request('/drafts/' + encodeURIComponent(selected), undefined, current);
@@ -212,7 +213,7 @@
     if (['publish', 'restore'].includes(action) && !selected) { status.textContent = 'Choose a named retained version first.'; return; }
     await submitReview(action, selected);
   }));
-  form?.addEventListener('input', () => { draftChanged = true; if (reviewed) { generation++; invalidate(); lock(false); status.textContent = 'The entered draft changed. Review it again before confirming.'; } });
+  form?.addEventListener('input', () => { draftChanged = true; if (reviewed || busy) { generation++; invalidate(); lock(false); status.textContent = 'The entered draft changed. Review it again before confirming.'; } });
   [draft, earlier, title, task, reason, acknowledge].forEach(field => field.addEventListener('input', () => { generation++; invalidate(); lock(false); }));
   originals.addEventListener('change', () => readOriginal(originals.value)); readButton.addEventListener('click', () => readOriginal(pending));
   openAuthor = async (value, options = {}) => {

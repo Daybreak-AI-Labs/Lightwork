@@ -88,6 +88,7 @@ class AgentOverrideIn(BaseModel):
     max_risk: str | None = None
     knowledge_sources: list[str] | None = None
     models: dict[str, str] | None = None
+    mcp_servers: list[str] | None = Field(default=None, max_length=5000)
     workflow: list[WorkflowStepIn] | None = None
     compartment: str | None = None
     extends: str | None = None

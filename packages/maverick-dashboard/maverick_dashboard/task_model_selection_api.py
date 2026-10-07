@@ -76,8 +76,15 @@ def effect_guard(request, value, context):
 def read_choices(request: Request, response: Response):
     context = context_for(request)
     rows = choices(request)
+    defaults = {"model": "", "effort": ""}
+    principal = auth.caller_principal(request)
+    from maverick import experience_preferences as preferences
+    if principal and preferences.enabled():
+        values = preferences.state(principal)["values"]
+        defaults = {"model": values["chat_model"], "effort": values["chat_effort"]}
+    current_authority(request)
     if context_for(request) != context:
         raise HTTPException(409, "Account or workspace changed while AI choices were read.")
     response.headers["Cache-Control"] = "private, no-store"
-    return {"context": context, "models": rows,
+    return {"context": context, "models": rows, "personal_default": defaults,
             "notice": "This choice is for this task. Some specialists have their own AI settings. Workspace-approved backups, spending limits and required approvals still apply."}

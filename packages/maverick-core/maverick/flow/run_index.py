@@ -38,6 +38,7 @@ CREATE INDEX IF NOT EXISTS runs_flow ON runs(flow_id, updated DESC, run_id DESC)
 CREATE INDEX IF NOT EXISTS runs_active ON runs(flow_id, status);
 CREATE INDEX IF NOT EXISTS runs_due ON runs(status, resume_at, run_id);
 CREATE INDEX IF NOT EXISTS runs_idem ON runs(flow_id, idem_key, owner, release_id);
+CREATE INDEX IF NOT EXISTS runs_release ON runs(flow_id, owner, release_id, updated DESC, run_id DESC);
 """
 
 
@@ -173,9 +174,10 @@ def rebuild(root: Path) -> None:
 
 
 def query(root: Path, *, flow_id=None, owner=None, statuses=None, due_before=None,
-          limit=50, cursor=None, idem_key=None) -> list[dict]:
+          limit=50, cursor=None, idem_key=None, release_id=None) -> list[dict]:
     clauses, args = [], []
-    for column, value in (("flow_id", flow_id), ("owner", owner), ("idem_key", idem_key)):
+    for column, value in (("flow_id", flow_id), ("owner", owner), ("idem_key", idem_key),
+                          ("release_id", release_id)):
         if value is not None:
             clauses.append(column + "=?")
             args.append(value)

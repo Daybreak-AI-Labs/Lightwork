@@ -205,11 +205,11 @@ def overlay_toml(patch: dict) -> str:
     for k in _ARRAY_KEYS:
         if k in patch:
             lines.append(f"{k} = {json.dumps(list(patch[k]))}")
-    if patch.get("models"):
+    if "models" in patch:
         lines.append("")
         lines.append("[models]")
         for role, model in dict(patch["models"]).items():
-            lines.append(f"{role} = {json.dumps(model)}")
+            lines.append(f"{json.dumps(role)} = {json.dumps(model)}")
     if patch.get("autonomy"):
         lines.append("")
         lines.append("[autonomy]")
@@ -472,6 +472,7 @@ def _resolved_view(name: str, directory: str | Path | None = None) -> dict | Non
         "max_risk": prof.max_risk,
         "base_max_risk": base.max_risk if base else None,
         "knowledge_sources": list(prof.knowledge_sources),
+        "mcp_servers": list(prof.mcp_servers),
         "models": dict(prof.models),
         "workflow": [_step_dict(s) for s in prof.workflow],
         "output": _output_dict(prof.output),

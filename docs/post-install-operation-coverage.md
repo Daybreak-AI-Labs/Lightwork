@@ -1,5 +1,175 @@
 # Post-install operation coverage
 
+October 7 UX518: actual Learning threads now register with the existing
+dashboard shutdown supervisor. Shutdown closes new admission, requests existing
+safe-point/Budget stops and joins those threads within one deadline. A launch
+held across shutdown cannot start after a reopen. Restart is refused while a
+prior thread remains alive. A noncancellable worker retains its actual running
+record, custody and original readback; shutdown never marks it finished.
+
+The native encrypted fixture qualified cooperative drain, closed admission,
+noncooperative timeout and degraded supervision, restart refusal then clean
+reopen, and a retained late admission marked not started with zero executions.
+No AI or external call was made. The deadline covers the currently installed
+nonblocking cancellation hooks and thread joins, not arbitrary caller-defined
+callbacks or forced thread termination.
+
+October 7 UX658 specialist default: encrypted personal Preferences and typed
+Copilot can select a named current published specialist. Untouched new Chat and
+task forms prefill that name; explicit handoffs, deliberate blank choices and
+restored drafts take precedence. Unavailable saved names remain visible and
+require a deliberate repair. Review binds the current published definition,
+and native authority/source checks run after encryption before the existing
+atomic preference writer. The latest exact Original remains historical even
+after publication withdrawal; mismatched review metadata stays unconfirmed.
+
+One actual specialist-default save with a lost reply recovered without replay;
+a second harmless reviewed name save occurred in the same fixture. Another
+user had no default and could not read the owner's Original. Publication change
+at the physical writer refused replacement. Current typed review/cancel and
+ordinary blank-choice Unicode draft restoration passed without starting work.
+Deferred production confirmation also refused changed draft/private context
+with zero requests. This completes the model/specialist-default portions with
+the existing answer-style controls; it does not publish a specialist or pin
+future execution to a saved edition.
+
+October 7 published-specialist work: ordinary Chat can choose a currently
+published specialist by name. Agent Factory opens that selection separately
+from its unpublished edits. Typed Copilot reviews the complete published
+definition before using the existing native task admission path. Explicit task
+AI choices are preserved. Native current publication, suite permissions and
+account/workspace checks run at admission and dispatch claim. Chat's exact
+sealed submission retains the selection through uploads, companion preparation
+and original recovery. Its saved draft retains the selected name while binding
+the current available revision on restoration.
+
+Actual ordinary and typed admissions retained two fictional tasks and reached
+two isolated physical worker boundaries; exact typed replay created no second
+task. Source withdrawal during staging refused admission. Withdrawal during
+companion preparation kept one original draft and prevented its dispatch and
+obsolete recovery. Genuine role withdrawal refused further admission. A fresh
+read-only Agent Factory handoff passed with a different personal default,
+explicit blank selection and unavailable-source refusal. No provider, selected
+tool or knowledge retrieval was executed. Work uses published settings when
+execution begins; there is no future version pin. The unpublished Try remains
+an answer-only check, not a full unpublished-specialist execution.
+
+October 7 shorthand review follow-through: learning and measurement capture
+the sample count and counting method before confirmation. A changed count,
+method, account or workspace event invalidates the open review while keeping
+the entered choices. Token-code learning checks both confirmation waits;
+unchanged confirmation submits the exact captured body. The finite production
+request-builder qualification passed all three refusal paths with no native
+write or provider call. It does not extend native admission or demonstrate
+token savings on customer work.
+
+October 7 UX644 connected services: the complete specialist editor and typed
+Copilot can select named configured services, review the complete definition,
+save it and publish it separately. New specialist bindings use only the exact
+selected, enabled services connected in the current workspace. Parent access,
+explicit denials and the existing high-risk tool defaults still apply. An
+empty allow list retains its existing inheritance rules. Current source checks
+run at native HTTP send admission and after the local transport lock; invalid
+configuration or a withdrawn source refuses the binding. Selection does not
+automatically connect a service or prove that an external service works.
+
+Actual ordinary and Copilot saves, separate publication, pure Original reads,
+source withdrawal, complete private clearing and the final 320-pixel form
+passed. The real native agent registry performed one fictional local transport
+write; source withdrawal after its lock prevented another. Parent inheritance
+and the legal read fallback remained intact. No provider or external call was
+made. Existing inherited/manual grants keep their original rules; no in-flight
+cancellation or live connection acceptance is established by this witness.
+
+October 7 UX658 model defaults: a person's encrypted Preferences can select a
+named permitted Chat model and its supported thinking depth. Copilot reviews
+the same changes, including any required depth reset. An untouched new composer
+prefills these choices once; explicit workspace choices, restored drafts and
+newer selections win. A retired choice remains visibly unavailable instead of
+being silently substituted. Native authority, scope, exact prior revision and
+current model/depth availability are checked after the writer waits.
+
+One ordinary encrypted Save with a lost reply recovered through exact Original
+without a second write, keeping a newer Unicode draft. Current role and model
+policy withdrawal at the native writer refused further writes; another user's
+default was blank and could not read the owner's Original. New Chat, explicit
+reset, delayed refresh, Copilot review, 320-pixel layout and private clearing
+passed without task submission or model calls. Original confirms only the
+latest save per scope; older requests remain unconfirmed. The default-specialist
+portion is separately qualified above.
+
+October 7 UX644 model follow-through: the complete specialist editor offers
+named AI choices for the specialist and its supporting parts. Typed Copilot
+Save can change one part while preserving the complete remaining definition.
+Ordinary reviewed saves and answer checks resolve the complete entered model
+map; changed choices use the current permitted-model policy. Actual profile
+spawns receive a private model map, and ordinary supporting agents inherit a
+copy. A selected specialist, including an explicitly empty map, replaces its
+parent's map. Explicit task and installation choices retain their documented
+priority; an explicit profile choice does not silently start on a cheaper
+cascade. Retained custom role names round-trip as quoted keys, and clearing all
+choices writes an empty map instead of silently retaining inherited choices.
+The complete review is discarded after a newer choice. Confirmed current
+access withdrawal clears and locks the complete private editor, including its
+retained model/profile data; a late apply cannot restore those controls.
+Actual native Save, typed Copilot Save, publication and exact earlier-map
+restoration passed in a fictional signed installation, with no model calls.
+A later permitted-model policy change refused confirmation; a fresh final
+template/controller page qualified complete access clearing and the 390-pixel
+phone layout without repeating those four retained decisions.
+This is model selection and governed authoring support, not evidence of better
+answers, provider acceptance or successful delegated execution.
+
+October 7 UX610 follow-through: Studio's first automatic evidence source can be
+chosen from the actual currently approved installed definitions before any
+blueprint exists. Named result fields and controls replace manual collector
+identifiers, versions, fingerprints and source locations. The product retains
+those exact native bindings, with complete ordinary review and protected Copilot
+handoff. Current source/control editions and signed authority are rechecked
+through the actual native writer's final guard; Original remains a historical
+owned read. Existing custom-adapter declarations retain their native contract
+but are not presented as verified installed choices.
+
+One ordinary first-source Save with a lost reply recovered the exact native
+version through pure Original, with one writer call. Actual role and source
+withdrawal after the native transaction began refused another version. Complete
+review, Keep editing, current refresh, preserved newer work, protected Copilot,
+private clearing and the 320-pixel form passed. No collector worker, provider
+transport or blueprint publication was used by this setup witness.
+
+October 7 practice admission follow-through: the ordinary objective and round
+count receive a complete native review with the current model and spending
+limit. A protected review binds that exact body, actor, workspace, settings and
+deadline; the confirmation refuses a newer or cleared draft. Native admission
+rechecks current signed authority after its awaited audit and under the existing
+authority fence. The caller's native task reference is retained before Start.
+Original reads that exact owned encrypted task without another admission,
+including after the review expires or current practice settings change.
+
+Actual stale body/settings/deadline and current role/session refusals admitted
+no task. One ordinary Start with a lost reply retained one native task; the
+disabled practice engine returned no work and spent nothing. Pure Original,
+page reload, a repeated matching token and protected Copilot opening preserved
+the newer draft and made no second admission. The model is a current review
+snapshot, not an exact future routing pin. Existing bounded task retention and
+cooperative-writer fencing remain the custody boundary; no code improvement or
+answer-quality result is established by this no-op witness.
+
+F01 release observation follow-through: status and canary assessments now select
+the release's own runs through an indexed, owner-bound query and 200-record
+keyset pages. Each selected record is read from the canonical native checkpoint
+and rechecked for flow, owner, release, terminal state and real execution before
+it can enter a stored verdict. The limit applies to the latest 1,000 relevant
+real terminal observations. A newer unrelated prefix no longer hides a relevant
+run, and disposable index previews cannot supply a saved canary verdict.
+
+One native publication, real rule execution, canary and restoration journey
+found the relevant run behind 1,001 newer unrelated records, with no unrelated
+result hydration. Complete-record verdict equivalence, misleading preview,
+owner/source/tenant refusal, ordering and exclusions passed. This preserves the
+existing local rule-only release boundary and failure criteria; it does not
+add connected actions, shared release storage or measured answer improvement.
+
 October 7 Learning continuity follow-through: model recommendations bind the
 exact selected role, resources and current account/workspace. Older replies are
 discarded when those choices or their offered options change. Native planning

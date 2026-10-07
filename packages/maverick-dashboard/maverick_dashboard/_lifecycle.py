@@ -183,6 +183,10 @@ class ShutdownSupervisor:
 
 
 def register_main_components(app, supervisor):
+    from . import learning_jobs
+
+    learning_jobs.open_admission()
+    supervisor.register("learning_jobs", learning_jobs.stop, learning_jobs.workers_alive)
     entries = [
         ("automation", "automation_queue", "stop", "_worker_threads"),
         ("orphan_recovery", "orphan_sweeper", "stop_orphan_sweeper", "_sweeper_thread"),

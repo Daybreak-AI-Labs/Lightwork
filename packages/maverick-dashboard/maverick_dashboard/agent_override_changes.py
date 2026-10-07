@@ -16,7 +16,7 @@ from maverick.governed_records import GovernedRecordStore
 from . import tools_ops_api
 from .auth import caller_principal, caller_suites, is_dashboard_admin, require_permission
 from .draft_api import context_for
-from .plain_labels import AGENT_ROLES, EFFORT_LABELS, agent_role_title, capability_label
+from .plain_labels import EFFORT_LABELS, agent_role_title, capability_label, model_label
 
 PAGE = "/agents#agent-override-change"
 TTL = 600
@@ -130,9 +130,10 @@ def _readable(value, kind):
     if kind in {"output", "autonomy"}:
         return _details(value, NESTED_LABELS[kind], kind)
     if kind == "models":
-        if not isinstance(value, dict) or not set(value) <= set(AGENT_ROLES):
-            raise HTTPException(409, "This definition includes an unsupported AI role. Nothing was changed.")
-        return [{"Role": agent_role_title(key), "AI choice": child} for key, child in value.items()]
+        if not isinstance(value, dict) or any(not isinstance(key, str) or not key.strip()
+                or not isinstance(child, str) or not child.strip() for key, child in value.items()):
+            raise HTTPException(409, "The complete saved AI choices cannot be read safely. Nothing was changed.")
+        return [{"Part": agent_role_title(key).replace(".", " ").replace("-", " "), "AI choice": model_label(child)} for key, child in value.items()]
     if kind == "autonomy_value":
         if isinstance(value, dict):
             return _details(value, NESTED_LABELS["autonomy"], "autonomy")

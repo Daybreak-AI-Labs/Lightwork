@@ -5,7 +5,7 @@
     var form = host.closest('form'), model = host.querySelector('[name="task_model"]');
     var effort = host.querySelector('[name="task_effort"]'), context = host.querySelector('[name="task_model_context"]');
     var status = host.querySelector('[role="status"]'), refresh = host.querySelector('button');
-    var generation = 0, rows = [], initial = true, locked = false, composerState = { asking: false, running: true };
+    var generation = 0, rows = [], initial = true, choiceRevision = 0, locked = false, composerState = { asking: false, running: true };
     if (!form || !model || !effort || !context) return;
     // The expanded choices get their own row; keep the message editor usable.
     if (form.id === 'answer-form') form.style.flexWrap = 'wrap';
@@ -20,10 +20,11 @@
       }
       effort.value = old;
       effort.disabled = locked || !row || (!row.efforts.length && !old);
-      if (model.value && (!row || !row.efforts.length)) status.textContent = 'Thinking depth is not adjustable for this model. Its normal settings still apply.';
+      if (model.value && !row) status.textContent = 'Your previous model choice is kept. Choose an available model before starting.';
+      else if (model.value && !row.efforts.length) status.textContent = 'Thinking depth is not adjustable for this model. Its normal settings still apply.';
     }
     async function load() {
-      var current = ++generation, previous = [model.value, effort.value]; refresh.disabled = true;
+      var current = ++generation, previous = [model.value, effort.value], readRevision = choiceRevision; refresh.disabled = true;
       try {
         var response = await fetch('/api/v1/chat/task-model-choices', { credentials: 'same-origin', cache: 'no-store' });
         var value = await response.json();
@@ -33,11 +34,15 @@
         }
         if (!response.ok || !value || !/^[a-f0-9]{64}$/.test(value.context) || !Array.isArray(value.models)) throw new Error(typeof value.detail === 'string' ? value.detail : 'AI choices could not be read. Your message is still here.');
         if (current !== generation) return;
+        if (readRevision !== choiceRevision) previous = [model.value, effort.value];
         if (context.value && context.value !== value.context) {
           rows = []; context.value = ''; model.replaceChildren(option('', 'Use workspace settings')); effort.replaceChildren(option('', 'Use the model’s usual thinking depth'));
           model.disabled = effort.disabled = true; status.textContent = 'Your account or workspace changed. Reopen Chat before choosing a model.'; return;
         }
         rows = value.models; context.value = value.context;
+        if (initial && readRevision === choiceRevision && !choiceRevision && !previous[0] && !previous[1] && value.personal_default) {
+          previous = [value.personal_default.model || '', value.personal_default.effort || ''];
+        }
         model.replaceChildren(option('', 'Use workspace settings'));
         rows.forEach(function (item) { model.append(option(item.value, item.label)); });
         if (previous[0] && !rows.some(function (item) { return item.value === previous[0]; })) {
@@ -52,8 +57,12 @@
         if (current === generation) { status.textContent = error.message; if (!context.value) { model.disabled = effort.disabled = true; } }
       } finally { if (current === generation) refresh.disabled = false; }
     }
-    model.addEventListener('change', function () { effort.value = ''; sync(); });
-    form.addEventListener('lightwork:task-model-restored', function () { sync(); });
+    model.addEventListener('change', function () { choiceRevision += 1; initial = false; effort.value = ''; sync(); });
+    effort.addEventListener('change', function () { choiceRevision += 1; initial = false; });
+    form.addEventListener('lightwork:task-model-restored', function () { choiceRevision += 1; initial = false; sync(); });
+    function privateBoundary() { generation += 1; choiceRevision += 1; initial = false; rows = []; context.value = ''; model.replaceChildren(option('', 'Use workspace settings')); effort.replaceChildren(option('', 'Use the model’s usual thinking depth')); model.disabled = effort.disabled = true; status.textContent = 'Your account or workspace changed. Reopen Chat before choosing a model.'; }
+    window.addEventListener('lightwork:copilot-context-changed', privateBoundary);
+    document.addEventListener('lightwork:account-context-changed', privateBoundary);
     refresh.addEventListener('click', load);
     // Guidance and answers to a running question do not replace the running
     // task's AI settings. Pending tasks keep their own exact saved choice.

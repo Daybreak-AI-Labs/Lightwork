@@ -34,6 +34,25 @@ def context(request):
 
 
 def authority(request, expected=None, *, write=False):
+    with auth.fresh_configuration():
+        return _current_authority(request, expected, write=write)
+
+
+def _current_authority(request, expected=None, *, write=False):
+    # Refresh named session claims before checking a retained review or a
+    # physical writer callback; its earlier request may have waited on a lock.
+    principal = getattr(request.state, "principal", None)
+    via = (getattr(principal, "claims", None) or {}).get("via")
+    refresh = {"session": auth._session_principal, "invite": auth._invite_session_principal,
+               "proxy": auth._proxy_principal}.get(via)
+    if refresh is not None:
+        fresh = refresh(request)
+        if fresh is None or fresh.principal != principal.principal:
+            raise HTTPException(401, "Sign in again before reviewing or saving this blueprint.")
+        request.state.principal = principal = fresh
+    if principal is not None:
+        auth._enforce_scim_active(principal)
+        auth._enforce_workspace_policies(request, principal)
     auth.require_permission(request, "operate")
     current = context(request)
     if expected is not None and current != expected:
@@ -117,7 +136,29 @@ VALUES = {"single_choice": "Pick one", "multi_choice": "Pick several", "boolean"
     "contains": "includes", "is_set": "is answered", "set_value": "Set an answer", "require_evidence": "Require evidence"}
 
 
-def _fields(blueprint):
+def _fields(blueprint, sources=()):
+    # Human labels are a review projection only. The sealed request and writer
+    # keep the exact native definition, field paths and control identities.
+    projected = dict(blueprint)
+    if "collector_bindings" in blueprint:
+        projected["collector_bindings"] = []
+    for original in blueprint.get("collector_bindings", ()):
+        source = next((row for row in sources if row["collector_id"] == original["collector_id"] and
+                       row["collector_version"] == original["collector_version"] and
+                       row["collector_integrity_sha256"] == original["collector_integrity_sha256"]), None)
+        item = dict(original)
+        if source:
+            item["collector_id"] = source["label"]
+            controls = {row["value"]: row["label"] for row in source["controls"]}
+            item["control_refs"] = [controls.get(value, value) for value in original["control_refs"]]
+            item["field_mappings"] = [{**mapping, "source_path": [next((row["label"] for row in source["outputs"]
+                                      if row["path"] == mapping["source_path"]), ", ".join(mapping["source_path"]))]}
+                                      for mapping in original["field_mappings"]]
+        projected["collector_bindings"].append(item)
+    return _project_fields(projected)
+
+
+def _project_fields(blueprint):
     result = {}
     def visit(value, path, technical=False, literal=False):
         if isinstance(value, dict):
@@ -162,10 +203,11 @@ def prepare(request, kind, studio, body, expected):
         inputs["version"] = version
     elif inputs["expected_latest_version"]:
         before = call(lambda: selected.get_version(tenant, studio, inputs["expected_latest_version"]))
+    sources = native.validate_collector_bindings(request, normalized, before.blueprint if before else None)
     value = {"kind": kind, "studio": studio, "inputs": inputs, "tenant": tenant, "actor": actor,
         "context": current, "source": _source(request, selected), "before": before.integrity_sha256 if before else None,
         "deadline": time.time() + TTL}
-    changes = review_rows(before.blueprint if before else {}, normalized)
+    changes = review_rows(before.blueprint if before else {}, normalized, sources)
     if before:
         changes[0]["before"] = _human(before.blueprint["name_ref"]) + " / version " + str(before.version) + " / recorded change " + str(before.revision) + " / " + _human(before.state)
     changes[0]["after"] = ("Create version " + str(inputs["expected_latest_version"] + 1) if kind == "create" else "Update draft version " + str(version)) + ". " + NOTICE
@@ -173,8 +215,8 @@ def prepare(request, kind, studio, body, expected):
     return value, changes
 
 
-def review_rows(before, after):
-    left, right = _fields(before), _fields(after)
+def review_rows(before, after, sources=()):
+    left, right = _fields(before, sources), _fields(after, sources)
     rows = [{"label": "Save effect", "before": "Current saved blueprint" if before else "No saved blueprint",
              "after": NOTICE}]
     for path in dict.fromkeys([*left, *right]):
@@ -224,6 +266,7 @@ def _guard(request, value, selected):
         before = selected.get_version(tenant, value["studio"], version)
         if before.integrity_sha256 != value["before"]:
             raise HTTPException(409, "The saved blueprint changed after your full review. Your entered work is kept; review it against the current saved version.")
+    native.validate_collector_bindings(request, value["inputs"]["blueprint"], before.blueprint if version else None)
 
 
 def apply(request, value, operation):
@@ -251,10 +294,13 @@ def legacy_save(request, selected, kind, tenant, studio, inputs, expected_contex
     with authority_effect_fence():
         authority(request, expected_context, write=True)
         source = _source(request, selected)
+        prior_version = version if kind == "replace" else inputs.get("expected_latest_version", 0)
+        previous = selected.get_version(tenant, studio, prior_version).blueprint if prior_version else None
         def guard():
             authority(request, expected_context, write=True)
             if _source(request, selected) != source:
                 raise HTTPException(409, "Studio setup changed during draft admission. No draft was saved.")
+            native.validate_collector_bindings(request, inputs["blueprint"], previous)
         if kind == "create":
             return selected.create_version(tenant, studio, **inputs, before_write=guard)
         return selected.replace_draft(tenant, studio, version, **inputs, before_write=guard)

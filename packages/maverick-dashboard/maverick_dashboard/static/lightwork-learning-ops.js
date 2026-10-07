@@ -194,14 +194,15 @@
   }
 
   // ---- practise changes to its own code -------------------------------------------
-  var smGeneration = 0, smLocked = false;
+  var smGeneration = 0, smLocked = false, smBusy = false, smCurrent = null, smHeld = null, smPending = false, smReader = null;
   function lockCodePractice() {
-    smGeneration++; smLocked = true;
+    smGeneration++; smLocked = true; smCurrent = null;
     var form = $('lo-sm-form');
     if (form) Array.from(form.elements).forEach(function (field) { if ('value' in field && field.tagName !== 'BUTTON') field.value = ''; field.disabled = true; });
     if (form) delete form.dataset.limit;
     ['lo-sm-state', 'lo-sm-results', 'lo-sm-out'].forEach(function (id) { if ($(id)) fill(id, []); });
     if ($('lo-sm-status')) $('lo-sm-status').textContent = 'Your account, workspace or access changed. Reload Learning before reviewing practice work.';
+    if (smReader) smReader.disabled = true;
   }
   function practiceStamp() { return JSON.stringify([$('lo-sm-objective')?.value, $('lo-sm-cycles')?.value]); }
   function loadModify() {
@@ -209,6 +210,7 @@
     var started = smGeneration;
     return Promise.all([J.request(LO + '/self-modify').then(function (d) {
       if (smLocked || started !== smGeneration) return false;
+      smCurrent = d;
       var nodes = [];
       var badge = el('span', 'badge' + (d.state === 'ready' ? ' active' : ''), d.state === 'ready' ? 'On and ready' : (d.state === 'blocked' ? 'On, but something is blocking it' : 'Off'));
       var head = el('p');
@@ -223,6 +225,13 @@
       fill('lo-sm-state', nodes);
       var form = $('lo-sm-form');
       if (form) form.dataset.limit = d.spending_limit != null ? String(d.spending_limit) : '';
+      if (!smHeld) {
+        try { var held = JSON.parse(sessionStorage.getItem('lightwork.code-practice.original.' + d.context) || 'null');
+          if (held && /^[a-f0-9]{16}$/.test(held.id) && held.context === d.context) { smHeld = held; smPending = true; }
+        } catch (_) { /* an unavailable browser record does not imply a failed task */ }
+      }
+      if (smReader) smReader.disabled = smBusy || !smHeld;
+      if ($('lo-sm-run')) $('lo-sm-run').disabled = smBusy || smPending;
       return true;
     }).catch(async function (failure) {
       if (smLocked || started !== smGeneration) return false;
@@ -249,9 +258,49 @@
     })]).then(function (results) { return !smLocked && started === smGeneration && results.every(Boolean); });
   }
   var smForm = $('lo-sm-form');
+  function practiceResult(d) {
+    var out = [], rounds = Array.isArray(d.rounds) ? d.rounds : [];
+    if (!d.ran) out.push(el('p', null, d.problem || 'The experiment did not report a completed practice run. Read its original result before deciding what to do next.'));
+    else out.push(el('p', null, 'Tested ' + plural(d.tested, 'change') + ' across ' + plural(rounds.length, 'round') + '. Spent ' + J.money(d.spent) + '.'));
+    if (rounds.length) out.push(J.technical(rounds.map(function (r, i) {
+      return 'Round ' + (i + 1) + ': ' + r.ideas + ' idea(s), ' + r.tested + ' tested' + (r.note ? ' — ' + r.note : '');
+    })));
+    return out;
+  }
+  function keepPracticeOriginal(id, context) {
+    smHeld = {id:id, context:context}; smPending = true;
+    try { sessionStorage.setItem('lightwork.code-practice.original.' + context, JSON.stringify(smHeld)); } catch (_) { /* the visible reader remains available */ }
+    if (smReader) smReader.disabled = smBusy;
+  }
+  async function readPracticeOriginal() {
+    if (smLocked || smBusy || !smHeld) return;
+    var started = smGeneration; smBusy = true; smReader.disabled = true; $('lo-sm-run').disabled = true;
+    try {
+      var original = await J.request(LO + '/self-modify/original/' + encodeURIComponent(smHeld.id));
+      if (smLocked || started !== smGeneration || original.context !== smHeld.context) return;
+      var job = await J.follow(original.job, ui('lo-sm', 'read the original practice task', practiceResult));
+      if (smLocked || started !== smGeneration) return;
+      if (job) {
+        smPending = false;
+        var review = el('details'); review.append(el('summary', null, 'What this original task was asked to do'),
+          el('p', null, original.review.objective), el('p', null, plural(original.review.cycles, 'practice round') + '. Model shown when reviewed: ' + original.review.model + '.'));
+        $('lo-sm-out').append(review);
+      }
+    } catch (failure) {
+      if (started !== smGeneration || smLocked) return;
+      if ([401,403].includes(failure.status)) { lockCodePractice(); return; }
+      $('lo-sm-status').textContent = await J.problem(failure, 'read the original practice task') + ' No work was repeated. An unavailable original does not prove the work failed.';
+    } finally {
+      smBusy = false; smReader.disabled = smLocked || !smHeld; $('lo-sm-run').disabled = smLocked || smPending;
+    }
+  }
+  if (smForm) {
+    smReader = el('button', 'btn btn--ghost', 'Read original practice task'); smReader.type = 'button'; smReader.disabled = true;
+    smForm.insertAdjacentElement('afterend', smReader); smReader.addEventListener('click', readPracticeOriginal);
+  }
   window.LightworkLearningOps = {
     openCodePractice: async function (context, isCurrent) {
-      if (!smForm || !admin || smLocked || $('lo-sm-run').disabled || !/^[a-f0-9]{64}$/.test(context) ||
+      if (!smForm || !admin || smLocked || smBusy || !/^[a-f0-9]{64}$/.test(context) ||
           typeof isCurrent !== 'function' || !isCurrent()) return false;
       var started = smGeneration, entered = practiceStamp();
       try {
@@ -276,28 +325,40 @@
   };
   if (smForm) smForm.addEventListener('submit', async function (ev) {
     ev.preventDefault();
-    if (smLocked) return;
-    var objective = $('lo-sm-objective').value.trim();
+    if (smLocked || smBusy || smPending || !smCurrent) return;
+    var objective = $('lo-sm-objective').value;
     if (objective.length < 10) { $('lo-sm-status').textContent = 'Describe what it should try to improve, in a sentence.'; return; }
     var cycles = Number($('lo-sm-cycles').value);
-    var limit = smForm.dataset.limit;
-    var cost = limit ? ' It can spend up to ' + J.money(Number(limit)) + '.' : '';
-    if (!(await window.mvConfirm('Start ' + plural(cycles, 'practice round') + '? Lightwork writes changes to a copy of its own code, tests them in the practice area and keeps the results for review. Nothing is installed.' + cost,
-      { okText: 'Start rounds' }))) return;
-    var btn = $('lo-sm-run');
-    btn.disabled = true;
-    var job = await J.run(LO + '/self-modify/run', { method: 'POST', json: { objective: objective, cycles: cycles, confirm: true } },
-      ui('lo-sm', 'start the practice rounds', function (d) {
-        var out = [];
-        if (!d.ran) out.push(el('p', null, d.problem || 'The experiment could not run. Nothing was changed. Try again.'));
-        else out.push(el('p', null, 'Tested ' + plural(d.tested, 'change') + ' across ' + plural(d.rounds.length, 'round') + '. Spent ' + J.money(d.spent) + '.'));
-        if (d.rounds.length) out.push(J.technical(d.rounds.map(function (r, i) {
-          return 'Round ' + (i + 1) + ': ' + r.ideas + ' idea(s), ' + r.tested + ' tested' + (r.note ? ' — ' + r.note : '');
-        })));
-        return out;
-      }));
-    btn.disabled = smLocked;
-    if (job) loadModify();
+    var started = smGeneration, entered = practiceStamp(), current = smCurrent;
+    var body = {objective:objective, cycles:cycles, context:current.context, revision:current.revision};
+    var btn = $('lo-sm-run'); smBusy = true; btn.disabled = true; smReader.disabled = true;
+    try {
+      var reviewed = await J.request(LO + '/self-modify/review', {method:'POST', json:body});
+      if (smLocked || started !== smGeneration) return;
+      if (practiceStamp() !== entered) { $('lo-sm-status').textContent = 'Your newer objective or rounds were kept. Review them again before starting.'; return; }
+      var limit = reviewed.review.spending_limit;
+      var cost = limit != null ? ' It can spend up to ' + J.money(limit) + '.' : ' The current task spending limits apply.';
+      if (!await window.mvConfirm('Start ' + plural(cycles, 'practice round') + '? Current model: ' + reviewed.review.model + '.\n\n' + objective +
+        '\n\nLightwork writes changes to a copy of its own code, tests them in the practice area and keeps the results for review. Nothing is installed.' + cost,
+        {okText:'Start rounds'})) return;
+      if (smLocked || started !== smGeneration) return;
+      if (practiceStamp() !== entered) { $('lo-sm-status').textContent = 'Your newer objective or rounds were kept. Review them again before starting.'; return; }
+      keepPracticeOriginal(reviewed.job_id, current.context);
+      $('lo-sm-status').textContent = 'Starting this reviewed task. Its original can be read here even if the reply is interrupted.';
+      var reply = await J.request(LO + '/self-modify/run', {method:'POST', json:{...body, token:reviewed.token, confirm:true}});
+      if (smLocked || started !== smGeneration) return;
+      var job = await J.follow(reply.job, ui('lo-sm', 'start the practice rounds', practiceResult));
+      if (smLocked || started !== smGeneration) return;
+      if (job) { smPending = false; void loadModify(); }
+    } catch (failure) {
+      if (smLocked || started !== smGeneration) return;
+      if ([401,403].includes(failure.status)) { lockCodePractice(); return; }
+      var message = window.mvPlainDetail ? window.mvPlainDetail(failure.detail) : '';
+      $('lo-sm-status').textContent = (message || 'The practice task reply could not be confirmed.') +
+        (smPending ? ' Read the original task before deciding what to do next. Work is never repeated automatically.' : ' Your objective and rounds were kept.');
+    } finally {
+      smBusy = false; btn.disabled = smLocked || smPending; smReader.disabled = smLocked || !smHeld;
+    }
   });
 
   // ---- plan a specialist model ------------------------------------------------------
@@ -469,24 +530,40 @@
       fill('lo-cd-state', el('p', null, await J.problem(failure, 'load the shorthand')));
     });
   }
+  var codecGeneration = 0;
   function codecBody() { return { how_many: Number($('lo-cd-count').value), exact: $('lo-cd-exact').value === '1' }; }
+  function codecChanged(event) { if (event.detail?.reason !== 'selection') codecGeneration++; }
+  ['lo-cd-count', 'lo-cd-exact'].forEach(function (id) {
+    $(id).addEventListener('input', codecChanged); $(id).addEventListener('change', codecChanged);
+  });
+  ['lightwork:workspace-changed', 'lightwork:account-context-changed', 'lightwork:copilot-context-changed'].forEach(function (name) { document.addEventListener(name, codecChanged); });
+  window.addEventListener('lightwork:context-changed', codecChanged);
+  function codecCurrent(body, generation) {
+    if (generation === codecGeneration && JSON.stringify(body) === JSON.stringify(codecBody())) return true;
+    window.mvToast('Your choices, account or workspace changed while the review was open. Nothing was started. Review your current choices again.', { error: true });
+    return false;
+  }
   async function exactOk(body) {
     return !body.exact || window.mvConfirm('Ask your connected Anthropic service to estimate token counts? Recent messages between agents are sent to it. This does not generate an answer or establish the cost of future work.',
       { okText: 'Use provider count' });
   }
   J.wire($('lo-cd-learn'), async function () {
-    if (!(await window.mvConfirm('Relearn the shorthand from recent messages between agents? The new codes replace the old ones.',
+    var body = codecBody(), generation = codecGeneration;
+    if (!(await window.mvConfirm('Relearn the shorthand from up to ' + body.how_many + ' recent messages between agents? The new codes replace the old ones.',
       { okText: 'Relearn' }))) return null;
-    return { url: TO + '/codec/shorthand/learn', init: { method: 'POST', json: codecBody() } };
+    if (!codecCurrent(body, generation)) return null;
+    return { url: TO + '/codec/shorthand/learn', init: { method: 'POST', json: body } };
   }, ui('lo-cd', 'relearn the shorthand', function (d) {
     return [el('p', null, 'Learned ' + plural(d.codes, 'code') + ' from ' + plural(d.messages, 'message') + '. Messages would be ' + d.smaller_pct + '% shorter.'),
       d.phrases.length ? list(d.phrases) : null];
   }, loadCodec));
   J.wire($('lo-cd-tokens'), async function () {
-    var body = codecBody();
+    var body = codecBody(), generation = codecGeneration;
     if (!(await exactOk(body))) return null;
-    if (!(await window.mvConfirm('Learn token-saving codes from recent messages and keep them? They replace the current ones.',
+    if (!codecCurrent(body, generation)) return null;
+    if (!(await window.mvConfirm('Learn token-saving codes from up to ' + body.how_many + ' recent messages and keep them? They replace the current ones.',
       { okText: 'Learn codes' }))) return null;
+    if (!codecCurrent(body, generation)) return null;
     return { url: TO + '/codec/token-codes/learn', init: { method: 'POST', json: body } };
   }, ui('lo-cd', 'learn token-saving codes', function (d) {
     if (!d.learned) return el('p', null, d.why);
@@ -494,8 +571,9 @@
       d.saved_pct + '% of tokens.');
   }, loadCodec));
   J.wire($('lo-cd-measure'), async function () {
-    var body = codecBody();
+    var body = codecBody(), generation = codecGeneration;
     if (!(await exactOk(body))) return null;
+    if (!codecCurrent(body, generation)) return null;
     return { url: TO + '/codec/measure', init: { method: 'POST', json: body } };
   }, ui('lo-cd', 'measure the savings', function (d) {
     if (!d.measured) return el('p', null, d.why);

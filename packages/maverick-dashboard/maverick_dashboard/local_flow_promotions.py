@@ -340,6 +340,26 @@ def completed_runs(tenant, principal):
         return ()
 
 
+def _release_runs(record, activation):
+    if not activation:
+        return []
+    rows = []
+    for preview in store.iter_run_metadata(batch_size=200, flow_id=record["flow_id"],
+            owner=record["owner"], release_id=activation, statuses=_TERMINAL):
+        if preview.dry_run:
+            continue
+        # The disposable index selects candidates; retained checkpoints establish
+        # the execution evidence saved by canary acceptance.
+        run = store.load_run(preview.run_id, owner=record["owner"], flow_id=record["flow_id"])
+        if (run is None or run.release_id != activation or run.status not in _TERMINAL
+                or run.dry_run):
+            continue
+        rows.append(run)
+        if len(rows) == 1000:
+            break
+    return rows
+
+
 def release_status(manifest, *, review=False):
     """A release-only projection; private input/output data is never included."""
     record = _bound(manifest)
@@ -349,15 +369,14 @@ def release_status(manifest, *, review=False):
     active = store.load_published_bundle(record["flow_id"])
     effect = _effects().get(_effect_id(manifest))
     activation = effect.get("activation_id") if effect else ""
-    rows = [run for run in store.list_run_metadata(flow_id=record["flow_id"], owner=record["owner"], limit=1000)
-            if not run.dry_run and activation and run.release_id == activation and run.status in _TERMINAL]
+    rows = _release_runs(record, activation)
     current = active is not None and activation and active[1]["release_id"] == activation
     result = {"kind": "rule_only_workflow", "name": root.name, "version": root.version,
               "baseline_version": record["baseline"]["definition_version"],
               "included_workflows": [{"name": flow.name, "version": flow.version} for flow in bundle["flows"][1:]],
               "observed_runs": len(rows), "can_assess": bool(current and rows),
               "current_release": "candidate" if current else "previous" if active and active[1]["release_digest"] == record["baseline"]["release_digest"] else "other",
-              "evidence": "Exact-version practice is readiness evidence. The latest 1,000 retained runs are checked for this activation's failures, not correctness or business improvement.",
+              "evidence": "Exact-version practice is readiness evidence. Up to the latest 1,000 retained real terminal runs of this activation are checked for failures, not correctness or business improvement.",
               "rollback": "Restores the previous published rules and their exact included versions with a fresh authorization, if their original owners and sources remain available. Waiting work from either old release stays revoked. Saved drafts are kept."}
     if record.get("comparison_id"):
         from .local_flow_comparisons import summary, validate_release
@@ -455,7 +474,7 @@ class LocalFlowDeployment:
                 raise CandidatePromotionConflict("The selected workflow has no current compatible publication.")
             _retained_bundle(*active)
             release = active[1]
-            pending = [(run.run_id, run.status, run.release_id) for run in store.list_runs(flow_id=flow.id)
+            pending = [(run.run_id, run.status, run.release_id) for run in store.list_run_metadata(flow_id=flow.id)
                        if run.status in runner.ACTIVE_STATUSES]
             return DeploymentObservation(tenant, TARGET, release["release_digest"], STATE, INTENTS,
                 _sha(["no outside effects", flow.owner, flow.revision]), _sha(pending), record["binding"], True,
@@ -499,8 +518,7 @@ class LocalFlowDeployment:
         active = store.load_published_bundle(record["flow_id"])
         if active[1]["release_id"] != effect["activation_id"]:
             raise CandidatePromotionConflict("The current publication is not this candidate's activation.")
-        rows = [run for run in store.list_runs(flow_id=record["flow_id"], owner=record["owner"], limit=1000)
-                if not run.dry_run and run.release_id == effect["activation_id"] and run.status in _TERMINAL]
+        rows = _release_runs(record, effect["activation_id"])
         if not rows:
             raise CandidatePromotionUnavailable("Complete a real run of this release before assessing its observed failure rate.")
         failed = sum(not _successful_execution(run) for run in rows)
