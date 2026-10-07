@@ -18,7 +18,9 @@ from __future__ import annotations
 import json
 import math
 import re
+import secrets
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -135,10 +137,17 @@ class JobStopIn(BaseModel):
     confirm: Literal[True]
 
 
-class ModifyRunIn(BaseModel):
+class ModifyReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     objective: str = Field(min_length=10, max_length=2000)
     cycles: Literal[1, 2, 3, 5] = 1
-    confirm: bool = False
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class ModifyRunIn(ModifyReviewIn):
+    token: str = Field(min_length=1, max_length=16384)
+    confirm: Literal[True]
 
 
 # ---- shared helpers ---------------------------------------------------------
@@ -946,9 +955,10 @@ def _modify_status() -> dict:
 
 @router.get("/self-modify")
 async def modify_status(request: Request) -> dict:
-    require_global_permission(request, "admin")
     try:
-        return await run_in_threadpool(_modify_status)
+        return await run_in_threadpool(_modify_current, request)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001 -- plain message, no internals
         raise HTTPException(status_code=503, detail="The experiment's status is not available right now.") from exc
 
@@ -973,31 +983,163 @@ def _modify_reason(reason: str) -> str:
     return "The experiment could not run. Nothing was changed. Try again."
 
 
+def _modify_authority(request, context=None):
+    from . import auth, training_ops_api
+
+    with auth.fresh_configuration():
+        current = training_ops_api._planning_context(request)
+        require_global_permission(request, "admin")
+        if context is not None and current != context:
+            raise HTTPException(409, "Your account or workspace changed. The practice task was not started.")
+        return current
+
+
+def _modify_current(request, context=None):
+    from maverick import config
+    from maverick.governed_operations import digest
+    from maverick.llm import model_for_role
+
+    from . import auth
+    from .plain_labels import model_label
+
+    with auth.fresh_configuration():
+        current = _modify_authority(request, context)
+        if config.config_source_errors(include_tenant=True):
+            raise HTTPException(503, "Current practice settings are unavailable. Review All settings before continuing.")
+        try:
+            status = _modify_status()
+            model = model_for_role("coding")
+            revision = digest([config.load_global_config(), config.load_config(), model, status])
+        except Exception as exc:
+            raise HTTPException(503, "Current practice settings could not be verified. Nothing was started.") from exc
+        _modify_authority(request, current)
+        return {**status, "context": current, "revision": revision, "model": model_label(model)}
+
+
+def _modify_original(request, job_id, binding=None):
+    context = _modify_authority(request)
+    job = _job_or_404(request, job_id)
+    view = jobs.current_view(job)
+    retained = (view.get("result") or {}).get("practice_request")
+    if (job.kind != "self_modify_run" or not isinstance(retained, dict)
+            or retained.get("actor") != _actor(request) or retained.get("workspace") != _workspace()
+            or binding is not None and retained.get("binding") != binding):
+        raise HTTPException(404, "This original practice task is not available to your account in this workspace. No work was repeated.")
+    _modify_authority(request, context)
+    return {"job": view, "context": context, "review": retained["review"]}
+
+
+@router.get("/self-modify/original/{job_id}")
+async def modify_original(request: Request, job_id: str):
+    return JSONResponse(await run_in_threadpool(_modify_original, request, job_id), headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/self-modify/review")
+async def modify_review(request: Request, body: ModifyReviewIn):
+    from maverick import crypto_at_rest
+    from maverick.governed_operations import digest
+
+    from .app import _require_same_origin
+
+    _require_same_origin(request)
+    state = await run_in_threadpool(_modify_current, request, body.context)
+    if state["revision"] != body.revision:
+        raise HTTPException(409, "Practice settings changed. Refresh the current status and review your objective again.")
+    operation = secrets.token_hex(16)
+    review = {"objective": body.objective, "cycles": body.cycles, "model": state["model"],
+              "spending_limit": state["spending_limit"]}
+    material = {"purpose": "lightwork.code-practice.v1", "body": body.model_dump(), "actor": _actor(request),
+                "workspace": _workspace(), "operation": operation, "expires": time.time() + 600, "review": review}
+    binding = digest(material)
+    try:
+        with crypto_at_rest.deployment_key_scope():
+            token = crypto_at_rest.seal_to_str(json.dumps(material, ensure_ascii=False, separators=(",", ":")))
+    except crypto_at_rest.EncryptionUnavailable as exc:
+        raise HTTPException(503, "The complete practice review could not be protected. Nothing was started.") from exc
+    if not crypto_at_rest.is_sealed_str(token) or len(token) > 16384:
+        raise HTTPException(503, "The complete practice review could not be protected. Nothing was started.")
+    _modify_authority(request, body.context)
+    return JSONResponse({"token": token, "job_id": digest([operation, binding])[:16], "review": review},
+                        headers={"Cache-Control": "private, no-store"})
+
+
 @router.post("/self-modify/run")
 async def modify_run(request: Request, body: ModifyRunIn) -> dict:
     """``self-modify run``: research cycles that propose, test in the practice
     area and keep results for review. The runner never adopts code; every
     refusal it makes is shown, never worked around."""
-    require_global_permission(request, "admin")
-    if not body.confirm:
-        raise HTTPException(status_code=422, detail="Confirm the change first.")
+    from maverick import crypto_at_rest
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.governed_operations import digest
     from maverick.self_modify_runner import run
-    budget = _budget("self_modify")
-    objective = " ".join(body.objective.split())
-    await run_in_threadpool(lambda: _record(request, "self_modify_run", cycles=body.cycles,
-                                            objective=objective[:300]))
+
+    from .app import _require_same_origin
+
+    _require_same_origin(request)
+    _modify_authority(request, body.context)
+    try:
+        with crypto_at_rest.deployment_key_scope():
+            if not crypto_at_rest.is_sealed_str(body.token):
+                raise ValueError
+            material = json.loads(crypto_at_rest.unseal_from_str(body.token))
+        if (set(material) != {"purpose", "body", "actor", "workspace", "operation", "expires", "review"}
+                or material["purpose"] != "lightwork.code-practice.v1"
+                or material["body"] != body.model_dump(exclude={"token", "confirm"})
+                or material["actor"] != _actor(request) or material["workspace"] != _workspace()):
+            raise ValueError
+    except crypto_at_rest.EncryptionUnavailable as exc:
+        raise HTTPException(503, "The protected practice review is unavailable. Read its original before deciding what to do next.") from exc
+    except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise HTTPException(409, "This practice review no longer matches your objective or account. Nothing was started.") from exc
+    binding = digest(material)
+    job_id = digest([material["operation"], binding])[:16]
+    def recorded():
+        try:
+            return jobs.get(job_id)
+        except jobs.JobRefused as exc:
+            raise HTTPException(503, "This original practice task could not be read. No work was repeated.") from exc
+
+    if recorded() is not None:
+        return _modify_original(request, job_id, binding)
+
+    def current():
+        state = _modify_current(request, body.context)
+        if time.time() > material["expires"] or state["revision"] != body.revision:
+            raise HTTPException(409, "This practice review expired or its settings changed. Nothing was started; review again.")
+        if material["actor"] != _actor(request) or material["workspace"] != _workspace():
+            raise HTTPException(409, "Your account or workspace changed. The practice task was not started.")
+        return state
+
+    await run_in_threadpool(current)
+    await run_in_threadpool(lambda: _record(request, "self_modify_run", cycles=body.cycles, operation=material["operation"],
+                                            objective=body.objective[:300]))
+    retained = {"binding": binding, "actor": material["actor"], "workspace": material["workspace"], "review": material["review"]}
+    budget = None
 
     def _run(job: jobs.Job) -> dict:
-        summary = run(cycles=body.cycles, objective=objective, budget=budget)
+        current()
+        summary = run(cycles=body.cycles, objective=body.objective, budget=budget)
         out = {"ran": bool(summary.ran), "tested": int(summary.evaluated),
                "spent": round(float(budget.dollars), 4),
+               "practice_request": retained,
                "rounds": [{"ideas": int(r.proposed), "tested": int(r.evaluated),
                            "note": _clip(r.reason, 200)} for r in summary.reports[:20]]}
         if not summary.ran:
             out["problem"] = _modify_reason(summary.reason)
         return out
-    return start_job(request, "self_modify_run", "Practising changes to its own code", _run,
-                     cancellable=True, on_cancel=jobs.stop_budget(budget))
+    with authority_effect_fence():
+        current()
+        budget = _budget("self_modify")
+        try:
+            job = jobs.start("self_modify_run", "Practising changes to its own code", _run,
+                             started_by=_actor(request), workspace=_workspace(), requested_id=job_id,
+                             initial_result={"practice_request": retained}, cancellable=True,
+                             on_cancel=jobs.stop_budget(budget), problem=job_problem)
+        except jobs.JobRefused as exc:
+            if recorded() is not None:
+                return _modify_original(request, job_id, binding)
+            raise HTTPException(409, str(exc)) from exc
+    return {"job": job.view()}
 
 
 # ---- donated task outlines (donate) --------------------------------------------------

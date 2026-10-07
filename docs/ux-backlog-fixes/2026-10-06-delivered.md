@@ -1,5 +1,33 @@
 # Product changes delivered on October 6
 
+UX610: Studio lists the first approved installed evidence definition without an
+existing blueprint. Named source, supported result and control choices retain
+their exact computed edition/fingerprint bindings. Complete ordinary review,
+protected Copilot handoff, Keep editing and pure Original preserve drafts.
+Current approved source/control editions and signed authority are checked at
+the actual final native writer boundary. One ordinary lost-reply Save retained
+one version; role/source withdrawal after native BEGIN refused another write.
+Phone layout, refresh and private clearing passed. This is setup qualification,
+not collector execution, provider delivery or publication; existing custom
+adapter declarations retain their distinct contract.
+
+Practice admission follow-through: complete native objective/round/current-model
+review binds the exact account, workspace, settings and deadline. Newer drafts
+and withdrawn signed authority refuse Start. An original reference is retained
+before submission; exact encrypted task readback survives a lost reply, reload,
+expired review and changed settings without another admission. One actual
+disabled-engine task spent nothing and changed no code; it establishes custody
+and recovery, not successful self-improvement or a pinned future model.
+
+F01 observation follow-through: release-specific indexed reads and 200-record
+pages find relevant real terminal runs beyond a newer unrelated prefix. Each
+selected observation comes from the owner-bound canonical checkpoint, with
+flow/release/state/dry-run checks. The existing 1,000-observation ceiling now
+applies to relevant runs; an index preview cannot authorize a saved canary
+verdict. Native publication, real run, assessment and restoration passed with
+1,001 newer unrelated records and zero unrelated result hydration. Local
+rule-only support and failure criteria remain unchanged.
+
 Learning continuity follow-through: native model-planning replies bind the exact
 current choices and account/workspace, and recheck current signed access after
 the read. An older result cannot replace changed choices. Protected Copilot

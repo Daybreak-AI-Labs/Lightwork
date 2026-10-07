@@ -1553,13 +1553,13 @@ def run_lock(run_id: str):
 
 def list_run_metadata(*, flow_id: str | None = None, owner: str | None = None,
                       limit: int | None = 50, statuses=None, due_before=None,
-                      cursor=None, idem_key=None) -> list[FlowRun]:
+                      cursor=None, idem_key=None, release_id: str | None = None) -> list[FlowRun]:
     """Indexed bounded previews; callers must load_run before executing/saving."""
     from . import run_index
 
     rows = run_index.query(_runs_dir(), flow_id=flow_id, owner=owner, limit=limit,
                            statuses=statuses, due_before=due_before, cursor=cursor,
-                           idem_key=idem_key)
+                           idem_key=idem_key, release_id=release_id)
     runs = [FlowRun.from_dict(row) for row in rows]
     for run in runs:
         run.metadata_only = True

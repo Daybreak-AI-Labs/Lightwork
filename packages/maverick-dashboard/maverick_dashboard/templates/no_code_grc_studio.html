@@ -169,23 +169,19 @@
           <ul class="grcs-list" id="grcs-view-list"></ul>
         </div></details>
 
-        <details class="grcs-step"><summary>6. Automatic evidence (advanced)</summary><div class="grcs-step-body">
-          <p class="muted">Fill fields automatically from an evidence collector that is already linked in this workspace. Choose it from the list.</p>
+        <details class="grcs-step"><summary>6. Automatic evidence</summary><div class="grcs-step-body">
+          <p class="muted">Link fields to an independently approved Continuous evidence source. Choose its recorded result and the controls it supports. Saving a blueprint does not start collection or change a connected service.</p>
           <div class="grcs-form-grid">
             <label>Link name<input class="input" id="grcs-binding-name" maxlength="100"></label>
-            <label>Collector<select class="select" id="grcs-collector-choice" aria-describedby="grcs-collector-note"><option value="">{{ 'Loading collectors…' if studio_module_enabled else 'Choose a collector' }}</option></select></label>
+            <label>Evidence source<select class="select" id="grcs-collector-choice" aria-describedby="grcs-collector-note"><option value="">{{ 'Loading evidence sources…' if studio_module_enabled else 'Choose an evidence source' }}</option></select></label>
             <p class="muted" id="grcs-collector-note" role="status"></p>
-            <details class="grcs-manual"><summary>Technical details: enter a collector by hand</summary>
-              <p class="muted">Only needed for a collector that has never been linked here. Your administrator can give you these values.</p>
-              <label>Collector name<input class="input" id="grcs-collector-id" maxlength="128"></label>
-              <label>Collector version<input class="input" id="grcs-collector-version" type="number" min="1" step="1"></label>
-              <label>Collector fingerprint<input class="input" id="grcs-collector-digest" maxlength="64"></label>
-            </details>
+            <input id="grcs-collector-id" type="hidden"><input id="grcs-collector-version" type="hidden"><input id="grcs-collector-digest" type="hidden">
+            <p class="muted"><a href="/compliance/continuous-evidence" target="_blank" rel="noopener">Open evidence source setup in another tab</a>. Your current blueprint stays open while you choose its saved source.</p>
             <label>Record type<select class="select grcs-object-select" id="grcs-binding-object"></select></label>
-            <label>Where the value comes from (separate steps with commas)<input class="input" id="grcs-source-path" maxlength="500"></label>
+            <label>Result to use<select class="select" id="grcs-source-path"><option value="">Choose a source first</option></select></label>
             <label>Field to fill<select class="select grcs-field-select" id="grcs-mapping-target" data-object-select="grcs-binding-object"></select></label>
             <label>When there is already a value<select class="select" id="grcs-mapping-mode"><option value="replace">Replace it</option><option value="append">Add to it</option></select></label>
-            <label>Controls it supports (separate with commas)<input class="input" id="grcs-control-refs" maxlength="2000"></label>
+            <fieldset class="grcs-choices" id="grcs-control-refs"><legend>Controls this link supports</legend><p class="muted">Choose a source first.</p></fieldset>
             <div class="grcs-actions"><button class="btn" id="grcs-add-binding" type="button">Add evidence link</button></div>
           </div>
           <ul class="grcs-list" id="grcs-binding-list"></ul>

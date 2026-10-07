@@ -1,5 +1,55 @@
 # Post-install operation coverage
 
+October 7 UX610 follow-through: Studio's first automatic evidence source can be
+chosen from the actual currently approved installed definitions before any
+blueprint exists. Named result fields and controls replace manual collector
+identifiers, versions, fingerprints and source locations. The product retains
+those exact native bindings, with complete ordinary review and protected Copilot
+handoff. Current source/control editions and signed authority are rechecked
+through the actual native writer's final guard; Original remains a historical
+owned read. Existing custom-adapter declarations retain their native contract
+but are not presented as verified installed choices.
+
+One ordinary first-source Save with a lost reply recovered the exact native
+version through pure Original, with one writer call. Actual role and source
+withdrawal after the native transaction began refused another version. Complete
+review, Keep editing, current refresh, preserved newer work, protected Copilot,
+private clearing and the 320-pixel form passed. No collector worker, provider
+transport or blueprint publication was used by this setup witness.
+
+October 7 practice admission follow-through: the ordinary objective and round
+count receive a complete native review with the current model and spending
+limit. A protected review binds that exact body, actor, workspace, settings and
+deadline; the confirmation refuses a newer or cleared draft. Native admission
+rechecks current signed authority after its awaited audit and under the existing
+authority fence. The caller's native task reference is retained before Start.
+Original reads that exact owned encrypted task without another admission,
+including after the review expires or current practice settings change.
+
+Actual stale body/settings/deadline and current role/session refusals admitted
+no task. One ordinary Start with a lost reply retained one native task; the
+disabled practice engine returned no work and spent nothing. Pure Original,
+page reload, a repeated matching token and protected Copilot opening preserved
+the newer draft and made no second admission. The model is a current review
+snapshot, not an exact future routing pin. Existing bounded task retention and
+cooperative-writer fencing remain the custody boundary; no code improvement or
+answer-quality result is established by this no-op witness.
+
+F01 release observation follow-through: status and canary assessments now select
+the release's own runs through an indexed, owner-bound query and 200-record
+keyset pages. Each selected record is read from the canonical native checkpoint
+and rechecked for flow, owner, release, terminal state and real execution before
+it can enter a stored verdict. The limit applies to the latest 1,000 relevant
+real terminal observations. A newer unrelated prefix no longer hides a relevant
+run, and disposable index previews cannot supply a saved canary verdict.
+
+One native publication, real rule execution, canary and restoration journey
+found the relevant run behind 1,001 newer unrelated records, with no unrelated
+result hydration. Complete-record verdict equivalence, misleading preview,
+owner/source/tenant refusal, ordering and exclusions passed. This preserves the
+existing local rule-only release boundary and failure criteria; it does not
+add connected actions, shared release storage or measured answer improvement.
+
 October 7 Learning continuity follow-through: model recommendations bind the
 exact selected role, resources and current account/workspace. Older replies are
 discarded when those choices or their offered options change. Native planning
