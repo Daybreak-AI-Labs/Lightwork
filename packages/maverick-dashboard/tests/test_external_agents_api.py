@@ -77,6 +77,16 @@ def _mint() -> str:
     return r.json()["token"]
 
 
+def _stub_review_is_current(monkeypatch, assurance):
+    """These stubbed records stand for a current reviewed declaration only
+    while it is approved for the observed version. The full review binding
+    (record digests, profile and hierarchy) is model_risk_assurance's own
+    check, which hand-written stub records cannot satisfy."""
+    monkeypatch.setattr(assurance._DEFAULT, "_declaration_is_current", lambda declaration, observation: (
+        declaration.get("status") == "approved"
+        and declaration.get("observed_version_digest") == observation.get("version_digest")))
+
+
 def test_enroll_mint_and_roster_roundtrip():
     r = _enroll()
     assert r.status_code == 201
@@ -332,6 +342,7 @@ def test_external_runtime_guardrail_is_authenticated_exact_bound_and_transient(
         lambda _result: {"schema": "normalized-runtime-risk"},
     )
     monkeypatch.setattr(assurance, "enabled", lambda: True)
+    _stub_review_is_current(monkeypatch, assurance)
     monkeypatch.setattr(
         assurance,
         "get_observation",
@@ -438,6 +449,7 @@ def test_external_execute_runtime_gate_cannot_be_bypassed_when_enabled(monkeypat
     monkeypatch.setattr(runtime, "enabled", lambda: True)
     monkeypatch.setattr(runtime, "default_service", Service())
     monkeypatch.setattr(assurance, "enabled", lambda: True)
+    _stub_review_is_current(monkeypatch, assurance)
     monkeypatch.setattr(
         assurance,
         "get_observation",
@@ -561,6 +573,7 @@ def test_runtime_policy_mutation_before_core_boundary_blocks_provider(monkeypatc
     monkeypatch.setattr(runtime, "enabled", lambda: True)
     monkeypatch.setattr(runtime, "default_service", Service())
     monkeypatch.setattr(assurance, "enabled", lambda: True)
+    _stub_review_is_current(monkeypatch, assurance)
     monkeypatch.setattr(
         assurance,
         "get_observation",
