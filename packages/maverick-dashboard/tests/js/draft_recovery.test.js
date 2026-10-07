@@ -136,18 +136,21 @@ test('guided recovery keeps raw request references and separate resource drafts 
   select.value='first';select.dispatchEvent(new w.Event('change',{bubbles:true}));assert.equal(JSON.parse(raw.value).idempotency_key,'exact-request');assert.equal(submits,0);dom.window.close();
 });
 
-test('the comparison is a readable field-by-field table, not raw data',async()=>{
+test('the comparison is a readable field-by-field view, not raw data',async()=>{
   const ui=await fixture({remote:{brief:'unfinished',format:1,variants:{a:1}},revision:1,initial:'current'});
   ui.d.getElementById('brief').setAttribute('aria-label','Task brief');
   ui.edit('current draft');await tick();
   const details=ui.recovery.panel.querySelector('details');
   Object.defineProperty(details,'open',{value:true});details.dispatchEvent(new ui.w.Event('toggle'));
-  assert.equal(details.querySelector('pre'),null);
   const text=details.textContent;
   assert.match(text,/1 field differs/);
-  assert.equal(details.querySelector('tbody th').textContent,'Task brief');
-  const cells=[...details.querySelectorAll('tbody td')].map(cell=>cell.textContent);
-  assert.deepEqual(cells,['unfinished','current draft']);
+  // One section per changed field, named by its label, with each side's own value
+  // (kept whole and wrapped by the stylesheet) -- never the stored record.
+  const fields=details.querySelectorAll('.draft-recovery__field');
+  assert.equal(fields.length,1);
+  assert.equal(fields[0].querySelector('h4').textContent,'Task brief');
+  const values=[...fields[0].querySelectorAll('pre')].map(value=>[value.getAttribute('aria-label'),value.textContent]);
+  assert.deepEqual(values,[['Recovery copy','unfinished'],['Current draft','current draft']]);
   assert.doesNotMatch(text,/[{}"]|variants|format/);
   ui.dom.window.close();
 });
