@@ -2,7 +2,9 @@
 {% block title %}{{ 'Diagnostics · Knowledge' if tab_host else 'Cortex memory diagnostics' }} · Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
-  .ctx { display: grid; gap: var(--space-5); }
+  .ctx { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--space-5); }
+  .ctx > * { min-width: 0; }
+  .ctx .section-head { flex-wrap: wrap; }
   .ctx :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-sm); }
   .ctx-figure { margin: 0; display: grid; gap: var(--space-3); }
   .ctx-lattice { display: block; width: 100%; max-width: 640px; aspect-ratio: 4 / 3; height: auto; margin: 0 auto;
@@ -25,14 +27,14 @@
   .ctx-posture__cell span { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .06em; display: block; }
   .ctx-posture__cell strong { display: block; margin-top: var(--space-1); }
   .ctx-posture__note { grid-column: 1 / -1; color: var(--muted); font-size: var(--text-sm); margin: 0; }
-  .ctx-form { display: grid; gap: var(--space-3); }
+  .ctx-form { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--space-3); }
   .ctx-form__grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ctx-field { display: grid; gap: var(--space-1); min-width: 0; }
   .ctx-field--wide { grid-column: 1 / -1; }
   .ctx-field label, .ctx-sources legend { color: var(--muted); font-size: var(--text-sm); font-weight: var(--font-semibold); }
-  .ctx-field .input, .ctx-field .textarea { width: 100%; }
+  .ctx-field .input, .ctx-field .textarea, .ctx-field .select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
   .ctx-sources { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3);
-                 display: flex; flex-wrap: wrap; gap: var(--space-3); margin: 0; }
+                 display: flex; flex-wrap: wrap; gap: var(--space-3); margin: 0; min-width: 0; }
   .ctx-sources legend { padding: 0 var(--space-1); }
   .ctx-inline { display: inline-flex; align-items: center; gap: var(--space-1); }
   .ctx-form__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
@@ -56,7 +58,7 @@
   .ctx-table td { color: var(--muted); }
   .ctx-table td code { color: var(--text); }
   .ctx-table .ctx-chip { margin: 0 .25rem .25rem 0; }
-  @media (max-width: 720px) { .ctx-form__grid { grid-template-columns: 1fr; } .ctx-counts { grid-template-columns: 1fr; } }
+  @media (max-width: 720px) { .ctx-form__grid { grid-template-columns: minmax(0, 1fr); } .ctx-counts { grid-template-columns: minmax(0, 1fr); } }
 </style>
 {% endblock %}
 {% block content %}
@@ -223,6 +225,7 @@
         <div class="ctx-field">
           <label for="fa-cortex-file">Or use a text file</label>
           <input class="input" type="file" id="fa-cortex-file" accept=".txt,.md,text/plain,text/markdown">
+          <p class="muted">Text files can contain up to 20,000 characters. For a longer file, paste the part you want to keep above.</p>
         </div>
         <div class="ctx-field">
           <label for="fa-cortex-source">Where it came from</label>

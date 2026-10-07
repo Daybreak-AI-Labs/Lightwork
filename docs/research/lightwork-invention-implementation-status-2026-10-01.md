@@ -1,5 +1,14 @@
 # Invention register: implementation status
 
+October 7 shared-storage follow-through: P14/N05's complete ordinary decision
+reviews and protected Copilot now support loss-review admission and changes on
+native PostgreSQL through its existing guarded record writer. Current authority,
+deadlines, exact source revisions and final changed-material checks remain
+binding across native writer phases; encryption, audit and exact Original are
+unchanged. The October 6 local-only storage boundary below describes the earlier
+implementation. This extends the supported product path; it does not establish
+independent business truth, superiority or a new research disposition.
+
 October 7 product follow-through: F03/F06 now have ordinary Activity log and
 protected Copilot controls for independently retained signed checkpoint copies.
 Complete review, second-person approval, pre-send custody, a one-attempt upload

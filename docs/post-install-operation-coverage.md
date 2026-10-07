@@ -1,5 +1,46 @@
 # Post-install operation coverage
 
+October 7 Knowledge follow-through: adding information keeps newer text, source,
+type, business area and collection choices while an earlier native save is
+pending. Overlapping submissions are blocked. Delayed or superseded file reads
+cannot overwrite current work. Text files above the form's 20,000-character
+limit refuse explicitly instead of being silently shortened. The ordinary
+phone form and headings now fit through local grid and control sizing, without
+hiding overflow or removing any controls.
+
+One real native saved document, delayed reply, overlapping Enter and subsequent
+access withdrawal passed without an AI provider. File ordering and size checks
+used fictional in-memory files with the actual browser FileReader; the external
+file chooser's permission was unavailable and was left unchanged. Separate
+320-pixel and desktop read-only journeys preserved drafts without adding another
+document. Genuine access refusal clears and locks the private form.
+
+October 7 release-view follow-through: current candidate release records and
+review notes clear after a genuine role or session refusal. Controls remain
+locked, including after an earlier awaited response finishes. Replies from an
+invalidated account or workspace cannot redraw private records. A connection
+failure that does not change access keeps the review draft. Actual signed native
+page and Copilot reads, current 403/401 refusals and a delayed earlier 200 passed
+against authentic governed-store records; no release mutation was made.
+
+October 7 shared decision storage follow-through: the existing complete decision
+forms and Copilot controls now support native PostgreSQL for loss reviews as
+well as local storage. Admission and updates pass the same current-authority,
+deadline and source checks into the native writer. The guard accommodates its
+pre-mutation check and still validates exact changed material after mutation,
+encryption and immediately before commit. Unsupported backend types retain their
+existing refusal; encryption, audit, exact Original and the 100-review bound are
+unchanged. These are attributed decision reports, not independently verified
+business facts or execution of a commercial choice.
+
+Actual native PostgreSQL qualification covered ordinary complete creation,
+edited Save with an interrupted reply and pure confirmed Original, encrypted
+reopen, delivered audit, foreign-workspace refusal and protected Copilot draft
+preservation. An external SQL row lock exercised current-authority withdrawal
+at the locked write boundary: the transaction retained its earlier revision
+and made no new outcome receipt. The refused request stayed unconfirmed after
+access was restored; the earlier successful Original stayed confirmed.
+
 October 7 instruction suggestion follow-through: Learned's Suggest a change form
 keeps a newer suggestion entered while the earlier save is pending, including
 the selected target, title, observed problem, proposed instructions and reason.
