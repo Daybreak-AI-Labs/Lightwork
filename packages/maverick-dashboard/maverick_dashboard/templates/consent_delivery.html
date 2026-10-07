@@ -40,7 +40,7 @@
         <label>Automatic delivery name<input class="input" id="cd-subscription-name" maxlength="100" placeholder="For example: CRM consent updates"></label>
         <p class="muted">Choose destinations in Send updates below, then review an ongoing subscription. It includes choices recorded after your review. Saving a destination alone authorizes no automatic send.</p>
         <div class="cw-actions">
-          <button class="btn btn--primary" type="button" id="cd-subscribe"{% if not cd_admin %} disabled{% endif %}>Review automatic delivery</button>
+          <button class="btn" type="button" id="cd-subscribe"{% if not cd_admin %} disabled{% endif %}>Review automatic delivery</button>
           <button class="btn" type="button" id="cd-subscription-pause" hidden>Pause automatic delivery</button>
           <button class="btn" type="button" id="cd-managed-refresh">Refresh setup</button>
           <a class="btn btn--ghost" href="/settings/all?q=automatic%20consent%20delivery">Automatic delivery settings</a>
