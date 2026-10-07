@@ -103,6 +103,14 @@ def _ok(response, status: int = 200) -> dict:
     return response.json()
 
 
+def _saved_recipient(store, address: str = "risk-ops@example.test", recipient_id: str = "risk-ops") -> str:
+    """A watch sends only to a saved, reviewed recipient; its opaque reference."""
+    saved = store.save_alert_recipient(
+        "tenant-a", recipient_id=recipient_id, name="Risk operations", address=address,
+        actor_ref="vendor-owner", idempotency_key=f"save-{recipient_id}", external_use_reviewed=True)
+    return saved["destination_ref"]
+
+
 def _vendor_body(*, identity: str = "vendor-1", revision: int = 0) -> dict:
     return {
         "display_label": f"Pseudonymous {identity}",
@@ -224,7 +232,8 @@ def test_status_routes_injection_and_exact_default_off(environment) -> None:
     assert status["live_feed_configured"] is False
     assert status["provider_acceptance_verified"] is False
     assert status["external_operations_accepted"] is False
-    assert status["delivery_destination_resolver_configured"] is False
+    # Alerts resolve only saved, reviewed recipients; that resolver is built in.
+    assert status["delivery_destination_resolver_configured"] is True
     assert status["silent_pep_sanctions_adverse_dismissal_allowed"] is False
     assert status["low_risk_autoapproval_requires_complete_fresh_evidence"] is True
     assert status["exchange_anonymity_assumed"] is False
@@ -596,16 +605,21 @@ def test_edd_tasks_evidence_and_independent_decision(environment) -> None:
 
 
 def test_monitor_alert_outbox_retry_ack_and_revoke(environment) -> None:
-    client, _store, clock, _state = environment
+    client, store, clock, _state = environment
     vendor = _create_vendor(client)
     source, snapshot = _enroll_source(client, "breach_intelligence")
+    unsaved = client.put(f"{API}/monitors/unsaved-monitor", json={
+        "vendor_id": vendor["vendor_id"], "source_bindings": {"breach_intelligence": source["source_id"]},
+        "destination_ref": "third-party-alert-sink", "cadence_seconds": 60, "idempotency_key": "create-unsaved"})
+    assert unsaved.status_code == 404 and "saved alert recipient" in unsaved.text
+    destination = _saved_recipient(store)
     monitor = _ok(
         client.put(
             f"{API}/monitors/breach-monitor",
             json={
                 "vendor_id": vendor["vendor_id"],
                 "source_bindings": {"breach_intelligence": source["source_id"]},
-                "destination_ref": "third-party-alert-sink",
+                "destination_ref": destination,
                 "cadence_seconds": 60,
                 "idempotency_key": "create-breach-monitor",
             },
@@ -684,16 +698,17 @@ def test_monitor_alert_outbox_retry_ack_and_revoke(environment) -> None:
 def test_explicit_delivery_worker_fails_closed_then_acknowledges_without_recipient_leak(
     environment,
 ) -> None:
-    client, _store, clock, _state = environment
+    client, store, clock, _state = environment
     vendor = _create_vendor(client, "delivery-vendor")
     source, snapshot = _enroll_source(client, "breach_intelligence", suffix="delivery")
+    destination = _saved_recipient(store)
     monitor = _ok(
         client.put(
             f"{API}/monitors/delivery-monitor",
             json={
                 "vendor_id": vendor["vendor_id"],
                 "source_bindings": {"breach_intelligence": source["source_id"]},
-                "destination_ref": "opaque-alert-sink",
+                "destination_ref": destination,
                 "cadence_seconds": 60,
                 "idempotency_key": "create-delivery-monitor",
             },
@@ -728,40 +743,39 @@ def test_explicit_delivery_worker_fails_closed_then_acknowledges_without_recipie
     )
     assert changed["changed"] is True
 
-    payload = {
-        "limit": 10,
-        "lease_seconds": 30.0,
-        "base_backoff_seconds": 10.0,
-        "maximum_backoff_seconds": 60.0,
-    }
-    unavailable = client.post(f"{API}/outbox/run", json=payload)
-    assert unavailable.status_code == 503
-    assert "resolver is not configured" in unavailable.json()["detail"]
+    from maverick import third_party_intelligence_delivery as delivery
 
+    # Sending is a reviewed batch on the page (outbox/review then outbox/run);
+    # the delivery worker beneath it is exercised directly here.
     sent: list[dict[str, str]] = []
 
     class Transport:
         def send(self, **kwargs) -> None:
             sent.append(dict(kwargs))
 
-    client.app.state.third_party_intelligence_destination_resolver = (
-        lambda tenant_id, destination_ref: (
-            "risk-ops@example.test"
-            if (tenant_id, destination_ref) == ("tenant-a", "opaque-alert-sink")
-            else "unexpected@example.test"
-        )
-    )
-    client.app.state.third_party_intelligence_delivery_transport = Transport()
-    assert _ok(client.get(f"{API}/status"))["delivery_destination_resolver_configured"] is True
-    result = _ok(client.post(f"{API}/outbox/run", json=payload))
-    assert result["claimed"] == 1
-    assert result["acknowledged"] == 1
-    assert result["retry_pending"] == 0
-    assert result["acknowledgement_ambiguous"] == 0
+    def unavailable(_tenant_id, _destination_ref):
+        raise delivery.DestinationResolutionError("no current recipient")
+
+    batch = dict(tenant_id="tenant-a", worker_id="worker", transport=Transport(), limit=10, lease_seconds=30.0,
+                 base_backoff_seconds=10.0, maximum_backoff_seconds=60.0)
+    refused = delivery.deliver_alert_batch(store, resolve_destination=unavailable, **batch)
+    assert refused.claimed == 1 and refused.acknowledged == 0 and sent == []
+    clock.advance(60)
+
+    def saved_only(tenant_id, destination_ref):
+        return store.resolve_alert_recipient(tenant_id, destination_ref)["address"]
+
+    result = delivery.deliver_alert_batch(store, resolve_destination=saved_only, **batch)
+    assert result.claimed == 1
+    assert result.acknowledged == 1
+    assert result.retry_pending == 0
+    assert result.acknowledgement_ambiguous == 0
     assert len(sent) == 1
     assert sent[0]["recipient"] == "risk-ops@example.test"
-    assert sent[0]["idempotency_key"] == result["outcomes"][0]["delivery_id"]
+    assert sent[0]["idempotency_key"] == result.outcomes[0].delivery_id
     assert "risk-ops@example.test" not in str(result)
+    listed = _ok(client.get(f"{API}/outbox"))
+    assert "risk-ops@example.test" not in str(listed)
 
 
 def test_exchange_claims_are_false_without_independent_proof_and_withdrawable(
@@ -902,9 +916,10 @@ def test_retention_integrity_and_complete_mount_surface(environment) -> None:
 
     paths = client.app.openapi()["paths"]
     scoped = [path for path in paths if path.startswith(API)]
-    # 45 governed operations plus 11 read-only list routes for the page.
-    assert len(scoped) == 56
-    assert len(api.router.routes) == 63
+    # 45 governed operations, 11 read-only list routes for the page, and five
+    # paths for saved alert recipients and the reviewed outbox.
+    assert len(scoped) == 61
+    assert len(api.router.routes) == 69
     expected_fragments = {
         "/status",
         "/provider-runtime/",
@@ -918,6 +933,8 @@ def test_retention_integrity_and_complete_mount_surface(environment) -> None:
         "/monitors/",
         "/monitoring/",
         "/outbox/",
+        "/outbox/review",
+        "/alert-recipients",
         "/exchange/",
         "/retention/",
         "/integrity",
