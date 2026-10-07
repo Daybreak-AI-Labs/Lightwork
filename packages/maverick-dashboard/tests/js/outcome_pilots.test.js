@@ -316,3 +316,34 @@ test('a person who cannot review is told who can, without clearing the page',asy
   for(let i=0;i<10;i++)await tick();
   ui.dom.window.close();
 });
+test('opening the plan while the page is still loading checks release readiness once loading finishes',async()=>{
+  const dom=new JSDOM(template,{url:'https://lightwork.test',runScripts:'outside-only'});
+  const w=dom.window,d=w.document,calls=[];let release;const listed=new Promise(resolve=>{release=resolve;});
+  const readiness={context:'alice',available:false,items:[],
+    readiness:{status:'setup_required',release_decisions:false,deployed_release_check:false,
+      next_action:'Ask an installation administrator to connect release controls. You can still plan a normal workflow pilot.'}};
+  w.fetch=async url=>{
+    calls.push(url);
+    if (/release-candidates$/.test(url)) return {ok:true,json:async()=>readiness};
+    if (/\/sources$/.test(url)) return {ok:true,json:async()=>({context:'alice',items:[],coverage:[]})};
+    await listed;return {ok:true,json:async()=>({context:'alice',items:[]})};
+  };
+  w.eval(script);await tick();
+  const details=d.getElementById('op-plan-details');Object.defineProperty(details,'open',{value:true});
+  details.dispatchEvent(new w.Event('toggle'));await tick();
+  assert.equal(calls.some(url=>/release-candidates$/.test(url)),false);
+  release();for(let i=0;i<10;i++)await tick();
+  assert.equal(calls.filter(url=>/release-candidates$/.test(url)).length,1);
+  assert.match(d.getElementById('op-candidate-status').textContent,/normal workflow pilot/);
+  dom.window.close();
+});
+test('saving pilot work leaves the cohort value report fields in their own states',async()=>{
+  const ui=await setup([]);
+  const own=ui.d.querySelector('[data-own-controls]');assert.ok(own);
+  const fields=[...own.querySelectorAll('button,input,select,textarea')];assert.ok(fields.length);
+  const before=fields.map(field=>field.disabled);assert.ok(before.includes(true));
+  const form=ui.d.getElementById('op-plan');form.elements.title.value='Unchanged';
+  ui.d.getElementById('op-candidate-refresh').click();for(let i=0;i<6;i++)await tick();
+  assert.deepEqual(fields.map(field=>field.disabled),before);
+  ui.dom.window.close();
+});

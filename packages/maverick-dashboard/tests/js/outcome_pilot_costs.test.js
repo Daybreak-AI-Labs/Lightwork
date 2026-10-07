@@ -50,3 +50,9 @@ test('complete cost coverage is separately reviewed and never turns missing cost
   form.querySelector('input[type="checkbox"]').checked=true;submit(ui,form);await ui.settle();const write=ui.calls.find(c=>c.method==='PUT');assert.match(write.url.pathname,/provider-costs\/coverage$/);const body=JSON.parse(write.body);assert.equal(body.coverage_version,coverage.version);assert.equal(body.currency,'USD');assert.equal(body.confirm,true);assert.equal(Object.hasOwn(body,'accepted_outcomes'),false);
   const missing=await fixture(call=>call.url.pathname.endsWith('/OPL-test')?{...report(),provider_costs:{...report().provider_costs,coverage:{...coverage,status:'incomplete',can_confirm:false,covered_cases:3}}}:undefined);t.after(missing.close);const blocked=missing.d.getElementById('op-cost-coverage-form');assert.equal(blocked.querySelector('button').disabled,true);assert.match(missing.d.getElementById('op-cost-coverage').textContent,/Missing costs are not zero/);
 });
+
+test('a saved allocation redraws the report with the current allocated cost',async t=>{
+  let saved=false;const ui=await fixture(call=>{if(call.method==='PUT'){saved=true;return undefined;}if(saved&&call.url.pathname.endsWith('/OPL-test'))return {...report(),revision:3,provider_costs:{...report().provider_costs,current_totals_by_currency:{USD:'10.000000001'}}};});t.after(ui.close);
+  const form=await select(ui);ui.fill(form.querySelector('input[type="number"]'),'100');form.querySelector('input[type="checkbox"]').checked=true;submit(ui,form);await ui.settle();
+  assert.equal(saved,true);assert.match(ui.d.getElementById('op-provider-costs').textContent,/Current allocated provider cost: USD 10\.000000001/);assert.match(ui.d.getElementById('op-status').textContent,/Saved\. The current report is shown below\./);
+});
