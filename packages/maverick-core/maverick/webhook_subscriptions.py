@@ -43,7 +43,7 @@ MAX_ATTEMPTS = len(RETRY_DELAYS) + 1
 JITTER = 0.2
 RESPONSE_SNIPPET_CHARS = 200
 LEGACY_SUBSCRIPTION_ID = "legacy-config"
-STATUSES = ("pending", "delivered", "dead")
+STATUSES = ("pending", "sending", "unknown", "delivered", "dead")
 _MAX_URL = 2048
 _MAX_DESCRIPTION = 500
 _MAX_EVENTS = 64
@@ -77,6 +77,14 @@ class SubscriptionError(ValueError):
     """A subscription field was rejected."""
 
 
+class DeliveryConflict(SubscriptionError):
+    """The current original cannot safely be retried."""
+
+
+class DeliveryUnconfirmed(SubscriptionError):
+    """A reserved send's saved outcome could not be confirmed."""
+
+
 # --------------------------------------------------------------------- store
 def _world(world: Any = None) -> Any:
     if world is not None:
@@ -97,16 +105,33 @@ def _is_sqlite(world: Any) -> bool:
     return hasattr(world, "_writing")
 
 
+def _cursor_row(cursor: Any, row: Any) -> dict | None:
+    if row is None:
+        return None
+    if hasattr(row, "keys"):
+        return dict(row)
+    return dict(zip((column.name for column in cursor.description), row, strict=True))
+
+
 def _rows(world: Any, sql: str, params: tuple = ()) -> list[dict]:
     if not _is_sqlite(world):
         sql = sql.replace("?", "%s")
+    if not hasattr(world, "_read_all"):
+        with world._tx(snapshot=True) as cursor:
+            cursor.execute(sql, params)
+            return [_cursor_row(cursor, row) for row in cursor.fetchall()]
     return [dict(r) for r in world._read_all(sql, params)]
 
 
 def _row(world: Any, sql: str, params: tuple = ()) -> dict | None:
     if not _is_sqlite(world):
         sql = sql.replace("?", "%s")
-    found = world._read_one(sql, params)
+    if hasattr(world, "_read_one"):
+        found = world._read_one(sql, params)
+    else:
+        with world._tx(snapshot=True) as cursor:
+            cursor.execute(sql, params)
+            return _cursor_row(cursor, cursor.fetchone())
     return dict(found) if found is not None else None
 
 
@@ -117,6 +142,18 @@ def _write(world: Any, sql: str, params: tuple = ()) -> None:
         return
     with world._tx() as cur:
         cur.execute(sql.replace("?", "%s"), params)
+
+
+def _write_one(world: Any, sql: str, params: tuple) -> dict | None:
+    """Return a conditional write only after its native transaction commits."""
+    if _is_sqlite(world):
+        with world._writing() as conn:
+            row = conn.execute(sql, params).fetchone()
+    else:
+        with world._tx() as cur:
+            cur.execute(sql.replace("?", "%s"), params)
+            row = _cursor_row(cur, cur.fetchone())
+    return dict(row) if row is not None else None
 
 
 # ---------------------------------------------------------------- validation
@@ -325,15 +362,46 @@ def update_subscription(
 
 
 def _subscription_secret(sub_id: str, world: Any) -> str | None:
-    from .world_model import _dec_field
+    from .world_model import _UNSEALED_WITHHELD, _dec_field
 
     if sub_id == LEGACY_SUBSCRIPTION_ID:
         from .webhooks import _load_config_outbound
         return _load_config_outbound()[1]
-    row = _row(world, "SELECT secret FROM webhook_subscriptions WHERE id = ?", (sub_id,))
+    row = _row(world, "SELECT secret FROM webhook_subscriptions WHERE id = ? AND workspace = ?",
+               (sub_id, workspace_id()))
     if not row:
         return None
-    return _dec_field(row.get("secret") or "") or None
+    secret = _dec_field(row.get("secret") or "")
+    if secret == _UNSEALED_WITHHELD:
+        raise SubscriptionError("The saved signing secret could not be verified. Nothing was sent.")
+    return secret or None
+
+
+def _send_source(delivery: dict, world: Any, *, read: Callable[[], dict | None] | None = None) -> tuple[tuple, str | None]:
+    """Check the current destination and key without changing retained history."""
+    from .world_model import _UNSEALED_WITHHELD, _dec_field
+
+    if delivery["workspace"] != workspace_id():
+        raise SubscriptionError("The current workspace no longer matches this delivery. Nothing was sent.")
+    sub_id = delivery["subscription_id"]
+    if sub_id == LEGACY_SUBSCRIPTION_ID:
+        from .webhooks import _load_config_outbound
+        urls, secret = _load_config_outbound()
+        if delivery["url"] not in urls:
+            raise SubscriptionError("This destination is no longer configured. Nothing was sent.")
+        return (tuple(urls), secret), secret
+    source = (read() if read is not None else _row(
+        world, "SELECT * FROM webhook_subscriptions WHERE id = ? AND workspace = ?",
+        (sub_id, delivery["workspace"])))
+    if source is None or not source["enabled"]:
+        raise SubscriptionError("This subscription is unavailable or turned off. Nothing was sent.")
+    if source["url"] != delivery["url"]:
+        raise SubscriptionError("The subscription address changed. Nothing was sent to the previous address.")
+    secret = _dec_field(source["secret"] or "")
+    if secret == _UNSEALED_WITHHELD:
+        raise SubscriptionError("The saved signing secret could not be verified. Nothing was sent.")
+    return (source["id"], source["workspace"], source["url"], source["enabled"],
+            source["secret"], source["updated_at"]), secret or None
 
 
 def targets_for(event_type: str, *, world: Any = None) -> list[dict]:
@@ -424,71 +492,264 @@ def list_deliveries(
     return [_delivery_public(r) for r in rows]
 
 
-def attempt_delivery(
-    delivery_id: str,
-    *,
-    world: Any = None,
-    now: float | None = None,
-    transport: Callable[..., tuple] | None = None,
-    rng: Callable[[], float] = random.random,
-) -> dict | None:
-    """Run one attempt for a pending delivery and record the outcome.
-
-    ``transport(url, body, headers, timeout)`` returns
-    ``(status_code | None, latency_ms, response_snippet, error_text)``; the
-    default is the dispatcher's guarded HTTP POST."""
-    from .webhooks import _post_result, build_headers
-
-    world = _world(world)
-    row = _row(world, "SELECT * FROM webhook_deliveries WHERE id = ?", (delivery_id,))
-    if row is None or row["status"] != "pending":
-        return _delivery_public(row) if row else None
-    stamp = time.time() if now is None else float(now)
-    body = str(row["body"]).encode("utf-8")
-    secret = _subscription_secret(row["subscription_id"], world)
-    headers = build_headers(body, row["event_type"], secret, event_id=row["event_id"])
-    send = transport or _post_result
-    from .enterprise import enterprise_egress_denial
-    deny = enterprise_egress_denial(row["url"], tool="webhook")
-    if deny is not None:
-        code, latency, snippet, error = None, 0, "", "blocked by the enterprise egress lock"
-        exhausted = True
-    else:
-        try:
-            code, latency, snippet, error = send(row["url"], body, headers, 10.0)
-        except Exception as exc:  # the transport promises not to raise; belt and braces
-            code, latency, snippet, error = None, 0, "", f"{type(exc).__name__}"
-        exhausted = False
-    attempts = int(row["attempts"] or 0) + 1
-    ok = code is not None and code < 400
+def _history(row: dict) -> list:
+    if isinstance(row.get("attempt_log"), list):
+        return row["attempt_log"]
     try:
         history = json.loads(row.get("attempt_log") or "[]")
     except ValueError:
-        history = []
-    history.append({"attempt": attempts, "at": stamp, "status_code": code,
-                    "latency_ms": latency, "error": (error or "")[:200],
-                    "response": (snippet or "")[:RESPONSE_SNIPPET_CHARS]})
-    if ok:
-        status, next_at, delivered_at = "delivered", None, stamp
-    else:
-        delay = None if exhausted else retry_delay(attempts, rng=rng)
-        if delay is None:
-            status, next_at, delivered_at = "dead", None, None
-        else:
-            status, next_at, delivered_at = "pending", stamp + delay, None
-    _write(
+        return []
+    return history if isinstance(history, list) else []
+
+
+def _bounded_history(history: list) -> list:
+    decisions = [entry for entry in history if isinstance(entry, dict) and entry.get("state") == "reviewed_recovery"]
+    attempts = [entry for entry in history if entry not in decisions]
+    return decisions + attempts[-MAX_ATTEMPTS * 2:]
+
+
+def _claim_delivery(world: Any, row: dict, stamp: float, *, retry: bool = False) -> dict | None:
+    """Claim the exact current row without holding a transaction during I/O."""
+    attempts = 1 if retry else int(row["attempts"] or 0) + 1
+    history = _history(row)
+    history.append({"attempt": attempts, "at": stamp, "state": "sending",
+                    "attempt_id": uuid.uuid4().hex})
+    return _write_one(
         world,
-        "UPDATE webhook_deliveries SET status = ?, attempts = ?, last_status_code = ?,"
-        " last_latency_ms = ?, last_response = ?, last_error = ?, attempt_log = ?,"
-        " next_attempt_at = ?, updated_at = ?, delivered_at = ? WHERE id = ?",
-        (status, attempts, code, int(latency or 0), (snippet or "")[:RESPONSE_SNIPPET_CHARS],
-         (error or "")[:200], json.dumps(history[-MAX_ATTEMPTS * 2:]), next_at, stamp,
-         delivered_at, delivery_id),
+        "UPDATE webhook_deliveries SET status = 'sending', attempts = ?, next_attempt_at = NULL,"
+        " updated_at = ?, attempt_log = ?, delivered_at = NULL WHERE id = ? AND workspace = ?"
+        " AND status = ? AND attempts = ? AND updated_at = ? AND attempt_log = ? RETURNING *",
+        (attempts, stamp, json.dumps(_bounded_history(history)), row["id"], workspace_id(),
+         row["status"], row["attempts"], row["updated_at"], row["attempt_log"]),
     )
+
+
+def _delivery_state(code: object, attempts: int, stamp: float, exhausted: bool,
+                    rng: Callable[[], float]) -> tuple[str, float | None, float | None]:
+    if type(code) is int and 200 <= code <= 299:
+        return "delivered", None, stamp
+    if exhausted:
+        return "dead", None, None
+    if type(code) is not int or not 100 <= code <= 599:
+        return "unknown", None, None
+    delay = retry_delay(attempts, rng=rng)
+    return ("dead", None, None) if delay is None else ("pending", stamp + delay, None)
+
+
+def _finish_delivery(world: Any, row: dict, stamp: float, result: tuple,
+                     exhausted: bool, rng: Callable[[], float]) -> dict:
+    code, latency, snippet, error = result
+    status, next_at, delivered_at = _delivery_state(code, row["attempts"], stamp, exhausted, rng)
+    code = code if type(code) is int and 100 <= code <= 599 else None
+    history = _history(row)
+    history[-1].update({"state": status, "status_code": code, "latency_ms": latency,
+                        "error": (error or "")[:200],
+                        "response": (snippet or "")[:RESPONSE_SNIPPET_CHARS]})
+    try:
+        saved = _write_one(
+            world,
+            "UPDATE webhook_deliveries SET status = ?, last_status_code = ?, last_latency_ms = ?,"
+            " last_response = ?, last_error = ?, attempt_log = ?, next_attempt_at = ?,"
+            " updated_at = ?, delivered_at = ? WHERE id = ? AND workspace = ? AND status = 'sending'"
+            " AND attempts = ? AND attempt_log = ? RETURNING *",
+            (status, code, int(latency or 0), (snippet or "")[:RESPONSE_SNIPPET_CHARS], (error or "")[:200],
+             json.dumps(history), next_at, stamp, delivered_at, row["id"], workspace_id(),
+             row["attempts"], row["attempt_log"]),
+        )
+    except Exception as exc:
+        raise DeliveryUnconfirmed(
+            "The send may have reached the receiving system, but its saved outcome is unconfirmed. "
+            "Refresh this original delivery and check the receiving system before another attempt."
+        ) from exc
+    if saved is None:
+        raise DeliveryUnconfirmed("The original send's saved outcome changed. Refresh this delivery; do not repeat it.")
     if status == "dead":
         log.warning("webhooks: delivery %s to subscription %s is dead after %d attempts",
-                    delivery_id, row["subscription_id"], attempts)
-    return get_delivery(delivery_id, world=world)
+                    row["id"], row["subscription_id"], row["attempts"])
+    return _delivery_public(saved)
+
+
+def _send_claimed(world: Any, row: dict, stamp: float, transport: Callable[..., tuple] | None,
+                  rng: Callable[[], float], *, effect_guard: Callable[[], None] | None = None) -> dict:
+    from .enterprise import enterprise_egress_denial
+    from .webhooks import _post_result, build_headers
+
+    exhausted = False
+    entered_transport = False
+    try:
+        body = str(row["body"]).encode("utf-8")
+        source, secret = _send_source(row, world)
+        headers = build_headers(body, row["event_type"], secret, event_id=row["event_id"])
+        if enterprise_egress_denial(row["url"], tool="webhook") is not None:
+            result = (None, 0, "", "blocked by the enterprise egress lock")
+            exhausted = True
+        else:
+            if _send_source(row, world)[0] != source:
+                raise SubscriptionError("The subscription changed while preparing the send. Nothing was sent.")
+            if effect_guard is not None:
+                effect_guard()
+            entered_transport = True
+            result = (transport or _post_result)(row["url"], body, headers, 10.0)
+            # The legacy transport tuple has no closed send-phase marker.
+            # A missing response cannot safely establish that nothing was sent.
+            if not isinstance(result, tuple) or len(result) != 4:
+                raise ValueError("invalid transport result")
+            if (type(result[1]) is not int or result[1] < 0
+                    or not isinstance(result[2], str) or not isinstance(result[3], str)):
+                raise ValueError("invalid transport result fields")
+    except Exception as exc:
+        exhausted = not entered_transport
+        error = (str(exc) if isinstance(exc, SubscriptionError) else
+                 "The send was refused before contacting the receiving system." if exhausted else
+                 "Destination acceptance is unconfirmed; check the original delivery and receiving system.")
+        result = (None, 0, "", error)
+    return _finish_delivery(world, row, stamp, result, exhausted, rng)
+
+
+def recovery_material(delivery_id: str, *, world: Any = None) -> tuple[dict, str, bool]:
+    """The exact unresolved original and current destination, for private review."""
+    from .governed_operations import digest
+
+    world = _world(world)
+    row = _row(world, "SELECT * FROM webhook_deliveries WHERE id = ? AND workspace = ?",
+               (delivery_id, workspace_id()))
+    if row is None or row["status"] not in {"unknown", "sending"}:
+        raise DeliveryConflict("This original is no longer an unconfirmed send. Refresh its current record.")
+    source, secret = _send_source(row, world)
+    return row, digest(source), bool(secret)
+
+
+def recovery_id(value: dict) -> str:
+    from .governed_operations import digest
+
+    return "whr_" + digest([value["workspace"], value["actor"], value["context"],
+                            value["original"], value["operation"]])[:40]
+
+
+def _recovery_decision(row: dict) -> dict | None:
+    return next((item for item in _history(row) if isinstance(item, dict) and item.get("state") == "reviewed_recovery"), None)
+
+
+def recovery_original(value: dict, *, world: Any = None) -> dict | None:
+    """Pure exact-request read, independent of current destination or review expiry."""
+    row = _row(_world(world), "SELECT * FROM webhook_deliveries WHERE id = ? AND workspace = ?",
+               (recovery_id(value), workspace_id()))
+    if row is None:
+        return None
+    decision = _recovery_decision(row)
+    if decision != {"state": "reviewed_recovery", **value}:
+        raise DeliveryConflict("This saved original belongs to another reviewed request. Nothing was repeated.")
+    return _delivery_public(row)
+
+
+def _recovery_insert(writer: Any, world: Any, value: dict, guard: Callable[[], None]) -> tuple[dict, bool]:
+    from .governed_operations import digest
+
+    def execute(sql, params):
+        if _is_sqlite(world):
+            return writer.execute(sql, params)
+        writer.execute(sql.replace("?", "%s"), params)
+        return writer
+
+    if _is_sqlite(world):
+        if not writer.in_transaction:
+            writer.execute("BEGIN IMMEDIATE")
+    if value["workspace"] != workspace_id():
+        raise DeliveryConflict("The current workspace changed. Nothing was sent.")
+    found = execute("SELECT * FROM webhook_deliveries WHERE id = ? AND workspace = ?",
+                    (recovery_id(value), workspace_id())).fetchone()
+    if found is not None:
+        row = _cursor_row(writer, found)
+        decision = _recovery_decision(row)
+        if decision != {"state": "reviewed_recovery", **value}:
+            raise DeliveryConflict("This saved identity belongs to another reviewed request. Nothing was repeated.")
+        return _delivery_public(row), False
+    suffix = "" if _is_sqlite(world) else " FOR UPDATE"
+    original = execute("SELECT * FROM webhook_deliveries WHERE id = ? AND workspace = ?" + suffix,
+                       (value["original"], workspace_id())).fetchone()
+    if original is None:
+        raise DeliveryConflict("The reviewed original is unavailable. Nothing was sent.")
+    original = _cursor_row(writer, original)
+    def source_read():
+        found = execute("SELECT * FROM webhook_subscriptions WHERE id = ? AND workspace = ?" + suffix,
+                        (original["subscription_id"], workspace_id())).fetchone()
+        return _cursor_row(writer, found)
+
+    guard()
+    if (original["status"] not in {"sending", "unknown"} or digest(original) != value["before"]
+            or digest(_send_source(original, world, read=source_read)[0]) != value["source"]):
+        raise DeliveryConflict("The original delivery or subscription changed. Review its current record; nothing was sent.")
+    _audit("reviewed_recovery", value["actor"], operation=value["operation"],
+           original_delivery=value["original"], new_delivery=recovery_id(value),
+           original_sha256=value["before"], source_sha256=value["source"])
+    guard()
+    if digest(_send_source(original, world, read=source_read)[0]) != value["source"]:
+        raise DeliveryConflict("The subscription changed while recording the decision. Nothing was sent.")
+    stamp = time.time()
+    history = [{"state": "reviewed_recovery", **value},
+               {"attempt": 1, "at": stamp, "state": "sending", "attempt_id": value["operation"]}]
+    inserted = execute(
+        "INSERT INTO webhook_deliveries(id, workspace, subscription_id, event_id, event_type, url, body,"
+        " status, attempts, attempt_log, created_at, updated_at) VALUES(?,?,?,?,?,?,?,'sending',1,?,?,?)"
+        " ON CONFLICT(id) DO NOTHING RETURNING *",
+        (recovery_id(value), workspace_id(), original["subscription_id"], original["event_id"],
+         original["event_type"], original["url"], original["body"], json.dumps(history), stamp, stamp),
+    ).fetchone()
+    if inserted is None:
+        raise DeliveryConflict("Another request reserved this identity. Read its original outcome; nothing was repeated.")
+    result = _cursor_row(writer, inserted)
+    guard()
+    return result, True
+
+
+def recover_delivery(value: dict, *, guard: Callable[[], None], world: Any = None,
+                     transport: Callable[..., tuple] | None = None) -> dict:
+    """One separately reviewed new send; the unresolved original is never reset."""
+    world = _world(world)
+    existing = recovery_original(value, world=world)
+    if existing is not None:
+        return existing
+    scope = world._writing() if _is_sqlite(world) else world._tx()
+    with scope as writer:
+        row, inserted = _recovery_insert(writer, world, value, guard)
+    if not inserted:
+        return row
+    def before_send():
+        from .governed_operations import digest
+
+        guard()
+        original, source, _signed = recovery_material(value["original"], world=world)
+        if digest(original) != value["before"] or source != value["source"]:
+            raise DeliveryConflict("The original delivery or subscription changed before the send. Nothing was sent.")
+        guard()
+
+    return _send_claimed(world, row, row["created_at"], transport, random.random, effect_guard=before_send)
+
+
+def _attempt_pending(delivery_id: str, world: Any, stamp: float,
+                     transport: Callable[..., tuple] | None, rng: Callable[[], float]) -> tuple[dict | None, bool]:
+    row = _row(world, "SELECT * FROM webhook_deliveries WHERE id = ? AND workspace = ?",
+               (delivery_id, workspace_id()))
+    if (row is None or row["status"] != "pending" or row["next_attempt_at"] is None
+            or row["next_attempt_at"] > stamp):
+        return (_delivery_public(row) if row else None), False
+    claimed = _claim_delivery(world, row, stamp)
+    if claimed is None:
+        return get_delivery(delivery_id, world=world), False
+    return _send_claimed(world, claimed, stamp, transport, rng), True
+
+
+def attempt_delivery(
+    delivery_id: str, *, world: Any = None, now: float | None = None,
+    transport: Callable[..., tuple] | None = None, rng: Callable[[], float] = random.random,
+) -> dict | None:
+    """Claim one due send before I/O; an unconfirmed original is never replayed.
+
+    The transport's existing four-field result is preserved. Only a final 2xx
+    response establishes destination acceptance, not downstream completion.
+    """
+    stamp = time.time() if now is None else float(now)
+    return _attempt_pending(delivery_id, _world(world), stamp, transport, rng)[0]
 
 
 def process_due(
@@ -501,14 +762,14 @@ def process_due(
     stamp = time.time() if now is None else float(now)
     rows = _rows(
         world,
-        "SELECT id FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at <= ?"
+        "SELECT id FROM webhook_deliveries WHERE workspace = ? AND status = 'pending' AND next_attempt_at <= ?"
         " ORDER BY next_attempt_at LIMIT ?",
-        (stamp, max(1, int(limit))),
+        (workspace_id(), stamp, max(1, int(limit))),
     )
     count = 0
     for row in rows:
-        attempt_delivery(row["id"], world=world, now=stamp, transport=transport)
-        count += 1
+        _, claimed = _attempt_pending(row["id"], world, stamp, transport, random.random)
+        count += int(claimed)
     return count
 
 
@@ -516,18 +777,24 @@ def retry_now(
     delivery_id: str, *, actor: str = "", world: Any = None, now: float | None = None,
     transport: Callable[..., tuple] | None = None,
 ) -> dict | None:
-    """Put a failed or dead delivery back on the queue and try it immediately."""
+    """Explicitly claim a known pending/dead send; never reset an uncertain original."""
     world = _world(world)
-    current = get_delivery(delivery_id, world=world)
+    current = _row(world, "SELECT * FROM webhook_deliveries WHERE id = ? AND workspace = ?",
+                   (delivery_id, workspace_id()))
     if current is None:
         return None
+    if current["status"] not in {"pending", "dead"}:
+        raise DeliveryConflict(
+            "This original delivery cannot be retried: it was accepted or its send is unconfirmed. "
+            "Refresh its current record and check the receiving system."
+        )
     stamp = time.time() if now is None else float(now)
     _audit("retry_delivery", actor, delivery_id=current["id"],
            subscription_id=current["subscription_id"], event_type=current["event_type"])
-    _write(world, "UPDATE webhook_deliveries SET status = 'pending', attempts = 0,"
-                  " next_attempt_at = ?, updated_at = ? WHERE id = ?",
-           (stamp, stamp, current["id"]))
-    return attempt_delivery(current["id"], world=world, now=stamp, transport=transport)
+    claimed = _claim_delivery(world, current, stamp, retry=True)
+    if claimed is None:
+        raise DeliveryConflict("This delivery changed before the retry. Refresh its original record; nothing was sent by this request.")
+    return _send_claimed(world, claimed, stamp, transport, random.random)
 
 
 def dispatch(

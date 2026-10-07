@@ -8,11 +8,18 @@
   #wh-page .row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
   #wh-page table td, #wh-page table th { vertical-align: top; overflow-wrap: anywhere; }
   #wh-page .status-dead { color: var(--danger, #c33); font-weight: var(--font-semibold); }
+  #wh-page .status-sending, #wh-page .status-unknown { color: var(--warning, #a60); }
   #wh-page .status-delivered { color: var(--success); }
   #wh-events { border: 0; margin: var(--space-3) 0; padding: 0; min-width: 0; }
   #wh-event-list { max-height: 20rem; overflow-y: auto; padding-inline: var(--space-2); }
   #wh-event-list label { display: flex; gap: var(--space-2); align-items: flex-start; }
   #wh-event-list input { flex-shrink: 0; margin-top: .25em; }
+  #wh-recovery { width: min(40rem, calc(100vw - 2rem)); max-width: calc(100vw - 2rem); box-sizing: border-box; padding: var(--space-4); }
+  #wh-recovery-values { max-height: 55vh; overflow: auto; }
+  #wh-recovery-values .wh-review-value { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: var(--space-1); }
+  #wh-recovery-values .wh-review-field { margin-block: var(--space-3); }
+  #wh-recovery .row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  #wh-recovery .btn { max-width: 100%; white-space: normal; }
   @media (max-width: 640px) {
     #wh-page .table, #wh-page .table tbody, #wh-page .table tr { display: block; width: 100%; min-width: 0; box-sizing: border-box; }
     #wh-page .table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
@@ -24,10 +31,10 @@
     #wh-page .table .btn { max-width: 100%; white-space: normal; }
   }
 </style>
-<div id="wh-page">
+<div id="wh-page" data-recovery-context="{{ webhook_recovery_context }}">
   <p class="muted" style="margin-bottom: var(--space-2);">{{ back_link('/settings', 'Settings') }}</p>
   <h1 class="page-title">Webhooks</h1>
-  <p class="page-subtitle">Send an update to another system when something happens to a task, request, incident, assessment, vendor contract, approval or policy. A saved signing secret lets the receiving system verify who sent it. Each delivery is logged and retried up to five times over about an hour; after that it needs your attention before another try.</p>
+  <p class="page-subtitle">Send an update to another system when something happens to a task, request, incident, assessment, vendor contract, approval or policy. A saved signing secret lets the receiving system verify who sent it. Known unsuccessful replies are logged and retried up to five times over about an hour. An unconfirmed send is kept for review and is not automatically repeated.</p>
   <p id="wh-msg" role="status" aria-live="polite" class="muted"></p>
 
   <div class="section-head"><h2>Subscriptions</h2></div>
@@ -77,20 +84,33 @@
     <div class="row">
       <label for="wh-filter-status" style="margin:0">Show</label>
       <select class="input" id="wh-filter-status" style="width:auto">
-        <option value="">All</option><option value="pending">Waiting or retrying</option><option value="delivered">Delivered</option><option value="dead">Needs attention</option>
+        <option value="">All</option><option value="pending">Waiting or retrying</option><option value="sending">Attempt started; acceptance unconfirmed</option><option value="unknown">Acceptance unconfirmed</option><option value="delivered">Accepted by destination</option><option value="dead">Needs attention</option>
       </select>
       <button type="button" class="btn" id="wh-refresh">Refresh</button>
+      <button type="button" class="btn" id="wh-read-original" hidden>Check original new attempt</button>
     </div>
     <table class="table" id="wh-deliveries" hidden>
       <thead><tr><th scope="col">When</th><th scope="col">Event</th><th scope="col">Address</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col">Last result</th><th scope="col">Next try</th><th scope="col">Actions</th></tr></thead>
       <tbody></tbody>
     </table>
-    <p class="muted" id="wh-deliveries-empty">No deliveries yet. Each event sent to a subscription appears here.</p>
+    <p class="muted" id="wh-deliveries-empty">No deliveries match this view. Choose All or refresh to see retained delivery records.</p>
+    <p class="muted">Accepted means the destination returned a successful response; it does not prove that a person received the update or that later actions finished. If acceptance is unconfirmed, refresh the original record and check the receiving system. Repeating it could repeat outside actions.</p>
   </div>
 
-  <p class="muted">Messages use a subscription's own signing secret when one is saved. The installation's configured address list uses the installation signing secret. Without the applicable secret, a message is unsigned. Check the receiving system's requirements before turning a subscription on.</p>
+  <p class="muted">Turning a subscription off stops sends that have not yet passed their final check. An attempt already sent cannot be undone. Changing its address stops queued messages to the previous address.</p>
+  <p class="muted">Messages use a subscription's current signing secret when one is saved. The installation's configured address list uses the installation signing secret. Without the applicable secret, a message is unsigned. Check the receiving system's requirements before turning a subscription on.</p>
   <noscript>Enable browser scripting to manage subscriptions and see deliveries.</noscript>
 </div>
+<dialog id="wh-recovery" class="mv-confirm" aria-labelledby="wh-recovery-title">
+  <h2 id="wh-recovery-title">Review another attempt</h2>
+  <p id="wh-recovery-warning"></p>
+  <p class="muted">Read the complete destination, signing-key choice and message contents below. Cancel keeps the original unchanged.</p>
+  <div id="wh-recovery-values"></div>
+  <div class="row">
+    <button type="button" class="btn" id="wh-recovery-cancel">Cancel</button>
+    <button type="button" class="btn btn--danger" id="wh-recovery-confirm">Confirm another attempt</button>
+  </div>
+</dialog>
 {% endblock %}
 {% block scripts_extra %}
 <script>
@@ -108,12 +128,125 @@
         say('An update choice is no longer supported. Choose a current update or remove the previously saved choice before saving. Your draft is kept.');
         return;
       }
-      say((e.status === 400 || e.status === 422) && detail || window.mvErrorText(e, action));
+      say((e.status === 400 || e.status === 409 || e.status === 422 || e.status === 503) && detail || window.mvErrorText(e, action));
     };
   };
   function req(method, url, body) {
-    return window.mvFetchJSON(url, { method: method, body: body }).then(function (j) { return j || {}; });
+    var started = recoveryGeneration;
+    return window.mvFetchJSON(url, { method: method, body: body }).then(function (j) {
+      if (contextChanged || started !== recoveryGeneration) throw { status: 409, detail: 'Your account or workspace changed. Reload Webhooks before continuing.' };
+      return j || {};
+    }).catch(function (error) {
+      if (error.status === 401 || error.status === 403) clearPrivate();
+      throw error;
+    });
   }
+  function deliveryLabel(row) {
+    if (row.status === 'pending') return row.attempts ? 'Retrying after an unsuccessful reply' : 'Waiting';
+    return { delivered: 'Accepted by destination', dead: 'Needs attention',
+      sending: 'Attempt started; acceptance unconfirmed', unknown: 'Acceptance unconfirmed' }[row.status] || 'Current state unavailable';
+  }
+  var recoveryContext = $('wh-page').dataset.recoveryContext, recoveryGeneration = 0;
+  var recoveryBusy = false, reviewedRecovery = null, pendingRecovery = null, confirmingRecovery = false;
+  var recoveryKey = 'lightwork-webhook-original:' + recoveryContext;
+  try {
+    var savedRecovery = JSON.parse(sessionStorage.getItem(recoveryKey) || 'null');
+    if (savedRecovery && savedRecovery.context === recoveryContext && typeof savedRecovery.original === 'string' &&
+        typeof savedRecovery.token === 'string') pendingRecovery = savedRecovery;
+  } catch (_) { /* Retained owned delivery records also provide original lookup. */ }
+  $('wh-read-original').hidden = !pendingRecovery;
+  function keepOriginal(value) {
+    pendingRecovery = value; $('wh-read-original').hidden = false;
+    try { sessionStorage.setItem(recoveryKey, JSON.stringify(value)); } catch (_) { /* The native record remains authoritative. */ }
+  }
+  function closeRecovery() {
+    if ($('wh-recovery').open) $('wh-recovery').close();
+    $('wh-recovery-values').replaceChildren(); $('wh-recovery-warning').textContent = '';
+    reviewedRecovery = null;
+  }
+  function clearPrivate() {
+    contextChanged = true; recoveryGeneration++; closeRecovery(); pendingRecovery = null;
+    $('wh-read-original').hidden = true;
+    try { sessionStorage.removeItem(recoveryKey); } catch (_) { /* Nothing private is adopted. */ }
+    if (confirmingRecovery) {
+      var cancel = $('mv-confirm-cancel');
+      if (cancel) cancel.click();
+    }
+    reset(); $('wh-subs').querySelector('tbody').replaceChildren(); $('wh-deliveries').querySelector('tbody').replaceChildren();
+    $('wh-subs').hidden = true; $('wh-deliveries').hidden = true; $('wh-legacy').textContent = '';
+    say('Your access or account changed. Reload Webhooks before continuing. Private details were cleared.');
+  }
+  ['lightwork:context-changed', 'lightwork:workspace-changed', 'lightwork:account-context-changed'].forEach(function (name) {
+    window.addEventListener(name, clearPrivate);
+  });
+  ['lightwork:workspace-changed', 'lightwork:account-context-changed'].forEach(function (name) {
+    document.addEventListener(name, clearPrivate);
+  });
+  function recoveryRequest(id, action, token, confirmed) {
+    return req('POST', '/api/v1/webhooks/deliveries/' + encodeURIComponent(id) + '/recovery-' + action,
+      { context: recoveryContext, token: token || '', confirmed: confirmed === true }).then(function (result) {
+      if (result.context !== recoveryContext) { clearPrivate(); throw { status: 409, detail: 'Your account or workspace changed. Reload Webhooks.' }; }
+      return result;
+    });
+  }
+  function reviewLine(name, value) {
+    var field = document.createElement('div'), label = document.createElement('strong'), content = document.createElement('div');
+    field.className = 'wh-review-field'; label.textContent = name; content.className = 'wh-review-value';
+    content.textContent = String(value); field.append(label, content); $('wh-recovery-values').appendChild(field);
+  }
+  async function reviewAnother(id) {
+    if (contextChanged || recoveryBusy) return;
+    recoveryBusy = true; var started = recoveryGeneration;
+    try {
+      var result = await recoveryRequest(id, 'review');
+      if (started !== recoveryGeneration || contextChanged) return;
+      if (!result.review || !Array.isArray(result.review['Message contents']) || typeof result.token !== 'string') throw { status: 503, detail: 'The complete review is unavailable. Nothing was sent.' };
+      closeRecovery(); reviewedRecovery = { original: id, token: result.token, context: recoveryContext };
+      $('wh-recovery-warning').textContent = result.warning;
+      Object.keys(result.review).forEach(function (name) {
+        if (name !== 'Message contents') reviewLine(name, name === 'Original attempted at' ? when(result.review[name]) : result.review[name]);
+      });
+      result.review['Message contents'].forEach(function (row) { reviewLine(row.name.join(' › '), row.value); });
+      $('wh-recovery').showModal(); $('wh-recovery-cancel').focus();
+    } catch (error) { fail('prepare the complete review')(error); }
+    finally { recoveryBusy = false; }
+  }
+  async function readNewOriginal(id, token) {
+    if (contextChanged || recoveryBusy) return;
+    recoveryBusy = true; var started = recoveryGeneration;
+    try {
+      var result = await recoveryRequest(id, 'original', token);
+      if (started !== recoveryGeneration || contextChanged) return;
+      await loadDeliveries();
+      if (started !== recoveryGeneration || contextChanged) return;
+      say(result.message + (result.delivery ? ' ' + deliveryLabel(result.delivery) + '.' : ''));
+    } catch (error) { fail('read the original new attempt')(error); }
+    finally { recoveryBusy = false; }
+  }
+  $('wh-read-original').addEventListener('click', function () {
+    if (pendingRecovery) readNewOriginal(pendingRecovery.original, pendingRecovery.token);
+  });
+  $('wh-recovery-cancel').addEventListener('click', closeRecovery);
+  $('wh-recovery').addEventListener('cancel', function () { closeRecovery(); });
+  $('wh-recovery-confirm').addEventListener('click', async function () {
+    if (!reviewedRecovery || recoveryBusy || contextChanged) return;
+    var selected = reviewedRecovery, started = recoveryGeneration;
+    recoveryBusy = true; closeRecovery(); confirmingRecovery = true;
+    try {
+      var accepted = await window.mvConfirm('Send another attempt? The earlier attempt may still be active or already accepted. This separate new send may repeat outside actions. Check the receiving system first.', { okText: 'Send another attempt' });
+      confirmingRecovery = false;
+      if (!accepted || started !== recoveryGeneration || contextChanged) return;
+      keepOriginal(selected);
+      var result = await recoveryRequest(selected.original, 'apply', selected.token, true);
+      if (started !== recoveryGeneration || contextChanged) return;
+      await loadDeliveries();
+      if (started !== recoveryGeneration || contextChanged) return;
+      say(result.message + (result.delivery ? ' ' + deliveryLabel(result.delivery) + '.' : ''));
+    } catch (error) {
+      if (!contextChanged && pendingRecovery) say('The new attempt outcome could not be confirmed. Check original new attempt before deciding anything else; do not send it again. ' + (window.mvPlainDetail(error.detail) || ''));
+      else fail('confirm the new attempt')(error);
+    } finally { recoveryBusy = false; confirmingRecovery = false; }
+  });
   function eventInputs() { return Array.from($('wh-events').querySelectorAll('input[name="wh-event"]')); }
   function chosenEvents() { return eventInputs().filter(function (input) { return input.checked; }).map(function (input) { return input.value; }); }
   function eventSummary() {
@@ -156,10 +289,9 @@
     $('wh-event-picker').open = !values.includes('*'); eventSummary();
   }
   var contextChanged = false;
-  window.addEventListener('lightwork:context-changed', function () { contextChanged = true; });
   window.LightworkWebhookSubscriptions = { openReview: async function (selection, options) {
     var current = options && options.isCurrent, context = options && options.context;
-    if (contextChanged || location.pathname !== '/settings/webhooks/manage' ||
+    if (contextChanged || recoveryBusy || $('wh-recovery').open || location.pathname !== '/settings/webhooks/manage' ||
         (selection && Object.keys(selection).length) || !/^[a-f0-9]{64}$/.test(context || '') ||
         (current && !current())) return false;
     var checked = await req('POST', '/api/v1/copilot/product-operations/catalog', {
@@ -206,7 +338,7 @@
         }));
         actions.appendChild(button('Send test event', function () {
           req('POST', '/api/v1/webhooks/subscriptions/' + encodeURIComponent(s.id) + '/test')
-            .then(function (r) { var dl = r.delivery || {}; say('Test event ' + dl.status + (dl.last_status_code ? ' (HTTP ' + dl.last_status_code + ')' : '') + (dl.last_error ? ': ' + dl.last_error : '.')); loadDeliveries(); })
+            .then(function (r) { var dl = r.delivery || {}; say('Test event: ' + deliveryLabel(dl) + (dl.last_status_code ? ' (HTTP ' + dl.last_status_code + ')' : '') + '. Check its original record below.'); loadDeliveries(); })
             .catch(fail('send the test event'));
         }));
         tr.appendChild(actions); rowLabels(tr, ['Address', 'Updates', 'Description', 'Own signing secret', 'On', 'Actions']); tbody.appendChild(tr);
@@ -245,16 +377,21 @@
       rows.forEach(function (r) {
         var tr = document.createElement('tr');
         cell(tr, when(r.created_at)); cell(tr, eventLabel(r.event_type)); cell(tr, r.url);
-        cell(tr, r.status === 'pending' ? (r.attempts ? 'Retrying' : 'Waiting') : r.status === 'dead' ? 'Needs attention' : r.status === 'delivered' ? 'Delivered' : 'Status needs review', 'status-' + r.status);
+        cell(tr, deliveryLabel(r), 'status-' + r.status);
         cell(tr, esc(r.attempts));
         cell(tr, (r.last_status_code ? 'HTTP ' + r.last_status_code : (r.last_error || '—')) + (r.last_latency_ms ? ' · ' + r.last_latency_ms + ' ms' : '') + (r.last_response ? ' · ' + r.last_response.slice(0, 80) : ''));
         cell(tr, r.status === 'pending' ? when(r.next_attempt_at) : '—');
         var actions = document.createElement('td');
-        if (r.status !== 'delivered') {
+        if (r.status === 'pending' || r.status === 'dead') {
           actions.appendChild(button('Retry now', function () {
             req('POST', '/api/v1/webhooks/deliveries/' + encodeURIComponent(r.id) + '/retry')
-              .then(function () { say('Retried.'); loadDeliveries(); }).catch(fail('retry the delivery'));
+              .then(function (d) { say('Retry result: ' + deliveryLabel(d.delivery || {}) + '.'); loadDeliveries(); })
+              .catch(function (e) { loadDeliveries(); fail('retry the delivery')(e); });
           }));
+        }
+        if (r.status === 'unknown' || r.status === 'sending') actions.appendChild(button('Review another attempt', function () { reviewAnother(r.id); }));
+        if ((r.attempt_log || []).some(function (entry) { return entry && entry.state === 'reviewed_recovery'; })) {
+          actions.appendChild(button('Original new attempt', function () { readNewOriginal(r.id); }));
         }
         tr.appendChild(actions); rowLabels(tr, ['When', 'Update', 'Address', 'Status', 'Attempts', 'Last result', 'Next try', 'Actions']); tbody.appendChild(tr);
       });
