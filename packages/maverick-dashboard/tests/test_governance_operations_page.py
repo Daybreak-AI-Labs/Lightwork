@@ -16,7 +16,9 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 
 def _intake_controller(page):
     script = '/static/lightwork-ai-business-intake.js'
-    assert page.count(f'<script src="{script}" defer></script>') == 1
+    # Static tags carry a content-hash cache key (static_asset_versioning).
+    tag = re.compile(rf'<script src="{re.escape(script)}(?:\?v=[0-9a-f]{{8}})?" defer></script>')
+    assert len(tag.findall(page)) == 1
     response = client.get(script)
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]
@@ -647,7 +649,10 @@ def test_governance_tools_offer_forms_and_pickers_in_plain_words(monkeypatch, ad
         "action-details",
     ):
         assert f'data-structured="{slot}"' in fragment
-    assert '<script src="/static/lightwork-assurance-forms.js"></script>' in fragment
+    assert re.search(
+        r'<script src="/static/lightwork-assurance-forms\.js(?:\?v=[0-9a-f]{8})?"></script>',
+        fragment,
+    )
     # Records, versions and outside results are chosen, never typed.
     assert 'name="source_choice" required data-grc-source' in fragment
     assert 'data-version-options="profile"' in fragment
