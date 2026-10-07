@@ -710,10 +710,13 @@ def handle_slash_command(form: dict[str, Any], *, world, principal_for: Principa
 # ----------------------------------------------------------------------------
 
 def post_json(url: str, payload: dict[str, Any], *, token: str | None = None,
-              timeout: float = 10.0) -> dict[str, Any] | None:
+              timeout: float = 10.0, delivery: bool = False) -> dict[str, Any] | None:
     """POST JSON through the SSRF-guarded client; ``None`` on any failure.
 
-    Logs only the failure type: the response URL and token are secrets.
+    Logs only the failure type: the response URL and token are secrets. With
+    ``delivery`` (posting a message), a failure that may still have reached
+    Slack -- no answer, a timeout, a server error -- is flagged unconfirmed
+    (:func:`maverick.notifications.mark_unconfirmed`) so it is never replayed.
     """
     try:
         from .tools._ssrf import safe_client
@@ -725,6 +728,8 @@ def post_json(url: str, payload: dict[str, Any], *, token: str | None = None,
             response = client.post(url, json=payload, headers=headers)
         if response.status_code >= 400:
             log.warning("slack post refused: HTTP %s", response.status_code)
+            if delivery and (response.status_code >= 500 or response.status_code == 408):
+                _unconfirmed()
             return None
         try:
             body = response.json()
@@ -733,7 +738,15 @@ def post_json(url: str, payload: dict[str, Any], *, token: str | None = None,
         return body if isinstance(body, dict) else {"ok": True}
     except Exception as exc:  # noqa: BLE001 -- never raise into a request handler
         log.warning("slack post failed: %s", type(exc).__name__)
+        if delivery:
+            _unconfirmed()
         return None
+
+
+def _unconfirmed() -> None:
+    from .notifications import mark_unconfirmed
+
+    mark_unconfirmed()
 
 
 def respond(response_url: str, payload: dict[str, Any]) -> bool:
@@ -786,7 +799,7 @@ def post_message(bot_token: str, channel: str, text: str,
         payload["blocks"] = blocks[:50]
     if thread_ts:
         payload["thread_ts"] = thread_ts
-    result = post_json(f"{SLACK_API}/chat.postMessage", payload, token=bot_token)
+    result = post_json(f"{SLACK_API}/chat.postMessage", payload, token=bot_token, delivery=True)
     if not result or not result.get("ok"):
         return None
     ts = result.get("ts")

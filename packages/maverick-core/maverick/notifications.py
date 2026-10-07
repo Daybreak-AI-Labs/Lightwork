@@ -39,7 +39,9 @@ import logging
 import os
 import threading
 import uuid
+from collections.abc import Callable
 from contextvars import ContextVar, copy_context
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +62,25 @@ def _response_accepted(status: int) -> bool:
 
 def _network_unknown() -> None:
     _outcome.set(("unknown", "Delivery could not be confirmed. Check the destination before sending again.", False))
+
+
+def mark_unconfirmed() -> None:
+    """Flag that a send made outside this module (a Slack DM) may have gone
+    out without a confirmation; :func:`send_checked` reports it."""
+    _network_unknown()
+
+
+def send_checked(send: Callable[[], Any]) -> tuple[Any, bool]:
+    """Run ``send`` and also say whether a transport inside it could not
+    confirm the result -- it may have been delivered, so never replay it
+    blindly. An exception propagates; callers treat it as unconfirmed too."""
+    token = _outcome.set(None)
+    try:
+        result = send()
+        state = _outcome.get()
+        return result, bool(state) and state[0] == "unknown"
+    finally:
+        _outcome.reset(token)
 
 
 _executor = None  # type: ignore[var-annotated]
@@ -506,4 +527,4 @@ def notify(
     return fired
 
 
-__all__ = ["email_configured", "notify", "send_email"]
+__all__ = ["email_configured", "mark_unconfirmed", "notify", "send_checked", "send_email"]
