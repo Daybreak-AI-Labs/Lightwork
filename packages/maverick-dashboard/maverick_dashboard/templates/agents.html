@@ -393,8 +393,8 @@
         {# CTL-3: the shared form-field pattern -- each problem next to its field and in a summary that takes focus. #}
         {% from "_form_field.html" import error_summary %}{{ error_summary('agent-form-errors') }}
         {% if published_work_available %}
-        <p><a class="btn btn--ghost" id="agent-published-work" href="/chat?specialist={{ selected.name | urlencode }}">Work with this specialist</a></p>
-        <p class="muted">Opens a new message with this published specialist selected. Starting work uses its published settings, spending limits, permitted sources and approval rules. Unsaved edits and unpublished drafts are kept separate.</p>
+        <p><a class="btn btn--ghost" id="agent-published-work" href="/chat?specialist={{ selected.name | urlencode }}">Work with this {{ kind_word }}</a></p>
+        <p class="muted">Opens a new message with this published {{ kind_word }} selected. Starting work uses its published settings, spending limits, permitted sources and approval rules. Unsaved edits and unpublished drafts are kept separate.</p>
         {% endif %}
         {% if creating %}
         <div class="fld">
@@ -464,7 +464,7 @@
             <label for="f-model">This {{ kind_word }}</label>
             <select id="f-model" class="input" aria-describedby="agent-model-help"></select>
             <p class="sub" id="agent-model-help">Choose the AI this {{ kind_word }} uses. Leave a choice at the workspace setting to follow your shared preferences. A choice made for a specific task or by your installation administrator takes priority; the complete review shows the AI used for answer checks.</p>
-            <details><summary>AI for supporting work</summary><p class="sub">Choose an AI for each supporting part when this {{ kind_word }} delegates work. Another specialist uses its own choices.</p><div id="agent-supporting-models"></div></details>
+            <details><summary>AI for supporting work</summary><p class="sub">Choose an AI for each supporting part when this {{ kind_word }} delegates work. Another agent or specialist uses its own choices.</p><div id="agent-supporting-models"></div></details>
           </fieldset>
         </div>
 
