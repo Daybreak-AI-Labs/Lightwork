@@ -24,7 +24,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -261,6 +261,7 @@ class CollectorDefinition:
     approved_at: float | None
     retired_at: float | None
     integrity_sha256: str
+    source_manifest: dict[str, Any] | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,6 +402,8 @@ def _record_payload(
 ) -> dict[str, object]:
     payload = asdict(record)
     payload.pop("integrity_sha256", None)
+    if payload.get("source_manifest") is None:
+        payload.pop("source_manifest", None)
     payload["schema"] = schema
     payload["tenant_sha256"] = tenant_sha256
     return payload
@@ -759,6 +762,13 @@ class ContinuousEvidenceStore:
         _id(definition.definition_id, "definition_id")
         _integer(definition.version, "definition version", 1, 2**31 - 1)
         _id(definition.collector_id, "collector_id")
+        if definition.source_manifest is not None:
+            from .trc_stock_evidence_collectors import managed_source_from_definition
+
+            source = managed_source_from_definition("default", definition)
+            if (source.collector_id != definition.collector_id or
+                    tuple(item.control_ref for item in source.bindings) != definition.allowed_control_refs):
+                raise ContinuousEvidenceValidationError("source and definition controls disagree")
         _integer(
             definition.collector_schema_version,
             "collector_schema_version",
@@ -1152,6 +1162,10 @@ class ContinuousEvidenceStore:
         collector_key_id: str,
         capability_revision: int,
         allowed_control_refs: Sequence[str],
+        source_manifest: Mapping[str, Any] | None = None,
+        expected_previous_integrity_sha256: str | None = None,
+        operation_id: str | None = None,
+        before_effect: Callable[[], None] | None = None,
     ) -> CollectorDefinition:
         self._check_gate()
         actor = self._actor_sha256()
@@ -1181,16 +1195,39 @@ class ContinuousEvidenceStore:
             approved_at=None,
             retired_at=None,
             integrity_sha256="0" * 64,
+            source_manifest=(json.loads(_canonical(source_manifest)) if source_manifest is not None else None),
         )
         self._validate_definition(definition)
         with self._connect() as connection:
             self._begin(connection)
+            source_request = {
+                "schema": "lightwork.trc-source-save.v1", "actor_sha256": actor,
+                "definition_id": definition.definition_id, "version": definition.version,
+                "source_manifest": definition.source_manifest,
+                "expected_previous_integrity_sha256": expected_previous_integrity_sha256,
+            }
+            operation_sha = None
+            if operation_id is not None:
+                if source_manifest is None:
+                    raise ContinuousEvidenceValidationError("source operation requires a source manifest")
+                operation_sha, prior = self._operation(connection, operation_id, source_request)
+                if prior is not None:
+                    original = connection.execute(
+                        "SELECT * FROM trc_definition_history WHERE tenant_sha256=? "
+                        "AND definition_id=? AND version=? AND state='pending'",
+                        (self._tenant_sha256, prior["result_id"], prior["result_revision"]),
+                    ).fetchone()
+                    if original is None or prior["result_kind"] != "source_definition":
+                        raise ContinuousEvidenceIntegrityError("source operation result disappeared")
+                    return self._definition(original)
             existing = connection.execute(
                 "SELECT * FROM trc_definitions WHERE tenant_sha256=? "
                 "AND definition_id=? AND version=?",
                 (self._tenant_sha256, definition.definition_id, definition.version),
             ).fetchone()
             if existing is not None:
+                if source_manifest is not None and operation_id is not None:
+                    raise ContinuousEvidenceConflict("another source operation already saved this version")
                 stored = self._definition(existing)
                 request_fields = (
                     stored.collector_id,
@@ -1198,6 +1235,7 @@ class ContinuousEvidenceStore:
                     stored.collector_key_id,
                     stored.capability_revision,
                     stored.allowed_control_refs,
+                    stored.source_manifest,
                 )
                 new_fields = (
                     definition.collector_id,
@@ -1205,12 +1243,34 @@ class ContinuousEvidenceStore:
                     definition.collector_key_id,
                     definition.capability_revision,
                     definition.allowed_control_refs,
+                    definition.source_manifest,
                 )
                 if request_fields != new_fields:
                     raise ContinuousEvidenceConflict(
                         "collector definition version already has different content"
                     )
                 return stored
+            previous_row = connection.execute(
+                "SELECT * FROM trc_definitions WHERE tenant_sha256=? AND definition_id=? "
+                "ORDER BY version DESC LIMIT 1", (self._tenant_sha256, definition.definition_id),
+            ).fetchone()
+            previous = self._definition(previous_row) if previous_row is not None else None
+            if previous is not None and (previous.source_manifest is not None or source_manifest is not None):
+                if (previous.source_manifest is None or source_manifest is None or
+                        definition.version != previous.version + 1 or
+                        expected_previous_integrity_sha256 != previous.integrity_sha256):
+                    raise ContinuousEvidenceConflict("source changed; review its current version")
+            elif source_manifest is not None and (definition.version != 1 or expected_previous_integrity_sha256 is not None):
+                raise ContinuousEvidenceConflict("new source must start with its first version")
+            if source_manifest is not None and previous is None:
+                count = connection.execute(
+                    "SELECT COUNT(DISTINCT definition_id) FROM trc_definitions WHERE tenant_sha256=? "
+                    "AND json_type(payload_json,'$.source_manifest')='object'", (self._tenant_sha256,),
+                ).fetchone()[0]
+                if count >= 64:
+                    raise ContinuousEvidenceValidationError("workspace source limit reached")
+            if before_effect is not None:
+                before_effect()
             integrity = self._insert_record(
                 connection,
                 "trc_definitions",
@@ -1237,8 +1297,97 @@ class ContinuousEvidenceStore:
                 DEFINITION_SCHEMA,
             )
             self._audit(connection, "definition_registered", integrity, actor, now)
+            if previous is not None and source_manifest is not None:
+                rows = connection.execute(
+                    "SELECT * FROM trc_enrollments WHERE tenant_sha256=? "
+                    "AND json_extract(payload_json,'$.definition_id')=? AND state='active'",
+                    (self._tenant_sha256, definition.definition_id),
+                ).fetchall()
+                for row in rows:
+                    enrollment = self._enrollment(row)
+                    paused = self._replace_enrollment(connection, enrollment, replace(
+                        enrollment, state="paused", revision=enrollment.revision + 1, updated_at=now,
+                    ))
+                    self._cancel_enrollment_jobs(connection, enrollment.enrollment_id, "source_changed", now)
+                    self._audit(connection, "source_enrollment_paused", paused.integrity_sha256, actor, now)
+            if operation_sha is not None:
+                self._save_operation(connection, self._tenant_sha256, operation_sha,
+                                     _sha256(source_request), "source_definition", stored.definition_id,
+                                     stored.version, now)
+            if before_effect is not None:
+                before_effect()
             connection.commit()
             return stored
+
+    def source_original(self, *, operation_id: str, definition_id: str, version: int,
+                        source_manifest: Mapping[str, Any],
+                        expected_previous_integrity_sha256: str | None = None) -> CollectorDefinition | None:
+        """Recover the exact original pending record; never repeat a source write."""
+        actor = self._actor_sha256()
+        request = {"schema": "lightwork.trc-source-save.v1", "actor_sha256": actor,
+                   "definition_id": _id(definition_id, "definition_id"), "version": version,
+                   "source_manifest": json.loads(_canonical(source_manifest)),
+                   "expected_previous_integrity_sha256": expected_previous_integrity_sha256}
+        with self._connect() as connection:
+            _operation_sha, prior = self._operation(connection, operation_id, request)
+            if prior is None:
+                return None
+            row = connection.execute(
+                "SELECT * FROM trc_definition_history WHERE tenant_sha256=? AND definition_id=? "
+                "AND version=? AND state='pending'",
+                (self._tenant_sha256, prior["result_id"], prior["result_revision"]),
+            ).fetchone()
+        if row is None or prior["result_kind"] != "source_definition":
+            raise ContinuousEvidenceIntegrityError("source operation result disappeared")
+        return self._definition(row)
+
+    def list_source_definitions(self, *, limit: int = 65) -> tuple[CollectorDefinition, ...]:
+        self._check_gate()
+        limit = _integer(limit, "limit", 1, 65)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT d.* FROM trc_definitions d JOIN (SELECT definition_id,MAX(version) AS version "
+                "FROM trc_definitions WHERE tenant_sha256=? GROUP BY definition_id) latest "
+                "ON d.definition_id=latest.definition_id AND d.version=latest.version "
+                "WHERE d.tenant_sha256=? AND json_type(d.payload_json,'$.source_manifest')='object' "
+                "ORDER BY d.definition_id LIMIT ?", (self._tenant_sha256, self._tenant_sha256, limit),
+            ).fetchall()
+        return tuple(self._definition(row) for row in rows)
+
+    def source_pause_count(self, definition: CollectorDefinition) -> int:
+        self._check_gate()
+        with self._connect() as connection:
+            return int(connection.execute(
+                "SELECT COUNT(*) FROM trc_enrollment_history WHERE tenant_sha256=? "
+                "AND json_extract(payload_json,'$.definition_id')=? "
+                "AND json_extract(payload_json,'$.definition_version')<? "
+                "AND json_extract(payload_json,'$.state')='paused' "
+                "AND json_extract(payload_json,'$.updated_at')=?",
+                (self._tenant_sha256, definition.definition_id, definition.version, definition.created_at),
+            ).fetchone()[0])
+
+    def _require_latest_source(self, connection: sqlite3.Connection, definition: CollectorDefinition) -> None:
+        if definition.source_manifest is None:
+            return
+        latest = connection.execute(
+            "SELECT MAX(version) FROM trc_definitions WHERE tenant_sha256=? AND definition_id=?",
+            (self._tenant_sha256, definition.definition_id),
+        ).fetchone()[0]
+        if latest != definition.version:
+            raise ContinuousEvidenceConflict("source has a newer version awaiting review")
+
+    def _cancel_enrollment_jobs(self, connection: sqlite3.Connection, enrollment_id: str,
+                                code: str, now: float) -> None:
+        rows = connection.execute(
+            "SELECT * FROM trc_jobs WHERE tenant_sha256=? AND enrollment_id=? AND state IN ('queued','leased')",
+            (self._tenant_sha256, enrollment_id),
+        ).fetchall()
+        for row in rows:
+            job = self._job(row)
+            self._replace_job(connection, job, replace(
+                job, state="cancelled", lease_token_sha256=None, lease_until=None,
+                error_code=code, updated_at=now, revision=job.revision + 1,
+            ))
 
     def get_definition(self, definition_id: str, version: int) -> CollectorDefinition:
         self._check_gate()
@@ -1273,6 +1422,7 @@ class ContinuousEvidenceStore:
         version: int,
         *,
         expected_integrity_sha256: str,
+        before_effect: Callable[[], None] | None = None,
     ) -> CollectorDefinition:
         self._check_gate()
         actor = self._actor_sha256()
@@ -1292,6 +1442,7 @@ class ContinuousEvidenceStore:
             if row is None:
                 raise ContinuousEvidenceNotFound("collector definition not found")
             current = self._definition(row)
+            self._require_latest_source(connection, current)
             if not _same(current.integrity_sha256, expected):
                 raise ContinuousEvidenceConflict("collector definition changed")
             if current.state == "approved":
@@ -1302,6 +1453,8 @@ class ContinuousEvidenceStore:
                 raise ContinuousEvidencePermissionDenied(
                     "collector definition requires an independent approver"
                 )
+            if before_effect is not None:
+                before_effect()
             candidate = replace(
                 current,
                 state="approved",
@@ -1340,6 +1493,8 @@ class ContinuousEvidenceStore:
                 DEFINITION_SCHEMA,
             )
             self._audit(connection, "definition_approved", integrity, actor, now)
+            if before_effect is not None:
+                before_effect()
             connection.commit()
             return stored
 
@@ -1423,6 +1578,7 @@ class ContinuousEvidenceStore:
         interval_seconds: int,
         operation_id: str,
         retention_seconds: int | None = None,
+        before_effect: Callable[[], None] | None = None,
     ) -> CollectorEnrollment:
         self._check_gate()
         actor = self._actor_sha256()
@@ -1488,6 +1644,7 @@ class ContinuousEvidenceStore:
             if definition_row is None:
                 raise ContinuousEvidenceNotFound("collector definition not found")
             definition = self._definition(definition_row)
+            self._require_latest_source(connection, definition)
             if definition.state != "approved" or not _same(
                 definition.integrity_sha256,
                 request["expected_definition_integrity_sha256"],
@@ -1499,6 +1656,16 @@ class ContinuousEvidenceStore:
                 raise ContinuousEvidenceValidationError(
                     "enrollment controls exceed the approved collector definition"
                 )
+            if definition.source_manifest is not None:
+                from .trc_stock_evidence_collectors import managed_source_from_definition
+
+                source = managed_source_from_definition(self._tenant_id, definition)
+                if (request["enrollment_id"] != source.enrollment_id or
+                        request["asset_scope_sha256"] != source.asset_scope_sha256 or
+                        request["credential_profile_sha256"] != source.credential_profile_sha256):
+                    raise ContinuousEvidenceConflict("source enrollment does not match its approved scope and account")
+            if before_effect is not None:
+                before_effect()
             enrollment = CollectorEnrollment(
                 enrollment_id=request["enrollment_id"],
                 definition_id=definition.definition_id,
@@ -1550,6 +1717,8 @@ class ContinuousEvidenceStore:
                 now,
             )
             self._audit(connection, "enrollment_created", integrity, actor, now)
+            if before_effect is not None:
+                before_effect()
             connection.commit()
             return stored
 
@@ -1582,6 +1751,7 @@ class ContinuousEvidenceStore:
         state: str,
         expected_revision: int,
         expected_integrity_sha256: str,
+        before_effect: Callable[[], None] | None = None,
     ) -> CollectorEnrollment:
         self._check_gate()
         if state not in _ENROLLMENT_STATES:
@@ -1628,6 +1798,9 @@ class ContinuousEvidenceStore:
                     raise ContinuousEvidenceConflict(
                         "collector definition is not the exact approved authority"
                     )
+                self._require_latest_source(connection, definition)
+            if before_effect is not None:
+                before_effect()
             candidate = replace(
                 current,
                 state=state,
@@ -1688,6 +1861,8 @@ class ContinuousEvidenceStore:
                         ),
                     )
             self._audit(connection, f"enrollment_{state}", integrity, actor, now)
+            if before_effect is not None:
+                before_effect()
             connection.commit()
             return stored
 

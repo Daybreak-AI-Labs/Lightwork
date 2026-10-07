@@ -225,6 +225,18 @@
               ? function (isCurrent) { return evidenceControls.openReview({}, {isCurrent: isCurrent, context: evidenceContext}); } : null);
           return;
         }
+        if (entry[0] === 'continuous_evidence_source_review') {
+          var sourceReview = entry[1], sourceControls = window.LightworkContinuousEvidence;
+          var sourceContext = catalog && catalog.context;
+          if (!sourceReview || Array.isArray(sourceReview) ||
+              Object.keys(sourceReview).join(',') !== 'scope' || sourceReview.scope !== 'current_page' ||
+              typeof sourceContext !== 'string' || !/^[a-f0-9]{64}$/.test(sourceContext)) return;
+          protectedControls(node('dd', undefined, list), 'Open evidence source setup',
+            '/compliance/continuous-evidence#trc-source-form',
+            sourceControls && typeof sourceControls.openSourceReview === 'function'
+              ? function (isCurrent) { return sourceControls.openSourceReview({}, {isCurrent: isCurrent, context: sourceContext}); } : null);
+          return;
+        }
         if (entry[0] === 'webhook_subscription_review') {
           var webhookReview = entry[1], webhookControls = window.LightworkWebhookSubscriptions;
           var webhookContext = catalog && catalog.context;

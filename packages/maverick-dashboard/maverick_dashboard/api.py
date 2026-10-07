@@ -6396,6 +6396,13 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
     owner_filter = _request_identity(request)
     if rec is None or ((rec.get("owner") or None) != owner_filter):
         raise HTTPException(status_code=404, detail="no such connection")
+    from maverick.trc_stock_evidence_collectors import STOCK_PROVIDERS
+
+    if rec.get("connector") in STOCK_PROVIDERS:
+        raise HTTPException(status_code=409, detail=(
+            "Choose and check this account's exact security source in Continuous evidence. "
+            "Saving a credential is separate from source access; this general service check sends nothing."
+        ))
     probe_revision = str(rec.get("revision") or "")
 
     def _persist_probe(result: dict) -> None:

@@ -56,6 +56,13 @@
     { id: 'snowflake_metadata', label: 'Privacy scanning: Snowflake', connector: 'snowflake_metadata', base: '', hint: 'https://your-account.snowflakecomputing.com', baseLabel: 'Your Snowflake address', discovery: true, help: 'Paste an access token from Snowflake. Scanning only reads the names and types of your data, not the data itself.' },
     { id: 'servicenow_cmdb', label: 'Privacy scanning: ServiceNow', connector: 'servicenow_cmdb', base: '', hint: 'https://your-company.service-now.com', baseLabel: 'Your ServiceNow address', discovery: true, help: 'Paste an access token from ServiceNow that can read your list of systems.' },
     { id: 'entra_assets', label: 'Privacy scanning: Microsoft Entra', connector: 'entra_assets', base: 'https://graph.microsoft.com', discovery: true, help: 'Paste a Microsoft access token that can read your devices and apps.' },
+    { id: 'aws_security_hub', label: 'Evidence: AWS Security Hub', connector: 'aws_security_hub', evidence: true, aws: true, help: 'Enter the AWS sign-in below. Choose the account and security controls separately in Continuous evidence.' },
+    { id: 'aws_config', label: 'Evidence: AWS Config', connector: 'aws_config', evidence: true, aws: true, help: 'Enter the AWS sign-in below. Choose the account and configuration rules separately in Continuous evidence.' },
+    { id: 'azure_defender', label: 'Evidence: Microsoft Defender for Cloud', connector: 'azure_defender', base: 'https://management.azure.com', evidence: true, help: 'Paste a Microsoft access token for Azure management that can read the selected subscription. Storage tokens are a separate kind of access.' },
+    { id: 'azure_policy', label: 'Evidence: Azure Policy', connector: 'azure_policy', base: 'https://management.azure.com', evidence: true, help: 'Paste a Microsoft access token for Azure management that can read policy results in the selected subscription.' },
+    { id: 'gcp_security_command_center', label: 'Evidence: Google Cloud Security Command Center', connector: 'gcp_security_command_center', base: 'https://securitycenter.googleapis.com', evidence: true, help: 'Paste a Google access token that can read Security Command Center findings in your chosen organization, folder or project.' },
+    { id: 'github_security', label: 'Evidence: GitHub security alerts', connector: 'github_security', base: 'https://api.github.com', evidence: true, help: 'Paste a GitHub token that can read the security alerts you choose. Repository access alone may not grant security-alert access.' },
+    { id: 'okta_posture', label: 'Evidence: Okta policies', connector: 'okta_posture', base: '', hint: 'https://your-company.okta.com', evidence: true, help: 'Paste an Okta API token and your company’s exact HTTPS Okta address. Choose the policy type separately in Continuous evidence.' },
   ];
 
   var preset = document.getElementById('cx-preset'), nameEl = document.getElementById('cx-name');
@@ -64,10 +71,19 @@
   function slugName(value) { return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '').slice(0,64); }
   function peopleBoxes() { return Array.from(document.querySelectorAll('#cx-principals input[type="checkbox"]')); }
   function discoveryPreset(value) { return PRESETS.find(function (p) { return p.connector === value && p.discovery; }); }
+  function evidencePreset(value) { return PRESETS.find(function (p) { return p.connector === value && p.evidence; }); }
+  function evidenceOrigin() {
+    var selected = evidencePreset(connEl.value), region = document.getElementById('cx-aws-region').value.trim();
+    if (selected && selected.aws && /^[a-z]{2}(?:-gov)?-[a-z]+-\d$/.test(region)) {
+      baseEl.value = 'https://' + (selected.id === 'aws_security_hub' ? 'securityhub' : 'config') + '.' + region + '.amazonaws.com';
+    }
+  }
   function credentialFields(value) {
     var p = PRESETS.find(function (item) { return item.connector === value; });
-    document.getElementById('cx-aws').hidden = value !== 'aws_s3';
-    document.getElementById('cx-save-test').hidden = Boolean(discoveryPreset(value));
+    var aws = value === 'aws_s3' || Boolean(p && p.aws);
+    document.getElementById('cx-aws').hidden = !aws;
+    document.getElementById('cx-token').closest('.cx__fld').hidden = aws;
+    document.getElementById('cx-save-test').hidden = Boolean(discoveryPreset(value) || evidencePreset(value));
     document.getElementById('cx-credential-help').textContent = p && p.help ? p.help : catalog[value] ? catalog[value].auth_method + '. ' + catalog[value].prerequisites : 'Existing tool binding preserved. Unknown adapters require administrator review before migration.';
     document.getElementById('cx-key-help').hidden = !(p && p.keyHelp);
     if (p && p.keyHelp) document.getElementById('cx-key-help').href = p.keyHelp;
@@ -87,12 +103,14 @@
     advanced.open = true; clearSecrets(); credentialFields(connEl.value);
   });
   connEl.addEventListener('change', function () { clearSecrets(); credentialFields(connEl.value); });
+  document.getElementById('cx-aws-region').addEventListener('input', evidenceOrigin);
   document.getElementById('cx-catalog-search').addEventListener('input', function (event) {
     var q = event.target.value.trim().toLowerCase();
     Array.from(preset.options).forEach(function (o) { o.hidden = Boolean(o.value && o.value !== 'custom' && !o.textContent.toLowerCase().includes(q)); });
   });
   nameEl.addEventListener('input', function () { document.getElementById('cx-name-as').textContent = slugName(nameEl.value) !== nameEl.value.trim() ? 'Saved name: ' + slugName(nameEl.value) : ''; });
   function readiness(record) {
+    if (evidencePreset(record.connector)) return 'Check the chosen security source in Continuous evidence.';
     if (discoveryPreset(record.connector)) return 'Check exact source access in Privacy scanning.';
     var t = record.last_test;
     if (!t) return 'Access not checked. A saved key does not prove task access.';
@@ -149,8 +167,12 @@
         li.appendChild(el('div','meta',(catalog[record.connector] ? catalog[record.connector].label : record.connector) + ' · ' + (record.access === 'tenant' ? 'Everyone in this workspace' : 'Owner and selected people') + ' · ' + readiness(record)));
         li.appendChild(el('span','badge',record.has_token ? 'Credential saved' : 'No credential saved'));
         var change = el('button','btn btn--ghost','Change'); change.type='button'; change.addEventListener('click',function () { if (inventoryReady && !busy) editRecord(record); });
-        var test = el('button','btn btn--ghost',discoveryPreset(record.connector) ? 'Check source access' : 'Check service access'); test.type='button';
-        test.addEventListener('click',function () { if (discoveryPreset(record.connector)) { location.href='/privacy/data-discovery'; return; } mutate('test', record); });
+        var test = el('button','btn btn--ghost',discoveryPreset(record.connector) || evidencePreset(record.connector) ? 'Check source access' : 'Check service access'); test.type='button';
+        test.addEventListener('click',function () {
+          if (evidencePreset(record.connector)) { location.href='/compliance/continuous-evidence'; return; }
+          if (discoveryPreset(record.connector)) { location.href='/privacy/data-discovery'; return; }
+          mutate('test', record);
+        });
         var remove=el('button','btn btn--danger','Remove'); remove.type='button'; remove.addEventListener('click',function () { mutate('remove',record); });
         var impactButton=el('button','btn btn--ghost','Used by and repair'); impactButton.type='button'; impactButton.dataset.connectionImpact=record.name; impactButton.dataset.connectionRevision=record.revision;
         li.append(change,test,remove,impactButton); list.appendChild(li); if(location.hash==='#'+encodeURIComponent(li.id)){li.tabIndex=-1;li.focus();}
@@ -171,12 +193,17 @@
     if (!editing && currentByName[name]) throw new Error('That name is already saved. Choose Change on its current row before editing.');
     if (!editing && catalog[body.connector] && !catalog[body.connector].key_setup_supported) throw new Error(catalog[body.connector].prerequisites);
     if (!body.connector) throw new Error('Choose the service that will use this connection.');
-    if (body.connector === 'aws_s3') {
+    var securitySource = evidencePreset(body.connector);
+    if (body.connector === 'aws_s3' || (securitySource && securitySource.aws)) {
       var access=document.getElementById('cx-aws-access').value.trim(), secret=document.getElementById('cx-aws-secret').value, region=document.getElementById('cx-aws-region').value.trim(), session=document.getElementById('cx-aws-session').value;
       if (access || secret || region || session) {
-        if (!access || !secret || !/^[a-z]{2}(-[a-z]+)+-[0-9]+$/.test(region)) throw new Error('Enter the access key, secret key, and a valid storage region together.');
-        token=JSON.stringify(Object.assign({access_key_id:access,secret_access_key:secret,region:region},session ? {session_token:session} : {}));
+        if (!access || !secret || !/^[a-z]{2}(-[a-z]+)+-[0-9]+$/.test(region)) throw new Error('Enter the access key, secret key, and a valid AWS region together.');
+        var credential = {access_key_id:access,secret_access_key:secret};
+        if (!securitySource) credential.region = region;
+        else { evidenceOrigin(); body.base_url = baseEl.value.trim(); }
+        token=JSON.stringify(Object.assign(credential,session ? {session_token:session} : {}));
       }
+      else if (!editing && securitySource) throw new Error('Enter the AWS access key, secret key, and region before saving this account.');
     }
     if (token || !editing) body.token=token;
     if (editing) body.expected_revision=editing.revision;
@@ -205,7 +232,7 @@
       if (action === 'test' && typeof result.reachable !== 'boolean') throw new Error('Test receipt is unreadable.');
       if (action === 'save') {
         clearSecrets(); editing=null; unknownBinding=false; nameEl.readOnly=false; preset.disabled=false; connEl.disabled=false; baseEl.readOnly=false;
-        if (thenTest && !discoveryPreset(body.connector)) { await request('/api/v1/connections/'+encodeURIComponent(body.name)+'/test',{method:'POST'}); }
+        if (thenTest && !discoveryPreset(body.connector) && !evidencePreset(body.connector)) { await request('/api/v1/connections/'+encodeURIComponent(body.name)+'/test',{method:'POST'}); }
       }
       say(action === 'remove' ? 'Local connection removed. Provider authorization has not been revoked.' : action === 'test' ? 'Check recorded. Review its scope and time on the connection row.' : 'Connection saved. Review the separate service or source check before running work.');
       await load();
@@ -224,5 +251,11 @@
     data.connectors.forEach(function (item) { catalog[item.name]=item; addOption(item.name,item.label + (item.key_setup_supported ? '' : ' (dedicated setup)')); });
     if (editing && catalog[editing.connector]) { unknownBinding=false; controls(); }
   }).catch(function () { if (!accessLost) say('The full service catalog is unavailable. Refresh before setting up a new service.',true); });
+  var requestedEvidence = new URLSearchParams(location.search).get('evidence');
+  if (evidencePreset(requestedEvidence)) {
+    preset.value = requestedEvidence; preset.dispatchEvent(new Event('change'));
+    var returnLink = el('a','btn btn--ghost','Return to Continuous evidence');
+    returnLink.href = '/compliance/continuous-evidence'; form.insertBefore(returnLink, form.firstChild);
+  }
   load();
 })();

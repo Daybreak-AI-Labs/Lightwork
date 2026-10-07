@@ -702,4 +702,19 @@ def connection_setup_catalog() -> list[dict]:
                                  "Use access that can read the definitions you want to import. "
                                  + ("Choose your organization and tenant separately on the workflow import page. " if name == "uipath" else "")
                                  + "Saving does not contact the service or import or run a workflow.")
+    # These credentials belong to the closed read-only evidence collectors,
+    # not the generic REST tool. Source selection and checks stay in Evidence.
+    for name, label, auth in (
+        ("aws_security_hub", "Evidence: AWS Security Hub", "AWS access key and secret key"),
+        ("aws_config", "Evidence: AWS Config", "AWS access key and secret key"),
+        ("azure_defender", "Evidence: Microsoft Defender for Cloud", "Microsoft access token"),
+        ("azure_policy", "Evidence: Azure Policy", "Microsoft access token"),
+        ("gcp_security_command_center", "Evidence: Google Cloud Security Command Center", "Google access token"),
+        ("github_security", "Evidence: GitHub security alerts", "GitHub access token"),
+        ("okta_posture", "Evidence: Okta policies", "Okta API token"),
+    ):
+        rows.append({"name": name, "label": label, "auth_method": auth,
+                     "key_setup_supported": True, "live_provider_verified": False,
+                     "prerequisites": "Use access that can read the selected security source. "
+                                      "Saving only keeps the encrypted credential; choose and check the exact source in Continuous evidence."})
     return rows
