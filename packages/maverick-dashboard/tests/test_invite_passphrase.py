@@ -574,6 +574,92 @@ def test_a_reset_link_is_refused_after_the_account_changes(workspace, tmp_path, 
     assert _accept(_remote(), link, OTHER).status_code == 410
 
 
+# -- authority the identity provider's groups confer is part of the account ----
+
+_SCIM_TOKEN = "scim-secret-token-xyz"  # pragma: allowlist secret
+
+
+def _idp(monkeypatch, *, roles=None, suites=None):
+    """The identity provider as its own caller (no browser session), with a
+    group -> role / department mapping."""
+    from maverick_dashboard import scim_groups
+    from maverick_dashboard.app import app
+
+    monkeypatch.setenv("MAVERICK_SCIM_TOKEN", _SCIM_TOKEN)
+    tables = {"group_roles": roles or {}, "group_suites": suites or {}}
+    monkeypatch.setattr(scim_groups, "_config_table", lambda key: tables.get(key, {}))
+    idp = TestClient(app, headers={"Origin": "http://testserver"})
+    headers = {"Authorization": f"Bearer {_SCIM_TOKEN}"}
+
+    def push(email, group):
+        user = idp.post("/scim/v2/Users", headers=headers, json={
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": email,
+            "externalId": email, "emails": [{"value": email, "primary": True}], "active": True})
+        assert user.status_code == 201, user.text
+        made = idp.post("/scim/v2/Groups", headers=headers, json={
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"], "displayName": group,
+            "members": [{"value": user.json()["id"]}]})
+        assert made.status_code == 201, made.text
+
+    return push
+
+
+def _workspace_member_only(owner):
+    """Sam signs in with a passphrase and holds a workspace membership, no installation role."""
+    from maverick.tenant import registry
+    from maverick_dashboard import auth, rbac
+
+    assert _accept(_remote(), _invite(owner)).status_code == 303
+    principal = "user:" + COLLEAGUE
+    registry.create_tenant("acme")
+    rbac.set_tenant_role("acme", principal, "viewer")
+    rbac.remove_user(principal)
+    assert auth.global_role_for_principal(principal) == "operator"   # the default: nothing is conferred
+    return principal
+
+
+def test_a_reset_link_is_refused_after_the_idp_gives_the_person_a_group_role(workspace, tmp_path, monkeypatch):
+    from maverick_dashboard import auth
+
+    principal = _workspace_member_only(workspace)
+    link = _reset_link(_reset(workspace))
+    audits = _audits(monkeypatch)
+    _idp(monkeypatch, roles={"Admins": "admin"})(COLLEAGUE, "Admins")   # the IdP promotes them
+    assert auth.global_role_for_principal(principal) == "admin"
+
+    refused = _accept(_remote(), link, OTHER)
+    assert refused.status_code == 409
+    assert "changed after the reset" in refused.text and "no passphrase was saved" in refused.text
+    accounts = json.loads((tmp_path / "dashboard-passphrases.json").read_text(encoding="utf-8"))["accounts"]
+    assert COLLEAGUE not in accounts
+    assert any(row.get("action") == "passphrase_reset_refused" and row.get("reason") == "account_changed"
+               for row in audits)
+    assert _accept(_remote(), link, OTHER).status_code == 410            # used up
+
+
+def test_a_reset_link_is_refused_after_the_idp_gives_the_person_group_departments(workspace, tmp_path, monkeypatch):
+    from maverick_dashboard import suite_grants
+
+    _workspace_member_only(workspace)
+    link = _reset_link(_reset(workspace))
+    suite = sorted(suite_grants.known_suites())[0]
+    _idp(monkeypatch, suites={"Finance": [suite]})(COLLEAGUE, "Finance")
+    assert suite_grants.granted_suites("user:" + COLLEAGUE) == frozenset({suite})
+
+    assert _accept(_remote(), link, OTHER).status_code == 409
+    accounts = json.loads((tmp_path / "dashboard-passphrases.json").read_text(encoding="utf-8"))["accounts"]
+    assert COLLEAGUE not in accounts
+
+
+def test_a_reset_link_still_works_when_the_idp_changes_someone_else(workspace, tmp_path, monkeypatch):
+    _workspace_member_only(workspace)
+    link = _reset_link(_reset(workspace))
+    _idp(monkeypatch, roles={"Admins": "admin"})("someone.else@example.test", "Admins")
+    assert _accept(_remote(), link, OTHER).status_code == 200
+    accounts = json.loads((tmp_path / "dashboard-passphrases.json").read_text(encoding="utf-8"))["accounts"]
+    assert COLLEAGUE in accounts
+
+
 def test_the_owner_cannot_be_reset_this_way(workspace, tmp_path):
     refused = _reset(workspace, email=OWNER)
     assert refused.status_code == 403

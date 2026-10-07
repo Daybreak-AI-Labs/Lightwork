@@ -13,7 +13,8 @@ What a reset does, in this order:
 
 1. records a one-time link (only a SHA-256 of its token is stored) bound to
    that exact account: its installation role, workspace memberships,
-   department access and administrator status;
+   department access and administrator status, including any the identity
+   provider's groups confer;
 2. removes the colleague's passphrase, so it no longer signs in;
 3. ends every session they hold: the Sessions record and the revocation
    epoch, which also stops older cookies and bearers;
@@ -140,17 +141,26 @@ def _locked(*, fence: bool = True):
 
 
 def _binding(email: str) -> str:
-    """A fingerprint of what the account may do. A link stops working once it changes."""
-    from maverick.suite_grants import get_grant, is_admin_principal
+    """A fingerprint of what the account may do. A link stops working once it changes.
 
-    from . import rbac
+    It covers stored and derived authority alike: the role and departments the
+    person actually holds (so an IdP group that grants either changes it), and
+    whether the IdP has bound them at all, as well as the stored role,
+    memberships and explicit department grant."""
+    from maverick.suite_grants import get_grant, granted_suites, is_admin_principal
+
+    from . import auth, rbac, scim_groups
 
     principal = "user:" + email
     try:
         grant = get_grant(principal)
+        effective = granted_suites(principal)  # explicit, then IdP groups, then the default
         state = {"role": rbac.get_stored_role(principal),
+                 "effective_role": auth.global_role_for_principal(principal),
+                 "idp_record": scim_groups.active_for_principal(principal),
                  "workspaces": rbac.tenant_memberships(principal),
                  "departments": None if grant is None else sorted(grant),
+                 "effective_departments": None if effective is None else sorted(effective),
                  "installation_admin": is_admin_principal(principal),
                  "owner": local_passphrases.owner_of(email)}
     except HTTPException:
