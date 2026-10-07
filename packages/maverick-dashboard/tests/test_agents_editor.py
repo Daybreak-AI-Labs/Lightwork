@@ -21,6 +21,46 @@ def _clean_builtin_name() -> str:
     raise AssertionError("no lint-error-clean built-in pack found")
 
 
+DRAFTS = "/api/v1/specialist-drafts"
+PUBLISH_REASON = "Reviewed specialist change approved for this test"
+
+
+def _review_draft(name, action, *, app=None, **fields):
+    """Review one Agent Factory decision on a specialist's complete draft."""
+    app = app or client
+    context = app.get(DRAFTS + "/history").json()["context"]
+    return app.post(DRAFTS + "/review", json={"name": name, "action": action, "context": context, **fields})
+
+
+def _apply_draft(review, *, app=None):
+    app = app or client
+    return app.post(DRAFTS + "/apply", json={"token": review.json()["token"], "confirmed": True})
+
+
+def _publish_review(name, entered, *, reason=PUBLISH_REASON, app=None):
+    """Save the complete draft, then prepare (not apply) its Publish review.
+
+    Direct live saves are retired: a definition changes only by publishing a
+    retained complete draft. Returns the first refusal, or the publish review."""
+    saved = _review_draft(name, "save", app=app, entered=entered)
+    if saved.status_code != 200:
+        return saved
+    applied = _apply_draft(saved, app=app)
+    if applied.status_code != 200 or not applied.json().get("confirmed"):
+        return applied
+    # The retained draft is the saved original itself (a brand-new agent has no
+    # active definition yet, so its original does not echo a draft link).
+    return _review_draft(name, "publish", app=app, selected="SPD-" + applied.json()["operation"], reason=reason)
+
+
+def _publish(name, entered, *, reason=PUBLISH_REASON, app=None):
+    """Save and publish a complete draft through Agent Factory's reviewed flow."""
+    review = _publish_review(name, entered, reason=reason, app=app)
+    if review.status_code != 200 or "token" not in review.json():
+        return review
+    return _apply_draft(review, app=app)
+
+
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     from maverick import world_model
@@ -99,20 +139,21 @@ class TestOverrideLifecycle:
         name = _clean_builtin_name()
         current = client.get(f"/api/v1/agents/{name}").json()
         policy = {**current["autonomy"]["pack"], "default": "observe"}
-        saved = client.post(f"/api/v1/agents/{name}/override", json={
-            "expected_generation": current["generation"], "autonomy": policy,
-        })
-        assert saved.status_code == 200, saved.text
-        assert saved.json()["autonomy"]["pack"]["default"] == "observe"
-        assert "autonomy" in saved.json()["overridden"]
+        saved = _publish(name, {"autonomy": policy})
+        assert saved.status_code == 200 and saved.json()["confirmed"], saved.text
+        view = client.get(f"/api/v1/agents/{name}").json()
+        assert view["autonomy"]["pack"]["default"] == "observe"
+        assert "autonomy" in view["overridden"]
         from maverick.domain_edit import read_override
 
         assert read_override(name)["autonomy"]["default"] == "observe"
-        stale_editor = client.post(f"/api/v1/agents/{name}/override", json={
-            "expected_generation": saved.json()["generation"], "description": "new brief",
-        })
-        assert stale_editor.status_code == 409
-        assert client.get(f"/api/v1/agents/{name}").json()["autonomy"]["pack"]["default"] == "observe"
+        # A later draft that edits only the brief starts from the complete saved
+        # definition, so the independence choice is preserved, never dropped.
+        later = _publish(name, {"description": "new brief"})
+        assert later.status_code == 200 and later.json()["confirmed"], later.text
+        view = client.get(f"/api/v1/agents/{name}").json()
+        assert view["description"] == "new brief"
+        assert view["autonomy"]["pack"]["default"] == "observe"
 
     def test_editor_explains_effective_independence(self):
         name = _clean_builtin_name()
@@ -135,14 +176,11 @@ class TestOverrideLifecycle:
             graduated=True, sample=100))
         monkeypatch.setattr(audit, "audit_event", lambda *_args, **_kwargs: True)
         name = _clean_builtin_name()
-        current = client.get(f"/api/v1/agents/{name}").json()
         policy = {"default": "suggest", "low": "request", "medium": "request",
                   "high": "auto", "onboarding": True}
-        saved = client.post(f"/api/v1/agents/{name}/override", json={
-            "expected_generation": current["generation"], "autonomy": policy,
-        })
-        assert saved.status_code == 200, saved.text
-        generation = saved.json()["generation"]
+        saved = _publish(name, {"autonomy": policy})
+        assert saved.status_code == 200 and saved.json()["confirmed"], saved.text
+        generation = client.get(f"/api/v1/agents/{name}").json()["generation"]
 
         graduated = client.post(f"/api/v1/agents/{name}/graduate", json={
             "expected_generation": generation,
@@ -157,18 +195,14 @@ class TestOverrideLifecycle:
         assert checked.status_code == 200
         assert any("overall approval record cannot prove" in error
                    for error in checked.json()["errors"])
-        rejected = client.post(f"/api/v1/agents/{name}/override", json=proposed)
+        rejected = _publish(name, {"autonomy": policy})
         assert rejected.status_code == 422
 
         policy["high"] = "request"
-        safe = client.post(f"/api/v1/agents/{name}/override", json={
-            "expected_generation": generation, "autonomy": policy,
-        })
-        assert safe.status_code == 200, safe.text
+        safe = _publish(name, {"autonomy": policy})
+        assert safe.status_code == 200 and safe.json()["confirmed"], safe.text
         policy["high"] = "auto"
-        widened = client.post(f"/api/v1/agents/{name}/override", json={
-            "expected_generation": safe.json()["generation"], "autonomy": policy,
-        })
+        widened = _publish(name, {"autonomy": policy})
         assert widened.status_code == 422
 
     def test_graduation_rechecks_evidence_and_generation(self, monkeypatch):
@@ -213,11 +247,11 @@ class TestOverrideLifecycle:
 
     def test_save_override_persists_and_marks_provenance(self, tmp_path):
         name = _clean_builtin_name()
-        r = client.post(f"/api/v1/agents/{name}/override",
-                        json={"description": "Tuned for ACME."})
-        assert r.status_code == 200
-        assert r.json()["is_override"] is True
-        assert "description" in r.json()["overridden"]
+        r = _publish(name, {"description": "Tuned for ACME."})
+        assert r.status_code == 200 and r.json()["confirmed"], r.text
+        view = client.get(f"/api/v1/agents/{name}").json()
+        assert view["is_override"] is True
+        assert "description" in view["overridden"]
         assert (tmp_path / "domains" / f"{name}.toml").is_file()
         # A fresh GET reflects the override too.
         assert client.get(f"/api/v1/agents/{name}").json()["description"] == "Tuned for ACME."
@@ -226,16 +260,18 @@ class TestOverrideLifecycle:
         name = _clean_builtin_name()
         steps = [{"name": "intake", "instruction": "Read the request.",
                   "tools": [], "gate": None}]
-        r = client.post(f"/api/v1/agents/{name}/override", json={"workflow": steps})
-        assert r.status_code == 200
-        assert [s["name"] for s in r.json()["workflow"]] == ["intake"]
+        r = _publish(name, {"workflow": steps})
+        assert r.status_code == 200 and r.json()["confirmed"], r.text
+        view = client.get(f"/api/v1/agents/{name}").json()
+        assert [s["name"] for s in view["workflow"]] == ["intake"]
 
     def test_page_renders_workflow_as_editable_rows(self):
         name = _clean_builtin_name()
-        client.post(f"/api/v1/agents/{name}/override", json={"workflow": [
+        published = _publish(name, {"workflow": [
             {"name": "intake", "instruction": "Read the request.", "tools": [], "gate": None},
             {"name": "review", "instruction": "Check it.", "tools": [], "gate": "approval"},
         ]})
+        assert published.status_code == 200 and published.json()["confirmed"], published.text
         html = client.get(f"/agents?name={name}").text
         # The playbook renders as structured rows (not a raw JSON textarea),
         # with an add-step control and a clone template for new rows.
@@ -252,7 +288,7 @@ class TestOverrideLifecycle:
     def test_invalid_override_rejected_422(self):
         # Empty allow_tools makes the merged pack fail lint -> rejected, not written.
         name = _clean_builtin_name()
-        r = client.post(f"/api/v1/agents/{name}/override", json={"allow_tools": []})
+        r = _publish(name, {"allow_tools": []})
         assert r.status_code == 422
         assert client.get(f"/api/v1/agents/{name}").json()["is_override"] is False
 
@@ -272,12 +308,14 @@ class TestOverrideLifecycle:
         assert review.status_code == 200
         assert any("'files'" in error for error in review.json()["errors"])
         assert any("'code'" in error for error in review.json()["errors"])
-        saved = client.post(f"/api/v1/agents/{name}/override", json=body)
+        saved = _publish(name, body)
         assert saved.status_code == 422
         assert not (tmp_path / "domains" / f"{name}.toml").exists()
         body["allow_tools"] = ["read_file", "list_dir"]
         assert client.post(f"/api/v1/agents/{name}/validate", json=body).json()["ok"]
-        assert client.post(f"/api/v1/agents/{name}/override", json=body).status_code == 200
+        published = _publish(name, body)
+        assert published.status_code == 200 and published.json()["confirmed"], published.text
+        assert (tmp_path / "domains" / f"{name}.toml").is_file()
 
     @staticmethod
     def _review_change(name, action):
@@ -305,7 +343,7 @@ class TestOverrideLifecycle:
             return real_record(kind, **payload)
         monkeypatch.setattr(audit, "record", recording)
         name = _clean_builtin_name()
-        client.post(f"/api/v1/agents/{name}/override", json={"description": "temp"})
+        assert _publish(name, {"description": "temp"}).json()["confirmed"]
         current = client.get(f"/api/v1/agents/{name}").json()
         assert current["is_override"] is True
         events.clear()
@@ -378,10 +416,8 @@ class TestOverrideLifecycle:
     ):
         escaped = tmp_path / "config.toml"
         escaped.write_text("sentinel", encoding="utf-8")
-        url = "/api/v1/agents/..%5Cconfig/override"
-
         if method == "post":
-            response = client.post(url, json={"description": "overwrite"})
+            response = _review_draft("..\\config", "save", entered={"description": "overwrite"})
         else:
             response = self._review_change("..\\config", "remove_custom")
 
@@ -426,11 +462,10 @@ class TestPackEditingAuthorization:
         monkeypatch.setattr(api, "is_dashboard_admin", lambda principal: True)
         name = _clean_builtin_name()
 
-        r = client.post(f"/api/v1/agents/{name}/override",
-                        json={"description": "admin tuned"})
+        r = _publish(name, {"description": "admin tuned"})
 
-        assert r.status_code == 200
-        assert r.json()["description"] == "admin tuned"
+        assert r.status_code == 200 and r.json()["confirmed"], r.text
+        assert client.get(f"/api/v1/agents/{name}").json()["description"] == "admin tuned"
 
     def test_non_admin_cannot_see_recovery_controls(self, tmp_path, monkeypatch):
         import maverick_dashboard.api as api
@@ -471,7 +506,7 @@ def _pack_with_denied_tool_and_risk_below_high() -> tuple[str, str]:
 class TestPackEditingSafetyEnvelope:
     def test_override_cannot_widen_tools_or_raise_risk(self):
         name, denied_tool = _pack_with_denied_tool_and_risk_below_high()
-        r = client.post(f"/api/v1/agents/{name}/override", json={
+        r = _publish(name, {
             "allow_tools": [denied_tool],
             "deny_tools": [],
             "max_risk": "high",
@@ -486,19 +521,26 @@ class TestPackEditingSafetyEnvelope:
 
 def test_restored_agent_revision_cannot_overwrite_a_newer_save():
     name = _clean_builtin_name()
-    original = client.get(f"/api/v1/agents/{name}").json()
-    first = client.post(f"/api/v1/agents/{name}/override", json={"description": "Newer saved work", "expected_generation": original["generation"]})
-    assert first.status_code == 200
-    stale = client.post(f"/api/v1/agents/{name}/override", json={"description": "Recovered old work", "expected_generation": original["generation"]})
-    assert stale.status_code == 409
+    # A publish review prepared against the original definition...
+    stale = _publish_review(name, {"description": "Recovered old work"})
+    assert stale.status_code == 200, stale.text
+    first = _publish(name, {"description": "Newer saved work"})
+    assert first.status_code == 200 and first.json()["confirmed"], first.text
+    # ...cannot overwrite the newer published work.
+    assert _apply_draft(stale).status_code == 409
     assert client.get(f"/api/v1/agents/{name}").json()["description"] == "Newer saved work"
 
 def test_stale_reset_cannot_delete_a_newer_agent():
     name = _clean_builtin_name()
-    original = client.post(f"/api/v1/agents/{name}/override", json={"description": "First"}).json()
-    newer = client.post(f"/api/v1/agents/{name}/override", json={"description": "Second", "expected_generation": original["generation"]})
-    assert newer.status_code == 200
-    stale = client.delete(f"/api/v1/agents/{name}/override", params={"expected_generation": original["generation"]})
+    assert _publish(name, {"description": "First"}).json()["confirmed"]
+    context = client.get("/api/v1/agent-override-changes").json()["context"]
+    reset = client.post("/api/v1/agent-override-changes/review",
+                        json={"name": name, "action": "reset_builtin", "context": context})
+    assert reset.status_code == 200, reset.text
+    newer = _publish(name, {"description": "Second"})
+    assert newer.status_code == 200 and newer.json()["confirmed"], newer.text
+    stale = client.request("DELETE", f"/api/v1/agents/{name}/override",
+                           json={"token": reset.json()["token"], "confirmed": True})
     assert stale.status_code == 409
     assert client.get(f"/api/v1/agents/{name}").json()["description"] == "Second"
 
