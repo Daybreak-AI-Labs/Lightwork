@@ -12,7 +12,7 @@
 </section>
 {% else %}
 {{ hero('Your account', 'Your notifications',
-        lede='Personal alerts for your own tasks and decisions assigned to you. The shared organization channel, including ntfy, does not receive private task updates. Choose a verified private conversation below if you want alerts outside Lightwork.',
+        lede='Personal alerts for your own tasks and decisions assigned to you. Choose a verified private conversation or register your own private topic below for alerts outside Lightwork. Shared organization alerts stay separate.',
         compact=true) }}
 <section class="panel">
   <p class="muted">The inbox includes current unresolved work and recent activity from the last seven days. Changes resolved before observation are combined into the current actionable state. Repeated streaming updates do not create alerts.</p>
@@ -69,7 +69,9 @@
   <p id="personal-notification-save-status" role="status" aria-live="polite"></p>
 </form>
 {% include "_personal_alert_test.html" %}
+{% include "_personal_push_devices.html" %}
 <script src="/static/lightwork-personal-notifications.js" defer></script>
 <script src="/static/lightwork-personal-alert-tests.js" defer></script>
+<script src="/static/lightwork-personal-push-devices.js" defer></script>
 {% endif %}
 {% endblock %}

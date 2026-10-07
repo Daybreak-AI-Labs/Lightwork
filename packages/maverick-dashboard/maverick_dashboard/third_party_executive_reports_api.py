@@ -155,6 +155,21 @@ def _require_report_permission(request: Request, permission: str) -> None:
         raise HTTPException(status_code=403, detail="insufficient role for this action")
 
 
+def _report_read_context(request: Request) -> tuple:
+    """Current private-page authority, repeated after a waited report read."""
+    from . import auth
+    from .app import require_page_visible
+    from .draft_api import context_for
+
+    with auth.fresh_configuration():
+        auth.require_principal(request=request)
+        _require_report_permission(request, "view")
+        auth.require_page_permission(request, "/third-party/executive-reports")
+        require_page_visible(request, "/third-party/executive-reports")
+        return (context_for(request), _tenant_id(), auth.caller_principal(request),
+                auth.caller_role(request), _dashboard_token_authenticated(request))
+
+
 def create_third_party_executive_reports_router(  # noqa: C901
     dependencies: ThirdPartyExecutiveReportsDependencies | None = None,
 ) -> APIRouter:
@@ -306,15 +321,22 @@ def create_third_party_executive_reports_router(  # noqa: C901
         request: Request,
         response: Response,
     ) -> dict[str, Any]:
-        _require_report_permission(request, "view")
+        before = _report_read_context(request)
         _tenant, selected = runtime(request)
         record = await call(
             selected.store.get_report,
             report_id,
             caller_role=selected.role_view,
         )
+        result = _jsonable(record)
+        config_gate = getattr(selected.store, "_config_gate", None)
+        if config_gate is not None:
+            await call(config_gate)
+        if _report_read_context(request) != before:
+            raise HTTPException(409, "Your account, workspace or access changed. Open the current report page again.")
         _private(response)
-        return _jsonable(record)
+        response.headers["X-Lightwork-Report-Context"] = before[0]
+        return result
 
     @router.post("/reports/{report_id}/download-grants", status_code=201)
     async def issue_download_grant(

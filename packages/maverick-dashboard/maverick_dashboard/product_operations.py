@@ -251,6 +251,7 @@ def _adapter_modules():
         product_operations_operator_acquisition,
         product_operations_outcome_pilots,
         product_operations_personal_data,
+        product_operations_personal_push_setup,
         product_operations_plugin_environment,
         product_operations_plugins,
         product_operations_policy_exceptions,
@@ -260,10 +261,12 @@ def _adapter_modules():
         product_operations_privacy_notice_proposals,
         product_operations_private_task_computation,
         product_operations_procedure_interactions,
+        product_operations_product_tour,
         product_operations_projects,
         product_operations_record_history,
         product_operations_recovery_visibility,
         product_operations_report_downloads,
+        product_operations_report_templates,
         product_operations_request_program,
         product_operations_research_execution,
         product_operations_retention,
@@ -379,6 +382,9 @@ def _adapter_modules():
         product_operations_runtime_enforcement,
         product_operations_third_party_alert_setup,
         product_operations_research_execution,
+        product_operations_personal_push_setup,
+        product_operations_report_templates,
+        product_operations_product_tour,
         product_operations_plugins,
         product_operations_projects,
         product_operations_stop,
@@ -454,9 +460,11 @@ def _page(value):
 
 def _adapter(request, page, selection, identifier):
     _read_gate(request)
+    page = _page(page)
     adapter = adapters().get(identifier)
-    if adapter is None or not any(fnmatchcase(_page(page), path) for path in adapter.pages):
+    if adapter is None or not any(fnmatchcase(page, path) for path in adapter.pages):
         raise HTTPException(404, "This action is not registered for the selected page.")
+    request.state.product_operations_page = page
     if adapter.execute is not None:
         _gate(request)
     if adapter.family not in enabled_families():
@@ -488,6 +496,7 @@ def catalog(request: Request, body: ContextInput):
     _read_gate(request)
     writes = _writes_enabled(request)
     page, selection = _page(body.page), _selection(body.selection)
+    request.state.product_operations_page = page
     original_context = _context(request)
     families = enabled_families()
     items = []

@@ -216,6 +216,19 @@ def _inventory(request):
         stores.append({"name": "Original private notification test receipts", "state": "unavailable",
                        "action": "The exact owned receipt inventory could not be read; no zero count or erasure is claimed."})
     try:
+        from maverick.personal_push_devices import owned_inventory
+        destinations = owned_inventory(actor)
+        stores.append({"name": "Private notification destinations", "state": "available", "count": destinations["count"],
+                       "active": destinations["active"], "use": "Your private topic setup; addresses and access tokens are protected and never included in this inventory.",
+                       "action": "Select Private notification destinations below to pause, withdraw and erase saved names, topics and tokens.", "href": "/notifications#private-device-setup"})
+        stores.append({"name": "Original private destination outcomes and replay barriers", "state": "retained",
+                       "count": destinations["originals"], "barriers": destinations["barriers"],
+                       "use": "Content-free outcomes, owner and destination references, review digests and route hashes prevent an interrupted send from being repeated.",
+                       "action": "These original results remain separately from setup erasure. Service acceptance does not establish receipt or reading.", "href": "/notifications#private-device-setup"})
+    except Exception:
+        stores.append({"name": "Private notification destinations and original outcomes", "state": "unavailable",
+                       "action": "The exact owned inventory could not be read; no zero count or erasure is claimed."})
+    try:
         from maverick.ux_store import shared
         navigation = shared().owned_navigation_inventory(actor)
         stores.append({"name": "Saved dashboard views and pinned tasks", "state": "available", "inventory": navigation,

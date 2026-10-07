@@ -2437,3 +2437,23 @@ The Goal Map's interactive SVG is exposed as a group, retaining its named keyboa
 ## Current external-agent discovery
 
 The agent card now advertises the installed A2A 0.3 task contract and its actual current authentication requirement, with plain product descriptions and no published credential. Native discovery, unauthenticated refusal and authenticated readback were exercised without starting a task. Existing All settings controls manage the shared key, public address and limits; enabling the service is explicitly marked as requiring a restart. This corrects inaccurate discovery and setup guidance; it does not claim A2A 1.0 conformance.
+
+## Private notification destinations
+
+My notifications offers an ordinary private destination form, complete registration review, a separate fixed test, enable, quiet hours, pause and withdrawal. Registrations begin paused. The supported service is a privately reserved ntfy.sh topic; every device subscribed to that topic may receive its updates. Lightwork checks the current account and private reservation before posting and stores the destination and credential encrypted. It does not describe a topic as a uniquely identified physical device or claim that a person saw the notification.
+
+Existing background delivery owns accepted and uncertain originals. Interrupted registration recovers its original, and an uncertain test or send is held without automatic replay. Re-registering a withdrawn topic preserves earlier duplicate protection. Copilot opens the same protected form while keeping unfinished entries and the original panel. My data includes these owned destinations in its complete independently reviewed erasure: exact current registration editions are checked at the native writer, names and credentials are removed, and content-free original/duplicate barriers are separately disclosed and retained. The provider account and the separate delivery history are not represented as erased.
+
+Actual native stores, background dispatch, signed My data erasure and ordinary registration/test/enable/pause/withdrawal journeys qualified this path with fictional local service responses. Current access or privacy-policy withdrawal after writer/provider waits refused changes or posting. No live service, physical-device receipt or phone layout acceptance was qualified.
+
+## A saved report as a starting point
+
+Executive reports can reuse an allowed saved report's complete six layout choices and currently available named sources. The private review shows unavailable source counts; old findings and measurements are not copied. Use these choices stages the existing editor, then Create report remains separate and reads current source records through the existing native writer. A newer draft entered during a read is preserved. Current report withdrawal or access loss refuses reuse before changing the editor. Copilot opens that same complete private review, without supplying the saved report's private layout or findings to the model.
+
+A native ordinary journey created a second readable PDF while retaining the first report. Actual source withdrawal, an interrupted awaited choice and current access withdrawal refused reuse and preserved entered work. The protected Copilot handoff and complete review worked at 320 pixels. This delivers saved layout/source reuse; broader scheduled report customization remains separate.
+
+## Guided help using the actual product controls
+
+Get started, Chat, Tasks, Connections, Automations and Learned now offer a short contextual tour through Help. It uses current visible controls and current page/action permission. Show me highlights and focuses the actual control without activating it, reading a draft, changing settings or starting work. Guidance appears in normal page flow; its dialog can be paused, resumed, restarted or closed with Escape. Progress is remembered for this browser, account, workspace and page; viewing a tour never marks setup or a task complete.
+
+Copilot opens the same current tour through its protected handoff. The existing guided-onboarding setting controls availability; disabled guidance, lost access, changed page and stale review refuse. A 320-pixel ordinary/Copilot journey retained an entered connection draft, focused the real named service picker and verified Escape focus recovery. Native access withdrawal was checked under the retained signed session. These six guided pages do not claim complete customer acceptance of every page in the product.
