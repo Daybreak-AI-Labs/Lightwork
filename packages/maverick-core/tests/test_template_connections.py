@@ -124,13 +124,19 @@ def test_schedule_permission_change_refuses_before_goal_or_runner(account, monke
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **k: called.append(True))
     refs = [selections.decode(choice["value"])]
     payload = {"title": "Occurrence", "text": "Use reviewed account", "owner": OWNER, "connection_references": refs}
-    # Dispatch the real built-in handler after a native role change; no provider is invoked.
-    from types import SimpleNamespace
+    # Dispatch the real built-in handler on a claimed job (task creation first
+    # records its admission on the job's lease) after a native role change;
+    # no provider is invoked.
+    queue.enqueue("start_goal", payload)
+    job = queue.claim()
     rbac.set_tenant_role("picker-team", OWNER, "viewer", actor=OWNER)
+    from maverick.worker import GoalRunStopped
     worker = Worker(queue)
-    with pytest.raises(selections.SelectionUnavailable):
-        worker._dispatch(SimpleNamespace(kind="start_goal", payload=payload, id=1, attempts=1))
-    assert called == [] and "goal_id" not in payload
+    # The refused selection stops the job without replay (no new task, no run).
+    with pytest.raises(GoalRunStopped) as stopped:
+        worker._dispatch(job)
+    assert isinstance(stopped.value.__cause__ or stopped.value.__context__, selections.SelectionUnavailable)
+    assert called == [] and "goal_id" not in job.payload
 
 
 def test_selected_drive_uses_exact_saved_account_and_refuses_writes(account, monkeypatch):
