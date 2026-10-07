@@ -1,5 +1,27 @@
 # Post-install operation coverage
 
+October 7 UX644 model follow-through: the complete specialist editor offers
+named AI choices for the specialist and its supporting parts. Typed Copilot
+Save can change one part while preserving the complete remaining definition.
+Ordinary reviewed saves and answer checks resolve the complete entered model
+map; changed choices use the current permitted-model policy. Actual profile
+spawns receive a private model map, and ordinary supporting agents inherit a
+copy. A selected specialist, including an explicitly empty map, replaces its
+parent's map. Explicit task and installation choices retain their documented
+priority; an explicit profile choice does not silently start on a cheaper
+cascade. Retained custom role names round-trip as quoted keys, and clearing all
+choices writes an empty map instead of silently retaining inherited choices.
+The complete review is discarded after a newer choice. Confirmed current
+access withdrawal clears and locks the complete private editor, including its
+retained model/profile data; a late apply cannot restore those controls.
+Actual native Save, typed Copilot Save, publication and exact earlier-map
+restoration passed in a fictional signed installation, with no model calls.
+A later permitted-model policy change refused confirmation; a fresh final
+template/controller page qualified complete access clearing and the 390-pixel
+phone layout without repeating those four retained decisions.
+This is model selection and governed authoring support, not evidence of better
+answers, provider acceptance or successful delegated execution.
+
 October 7 UX610 follow-through: Studio's first automatic evidence source can be
 chosen from the actual currently approved installed definitions before any
 blueprint exists. Named result fields and controls replace manual collector

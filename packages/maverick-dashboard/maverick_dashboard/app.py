@@ -7897,11 +7897,16 @@ async def agents_page(request: Request) -> HTMLResponse:
 
         # The cost history is a database read: keep it off the event loop.
         typical = await run_in_threadpool(lambda: typical_cost(_world(), specialist=selected["name"]))
+    from maverick.role_edit import ROLES
+
+    model_options = [(spec, _plain_labels.model_label(spec)) for spec, _label in model_picker_options()] if (selected or creating) and editable else []
+    model_roles = [{"role": role, "label": _plain_labels.agent_role_title(role)} for role in ROLES]
     return templates.TemplateResponse(
         request,
         "agents.html",
         {"agents": agents, "rejected_agents": rejected_agents,
          "selected": selected, "editable": editable, "creating": creating,
+         "model_options": model_options, "model_roles": model_roles,
          "can_set_model_cost_tier": has_global_permission(request, "admin"),
          "agent_changes": agent_changes, "selected_kind": selected_kind,
          # Names of the people who changed an agent are shown to administrators.

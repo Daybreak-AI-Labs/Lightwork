@@ -99,13 +99,28 @@ def _draft(request, name, entered, source):
     errors = _agent_action_errors(name, body) + _agent_autonomy_errors(name, body)
     if errors:
         raise HTTPException(422, "; ".join(errors))
+    _allowed_draft_models(asdict(profile), source)
     _bounded(patch)
     return patch, asdict(profile)
 
 
-def _connection(name, model=None):
-    from maverick.llm import LLM, _parse_spec, model_for_role
-    model = model or model_for_role(name)
+def _allowed_draft_models(profile, source):
+    from maverick.llm import ModelNotAllowedError, require_model_allowed
+    before = (source.get("profile") or {}).get("models", {})
+    try:
+        for role, model in profile["models"].items():
+            if before.get(role) != model:
+                require_model_allowed(model)
+    except ModelNotAllowedError as exc:
+        raise HTTPException(409, "A changed AI choice is no longer permitted by the current workspace policy. Choose an allowed AI in the complete editor and review the draft again.") from exc
+
+
+def _connection(name, *, models=None):
+    from maverick.llm import LLM, ModelNotAllowedError, _parse_spec, model_for_role
+    try:
+        model = model_for_role(name, domain_models=models)
+    except ModelNotAllowedError as exc:
+        raise HTTPException(409, "This draft's AI choice is not permitted by the current workspace policy. Choose an allowed AI in the complete editor before reviewing it again.") from exc
     provider, _ = _parse_spec(model)
     client = LLM(model)
     connection = client._provider_client_config(provider).fingerprint
@@ -233,7 +248,7 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
     cases = tests.cases_for(name) if action == "check" else []
     if action == "check" and not 1 <= len(cases) <= tests.MAX_CASES_PER_SPECIALIST:
         raise HTTPException(409, "Add at least one saved answer check before checking this draft.")
-    connection = _connection(name)
+    connection = _connection(name, models=profile["models"])
     if action in {"try", "check"}:
         from maverick import model_tests
         try:
@@ -256,11 +271,12 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
 
 
 def changes(request, prepared):
+    from .plain_labels import model_label
     _guard(request, prepared)
     rows = [{"label": "Decision", "after": ACTIONS[prepared["action"]]},
             {"label": "Complete draft", "after": _readable(prepared["profile"], "definition")},
             {"label": "Currently used definition", "after": _readable(prepared["before"]["profile"], "definition") if prepared["before"]["profile"] else "No active custom agent"},
-            {"label": "AI used for answer checks", "after": prepared["connection"]["model"]}]
+            {"label": "AI used for answer checks", "after": model_label(prepared["connection"]["model"])}]
     if prepared["action"] == "try":
         rows.append({"label": "Fictional sample request", "after": prepared["task"]})
     if prepared["action"] == "check":
@@ -317,7 +333,8 @@ def _guard(request, prepared, *, budget=None, published=None):
         raise HTTPException(409, "The active or inherited specialist changed. Review the complete current draft again.")
     if asdict(domain_edit.preview_override(prepared["name"], prepared["patch"])) != prepared["profile"]:
         raise HTTPException(409, "The draft's inherited settings changed. Review its complete current definition again.")
-    if _connection(prepared["name"], prepared["connection"]["model"]) != prepared["connection"]:
+    _allowed_draft_models(prepared["profile"], prepared["before"])
+    if _connection(prepared["name"], models=prepared["profile"]["models"]) != prepared["connection"]:
         raise HTTPException(409, "The AI connection or current settings changed. Review the draft again before proceeding.")
     if prepared["selected"] is not None:
         row = _owned(request, prepared["selected"])

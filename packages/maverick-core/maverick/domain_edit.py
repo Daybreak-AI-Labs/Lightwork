@@ -205,11 +205,11 @@ def overlay_toml(patch: dict) -> str:
     for k in _ARRAY_KEYS:
         if k in patch:
             lines.append(f"{k} = {json.dumps(list(patch[k]))}")
-    if patch.get("models"):
+    if "models" in patch:
         lines.append("")
         lines.append("[models]")
         for role, model in dict(patch["models"]).items():
-            lines.append(f"{role} = {json.dumps(model)}")
+            lines.append(f"{json.dumps(role)} = {json.dumps(model)}")
     if patch.get("autonomy"):
         lines.append("")
         lines.append("[autonomy]")

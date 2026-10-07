@@ -1087,6 +1087,7 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
         capability=cap,
         knowledge_sources=profile.knowledge_sources,
         domain_effort=profile.effort,
+        domain_models=profile.models,
         autonomy=profile.autonomy or default_profile_for(profile.name),
         # W1-24: the depth-0 call (parent is None -- run_goal's domain-routed
         # root) owns this goal's FINAL just like the plain "orchestrator"

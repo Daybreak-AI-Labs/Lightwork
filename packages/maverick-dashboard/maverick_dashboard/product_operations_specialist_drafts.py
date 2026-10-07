@@ -11,7 +11,7 @@ from maverick.governed_operations import digest
 from pydantic import Field
 
 from . import specialist_drafts as native
-from .plain_labels import capability_label, pack_display_name
+from .plain_labels import agent_role_title, capability_label, model_label, pack_display_name
 from .product_operations import Adapter, Outcome, Preview, Snapshot, StrictInput
 
 
@@ -43,6 +43,8 @@ class SaveInput(NameInput):
     allow_tools: list[str] = Field(min_length=1, max_length=5000)
     deny_tools: list[str] = Field(default_factory=list, max_length=5000)
     max_risk: Literal["low", "medium", "high"]
+    model_role: str = Field(default="", max_length=128)
+    model: str = Field(default="", max_length=200)
     acknowledge_previous: bool = False
 
 
@@ -147,25 +149,45 @@ def selection_snapshot(action):
 
 def save_snapshot(request, selection):
     state = name_snapshot(request, selection)
-    _, name = _chosen_name(request, selection)
-    profile = asdict(_profiles(request)[name]) if name else {}
+    profiles, _names, name = _profile_choices(request, selection)
+    profile = asdict(profiles[name]) if name else {}
     profile = profile or {}
     from maverick.tools import base_tool_names
-    # The editor remains the complete form for playbook, knowledge, deliverable,
-    # models and every retained domain field. This typed edit preserves them.
+    # The editor remains the complete form. This typed edit changes at most one
+    # model entry and preserves the complete map and every other retained field.
     known = base_tool_names(configured_optional=True, include_plugins=False)
     if known is None or len(known) > 10000:
         raise HTTPException(503, "The complete built-in action choices could not be read. Open the complete editor to review retained actions.")
     known |= set(profile.get("allow_tools", [])) | set(profile.get("deny_tools", []))
     choices = [{"value": action, "label": capability_label(action)} for action in sorted(known)]
-    return Snapshot(state.revision, state.source, "Save a draft of these changes while preserving its other complete settings. Use Open complete specialist editor to change every field.",
+    from maverick.role_edit import ROLES
+
+    from .app import model_picker_options
+    models = model_picker_options()
+    role_choices = {}
+    retained_models = set()
+    for item_name, item_profile in profiles.items():
+        labels = [{"value": "", "label": "Keep every AI choice"}, {"value": item_name, "label": "This specialist or agent"}]
+        labels += [{"value": role, "label": agent_role_title(role).replace(".", " ").replace("-", " ")}
+                   for role in dict.fromkeys((*ROLES, *item_profile.models)) if role != item_name]
+        role_choices[item_name] = labels
+        retained_models.update(item_profile.models.values())
+    model_choices = [{"value": "", "label": "Use the workspace choice"}]
+    model_choices += [{"value": spec, "label": model_label(spec)} for spec, _label in models]
+    available = {spec for spec, _label in models}
+    model_choices += [{"value": spec, "label": "Saved choice · " + model_label(spec)} for spec in sorted(retained_models - available)]
+    return Snapshot(digest([state.revision, role_choices, model_choices]), state.source, "Save a draft of these changes while preserving its other complete settings. Use Open complete specialist editor to change every field.",
         fields=state.fields + [{"name": "title", "label": "Draft name (optional)", "kind": "text", "max_length": 120},
             {"name": "description", "label": "Name people see", "kind": "text", "required": True, "max_length": 1000, "value": profile.get("description", "")},
             {"name": "persona", "label": "What should it do?", "kind": "textarea", "required": True, "max_length": 16000, "value": profile.get("persona", "")},
             {"name": "allow_tools", "label": "Permitted actions", "kind": "multiselect", "required": True, "choices": choices, "value": profile.get("allow_tools", [])},
             {"name": "deny_tools", "label": "Actions it must never use", "kind": "multiselect", "choices": choices, "value": profile.get("deny_tools", [])},
             {"name": "max_risk", "label": "Highest risk", "kind": "select", "required": True, "value": profile.get("max_risk", "low"),
-                "choices": [{"value": level, "label": level.capitalize()} for level in ("low", "medium", "high")]}, _ack_field()], blocked=state.blocked)
+                "choices": [{"value": level, "label": level.capitalize()} for level in ("low", "medium", "high")]},
+            {"name": "model_role", "label": "Change the AI for (optional)", "kind": "select", "value": "", "depends_on": "name",
+                "choices": role_choices.get(name, []), "choices_by": role_choices},
+            {"name": "model", "label": "AI choice (used only when a part is selected above)", "kind": "select", "value": "", "choices": model_choices},
+            _ack_field()], blocked=state.blocked)
 
 
 def _ack_field():
@@ -181,8 +203,27 @@ def prepare_for(action):
             if profile is None and saved is None:
                 raise HTTPException(409, "This unpublished draft is no longer available. Choose a current owned draft again.")
             retained = saved["patch"] if saved else {}
+            entered = {**retained, **{key: arguments[key] for key in ("description", "persona", "allow_tools", "deny_tools", "max_risk")}}
+            role = arguments.get("model_role", "")
+            model = arguments.get("model", "")
+            if role:
+                from maverick.llm import ModelNotAllowedError, require_model_allowed
+                from maverick.role_edit import ROLES
+                models = dict((saved["profile"] if saved else profile).get("models", {}))
+                if role not in {*ROLES, arguments["name"], *models}:
+                    raise HTTPException(422, "Choose this specialist or one of its supporting parts before changing an AI choice.")
+                if model:
+                    try:
+                        models[role] = require_model_allowed(model)
+                    except ModelNotAllowedError as exc:
+                        raise HTTPException(409, "This AI choice is no longer permitted by the current workspace policy. Choose an allowed AI and review the draft again.") from exc
+                else:
+                    models.pop(role, None)
+                entered["models"] = models
+            elif model:
+                raise HTTPException(422, "Choose which part should use this AI before reviewing the draft.")
             prepared = native.prepare(request, arguments["name"], action, title=arguments["title"],
-                entered={**retained, **{key: arguments[key] for key in ("description", "persona", "allow_tools", "deny_tools", "max_risk")}}, acknowledge_previous=arguments["acknowledge_previous"])
+                entered=entered, acknowledge_previous=arguments["acknowledge_previous"])
         else:
             prepared = native.prepare(request, arguments["name"], action, selected=arguments["selected"],
                 task=arguments.get("task", ""), reason=arguments.get("reason", ""), acknowledge_previous=arguments["acknowledge_previous"])

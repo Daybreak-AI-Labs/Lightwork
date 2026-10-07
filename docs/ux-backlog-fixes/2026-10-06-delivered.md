@@ -1,5 +1,14 @@
 # Product changes delivered on October 6
 
+UX644, model portion: the ordinary complete editor and typed Copilot Save now
+retain usable specialist and supporting-part AI choices. Complete review and
+answer-check preparation resolve the entered map; actual specialist spawns and
+supporting agents use private copied maps while explicit task/installation
+choices and current model policy keep priority. The complete renderer preserves
+legitimate custom role names, the overlay safely quotes those keys, and an
+explicit empty map clears inherited choices. Selected connected-server binding
+is a separate remaining UX644 portion; this model repair does not close it.
+
 UX610: Studio lists the first approved installed evidence definition without an
 existing blueprint. Named source, supported result and control choices retain
 their exact computed edition/fingerprint bindings. Complete ordinary review,
