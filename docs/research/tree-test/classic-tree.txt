@@ -33,6 +33,7 @@ Work
 	Your notifications
 	My background work
 	My conversations
+	Human conversations
 	Your first useful result
 	Project workspaces
 	Your paired devices

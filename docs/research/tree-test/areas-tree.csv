@@ -2,6 +2,7 @@ Level 1,Level 2,Level 3,Address
 Ask,Ask,Chat,/chat
 Ask,Ask,Task builder,/goal-builder
 Ask,Conversations,My conversations,/conversations
+Ask,Conversations,Human conversations,/human-conversations
 Ask,Start from a template,Templates,/templates
 Ask,My companion,,/companion
 Home,Home,Today,/today
