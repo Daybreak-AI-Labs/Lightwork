@@ -84,6 +84,57 @@ class Job:
 
 _jobs: dict[str, Job] = {}
 _lock = threading.Lock()
+_worker_lock = threading.Lock()
+_workers: list[tuple[threading.Thread, Job]] = []
+_accepting = True
+_admission_generation = 0
+
+
+def workers_alive() -> bool:
+    with _worker_lock:
+        return any(thread.is_alive() for thread, _job in _workers)
+
+
+def open_admission() -> None:
+    """Reopen a restarted dashboard only after its prior workers exited."""
+    global _accepting, _admission_generation
+    with _worker_lock:
+        if any(thread.is_alive() for thread, _job in _workers):
+            raise RuntimeError("prior learning workers are still stopping; restart refused")
+        _workers.clear()
+        _accepting = True
+        _admission_generation += 1
+
+
+def stop(*, timeout: float = 5.0, wait: bool = True) -> None:
+    """Close admission, request existing safe stops and drain one deadline.
+
+    No observation is changed to finished by shutdown. Workers keep custody
+    and write their own outcomes; an unfinished original remains unfinished.
+    Existing stop hooks only signal safe points or tighten their own Budget.
+    """
+    global _accepting, _admission_generation
+    deadline = time.monotonic() + max(0.0, min(float(timeout), 30.0))
+    hooks = []
+    with _worker_lock:
+        if _accepting:
+            _admission_generation += 1
+        _accepting = False
+        workers = list(_workers)
+        for thread, job in workers:
+            if thread.is_alive() and job.active and job.cancellable and not job.cancelled:
+                job._cancel.set()
+                if job.on_cancel is not None:
+                    hooks.append((job.id, job.on_cancel))
+    for job_id, hook in hooks:
+        try:
+            hook()
+        except Exception:  # noqa: BLE001 -- a stop request cannot erase its original
+            log.warning("learning task %s shutdown stop hook failed", job_id, exc_info=True)
+    if wait:
+        for thread, _job in workers:
+            if thread is not threading.current_thread():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
 
 def _prune() -> None:
@@ -210,6 +261,10 @@ def start(kind: str, label: str, fn: Callable[[Job], dict], *, started_by: str,
     ``problem`` turns an exception into a sentence for people (``None`` keeps
     the generic one and logs the failure). Raises :class:`JobRefused` when the
     same kind is already running or too many jobs are running."""
+    with _worker_lock:
+        if not _accepting:
+            raise JobRefused("This server is stopping. No new work was started. Read the original task's recorded progress.")
+        generation = _admission_generation
     with _lock:
         running = [j for j in _jobs.values() if j.active]
         if any(j.kind == kind for j in running):
@@ -242,8 +297,16 @@ def start(kind: str, label: str, fn: Callable[[Job], dict], *, started_by: str,
     from ._request_memo import discard_request_memo
     ctx.run(discard_request_memo)
     try:
-        threading.Thread(target=ctx.run, args=(_run, job, fn, problem), daemon=True,
-                         name=f"lightwork-job-{kind}").start()
+        thread = threading.Thread(target=ctx.run, args=(_run, job, fn, problem), daemon=True,
+                                  name=f"lightwork-job-{kind}")
+        with _worker_lock:
+            # Observation writes may have waited. The physical launch and
+            # shutdown signal share this short lock, with no storage I/O.
+            if not _accepting or generation != _admission_generation:
+                raise JobRefused("This server stopped accepting work before the worker started.")
+            _workers[:] = [(item, owner) for item, owner in _workers if item.is_alive()]
+            _workers.append((thread, job))
+            thread.start()
     except Exception as exc:
         with _lock:
             job.state = "not_started"
@@ -423,4 +486,4 @@ def clear_for_tests() -> None:
 
 
 __all__ = ["Job", "JobRefused", "MAX_RUNNING", "cancel", "clear_for_tests", "get",
-           "listed", "start", "stop_budget"]
+           "listed", "open_admission", "start", "stop", "stop_budget", "workers_alive"]

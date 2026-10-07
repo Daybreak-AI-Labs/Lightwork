@@ -1,5 +1,13 @@
 # Product changes delivered on October 6
 
+UX518: Learning's actual threads participate in coordinated dashboard shutdown.
+New admission closes, cooperative safe points/Budget hooks receive stop, and
+joins share one deadline. Noncancellable work retains truthful running custody
+and Original; restart waits for its exit. Native encrypted jobs qualified
+cooperative drain, bounded noncooperative return, degraded supervision, closed
+admission, clean reopen and a held late admission that executes nothing. No
+provider call, forced thread kill or arbitrary-callback deadline is claimed.
+
 UX658, specialist portion: current named published specialists are available in
 encrypted personal Preferences and typed Copilot. Untouched Chat/task forms
 prefill the saved name; explicit handoffs, restored drafts and deliberate blank

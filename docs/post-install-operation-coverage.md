@@ -1,5 +1,19 @@
 # Post-install operation coverage
 
+October 7 UX518: actual Learning threads now register with the existing
+dashboard shutdown supervisor. Shutdown closes new admission, requests existing
+safe-point/Budget stops and joins those threads within one deadline. A launch
+held across shutdown cannot start after a reopen. Restart is refused while a
+prior thread remains alive. A noncancellable worker retains its actual running
+record, custody and original readback; shutdown never marks it finished.
+
+The native encrypted fixture qualified cooperative drain, closed admission,
+noncooperative timeout and degraded supervision, restart refusal then clean
+reopen, and a retained late admission marked not started with zero executions.
+No AI or external call was made. The deadline covers the currently installed
+nonblocking cancellation hooks and thread joins, not arbitrary caller-defined
+callbacks or forced thread termination.
+
 October 7 UX658 specialist default: encrypted personal Preferences and typed
 Copilot can select a named current published specialist. Untouched new Chat and
 task forms prefill that name; explicit handoffs, deliberate blank choices and
