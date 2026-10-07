@@ -8,7 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 # Their routes also need a named account, which the local owner does not have.
-NAMED_ACCOUNT_PAGES = {"/notifications", "/access-requests", "/devices", "/get-started/employee"}
+NAMED_ACCOUNT_PAGES = {"/notifications", "/access-requests", "/devices", "/get-started/employee",
+                       "/human-conversations"}
 
 
 class _Items(HTMLParser):
