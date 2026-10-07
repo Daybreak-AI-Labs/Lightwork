@@ -362,14 +362,21 @@
       var nodes = [el('p', null, 'Shorthand: ' + plural(d.shorthand.codes, 'code') + (d.shorthand.on ? ' (in use).' : ' (not in use).') +
         ' Token-saving codes: ' + plural(d.token_codes.codes, 'code') + (d.token_codes.on ? ' (being measured live).' : '.'))];
       if (d.shorthand.phrases.length) { nodes.push(el('h4', null, 'Phrases with a code')); nodes.push(list(d.shorthand.phrases)); }
-      fill('lo-cd-state', nodes);
       var exact = $('lo-cd-exact');
-      if (exact) Array.from(exact.options).filter(function (option) { return option.value !== '0'; }).forEach(function (option) { option.remove(); });
-      if (exact && d.exact_count_available && exact.options.length === 1) {
+      var connected = exact && Array.from(exact.options).find(function (option) { return option.value === '1'; });
+      if (exact && d.exact_count_available && !connected) {
         var o = el('option', null, 'Anthropic count estimate (sends these messages to your connected service)');
         o.value = '1';
         exact.appendChild(o);
+      } else if (connected && !d.exact_count_available) {
+        var wasSelected = exact.value === '1';
+        connected.remove();
+        if (wasSelected) {
+          exact.value = '0';
+          nodes.push(el('p', null, 'Connected-service counting is no longer available. The counting method changed to the free estimate.'));
+        }
       }
+      fill('lo-cd-state', nodes);
     }).catch(async function (failure) {
       fill('lo-cd-state', el('p', null, await J.problem(failure, 'load the shorthand')));
     });

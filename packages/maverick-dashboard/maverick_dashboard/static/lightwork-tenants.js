@@ -4,6 +4,43 @@
   'use strict';
   var addMsg = document.getElementById('tenant-add-msg');
   var rowMsg = document.getElementById('tenant-quota-msg') || document.getElementById('removed-tenants-msg');
+  var add = document.getElementById('tenant-add');
+  var creating = false;
+
+  function formStamp(form) {
+    return JSON.stringify(Array.from(form.elements).filter(function (field) { return !!field.name; })
+      .map(function (field) { return [field.name, field.value, !!field.checked]; }));
+  }
+  var emptyCreate = add ? formStamp(add) : '';
+  function enteredCreate() { return add && formStamp(add) !== emptyCreate; }
+  function shownInvitation() {
+    var output = document.getElementById('tenant-onboard-out');
+    var link = document.getElementById('tenant-onboard-link');
+    return output && !output.hidden && link && !!link.value;
+  }
+  function keepPage() {
+    var notice = document.getElementById('tenant-kept-work');
+    if (notice || !addMsg) return;
+    notice = document.createElement('p');
+    notice.id = 'tenant-kept-work'; notice.className = 'muted tenants-msg';
+    notice.textContent = 'The workspace list has changed. Your entered details and any invitation link stay here until you are ready to refresh. ';
+    var refresh = document.createElement('button');
+    refresh.type = 'button'; refresh.className = 'btn'; refresh.textContent = 'Refresh workspace list';
+    refresh.addEventListener('click', async function () {
+      if (creating) { addMsg.textContent = 'Wait for the workspace being created before refreshing.'; return; }
+      var before = add ? formStamp(add) : '';
+      if ((enteredCreate() || shownInvitation()) && !await window.mvConfirm(
+        'Refresh the workspace list? Your unsaved workspace details and any invitation link shown only once will leave this page.',
+        {okText: 'Refresh list'})) return;
+      // Recheck after the confirmation waits: never interrupt a new creation.
+      if (creating || (add && formStamp(add) !== before)) {
+        addMsg.textContent = 'Your workspace details changed. They are kept here; choose Refresh workspace list again when ready.';
+        return;
+      }
+      window.location.reload();
+    });
+    notice.appendChild(refresh); addMsg.after(notice);
+  }
 
   function errorText(failure, action) {
     return window.mvErrorText ? window.mvErrorText(failure, action) : 'Could not ' + action + '. Try again.';
@@ -15,7 +52,12 @@
   function plainDetail(failure) {
     return window.mvPlainDetail ? window.mvPlainDetail(failure && failure.detail) : '';
   }
-  function reloadSoon() { window.setTimeout(function () { window.location.reload(); }, 350); }
+  function reloadSoon() {
+    window.setTimeout(function () {
+      if (creating || enteredCreate() || shownInvitation()) { keepPage(); return; }
+      window.location.reload();
+    }, 350);
+  }
   function base(id) { return '/api/v1/admin/tenants/' + encodeURIComponent(id); }
   function nameOf(id) {
     var row = document.querySelector('[data-tenant-row="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
@@ -23,13 +65,18 @@
   }
 
   // "No limit" disables the amount; unticking asks for one.
+  function syncLimit(form) {
+    var box = form.querySelector('[data-limit-toggle]');
+    var amount = form.querySelector('[data-limit-amount]');
+    if (!box || !amount) return;
+    amount.disabled = box.checked; amount.required = !box.checked;
+  }
   document.querySelectorAll('[data-limit-toggle]').forEach(function (box) {
     var scope = box.closest('form');
     var amount = scope && scope.querySelector('[data-limit-amount]');
     if (!amount) return;
     box.addEventListener('change', function () {
-      amount.disabled = box.checked;
-      amount.required = !box.checked;
+      syncLimit(scope);
       if (!box.checked) amount.focus();
     });
   });
@@ -40,20 +87,33 @@
     return isFinite(value) && value > 0 ? value : null;
   }
 
-  var add = document.getElementById('tenant-add');
   if (add) {
     add.addEventListener('submit', async function (event) {
       event.preventDefault();
+      if (creating) return;
       var data = new FormData(add);
       var limit = limitFrom(add);
       var name = String(data.get('display_name') || '').trim();
       if (!name) { addMsg.textContent = 'Give the workspace a name.'; return; }
       if (limit === null) { addMsg.textContent = 'Enter a daily limit above $0, or tick "No daily limit".'; return; }
+      var submitted = formStamp(add);
+      var submit = add.querySelector('button[type="submit"]');
+      creating = true; add.setAttribute('aria-busy', 'true');
+      if (submit) submit.disabled = true;
       var adminEmail = String(data.get('admin_email') || '').trim();
       var out = document.getElementById('tenant-onboard-out');
-      if (out) out.hidden = true;
-      addMsg.textContent = 'Creating…';
       try {
+        if (adminEmail && shownInvitation()) {
+          addMsg.textContent = 'Save the invitation link already shown before creating another invitation.';
+          if (!await window.mvConfirm(
+            'Have you saved the invitation link currently shown? A new invitation will replace the only copy displayed here.',
+            {okText: 'I saved the link'})) return;
+          if (formStamp(add) !== submitted) {
+            addMsg.textContent = 'Your workspace details changed while confirming. They are kept; choose Create workspace again when ready.';
+            return;
+          }
+        }
+        addMsg.textContent = 'Creating…';
         if (adminEmail) {
           // Workspace + its first administrator's invitation in one step. The
           // page does not reload: the invitation link is shown only once.
@@ -63,18 +123,33 @@
           addMsg.textContent = result.summary || ('Workspace "' + name + '" created and ' + adminEmail + ' invited.');
           if (window.mvToast) window.mvToast(addMsg.textContent);
           var link = document.getElementById('tenant-onboard-link');
-          if (link && out) { link.value = result.invite_link || ''; out.hidden = !link.value; }
-          add.reset();
+          if (link && out && result.invite_link) {
+            var identity = document.getElementById('tenant-onboard-identity');
+            if (!identity) {
+              identity = document.createElement('p');
+              identity.id = 'tenant-onboard-identity'; identity.className = 'muted tenants-msg';
+              out.insertBefore(identity, out.firstChild);
+            }
+            identity.textContent = 'Invitation for ' + adminEmail + ' in ' + name + '.';
+            link.value = result.invite_link; out.hidden = false;
+          }
+          if (formStamp(add) === submitted) { add.reset(); syncLimit(add); }
+          else addMsg.textContent += ' Your newer workspace details are kept.';
           return;
         }
         await send('/api/v1/admin/tenants', 'POST', {display_name: name, plan: String(data.get('plan') || 'free'), max_daily_dollars: limit});
         addMsg.textContent = 'Workspace "' + name + '" created.';
+        if (formStamp(add) === submitted) { add.reset(); syncLimit(add); }
+        else addMsg.textContent += ' Your newer workspace details are kept.';
         if (window.mvToastAfterReload) window.mvToastAfterReload('Workspace "' + name + '" created.');
         reloadSoon();
       } catch (failure) {
         var plain = plainDetail(failure);
         addMsg.textContent = plain || errorText(failure, 'create the workspace');
         if (window.mvToast) window.mvToast(addMsg.textContent, {error: true});
+      } finally {
+        creating = false; add.removeAttribute('aria-busy');
+        if (submit) submit.disabled = false;
       }
     });
   }
