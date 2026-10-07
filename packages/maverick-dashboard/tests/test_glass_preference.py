@@ -99,7 +99,9 @@ def test_an_account_choice_follows_the_person_and_policy_can_require_it(monkeypa
 
     assert "glass" in preferences_api.PROFILE_FIELDS
     assert "glass" in product_operations_preferences.KEYS
-    assert dict(product_operations_preferences._choices()["glass"]) == {"off": "Off", "on": "On"}
+    # The choice list is built from the caller's current Chat choices; glass is fixed.
+    current = {"chat_specialists": [], "chat_models": [], "values": {"chat_model": ""}}
+    assert dict(product_operations_preferences._choices(current)["glass"]) == {"off": "Off", "on": "On"}
     # Organization policy can require it like any presentation preference.
     required = catalog.BY_ID["personalization.defaults.glass"]
     assert required.control == "select" and [v for v, _ in required.choices] == ["off", "on"]
