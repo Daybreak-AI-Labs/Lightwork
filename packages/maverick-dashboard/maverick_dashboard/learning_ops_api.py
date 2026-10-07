@@ -682,6 +682,10 @@ async def export_cases(request: Request) -> Response:
 
 
 def _parse_cases(raw: bytes) -> dict:
+    from maverick.self_harness_eval import _CASE_EFFECTS
+
+    from .learning_test_cases_api import CaseIn
+
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -696,6 +700,20 @@ def _parse_cases(raw: bytes) -> dict:
         raise HTTPException(status_code=422, detail="That file is not a test-case file Lightwork can read.") from exc
     if not isinstance(data, dict):
         raise HTTPException(status_code=422, detail="That file is not a test-case file Lightwork can read.")
+    for model, rows in data.items():
+        if model == _CASE_EFFECTS:
+            continue  # Copied history cannot establish an import; native storage excludes it.
+        if not isinstance(rows, list):
+            raise HTTPException(422, "Each model in the file needs a list of questions and expected answers. Nothing was imported.")
+        for row in rows:
+            if not isinstance(row, dict):
+                raise HTTPException(422, "Every question in the file needs a complete question and expected answer. Nothing was imported.")
+            if "task_source" in row or "task_question_payload" in row:
+                raise HTTPException(409, "Private task-derived questions need their native source review. Use one of my completed tasks in Learning questions; a file cannot recreate that permission.")
+            try:
+                CaseIn(model=model, question=row.get("goal"), expected=row.get("expected"))
+            except ValueError as exc:
+                raise HTTPException(422, "Every question in the file needs a model name of up to 200 characters, a complete question and expected answer of up to 4,000 characters each. Nothing was imported.") from exc
     return data
 
 
@@ -824,8 +842,6 @@ async def import_preview(request: Request, replace: bool = Query(default=False))
     scope = await run_in_threadpool(_import_scope, request, request.headers.get("X-Lightwork-Import-Context"), write=True)
     raw = await _upload(request, _CORPUS_LIMIT)
     data = _parse_cases(raw)
-    if any("task_source" in row or "task_question_payload" in row for row in _import_rows(data)):
-        raise HTTPException(409, "Private task-derived questions need their native source review. Use one of my completed tasks in Learning questions; a file cannot recreate that permission.")
     try:
         preview = await run_in_threadpool(lambda: ev.preview_corpus_import(scope["path"], data, replace=replace, complete=True))
         if len(json.dumps([data, preview], ensure_ascii=False, allow_nan=False).encode()) > 192000:

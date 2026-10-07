@@ -1041,11 +1041,33 @@ def get_budget_overrides() -> dict:
     return load_config().get("budget", {})
 
 
+def get_deferred_tools(*, config: dict | None = None, default: bool = True) -> bool:
+    """Resolve the one tool-discovery policy, including its older config name.
+
+    An explicit environment true/false wins. The current capabilities key then
+    wins over the legacy tools key; saving the current key can therefore turn
+    off an inherited legacy choice. Standalone registries retain their older
+    absent-setting default by passing ``default=False``.
+    """
+    environment = env_flag("MAVERICK_DEFERRED_TOOLS")
+    if environment is not None:
+        return environment
+    cfg = load_config() if config is None else config
+    capabilities = cfg.get("capabilities", {})
+    if isinstance(capabilities, dict) and "deferred_tools" in capabilities:
+        return _strict_config_bool(capabilities, "deferred_tools", default, invalid=True)
+    legacy = cfg.get("tools", {})
+    if isinstance(legacy, dict) and "deferred_loading" in legacy:
+        return _strict_config_bool(legacy, "deferred_loading", default, invalid=True)
+    return bool(default)
+
+
 def get_capabilities() -> dict:
     """Return the [capabilities] section (computer_use / browser / web_search /
     mobile_tools / ros). These gate the optional high-impact tools in
     ``tools.base_registry``; all default off."""
-    cfg = load_config().get("capabilities", {}) or {}
+    current = load_config()
+    cfg = current.get("capabilities", {}) or {}
     return {
         "computer_use": bool(cfg.get("computer_use", False)),
         "browser": bool(cfg.get("browser", False)),
@@ -1057,7 +1079,7 @@ def get_capabilities() -> dict:
         "code_exec": bool(cfg.get("code_exec", False)),
         # Deferred connector loading (default on); agent.py reads it from this
         # dict, so without it here the documented knob could never turn it off.
-        "deferred_tools": _strict_config_bool(cfg, "deferred_tools", True, invalid=True),
+        "deferred_tools": get_deferred_tools(config=current),
     }
 
 

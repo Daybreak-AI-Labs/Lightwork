@@ -13,6 +13,7 @@ import inspect
 import itertools
 import json
 import logging
+import math
 import os
 import re
 import secrets as _secrets
@@ -26,7 +27,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from . import killswitch
-from ._envparse import env_float, env_int
+from ._envparse import env_int
 from .audit.errors import AuditRefused
 from .budget import BudgetExceeded, UnpricedModelError, UsageAccountingError
 from .env_setting import env_or_config as _env_or_config
@@ -250,12 +251,22 @@ def apply_memory_brief(base: str, *, depth: int) -> str:
 # (1 - this) of the cap, so a recursive research swarm can't burn the budget
 # the orchestrator needs to actually produce the answer (the dogfooded failure:
 # 35 agents, $7.85 spent, zero report). 0 disables it.
-_SYNTHESIS_RESERVE = env_float("MAVERICK_SYNTHESIS_RESERVE", 0.25)
+def _budget_reporting_settings() -> tuple[float, float]:
+    """Read bounded startup choices; an explicit environment value still wins."""
+    from .env_setting import env_or_config_float
+
+    reserve = env_or_config_float("MAVERICK_SYNTHESIS_RESERVE", "agent", "synthesis_reserve", 0.25)
+    interval = env_or_config_float("MAVERICK_SPEND_MIRROR_INTERVAL", "agent", "spend_mirror_interval", 5.0)
+    if not math.isfinite(reserve) or not 0 <= reserve <= 1:
+        reserve = 0.25
+    if not math.isfinite(interval) or not 0 <= interval <= 300:
+        interval = 5.0
+    return reserve, interval
 
 # #614: how often (seconds) the root agent mirrors running spend onto its
 # open episode row so `maverick runs` / `maverick budget` show mid-run spend.
 # Throttled so we don't write the row on every step of a fast loop.
-_SPEND_MIRROR_INTERVAL = env_float("MAVERICK_SPEND_MIRROR_INTERVAL", 5.0)
+_SYNTHESIS_RESERVE, _SPEND_MIRROR_INTERVAL = _budget_reporting_settings()
 
 # Loop guard: a long-horizon failure mode is the model re-issuing the SAME
 # tool call that keeps failing the same way, silently burning budget/steps. We
@@ -2160,13 +2171,9 @@ class Agent:
         # discoverable. Disable ordinary deferral via [capabilities]
         # deferred_tools = false or MAVERICK_DEFERRED_TOOLS=0; a model's tool
         # ceiling and the agent's capability still constrain what it sees.
-        env_dt = os.environ.get("MAVERICK_DEFERRED_TOOLS", "").strip().lower()
-        if env_dt in {"0", "false", "no", "off"}:
-            deferred_on = False
-        elif env_dt in {"1", "true", "yes", "on"}:
-            deferred_on = True
-        else:
-            deferred_on = bool(caps.get("deferred_tools", True))
+        # get_capabilities resolves environment/current/legacy precedence once;
+        # base_registry uses that same resolver for its initial catalog.
+        deferred_on = bool(caps.get("deferred_tools", True))
         deferrable = getattr(reg, "deferrable_names", None) or set()
         if deferrable:
             from .tools.find_tools import find_tools
@@ -2174,11 +2181,14 @@ class Agent:
             if deferred_on:
                 core, hidden = self._tool_exposure_sets(reg, deferrable)
                 reg.enable_deferred(core=core, hidden=hidden)
-            elif self.capability is not None:
+            else:
                 # Disabling deferral widens the visible catalog, never a pack's
                 # authority. Keep refused names out of both model and search.
+                # Also replace any earlier core-only catalog when no capability
+                # envelope is configured; off must not retain legacy deferral.
                 registered = {tool.name for tool in reg.all()}
-                hidden = {name for name in registered if not self.capability.permits(name)}
+                hidden = {name for name in registered
+                          if self.capability is not None and not self.capability.permits(name)}
                 reg.enable_deferred(core=registered - hidden, hidden=hidden)
         return reg
 

@@ -1414,6 +1414,28 @@ def pick_budget() -> dict[str, Any]:
     return budget
 
 
+def _pick_agent_budget_reporting() -> dict[str, float]:
+    """The same bounded startup choices offered in All settings."""
+    console.print("[dim]Keep part of a task's dollar limit for its final answer. "
+                  "Running-spending updates do not change how charges or limits are counted.[/dim]")
+    choices = {}
+    for field, question, default, maximum in (
+        ("synthesis_reserve", "  Budget kept for the final answer, as a percentage (0–100; zero keeps no reserve)", "25", 100),
+        ("spend_mirror_interval", "  Refresh recorded running spending every how many seconds (0–300; zero updates every step)", "5", 300),
+    ):
+        while True:
+            try:
+                value = float(_q_text(question, default=default).strip())
+                if not math.isfinite(value) or not 0 <= value <= maximum:
+                    raise ValueError
+            except ValueError:
+                console.print(f"[yellow]Enter a number from 0 to {maximum}.[/yellow]")
+                continue
+            choices[field] = value / 100 if field == "synthesis_reserve" else value
+            break
+    return choices
+
+
 def pick_capabilities() -> dict[str, Any]:
     """Opt-in to high-impact tools that ship disabled.
 
@@ -4796,6 +4818,7 @@ def pick_advanced() -> dict[str, Any]:
     """
     console.print()
     advanced: dict[str, Any] = {
+        "agent_budget_reporting": _pick_agent_budget_reporting(),
         "image_edit": _pick_image_edit_models(),
         "cost_aware": _q_confirm(
             "Cost-aware routing? Use the cheapest capable model per role to cut spend.",
@@ -8795,6 +8818,17 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if not advanced:
         return []
     lines: list[str] = []
+    budget_reporting = advanced.get("agent_budget_reporting")
+    if budget_reporting is not None:
+        if not isinstance(budget_reporting, dict) or set(budget_reporting) != {"synthesis_reserve", "spend_mirror_interval"}:
+            raise ValueError("Running-task choices are not in the supported form.")
+        values = []
+        for key, maximum in (("synthesis_reserve", 1), ("spend_mirror_interval", 300)):
+            value = budget_reporting[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= maximum:
+                raise ValueError("Running-task choices must be within their displayed limits.")
+            values.append(f"{key} = {float(value)}")
+        lines.extend(["", "[agent]", *values])
     image_edit = advanced.get("image_edit")
     if image_edit:
         from maverick.image_edit_models import CHOICES, validate_model

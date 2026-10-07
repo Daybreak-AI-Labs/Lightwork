@@ -166,6 +166,8 @@ def _resolve_table(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str
 
 def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:
     """Effective value, where it comes from, and whether this page may change it."""
+    if setting.id == "capabilities.deferred_tools":
+        return _resolve_deferred_tools(layers)
     provider = _resolve_provider_field(setting, layers)
     if provider is not None:
         return provider
@@ -218,6 +220,35 @@ def _resolve(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]
         return {"source": "installer", "locked": False, "value": value, "known": True}
     return {"source": "default", "locked": False, "value": _default_in(setting, layers),
             "known": True}
+
+
+def _resolve_deferred_tools(layers: dict[str, Any]) -> dict[str, Any]:
+    """Show the same explicit/current/legacy choice as the native registry."""
+    from maverick.config import env_flag
+    from maverick.config_resets import apply_to_base
+
+    environment = env_flag("MAVERICK_DEFERRED_TOOLS")
+    if environment is not None:
+        return {"source": "deployment", "locked": True, "value": environment, "known": True}
+    if os.environ.get("MAVERICK_DEFERRED_TOOLS", "").strip():
+        return {"source": "deployment", "locked": True, "value": None, "known": False}
+    layers = {**layers, "base": apply_to_base(layers["base"], layers["here"])}
+    for path in (("capabilities", "deferred_tools"), ("tools", "deferred_loading")):
+        for name in ("tenant", "operator", "here", "base"):
+            present, value = catalog.lookup(layers[name], path)
+            if not present:
+                continue
+            legacy = path[0] == "tools"
+            source = {"tenant": "deployment", "operator": "deployment",
+                      "here": "here", "base": "installer"}[name]
+            state = {"source": source, "locked": not legacy and source == "deployment",
+                     "value": value if type(value) is bool else True, "known": True}
+            if type(value) is not bool:
+                state["source_text"] = "The earlier choice is invalid; the short list stays on."
+            elif legacy:
+                state["source_text"] = "Earlier saved choice · save here to replace it"
+            return state
+    return {"source": "default", "locked": False, "value": True, "known": True}
 
 
 def _resolve_feature(setting: catalog.Setting, layers: dict[str, Any]) -> dict[str, Any]:

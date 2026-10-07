@@ -795,7 +795,7 @@ def _tools(S, C) -> tuple:
           subgroup="Reusing tool results", minimum=100, maximum=600000, integer=True,
           unit="milliseconds", none_text="Off", env=("MAVERICK_TOOL_LATENCY_BUDGET_MS",)),
         S("tools", "exposure", "Tools described on each request",
-          "How much of the tool list each request to the AI describes up front. The short "
+          "When Use a short tool list is on, choose the starting list described to the AI. The short "
           "list fits the agent's role, and a specialist pack sees its own tools; agents can "
           "look up any other permitted tool when they need it. Models with a smaller tool "
           "limit keep key actions and let agents look up the rest.", "select", "Performance", "core",
@@ -804,15 +804,18 @@ def _tools(S, C) -> tuple:
                    ("full", "A longer list, up to the model's limit (costs more)")),
           env=("MAVERICK_TOOL_EXPOSURE",), aliases="tool catalog exposure context tokens"),
         S("tools", "core_extra", "Tools always described",
-          "Tools to describe on every request as well as the short list, by tool name.",
+          "When Use a short tool list is on, describe these tools too, by tool name.",
           "list", "Performance", [], "maverick.config", subgroup="Reusing tool results",
           item_label="Tool name", item_hint="scan_finance_anomalies",
           pattern=r"[a-z0-9_]{1,80}", item_error="a tool name such as read_file",
           max_items=50),
-        S("capabilities", "deferred_tools", "Hide rarely used connectors until needed",
-          "Keep the long list of business-system connectors out of each request until an "
-          "agent searches for one.", "toggle", "Performance", True, "maverick.agent",
-          subgroup="Reusing tool results", env=("MAVERICK_DEFERRED_TOOLS",)),
+        S("capabilities", "deferred_tools", "Use a short tool list",
+          "Describe a smaller set of tools to the AI, and let it find other permitted tools "
+          "when needed. Turn off to describe the longer list. Tool permissions and the AI's "
+          "own tool limit still apply. Saving here replaces an earlier tool-loading choice.",
+          "toggle", "Performance", True, "maverick.agent", partial_default=True,
+          subgroup="Reusing tool results", env=("MAVERICK_DEFERRED_TOOLS",),
+          aliases="deferred loading connectors core tool catalog"),
         S("capabilities", "web_search", "Let agents and specialists search the web",
           "Allow agents and specialists whose work calls for current web information to use Web search. "
           "Lightwork uses a connected search service when available, with a public-search "
@@ -1531,6 +1534,19 @@ def _startup_limits(S) -> tuple:
     """Limits the kernel reads once when it starts (the environment still wins)."""
     how, length = "How agents work", "Conversation length"
     return (
+        S("agent", "synthesis_reserve", "Budget kept for the final answer",
+          "Helper agents stop before using this share of a task's dollar limit, leaving the lead "
+          "agent room to write its answer. 0.25 keeps one quarter; zero keeps no reserve. This "
+          "applies only when the task has a dollar limit. Restart the service after saving.",
+          "number", "AI models", 0.25, "maverick.agent", subgroup=how, minimum=0,
+          maximum=1, step=0.05, unit="share", restart=True,
+          env=("MAVERICK_SYNTHESIS_RESERVE",)),
+        S("agent", "spend_mirror_interval", "Refresh recorded running spending every",
+          "How often the lead agent updates the recorded spending of a running task. This "
+          "does not change spending limits or how charges are counted. Zero updates at every "
+          "step. Restart the service after saving.", "number", "Performance", 5.0,
+          "maverick.agent", subgroup="Running tasks", minimum=0, maximum=300, step=0.5,
+          unit="seconds", restart=True, env=("MAVERICK_SPEND_MIRROR_INTERVAL",)),
         S("agent", "loop_guard", "Stop agents repeating the same action",
           "When an agent keeps making exactly the same request and getting the same result, "
           "tell it to change course, and in the end refuse the repeat.", "toggle", "AI models",

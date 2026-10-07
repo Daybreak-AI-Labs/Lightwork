@@ -874,18 +874,12 @@ def enterprise_unavailable_tool_names() -> frozenset[str]:
 
 
 def _deferred_loading_enabled() -> bool:
-    """Whether deferred tool loading is on (default off -- unchanged behavior).
-
-    Enable with ``MAVERICK_DEFERRED_TOOLS=1`` or ``[tools] deferred_loading =
-    true`` in ``~/.maverick/config.toml``.
-    """
-    if _env_true("MAVERICK_DEFERRED_TOOLS"):
-        return True
+    """Use the same explicit policy as agents, retaining the standalone default."""
     try:
-        from ..config import load_config
-        return bool(load_config().get("tools", {}).get("deferred_loading", False))
+        from ..config import get_deferred_tools
+        return get_deferred_tools(default=False)
     except Exception:  # pragma: no cover -- config never blocks the registry
-        return False
+        return True  # a failed policy read must not widen the visible catalog
 
 
 def base_registry(
