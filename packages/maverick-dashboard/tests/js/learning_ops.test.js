@@ -34,8 +34,12 @@ const JOB = (result) => ({ job: { id: "0123456789abcdef", kind: "learning_task",
 
 function defaults() {
   return {
-    "/api/v1/learning-ops/self-modify": { state: "blocked", blockers: ["Add at least two practice tests it must pass."],
+    "/api/v1/learning-ops/self-modify": { context: CONTEXT, revision: "r".repeat(64), model: "Coder model",
+      state: "blocked", blockers: ["Add at least two practice tests it must pass."],
       level: "starter", areas: 2, results: 0, spending_limit: 4, technical: { areas: ["docs/**"] } },
+    // Practice starts from a complete review of the exact objective (a sealed request).
+    "/api/v1/learning-ops/self-modify/review": { token: "sealed:practice", job_id: "0123456789abcdef",  // pragma: allowlist secret
+      review: { objective: "make summaries faster", cycles: 1, model: "Coder model", spending_limit: 4 } },
     "/api/v1/learning-ops/self-modify/results": { results: [] },
     "/api/v1/training-ops/model-improvement": { context: CONTEXT, on: false, catalog: { as_of: "2026-06-01", candidates: 7 },
       task_sets: [{ value: "invoice_triage", label: "Invoice triage", ready: false, practice_groups: 3,
@@ -160,8 +164,13 @@ test("practice rounds show the spending limit in the confirmation and the kernel
   ui.doc.getElementById("lo-sm-form").dispatchEvent(new ui.window.Event("submit", { cancelable: true }));
   await ui.settle();
   assert.match(ui.calls.find((c) => c.confirm).confirm, /Nothing is installed\. It can spend up to \$4\.00/);
-  const sent = ui.calls.find((c) => c.method === "POST");
-  assert.deepEqual(sent.body, { objective: "make summaries faster", cycles: 1, confirm: true });
+  const exact = { objective: "make summaries faster", cycles: 1, context: CONTEXT, revision: "r".repeat(64) };
+  const posts = ui.calls.filter((c) => c.method === "POST");
+  assert.deepEqual(posts.map((c) => c.url), ["/api/v1/learning-ops/self-modify/review", "/api/v1/learning-ops/self-modify/run"]);
+  assert.deepEqual(posts[0].body, exact);
+  // The run carries the reviewed objective and its sealed review, only after the confirmation.
+  assert.deepEqual(posts[1].body, { ...exact, token: "sealed:practice", confirm: true });
+  assert.ok(ui.calls.findIndex((c) => c.confirm) < ui.calls.indexOf(posts[1]));
   assert.match(ui.doc.getElementById("lo-sm-out").textContent, /Turn this experiment on first/);
 });
 
