@@ -16,9 +16,12 @@ empty"; a person can turn the summary off on ``/me``. Every send is written
 to the audit log with the recipient, the channel and item counts only.
 
 The day counts as done only once a channel accepted the summary. When every
-channel definitely did not send it (nothing set up, or refused), the next
-poll tries again, so fixing the channel still delivers today's summary. When
-a channel may have sent it without confirming, it is not sent again.
+channel definitely did not send it (nothing set up, or refused), it is tried
+again after a growing wait (:data:`RETRY_MINUTES`, then hourly) -- at once
+when the person's channels or the channel settings change -- so fixing the
+channel still delivers today's summary without an attempt (and an audit
+row) on every poll. When a channel may have sent it without confirming, it
+is not sent again.
 """
 from __future__ import annotations
 
@@ -554,6 +557,72 @@ def _attempt(channel: str, sender: DigestSender, principal: str, digest: dict[st
 # Scheduling
 # ----------------------------------------------------------------------------
 
+# Waits (minutes) after the 1st, 2nd, ... definite failure of the day; the
+# last one repeats (hourly) until the person's local day ends.
+RETRY_MINUTES = (5, 10, 20, 40, 60)
+# Environment settings that decide whether a channel can send. Only whether
+# each is set enters the setup fingerprint, never its value.
+_CHANNEL_ENV = ("SLACK_BOT_TOKEN", "EMAIL_PROVIDER", "EMAIL_USER", "EMAIL_APP_PASSWORD", "EMAIL_FROM",
+                "MAVERICK_EMAIL_DISABLE", "MAVERICK_SMTP_PASSWORD")
+
+
+def retry_delay(failures: int) -> float:
+    """Seconds to wait after the ``failures``-th definite failure of the day."""
+    return 60.0 * RETRY_MINUTES[min(max(int(failures), 1), len(RETRY_MINUTES)) - 1]
+
+
+def channel_setup(links: list[dict[str, Any]], prefs: dict[str, Any]) -> str:
+    """A short fingerprint of what decides whether this person's summary can
+    go out: their linked accounts and email, the registered channels, the
+    config files (by size and modification time) and which channel
+    environment settings are present. A change ends a back-off at once."""
+    import hashlib
+    import json
+    import os
+
+    from .config import config_path, dashboard_overrides_path, tenant_config_path
+
+    files = []
+    for path in (config_path(), dashboard_overrides_path(), tenant_config_path()):
+        try:
+            stat = path.stat() if path else None
+        except OSError:
+            stat = None
+        files.append([str(path or ""), stat.st_mtime_ns if stat else 0, stat.st_size if stat else 0])
+    material = {
+        "links": sorted([str(link.get("channel")), str(link.get("external_id"))] for link in links),
+        "email": str(prefs.get("email") or ""),
+        "senders": sorted(digest_senders()),
+        "files": files,
+        "env": [bool(os.environ.get(name)) for name in _CHANNEL_ENV],
+    }
+    return hashlib.sha256(json.dumps(material, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+
+
+def _waiting(retry: dict[str, Any], local_date: str, setup: str, current: float) -> bool:
+    """Still inside today's back-off, with the channel setup unchanged."""
+    if retry.get("date") != local_date or retry.get("setup") != setup:
+        return False
+    try:
+        return current < float(retry.get("next_at") or 0)
+    except (TypeError, ValueError):
+        return False
+
+
+def _back_off(principal: str, retry: dict[str, Any], local_date: str, setup: str, current: float) -> None:
+    from . import user_preferences
+
+    same = retry.get("date") == local_date and retry.get("setup") == setup
+    try:
+        before = int(retry.get("failures") or 0) if same else 0
+    except (TypeError, ValueError):
+        before = 0
+    failures = before + 1
+    user_preferences.set_digest_retry(principal, {
+        "date": local_date, "failures": failures, "next_at": current + retry_delay(failures), "setup": setup,
+    })
+
+
 def due_now(prefs: dict[str, Any], *, now: float | None = None) -> tuple[bool, str]:
     """Whether the person's summary is due at ``now`` and their local date.
 
@@ -578,7 +647,7 @@ def run_digest_cycle(world, *, principals: list[str], can_decide: Callable[[str]
 
     current = time.time() if now is None else float(now)
     summary = {"checked": 0, "sent": 0, "skipped_empty": 0, "skipped_unlinked": 0, "failed": 0,
-               "unconfirmed": 0}
+               "unconfirmed": 0, "backing_off": 0}
     for principal in principals:
         summary["checked"] += 1
         prefs = user_preferences.get_preferences(principal)
@@ -589,6 +658,11 @@ def run_digest_cycle(world, *, principals: list[str], can_decide: Callable[[str]
         if not links and not prefs.get("email"):
             summary["skipped_unlinked"] += 1
             user_preferences.mark_digest_sent(principal, local_date)
+            continue
+        setup = channel_setup(links, prefs)
+        retry = user_preferences.digest_retry(principal)
+        if _waiting(retry, local_date, setup, current):
+            summary["backing_off"] += 1
             continue
         digest = prepare_digest(
             world, principal, can_decide=can_decide(principal), prefs=prefs,
@@ -604,7 +678,8 @@ def run_digest_cycle(world, *, principals: list[str], can_decide: Callable[[str]
         elif "unconfirmed" in deliveries:
             summary["unconfirmed"] += 1  # it may have gone out: never resent
         else:
-            summary["failed"] += 1  # definitely not sent: the next poll tries again
+            summary["failed"] += 1  # definitely not sent: tried again after a wait
+            _back_off(principal, retry, local_date, setup, current)
             continue
         user_preferences.mark_digest_sent(principal, local_date)
     return summary
@@ -612,6 +687,8 @@ def run_digest_cycle(world, *, principals: list[str], can_decide: Callable[[str]
 
 __all__ = [
     "RECENT_DAYS",
+    "RETRY_MINUTES",
+    "channel_setup",
     "compose_digest",
     "dashboard_url",
     "digest_senders",
@@ -621,6 +698,7 @@ __all__ = [
     "register_digest_sender",
     "render_html",
     "render_text",
+    "retry_delay",
     "run_digest_cycle",
     "send_digest",
     "subject",

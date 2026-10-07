@@ -170,7 +170,7 @@ def test_run_cycle_sends_once_skips_empty_and_audits(tmp_path, recorded, monkeyp
         summary = daily_digest.run_digest_cycle(
             world, principals=people, can_decide=lambda p: p == "user:alice", now=now)
         assert summary == {"checked": 4, "sent": 1, "skipped_empty": 1,
-                           "skipped_unlinked": 1, "failed": 0, "unconfirmed": 0}
+                           "skipped_unlinked": 1, "failed": 0, "unconfirmed": 0, "backing_off": 0}
         assert sorted(s[0] for s in sent) == ["slack", "teams"]
         assert all(s[1] == "user:alice" for s in sent)
         notes = [p for k, p in recorded if k == "digest_sent"]
@@ -494,3 +494,97 @@ def test_email_the_server_refused_is_retried_and_one_it_may_have_taken_is_not(tm
     # The server accepts tomorrow's summary as usual.
     monkeypatch.setattr(notifications, "_smtp_session", lambda mail: _Smtp({}))
     assert _cycle(world, NOON + 86_400)["sent"] == 1 and _last_sent() == "2026-07-02"
+
+
+# ---- a channel that keeps refusing is retried after a growing wait --------
+
+@pytest.fixture
+def teams(tmp_path):
+    """Alice has only a Teams account; ``answer`` decides what the sender does."""
+    from maverick import channel_identities, daily_digest
+
+    state = {"answer": False, "tried": []}
+
+    def sender(p, d, links, prefs):
+        state["tried"].append(p)
+        if isinstance(state["answer"], Exception):
+            raise state["answer"]
+        return state["answer"]
+    daily_digest.register_digest_sender("teams", sender)
+    channel_identities.link("teams", "T-1", "user:alice", actor="admin")
+    world = _world(tmp_path)
+    _seed(world)
+    state["world"] = world
+    yield state
+    daily_digest.register_digest_sender("teams", None)
+
+
+def _at(minutes):
+    return NOON + 60 * minutes
+
+
+def test_definite_failures_back_off_5_10_20_40_60_minutes_then_hourly(teams, recorded):
+    from maverick import daily_digest, user_preferences
+
+    assert [daily_digest.retry_delay(n) / 60 for n in range(1, 9)] == [5, 10, 20, 40, 60, 60, 60, 60]
+    attempts = [m for m in range(0, 256, 5) if _cycle(teams["world"], _at(m))["failed"]]
+    assert attempts == [0, 5, 15, 35, 75, 135, 195, 255]
+    retry = user_preferences.digest_retry("user:alice")
+    assert retry["date"] == "2026-07-01" and retry["failures"] == 8 and retry["next_at"] == _at(315)
+    assert _last_sent() == ""
+
+
+def test_polls_inside_the_wait_write_no_audit_rows(teams, recorded):
+    summaries = [_cycle(teams["world"], _at(m)) for m in range(0, 61, 5)]  # 13 polls in an hour
+    assert sum(s["failed"] for s in summaries) == 4  # minutes 0, 5, 15 and 35
+    assert sum(s["backing_off"] for s in summaries) == 9
+    assert _deliveries(recorded) == [("teams", "not_sent")] * 4
+    assert len(teams["tried"]) == 4
+
+
+def test_a_send_accepted_after_backing_off_closes_the_day(teams, recorded):
+    from maverick import user_preferences
+
+    for m in (0, 5, 10, 15):
+        _cycle(teams["world"], _at(m))
+    assert len(teams["tried"]) == 3  # minute 10 waited
+    teams["answer"] = True
+    assert _cycle(teams["world"], _at(20))["backing_off"] == 1 and len(teams["tried"]) == 3
+    done = _cycle(teams["world"], _at(35))
+    assert done["sent"] == 1 and len(teams["tried"]) == 4 and _last_sent() == "2026-07-01"
+    assert user_preferences.digest_retry("user:alice") == {}
+    assert _cycle(teams["world"], _at(95))["sent"] == 0 and len(teams["tried"]) == 4
+    # The next day starts without a wait.
+    assert _cycle(teams["world"], _at(24 * 60))["sent"] == 1 and len(teams["tried"]) == 5
+
+
+def test_an_unconfirmed_send_after_backing_off_is_still_not_resent(teams, recorded):
+    from maverick import user_preferences
+
+    assert _cycle(teams["world"], _at(0))["failed"] == 1
+    teams["answer"] = ConnectionError("reset after the message was written")
+    assert _cycle(teams["world"], _at(3))["backing_off"] == 1
+    lost = _cycle(teams["world"], _at(5))
+    assert lost["unconfirmed"] == 1 and lost["failed"] == 0 and _last_sent() == "2026-07-01"
+    assert user_preferences.digest_retry("user:alice") == {}
+    for m in (10, 60, 180):
+        assert _cycle(teams["world"], _at(m))["unconfirmed"] == 0
+    assert len(teams["tried"]) == 2
+    assert _deliveries(recorded) == [("teams", "not_sent"), ("teams", "unconfirmed")]
+
+
+def test_changing_the_channel_settings_ends_the_wait_at_once(teams, recorded, tmp_path):
+    from maverick import channel_identities, user_preferences
+
+    for m in (0, 5, 15, 35):
+        assert _cycle(teams["world"], _at(m))["failed"] == 1
+    assert _cycle(teams["world"], _at(40))["backing_off"] == 1  # next try at minute 75
+    (tmp_path / "config.toml").write_text("[my_work]\ndigest_enable = true\n", encoding="utf-8")
+    assert _cycle(teams["world"], _at(45))["failed"] == 1  # tried at once
+    assert user_preferences.digest_retry("user:alice")["failures"] == 1  # a fresh wait: 5 minutes
+    assert _cycle(teams["world"], _at(50))["failed"] == 1
+    assert _cycle(teams["world"], _at(55))["backing_off"] == 1
+    # Linking another account is a change too.
+    channel_identities.link("slack", "U9", "user:alice", actor="admin")
+    linked = _cycle(teams["world"], _at(56))
+    assert linked["backing_off"] == 0 and linked["failed"] == 1
