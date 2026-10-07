@@ -1453,6 +1453,7 @@ _CONTEXTS = tuple(
             ),
             suggested_questions=(
                 "Read current evidence collection status",
+                "Open evidence source setup",
                 "Open complete evidence controls",
                 "Why does setup need another administrator's approval?",
                 "What does collected evidence tell us?",

@@ -173,9 +173,9 @@ def _principal(request: Request, tenant_id: str) -> str:
 
 def _jsonable(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
-        return {key: _jsonable(item) for key, item in asdict(value).items()}
+        return {key: _jsonable(item) for key, item in asdict(value).items() if key != "source_manifest"}
     if isinstance(value, Mapping):
-        return {str(key): _jsonable(item) for key, item in value.items()}
+        return {str(key): _jsonable(item) for key, item in value.items() if key != "source_manifest"}
     if isinstance(value, (tuple, list)):
         return [_jsonable(item) for item in value]
     return value
@@ -426,6 +426,8 @@ def create_trc_continuous_evidence_router(  # noqa: C901
                 status_code=403,
                 detail="collector is not enabled for this tenant",
             )
+        from .trc_setup_api import managed_definition_guard
+
         return _jsonable(
             await call(
                 evidence,
@@ -433,6 +435,7 @@ def create_trc_continuous_evidence_router(  # noqa: C901
                 definition_id,
                 version,
                 **body.model_dump(),
+                before_effect=managed_definition_guard(request, definition),
             )
         )
 
@@ -474,12 +477,15 @@ def create_trc_continuous_evidence_router(  # noqa: C901
                 status_code=403,
                 detail="collector is not enabled for this tenant",
             )
+        from .trc_setup_api import managed_definition_guard
+
         return _jsonable(
             await call(
                 evidence,
                 store.enroll,
                 enrollment_id=enrollment_id,
                 **body.model_dump(),
+                before_effect=managed_definition_guard(request, definition),
             )
         )
 
@@ -507,12 +513,20 @@ def create_trc_continuous_evidence_router(  # noqa: C901
     ):
         require_global_permission(request, "admin")
         evidence, store = authority(request)
+        guard = None
+        if body.state == "active":
+            from .trc_setup_api import managed_definition_guard
+
+            enrollment = await call(evidence, store.get_enrollment, enrollment_id)
+            definition = await call(evidence, store.get_definition, enrollment.definition_id, enrollment.definition_version)
+            guard = managed_definition_guard(request, definition)
         return _jsonable(
             await call(
                 evidence,
                 store.update_enrollment_state,
                 enrollment_id,
                 **body.model_dump(),
+                before_effect=guard,
             )
         )
 

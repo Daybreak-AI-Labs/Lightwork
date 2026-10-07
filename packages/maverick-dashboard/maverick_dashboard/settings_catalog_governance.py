@@ -22,8 +22,10 @@ uploaded file, or from the files installed on this server.
 Not here, with the reason:
 
 * ``tech_risk_compliance.continuous_evidence.stock_collectors.sources``: see
-  settings_catalog_structured (``grc_sync.response_field_params`` is there
-  too, as a table of names and values).
+  the guided source form on Continuous evidence. It stores each exact source
+  in that workspace's signed definition, with separate approval and enrollment.
+  ``grc_sync.response_field_params`` is in settings_catalog_structured as a
+  table of names and values.
 * ``red_team_assurance.commitment_secret_ref`` and the connectors'
   ``credential_secret_ref`` keys name environment variables on the server;
   the sealed key rows below make the key itself adjustable instead.

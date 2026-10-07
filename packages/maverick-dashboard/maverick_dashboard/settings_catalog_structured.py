@@ -28,11 +28,11 @@ Not given a row, with the reason:
   nothing in the product generates or starts such a job yet
   (``generate_prime_rl_run_spec`` has no caller), so there is nothing to wire.
 * ``tech_risk_compliance.continuous_evidence.stock_collectors.sources``: each
-  source must match a signed collector definition and an enrollment held in
-  each workspace's continuous-evidence store (definition id, version,
-  fingerprint, collector key, capability revision), plus provider-specific
-  rule bindings read from the provider itself; the form needs an enrollment
-  picker from that store first.
+  source belongs to the workspace's signed continuous-evidence definition,
+  rather than this installation-wide overlay. Continuous evidence supplies
+  the named account, provider check and control form; independent approval
+  and enrollment use the same exact retained definition. Credentials remain
+  in sealed Connections. Older deployment source manifests remain separate.
 """
 from __future__ import annotations
 

@@ -124,9 +124,32 @@ def prepare(request, selection, _arguments):
     })
 
 
+def source_snapshot(request, selection):
+    _, tenant, owner, context = setup._source_access(request)
+    revision, details = _state(request, selection)
+    _, current_tenant, current_owner, current_context = setup._source_access(request)
+    if (current_tenant, current_owner, current_context) != (tenant, owner, context):
+        raise HTTPException(409, "Your account or workspace changed. Read the source setup again.")
+    return Snapshot(digest([revision, context]), "Current authorized evidence source setup",
+                    "Open named provider, saved account and security-check controls. Nothing is saved or collected.",
+                    {**details, "Next step": "Choose and check a saved account and its source. Review the complete setup "
+                     "before saving; independent approval and Start collecting remain separate."})
+
+
+def source_prepare(request, selection, _arguments):
+    current = source_snapshot(request, selection)
+    return Preview(current.summary, native={
+        **current.details, "continuous_evidence_source_review": {"scope": "current_page"},
+    })
+
+
 def entries():
     return (Adapter("connections.continuous_evidence_status", "Read evidence status and open collection controls",
                     "connections", PAGE + "#trc-refresh", (PAGE,), EmptyInput, snapshot, prepare,
                     aliases=("read current evidence status", "read current evidence collection status",
                              "show continuous evidence status", "open complete evidence controls",
-                             "open the complete evidence controls", "review evidence collection controls")),)
+                             "open the complete evidence controls", "review evidence collection controls")),
+            Adapter("connections.evidence_source_setup", "Open guided evidence source setup",
+                    "connections", PAGE + "#trc-source-form", (PAGE,), EmptyInput, source_snapshot, source_prepare,
+                    aliases=("set up an evidence source", "add an evidence source", "configure evidence sources",
+                             "open evidence source setup", "repair an evidence source")))
