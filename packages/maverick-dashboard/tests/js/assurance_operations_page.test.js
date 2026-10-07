@@ -530,3 +530,12 @@ test("refused sections release their responses and leave no table or list at Loa
     .map(node => (node.closest("[id]") || {}).id + ": " + node.textContent.trim());
   assert.deepEqual(stuck, []);
 });
+
+test("a failed first read of the exception choices leaves no rules or safeguards at Loading", async t => {
+  const h = await fixture(t, {"/pickers/policy-exceptions": () => new Response(JSON.stringify({detail: "Service unavailable"}), {status: 503, headers: {"Content-Type": "application/json"}})});
+  await h.settle();
+  assert.doesNotMatch(h.byId("policy-exception-controls").textContent, /Loading/);
+  assert.match(h.byId("policy-exception-controls").textContent, /Safeguards could not be read\. Use Refresh to try again\./);
+  assert.doesNotMatch(h.byId("policy-exception-policy").textContent, /Loading/);
+  assert.equal(h.byId("policy-exception-policy").value, "");
+});

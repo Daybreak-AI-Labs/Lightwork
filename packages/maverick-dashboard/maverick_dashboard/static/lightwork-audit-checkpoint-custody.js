@@ -155,7 +155,14 @@
   }};
   ['lightwork:workspace-changed', 'lightwork:account-context-changed', 'lightwork:connection-access-lost'].forEach(name => document.addEventListener(name, clearPrivate));
   window.addEventListener('pagehide', clearPrivate);
-  run(async () => { await refresh(); const reference = retained();
+  run(async () => {
+    try { await refresh(); }
+    catch (error) {
+      // A failed first read must not leave the request list saying "Loading…".
+      if (!current) el('acc-requests').replaceChildren(node('p', 'Saved copy requests could not be read. Use Refresh choices to try again.', 'muted'));
+      throw error;
+    }
+    const reference = retained();
     if (reference && /^[a-f0-9]{32}$/.test(reference)) {
       try { show(await request('/ACC-' + reference + '/original')); } catch (error) { notice(error.message); }
     }
