@@ -5,7 +5,7 @@
   var R = global.LwRecords, catalog = null, saved = null, review = null, busy = false;
   var base = '/api/v1/privacy/data-discovery/data-use', storageKey = null;
   function el(id) { return document.getElementById('pddb-' + id); }
-  function say(text) { el('status').textContent = text; }
+  function say(text) { const line = el('status'); if (typeof window.mvStatus === 'function') window.mvStatus(line, text); else line.textContent = text; }
   function human(value) { return R.human(value); }
   function call(path, method, body) { return R.call(method || 'GET', base + path, body); }
   function error(failure, action) { return failure && failure.message || R.errorText(failure, action); }
