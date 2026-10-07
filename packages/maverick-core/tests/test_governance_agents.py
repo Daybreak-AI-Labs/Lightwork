@@ -1343,6 +1343,9 @@ def test_tamper_is_detected(harness):
     publish(store, principal, clock)
     submit(store, principal, clock)
     with sqlite3.connect(store.path) as connection:
+        # The runs index orders by a store-registered SQL function; an outside
+        # writer (the tamperer) supplies its own to rewrite the payload.
+        connection.create_function("lightwork_governance_updated_at", 2, lambda *_args: 0)
         connection.execute("UPDATE runs SET payload_json='{}' WHERE tenant_id='tenant-a'")
     principal.value = "auditor"
     with pytest.raises(GovernanceAgentIntegrityError, match="integrity"):
