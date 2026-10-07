@@ -373,10 +373,18 @@ def _ntfy_topic(cfg: dict) -> str | None:
             or os.environ.get("MAVERICK_NTFY_TOPIC"))
 
 
+# The configuration key and environment variable of each webhook backend. The
+# key names are spelled out so the settings catalog can prove they are read here.
+_WEBHOOKS = {
+    "discord": ("discord_webhook", "DISCORD_NOTIFY_WEBHOOK_URL"),
+    "slack": ("slack_webhook", "SLACK_NOTIFY_WEBHOOK_URL"),
+}
+
+
 def _webhook_url(cfg: dict, backend: str) -> str:
     """The saved or environment webhook URL of a ``discord`` / ``slack`` backend."""
-    env_name = "DISCORD_NOTIFY_WEBHOOK_URL" if backend == "discord" else "SLACK_NOTIFY_WEBHOOK_URL"
-    return (_resolve_env_ref(cfg.get(f"{backend}_webhook") or _legacy_url(cfg, backend))
+    key, env_name = _WEBHOOKS[backend]
+    return (_resolve_env_ref(cfg.get(key) or _legacy_url(cfg, backend))
             or os.environ.get(env_name) or "")
 
 
