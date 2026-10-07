@@ -96,7 +96,7 @@ _DEFAULTS = {
     "min_resistance": 0.0,
 }
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 
 def _settings(*, config: dict | None = None) -> dict:
@@ -288,12 +288,13 @@ def _clamp01(v: float) -> float:
 def record_sample(
     confidence: float, correct: bool, *, source: str = "",
     adversarial: bool = False, evaluator_id: str = "",
-    path: Path | None = None,
+    path: Path | None = None, before_effect=None,
 ) -> bool:
-    """Append one ``(confidence, ground_truth)`` calibration sample. Never raises.
+    """Append one ``(confidence, ground_truth)`` calibration sample.
 
     Set ``adversarial=True`` for a crafted probe whose known outcome tests
-    whether the judge is being gamed (see :func:`record_probe`)."""
+    whether the judge is being gamed (see :func:`record_probe`). Legacy callers
+    remain best-effort; an explicit effect guard preserves refusal/errors."""
     if path is None:
         path = _samples_path()
     entry = CalibrationSample(
@@ -302,17 +303,28 @@ def record_sample(
         evaluator_id=str(evaluator_id or "").strip()[:240],
         adversarial=bool(adversarial),
     )
-    with _lock:
+    from .file_lock import cross_process_lock
+
+    with _lock, cross_process_lock(path, strict=before_effect is not None):
+        if before_effect is not None:
+            before_effect()
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "a", encoding="utf-8") as f:
+                if before_effect is not None:
+                    before_effect()
                 f.write(json.dumps(entry.__dict__) + "\n")
+                if before_effect is not None:
+                    f.flush()
+                    os.fsync(f.fileno())
             try:
                 os.chmod(path, 0o600)
             except OSError:
                 pass
             return True
         except OSError as e:
+            if before_effect is not None:
+                raise
             log.warning("calibration: sample write failed: %s", e)
             return False
 
@@ -343,10 +355,38 @@ def current_resistance(path: Path | None = None) -> float | None:
     return assess(load_samples(path)).resistance
 
 
-def load_samples(path: Path | None = None) -> list[CalibrationSample]:
+def load_samples(path: Path | None = None, *, strict: bool = False) -> list[CalibrationSample]:
     """Read the calibration-sample ledger (most recent last). Never raises."""
     if path is None:
         path = _samples_path()
+    if strict:
+        from .file_lock import cross_process_lock, open_private_read
+
+        with _lock, cross_process_lock(path, strict=True):
+            try:
+                with os.fdopen(open_private_read(path), "rb") as handle:
+                    raw = handle.read(32 * 1024 * 1024 + 1)
+            except FileNotFoundError:
+                return []
+            if len(raw) > 32 * 1024 * 1024:
+                raise ValueError("The complete checker record exceeds its supported reading size")
+            result = []
+            for line in raw.decode("utf-8").splitlines():
+                if not line.strip():
+                    continue
+                value = json.loads(line)
+                if (not isinstance(value, dict)
+                        or type(value.get("confidence")) not in {int, float}
+                        or not math.isfinite(value["confidence"]) or not 0 <= value["confidence"] <= 1
+                        or type(value.get("correct")) is not bool
+                        or type(value.get("ts")) not in {int, float}
+                        or not math.isfinite(value["ts"]) or value["ts"] < 0
+                        or not isinstance(value.get("source", ""), str)
+                        or not isinstance(value.get("evaluator_id", ""), str)
+                        or type(value.get("adversarial", False)) is not bool):
+                    raise ValueError("The complete checker record cannot be verified")
+                result.append(CalibrationSample(**value))
+            return result
     if not path.exists():
         return []
     out: list[CalibrationSample] = []
@@ -375,6 +415,8 @@ def load_samples(path: Path | None = None) -> list[CalibrationSample]:
 def run_assessment(
     *, samples_path: Path | None = None, verdict_path: Path | None = None,
     evaluator_id: str | None = None, since: float | None = None,
+    sources: set[str] | None = None, strict: bool = False, before_effect=None,
+    min_samples: int | None = None, min_discrimination: float | None = None,
 ) -> CalibrationReport:
     """Assess the ledger and persist the verdict that :func:`learning_frozen` reads.
 
@@ -389,7 +431,11 @@ def run_assessment(
         samples_path = _samples_path()
     if verdict_path is None:
         verdict_path = _verdict_path()
-    samples = load_samples(samples_path)
+    if before_effect is not None:
+        before_effect()
+    samples = load_samples(samples_path, strict=True) if strict else load_samples(samples_path)
+    if sources is not None:
+        samples = [sample for sample in samples if sample.source in sources]
     bound_id: str | None = None
     if evaluator_id is not None:
         bound_id = str(evaluator_id or "").strip()[:240]
@@ -406,7 +452,7 @@ def run_assessment(
         else:
             samples = [sample for sample in samples
                        if math.isfinite(sample.ts) and sample.ts >= evidence_since]
-    report = assess(samples)
+    report = assess(samples, min_samples=min_samples, min_discrimination=min_discrimination)
     payload = report.to_dict()
     if evaluator_id is not None or since is not None:
         timestamps = [sample.ts for sample in samples
@@ -420,6 +466,15 @@ def run_assessment(
         })
     with _lock:
         try:
+            if strict or before_effect is not None:
+                from .file_lock import atomic_write_text, cross_process_lock
+
+                with cross_process_lock(verdict_path, strict=True):
+                    if before_effect is not None:
+                        before_effect()
+                    atomic_write_text(verdict_path, json.dumps(payload, indent=2),
+                                      mode=0o600, effect_guard=before_effect)
+                return report
             verdict_path.parent.mkdir(parents=True, exist_ok=True)
             verdict_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
             try:
@@ -427,6 +482,8 @@ def run_assessment(
             except OSError:
                 pass
         except OSError as e:  # pragma: no cover -- persistence is best-effort
+            if strict or before_effect is not None:
+                raise
             log.warning("calibration: verdict write failed: %s", e)
     return report
 

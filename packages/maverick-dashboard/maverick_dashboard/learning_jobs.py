@@ -203,6 +203,7 @@ def _run(job: Job, fn: Callable[[Job], dict], problem: Callable[[Exception], str
 def start(kind: str, label: str, fn: Callable[[Job], dict], *, started_by: str,
           workspace: str = "", needs_global: bool = True, cancellable: bool = False,
           on_cancel: Callable[[], None] | None = None,
+          requested_id: str | None = None, initial_result: dict | None = None,
           problem: Callable[[Exception], str | None] = lambda exc: None) -> Job:
     """Start ``fn(job)`` in a thread and return the job.
 
@@ -215,11 +216,17 @@ def start(kind: str, label: str, fn: Callable[[Job], dict], *, started_by: str,
             raise JobRefused("This is already running. Wait for it to finish, or stop it first.")
         if len(running) >= MAX_RUNNING:
             raise JobRefused("Too many jobs are running right now. Try again when one finishes.")
-        job = Job(id=uuid.uuid4().hex[:16], kind=kind, label=label, started_by=started_by,
+        if requested_id is not None:
+            import re
+            if not re.fullmatch(r"[a-f0-9]{16}", requested_id):
+                raise JobRefused("This original task reference is invalid. No work was started.")
+        job = Job(id=requested_id or uuid.uuid4().hex[:16], kind=kind, label=label, started_by=started_by,
                   workspace=workspace, needs_global=needs_global, cancellable=cancellable,
-                  on_cancel=on_cancel)
+                  on_cancel=on_cancel, result=copy.deepcopy(initial_result))
         try:
             job._custody = retained.acquire(kind, job.id)
+            if requested_id is not None and (job.id in retained.read() or job.id in _jobs):
+                raise JobRefused("This original task is already recorded. Read it; no work was repeated.")
             _persist(job, "worker_admitted", admit=True)
         except (JobRefused, retained.ObservationUnavailable) as exc:
             if job._custody is not None:

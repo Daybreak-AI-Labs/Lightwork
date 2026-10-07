@@ -69,6 +69,7 @@ ASSETS = (
     "lightwork-manual-skill-removal.js",
     "lightwork-learning-passes.js",
     "lightwork-learning-transfers.js",
+    "lightwork-learning-calibration.js",
     "lightwork-audit-actions.js",
     "lightwork-decision-evidence.js",
     "lightwork-commitment-capability.js",

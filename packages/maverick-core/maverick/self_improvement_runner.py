@@ -293,7 +293,8 @@ def _risk_calibration_boundary(
     evaluator_id: str | None,
 ) -> tuple[str | None, Callable[[], bool] | None]:
     """Preflight calibration and build the final post-eval receipt check."""
-    if not _fresh_calibration_receipt(settings):
+    if not _fresh_calibration_receipt(
+            settings, general_evaluator_id=evaluator_id if scoring else None):
         return ("risk-limited promotion requires a fresh adequate calibration "
                 "receipt", None)
     if not bool(settings.get("risk_limited")) or not scoring:
@@ -485,6 +486,7 @@ def run_self_harness_pass(  # noqa: C901 - fail-closed orchestration boundary
 def _fresh_calibration_receipt(
     settings: Mapping[str, object], *, now: float | None = None,
     evaluator_id: str | None = None, evidence_since: float | None = None,
+    general_evaluator_id: str | None = None,
 ) -> bool:
     """Require a structurally valid, recent risk-limited calibration receipt.
 
@@ -533,7 +535,11 @@ def _fresh_calibration_receipt(
                 or not 0.0 <= current - stamp <= max_age):
             return False
         if evaluator_id is None:
-            return True
+            # Initial admission must use the checker that was actually
+            # reviewed, before spending on a new cycle. The separate final
+            # receipt still requires this cycle's exact evidence watermark.
+            return (general_evaluator_id is None or
+                    verdict.get("evaluator_id") == general_evaluator_id)
         bound_id = str(evaluator_id or "").strip()
         if (not bound_id
                 or verdict.get("schema") != "maverick-calibration-receipt-v2"

@@ -2007,6 +2007,7 @@ from . import (  # noqa: E402
     generated_tool_removal_api,
     governed_rule_evolution_api,
     grc_draft_changes_api,
+    learning_calibration_api,
     learning_distinctions_api,
     learning_transfers_api,
     operator_acquisition_api,
@@ -2024,6 +2025,7 @@ from . import (  # noqa: E402
 app.include_router(shared_decision_evidence_api.router)
 app.include_router(flow_requalification_api.router)
 app.include_router(learning_distinctions_api.router)
+app.include_router(learning_calibration_api.router)
 app.include_router(learning_transfers_api.router)
 app.include_router(commitment_capability_api.router)
 app.include_router(commitment_economic_alternatives_api.router)

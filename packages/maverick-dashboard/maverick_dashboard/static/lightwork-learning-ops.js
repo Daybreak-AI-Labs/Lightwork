@@ -45,41 +45,133 @@
     return J.readFile(file);
   }
 
-  // ---- improve how new agents are built -----------------------------------------
-  var faPreview = $('lo-fa-preview');
-  if (faPreview) faPreview.addEventListener('click', async function () {
-    faPreview.disabled = true;
-    $('lo-fa-status').textContent = 'Looking…';
-    $('lo-fa-out').textContent = '';
-    try {
-      var d = await J.request(LO + '/factory/preview?min_support=' + encodeURIComponent($('lo-fa-support').value));
-      $('lo-fa-status').textContent = d.corrections.length
-        ? plural(d.corrections.length, 'problem keeps', 'problems keep') + ' showing up. Nothing was changed.'
-        : 'No problem shows up often enough yet. Nothing would change.';
-      if (d.corrections.length) fill('lo-fa-out', J.table(['Suggested guidance', 'Seen in', 'Area'], d.corrections.map(function (c) {
-        return [c.guidance, plural(c.seen_in, 'agent'), window.mvHuman ? window.mvHuman(c.area) : c.area];
-      })));
-    } catch (failure) {
-      $('lo-fa-status').textContent = await J.problem(failure, 'look for repeated problems');
-    } finally { faPreview.disabled = false; }
-  });
-  var faAdopt = $('lo-fa-adopt');
-  if (faAdopt) faAdopt.addEventListener('click', async function () {
-    var body = await fileBody($('lo-fa-file'), 'Choose the results file first.');
-    if (!body) return;
-    if (!(await window.mvConfirm('Apply the guidance that passes the paired comparison checks? New agents will be built with it. You are responsible for reviewing the source of the uploaded results; a file check alone does not establish their accuracy or business value.',
-      { okText: 'Adopt guidance' }))) return;
-    faAdopt.disabled = true;
-    $('lo-fa-status').textContent = 'Checking the results file…';
-    try {
-      var d = await J.request(LO + '/factory/promote?confirm=true&min_support=' + encodeURIComponent($('lo-fa-support').value),
-        { method: 'POST', body: body, type: 'application/json' });
-      $('lo-fa-status').textContent = d.adopted ? 'Adopted ' + plural(d.adopted, 'piece') + ' of guidance.'
-        : 'Nothing passed the checks this time, so nothing was adopted.';
-    } catch (failure) {
-      $('lo-fa-status').textContent = await J.problem(failure, 'adopt the guidance');
-    } finally { faAdopt.disabled = false; }
-  });
+  // ---- complete factory comparison and separately reviewed adoption ------------
+  var fa = $('lo-factory'), faCurrent = null, faReview = null, faOriginal = '', faResult = null;
+  var faBusy = false, faGeneration = 0, faHeld = false, faPoll = null, faRequests = new Set();
+  function faSay(text) { $('lo-fa-status').textContent = text; }
+  function faSync() {
+    if (!$('lo-fa-form')) return;
+    $('lo-fa-preview').disabled = faBusy;
+    $('lo-fa-compare').disabled = faBusy || faHeld || faResult?.job?.worker_available || !faCurrent?.enabled || !$('lo-fa-suggestion').value || !$('lo-fa-consent').checked;
+    $('lo-fa-apply').disabled = faBusy || faHeld || faResult?.job?.worker_available || !faReview || !$('lo-fa-reviewed').checked;
+    $('lo-fa-read').disabled = faBusy || !faOriginal;
+    $('lo-fa-adopt').disabled = faBusy || faHeld || faResult?.job?.worker_available || !faCurrent?.enabled || !faResult?.confirmed || !faResult?.source_visible || !faResult?.result?.pairs;
+    $('lo-fa-original').disabled = faBusy;
+  }
+  function faInvalidate() {
+    faGeneration++; clearTimeout(faPoll); faRequests.forEach(function(controller){controller.abort();});faRequests.clear(); faCurrent = faReview = faResult = null; faOriginal = ''; faHeld = false; faBusy = false;
+    ['lo-fa-out','lo-fa-review-rows','lo-fa-requests'].forEach(function(id){$(id)?.replaceChildren();});
+    $('lo-fa-form')?.reset(); $('lo-fa-suggestion')?.replaceChildren(new Option('Choose current guidance',''));
+    $('lo-fa-original')?.replaceChildren(new Option('Choose a recorded decision',''));
+    if ($('lo-fa-review')) $('lo-fa-review').hidden = true;
+    faSay('Your account or workspace changed. Refresh current suggestions.'); faSync();
+  }
+  async function faRequest(path, body, options) {
+    options=options||{};var controller=new AbortController(),timer=setTimeout(function(){controller.abort();},30000);faRequests.add(controller);
+    try{var response=await fetch((options.copilot?'/api/v1/copilot/product-operations':LO+'/factory')+path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',signal:controller.signal,
+      headers:body?{'Content-Type':'application/json'}:{},body:body?(options.raw?body:JSON.stringify(body)):undefined});
+      var text=await response.text();if(text.length>6*1024*1024)throw Error('The complete reply is too large. Read its original before another decision.');
+      var value;try{value=JSON.parse(text);}catch(_){value={};}
+      if(response.redirected||[401,403].includes(response.status)){faInvalidate();throw Error('Your current permission is unavailable. Ask an administrator.');}
+      if(!response.ok)throw Error(typeof value.detail==='string'?value.detail:'The original reply is unavailable. Read the recorded result before a separate decision.');
+      if(!options.copilot&&faCurrent&&value.context&&faCurrent.context!==value.context){faInvalidate();throw Error('Your account or workspace changed. Refresh current choices.');}
+      return value;
+    }catch(error){if(error.name==='AbortError')throw Error('The reply did not arrive within 30 seconds. Read the original result before another decision.');throw error;}
+    finally{clearTimeout(timer);faRequests.delete(controller);}
+  }
+  function faRenderReview(container, changes) {
+    if(!Array.isArray(changes)||changes.length>200||JSON.stringify(changes).length>240000)throw Error('The complete review is too large. Nothing was shortened.');
+    container.replaceChildren();
+    changes.forEach(function(row){var keys=Object.keys(row||{}).sort().join('|');
+      if(!['after|label','after|before|label'].includes(keys)||typeof row.label!=='string'||typeof row.after!=='string'||('before'in row&&typeof row.before!=='string'))throw Error('A complete readable review row is missing. Nothing can be confirmed.');
+      var box=el('section'),heading=el('h4',null,row.label);box.append(heading);
+      if('before'in row){var before=el('p',null,'Current guidance result: '+row.before);before.style.whiteSpace='pre-wrap';box.append(before);}
+      var after=el('p',null,('before'in row?'Proposed guidance result: ':'')+row.after);after.style.whiteSpace='pre-wrap';after.style.overflowWrap='anywhere';box.append(after);container.append(box);
+    });return true;
+  }
+  function faChanged() { faReview=null;$('lo-fa-review').hidden=true;$('lo-fa-reviewed').checked=false;faSync(); }
+  function faStamp(){return JSON.stringify(Array.from($('lo-fa-form').elements).filter(function(input){return ['INPUT','SELECT','TEXTAREA'].includes(input.tagName);}).map(function(input){return [input.id,input.value,input.checked];}));}
+  function faSelectSuggestion(retain) {
+    var item=faCurrent?.corrections.find(function(row){return row.key===$('lo-fa-suggestion').value;});
+    var chosen=retain?Array.from($('lo-fa-requests').querySelectorAll('input:checked')).map(function(input){return input.value;}):[];
+    $('lo-fa-requests').replaceChildren();$('lo-fa-suggestion-help').textContent=item?(item.guidance+' '+item.why):'Choose one current suggestion.';
+    if(item)item.packs.forEach(function(name){var label=el('label'),input=el('input');input.type='checkbox';input.value=name;input.checked=chosen.includes(name);label.append(input,document.createTextNode(' '+(window.mvHuman?window.mvHuman(name):name)));$('lo-fa-requests').append(label);});
+    faChanged();
+  }
+  async function faLoad(preserve) {
+    if(faBusy)return false;var started=++faGeneration;faBusy=true;faSync();
+    try{var value=await faRequest('/catalog?min_support='+encodeURIComponent($('lo-fa-support').value));if(started!==faGeneration)return false;
+      if(faCurrent&&faCurrent.context!==value.context){faInvalidate();return false;}
+      var old=$('lo-fa-suggestion').value;faCurrent=value;
+      options($('lo-fa-suggestion'),[{value:'',label:'Choose current guidance'}].concat(value.corrections.map(function(row){return {value:row.key,label:row.guidance+(row.supported?'':' / '+row.why)};})),preserve?old:'');
+      Array.from($('lo-fa-suggestion').options).forEach(function(option){var row=value.corrections.find(function(item){return item.key===option.value;});if(row&&!row.supported)option.disabled=true;});
+      faSelectSuggestion(!!preserve);
+      options($('lo-fa-original'),[{value:'',label:'Choose a recorded decision'}].concat(value.requests),faOriginal);
+      if(faOriginal&&!value.requests.some(function(row){return row.value===faOriginal;})){$('lo-fa-original').append(new Option('Original awaiting readback',faOriginal));$('lo-fa-original').value=faOriginal;}
+      faSay(value.notice+' Current AI service: '+value.model+'. '+(value.enabled?'':'Turn on agent-building improvements to admit new work. Original reads remain available.'));
+      return true;
+    }catch(error){if(started===faGeneration)faSay(error.message);return false;}
+    finally{if(started===faGeneration){faBusy=false;faSync();}}
+  }
+  function faShow(value){faResult=value;faSay(value.message);var nodes=[];
+    var labels={baseline_score:'Current guidance tool-check score',candidate_score:'Proposed guidance tool-check score',samples:'Complete paired requests',effect_ci_low:'Conservative difference estimate',adopted:'Guidance adopted'};
+    Object.keys(labels).forEach(function(key){if(value.result&&key in value.result)nodes.push(el('p',null,labels[key]+': '+(typeof value.result[key]==='boolean'?(value.result[key]?'Yes':'No'):String(value.result[key]))));});
+    if(value.result?.pairs){var rows=value.result.pairs.map(function(pair,index){return {label:'Request '+(index+1)+': '+pair.request,before:faCapabilities(pair.baseline),after:faCapabilities(pair.candidate)};});var box=el('div');faRenderReview(box,rows);nodes.push(box);}
+    if(value.job?.problem)nodes.push(el('p',null,value.job.problem));
+    nodes.push(el('p','muted','These are native tool-presence checks of unsaved setups. Reported requests and expected tools do not establish overall quality, business value or independently measured causation.'));
+    if(value.task_href){var link=el('a','btn btn--ghost','Read current progress and stop controls');link.href=value.task_href;nodes.push(link);}fill('lo-fa-out',nodes);faHeld=!value.confirmed;faSync();
+  }
+  function faCapabilities(value){return 'Expected tool: '+(value.passed?'Allowed':'Not allowed')+'\nAllowed tools: '+value.allowed_tools.join(', ')+'\nDenied tools: '+value.denied_tools.join(', ')+'\nMaximum risk: '+value.maximum_risk;}
+  function faRemember(){try{sessionStorage.setItem('lightwork.factory.original.'+faCurrent.context,faOriginal);}catch(_){} }
+  async function faRead(){if(faBusy||!faOriginal)return;clearTimeout(faPoll);var started=++faGeneration,operation=faOriginal;faBusy=true;faReview=null;$('lo-fa-review').hidden=true;$('lo-fa-reviewed').checked=false;faSync();
+    try{var value=await faRequest('/original/'+encodeURIComponent(operation));if(started!==faGeneration||operation!==faOriginal)return;faShow(value);if(value.job?.worker_available)faPoll=setTimeout(faRead,2000);}
+    catch(error){if(started===faGeneration){faSay(error.message);$('lo-fa-out').replaceChildren();faResult=null;}}
+    finally{if(started===faGeneration){faBusy=false;faSync();}}
+  }
+  async function faPrepare(action,values){if(faBusy||faHeld)return;var started=++faGeneration,entered=faStamp();clearTimeout(faPoll);faBusy=true;faReview=null;$('lo-fa-reviewed').checked=false;faSync();
+    try{var value=await faRequest('/review',{action:action,values:values});if(started!==faGeneration)return;if(entered!==faStamp()){faSay('Your entered work changed. Review it again before continuing.');return;}
+      if(value.context!==faCurrent.context){faInvalidate();return;}faRenderReview($('lo-fa-review-rows'),value.changes);faReview=value;$('lo-fa-review').hidden=false;
+      $('lo-fa-apply').textContent=action==='adopt'?'Adopt this reviewed guidance':'Start this reviewed comparison';$('lo-fa-review').focus();faSay('Review every complete request, expected result and consequence. Nothing has started.');
+    }catch(error){if(started===faGeneration)faSay(error.message);}finally{if(started===faGeneration){faBusy=false;faSync();}}
+  }
+  async function faOpenAuthor(_details,options){options=options||{};if(typeof options.isCurrent==='function'&&!options.isCurrent())return false;
+    if(!fa||!$('lo-fa-form')||faBusy||typeof options.isCurrent!=='function'||!options.isCurrent()||!/^[a-f0-9]{64}$/.test(options.context||''))return false;
+    var before=faGeneration,stamp=faStamp();
+    var checked=await faRequest('/catalog',{page:'/learning',selection:{}},{copilot:true});
+    if(before!==faGeneration||!options.isCurrent()||checked.context!==options.context||!(checked.operations||[]).some(function(row){return row.id==='learning.factory_guidance_form'&&row.available;})||stamp!==faStamp())return false;
+    if(!faCurrent&&!await faLoad(true))return false;
+    if(!options.isCurrent()||faBusy)return false;
+    var generation=faGeneration;var fresh=await faRequest('/catalog?min_support='+encodeURIComponent($('lo-fa-support').value));
+    if(generation!==faGeneration||fresh.context!==faCurrent.context||stamp!==faStamp()||typeof options.isCurrent==='function'&&!options.isCurrent())return false;
+    if(fresh.revision!==faCurrent.revision){faChanged();faSay('Current source changed. Refresh suggestions; your entered work is kept.');return false;}
+    if(!options.isCurrent())return false;$('lo-fa-form').scrollIntoView({block:'start'});$('lo-fa-suggestion').focus();return options.isCurrent();
+  }
+  window.LWFactoryGuidance={renderReview:faRenderReview,openAuthor:faOpenAuthor};
+  if(admin&&$('lo-fa-form')){
+    $('lo-fa-preview').addEventListener('click',function(){faChanged();faLoad(true);});
+    $('lo-fa-suggestion').addEventListener('change',function(){faSelectSuggestion(false);});
+    $('lo-fa-form').addEventListener('input',faChanged);$('lo-fa-support').addEventListener('change',function(){faChanged();faLoad(true);});
+    $('lo-fa-form').addEventListener('submit',function(event){event.preventDefault();if(!faCurrent||faHeld)return;
+      faPrepare('compare',{context:faCurrent.context,revision:faCurrent.revision,min_support:Number($('lo-fa-support').value),correction:$('lo-fa-suggestion').value,
+        packs:Array.from($('lo-fa-requests').querySelectorAll('input:checked')).map(function(input){return input.value;}),dollars:Number($('lo-fa-dollars').value),seconds:Number($('lo-fa-seconds').value),authorize_input_use:$('lo-fa-consent').checked});});
+    $('lo-fa-reviewed').addEventListener('change',faSync);$('lo-fa-dismiss').addEventListener('click',faChanged);
+    $('lo-fa-apply').addEventListener('click',async function(){if(faBusy||faHeld||!faReview||!$('lo-fa-reviewed').checked)return;
+      var review=faReview,started=++faGeneration;faReview=null;faBusy=true;faHeld=true;faOriginal=review.operation;faRemember();$('lo-fa-original').append(new Option('Original reviewed decision',faOriginal));$('lo-fa-original').value=faOriginal;
+      $('lo-fa-review').hidden=true;$('lo-fa-reviewed').checked=false;faSync();
+      try{var value=await faRequest('/apply',{token:review.token,confirmed:true});if(started===faGeneration)faShow(value);}
+      catch(error){if(started===faGeneration)faSay(error.message+' Read the original result. This decision will not be submitted again automatically.');}
+      finally{if(started===faGeneration){faBusy=false;faSync();faRead();}}});
+    $('lo-fa-original').addEventListener('change',function(){faGeneration++;clearTimeout(faPoll);faOriginal=$('lo-fa-original').value;faResult=null;faHeld=false;faChanged();$('lo-fa-out').replaceChildren();if(faOriginal)faRemember();faRead();});
+    $('lo-fa-read').addEventListener('click',faRead);$('lo-fa-adopt').addEventListener('click',function(){faPrepare('adopt',{operation:faOriginal});});
+    $('lo-fa-import').addEventListener('click',async function(){if(faBusy)return;var generation=++faGeneration,body=await fileBody($('lo-fa-file'),'Choose an existing report first.');if(!body||generation!==faGeneration)return;
+      try{var value=await faRequest('/report',body,{raw:true});if(generation!==faGeneration)return;
+        faRenderReview($('lo-fa-out'),value.rows);faSay('Imported report inspected only. Its reported scores do not become a native comparison or adopt guidance.');}
+      catch(error){if(generation===faGeneration)faSay(error.message);}});
+    document.addEventListener('lightwork:workspace-changed',faInvalidate);document.addEventListener('lightwork:account-context-changed',faInvalidate);
+    window.addEventListener('lightwork:context-changed',function(event){if(event.detail?.reason!=='selection')faInvalidate();});document.addEventListener('lightwork:copilot-context-changed',function(event){if(event.detail?.reason!=='selection')faInvalidate();});
+    window.addEventListener('pagehide',function(){faGeneration++;clearTimeout(faPoll);faRequests.forEach(function(controller){controller.abort();});faRequests.clear();});
+    faLoad(false).then(function(ok){if(!ok)return;var requested=new URLSearchParams(location.search).get('factory_original');try{faOriginal=requested||sessionStorage.getItem('lightwork.factory.original.'+faCurrent.context)||'';}catch(_){faOriginal=requested||'';}if(/^[a-f0-9]{32}$/.test(faOriginal)){$('lo-fa-original').append(new Option('Original retained decision',faOriginal));$('lo-fa-original').value=faOriginal;faRead();}else faOriginal='';faSync();});
+  }
 
   // ---- practise changes to its own code -------------------------------------------
   function loadModify() {

@@ -173,6 +173,12 @@ def unchanged(version):
 
 
 def _retirable(value):
+    if value.get("kind") in {"factory_guidance_check", "factory_guidance_adopt"}:
+        import math
+        result = value.get("result")
+        until = result.get("original_until") if isinstance(result, dict) else None
+        if type(until) not in {int, float} or not math.isfinite(until) or time.time() < until:
+            return False
     if value["state"] not in {"admitted", "running", "stopping"}:
         return True
     # A missing worker in this process is not evidence it stopped. Only the

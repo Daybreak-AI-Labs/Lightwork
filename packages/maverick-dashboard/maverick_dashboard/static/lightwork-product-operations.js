@@ -225,6 +225,30 @@
               ? function (isCurrent) { return evidenceControls.openReview({}, {isCurrent: isCurrent, context: evidenceContext}); } : null);
           return;
         }
+        if (entry[0] === 'factory_guidance_author') {
+          var factoryAuthor = entry[1], factoryControls = window.LWFactoryGuidance;
+          var factoryContext = catalog && catalog.context;
+          if (!factoryAuthor || Array.isArray(factoryAuthor) ||
+              Object.keys(factoryAuthor).join(',') !== 'scope' || factoryAuthor.scope !== 'current_page' ||
+              typeof factoryContext !== 'string' || !/^[a-f0-9]{64}$/.test(factoryContext)) return;
+          protectedControls(node('dd', undefined, list), 'Review how new agents are built',
+            '/learning#lo-factory',
+            factoryControls && typeof factoryControls.openAuthor === 'function'
+              ? function (isCurrent) { return factoryControls.openAuthor({}, {isCurrent: isCurrent, context: factoryContext}); } : null);
+          return;
+        }
+        if (entry[0] === 'calibration_review') {
+          var calibrationReview = entry[1], calibrationControls = window.LightworkLearningCalibration;
+          var calibrationContext = catalog && catalog.context;
+          if (!calibrationReview || Array.isArray(calibrationReview) ||
+              Object.keys(calibrationReview).join(',') !== 'scope' || calibrationReview.scope !== 'current_page' ||
+              typeof calibrationContext !== 'string' || !/^[a-f0-9]{64}$/.test(calibrationContext)) return;
+          protectedControls(node('dd', undefined, list), 'Review answer checking',
+            '/learned#learning-calibration',
+            calibrationControls && typeof calibrationControls.openReview === 'function'
+              ? function (isCurrent) { return calibrationControls.openReview({}, {isCurrent: isCurrent, context: calibrationContext}); } : null);
+          return;
+        }
         if (entry[0] === 'learning_transfer_form') {
           var transferForm = entry[1], transferControls = window.LightworkLearningTransfers;
           if (!transferForm || Array.isArray(transferForm) ||
@@ -1327,6 +1351,9 @@
               : item.id === 'learning.run_joint_rules'
                 ? !!(window.LightworkJointRules && window.LightworkJointRules.renderReview &&
                      window.LightworkJointRules.renderReview(formHost, review.changes) === true)
+              : ['learning.factory_guidance_check', 'learning.factory_guidance_adopt'].includes(item.id)
+                ? !!(window.LWFactoryGuidance && window.LWFactoryGuidance.renderReview &&
+                     window.LWFactoryGuidance.renderReview(formHost, review.changes) === true)
               : ['learning.pilot_prepare_task', 'learning.pilot_freeze_plan', 'learning.pilot_observe', 'learning.pilot_independent_review'].includes(item.id)
                 ? !!(window.LightworkOutcomePilots && window.LightworkOutcomePilots.renderReview &&
                      window.LightworkOutcomePilots.renderReview(formHost, review.changes) === true)
