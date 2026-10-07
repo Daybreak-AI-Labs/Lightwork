@@ -9071,6 +9071,8 @@ def tools_page(
         sb = build_sandbox()
         reg = base_registry(world=wm, sandbox=sb)
         enterprise_blocked = enterprise_unavailable_tool_names()
+        # One snapshot of the permitted tools serves the list and its summaries.
+        registered = {t.name: t for t in reg.all()}
         catalog = [
             {
                 "name": t.name,
@@ -9078,7 +9080,7 @@ def tools_page(
                 "summary": plain_tool_summary(t.name, t.description) if query else "",
                 "enterprise_blocked": t.name in enterprise_blocked,
             }
-            for t in sorted(reg.all(), key=lambda x: x.name)
+            for t in sorted(registered.values(), key=lambda x: x.name)
         ]
         enterprise_blocked_total = sum(1 for tool in catalog if tool["enterprise_blocked"])
         folded = query.casefold()
@@ -9102,7 +9104,7 @@ def tools_page(
             # Browsing needs only this page's copy. Searches still inspect
             # every current permitted summary, including its full description.
             for tool in tools:
-                tool["summary"] = plain_tool_summary(tool["name"], reg.get(tool["name"]).description)
+                tool["summary"] = plain_tool_summary(tool["name"], registered[tool["name"]].description)
         tool_page = {
             "query": query,
             "page": page,
