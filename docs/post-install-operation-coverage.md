@@ -1,5 +1,15 @@
 # Post-install operation coverage
 
+October 7 Chat search integration: the current searchable specialist roster
+keeps a restored or older selection separate from its current search result.
+The user can deliberately choose that result to repair an unavailable edition;
+search never silently updates a reviewed selection. Query changes invalidate
+older replies immediately, including the debounce wait. Native access refusal
+clears displayed choices, personal-default data and search text while keeping
+the unsent message. The actual production controller and shared request helper
+qualified these paths on real browser controls with isolated read responses;
+this particular check admitted no task and did not qualify a native server.
+
 October 7 question-file import: Learned reviews the complete chosen file,
 current saved questions and resulting collection in ordinary readable controls.
 The sealed review binds exact file bytes, add/replace choice, current collection,

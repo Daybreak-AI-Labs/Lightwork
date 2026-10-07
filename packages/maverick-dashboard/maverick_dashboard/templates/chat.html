@@ -294,7 +294,10 @@
       choice.options[0].value = ''; choice.options[0].textContent = chatText('Let Lightwork choose the team');
       if (keep && keep.value) choice.append(keep);
       items.forEach(function (row) {
-        if (keep && row.value === keep.value) return;
+        if (keep && row.value === keep.value) {
+          if (keep.dataset.revision === row.revision) return;
+          keep.textContent = chatText('Earlier selection — choose the current specialist below.');
+        }
         var option = choice.ownerDocument.createElement('option');
         option.value = row.value; option.textContent = row.label; option.dataset.revision = row.revision;
         choice.append(option);
@@ -305,7 +308,11 @@
       var seq = ++searchSeq, words = search.value.trim();
       if (!words) { chatCopy(found, 'Type part of a name, then choose from the list below.'); return; }
       try {
-        var reply = await window.mvFetchJSON('/api/v1/chat/specialists?limit=20&q=' + encodeURIComponent(words), {}, 'find specialists');
+        var reply = await window.mvFetchJSON('/api/v1/chat/specialists?limit=20&q=' + encodeURIComponent(words), {
+          timeout: 20000,
+          onAccess: function () { clear({detail: {reason: 'account'}}); },
+          onContextChange: function () { clear({detail: {reason: 'account'}}); }
+        }, 'find specialists');
         if (seq !== searchSeq || unavailable) return;
         if (!reply || reply.context !== form.querySelector('[name="specialist_context"]').value || !Array.isArray(reply.items)) {
           clear({detail: {reason: 'account'}}); return;
@@ -318,14 +325,18 @@
       }
     }
     if (search) search.addEventListener('input', function () {
+      searchSeq++;
       clearTimeout(searchTimer); searchTimer = setTimeout(findSpecialists, 250);
     });
     form.addEventListener('lightwork:task-model-restored', selected);
     function clear(event) {
       if (event.detail?.reason === 'selection') return;
       unavailable = true;
+      clearTimeout(searchTimer); searchSeq++;
       choice.replaceChildren(); choice.disabled = true; revision.value = '';
+      delete choice.dataset.saved; delete choice.dataset.notice;
       if (search) { search.value = ''; search.disabled = true; }
+      chatCopy(found, '');
       form.querySelector('[name="specialist_context"]').value = '';
       chatCopy(document.getElementById('chat-specialist-help'), 'Your account or workspace changed. Your message is kept; reopen Chat before starting work.');
     }

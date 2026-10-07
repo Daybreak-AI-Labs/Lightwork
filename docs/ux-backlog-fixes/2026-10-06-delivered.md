@@ -1,5 +1,14 @@
 # Product changes delivered on October 6
 
+Chat search integration: a restored or older specialist can be repaired by
+deliberately choosing its current search result. It is no longer excluded just
+because the name matches the unavailable selection. Query changes immediately
+invalidate old responses; shared access refusal clears private choices and
+saved-name data while retaining the unsent message. Actual production browser
+controls and the shared request helper passed with isolated read responses,
+zero native writes and no provider call. Native server/search acceptance is
+separate from this controller check.
+
 Learning question-import follow-through: the ordinary complete file and before/
 after review binds exact bytes, mode, current collection/storage/account and
 deadline. Native current authority and private source checks run at the physical
