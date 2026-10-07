@@ -62,16 +62,35 @@ class _DummyChannel:
         pass
 
 
-def test_add_channel_wraps_when_rich_render_on(monkeypatch):
+def test_rich_render_is_prepared_with_the_reply_not_by_wrapping_the_channel(monkeypatch):
+    # The durable reply path attaches the rendered copy before custody; a
+    # send() wrapper could not intercept an adapter's saved-reply transport.
+    from types import SimpleNamespace
+
+    from maverick import channel_reply_results
     from maverick_channels import rich_render
 
     monkeypatch.setattr(rich_render, "enabled", lambda: True)
     srv = _make_bare_server()
     ch = _DummyChannel()
     srv.add_channel(ch)
-    assert isinstance(srv._channels[0], rich_render.RichRenderChannel)
-    # The wrapper proxies attribute access to the inner channel.
-    assert srv._channels[0].name == "dummy"
+    assert srv._channels[0] is ch
+
+    monkeypatch.setattr(channel_reply_results, "require_source", lambda _source: None)
+    world = SimpleNamespace(get_goal=lambda _id: SimpleNamespace(status="done"),
+                            latest_artifacts=lambda _id: [])
+    text = "Result: $$x^2$$"
+    assert rich_render.has_rich_blocks(text)
+
+    def msg(channel):
+        return SimpleNamespace(channel=channel, provider_tenant_id=None, provider_sender_id=None,
+                               conversation_ref="thread", message_id="m1")
+
+    kwargs = {"owner": "user:a", "execution_principal": "user:a", "principal": "user:a"}
+    reply = channel_reply_results.prepare_reply(world, msg("slack"), 1, text, **kwargs)
+    assert reply.attachments == ["Rendered reply.html"]
+    plain = channel_reply_results.prepare_reply(world, msg("sms"), 1, text, **kwargs)
+    assert isinstance(plain, str) and "cannot attach a rendered copy" in plain
 
 
 def test_add_channel_passthrough_when_rich_render_off(monkeypatch):
