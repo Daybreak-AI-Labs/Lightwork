@@ -84,7 +84,7 @@ def request_store(monkeypatch):
 
 def test_known_hold_never_dispatches_or_claims_deletion(request_store, monkeypatch):
     monkeypatch.setattr(deletion, "preservation_snapshot", lambda: {"blocked": True})
-    monkeypatch.setattr(deletion, "_erase_target", lambda *a: pytest.fail("hold must prevent dispatch"))
+    monkeypatch.setattr(deletion, "_erase_target", lambda *a, **k: pytest.fail("hold must prevent dispatch"))
     receipt = deletion.apply("PDR-case", 1, "user:reviewer", lambda: None, None, external_holds_clear=True)
     assert receipt["status"] == "held"
     assert receipt["targets"][0]["state"] == "requested"
@@ -97,7 +97,8 @@ def test_own_request_requires_distinct_current_reviewer(request_store):
 
 
 def test_effect_receipt_precedes_dispatch_failure_stays_unknown(request_store, monkeypatch):
-    def erase(*args):
+    def erase(*args, authorize=None):
+        assert authorize is not None  # the current reviewer check reaches the store
         assert request_store.row["targets"][0]["state"] == "dispatching"
         raise OSError("interrupted deletion")
     monkeypatch.setattr(deletion, "_erase_target", erase)
@@ -109,7 +110,7 @@ def test_effect_receipt_precedes_dispatch_failure_stays_unknown(request_store, m
 
 
 def test_purged_scope_keeps_explicit_retained_exceptions(request_store, monkeypatch):
-    monkeypatch.setattr(deletion, "_erase_target", lambda *args: {"state": "purged", "removed": 2})
+    monkeypatch.setattr(deletion, "_erase_target", lambda *args, authorize=None: {"state": "purged", "removed": 2})
     receipt = deletion.apply("PDR-case", 1, "user:reviewer", lambda: None, None, external_holds_clear=True)
     assert receipt["status"] == "purged-with-retained-exceptions"
     assert any(row["state"] == "external-unverified" for row in receipt["exceptions"])
@@ -122,7 +123,7 @@ def test_reviewer_revocation_prevents_next_store(request_store, monkeypatch):
         calls += 1
         if calls > 1:
             raise HTTPException(403, "revoked")
-    monkeypatch.setattr(deletion, "_erase_target", lambda *args: pytest.fail("revoked reviewer must not delete"))
+    monkeypatch.setattr(deletion, "_erase_target", lambda *args, **kwargs: pytest.fail("revoked reviewer must not delete"))
     with pytest.raises(HTTPException):
         deletion.apply("PDR-case", 1, "user:reviewer", authorize, None, external_holds_clear=True)
     assert request_store.row["targets"][0]["state"] == "requested"
