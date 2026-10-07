@@ -31,11 +31,23 @@ def test_private_recipient_rejects_public_channel_identifiers():
         delivery._transport({'channel': 'telegram', 'sender_id': '-10012345678'})
 
 
+def _current_link(monkeypatch, link):
+    """Delivery is enabled and ``link`` is the principal's current verified link,
+    so a refusal comes from the bot/account check under test."""
+    monkeypatch.setattr(delivery, '_settings', lambda: {
+        'personal_alerts': True, 'personal_background': True, 'personal_external': True})
+    monkeypatch.setitem(sys.modules, 'maverick.personal_identity', SimpleNamespace(
+        linked_channels=lambda _principal: [link], principal_current=lambda _: True))
+    return link
+
+
 def test_telegram_bot_change_refuses_before_any_request(monkeypatch):
     monkeypatch.setattr(delivery, '_transport', lambda _: ('telegram', '123:synthetic'))
     monkeypatch.setattr(delivery, '_post', lambda *args: pytest.fail('bot mismatch must not send'))
+    link = _current_link(monkeypatch, {'id': 'a' * 32, 'principal': 'user:alice', 'channel': 'telegram',
+                                       'sender_id': '456', 'account_sha256': delivery._digest('789')})
     with pytest.raises(delivery.Refused):
-        delivery.send_private({'channel': 'telegram', 'sender_id': '456', 'account_sha256': delivery._digest('789')}, 'synthetic')
+        delivery.send_private(link, 'synthetic')
 
 
 def test_slack_will_not_post_to_a_mismatched_direct_conversation(monkeypatch):
@@ -47,9 +59,11 @@ def test_slack_will_not_post_to_a_mismatched_direct_conversation(monkeypatch):
             return {'ok': True, 'team_id': 'T12345678', 'user_id': 'U87654321'}
         return {'ok': True, 'channel': {'id': 'D12345678', 'is_im': True, 'user': 'U99999999'}}
     monkeypatch.setattr(delivery, '_post', post)
+    link = _current_link(monkeypatch, {'id': 'b' * 32, 'principal': 'user:alice', 'channel': 'slack',
+                                       'sender_id': 'U11111111',
+                                       'account_sha256': delivery._digest('T12345678:U87654321')})
     with pytest.raises(delivery.Refused):
-        delivery.send_private({'channel': 'slack', 'sender_id': 'U11111111',
-                               'account_sha256': delivery._digest('T12345678:U87654321')}, 'synthetic')
+        delivery.send_private(link, 'synthetic')
     assert len(calls) == 2
     assert not any(url.endswith('/chat.postMessage') for url in calls)
 
