@@ -9,7 +9,7 @@ import json
 import re
 import stat
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -376,7 +376,7 @@ def changes(prepared):
         ("file_size", "Complete file size in bytes", source["bytes"]), ("rows", "Complete data rows", source["rows"]),
         ("columns", "All file column names", source["columns"]), ("row", "Only selected data row", prepared["row"]),
         ("purpose", "Fixed purpose", model["purpose"]), ("basis", "Entered basis for reuse and release rights", model["basis"]),
-        ("expiry", "Review source permission again by", datetime.fromtimestamp(model["expires_at"], UTC).isoformat()), ("fields", "Complete possible values you enter", model["fields"]),
+        ("expiry", "Review source permission again by", datetime.fromtimestamp(model["expires_at"], timezone.utc).isoformat()), ("fields", "Complete possible values you enter", model["fields"]),
         ("conditions", "Every entered condition", model["conditions"]), ("combine", "How conditions combine", "Every condition" if model["mode"] == "all" else "At least one condition"),
         ("only_result", "The only result allowed into a file", model["approved_result"]),
         ("allowance", "Shared lifetime allowance already used", {"checks": prepared["allowance"]["checks_used"], "fixed_release_spent": prepared["allowance"]["release_used"]}),
