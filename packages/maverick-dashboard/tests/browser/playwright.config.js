@@ -15,11 +15,15 @@ const pythonExecutable=require('./python-runtime');
 const pythonCommand=JSON.stringify(pythonExecutable);
 // Capture this test-only opt-in before the server clears LIGHTWORK_* variables.
 const showVendorSetup=process.env.LIGHTWORK_BROWSER_SHOW_VENDOR_SETUP==='1'?' --show-vendor-setup':'';
+// A journey with its own <journey>.config.js needs that config's fixture
+// server; `npm test` (run-journeys.js) runs it there instead of here.
+const ownServer=fs.readdirSync(__dirname).filter(name=>name.endsWith('.config.js')&&name!=='playwright.config.js')
+  .map(name=>name.replace(/\.config\.js$/,'.spec.js'));
 // The expanded suite includes fresh owner, recovery and enterprise lifecycle
 // journeys. Allow the complete one-worker qualification run to finish; keep
 // each test and assertion deadline unchanged so hangs remain failures.
 module.exports=defineConfig({
-  testDir:'.',testMatch:'*.spec.js',fullyParallel:false,forbidOnly:!!process.env.CI,workers:1,retries:0,globalTimeout:1800000,
+  testDir:'.',testMatch:'*.spec.js',testIgnore:ownServer,fullyParallel:false,forbidOnly:!!process.env.CI,workers:1,retries:0,globalTimeout:1800000,
   outputDir:process.env.LIGHTWORK_BROWSER_OUTPUT||path.join(os.tmpdir(),'lightwork-browser-results'),
   timeout:45000,expect:{timeout:10000},
   reporter:[['list'],['html',{outputFolder:'browser-report',open:'never'}],['json',{outputFile:'test-results/results.json'}]],

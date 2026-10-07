@@ -21,6 +21,12 @@ installs browser OS dependencies on a CI runner). CI runs this suite in
 `.github/workflows/ui-regressions.yml`; a failure blocks that job. Repository
 administrators must separately select the job in branch protection if required.
 
+`npm test` runs the journeys that share the default fixture server
+(`playwright.config.js`), then each journey that has its own
+`<journey>.config.js` and fixture server, one after another; it fails if any
+run fails. Run one of those journeys alone with
+`npx playwright test --config <journey>.config.js`.
+
 The fixture binds only `127.0.0.1`, uses a new temporary home/configuration,
 clears inherited Lightwork configuration and provider-key environment aliases,
 and blocks outbound sockets before importing the product. Browser requests are
