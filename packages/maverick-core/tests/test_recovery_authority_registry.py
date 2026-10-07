@@ -594,6 +594,7 @@ def test_installation_passphrases_and_link_signing_key_are_protected_authority()
     expected = {
         "dashboard-passphrases.json": "dashboard_local_passphrases",
         "notification-links/signing.key": "notification_link_signing_key",
+        "privacy_automation/discovery-data-use-key.sealed": "privacy_discovery_data_use_key",
     }
     for relative, policy in expected.items():
         assert authority_policy(relative, is_sqlite=False) == policy

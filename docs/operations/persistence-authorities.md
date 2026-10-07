@@ -5,7 +5,7 @@ world model or governed records does not make every queue, file, key, approval,
 audit chain and instruction store shared. This inventory does not enable high
 availability or relax deployment guards.
 
-The machine-readable [inventory](persistence-authorities.json) classifies 713
+The machine-readable [inventory](persistence-authorities.json) classifies 719
 Python source files from the original persistence-seam scan and subsequent
 production-owner reviews, including the shared A2A store, PostgreSQL primitives,
 learning-key schema helper and signed client-erasure receipts. The learning-key

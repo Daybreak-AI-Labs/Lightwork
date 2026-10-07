@@ -304,6 +304,11 @@ def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: 
         return "privacy_identity_key_authority"
     if _contains(parts, "keys", "dek.wrapped"):
         return "wrapped_tenant_dek"
+    if _contains(parts, "privacy_automation", "discovery-data-use-key.sealed"):
+        # Tenant-sealed key for the discovery data-use database (itself an
+        # unknown, blocking SQLite). Retain it with that database; a missing or
+        # rolled-back key must never be silently regenerated over saved data.
+        return "privacy_discovery_data_use_key"
     tenant_scoped_root = len(parts) == 1 or (
         len(parts) >= 3 and parts[-3] == "tenants"
     )
@@ -753,6 +758,7 @@ GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
     "dashboard-session.key": "dashboard_session_secret",
     "dashboard-passphrases.json": "dashboard_local_passphrases",
     "notification-links/signing.key": "notification_link_signing_key",
+    "privacy_automation/discovery-data-use-key.sealed": "privacy_discovery_data_use_key",
     "scim_users.json": "scim_user_directory",
     "scim_groups.json": "scim_group_directory",
     "scim_groups.audit-outbox.json": "scim_audit_delivery",
