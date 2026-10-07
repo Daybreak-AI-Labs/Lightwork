@@ -54,6 +54,37 @@ class ExistingAccountError(ValueError):
     """A local invitation would take over an identity that already exists here."""
 
 
+class InviteRateLimited(RuntimeError):
+    """A workspace administrator has made too many invitations in a short time."""
+
+
+# A workspace administrator is told only that an invitation could not be made,
+# but an invitation that works and one that does not still differ. This keeps
+# that difference from being used to test a list of addresses: every attempt
+# counts, a refused one included, per administrator and per process.
+ISSUE_ATTEMPTS = 20
+ISSUE_WINDOW_SECONDS = 600.0
+TOO_MANY_INVITATIONS = ("You have made many invitations in a short time. Wait a few minutes, "
+                        "then try again.")
+_ISSUE_LIMIT = None
+
+
+def _limit_scoped_issuance(issuer: str) -> None:
+    global _ISSUE_LIMIT
+    from maverick.public_rights_form import SlidingWindowLimit
+
+    if _ISSUE_LIMIT is None:
+        _ISSUE_LIMIT = SlidingWindowLimit(ISSUE_WINDOW_SECONDS)
+    if not _ISSUE_LIMIT.hit(f"workspace-invite:{issuer or 'unknown'}", ISSUE_ATTEMPTS, time.time()):
+        raise InviteRateLimited(TOO_MANY_INVITATIONS)
+
+
+def reset_issue_limit() -> None:
+    """Tests only."""
+    if _ISSUE_LIMIT is not None:
+        _ISSUE_LIMIT.reset()
+
+
 def existing_local_account(email: str) -> bool:
     """Whether accepting a local invitation for ``email`` would take over an
     existing identity: any identity source that already knows ``user:<email>``.
@@ -321,6 +352,8 @@ def create_invite(email: str, role: str, *, created_by: str,
     tenant = (tenant or "").strip()
     if len(tenant) > 128 or (workspace_admin_invite and not tenant):
         raise ValueError("invalid workspace")
+    if workspace_admin_invite:
+        _limit_scoped_issuance(created_by)
     if local_login_mode() and existing_local_account(email):
         from .local_passphrases import ACCOUNT_EXISTS
 

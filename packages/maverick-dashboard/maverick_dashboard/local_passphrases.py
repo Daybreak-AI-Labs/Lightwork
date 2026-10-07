@@ -56,6 +56,14 @@ ACCOUNT_EXISTS = (
     "if they have forgotten it, the installation owner can reset it on the Users page. "
     "To change their access, change their role on the Users page or add them to the workspace there."
 )
+# The same refusal for everyone who may not see the installation's people: it
+# must read identically whatever made the invitation impossible, so it cannot
+# be used to find out who has an account, or which workspace holds them.
+NOT_INVITABLE = (
+    "This invitation could not be created for that email address. Check the address. If you "
+    "expected it to work, ask the installation owner or an installation administrator to invite "
+    "this person."
+)
 TOO_MANY = "Too many sign-in attempts. Wait a minute and try again."
 ATTEMPTS_PER_MINUTE = 10  # per client address, owner and colleagues alike
 
@@ -292,6 +300,6 @@ def reset_attempt_limit() -> None:
         _ATTEMPTS.reset()
 
 
-__all__ = ["ACCOUNT_EXISTS", "NOT_ACCEPTED", "TOO_MANY", "available", "emails", "has_account",
+__all__ = ["ACCOUNT_EXISTS", "NOT_ACCEPTED", "NOT_INVITABLE", "TOO_MANY", "available", "emails", "has_account",
            "limit_attempts", "login", "owner_of", "prepare", "require_same_origin", "reset_attempt_limit",
            "revoke", "store"]

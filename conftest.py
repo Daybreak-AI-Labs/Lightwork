@@ -144,6 +144,15 @@ def _isolate_dynamic_maverick_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_workspace_invite_limit():
+    """Each test starts with a fresh per-administrator invitation window."""
+    module = sys.modules.get("maverick_dashboard.invites")
+    if module is not None:
+        module.reset_issue_limit()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_runner_shutdown_admission(monkeypatch):
     """A prior TestClient shutdown must not close admission in another test."""
     import sys

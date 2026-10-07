@@ -1447,17 +1447,33 @@ def users_delete_custom_role(
     return RedirectResponse("/users?saved=role_deleted", status_code=303)
 
 
-def _existing_account_refusal(request: Request, email: str, **payload) -> HTTPException:
-    """An invitation for someone who can already sign in: recorded and refused."""
-    from .local_passphrases import ACCOUNT_EXISTS
+def _existing_account_refusal(request: Request, email: str, *, scoped: bool = False,
+                              **payload) -> HTTPException:
+    """An invitation for someone who can already sign in: recorded and refused.
+
+    An installation administrator can already see every account, so they are told
+    why. A workspace administrator is told only that the invitation could not be
+    made: the same words whichever store matched and whether the person belongs
+    to another workspace, so the refusal cannot be used to look people up.
+    """
+    from .local_passphrases import ACCOUNT_EXISTS, NOT_INVITABLE
     from .product_errors import background_save, product_error
 
     _admin_audit(request, "invite_refused", email=(email or "").strip().lower(),
                  reason="existing_local_account", **payload)
+    message = NOT_INVITABLE if scoped else ACCOUNT_EXISTS
     if background_save(request):
-        return product_error(409, "invite_existing_account", ACCOUNT_EXISTS,
-                             field_errors={"email": ACCOUNT_EXISTS})
-    return HTTPException(status_code=409, detail=ACCOUNT_EXISTS)
+        return product_error(409, "invite_not_created" if scoped else "invite_existing_account",
+                             message, field_errors={"email": message})
+    return HTTPException(status_code=409, detail=message)
+
+
+def _invite_rate_refusal(request: Request, exc: Exception) -> HTTPException:
+    from .product_errors import background_save, product_error
+
+    if background_save(request):
+        return product_error(429, "invite_rate_limited", str(exc))
+    return HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": "600"})
 
 
 def _invite_refusal(reason: str) -> HTTPException:
@@ -1596,7 +1612,10 @@ def users_workspace_invite(
                 ttl_hours=ttl, before_effect=guard,
             )
         except invites.ExistingAccountError as exc:
-            raise _existing_account_refusal(request, email, workspace=tenant) from exc
+            raise _existing_account_refusal(request, email, scoped=not installation_admin,
+                                            workspace=tenant) from exc
+        except invites.InviteRateLimited as exc:
+            raise _invite_rate_refusal(request, exc) from exc
         except ValueError as exc:
             from .product_errors import background_save
             if background_save(request):
