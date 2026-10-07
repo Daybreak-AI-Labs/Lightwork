@@ -454,10 +454,10 @@ async def source_options(request: Request):
             accounts = [{"name": row["name"], "label": row["name"], "revision": row["revision"]}
                         for row in rows if row["connector"] in ({provider, "github"} if provider == "github_security" else {provider})
                         and row.get("has_token") and connections._may_use(row, owner)]
-            streams = ({"code_scanning": "Code security", "dependabot": "Dependency security", "secret_scanning": "Exposed secrets"}
+            streams = ({"code_scanning": "Code security", "dependabot": "Dependency security", "secret_scanning": "Exposed secrets"}  # pragma: allowlist secret -- display labels, not a value
                        if provider == "github_security" else
                        {"ACCESS_POLICY": "Access policies", "IDP_DISCOVERY": "Identity provider discovery",
-                        "MFA_ENROLL": "Authentication enrollment", "OKTA_SIGN_ON": "Sign-in policies", "PASSWORD": "Password policies"}
+                        "MFA_ENROLL": "Authentication enrollment", "OKTA_SIGN_ON": "Sign-in policies", "PASSWORD": "Password policies"}  # pragma: allowlist secret -- display labels, not a value
                        if provider == "okta_posture" else {})
             providers.append({"id": provider, "label": label, "accounts": accounts,
                 "scope_label": ("AWS account number" if provider.startswith("aws_") else

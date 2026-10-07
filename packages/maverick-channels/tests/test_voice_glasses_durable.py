@@ -34,7 +34,7 @@ def test_voice_parallel_callbacks_return_saved_result_with_one_execution():
             await release.wait()
             return "saved response"
         handler_mock = AsyncMock(side_effect=handler)
-        channel = VoiceChannel(handler_mock, api_key="fixture", webhook_token="fixture", assistant_id="fixture-assistant",
+        channel = VoiceChannel(handler_mock, api_key="fixture", webhook_token="fixture", assistant_id="fixture-assistant",  # pragma: allowlist secret -- test fixture values
                                allowed_callers={"+12025550111"})
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=channel._app), base_url="http://fixture",
                                      headers={"Authorization": "Bearer fixture"}) as client:
@@ -59,7 +59,7 @@ def test_voice_parallel_callbacks_return_saved_result_with_one_execution():
 def test_voice_partial_missing_identity_and_changed_replay_do_not_execute():
     async def run():
         handler = AsyncMock(return_value="answer")
-        channel = VoiceChannel(handler, api_key="fixture", webhook_token="fixture", assistant_id="fixture-assistant",
+        channel = VoiceChannel(handler, api_key="fixture", webhook_token="fixture", assistant_id="fixture-assistant",  # pragma: allowlist secret -- test fixture values
                                allowed_callers={"+12025550111"})
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=channel._app), base_url="http://fixture",
                                      headers={"Authorization": "Bearer fixture"}) as client:

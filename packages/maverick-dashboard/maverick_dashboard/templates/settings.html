@@ -69,7 +69,7 @@
   // group, and selects its tab, from the first paint: the server cannot see
   // the address fragment. The page script below then takes over the tabs.
   window.mvSettingsGroupFor = function (hash) {
-    var aliases = {appearance: 'general', budget: 'general', providers: 'integrations', webhooks: 'integrations', 'webhook-settings': 'integrations', 'webhook-secret': 'integrations', capabilities: 'controls', features: 'controls', visibility: 'access', voice: 'models', discovery: 'models', connections: 'integrations', system: 'maintenance'};
+    var aliases = {appearance: 'general', budget: 'general', providers: 'integrations', webhooks: 'integrations', 'webhook-settings': 'integrations', 'webhook-secret': 'integrations', capabilities: 'controls', features: 'controls', visibility: 'access', voice: 'models', discovery: 'models', connections: 'integrations', system: 'maintenance'};  // pragma: allowlist secret -- settings section names, not a value
     var name = String(hash || '').replace(/^#settings-?/, '').replace(/^#/, '');
     if (/^feature-[a-z][a-z0-9_]*$/.test(name)) return 'controls';
     if (Object.prototype.hasOwnProperty.call(aliases, name)) name = aliases[name];

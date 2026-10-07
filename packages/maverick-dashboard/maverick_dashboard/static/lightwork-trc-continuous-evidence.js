@@ -246,7 +246,7 @@
     if (draft.stream) {
       var provider = ((sourceOptions || {}).providers || S.authorProviders || []).filter(function (item) { return item.id === draft.provider; })[0];
       var stream = provider && provider.streams.filter(function (item) { return item.id === draft.stream; })[0];
-      var streamLabels = {dependabot:"Dependency security",code_scanning:"Code security",secret_scanning:"Exposed secrets"};
+      var streamLabels = {dependabot:"Dependency security",code_scanning:"Code security",secret_scanning:"Exposed secrets"};  // pragma: allowlist secret -- display labels, not a value
       rows.push({label:"Checks to read",value:stream ? stream.label : streamLabels[draft.stream] || R.human(summary.stream || draft.stream)});
     }
     summary.controls.forEach(function (pair, index) { rows.push({label:"Check " + (index + 1),value:pair.check}); rows.push({label:"Evidence for control " + (index + 1),value:pair.control}); });

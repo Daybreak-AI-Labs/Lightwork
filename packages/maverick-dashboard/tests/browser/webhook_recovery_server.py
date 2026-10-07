@@ -75,7 +75,7 @@ def main():
             elif body.get("mode") == "receipt":
                 mode["receipt"] = True
             elif body.get("mode") == "external":
-                os.environ["MAVERICK_WEBHOOK_SECRET"] = "synthetic-fixture-external-key"
+                os.environ["MAVERICK_WEBHOOK_SECRET"] = "synthetic-fixture-external-key"  # pragma: allowlist secret -- synthetic test value
                 config.reset_config_cache()
             else:
                 raise HTTPException(422, "Choose a synthetic fixture mode.")
