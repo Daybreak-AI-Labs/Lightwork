@@ -18,9 +18,12 @@ function render(invoke, extra = {}) {
     "identity-transition-notice", "save-identity-transition",
     "maintenance-authorization-hint", "paste-authorization", "clear-authorization", "update-steps", "repair-steps",
     "maintenance-details-copy", "maintenance-details-save", "maintenance-details-copied",
+    "load-handoff", "offline-folder", "offline-review", "offline-details", "offline-install",
+    "planner-point", "planner-load", "planner-next", "planner-save", "planner-repair", "planner-workspace", "planner-details",
   ].map(id => [id, node()]));
   const context = { document: { getElementById: id => elements[id], createElement: () => ({}) },
-    window: { __TAURI__: { core: { invoke } }, location: { replace() {} } }, ...extra };
+    window: { __TAURI__: { core: { invoke } }, location: { replace() {} } },
+    setInterval() {}, setTimeout() {}, ...extra };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../ui/maintenance.js"), "utf8"), context);
   return elements;
 }
