@@ -318,8 +318,11 @@ _STEP_BUDGET_WARNING = _step_budget_warning_setting()
 # How many of an agent's recent tool calls speculative reads predict from.
 _SPECULATION_HISTORY = 20
 # AI-3: one plan decision per task run, shared by every agent in it.
-_PLAN_DECISIONS: dict[tuple[int, int], bool] = {}
+_PLAN_DECISIONS: dict[tuple, bool] = {}
 _PLAN_DECISIONS_LOCK = threading.Lock()
+# Runs whose first action is being asked about right now: the other agents of
+# the run wait for that answer instead of raising a prompt of their own.
+_PLAN_ASKING: set[tuple] = set()
 
 
 def _plan_facts(agent) -> tuple[list[str], list[str], float | None]:
@@ -3717,26 +3720,43 @@ class Agent:
         from .autonomy import confirm_plan_enabled
         if practice.tool_allowed(name) or not confirm_plan_enabled():
             return None
-        key = (int(getattr(self.ctx, "goal_id", 0) or 0), int(getattr(self.ctx, "episode_id", 0) or 0))
-        with _PLAN_DECISIONS_LOCK:
-            decided = _PLAN_DECISIONS.get(key)
+        goal_id = int(getattr(self.ctx, "goal_id", 0) or 0)
+        key: tuple = (goal_id, int(getattr(self.ctx, "episode_id", 0) or 0))
+        if not goal_id:
+            # No task to key on: scope the decision to this run's own context,
+            # never one entry shared by every unrelated run without a goal.
+            key = ("run", getattr(self.ctx, "bus_namespace", None) or id(self.ctx))
+        while True:
+            with _PLAN_DECISIONS_LOCK:
+                decided = _PLAN_DECISIONS.get(key)
+                asking = key in _PLAN_ASKING
+                if decided is None and not asking:
+                    _PLAN_ASKING.add(key)
+                    break
+            if decided is not None:
+                break
+            await asyncio.sleep(0.05)  # another agent of this run is asking; share its answer
         if decided is None:
             from .safety.consent import require_consent
             try:
-                from .plan_review import plan_card
-                steps, tools, cap = _plan_facts(self)
-                verdict = await asyncio.to_thread(
-                    require_consent, "confirm_plan", risk="high", scope=f"task {key[0]}",
-                    detail=self._plan_summary(name, args), provenance="plan",
-                    allow_auto_approve=False, consult_ledger=False,
-                    approval_card=plan_card(key[0], steps, name, args, tools, cap))
-                decided = bool(verdict.granted)
-            except Exception:  # an unavailable decision is a refusal
-                decided = False
-            with _PLAN_DECISIONS_LOCK:
-                decided = _PLAN_DECISIONS.setdefault(key, decided)
-                if len(_PLAN_DECISIONS) > 10000:
-                    _PLAN_DECISIONS.pop(next(iter(_PLAN_DECISIONS)))
+                try:
+                    from .plan_review import plan_card
+                    steps, tools, cap = _plan_facts(self)
+                    verdict = await asyncio.to_thread(
+                        require_consent, "confirm_plan", risk="high", scope=f"task {goal_id}",
+                        detail=self._plan_summary(name, args), provenance="plan",
+                        allow_auto_approve=False, consult_ledger=False,
+                        approval_card=plan_card(goal_id, steps, name, args, tools, cap))
+                    decided = bool(verdict.granted)
+                except Exception:  # an unavailable decision is a refusal
+                    decided = False
+                with _PLAN_DECISIONS_LOCK:
+                    decided = _PLAN_DECISIONS.setdefault(key, decided)
+                    if len(_PLAN_DECISIONS) > 10000:
+                        _PLAN_DECISIONS.pop(next(iter(_PLAN_DECISIONS)))
+            finally:
+                with _PLAN_DECISIONS_LOCK:
+                    _PLAN_ASKING.discard(key)
         if decided:
             return None
         return ("The plan was not confirmed, so nothing ran. Do not take any action. Finish by telling the "
@@ -4465,6 +4485,8 @@ class Agent:
             require_ai_open(self.ctx.world, goal_id)
         except GoalMutationConflict:
             return True
+        except Exception as e:  # a transient read error must not itself stop the run
+            log.debug("human-handoff check skipped: %s", e)
         try:
             goal = self.ctx.world.get_goal(goal_id)
         except Exception as e:  # pragma: no cover -- a stop check must not crash the run

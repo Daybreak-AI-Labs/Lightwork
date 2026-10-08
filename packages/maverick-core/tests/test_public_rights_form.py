@@ -226,6 +226,40 @@ def test_verification_link_valid_then_reused_then_expired(prop, _isolate):
     assert prf.verify(late, now=_NOW + 3601) is None
 
 
+def test_a_failed_verification_does_not_burn_the_link(prop, _isolate, monkeypatch):
+    from maverick import privacy_ops
+
+    _submit(_payload())
+    token = _link(_isolate, "/rights/verify/").rsplit("/", 1)[1]
+    real = privacy_ops.verify_dsar
+
+    def broken(*args, **kwargs):
+        raise OSError("disk unavailable")
+    monkeypatch.setattr(privacy_ops, "verify_dsar", broken)
+    with pytest.raises(OSError):
+        prf.verify(token, now=_NOW + 10)
+    assert privacy_ops.list_dsars()[0]["status"] == "unverified"
+    monkeypatch.setattr(privacy_ops, "verify_dsar", real)
+    view = prf.verify(token, now=_NOW + 20)  # the same link still works
+    assert view is not None and view["status"] == "open" and view["verified"] is True
+    assert prf.verify(token, now=_NOW + 30) is None  # and is single-use once it has
+
+
+def test_a_failed_acknowledgement_does_not_fail_a_completed_verification(prop, _isolate, monkeypatch):
+    from maverick import privacy_ops
+
+    _submit(_payload())
+    token = _link(_isolate, "/rights/verify/").rsplit("/", 1)[1]
+
+    def broken(*args, **kwargs):
+        raise OSError("disk unavailable")
+    monkeypatch.setattr(prf, "send_notice", broken)
+    view = prf.verify(token, now=_NOW + 10)
+    assert view is not None and view["status"] == "open" and view["verified"] is True
+    assert privacy_ops.list_dsars()[0]["status"] == "open"
+    assert prf.verify(token, now=_NOW + 20) is None  # still single-use
+
+
 def test_verification_mirrors_into_fulfillment_when_that_module_is_on(prop, _isolate, tmp_path):
     (tmp_path / "config.toml").write_text(
         _CONFIG + "\n[dsar_fulfillment]\nenable = true\n", encoding="utf-8")
