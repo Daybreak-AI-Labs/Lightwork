@@ -22,6 +22,10 @@ def _isolate(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     monkeypatch.delenv("MAVERICK_PUBLIC_URL", raising=False)
+    # A channel exported in the developer's shell must not turn a test into a real send.
+    for name in ("MAVERICK_NTFY_TOPIC", "PUSHOVER_USER_KEY", "PUSHOVER_APP_TOKEN",
+                 "DISCORD_NOTIFY_WEBHOOK_URL", "SLACK_NOTIFY_WEBHOOK_URL"):
+        monkeypatch.delenv(name, raising=False)
     from maverick import config
     config.reset_config_cache()
     # Webhook emission is exercised on its own; keep it out of the alert tests.
