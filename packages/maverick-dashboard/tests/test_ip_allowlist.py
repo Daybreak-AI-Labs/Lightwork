@@ -116,6 +116,27 @@ def test_middleware_allows_a_listed_address(monkeypatch):
     assert client.get("/api/v1/sessions").status_code == 200
 
 
+def test_installation_list_also_gates_the_websocket(monkeypatch):
+    """Starlette never runs ``@app.middleware("http")`` for a WebSocket, so the
+    run-events firehose has to apply the installation list itself, before
+    accepting."""
+    from maverick_dashboard import app as app_mod
+    from starlette.testclient import WebSocketDisconnect
+
+    app_mod._world_cache.clear()
+    gid = app_mod._world().create_goal("t", "d")
+    app_mod._world().set_goal_status(gid, "done", result="ok")
+    monkeypatch.setenv("MAVERICK_IP_ALLOWLIST", "10.0.0.0/8")
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+    assert client.get("/api/v1/sessions").status_code == 403
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(f"/ws/v1/runs/{gid}/events") as ws:
+            ws.receive_json()
+    monkeypatch.setenv("MAVERICK_IP_ALLOWLIST", "127.0.0.0/8")
+    with client.websocket_connect(f"/ws/v1/runs/{gid}/events") as ws:
+        assert ws.receive_json()["kind"] == "status"
+
+
 def test_config_list_is_read_and_env_wins(tmp_path, monkeypatch):
     _write_config(tmp_path, "[auth.ip_allowlist]\ncidrs = [\"192.0.2.0/24\"]\n")
     client = TestClient(app, headers={"Origin": "http://testserver"})

@@ -37,6 +37,7 @@ from fastapi import (
     Request,
     UploadFile,
     WebSocket,
+    WebSocketException,
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import (
@@ -10566,10 +10567,24 @@ async def providers_api(request: Request) -> JSONResponse:
     )
 
 
+async def _websocket_ip_allowlist_gate(websocket: WebSocket) -> None:
+    """The installation list for a WebSocket handshake. Starlette never runs
+    ``@app.middleware("http")`` for one, so the route applies it itself:
+    listed first among its dependencies, it refuses a blocked address before
+    sign-in runs and before the connection is accepted."""
+    from . import ip_allowlist
+
+    if await run_in_threadpool(ip_allowlist.installation_allows, websocket):
+        return
+    _auth_metrics.record_auth_failure("ip_allowlist")
+    raise WebSocketException(code=1008, reason=ip_allowlist.BLOCKED_MESSAGE)
+
+
 @app.websocket("/ws/v1/runs/{goal_id}/events")
 async def run_events_firehose(
     websocket: WebSocket,
     goal_id: int,
+    _address: None = Depends(_websocket_ip_allowlist_gate),
     principal: VerifiedPrincipal | None = Depends(require_websocket_principal_in_context),
 ) -> None:
     """Run-events firehose: stream a goal's events over WebSocket as they land.
