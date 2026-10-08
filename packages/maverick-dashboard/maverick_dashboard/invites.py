@@ -339,7 +339,9 @@ def create_invite(email: str, role: str, *, created_by: str,
     workspace membership), never as the dashboard-wide role."""
     from . import rbac
     email = (email or "").strip().lower()
-    if not email or "@" not in email or any(c.isspace() for c in email):
+    # The stored-record check refuses addresses over 320 characters, so one
+    # longer than that written here would make the whole store unreadable.
+    if not email or len(email) > 320 or "@" not in email or any(c.isspace() for c in email):
         raise ValueError("a valid email address is required")
     if not rbac.is_known_role(role):
         raise ValueError("unknown role")

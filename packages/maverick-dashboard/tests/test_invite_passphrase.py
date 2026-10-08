@@ -754,6 +754,15 @@ def test_an_admin_role_holder_cannot_make_themselves_an_administrator_to_reset(w
     assert _sign_in(_remote(), password=GOOD).status_code == 303  # the colleague is untouched
 
 
+def test_an_over_long_email_is_refused_and_cannot_make_the_invite_store_unreadable(workspace):
+    from maverick_dashboard import invites
+
+    refused = workspace.post("/users/invite", data={"email": "a" * 400 + "@example.test", "role": "viewer"})
+    assert 400 <= refused.status_code < 500, refused.text
+    assert invites.list_invites() == []
+    assert workspace.post("/users/invite", data={"email": "fine@example.test", "role": "viewer"}).status_code == 200
+
+
 def test_a_reset_needs_confirmation_this_site_and_a_recent_second_factor(workspace, tmp_path, monkeypatch):
     from maverick_dashboard import step_up
     from maverick_dashboard.app import app
