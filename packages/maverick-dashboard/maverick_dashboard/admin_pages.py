@@ -1288,8 +1288,8 @@ def users_passphrase_reset(request: Request, email: str = Form(...), confirm: st
     """Reset a colleague's forgotten passphrase, or give a person with access but no
     passphrase a first link, and show its one-time link ONCE.
 
-    Only the installation owner or a configured installation administrator;
-    never a workspace administrator (see :mod:`passphrase_resets`)."""
+    Only the installation owner; never a workspace administrator or an
+    administrator named in configuration (see :mod:`passphrase_resets`)."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import local_passphrases, passphrase_resets
