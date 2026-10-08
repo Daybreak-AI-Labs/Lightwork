@@ -376,3 +376,38 @@ def test_workspace_admin_cannot_remove_self_or_last_admin(monkeypatch):
     assert client.put("/api/v1/admin/tenants/acme/roles/user:bob",
                       json={"role": "admin"}).status_code == 204
     assert client.delete("/api/v1/admin/tenants/acme/roles/user:alice").status_code == 204
+
+
+def test_a_typed_in_erasure_review_is_not_a_review_this_server_prepared():
+    """unseal_from_str returns any unsealed text unchanged, so the token must be
+    required to be sealed before its expiry, actor and acknowledgements count."""
+    import json
+    import time
+
+    from maverick.paths import maverick_home
+    from maverick_dashboard import workspace_erasure
+
+    forged = json.dumps({
+        "purpose": workspace_erasure.PURPOSE, "workspace": "former", "context": "x", "actor": "local",
+        "home": str(maverick_home().resolve()), "operation": "a" * 48, "expires_at": time.time() + 10 ** 9,
+        "revision": "r", "previous_attempt": False, "changes": []})
+    for path in ("/api/v1/workspace-erasure/apply", "/api/v1/workspace-erasure/original"):
+        body = {"token": forged, "confirmed": True} if path.endswith("apply") else {"token": forged}
+        response = client.post(path, json=body)
+        assert response.status_code == 404, (path, response.text)
+    with pytest.raises(Exception) as unavailable:
+        workspace_erasure._open(forged)
+    assert getattr(unavailable.value, "status_code", None) == 404
+
+
+@pytest.mark.parametrize("spelling", ["acme", " acme", "acme "])
+def test_the_workspace_this_installation_is_fixed_to_is_recognised_by_identity(spelling, monkeypatch):
+    from maverick_dashboard import workspace_erasure
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    assert workspace_erasure._is_pinned_workspace(spelling) is True
+    assert workspace_erasure._is_pinned_workspace("acme-two") is False
+    monkeypatch.setenv("MAVERICK_TENANT", "café")
+    assert workspace_erasure._is_pinned_workspace("café") is True            # NFC and NFD are one id
+    monkeypatch.delenv("MAVERICK_TENANT")
+    monkeypatch.setattr("maverick.client.client_id", lambda: "bound-client")
+    assert workspace_erasure._is_pinned_workspace("bound-client") is True          # the [client] id binding too

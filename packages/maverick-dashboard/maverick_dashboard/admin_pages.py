@@ -1390,6 +1390,7 @@ def users_remove(request: Request, principal: str = Form(...), expected_standard
 def users_first_login_baseline(request: Request, expected_revision: str = Form(...), confirm: str = Form(...)):
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
+    step_up.require_recent_mfa(request, "change_role")
     if confirm != "existing-unassigned":
         raise HTTPException(422, "Review how existing unassigned accounts will change.")
     from .first_login_defaults import apply_conservative

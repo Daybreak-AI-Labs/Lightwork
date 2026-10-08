@@ -949,3 +949,33 @@ def test_the_pages_that_followed_a_failed_acceptance_no_longer_ask_for_a_replace
     text = re.sub(r"\s+", " ", page.text)
     assert "Users page" in text and "passphrase you chose" in text
     assert "new invitation link" not in text and "replacement invitation" not in text
+
+
+def test_an_unknown_email_is_locked_after_five_tries_exactly_like_a_real_account(workspace):
+    """If only real accounts ever answered 429, six wrong tries would reveal
+    which emails have an account."""
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    browser = _remote()
+    for _ in range(5):
+        assert _sign_in(browser, email="nobody@example.test", password=OTHER).status_code == 401
+    assert _sign_in(browser, email="nobody@example.test", password=OTHER).status_code == 429
+    assert _sign_in(browser, email="someone.else@example.test", password=OTHER).status_code == 401
+    from maverick_dashboard import local_passphrases
+    local_passphrases._ATTEMPTS.reset()                                     # the per-address window is a separate limit
+    for _ in range(5):
+        assert _sign_in(browser, password=OTHER).status_code == 401
+    assert _sign_in(browser, password=OTHER).status_code == 429             # the real account answers the same way
+
+
+def test_a_workspace_name_at_the_longest_allowed_length_still_lets_everyone_sign_in(workspace, tmp_path):
+    from maverick.paths import MAX_TENANT_SEGMENT_LENGTH
+    from maverick_dashboard import local_passphrases
+    prepared = local_passphrases.prepare(COLLEAGUE, GOOD)
+    local_passphrases.store(prepared, tenant="w" * MAX_TENANT_SEGMENT_LENGTH)
+    assert local_passphrases.has_account(COLLEAGUE) is True                  # the store reads back what it wrote
+    other = local_passphrases.prepare("pat@example.test", GOOD)
+    with pytest.raises(Exception) as refused:
+        local_passphrases.store(other, tenant="w" * (MAX_TENANT_SEGMENT_LENGTH + 1))
+    assert getattr(refused.value, "status_code", None) == 422
+    assert local_passphrases.has_account("pat@example.test") is False
+    assert local_passphrases.has_account(COLLEAGUE) is True                  # the refusal left the store readable

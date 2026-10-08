@@ -19,17 +19,19 @@ unreadable or malformed store fails closed.
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import math
 import secrets
 import threading
 import time
+from collections import OrderedDict
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request
 from maverick import file_lock
-from maverick.paths import maverick_home
+from maverick.paths import MAX_TENANT_SEGMENT_LENGTH, maverick_home
 
 from . import local_owner
 
@@ -119,7 +121,7 @@ def _valid_row(email: object, row: object) -> bool:
             and type(row["failures"]) is int and 0 <= row["failures"] <= 5
             and isinstance(row["locked_until"], (int, float)) and math.isfinite(row["locked_until"])
             and isinstance(row["updated_at"], (int, float)) and math.isfinite(row["updated_at"])
-            and isinstance(row["tenant"], str) and len(row["tenant"]) <= 128
+            and isinstance(row["tenant"], str) and len(row["tenant"]) <= MAX_TENANT_SEGMENT_LENGTH
             and row["tenant"] == row["tenant"].strip())
 
 
@@ -201,9 +203,13 @@ def store(prepared: dict, *, tenant: str = "") -> None:
             raise HTTPException(409, ACCOUNT_EXISTS)
         if len(accounts) >= _MAX_ACCOUNTS:
             raise HTTPException(409, "This workspace has reached its limit of passphrase accounts.")
-        accounts[email] = {"salt": prepared["salt"], "password_hash": prepared["password_hash"],
-                           "failures": 0, "locked_until": 0, "tenant": (tenant or "").strip(),
-                           "updated_at": time.time()}
+        row = {"salt": prepared["salt"], "password_hash": prepared["password_hash"],
+               "failures": 0, "locked_until": 0, "tenant": (tenant or "").strip(),
+               "updated_at": time.time()}
+        if not _valid_row(email, row):
+            # One row the store cannot read back would refuse every sign-in.
+            raise HTTPException(422, "This workspace name cannot be used with passphrase sign-in.")
+        accounts[email] = row
         _write(accounts)
 
 
@@ -242,6 +248,7 @@ def login(request: Request, *, email: str, password: str) -> str:
             _write(accounts)
             salt, expected, tenant = row["salt"], row["password_hash"], row["tenant"]
     if row is None:
+        _count_unknown_attempt(email)  # an unknown email locks after five tries too
         local_owner._password(password, _DUMMY_SALT)  # same cost, outside the lock
         raise HTTPException(401, NOT_ACCEPTED)
     if not hmac.compare_digest(local_owner._password(password, salt), expected):
@@ -273,6 +280,25 @@ def login(request: Request, *, email: str, password: str) -> str:
 
 
 _ATTEMPTS = None
+_UNKNOWN: OrderedDict[str, tuple[int, float]] = OrderedDict()
+_UNKNOWN_LIMIT = 20_000
+
+
+def _count_unknown_attempt(email: str) -> None:
+    """Count a failed sign-in for an email with no account exactly as one for a
+    real account is counted, so five wrong tries and the one-minute wait look
+    the same for both. Only a hash is kept, and only the newest few thousand."""
+    key = hashlib.sha256(email.encode("utf-8")).hexdigest()
+    now = time.time()
+    with _LOCK:
+        failures, locked_until = _UNKNOWN.pop(key, (0, 0.0))
+        if locked_until > now:
+            _UNKNOWN[key] = (failures, locked_until)
+            raise HTTPException(429, LOCKED)
+        failures = min(5, failures + 1)
+        _UNKNOWN[key] = (failures, now + 60 if failures == 5 else 0.0)
+        while len(_UNKNOWN) > _UNKNOWN_LIMIT:
+            _UNKNOWN.popitem(last=False)
 
 
 def limit_attempts(request: Request) -> None:
@@ -296,6 +322,7 @@ def limit_attempts(request: Request) -> None:
 
 def reset_attempt_limit() -> None:
     """Tests only."""
+    _UNKNOWN.clear()
     if _ATTEMPTS is not None:
         _ATTEMPTS.reset()
 

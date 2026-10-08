@@ -10,6 +10,8 @@ undone, and the confirmation says so).
 """
 from __future__ import annotations
 
+from maverick.audit import AuditRefused
+
 _SEP = "\x1f"
 MAX_PEOPLE = 500
 
@@ -39,6 +41,12 @@ def targets(role_map: dict[str, str], labels: dict[str, str], *, scope: str, cho
     return found[:MAX_PEOPLE + 1]
 
 
+def _store_reason(exc: Exception) -> str:
+    if isinstance(exc, AuditRefused):
+        return "The activity log refused this change, so it was not made."
+    return str(exc) or "The role list could not be updated."
+
+
 def apply(people: list[str], role: str, *, actor: str) -> list[dict]:
     """Give each person ``role``; one refusal never stops the others."""
     from . import rbac
@@ -57,13 +65,19 @@ def apply(people: list[str], role: str, *, actor: str) -> list[dict]:
                 row.update(outcome="refused", after=before, reason=str(exc))
             except ValueError:
                 row.update(outcome="refused", after=before, reason="That role or person is not valid.")
+            except (rbac.RbacStoreError, AuditRefused) as exc:
+                # The activity log or the role list refused this one change. The
+                # people already changed keep their report (and their undo).
+                row.update(outcome="refused", after=before, reason=_store_reason(exc))
         report.append(row)
     return report
 
 
 def undo_tokens(report: list[dict]) -> list[str]:
-    """What the Undo button posts back: each changed person and their role before."""
-    return [f"{row['principal']}{_SEP}{row['before']}" for row in report if row["outcome"] == "changed"]
+    """What the Undo button posts back: each changed person, the role they had
+    before and the role this change gave them."""
+    return [f"{row['principal']}{_SEP}{row['before']}{_SEP}{row['after']}"
+            for row in report if row["outcome"] == "changed"]
 
 
 def undo(tokens: list[str], *, actor: str) -> list[dict]:
@@ -75,15 +89,21 @@ def undo(tokens: list[str], *, actor: str) -> list[dict]:
     current = rbac.list_users()
     report = []
     for token in tokens[:MAX_PEOPLE]:
-        principal, _, before = str(token).partition(_SEP)
+        principal, _, rest = str(token).partition(_SEP)
         principal = principal.strip()
         if not principal:
             continue
+        before, has_given, given = rest.partition(_SEP)
         now = current.get(principal, "")
         row = {"principal": principal, "before": now, "after": before, "outcome": "changed", "reason": ""}
         try:
             if now == before:
                 row["outcome"] = "unchanged"
+            elif has_given and now != given:
+                # Someone changed this person again after the bulk change; putting
+                # the old role back would overwrite that newer decision.
+                row.update(outcome="refused", after=now,
+                           reason="Their role was changed again after this change, so it was left as it is.")
             elif before:
                 rbac.set_role(principal, before, actor=actor)
             else:
@@ -92,6 +112,8 @@ def undo(tokens: list[str], *, actor: str) -> list[dict]:
             row.update(outcome="refused", after=now, reason=str(exc))
         except ValueError:
             row.update(outcome="refused", after=now, reason="That role or person is not valid.")
+        except (rbac.RbacStoreError, AuditRefused) as exc:
+            row.update(outcome="refused", after=now, reason=_store_reason(exc))
         report.append(row)
     return report
 

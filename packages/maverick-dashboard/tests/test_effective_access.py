@@ -386,3 +386,13 @@ def test_outside_agent_page_shows_check_access(outside, client):
             "Above the riskiest action it is allowed (medium)") in panel
     assert "$5.00 per month" in panel and "left" in panel
     assert "specialist" not in panel.lower()
+
+
+def test_an_ai_action_reports_every_resource_it_reached_not_just_the_fingerprinted_ones():
+    from maverick_dashboard import content_access
+    event = {"agent": "specialist", "model": "model-x",
+             "resources": ["", "a"] + [f"file-{i}" for i in range(40)]}
+    fields = content_access.ai_action_fields(event)
+    assert fields["resources_reached"] == 41                      # the blank one is not a resource
+    assert len(fields["resource_fingerprints"]) == 5
+    assert fields["resource_fingerprints"][0] == content_access.resource_fingerprint("a")

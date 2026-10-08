@@ -239,10 +239,11 @@ def ai_action_fields(event: dict) -> dict:
             safe[name] = value
     resources = event.get("resources")
     if isinstance(resources, list):
-        names = [item for item in resources[:5] if isinstance(item, str) and item.strip()]
+        names = [item for item in resources if isinstance(item, str) and item.strip()]
+        # The count is every resource reached; only the first five are fingerprinted.
         safe["resources_reached"] = len(names)
         if names:
-            safe["resource_fingerprints"] = [resource_fingerprint(item) for item in names]
+            safe["resource_fingerprints"] = [resource_fingerprint(item) for item in names[:5]]
     return safe
 
 

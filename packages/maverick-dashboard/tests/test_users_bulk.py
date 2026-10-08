@@ -137,3 +137,63 @@ def test_cancel_several_invitations_after_confirming_the_count(client, monkeypat
         "invite_ids": picked, "scope": "selected", "confirmed": "yes", "expected_count": "2"}).text
     assert "Cancelled 2 invitations" in text(page)
     assert [i.id for i in invites.list_invites() if i.pending] == [pending[2].id]
+
+
+def test_a_refusal_by_the_activity_log_for_one_person_does_not_stop_the_others(client, monkeypatch):
+    from maverick.audit import AuditRefused
+    from maverick_dashboard import rbac, users_bulk
+    real = rbac.set_role
+
+    def set_role(principal, role, **kwargs):
+        if principal == "user:ana@corp.com":
+            raise AuditRefused("custody unavailable")
+        return real(principal, role, **kwargs)
+
+    monkeypatch.setattr(rbac, "set_role", set_role)
+    report = users_bulk.apply(["user:ana@corp.com", "user:ben@corp.com"], "operator", actor="user:setup")
+    assert [row["outcome"] for row in report] == ["refused", "changed"]
+    assert "activity log refused" in report[0]["reason"]
+    assert roles()["user:ana@corp.com"] == "viewer" and roles()["user:ben@corp.com"] == "operator"
+    assert len(users_bulk.undo_tokens(report)) == 1             # the change that happened can be undone
+
+
+def test_a_role_store_failure_for_one_person_is_reported_not_raised(client, monkeypatch):
+    from maverick_dashboard import rbac, users_bulk
+
+    def fail(principal, role, **kwargs):
+        raise rbac.RosterRollbackError("The role list could not be put back and may now include it.")
+
+    monkeypatch.setattr(rbac, "set_role", fail)
+    report = users_bulk.apply(["user:ana@corp.com"], "operator", actor="user:setup")
+    assert report[0]["outcome"] == "refused" and "role list" in report[0]["reason"]
+
+
+def test_undo_leaves_a_role_someone_changed_again_and_still_accepts_older_tokens(client):
+    from maverick_dashboard import rbac, users_bulk
+    report = users_bulk.apply(["user:ana@corp.com", "user:ben@corp.com"], "operator", actor="user:setup")
+    tokens = users_bulk.undo_tokens(report)
+    rbac.set_role("user:ana@corp.com", "admin", actor="user:other-admin")      # decided again afterwards
+    undone = {row["principal"]: row for row in users_bulk.undo(tokens, actor="user:setup")}
+    assert undone["user:ana@corp.com"]["outcome"] == "refused"
+    assert "changed again" in undone["user:ana@corp.com"]["reason"]
+    assert roles()["user:ana@corp.com"] == "admin"                              # the newer decision stands
+    assert undone["user:ben@corp.com"]["outcome"] == "changed" and roles()["user:ben@corp.com"] == "viewer"
+    rbac.set_role("user:cy@corp.com", "admin", actor="user:setup")
+    old_token = "user:cy@corp.com" + users_bulk._SEP + "operator"            # issued before the role was recorded
+    assert users_bulk.undo([old_token], actor="user:setup")[0]["outcome"] == "changed"
+    assert roles()["user:cy@corp.com"] == "operator"
+
+
+def test_changing_the_first_login_baseline_needs_the_same_fresh_second_factor_as_any_role_change(client, monkeypatch):
+    from maverick_dashboard import step_up
+    asked = []
+
+    def stale(request, operation):
+        asked.append(operation)
+        raise step_up.StepUpRequired("/auth/reauthenticate")
+
+    monkeypatch.setattr(step_up, "require_recent_mfa", stale)
+    response = client.post("/users/first-login-baseline", data={
+        "expected_revision": "0" * 64, "confirm": "existing-unassigned"}, follow_redirects=False)
+    assert asked == ["change_role"]
+    assert "saved=first_login" not in response.headers.get("location", "")
