@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 from .crypto_at_rest import seal, unseal
 from .file_lock import atomic_write_bytes, cross_process_lock, ensure_private_directory
+from .notifications import retry_delay
 from .paths import data_dir
 from .personal_notifications import alert_brief, delivery_window
 
@@ -254,12 +255,27 @@ class DeliveryStore:
         if (not isinstance(state, dict) or not isinstance(state.get("consumed"), dict)
                 or not isinstance(state.get("receipts"), list) or len(state["consumed"]) > 1000
                 or state.get("principal_sha256") != self.principal_sha256
-                or (self.scope is not None and state.get("scope") != self.scope)):
+                or (self.scope is not None and state.get("scope") != self.scope)
+                # In-flight claims and the back-off after a refusal (older files have neither).
+                or not isinstance(state.setdefault("claims", {}), dict)
+                or not isinstance(state.setdefault("retry", {}), dict)):
             raise ValueError("Personal delivery history is unavailable.")
         threshold = time.time() - 7 * 86400
         state["consumed"] = {key: at for key, at in state["consumed"].items() if at > threshold}
         state["receipts"] = [row for row in state["receipts"] if row["at"] > threshold][-100:]
+        for key in ("claims", "retry"):
+            state[key] = {name: row for name, row in state[key].items()
+                          if isinstance(row, dict) and isinstance(row.get("at"), (int, float)) and row["at"] > threshold}
         return state
+
+    @staticmethod
+    def _waiting(state, item_id, now):
+        """Still inside the wait after a definite refusal of this alert."""
+        entry = state["retry"].get(item_id)
+        try:
+            return entry is not None and float(entry["at"]) <= now < float(entry.get("next_at") or 0)
+        except (TypeError, ValueError):
+            return False
 
     def _write(self, state):
         atomic_write_bytes(self.path, seal(json.dumps(state).encode()), mode=0o600)
@@ -270,14 +286,17 @@ class DeliveryStore:
             state = self._read()
             if day and state["digest_day"] == day:
                 return None
-            fresh = [item for item in items if item["id"] not in state["consumed"]]
+            now = time.time()
+            fresh = [item for item in items
+                     if item["id"] not in state["consumed"] and not self._waiting(state, item["id"], now)]
             if not fresh:
                 return None
             if len(state["consumed"]) + len(fresh) > 1000:
                 raise ValueError("Personal delivery history is full; sends paused to preserve duplicate protection.")
-            now = time.time()
-            ident = _digest([day, [item["id"] for item in fresh]])
+            ident = _digest([day, [item["id"] for item in fresh], now])
             state["consumed"].update({item["id"]: now for item in fresh})
+            # Kept until the send's outcome is known: only a definite refusal gives these back.
+            state["claims"][ident] = {"items": [item["id"] for item in fresh], "day": day, "at": now}
             state["receipts"].append({"id": ident, "at": now, "state": "sending", "count": len(fresh),
                                       "message": "Waiting for service acceptance; not marked seen."})
             if day:
@@ -293,7 +312,32 @@ class DeliveryStore:
                     row.update(state=result, message=message)
                     if isinstance(provider_reference, str) and provider_reference:
                         row["provider_reference"] = provider_reference[:512]
+            claim = state["claims"].pop(ident, None)
+            if claim and result == "failed":
+                self._release(state, claim)
+            elif claim:
+                for item_id in claim["items"]:
+                    state["retry"].pop(item_id, None)
             self._write(state)
+
+    @staticmethod
+    def _release(state, claim):
+        """A definite refusal sent nothing: give the claim back, to be offered again
+        after the shared back-off (5, 10, 20, 40, 60 minutes, then hourly). An
+        uncertain outcome never comes here, so it is never replayed."""
+        now = time.time()
+        for item_id in claim["items"]:
+            state["consumed"].pop(item_id, None)
+            try:
+                before = int((state["retry"].get(item_id) or {}).get("failures") or 0)
+            except (TypeError, ValueError):
+                before = 0
+            state["retry"][item_id] = {"failures": before + 1, "next_at": now + retry_delay(before + 1), "at": now}
+        if claim["day"] and state["digest_day"] == claim["day"]:
+            state["digest_day"] = ""
+        newest = sorted(state["retry"], key=lambda key: state["retry"][key]["at"], reverse=True)[:1000]
+        state["retry"] = {key: state["retry"][key] for key in newest}
+
 
     def recent(self):
         state = self._read()
@@ -302,8 +346,10 @@ class DeliveryStore:
                 for row in reversed(state["receipts"][-10:])]
 
     def pending(self, items):
-        consumed = self._read()["consumed"]
-        return [item for item in items if item["id"] not in consumed]
+        state = self._read()
+        now = time.time()
+        return [item for item in items
+                if item["id"] not in state["consumed"] and not self._waiting(state, item["id"], now)]
 
 
 def _mute_choice(principal: str, base: str, item: dict) -> tuple[str, str, dict] | None:
@@ -392,7 +438,7 @@ def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
                     else:
                         reference = send_private(link, text)
             except (Refused, ValueError):
-                store.finish(ident, "failed", "Not accepted. Review the linked identity, channel access and bot configuration. No automatic retry.")
+                store.finish(ident, "failed", "Not accepted. Review the linked identity, channel access and bot configuration. Lightwork tries again after a wait.")
             except Exception:
                 store.finish(ident, "unknown", "Acceptance is unknown. Check the private conversation before another send; no automatic retry.")
             else:

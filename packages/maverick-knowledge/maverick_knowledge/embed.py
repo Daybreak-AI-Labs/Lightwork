@@ -241,17 +241,21 @@ def build_embedder(cfg: dict | None = None) -> Embedder:
         return DeterministicEmbedder(int(cfg.get("dim", 256)))
 
     if provider == "hosted":
-        key = (cfg.get("api_key") or os.environ.get("VOYAGE_API_KEY")
+        base_url = cfg.get("base_url") or "https://api.voyageai.com/v1"
+        # VOYAGE_API_KEY is Voyage's credential: it is only offered to Voyage's
+        # own host, never as a Bearer token to another configured endpoint.
+        voyage = (urlsplit(base_url).hostname or "").lower() in ("voyageai.com", "api.voyageai.com")
+        key = (cfg.get("api_key") or (os.environ.get("VOYAGE_API_KEY") if voyage else "")
                or os.environ.get("MAVERICK_EMBED_API_KEY", ""))
         if not key:
             raise RuntimeError(
                 "knowledge: hosted embedder selected but no API key (set "
-                "[knowledge] api_key, VOYAGE_API_KEY, or MAVERICK_EMBED_API_KEY); or set "
-                "embedder = 'deterministic' for offline/dev retrieval."
+                "[knowledge] api_key, MAVERICK_EMBED_API_KEY, or VOYAGE_API_KEY for Voyage's "
+                "own endpoint); or set embedder = 'deterministic' for offline/dev retrieval."
             )
         return HostedEmbedder(
             model=cfg.get("model", "voyage-3"),
-            base_url=cfg.get("base_url", "https://api.voyageai.com/v1"),
+            base_url=base_url,
             api_key=key,
             dim=int(cfg.get("dim", 1024)),
             revision=str(cfg.get("revision") or "provider-model-contract"),

@@ -174,3 +174,85 @@ def test_an_alert_already_seen_in_the_app_is_not_sent_again_privately(tmp_path, 
     fresh = {**seen, 'id': 'd' * 64, 'seen_at': None, 'state': 'available', 'href': '/chat/goal/2'}
     delivery.dispatch('user:alice', {'items': [seen, fresh]}, choice)
     assert len(sent) == 1 and '/chat/goal/2' in sent[0] and '/chat/goal/1' not in sent[0]
+
+
+def _clock(monkeypatch, start=1_800_000_000.0):
+    import time
+
+    now = [start]
+    monkeypatch.setattr(delivery, 'time', SimpleNamespace(time=lambda: now[0], monotonic=time.monotonic))
+    return now
+
+
+def test_a_definite_refusal_releases_the_claim_for_a_later_retry(ledger, monkeypatch):
+    now = _clock(monkeypatch)
+    item = {'id': 'a' * 64}
+    ident, _ = ledger.claim([item])
+    ledger.finish(ident, 'failed', 'Not accepted.')
+    # Waiting out the first back-off (5 minutes) before it is offered again.
+    assert ledger.pending([item]) == [] and ledger.claim([item]) is None
+    now[0] += 5 * 60 + 1
+    assert ledger.pending([item]) == [item]
+    again, fresh = ledger.claim([item])
+    assert fresh == [item] and again != ident
+    ledger.finish(again, 'failed', 'Not accepted.')
+    now[0] += 5 * 60 + 1  # the second wait is longer (10 minutes)
+    assert ledger.claim([item]) is None
+    now[0] += 5 * 60
+    ident, fresh = ledger.claim([item])
+    assert fresh == [item]
+    ledger.finish(ident, 'accepted', 'The service accepted this message.')
+    now[0] += 24 * 3600
+    assert ledger.pending([item]) == [] and ledger.claim([item]) is None  # delivered: never again
+
+
+def test_an_uncertain_or_interrupted_send_is_never_released(ledger, monkeypatch):
+    now = _clock(monkeypatch)
+    unknown, interrupted = {'id': 'a' * 64}, {'id': 'b' * 64}
+    ident, _ = ledger.claim([unknown])
+    ledger.finish(ident, 'unknown', 'Acceptance is unknown.')
+    assert ledger.claim([interrupted]) is not None  # claimed, then the process died: no finish
+    now[0] += 6 * 24 * 3600  # days later, still inside the 7-day history
+    assert ledger.pending([unknown, interrupted]) == []
+    assert ledger.claim([unknown, interrupted]) is None
+
+
+def test_a_refused_digest_is_offered_again_the_same_day(ledger, monkeypatch):
+    now = _clock(monkeypatch)
+    item = {'id': 'a' * 64}
+    ident, _ = ledger.claim([item], day='2026-10-01')
+    ledger.finish(ident, 'failed', 'Not accepted.')
+    now[0] += 5 * 60 + 1
+    retry = ledger.claim([item], day='2026-10-01')
+    assert retry is not None and retry[1] == [item]
+    ledger.finish(retry[0], 'accepted', 'The service accepted this message.')
+    assert ledger.claim([item], day='2026-10-01') is None  # once the digest went, the day is done
+
+
+def test_a_rate_limited_alert_is_sent_once_the_wait_is_over(tmp_path, monkeypatch):
+    now = _clock(monkeypatch)
+    sent, answers = [], [delivery.Refused(), None]
+
+    def flaky(target, text):
+        outcome = answers.pop(0)
+        if outcome is not None:
+            raise outcome
+        sent.append(text)
+        return 'message-1'
+    link = _dispatch_fixture(tmp_path, monkeypatch, [])
+    monkeypatch.setattr(delivery, 'send_private', flaky)
+    item = {'id': 'e' * 64, 'category': 'needs-decision', 'label': 'Needs your decision',
+            'reason': 'You were assigned this approval', 'action': 'Approve or reject the request',
+            'due_at': now[0] + 86400, 'href': '/approvals#approval-9', 'seen_at': None}
+    choice = validate_preferences({'external_links': [link['id']], 'timezone': 'UTC'})
+    inbox = {'items': [item]}
+    delivery.dispatch('user:alice', inbox, choice)  # the service said 429
+    assert sent == []
+    delivery.dispatch('user:alice', inbox, choice)  # still inside the wait
+    assert sent == [] and len(answers) == 1
+    now[0] += 5 * 60 + 1
+    delivery.dispatch('user:alice', inbox, choice)
+    assert len(sent) == 1
+    now[0] += 3600
+    delivery.dispatch('user:alice', inbox, choice)  # accepted once: not sent again
+    assert len(sent) == 1

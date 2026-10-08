@@ -384,6 +384,29 @@ class TestBuildEmbedderFailLoud:
         assert isinstance(e, HostedEmbedder)
         assert e.api_key == "voyage-credential"  # pragma: allowlist secret
 
+    def test_voyage_key_is_never_sent_to_another_host(self, monkeypatch):
+        from maverick_knowledge.embed import HostedEmbedder, build_embedder
+
+        monkeypatch.delenv("MAVERICK_EMBED_PROVIDER", raising=False)
+        monkeypatch.delenv("MAVERICK_EMBED_API_KEY", raising=False)
+        monkeypatch.setenv("VOYAGE_API_KEY", "voyage-credential")
+        gateway = {"embedder": "hosted", "dim": 8,
+                   "base_url": "https://embeddings.example-gateway.net/v1"}
+        # The ambient Voyage key is Voyage's: a third-party base_url does not get it.
+        with pytest.raises(RuntimeError, match="API key"):
+            build_embedder(gateway)
+        # That host's own key (config or the generic env var) is still used.
+        assert build_embedder({**gateway, "api_key": "gateway-credential"}).api_key == "gateway-credential"
+        monkeypatch.setenv("MAVERICK_EMBED_API_KEY", "generic-credential")
+        assert build_embedder(gateway).api_key == "generic-credential"
+        # Voyage's own endpoint, set explicitly or left unset, keeps the fallback.
+        monkeypatch.delenv("MAVERICK_EMBED_API_KEY")
+        for cfg in ({"embedder": "hosted", "dim": 8, "base_url": "https://api.voyageai.com/v1"},
+                    {"embedder": "hosted", "dim": 8, "base_url": ""}):
+            e = build_embedder(cfg)
+            assert isinstance(e, HostedEmbedder) and e.api_key == "voyage-credential"
+            assert e.base_url == "https://api.voyageai.com/v1"
+
     def test_unknown_provider_raises(self, monkeypatch):
         from maverick_knowledge.embed import build_embedder
 
