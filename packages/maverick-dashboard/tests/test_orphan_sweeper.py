@@ -434,6 +434,66 @@ def test_periodic_postgres_batches_rotate_fairly_when_roster_is_large(world, mon
     ]
 
 
+def _postgres_roster(monkeypatch, failing, *, tenants=5, batch=64):
+    """Shared PostgreSQL with ``tenants`` registered tenants; those in ``failing``
+    always raise (for example an at-rest decrypt failure with per-tenant keys)."""
+    from maverick import client, paths, world_model_backends
+    from maverick.tenant import registry
+    from maverick_dashboard import _shared
+
+    seen = []
+
+    class FakeWorld:
+        def reclaim_orphan_goals(self, **kwargs):
+            tenant = paths.current_tenant_id_strict()
+            seen.append(tenant)
+            if tenant in failing:
+                raise RuntimeError("tenant data cannot be read")
+            return 1
+
+    monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: True)
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setattr(client, "strict_client_id", lambda: None)
+    monkeypatch.setattr(registry, "list_tenants", lambda: [
+        registry.TenantRecord(id=f"client-{index}") for index in range(tenants)
+    ])
+    monkeypatch.setattr(_shared, "_world", FakeWorld)
+    monkeypatch.setattr(orphan_sweeper, "MAX_TENANTS_PER_SWEEP", batch)
+    monkeypatch.setattr(orphan_sweeper, "_last_periodic_tenant", None)
+    monkeypatch.setattr(orphan_sweeper, "_stalled_tenant", None)
+    return seen
+
+
+def test_one_persistently_failing_tenant_does_not_starve_later_tenants(world, monkeypatch):
+    seen = _postgres_roster(monkeypatch, {"client-2"})
+    assert orphan_sweeper.sweep_once() == 4
+    assert seen == [f"client-{index}" for index in range(5)]
+    # The failing tenant is tried again on the next rotation, and the others
+    # are still swept every time.
+    assert orphan_sweeper.sweep_once() == 4
+    assert seen[5:] == [f"client-{index}" for index in range(5)]
+
+
+def test_a_failing_tenant_at_the_start_of_a_batch_is_skipped_on_its_second_failure(world, monkeypatch):
+    seen = _postgres_roster(monkeypatch, {"client-2"}, batch=2)
+    assert orphan_sweeper.sweep_once() == 2          # client-0, client-1
+    assert orphan_sweeper.sweep_once() == 0          # client-2 fails first: nothing shows the backend is up
+    assert seen[-1:] == ["client-2"]
+    assert orphan_sweeper._last_periodic_tenant == "client-1"
+    assert orphan_sweeper.sweep_once() == 1          # failed first again: skipped, client-3 swept
+    assert seen[-2:] == ["client-2", "client-3"]
+    assert orphan_sweeper.sweep_once() == 2          # the rotation moves on to client-4, client-0
+    assert seen[-2:] == ["client-4", "client-0"]
+
+
+def test_a_broken_backend_still_costs_few_attempts_per_pass(world, monkeypatch):
+    seen = _postgres_roster(monkeypatch, {f"client-{index}" for index in range(100)}, tenants=100)
+    assert orphan_sweeper.sweep_once() == 0
+    assert seen == ["client-0"]                      # no evidence yet: stop at the first failure
+    assert orphan_sweeper.sweep_once() == 0
+    assert len(seen) <= 1 + 2                        # the repeat is skipped, the next one stops the pass
+
+
 def test_invalid_roster_is_rejected_before_any_postgres_write(world, monkeypatch):
     from maverick import client, world_model_backends
     from maverick.tenant import registry

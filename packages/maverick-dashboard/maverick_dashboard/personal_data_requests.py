@@ -188,15 +188,48 @@ def preview(actor, channel, user_id, selected, world):
     return result
 
 
+_IN_FLIGHT = {"requested", "held", "processing"}
+_MAX_GENERATIONS = 1000
+
+
+def _request_id(actor, snapshot, generation):
+    return "PDR-" + _digest([actor, snapshot, *([generation] if generation else [])])[:40]
+
+
+def _saved_requests(actor, snapshot):
+    """Saved requests for this exact reviewed state, oldest first.
+
+    The id comes from the reviewed state so a double click, or a retry after a
+    lost response, finds the same in-flight request. A request that already ran
+    cannot answer for later data with an identical snapshot (a new comment keeps
+    the count the same), so each new request after a finished one is the next
+    generation of the id."""
+    rows = []
+    while len(rows) < _MAX_GENERATIONS:
+        row = STORE.get(_request_id(actor, snapshot, len(rows)))
+        if not row:
+            break
+        rows.append(row)
+    return rows
+
+
+def latest_request(actor, snapshot):
+    """The newest saved request for this exact reviewed state, or ``None``."""
+    rows = _saved_requests(actor, snapshot)
+    return rows[-1] if rows else None
+
+
 def request_deletion(actor, channel, user_id, selected, snapshot, world):
     with authority_effect_fence():
         reviewed = preview(actor, channel, user_id, selected, world)
         if snapshot != reviewed["snapshot"]:
             raise HTTPException(409, "Data or preservation policy changed. Review a fresh deletion request.")
-        identifier = "PDR-" + _digest([actor, snapshot])[:40]
-        existing = STORE.get(identifier)
-        if existing:
-            return existing
+        saved = _saved_requests(actor, snapshot)
+        if saved and saved[-1].get("status") in _IN_FLIGHT:
+            return saved[-1]
+        if len(saved) >= _MAX_GENERATIONS:
+            raise HTTPException(409, "This exact request was already completed many times. Review a fresh deletion request.")
+        identifier = _request_id(actor, snapshot, len(saved))
         return STORE.create({"id": identifier, **reviewed, "status": "held" if reviewed["holds"]["blocked"] else "requested"},
                             action="deletion_requested", actor=actor, max_records=10000)
 

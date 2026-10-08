@@ -23,11 +23,17 @@ _sweeper_window: float | None = None
 _window_change_warned = False
 _tenant_cursor_lock = threading.Lock()
 _last_periodic_tenant: str | None = None
+# A tenant whose reclaim failed first in a pass, before anything showed the
+# backend was up; if it fails first again, the fault is that tenant's own.
+_stalled_tenant: str | None = None
 
 # Running goals may already be waiting up to 15 seconds for their next beat.
 # Keep at least twice that margin even after a dashboard process restart.
 MIN_WINDOW_SECONDS = 30.0
 MAX_TENANTS_PER_SWEEP = 64
+# Tenants one pass may skip as individually broken before it stops, so a pool
+# that breaks mid-pass costs a few timeouts, not one per remaining tenant.
+MAX_SKIPPED_PER_SWEEP = 3
 
 
 def _registered_tenant_ids() -> tuple[str, ...]:
@@ -62,6 +68,31 @@ def _mark_tenant_scanned(tenant_id: str) -> None:
     global _last_periodic_tenant
     with _tenant_cursor_lock:
         _last_periodic_tenant = tenant_id
+
+
+def _tenant_worked(tenant_id: str) -> None:
+    global _stalled_tenant
+    _mark_tenant_scanned(tenant_id)
+    with _tenant_cursor_lock:
+        _stalled_tenant = None
+
+
+def _tenant_fault(tenant_id: str, backend_up: bool) -> bool:
+    """Whether a failed tenant is skipped (its own fault) or stops the pass.
+
+    A failure after another tenant worked in the same pass, or from the tenant
+    that already failed first in the previous pass, is that tenant's own: it is
+    marked scanned so later tenants are reached, and is retried when the
+    rotation returns to it. A failure with no such evidence may be a broken
+    database or pool, so the pass stops with the cursor unchanged and this
+    tenant is retried first."""
+    global _stalled_tenant
+    with _tenant_cursor_lock:
+        own = backend_up or tenant_id == _stalled_tenant
+        _stalled_tenant = None if own else tenant_id
+    if own:
+        _mark_tenant_scanned(tenant_id)
+    return own
 
 
 def reclaim_registered_postgres(
@@ -102,6 +133,8 @@ def reclaim_registered_postgres(
         log.exception("stopped-task reclaim paused: shared PostgreSQL unavailable")
         return 0
     reclaimed = 0
+    backend_up = False
+    skipped = 0
     for tenant_id in selected:
         try:
             with tenant_scope(tenant=tenant_id):
@@ -110,12 +143,17 @@ def reclaim_registered_postgres(
                     resolved_window_seconds=window,
                 )
         except Exception:
-            # A failed transaction can be a broken database or pool. Its scope
-            # cannot be classified safely here, so stop instead of repeating
-            # a long timeout for every tenant; retry this tenant next cycle.
+            # A failed transaction can be a broken database or pool, or one
+            # tenant's own unreadable data. Stop instead of repeating a long
+            # timeout for every tenant, unless the failure is provably this
+            # tenant's (see _tenant_fault); either way it is retried next cycle.
             log.exception("stopped-task reclaim paused at tenant %r", tenant_id)
-            return reclaimed
-        _mark_tenant_scanned(tenant_id)
+            skipped += 1
+            if not _tenant_fault(tenant_id, backend_up) or skipped >= MAX_SKIPPED_PER_SWEEP:
+                return reclaimed
+            continue
+        backend_up = True
+        _tenant_worked(tenant_id)
     return reclaimed
 
 
@@ -256,7 +294,7 @@ def start_orphan_sweeper() -> bool:
 def stop_orphan_sweeper(*, timeout: float = 5.0, wait: bool = True) -> bool:
     """Signal first, then join within the supervisor's remaining deadline."""
     global _sweeper_stop, _sweeper_thread, _sweeper_window, _window_change_warned
-    global _last_periodic_tenant
+    global _last_periodic_tenant, _stalled_tenant
     with _sweeper_lock:
         stop, worker = _sweeper_stop, _sweeper_thread
         if stop is not None:
@@ -275,4 +313,5 @@ def stop_orphan_sweeper(*, timeout: float = 5.0, wait: bool = True) -> bool:
             _sweeper_window = None
             _window_change_warned = False
             _last_periodic_tenant = None
+            _stalled_tenant = None
     return True

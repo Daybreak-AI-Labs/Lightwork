@@ -82,6 +82,56 @@ def request_store(monkeypatch):
     return store
 
 
+class _Ledger:
+    """In-memory request store: ``get`` by id and ``create`` of a new row."""
+
+    def __init__(self):
+        self.rows = {}
+
+    def get(self, identifier):
+        return copy.deepcopy(self.rows.get(identifier))
+
+    def create(self, record, **kwargs):
+        assert record["id"] not in self.rows
+        self.rows[record["id"]] = {**copy.deepcopy(record), "revision": 1, "owner": record["owner"]}
+        return copy.deepcopy(self.rows[record["id"]])
+
+
+def test_repeat_request_after_completion_is_a_new_request_for_new_data(monkeypatch):
+    # One comment is purged; a new comment brings the same count and so the same
+    # snapshot. The finished request must not answer for the new data.
+    ledger = _Ledger()
+    monkeypatch.setattr(deletion, "STORE", ledger)
+    reviewed = {"owner": "user:alice", "channel": "dashboard", "user_id": "alice",
+                "targets": [{"store": "comments", "state": "requested", "count": 1}],
+                "holds": {"blocked": False}, "exceptions": [], "snapshot": "snapshot-one-comment"}
+    monkeypatch.setattr(deletion, "preview", lambda *args: copy.deepcopy(reviewed))
+
+    def ask():
+        return deletion.request_deletion("user:alice", "dashboard", "alice", ["comments"],
+                                         "snapshot-one-comment", None)
+
+    first = ask()
+    assert first["status"] == "requested"
+    # A double click, or a retry after a lost response, still finds the same request.
+    assert ask()["id"] == first["id"] and len(ledger.rows) == 1
+    ledger.rows[first["id"]]["status"] = "processing"
+    assert ask()["id"] == first["id"] and len(ledger.rows) == 1
+    # Once it has finished, the same state is a fresh request the reviewer can apply.
+    ledger.rows[first["id"]]["status"] = "purged-with-retained-exceptions"
+    second = ask()
+    assert second["id"] != first["id"] and second["status"] == "requested"
+    assert second["id"].startswith("PDR-") and len(ledger.rows) == 2
+    assert ask()["id"] == second["id"] and len(ledger.rows) == 2
+    # Lost-response recovery looks at the newest request for this state.
+    assert deletion.latest_request("user:alice", "snapshot-one-comment")["id"] == second["id"]
+    assert deletion.latest_request("user:alice", "another-snapshot") is None
+    # A partial outcome does not block asking again either.
+    ledger.rows[second["id"]]["status"] = "partial"
+    third = ask()
+    assert third["id"] not in {first["id"], second["id"]} and len(ledger.rows) == 3
+
+
 def test_known_hold_never_dispatches_or_claims_deletion(request_store, monkeypatch):
     monkeypatch.setattr(deletion, "preservation_snapshot", lambda: {"blocked": True})
     monkeypatch.setattr(deletion, "_erase_target", lambda *a, **k: pytest.fail("hold must prevent dispatch"))

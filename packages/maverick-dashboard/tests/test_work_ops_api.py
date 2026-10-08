@@ -191,6 +191,35 @@ def test_export_downloads_the_same_bundle_the_command_writes(env):
     assert env.client.get(f"/api/v1/goals/{env.goal}/export.json", headers=_as("other")).status_code == 404
 
 
+def test_export_holds_back_draft_events_of_a_gated_task_until_a_reviewer_approves(env):
+    # The bundle carries every event's content, so a gated pack's draft is
+    # released only after sign-off even while the task has no saved result.
+    world = env.world
+    drafts = world.create_goal("Refresh the cash forecast", owner="user:owner", domain="finance_cash13w")
+    world.append_event(drafts, "agent", "draft", "DRAFT cash forecast: week 1 closes at 1,200,000")
+    url = f"/api/v1/goals/{drafts}/export.json"
+    for status in ("running", "blocked"):
+        world.set_goal_status(drafts, status)
+        refused = env.client.get(url)
+        assert refused.status_code == 403, status
+        assert "reviewer must approve" in refused.json()["detail"]
+    # The finished-without-sign-off case keeps its existing refusal.
+    world.set_goal_status(drafts, "done", result="| a |\n| - |\n| 1 |")
+    assert env.client.get(url).status_code == 403
+    # A gated task that has recorded nothing yet has nothing to release.
+    empty = world.create_goal("Another forecast", owner="user:owner", domain="finance_cash13w")
+    assert env.client.get(f"/api/v1/goals/{empty}/export.json").status_code == 200
+    # An ungated task is unaffected by its events.
+    world.append_event(env.goal, "agent", "note", "plain progress")
+    assert env.client.get(f"/api/v1/goals/{env.goal}/export.json").status_code == 200
+    # Approval releases the bundle, events included.
+    assert world.record_signoff(drafts, "approved", decided_by="user:boss",
+                                expected_updated_at=world.get_goal(drafts).updated_at)
+    released = env.client.get(url)
+    assert released.status_code == 200
+    assert any("DRAFT cash forecast" in event["content"] for event in released.json()["events"])
+
+
 def test_gist_share_needs_confirmation_operate_and_audits_first(env, monkeypatch):
     import httpx
     from maverick.run_share import MissingGitHubToken

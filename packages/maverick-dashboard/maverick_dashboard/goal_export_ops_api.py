@@ -40,8 +40,11 @@ def _goal(request: Request, goal_id: int):
     return world, goal
 
 
-def _export_source(request, goal_id, *, include_artifacts=False, permission="view"):
-    """Bind content release to the same current policy as the Chat download."""
+def _export_source(request, goal_id, *, include_artifacts=False, include_events=False, permission="view"):
+    """Bind content release to the same current policy as the Chat download.
+
+    The full archive carries every recorded event, so with ``include_events``
+    any event is content a gated pack's reviewer has not yet released."""
     from dataclasses import asdict
 
     from maverick.governed_operations import digest
@@ -70,7 +73,8 @@ def _export_source(request, goal_id, *, include_artifacts=False, permission="vie
                                          current_tenant_id_strict() or "")
         world, goal = _goal(request, goal_id)
         artifacts = world.artifacts_for_goal(goal_id) if include_artifacts else None
-        has_output = bool(goal.result or (artifacts and any(row.get("content") for row in artifacts)))
+        has_output = bool(goal.result or (artifacts and any(row.get("content") for row in artifacts))
+                          or (include_events and world.goal_events(goal_id, limit=1)))
         gate = _goal_gate(goal.domain) if has_output else None
         signoff = world.signoff_for(goal_id) if gate is not None else None
         if gate is not None and (signoff is None or signoff.get("decision") != "approved"):
@@ -79,8 +83,9 @@ def _export_source(request, goal_id, *, include_artifacts=False, permission="vie
         return world, goal, artifacts, version
 
 
-def _current_export(request, goal_id, expected, *, include_artifacts=False, permission="view"):
-    value = _export_source(request, goal_id, include_artifacts=include_artifacts, permission=permission)
+def _current_export(request, goal_id, expected, *, include_artifacts=False, include_events=False, permission="view"):
+    value = _export_source(request, goal_id, include_artifacts=include_artifacts,
+                           include_events=include_events, permission=permission)
     if value[3] != expected:
         raise HTTPException(409, "The task or its release decision changed. Review the current copy before downloading or sharing.")
     return value
@@ -91,7 +96,7 @@ async def export_goal_bundle(request: Request, goal_id: int) -> Response:
     """The task's goal record, events and episode summaries as one file."""
     from maverick.goal_bundle import IncompleteGoalBundle, prepare_goal_archive
 
-    world, goal, _, version = _export_source(request, goal_id)
+    world, goal, _, version = _export_source(request, goal_id, include_events=True)
     try:
         prepared = await run_in_threadpool(prepare_goal_archive, world, goal_id)
     except IncompleteGoalBundle as exc:
@@ -101,7 +106,7 @@ async def export_goal_bundle(request: Request, goal_id: int) -> Response:
     try:
         # Ownership/content grants must still cover the exact exported source
         # after the snapshot is prepared and before a single byte is released.
-        _current_export(request, goal_id, version)
+        _current_export(request, goal_id, version, include_events=True)
         if prepared.goal != goal:
             raise HTTPException(409, "The task changed while preparing this archive. Review the current copy before downloading.")
         assert_goal_access(request, prepared.goal)
