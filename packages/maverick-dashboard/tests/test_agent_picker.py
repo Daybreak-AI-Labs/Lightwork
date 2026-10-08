@@ -90,6 +90,28 @@ def test_search_matches_the_words_people_see(client):
         "items": [], "total": 0, "limit": 20}
 
 
+def test_roster_is_read_and_ranked_off_the_event_loop(client, monkeypatch):
+    """Search-as-you-type must not run ~2,000 specialists' work on the loop."""
+    import asyncio
+
+    from maverick import domain_edit
+
+    seen = []
+    plain = domain_edit.list_agents
+
+    def list_agents(*args, **kwargs):
+        try:
+            asyncio.get_running_loop()
+            seen.append("event loop")
+        except RuntimeError:
+            seen.append("worker thread")
+        return plain(*args, **kwargs)
+
+    monkeypatch.setattr(domain_edit, "list_agents", list_agents)
+    assert client.get("/agents/picker", params={"q": "plan"}).status_code == 200
+    assert seen == ["worker thread"]
+
+
 def test_needs_setup_specialists_only_when_asked(client):
     needs_setup = next(agent for agent in _roster() if agent["readiness"]["state"] != "action_ready")
     hidden = client.get("/agents/picker", params={"q": needs_setup["name"]}).json()

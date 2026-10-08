@@ -1341,9 +1341,12 @@ async def _lifespan(app: FastAPI):
         from .local_runtime_service import shutdown as stop_local_ai
 
         try:
-            await run_in_threadpool(stop_local_ai)
-        finally:
+            # Close goal admission and drain in-flight goals first: a goal still
+            # running against the managed local server would otherwise lose it
+            # mid-call, and new goals could still be admitted while it stops.
             await supervisor.stop()
+        finally:
+            await run_in_threadpool(stop_local_ai)
 
 
 def enforce_page_visibility(
@@ -8033,7 +8036,7 @@ def chat_specialist_choices(
 
 
 @app.get("/agents/picker")
-async def agents_picker(request: Request, q: str = "", setup: bool = False, limit: int = 20) -> dict:
+def agents_picker(request: Request, q: str = "", setup: bool = False, limit: int = 20) -> dict:
     """Search-as-you-type for the Agent Factory picker.
 
     The page used to ship all 2,000+ specialists as one picker list. This
@@ -12550,9 +12553,10 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
 
     from .form_inputs import FormInputError
 
-    # Unknown tokens must never allocate a per-token file. Check the shared
-    # admission limit before parsing even a multipart request.
-    check_goal_rate_limit(request)
+    # Unknown tokens must never allocate a per-token file, and an anonymous
+    # guess must not spend the goal ceiling real task starts share: resolve the
+    # token first, then check the shared admission limit before parsing even a
+    # multipart request.
     trigger = None
     if automation_events.enabled():
         trigger = await run_in_threadpool(_registered_form_trigger, token)
@@ -12560,6 +12564,7 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
         questionnaire = await run_in_threadpool(_vendor_questionnaire_for, token)
         if questionnaire is None:
             raise HTTPException(status_code=404, detail="no such form")
+    check_goal_rate_limit(request)
     fields: dict = {}
     ctype = request.headers.get("content-type", "")
     if "application/json" in ctype:

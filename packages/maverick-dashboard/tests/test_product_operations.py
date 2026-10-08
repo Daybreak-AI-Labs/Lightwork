@@ -106,6 +106,30 @@ def test_unreviewed_stale_or_foreign_context_never_mutates(registry, change):
     assert state["calls"] == 0
 
 
+def test_proposal_reads_adapters_off_the_event_loop(registry, monkeypatch):
+    """A slow adapter snapshot must stall one worker thread, not the dashboard."""
+    import asyncio
+
+    client, state = registry
+    monkeypatch.setattr(ops, "_read_gate", lambda request: None)
+    seen = []
+    plain = state["adapter"].snapshot
+
+    def snapshot(request, selection):
+        try:
+            asyncio.get_running_loop()
+            seen.append("event loop")
+        except RuntimeError:
+            seen.append("worker thread")
+        return plain(request, selection)
+
+    state["adapter"] = replace(state["adapter"], snapshot=snapshot)
+    response = client.post(BASE + "/propose", json={
+        "page": "/preferences", "selection": {}, "context": state["context"], "message": "Example"})
+    assert response.status_code == 200 and response.json()["operation"] == "preferences.example"
+    assert seen and set(seen) == {"worker thread"}
+
+
 def test_model_or_client_cannot_supply_handler_authority_or_extra_arguments(registry):
     client, state = registry
     assert prepare(client, state, arguments={"value": "new", "actor": "admin"}).status_code == 422
