@@ -11,8 +11,8 @@ const flush = async () => { for(let i=0;i<25;i++) await new Promise(setImmediate
 const deferred = () => { let resolve; const promise = new Promise(r => {resolve=r;}); return {promise,resolve}; };
 function clock() {
   let seq=0;
-  const timers = new Map();
-  return {timers, setTimeout(fn, ms) {timers.set(++seq,{fn,ms}); return seq;},
+  const timers = new Map(), history = [];
+  return {timers, history, setTimeout(fn, ms) {history.push(ms); timers.set(++seq,{fn,ms}); return seq;},
     clearTimeout(id) {timers.delete(id);},
     fire(ms) {for(const [id,timer] of [...timers]) if(timer.ms===ms) {timers.delete(id);timer.fn();}}};
 }
@@ -79,14 +79,14 @@ test('worker missing start id is unknown while definitive access refusal is not 
   }
 });
 
-async function popup(handler, saved) {
+async function popup(handler, saved, tabs) {
   const dom=new JSDOM(read('extensions/browser/popup.html'),{url:'https://extension.test',runScripts:'outside-only'});
   await new Promise(resolve=>dom.window.document.addEventListener('DOMContentLoaded',resolve,{once:true}));
   const timers=clock(), local=storage({base:'http://127.0.0.1:8765',token:'fixture'}),session=storage({activeWatch:saved});
   const messages=[];
   const chrome={storage:{local,session},runtime:{lastError:null,sendMessage(msg,callback){
     messages.push(structuredClone(msg)); Promise.resolve(handler(msg)).then(callback);
-  }},tabs:{query:async()=>[],sendMessage(){}}};
+  }},tabs:tabs||{query:async()=>[],sendMessage(){}}};
   Object.assign(dom.window,{chrome,setTimeout:timers.setTimeout,clearTimeout:timers.clearTimeout});
   dom.window.eval(read('extensions/browser/client-protocol.js'));
   dom.window.eval(read('extensions/browser/popup.js'));
@@ -136,6 +136,36 @@ test('popup submission guard preserves draft when no start acknowledgement arriv
   pending.resolve({ok:true,scope:'scope1',goal:{id:4,status:'pending'}}); await flush();
   assert.equal(fixture.session.values.activeWatch,null);
   fixture.close();
+});
+
+test('popup waits for both worker requests of a page send before calling the start unconfirmed',async()=>{
+  const policy={revision:'r1',form_values:false,page_structure:false,model:'fixture-model'};
+  // The worker checks the sharing policy and then starts the goal; each request has its own deadline.
+  let calls=0; const pending=deferred();
+  const fixture=worker(async()=>{calls++; return calls===1 ? response(policy) : pending.promise;});
+  const chat=fixture.call({type:'chat',title:'goal',description:'brief',capturePolicy:{revision:'r1',form_values:false,page_structure:false}});
+  while(calls<2) await flush();
+  const workerWorstCase=fixture.timers.history.filter(ms=>ms===15000).length*15000;
+  assert.equal(workerWorstCase,30000);
+  fixture.timers.fire(15000); await chat;
+  // The popup must wait at least that long for the same message.
+  const tabs={query:async()=>[{id:7}],sendMessage(_id,_msg,callback){callback({title:'T',url:'https://page.example/',selection:'',structured:null});}};
+  const answered=deferred();
+  const popupFixture=await popup(msg=>msg.type==='identity'?identity:msg.type==='capturePolicy'?{ok:true,scope:'scope1',data:policy}:answered.promise,null,tabs);
+  popupFixture.doc.querySelector('#send-page').click(); await flush();
+  popupFixture.doc.querySelector('#page-confirm').click(); await flush();
+  const chatMessage=popupFixture.messages.find(m=>m.type==='chat');
+  assert.ok(chatMessage&&chatMessage.capturePolicy,'a page send carries its policy check');
+  const popupWait=Math.max(...popupFixture.timers.history);
+  assert.ok(popupWait>workerWorstCase,'popup gave up after '+popupWait+' ms but the worker may need '+workerWorstCase);
+  // A slow dashboard (10 s per request) must not be reported as an unconfirmed start while it is still working.
+  popupFixture.timers.fire(17000); await flush();
+  assert.equal(popupFixture.doc.querySelector('#status').textContent,'starting…');
+  answered.resolve({ok:true,scope:'scope1',goal:{id:5,status:'pending'}}); await flush();
+  assert.equal(popupFixture.session.values.activeWatch.goalId,5);
+  assert.doesNotMatch(popupFixture.doc.querySelector('#status').textContent,/not confirmed|unconfirmed/);
+  assert.equal(popupFixture.doc.querySelector('#clear-pending').hidden,true);
+  popupFixture.close();
 });
 
 test('popup disposal cancels the owned read and rejects its late content',async()=>{

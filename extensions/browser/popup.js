@@ -67,11 +67,18 @@ function appendEvent(agent, content) {
   $("log").scrollTop = $("log").scrollHeight;
 }
 
+// background.js gives each dashboard request 15 s, and a page send (a chat
+// message with a capture policy) makes two in a row: the policy check, then the
+// start. Wait for all of them plus a margin before calling the worker silent.
+const WORKER_REQUEST_MS = 15000;
+
 function ask(msg) {
   return new Promise((resolve) => {
     let settled = false;
+    const requests = msg.type === "chat" && msg.capturePolicy ? 2 : 1;
     const timer = setTimeout(() => finish({ ok: false, kind: msg.type === "chat" ? "unknown" : "transient",
-      error: "Client request not confirmed. Check the dashboard before retrying a start." }), 17000);
+      error: "Client request not confirmed. Check the dashboard before retrying a start." }),
+    requests * WORKER_REQUEST_MS + 2000);
     function finish(value) {
       if (settled) return;
       settled = true;

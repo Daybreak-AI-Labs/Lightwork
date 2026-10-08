@@ -17,7 +17,8 @@ def start_or_reconcile(session, base: str, headers: dict, body: dict, request_ke
         raise ValueError("Persist a stable request key before starting work")
     try:
         response = session.post(base + "/api/v1/goals", json=body, headers=bound, timeout=15)
-    except (requests.Timeout, requests.ConnectionError):
+    except requests.RequestException:
+        # Timeout, reset, or a body cut off mid-response: the server may have accepted it.
         return reconcile(session, base, bound)
     if response.status_code == 409:
         raise RecoveryRequired("The key's reviewed input or effective limits changed. Keep the key and review the original receipt.")
@@ -26,7 +27,10 @@ def start_or_reconcile(session, base: str, headers: dict, body: dict, request_ke
     if response.status_code in (401, 403):
         raise PermissionError("Restore authorized sign-in before checking this request")
     response.raise_for_status()
-    result = response.json()
+    try:
+        result = response.json()
+    except ValueError:  # a 2xx whose body cannot be read still may have started work
+        return reconcile(session, base, bound)
     if not isinstance(result, dict) or isinstance(result.get("id"), bool) or not isinstance(result.get("id"), int) or result["id"] <= 0:
         return reconcile(session, base, bound)
     return {"state": "accepted", "goal": result, "execution_confirmed": False}

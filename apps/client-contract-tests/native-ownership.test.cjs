@@ -101,6 +101,19 @@ test('external helper preserves safe rate-limit metadata and never retries a wri
     error.retryAfterSeconds === 12 && error.requestId === 'req-7' && !error.message.includes('private'));
   assert.equal(requests, 1); client.dispose();
 });
+test('external helper calls the default fetch as a plain function, not as a method of the client', async () => {
+  // Browsers and Workers throw "Illegal invocation" when fetch's receiver is any other object.
+  let receiver = 'unset', client;
+  function browserFetch() {
+    receiver = this;
+    if (this === client) throw new TypeError('Illegal invocation');
+    return Promise.resolve(new Response('{"ok":true}', {status: 200, headers: {'content-type': 'application/json'}}));
+  }
+  const {Lightwork} = source('docs/clients/examples/lightwork.ts', {fetch: browserFetch});
+  client = new Lightwork('https://dashboard.example', 'secret');
+  assert.equal((await client.screen('send_email')).ok, true);
+  assert.notEqual(receiver, client); client.dispose();
+});
 test('external helper aborts an owned stalled write without replaying it', async () => {
   let requests = 0, aborts = 0, deadline;
   const {Lightwork} = source('docs/clients/examples/lightwork.ts', {fetch: async () => {},

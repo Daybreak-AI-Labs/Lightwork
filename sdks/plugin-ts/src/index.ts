@@ -87,6 +87,11 @@ function manifest(tools: ToolDef[]): string {
   });
 }
 
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (typeof value === "object" || typeof value === "function") && value !== null
+    && typeof (value as { then?: unknown }).then === "function";
+}
+
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -123,9 +128,16 @@ async function answer(byName: Map<string, ToolDef>, line: string): Promise<WireR
   }
   let args: Record<string, unknown>;
   try {
-    args = tool.parseArgs ? tool.parseArgs(req.args) :
-      (typeof req.args === "object" && req.args !== null && !Array.isArray(req.args) ? req.args : {}) as Record<string, unknown>;
-    if (typeof args !== "object" || args === null || Array.isArray(args)) throw new TypeError("invalid arguments");
+    const parsedArgs: unknown = tool.parseArgs ? tool.parseArgs(req.args) :
+      (typeof req.args === "object" && req.args !== null && !Array.isArray(req.args) ? req.args : {});
+    if (isThenable(parsedArgs)) {
+      // A Promise is an object, so it would pass as the arguments and its rejection would
+      // go unhandled (Node exits). parseArgs is synchronous: consume the promise and refuse.
+      Promise.resolve(parsedArgs).catch(() => undefined);
+      return reply("not_started", { error: "invalid tool definition: parseArgs must be synchronous; handler was not started" });
+    }
+    if (typeof parsedArgs !== "object" || parsedArgs === null || Array.isArray(parsedArgs)) throw new TypeError("invalid arguments");
+    args = parsedArgs as Record<string, unknown>;
   } catch {
     // Validation messages may contain credentials or private argument values.
     return reply("not_started", { error: "invalid tool arguments; handler was not started" });

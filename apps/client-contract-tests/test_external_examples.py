@@ -117,3 +117,36 @@ def test_accepted_timeout_performs_one_post_then_original_key_receipt_get():
     receipt = rest.start_or_reconcile(SimpleNamespace(post=post, get=get), "https://example.test", {}, {"title": "work"}, "persisted-key")
     assert receipt["execution_confirmed"] is False and len(writes) == len(reads) == 1
     assert writes[0]["headers"]["Idempotency-Key"] == reads[0]["headers"]["Idempotency-Key"] == "persisted-key"
+
+
+class Unreadable(Response):
+    def json(self):
+        raise requests.exceptions.JSONDecodeError("Expecting value", "<html>", 0)
+
+
+@pytest.mark.parametrize("outcome", [
+    requests.exceptions.ChunkedEncodingError("connection broken mid-response"),
+    requests.exceptions.ConnectionError("reset after the request was sent"),
+    Unreadable(None),
+], ids=["cut-off-body", "connection-reset", "unparsable-2xx"])
+def test_any_failure_after_the_post_was_sent_reconciles_with_one_get(outcome):
+    writes, reads = [], []
+    def post(*args, **kwargs):
+        writes.append(kwargs)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+    def get(*args, **kwargs):
+        reads.append(kwargs)
+        return Response({"state": "accepted", "goal": {"id": 9}, "execution_confirmed": False})
+    receipt = rest.start_or_reconcile(SimpleNamespace(post=post, get=get), "https://example.test", {}, {"title": "work"}, "persisted-key")
+    assert receipt["execution_confirmed"] is False and len(writes) == len(reads) == 1
+    assert writes[0]["headers"]["Idempotency-Key"] == reads[0]["headers"]["Idempotency-Key"] == "persisted-key"
+
+
+def test_a_definite_rejection_is_not_reconciled():
+    reads = []
+    session = SimpleNamespace(post=lambda *a, **k: Response({}, 422), get=lambda *a, **k: reads.append(k))
+    with pytest.raises(requests.HTTPError):
+        rest.start_or_reconcile(session, "https://example.test", {}, {"title": "work"}, "persisted-key")
+    assert reads == []
