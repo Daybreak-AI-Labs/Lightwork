@@ -24455,12 +24455,6 @@
           "function": "inspect",
           "kind": "write_bytes",
           "expression": "path.write_bytes(raw)"
-        },
-        {
-          "line": 763,
-          "function": "_import_store",
-          "kind": "GovernedRecordStore",
-          "expression": "GovernedRecordStore('learning-case-import-requests', 'LCI', 'learning_case_import_request')"
         }
       ]
     },
