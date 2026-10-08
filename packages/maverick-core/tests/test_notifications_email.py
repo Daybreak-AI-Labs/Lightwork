@@ -209,6 +209,35 @@ def test_a_timeout_or_lost_connection_during_the_hand_over_is_unconfirmed(monkey
     assert _checked(CFG) == (True, False)
 
 
+def test_http_channels_that_never_connect_are_definite_failures_and_later_ones_unconfirmed(monkeypatch):
+    """Like the email channel: a send that could not even connect delivered
+    nothing and may be retried; once the request may have gone out it may not."""
+    import httpx
+    from maverick import notifications as n
+
+    senders = {
+        "ntfy": lambda: n._send_ntfy("t", "b", "default", "https://ntfy.example", "topic"),
+        "pushover": lambda: n._send_pushover("t", "b", "default", {"user_key": "u", "app_token": "a"}),
+        "discord": lambda: n._send_discord("t", "b", "https://discord.example/hook"),
+        "slack": lambda: n._send_slack("t", "b", "https://hooks.example/slack"),
+    }
+
+    def raising(error):
+        def post(*args, **kwargs):
+            raise error
+        return post
+
+    for name, send in senders.items():
+        for error in (httpx.ConnectError("refused"), httpx.ConnectTimeout("no route"),
+                      httpx.PoolTimeout("busy"), httpx.UnsupportedProtocol("ftp")):
+            monkeypatch.setattr(httpx, "post", raising(error))
+            assert n.send_checked(send) == (False, False), (name, type(error).__name__)
+        for error in (httpx.ReadTimeout("no reply"), httpx.RemoteProtocolError("closed mid-reply"),
+                      httpx.ReadError("reset")):
+            monkeypatch.setattr(httpx, "post", raising(error))
+            assert n.send_checked(send) == (False, True), (name, type(error).__name__)
+
+
 def test_the_platform_mailer_separates_not_sent_from_maybe_sent(monkeypatch):
     from maverick import mailer
 

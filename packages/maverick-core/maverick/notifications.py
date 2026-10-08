@@ -64,6 +64,24 @@ def _network_unknown() -> None:
     _outcome.set(("unknown", "Delivery could not be confirmed. Check the destination before sending again.", False))
 
 
+def mark_transport_failure(exc: BaseException) -> None:
+    """Record why an HTTP send raised. A request that never connected (the host
+    could not be reached or the address is unusable) was never sent, so it is a
+    definite failure that may be retried after a wait; any other failure may
+    have reached the service and stays unconfirmed."""
+    try:
+        import httpx
+
+        never_sent = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout,
+                                      httpx.UnsupportedProtocol, httpx.InvalidURL))
+    except Exception:  # noqa: BLE001 -- no httpx: treat the result as unknown
+        never_sent = False
+    if never_sent:
+        _outcome.set(("failed", "The notification service could not be reached. Nothing was sent.", True))
+    else:
+        _network_unknown()
+
+
 def mark_unconfirmed() -> None:
     """Flag that a send made outside this module (a Slack DM) may have gone
     out without a confirmation; :func:`send_checked` reports it."""
@@ -142,7 +160,7 @@ def _send_ntfy(title: str, body: str, priority: str, server: str, topic: str) ->
         resp = httpx.post(url, content=body.encode("utf-8"), headers=headers, timeout=10.0)
         return _response_accepted(resp.status_code)
     except Exception as e:
-        _network_unknown()
+        mark_transport_failure(e)
         log.warning("notify ntfy failed: %s", type(e).__name__)
         return False
 
@@ -187,7 +205,7 @@ def _send_pushover(title: str, body: str, priority: str, cfg: dict | None = None
             return False
         return _response_accepted(resp.status_code)
     except Exception as e:
-        _network_unknown()
+        mark_transport_failure(e)
         log.warning("notify pushover failed: %s", type(e).__name__)
         return False
 
@@ -212,7 +230,7 @@ def _send_discord(title: str, body: str, url: str) -> bool:
         # The webhook URL IS the secret here, and httpx embeds the request URL
         # in str(e); log the exception TYPE only so a failed POST can't write the
         # full secret URL to the logs.
-        _network_unknown()
+        mark_transport_failure(e)
         log.warning("notify discord failed: %s", type(e).__name__)
         return False
 
@@ -230,7 +248,7 @@ def _send_slack(title: str, body: str, url: str) -> bool:
         return _response_accepted(resp.status_code)
     except Exception as e:
         # The webhook URL IS the secret (see _send_discord); log type only.
-        _network_unknown()
+        mark_transport_failure(e)
         log.warning("notify slack failed: %s", type(e).__name__)
         return False
 

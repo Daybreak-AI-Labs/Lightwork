@@ -739,7 +739,9 @@ def post_json(url: str, payload: dict[str, Any], *, token: str | None = None,
     except Exception as exc:  # noqa: BLE001 -- never raise into a request handler
         log.warning("slack post failed: %s", type(exc).__name__)
         if delivery:
-            _unconfirmed()
+            from .notifications import mark_transport_failure
+
+            mark_transport_failure(exc)
         return None
 
 
