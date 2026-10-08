@@ -346,12 +346,29 @@ class KnowledgeSources:
                                           expected_revision=row["revision"], action="knowledge_source.refresh_claimed", actor=self.actor, effect_guard=guard)
             if claimed.get("_audit_pending"):
                 return {"id": job_id, "state": "unconfirmed", "message": "Refresh admission has a retained pending activity record. It will not run automatically."}
-            job = self.jobs.create({"id": job_id, "source": row["id"], "tenant": self.tenant, "owner": self.actor, "plan": row["plan"],
-                                    "plan_sha256": row["plan_sha256"], "binding": digest(prepared), "state": "queued", "deadline": time.time() + MAX_WALL_SECONDS,
-                                    "prepared": prepared, "items": [], "changed": 0, "unchanged": 0, "removed": 0,
-                                    "observed_dollars": 0.0, "unresolved_dollars": 0.0, "price_basis": prepared["embedding"]["price_basis"],
-                                    "message": "Refresh queued. No document delivery or registry approval is yet confirmed."},
-                                   action="knowledge_source.refresh_queued", actor=self.actor, max_records=MAX_JOBS, effect_guard=guard)
+            try:
+                job = self.jobs.create({"id": job_id, "source": row["id"], "tenant": self.tenant, "owner": self.actor, "plan": row["plan"],
+                                        "plan_sha256": row["plan_sha256"], "binding": digest(prepared), "state": "queued", "deadline": time.time() + MAX_WALL_SECONDS,
+                                        "prepared": prepared, "items": [], "changed": 0, "unchanged": 0, "removed": 0,
+                                        "observed_dollars": 0.0, "unresolved_dollars": 0.0, "price_basis": prepared["embedding"]["price_basis"],
+                                        "message": "Refresh queued. No document delivery or registry approval is yet confirmed."},
+                                       action="knowledge_source.refresh_queued", actor=self.actor, max_records=MAX_JOBS, effect_guard=guard)
+            except BaseException:
+                # No job record exists (for example the job ledger is full), so
+                # nothing can read or run this claim: give it back instead of
+                # leaving the source claimed by a refresh that does not exist.
+                # A scheduled source backs off as a withheld refresh does, so
+                # the scheduler does not retry it on every cycle.
+                def release(current):
+                    current.update(active_job=row.get("active_job"), state=row["state"], projection_allowed=row.get("projection_allowed", False))
+                    if row["plan"]["interval_seconds"]:
+                        current["next_refresh"] = time.time() + max(3600, row["plan"]["interval_seconds"])
+                try:
+                    self.sources.update(row["id"], release, expected_revision=claimed["revision"],
+                                        action="knowledge_source.refresh_claim_released", actor=self.actor, effect_guard=guard)
+                except Exception:  # noqa: BLE001 -- the original failure is what the caller must see
+                    pass
+                raise
             return self.job_public(job)
 
     def _job_guard(self, job):
@@ -518,7 +535,10 @@ class KnowledgeSources:
                   "active_job": None if state != "unconfirmed" and not result.get("_audit_pending") else job["id"],
                   "next_refresh": time.time() + job["plan"]["interval_seconds"] if job["plan"]["interval_seconds"] and state != "unconfirmed" else None}
         if complete:
-            update.update(snapshot=snapshot, fresh_until=time.time() + min(86400, (job["plan"]["interval_seconds"] or 86400) + 3600))
+            # A scheduled source keeps its hour of slack past the next refresh (scheduler or
+            # refresh latency must not open a gap); a manual one stays fresh for a day.
+            interval = job["plan"]["interval_seconds"]
+            update.update(snapshot=snapshot, fresh_until=time.time() + (interval + 3600 if interval else 86400))
         with self.publication_scope():
             self.sources.update(row["id"], lambda source: source.update(update), expected_revision=row["revision"],
                                 action="knowledge_source.refresh_recorded", actor=self.actor, effect_guard=guard)

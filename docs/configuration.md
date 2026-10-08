@@ -129,8 +129,8 @@ scan_output     = true
 # The Approvals page. A risky step waits this long for a decision (30
 # minutes; MAVERICK_CONSENT_DASHBOARD_TIMEOUT wins); after 10 minutes the
 # people who can decide get one in-app reminder, and with no decision in
-# time the step is refused. A request's card stays approvable for the wait,
-# at most an hour.
+# time the step is refused. A request's card stays approvable for the wait
+# plus the undo window below, at most an hour.
 dashboard_wait_seconds  = 1800
 # A decision can be undone for this long; the agent
 # only acts on an approval once the window has passed (0 = act at once,

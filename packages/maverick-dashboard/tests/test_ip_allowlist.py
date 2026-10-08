@@ -154,6 +154,15 @@ def test_unreadable_policy_allows_only_loopback(monkeypatch):
     assert ip_allowlist.installation_allows(_req(host="203.0.113.7")) is False
 
 
+@pytest.mark.parametrize("line", ["cidrs = 5", "cidrs = true", "workspace_cidrs = 7"])
+def test_a_mistyped_list_allows_only_loopback_instead_of_everyone(tmp_path, line):
+    _write_config(tmp_path, "[auth.ip_allowlist]\n" + line + "\n")
+    assert ip_allowlist.installation_allows(_req(host="127.0.0.1")) is True
+    assert ip_allowlist.installation_allows(_req(host="203.0.113.7")) is False
+    assert ip_allowlist.workspace_allows(_req(host="203.0.113.7")) is False
+    assert ip_allowlist.configured() is True
+
+
 # ---- the workspace gate ------------------------------------------------------------
 
 

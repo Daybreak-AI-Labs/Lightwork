@@ -89,3 +89,37 @@ def test_bad_session_limits_fail_closed(tmp_path, line):
     _write(tmp_path, "[auth.sessions]\n" + line + "\n")
     with pytest.raises(ValueError, match="auth.sessions"):
         config.get_auth_sessions()
+
+
+@pytest.mark.parametrize("text", [
+    "[auth.ip_allowlist]\ncidrs = 5\n",
+    "[auth.ip_allowlist]\ncidrs = true\n",
+    "[auth.ip_allowlist]\nworkspace_cidrs = 1.5\n",
+    "[auth.ip_allowlist]\nworkspace_cidrs = false\n",
+    "[auth.ip_allowlist.cidrs]\nnetwork = \"10.0.0.0/8\"\n",
+    "[auth]\nip_allowlist = true\n",
+    "[auth]\nip_allowlist = \"10.0.0.0/8\"\n",
+])
+def test_a_mistyped_allowlist_is_unreadable_not_empty(tmp_path, text):
+    # An empty list allows every address, so a policy that cannot be read must raise
+    # (callers fail closed to the local computer) rather than read as "allow everyone".
+    _write(tmp_path, text)
+    with pytest.raises(ValueError, match="ip_allowlist"):
+        config.get_ip_allowlist()
+
+
+def test_the_allowlist_still_accepts_a_comma_separated_text_and_an_empty_list(tmp_path):
+    _write(tmp_path, "[auth.ip_allowlist]\ncidrs = \"10.0.0.0/8, 192.0.2.1\"\nworkspace_cidrs = []\n")
+    assert config.get_ip_allowlist() == {"cidrs": ["10.0.0.0/8", "192.0.2.1"], "workspace_cidrs": []}
+
+
+@pytest.mark.parametrize("value", ["inf", "-inf", "1e999", "nan"])
+def test_an_unusable_step_up_window_falls_back_to_the_default(tmp_path, value):
+    _write(tmp_path, f"[auth.mfa]\nrequire = true\nstep_up_minutes = {value}\n")
+    mfa = config.get_auth_mfa()  # must not raise: a raise reads as "policy unreadable" and locks everyone out
+    assert mfa["require"] is True and mfa["step_up_minutes"] == config.DEFAULT_STEP_UP_MINUTES
+
+
+def test_an_unusable_step_up_window_in_the_environment_falls_back_to_the_default(monkeypatch):
+    monkeypatch.setenv("MAVERICK_MFA_STEP_UP_MINUTES", "1e999")
+    assert config.get_auth_mfa()["step_up_minutes"] == config.DEFAULT_STEP_UP_MINUTES
