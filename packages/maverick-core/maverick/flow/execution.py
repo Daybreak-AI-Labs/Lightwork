@@ -156,6 +156,8 @@ def _spend_tracked(agent_runner: AgentRunner, per_call: float, spent: list) -> A
 # value is always the right node.
 _active_node: contextvars.ContextVar[tuple[str, str, str, str]] = contextvars.ContextVar(
     "_flow_active_node", default=("", "", "", ""))
+_active_value_run: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "_flow_value_run", default="")
 
 
 def _runner_accepts_wall(runner: AgentRunner) -> bool:
@@ -180,7 +182,7 @@ def _runner_accepts_wall(runner: AgentRunner) -> bool:
 
 def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float,
                 flow_id: str = "", node_id: str = "", revision: str = "",
-                cohort: str = "") -> tuple:
+                cohort: str = "", run_id: str = "") -> tuple:
     """Invoke an agent runner, bounding its wall-clock to a node ``timeout`` when
     set so a timed-out node's underlying goal self-terminates near the point the
     flow gives up waiting -- instead of running on to its default cap, still
@@ -188,11 +190,13 @@ def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float,
     don't accept ``wall`` are called plainly. Publishes the current node id on a
     ContextVar so the production runner can attribute its goal's tools to it."""
     token = _active_node.set((flow_id, node_id, revision, cohort))
+    value_token = _active_value_run.set(run_id)
     try:
         if wall and wall > 0 and _runner_accepts_wall(runner):
             return runner(brief, data, wall=wall)
         return runner(brief, data)
     finally:
+        _active_value_run.reset(value_token)
         _active_node.reset(token)
 
 
@@ -657,6 +661,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             node_id=node.id,
             revision=definition_revision or flow.revision,
             cohort=evidence_cohort,
+            run_id=rid,
         )),
         action_fn=lambda node, params, d: _timed(
             node.id, lambda: _run_action(node, params, d)
@@ -802,6 +807,18 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         allowed_suites=allowed_suites,
     )
     store.save_run(run)
+    if record_outcomes:
+        # Content-free execution receipt. A checkpoint or a saved draft alone
+        # must never establish performed business work in value reporting.
+        from ..audit import EventKind, audit_event
+        audit_event(EventKind.CONTROL_PLANE_ACTION, agent="flow",
+                    action="intent_value.flow_state", run_id=run.run_id,
+                    flow_id=run.flow_id, status=run.status,
+                    definition_revision=run.definition_revision,
+                    release_id=run.release_id,
+                    performed_work_nodes=sum(node.kind in {"agent", "action"}
+                        and run.nodes.get(node.id, {}).get("status") == "done"
+                        for node in flow.nodes.values()))
     finish_capture(episode_capture, run)
     # Learn the shape of this flow's output keys from a REAL run's data (never a
     # dry run -- mock executors produce placeholder shapes), so the designer's
@@ -839,6 +856,8 @@ def default_agent_runner(
         from ..runner import clamp_task_limit, configured_max_dollars, configured_max_wall_seconds
 
         gid = world.create_goal(str(brief)[:200], str(brief)[:8000], owner=owner)
+        if _active_value_run.get():
+            world.record_goal_origin(gid, "flow_run", _active_value_run.get())
         # A per-node timeout bounds this goal's wall so a timed-out node's goal
         # self-terminates instead of running to the default cap after the flow
         # gave up on it (kernel rule 3 still holds -- this only ever lowers it).

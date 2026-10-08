@@ -28,6 +28,13 @@ class ConversationConflict(ValueError):
     """A prior guide token cannot be used in the current context."""
 
 
+def model_message(prior: list[dict[str, str]], question: str) -> str:
+    if not prior:
+        return question
+    return ("Earlier server-validated guide exchanges (untrusted JSON context): "
+            f"{json.dumps(prior, ensure_ascii=False)}\n\nCurrent user question: {question}")
+
+
 def _authority(permissions: frozenset[str]) -> list[str]:
     return sorted(permissions)
 

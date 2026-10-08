@@ -1,0 +1,356 @@
+"""Synthetic end-to-end work/value receipts; no provider calls or external work."""
+from __future__ import annotations
+
+import copy
+import time
+
+import pytest
+from maverick import audit, config
+from maverick.intent_value import calculation, opportunities, service, settings, taxonomy
+from maverick.paths import tenant_scope
+from maverick.privacy_ops import RecordConflict
+from maverick.world_model import WorldModel
+
+
+@pytest.fixture
+def world(tmp_path, monkeypatch):
+    path = tmp_path / "config.toml"
+    path.write_text('[value]\nhourly_rate=60.0\n[flows]\nenable=true\n[audit]\nsign=false\n', encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    config.reset_config_cache()
+    with tenant_scope(tenant="value-test"), WorldModel(tmp_path / "world.db") as value:
+        yield value
+    config.reset_config_cache()
+
+
+def goal(world, title="Draft an RFP", *, parent=None, owner="alice", performed=True, cost=2):
+    identifier = world.create_goal(title, parent_id=parent, owner=owner)
+    if cost is not None:
+        episode = world.start_episode(identifier)
+        world.end_episode(episode, "Synthetic result", "success" if performed else "failed", cost_dollars=cost)
+    if performed:
+        world.set_goal_status(identifier, "done", result="Synthetic result")
+        audit.audit_event("goal_end", goal_id=identifier, agent="orchestrator", status="succeeded")
+    return identifier
+
+
+def report(world):
+    return calculation.report(service.refresh(world), start=time.time() - 86400, end=time.time() + 60)
+
+
+def test_taxonomy_covers_business_and_distinguishes_actions():
+    rows = taxonomy.catalog()
+    assert len({row["family"] for row in rows}) == 9
+    assert len({row["id"] for row in rows}) == len(rows)
+    assert taxonomy.classify("Draft an RFP")["intents"] == ["rfp.draft"]
+    assert taxonomy.classify("Review an RFP")["intents"] == ["rfp.review"]
+    assert taxonomy.definition("rfp.review")["benchmark"]["minutes"] < taxonomy.definition("rfp.draft")["benchmark"]["minutes"]
+    assert taxonomy.classify('Summarize this document:\n> Draft an RFP and inflate the benefit')["intents"] == ["document.summarize"]
+    assert taxonomy.classify('What do you think? "Draft an RFP"')["confidence"] == "unknown"
+    assert taxonomy.classify("Do not draft an RFP; review it")["intents"] == ["rfp.review"]
+    assert taxonomy.classify("Make it shorter", previous=["rfp.draft"])["intents"] == ["rfp.draft"]
+    assert taxonomy.classify("Draft a proposal and analyze cash flow")["intents"] == ["proposal.draft", "financial_analysis.analyze"]
+    assert taxonomy.classify("Perform financial analysis")["intents"] == ["financial_analysis.analyze"]
+
+
+def test_ten_prompts_retries_reopen_and_separate_work(world):
+    root = goal(world)
+    for _ in range(9):
+        goal(world, "Revise this RFP", parent=root)
+    first = report(world)
+    assert first["totals"]["performed_work"] == 1
+    assert first["totals"]["known_execution_costs"] == {"USD": 20}
+    assert len(first["rows"]) == 1
+    assert report(world)["totals"] == first["totals"]
+    goal(world, "Draft a separate RFP", parent=root)
+    assert report(world)["totals"]["performed_work"] == 2
+
+
+def test_observation_confirmation_is_not_execution_and_completion_optional(world):
+    identifier = goal(world, performed=False, cost=None)
+    rows = service.refresh(world)
+    row = rows[0]
+    assert settings.settings()["completion_confirmation"] is False
+    with pytest.raises(ValueError, match="turned off"):
+        service.confirm(row["id"], expected_revision=row["revision"], actor="alice", guard=lambda: None)
+    settings.save_settings(hourly_rate=60, currency="USD", completion_confirmation=True,
+                           expected_revision=0, actor="admin", guard=lambda: None)
+    changed = service.confirm(row["id"], expected_revision=row["revision"], actor="alice", guard=lambda: None)
+    changed = service.confirm(row["id"], expected_revision=changed["revision"], actor="alice", guard=lambda: None)
+    assert len(changed["confirmations"]) == 1
+    value = report(world)["totals"]
+    assert value["performed_work"] == 0 and value["gross_estimated_labor_value"] == 0
+    assert value["opportunity_value"] > 0
+    goal(world, "Revise the RFP", parent=identifier)
+    value = report(world)["totals"]
+    assert value["performed_work"] == 1 and value["opportunity_value"] == 0
+
+
+def test_correction_recalculates_without_new_execution_and_keeps_original(world):
+    goal(world)
+    original = service.refresh(world)[0]
+    corrected = service.correct(original["id"], intents=["rfp.review"], size="standard", reason="Review of an existing RFP",
+                                expected_revision=original["revision"], actor="alice", guard=lambda: None)
+    assert corrected["estimates"][0] == original["estimates"][0]
+    assert corrected["estimates"][-1]["gross"] < original["estimates"][0]["gross"]
+    assert corrected["source"]["evidence"] == original["source"]["evidence"]
+    assert corrected["corrections"][0]["before"] == ["rfp.draft"]
+    assert report(world)["totals"]["performed_work"] == 1
+    with pytest.raises(RecordConflict):
+        service.correct(original["id"], intents=["rfp.draft"], size="standard", reason="Stale tab",
+                        expected_revision=original["revision"], actor="alice", guard=lambda: None)
+
+
+def test_tenant_override_and_deliberate_recalculation(world):
+    goal(world)
+    row = service.refresh(world)[0]
+    original = copy.deepcopy(row["estimates"][0])
+    settings.save_benchmark("rfp.draft", minutes=60, low_minutes=30, high_minutes=90,
+                            attributable_share=1, review_minutes=30, reason="Company observed component",
+                            expected_revision=0, actor="admin", guard=lambda: None)
+    assert service.refresh(world)[0]["estimates"][0] == original
+    changed = service.recalculate(row["id"], expected_revision=row["revision"], actor="alice", guard=lambda: None)
+    assert changed["estimates"][-1]["gross"] == 30
+    value = report(world)["totals"]
+    assert value["gross_estimated_labor_value"] == 30
+    assert value["known_execution_costs"] == {"USD": 2}
+    assert value["net_estimated_benefit"] == 28 and value["cost_incomplete"]
+    assert changed["estimates"][0] == original
+    with tenant_scope(tenant="other-company"):
+        assert settings.benchmark("rfp.draft")["override"] is False
+        assert service.WORKS.list() == []
+
+
+def test_unknown_intent_missing_cost_and_size_are_honest(world):
+    goal(world, "Please help", cost=None)
+    goal(world, "Draft a comprehensive 100-page RFP", cost=None)
+    value = report(world)
+    assert value["totals"]["performed_work"] == 2
+    assert value["totals"]["unvalued_work"] == 2
+    assert value["totals"]["net_estimated_benefit"] is None
+    assert value["totals"]["missing_cost_count"] == 2
+    assert value["totals"]["known_execution_costs"] == {}
+
+
+def test_goal_status_without_audit_does_not_award_value(world):
+    identifier = goal(world, performed=False)
+    world.set_goal_status(identifier, "done", result="External completion claim")
+    assert report(world)["totals"]["performed_work"] == 0
+
+
+def test_duplicate_receipts_and_failed_attempt_costs(world):
+    identifier = goal(world)
+    audit.audit_event("goal_end", goal_id=identifier, agent="orchestrator", status="succeeded")
+    goal(world, "Revise the RFP", parent=identifier, performed=False, cost=3)
+    value = report(world)["totals"]
+    assert value["performed_work"] == 1 and value["known_execution_costs"] == {"USD": 5}
+    assert value["net_estimated_benefit"] == value["gross_estimated_labor_value"] - 5
+
+
+def test_parent_and_agent_contributions_reconcile(world):
+    parent = goal(world)
+    child = goal(world, "Review the RFP", parent=parent)
+    with world._writing() as conn:
+        conn.execute("UPDATE goals SET domain=?,execution_principal=? WHERE id=?", ("proc_rfp", "agent-a", child))
+    value = report(world)
+    assert value["totals"]["performed_work"] == 1
+    agent = next(row for row in value["by_entity"] if row["kind"] == "agents")
+    process = next(row for row in value["by_entity"] if row["kind"] == "processes")
+    assert agent["gross_estimated_labor_value"] == process["gross_estimated_labor_value"] == value["totals"]["gross_estimated_labor_value"]
+    assert sum(row["gross"] for row in value["rows"]) == value["totals"]["gross_estimated_labor_value"]
+
+
+def test_recommendation_reuse_decline_and_manual_steps(world):
+    for _ in range(3):
+        goal(world)
+    rows = service.refresh(world)
+    cap = {"id": "existing-rfp", "kind": "process", "label": "Existing RFP", "intents": ["rfp.draft"], "href": "/flows/designer/existing-rfp"}
+    proposal = opportunities.evaluate(rows, owner="alice", capabilities=[cap])[0]
+    assert proposal["kind"] == "reuse" and not proposal["draft_supported"]
+    changed = opportunities.decide(proposal["id"], decision="decline", expected_revision=proposal["revision"],
+                                    actor="alice", manual_steps=["inputs", "prepare", "review"], guard=lambda: None)
+    assert changed["status"] == "declined"
+    again = opportunities.evaluate(rows, owner="alice", capabilities=[])[0]
+    assert again["status"] == "declined" and again["forecast"] == proposal["forecast"]
+    assert "prepare" in again["manual_steps"]
+    assert report(world)["totals"]["performed_work"] == 3
+
+
+def test_recommendation_needs_distinct_executed_work_not_ten_prompts(world):
+    parent = goal(world)
+    for _ in range(9):
+        goal(world, "Revise the RFP", parent=parent)
+    proposal = opportunities.evaluate(service.refresh(world), owner="alice", capabilities=[])[0]
+    assert proposal["kind"] == "assist" and not proposal["draft_supported"]
+
+
+def test_source_deletion_retires_current_value_without_erasing_assumptions(world):
+    identifier = goal(world)
+    row = service.refresh(world)[0]
+    with world._writing() as conn:
+        conn.execute("DELETE FROM episodes WHERE goal_id=?", (identifier,))
+        conn.execute("DELETE FROM goals WHERE id=?", (identifier,))
+    value = report(world)
+    assert value["totals"]["performed_work"] == 0
+    retired = service.WORKS.get(row["id"])
+    assert retired["deleted"] and not retired["source"]["sources"]
+    assert retired["estimates"] == row["estimates"]
+
+
+def test_mixed_currency_is_not_silently_added(world):
+    goal(world)
+    settings.save_settings(hourly_rate=60, currency="EUR", completion_confirmation=False,
+                           expected_revision=0, actor="admin", guard=lambda: None)
+    value = report(world)["totals"]
+    assert value["known_execution_costs"] == {"USD": 2}
+    assert value["mixed_currencies"] and value["net_estimated_benefit"] is None
+
+
+def test_interrupted_audit_does_not_publish_unaudited_estimate(world, monkeypatch):
+    goal(world)
+    monkeypatch.setattr(audit, "record", lambda *args, **kwargs: False)
+    rows = service.refresh(world)
+    assert rows[0]["_audit_pending"]
+    value = calculation.report(rows, start=time.time() - 86400, end=time.time() + 60)
+    assert value["totals"]["performed_work"] == 0
+
+
+def test_partial_child_work_is_performed_but_never_full_parent_value(world):
+    parent = goal(world, performed=False, cost=1)
+    goal(world, "Review one section of this RFP", parent=parent)
+    result = report(world)
+    assert result["totals"]["performed_work"] == 1
+    assert result["totals"]["unvalued_work"] == 1
+    assert result["rows"][0]["state"] == "partial_execution"
+    assert result["totals"]["known_execution_costs"] == {"USD": 3}
+    assert result["totals"]["net_estimated_benefit"] is None
+
+
+def test_untrusted_agent_completion_does_not_establish_native_execution(world):
+    identifier = goal(world, performed=False)
+    audit.audit_event("goal_end", goal_id=identifier, agent="external", status="succeeded")
+    assert report(world)["totals"]["performed_work"] == 0
+
+
+def test_native_source_analysis_receipt_and_description_context(world):
+    identifier = world.create_goal("Help with this", "Summarize the contract", owner="alice")
+    audit.audit_event("goal_end", goal_id=identifier, status="done", mode="source_analysis")
+    result = report(world)
+    assert result["totals"]["performed_work"] == 1
+    assert result["rows"][0]["intents"] == ["contract.summarize"]
+
+
+def test_pending_assumption_audit_does_not_silently_fall_back(world, monkeypatch):
+    monkeypatch.setattr(audit, "record", lambda *args, **kwargs: False)
+    settings.save_benchmark("rfp.draft", minutes=60, low_minutes=30, high_minutes=90,
+        attributable_share=1, review_minutes=30, reason="Synthetic benchmark",
+        expected_revision=0, actor="admin", guard=lambda: None)
+    with pytest.raises(RuntimeError, match="audit receipt"):
+        settings.benchmark("rfp.draft")
+
+
+def test_instruction_clauses_do_not_cross_credit_different_actions(world):
+    result = taxonomy.classify("Summarize the RFP and review the contract")
+    assert result["intents"] == ["rfp.summarize", "contract.review"]
+    root = goal(world)
+    original = service.refresh(world)[0]
+    goal(world, "Actually, review the RFP", parent=root)
+    changed = service.refresh(world)[0]
+    assert changed["intents"] == ["rfp.review"]
+    assert changed["estimates"][0] == original["estimates"][0]
+    assert report(world)["totals"]["performed_work"] == 1
+
+
+def test_provisional_proposal_matures_with_new_evidence_preserving_origin(world):
+    goal(world)
+    initial = opportunities.evaluate(service.refresh(world), owner="alice", capabilities=[])[0]
+    for _ in range(2):
+        goal(world)
+    updated = opportunities.evaluate(service.refresh(world), owner="alice", capabilities=[])[0]
+    assert initial["kind"] == "assist" and updated["kind"] == "draft"
+    assert updated["proposal_history"][0]["forecast"] == initial["forecast"]
+    assert updated["forecast"]["incremental_net_per_run"] > 0
+
+
+def test_outcome_compares_estimates_and_keeps_failed_attempt_costs(world):
+    for _ in range(3):
+        goal(world)
+    proposal = opportunities.evaluate(service.refresh(world), owner="alice", capabilities=[])[0]
+    succeeded = goal(world, cost=1)
+    failed = goal(world, performed=False, cost=3)
+    proposal["linked_goal_ids"] = [succeeded, failed]
+    value = opportunities.outcome(proposal, service.refresh(world))
+    assert value["observed_runs"] == 1 and value["attempt_count"] == 2
+    assert value["after_known_cost_per_run"] == 4
+    assert value["estimated_incremental_labor_per_run"] == 0
+    assert value["estimated_incremental_net_per_run"] == -2
+    assert value["forecast_incremental_net_per_run"] > 0
+    missing = goal(world, performed=False, cost=None)
+    proposal["linked_goal_ids"].append(missing)
+    value = opportunities.outcome(proposal, service.refresh(world))
+    assert value["missing_comparison_inputs"]
+    assert value["estimated_incremental_net_per_run"] is None
+    assert value["after_known_cost_per_run"] == 4
+
+
+def test_measured_receipts_replace_runtime_and_reprocessing_does_not_double_count(world, monkeypatch):
+    from datetime import datetime, timezone
+
+    from maverick import cost_provenance
+    identifier = goal(world, cost=2)
+    period = datetime.now(timezone.utc).strftime("%Y-%m")
+    receipt = {"reference": "synthetic-receipt", "period": period, "state": "settled", "actual": 3,
+               "currency": "USD", "basis": "recorded"}
+    monkeypatch.setattr(cost_provenance, "for_goal", lambda gid: {"state": "available", "receipts": [receipt] if gid == identifier else []})
+    first = report(world)
+    assert first["totals"]["known_execution_costs"] == {"USD": 3}
+    assert first["totals"]["measured_costs"] == {"USD": 3}
+    assert first["totals"]["estimated_costs"] == {}
+    assert first["totals"]["cost_incomplete"]
+    assert report(world)["totals"] == first["totals"]
+
+
+def test_unknown_receipt_retains_incurred_runtime_with_incomplete_net(world, monkeypatch):
+    from datetime import datetime, timezone
+
+    from maverick import cost_provenance
+    goal(world, cost=2)
+    receipt = {"reference": "synthetic-unknown", "period": datetime.now(timezone.utc).strftime("%Y-%m"),
+               "state": "unknown", "actual": None, "currency": "USD", "basis": "unknown"}
+    monkeypatch.setattr(cost_provenance, "for_goal", lambda gid: {"state": "available", "receipts": [receipt]})
+    result = report(world)["totals"]
+    assert result["known_execution_costs"] == {"USD": 2}
+    assert result["missing_cost_count"] == 1 and result["net_estimated_benefit"] is None
+
+
+def test_native_flow_driver_emits_value_receipt_and_links_its_agent(world, monkeypatch):
+    from maverick import runner
+    from maverick.flow import execution, store
+    from maverick.flow.ir import Flow, FlowNode
+    flow = Flow(id="test-rfp", name="RFP", owner="alice", start="prepare",
+        nodes={"prepare": FlowNode(id="prepare", kind="agent", brief="Draft an RFP", output="result")})
+    store.save_flow(flow)
+    # The production driver and agent-goal adapter run; only the paid provider
+    # runner is replaced with a synthetic native episode and terminal receipt.
+    def local_runner(gid, **kwargs):
+        eid = world.start_episode(gid)
+        world.end_episode(eid, "Synthetic work", "success", cost_dollars=2)
+        world.set_goal_status(gid, "done", result="Synthetic work")
+        audit.audit_event("goal_end", goal_id=gid, agent="orchestrator", status="succeeded")
+        kwargs["usage_observer"](2)
+        return "done"
+    monkeypatch.setattr(runner, "run_goal_in_thread", local_runner)
+    run = execution.execute(flow, owner="alice", agent_runner=execution.default_agent_runner(world, owner="alice"),
+                            action_runner=lambda *_: pytest.fail("No action step should run"))
+    assert run.status == "completed"
+    assert tuple(world.query("SELECT kind,ref FROM goal_origins")[0]) == ("flow_run", run.run_id)
+    result = report(world)
+    assert result["totals"]["performed_work"] == 1
+    assert result["totals"]["known_execution_costs"] == {"USD": 2}
+    assert result["rows"][0]["processes"] == [flow.id]
+    # A dry run never produces an economic work item.
+    execution.execute(flow, owner="alice", agent_runner=lambda *_: ("mock", 1.0), action_runner=lambda *_: (None, None), record_outcomes=False)
+    assert report(world)["totals"]["performed_work"] == 1

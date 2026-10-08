@@ -763,6 +763,13 @@ limits are recorded in the [operation coverage register](post-install-operation-
   cost avoided + ROI, the capability improvement curve from the hindsight
   ledger, and governance evidence, per department (and per external vendor
   with `--fleet`). Read-only; the POC-closing artifact.
+- **Intent-based work value and opportunities** (`intent_value/`, `/work-value`)
+  — business-task grouping, provisional editable component benchmarks,
+  audit-backed work, deduplicated cost/gross/net reporting, evidence/history
+  drilldowns and scoped live Copilot answers. Existing-capability handoffs and
+  optional native workflow drafts retain manual controls and require explicit
+  publication/run. Linked outcomes inform later planning without adding forecasts
+  to execution totals. See [the method, integration map and acceptance coverage](intent-work-value.md).
 - **Assessment doc discovery** (`doc_discovery.py`, `POST /api/v1/docs/
   discover`, `POST /api/v1/goals/{id}/attachments/from-source`) — when
   someone is filling an assessment, searches the CONNECTED sources

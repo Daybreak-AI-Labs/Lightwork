@@ -61,3 +61,14 @@ def test_value_declined_writes_no_section(tmp_path, monkeypatch):
     cfg_dir.mkdir(parents=True, exist_ok=True)
     cfg = _write(cfg_dir, monkeypatch, None)
     assert "[value]" not in cfg
+
+
+def test_intent_value_pick_and_writer_default_confirmation_off(monkeypatch):
+    from maverick_installer import wizard
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: kw["default"])
+    picked = wizard.pick_intent_value()
+    assert picked == {"enabled": True, "recommendations": True, "completion_confirmation": False}
+    text = "\n".join(wizard._cfg_intent_value(picked))
+    assert "[intent_value]" in text and "completion_confirmation = false" in text
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: False)
+    assert wizard.pick_intent_value()["enabled"] is False

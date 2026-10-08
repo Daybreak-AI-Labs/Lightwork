@@ -319,6 +319,14 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "view",
     },
+    {
+        "path": "/work-value",
+        "label": "Work value & opportunities",
+        "group": "Observe",
+        "icon": "spend",
+        "floor": "view",
+        "default": "view",
+    },
     # ROI: money saved vs the client's own human-cost assumptions.
     {
         "path": "/savings",
@@ -1497,6 +1505,7 @@ PAGE_AREAS: dict[str, tuple[str, str]] = {
     "/run-tree": ("Evidence & audit", "Task replay"),
     "/spend": ("Costs & value", "Spend"),
     "/savings": ("Costs & value", "Savings"),
+    "/work-value": ("Costs & value", "Work value & opportunities"),
     "/shoring": ("Work", "Hand over a team's work"),
     "/billing": ("Costs & value", "Billing"),
     "/providers": ("Settings", "AI providers"),

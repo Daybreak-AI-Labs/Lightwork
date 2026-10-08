@@ -34,6 +34,10 @@
              copy='A directional estimate: it changes with the numbers below. For measured
                    results, run a workflow pilot.') }}
   {% endcall %}
+  <p class="panel"><a class="btn" href="/work-value">Open work value &amp; opportunities</a>
+    Follow business intent through execution evidence, costs and useful next actions.
+    This page is the legacy attempt-based scenario. Work value uses deduplicated business work and audit completion;
+    compare the methods rather than adding their estimates.</p>
   {% from "_spend_freshness.html" import spend_freshness %}
   {{ spend_freshness(spend_recorded_at) }}
   {% include "_practice_cost.html" %}
