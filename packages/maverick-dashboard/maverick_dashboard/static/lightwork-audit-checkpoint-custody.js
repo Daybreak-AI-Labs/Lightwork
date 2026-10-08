@@ -161,6 +161,9 @@
       // A failed first read must not leave the request list saying "Loading…".
       // When access was lost the page is locked (Refresh included) and says to
       // sign in or reload, so it must not also tell the person to use Refresh.
+      // Nothing was read, so there is no account or checkpoint to act on; the
+      // next successful refresh sets these from the real answer.
+      if (!current) el('acc-review').dataset.unavailable = el('acc-check').dataset.unavailable = 'true';
       if (!current && !accessLost) el('acc-requests').replaceChildren(node('p', 'Saved copy requests could not be read. Use Refresh choices to try again.', 'muted'));
       throw error;
     }

@@ -26,6 +26,10 @@ test('a failed first read leaves no saved copy requests at Loading and keeps Ref
   assert.equal(ui.d.getElementById('acc-requests').textContent, 'Saved copy requests could not be read. Use Refresh choices to try again.');
   assert.equal(ui.d.getElementById('acc-status').textContent, 'Could not read the checkpoint copy. Try again.');
   assert.equal(ui.d.getElementById('acc-refresh').disabled, false);
+  // With nothing read there is no account or checkpoint to act on, so the two
+  // actions stay off until a Refresh succeeds instead of failing on a null.
+  assert.equal(ui.d.getElementById('acc-review').disabled, true);
+  assert.equal(ui.d.getElementById('acc-check').disabled, true);
 });
 
 test('a first read refused for lost access shows one instruction: sign in or reload, with every control locked', async t => {
