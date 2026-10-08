@@ -1,13 +1,13 @@
 """Resetting a colleague's forgotten passphrase, and the one-time link it gives.
 
-Who may reset: only the installation owner (``local_owner``) or a configured
-installation administrator (``[dashboard] admins``). Never a workspace
-administrator or someone given the Admin role: whoever resets a passphrase
-chooses who can set the next one, so this is an account takeover in the
-wrong hands. The owner's own passphrase is never reset here (owner recovery
-stays on this computer), and only the owner may reset an installation
-administrator. The route also needs a recent second factor where step-up
-applies, a same-origin form post and an explicit confirmation.
+Who may reset: only the installation owner (``local_owner``). Never a
+workspace administrator, someone given the Admin role, or an administrator
+listed in ``[dashboard] admins``: whoever resets a passphrase chooses who can
+set the next one, so this is an account takeover in the wrong hands, and that
+list can be edited in Settings by anyone holding the Admin role, so being on
+it proves nothing. The owner's own passphrase is never reset here (owner
+recovery stays on this computer). The route also needs a recent second factor
+where step-up applies, a same-origin form post and an explicit confirmation.
 
 What a reset does, in this order:
 
@@ -68,11 +68,9 @@ _KEEP_SECONDS = 30 * 86400  # completed resets are pruned after this
 _PREFIX = "pwr_"
 RESET_TTL_SECONDS = 3600
 
-ONLY_OWNER = ("Only the installation owner or an installation administrator set up in "
-              "configuration can reset a passphrase.")
+ONLY_OWNER = "Only the installation owner can reset a passphrase."
 OWNER_REFUSED = ("The installation owner's passphrase cannot be reset here. The owner signs in "
                  "on the computer running Lightwork and uses owner recovery there.")
-ADMIN_REFUSED = "Only the installation owner can reset an installation administrator's passphrase."
 NO_PASSPHRASE = ("This person has no passphrase and no access here, so there is nothing to reset or "
                  "give. Invite them from the Users page instead.")
 UNAVAILABLE = "Passphrase resets are unavailable right now. Ask your administrator to check Lightwork."
@@ -189,26 +187,19 @@ def _owner_principal() -> str | None:
 
 
 def _authority(issuer: str) -> str | None:
-    """``"owner"`` or ``"admin"`` (installation administrator) when ``issuer``
-    may reset passphrases now; None for anyone else."""
-    from maverick.suite_grants import is_admin_principal
-
+    """``"owner"`` when ``issuer`` is the installation owner and may reset
+    passphrases now; None for anyone else."""
     from . import auth, rbac
 
-    if not issuer.startswith("user:"):
+    if not issuer.startswith("user:") or issuer != _owner_principal():
         return None
-    if issuer == _owner_principal():
-        # The owner keeps this power only while still an administrator.
-        role = auth.global_role_for_principal(issuer)
-        return "owner" if "admin" in rbac.permissions_for(role) else None
-    return "admin" if is_admin_principal(issuer) else None
+    # The owner keeps this power only while still an administrator.
+    role = auth.global_role_for_principal(issuer)
+    return "owner" if "admin" in rbac.permissions_for(role) else None
 
 
-def _allowed(authority: str | None, email: str) -> bool:
-    """Only the owner may reset an installation administrator."""
-    from maverick.suite_grants import is_admin_principal
-
-    return authority == "owner" or (authority == "admin" and not is_admin_principal("user:" + email))
+def _allowed(authority: str | None) -> bool:
+    return authority == "owner"
 
 
 def actor(request: Request) -> str:
@@ -281,7 +272,7 @@ def accounts(caller: str) -> list[dict]:
     return [{"email": email, "has_passphrase": email in current, "waiting": email in waiting,
              "first": email in first}
             for email in sorted(current | waiting | first)
-            if "user:" + email != owner and _allowed(authority, email)]
+            if "user:" + email != owner and _allowed(authority)]
 
 
 def _first_passphrase_tenant(email: str) -> str | None:
@@ -327,8 +318,8 @@ def issue(request: Request, email: str) -> tuple[str, dict]:
         if local_passphrases.owner_of(email):
             raise HTTPException(403, OWNER_REFUSED)
         authority = _authority(caller)
-        if not _allowed(authority, email):
-            raise HTTPException(403, ADMIN_REFUSED if authority == "admin" else ONLY_OWNER)
+        if not _allowed(authority):
+            raise HTTPException(403, ONLY_OWNER)
         resets = _read()
         now = time.time()
         record = {"email": email, "tenant": "", "binding": _binding(email), "created_by": caller,
@@ -415,7 +406,7 @@ def complete(token: str, prepared: dict) -> dict:
         if prepared["email"] != record["email"]:
             raise HTTPException(409, "This reset link changed. Open it again.")
         if (_binding(record["email"]) != record["binding"]
-                or not _allowed(_authority(record["created_by"]), record["email"])):
+                or not _allowed(_authority(record["created_by"]))):
             record.update(used_at=now, outcome="refused")
             _write(resets)
             try:
@@ -441,7 +432,7 @@ def _reset_by(created_by: str) -> str:
         owner = None
     who = created_by.removeprefix("user:")
     return (f"the installation owner ({who})" if created_by == owner
-            else f"an installation administrator ({who})")
+            else f"an administrator ({who})")
 
 
 def _page(request: Request, state: str, *, status: int = 200, record: dict | None = None,

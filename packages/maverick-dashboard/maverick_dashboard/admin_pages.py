@@ -1157,7 +1157,7 @@ def _users_context(request: Request) -> dict:
 
 def _passphrase_resets(request: Request) -> dict | None:
     """Colleagues whose passphrase this caller may reset, or None when the
-    caller may not reset any (only the owner or an installation administrator)."""
+    caller may not reset any (only the installation owner)."""
     from . import passphrase_resets
     caller = passphrase_resets.can_reset(request)
     if caller is None:

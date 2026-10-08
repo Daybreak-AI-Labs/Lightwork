@@ -351,8 +351,7 @@ def test_principal_less_and_legacy_invites_keep_their_existing_contract(monkeypa
 
 def test_a_workspace_admin_cannot_reset_a_members_passphrase(monkeypatch, tmp_path):
     """Whoever resets a passphrase chooses who sets the next one, so only the
-    installation owner or an installation administrator may; never a workspace
-    administrator."""
+    installation owner may; never a workspace administrator."""
     import json
 
     client = _client(monkeypatch, tmp_path)

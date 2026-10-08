@@ -713,29 +713,45 @@ def test_an_admin_role_holder_who_is_not_the_owner_cannot_reset(workspace, tmp_p
     assert not (tmp_path / "dashboard-passphrase-resets.json").exists()
 
 
-def test_installation_administrators_reset_colleagues_but_only_the_owner_resets_them(
-        workspace, tmp_path, monkeypatch):
+def test_an_installation_administrator_who_is_not_the_owner_cannot_reset(workspace, tmp_path, monkeypatch):
+    """Only the owner resets. Being named in configuration is not enough: the list
+    is editable in Settings by anyone holding the Admin role."""
     assert _accept(_remote(), _invite(workspace)).status_code == 303
-    for email in ("ia@example.test", "ib@example.test"):
-        assert _accept(_remote(), _invite(workspace, email=email, role="admin")).status_code == 303
-    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:ia@example.test,user:ib@example.test")
+    assert _accept(_remote(), _invite(workspace, email="ia@example.test", role="admin")).status_code == 303
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:ia@example.test")
     installer = _remote()
     assert _sign_in(installer, email="ia@example.test").status_code == 303
-    page = installer.get("/users").text
-    assert f'name="email" value="{COLLEAGUE}"' in page and 'name="email" value="ib@example.test"' not in page
-    link = _reset_link(_reset(installer))
-    opened = re.sub(r"\s+", " ", _remote().get(link).text)
-    assert "reset by an installation administrator (ia@example.test)" in opened
-    before = _passphrase_row(tmp_path, "ib@example.test")
-    refused = _reset(installer, email="ib@example.test")
+    assert 'action="/users/passphrase-reset"' not in installer.get("/users").text
+    before = _passphrase_row(tmp_path)
+    refused = _reset(installer)
     assert refused.status_code == 403
-    assert _passphrase_row(tmp_path, "ib@example.test") == before
-    assert _reset_link(_reset(workspace, email="ib@example.test"))  # the owner may
-    # An administrator who loses that standing also loses the links they made.
-    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:ib@example.test")
-    assert _accept(_remote(), link, OTHER).status_code == 409
-    assert COLLEAGUE not in json.loads(
-        (tmp_path / "dashboard-passphrases.json").read_text(encoding="utf-8"))["accounts"]
+    assert _passphrase_row(tmp_path) == before
+    assert not (tmp_path / "dashboard-passphrase-resets.json").exists()
+    # The owner may reset a colleague and an installation administrator alike.
+    opened = re.sub(r"\s+", " ", _remote().get(_reset_link(_reset(workspace))).text)
+    assert "reset by the installation owner (" + OWNER in opened
+    assert _reset_link(_reset(workspace, email="ia@example.test"))
+
+
+def test_an_admin_role_holder_cannot_make_themselves_an_administrator_to_reset(workspace, tmp_path):
+    """An Admin-role holder can save [dashboard] admins, but that must not give
+    them the power to choose a colleague's next passphrase."""
+    from test_support.settings_pages import save_catalog
+
+    assert _accept(_remote(), _invite(workspace)).status_code == 303
+    assert _accept(_remote(), _invite(workspace, email="boss@example.test", role="admin")).status_code == 303
+    boss = _remote()
+    assert _sign_in(boss, email="boss@example.test").status_code == 303
+    assert _reset(boss).status_code == 403
+    saved = save_catalog(boss, "/api/v1/settings/catalog", json={"changes": [
+        {"id": "dashboard.admins", "value": ["user:boss@example.test"]}], "confirm": True})
+    assert saved.status_code == 200, saved.text
+    before = _passphrase_row(tmp_path)
+    assert _reset(boss).status_code == 403
+    assert 'action="/users/passphrase-reset"' not in boss.get("/users").text
+    assert _passphrase_row(tmp_path) == before
+    assert not (tmp_path / "dashboard-passphrase-resets.json").exists()
+    assert _sign_in(_remote(), password=GOOD).status_code == 303  # the colleague is untouched
 
 
 def test_a_reset_needs_confirmation_this_site_and_a_recent_second_factor(workspace, tmp_path, monkeypatch):
