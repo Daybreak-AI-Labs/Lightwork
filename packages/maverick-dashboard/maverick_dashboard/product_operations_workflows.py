@@ -86,6 +86,24 @@ def harden_snapshot(request, selection):
                     fields=fields)
 
 
+def _number(value, kind):
+    """The entered number, or None when it is not one. A whole number given as
+    an int or as text stays exact beyond 2**53, where a float would round it."""
+    try:
+        if kind == "integer" and type(value) in (int, str):
+            number = int(value)
+            float(number)  # the finite range every number field has
+        elif type(value) in (int, float, str):
+            number = float(value)
+        else:
+            return None
+    except (OverflowError, ValueError):
+        return None
+    if not math.isfinite(number) or (kind == "integer" and not float(number).is_integer()):
+        return None
+    return int(number) if kind == "integer" else number
+
+
 def harden_prepare(request, selection, arguments):
     state = harden_snapshot(request, selection)
     if state.blocked:
@@ -121,14 +139,11 @@ def harden_prepare(request, selection, arguments):
             params[name] = value
             shown = "Yes" if value else "No"
         else:
-            try:
-                number = float(value) if type(value) in (int, float, str) else math.nan
-            except (OverflowError, ValueError):
-                number = math.nan
-            if (not math.isfinite(number) or (kind == "integer" and not number.is_integer())):
+            number = _number(value, kind)
+            if number is None:
                 raise HTTPException(422, "Enter a valid number for " + field["label"] + ".")
-            params[name] = int(number) if kind == "integer" else number
-            shown = str(params[name])
+            params[name] = number
+            shown = str(number)
         changes.append({"item": field["label"], "effect": shown})
     from maverick.flow import Flow, evolve
 

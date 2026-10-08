@@ -11416,14 +11416,15 @@ def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conve
     and error handling as the REST API and MCP server)."""
     from maverick.runner import run_goal_in_background_async
 
+    from ._request_memo import fresh_configuration
     from .attachment_submission import dispatch
+    from .task_model_selection_api import effect_guard as task_ai_guard
 
     kwargs: dict = {"allowed_suites": caller_suites(request)}
     selection = receipt.get("detail", {}).get("specialist_selection")
+    context, check_specialist = _conversation_context(request), None
     if selection is not None:
-        from ._request_memo import fresh_configuration
         from .product_operations_task_launch import published_guard
-        from .task_model_selection_api import effect_guard as task_ai_guard
 
         if (not isinstance(selection, dict) or set(selection) != {"name", "context", "revision"}
                 or any(not isinstance(value, str) for value in selection.values())):
@@ -11431,16 +11432,20 @@ def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conve
         goal = _world().get_goal(goal_id)
         if goal is None or goal.domain != selection["name"]:
             raise HTTPException(409, "The original specialist selection no longer matches this task.")
-        check_model = task_ai_guard(request, receipt["detail"].get("task_model_selection"), selection["context"])
-        check_specialist = published_guard(request, **selection)
-        def current_start_guard():
-            with fresh_configuration():
-                check_model()
+        context, check_specialist = selection["context"], published_guard(request, **selection)
+    # Every start re-reads the current session, SCIM and workspace authority
+    # when the run is admitted, not only one that chose a specialist: a person
+    # deactivated or signed out during an upload or writer wait must not start it.
+    check_model = task_ai_guard(request, receipt["detail"].get("task_model_selection"), context)
+    def current_start_guard():
+        with fresh_configuration():
+            check_model()
+            if check_specialist is not None:
                 check_specialist()
-                if caller_suites(request) != kwargs["allowed_suites"]:
-                    raise HTTPException(409, "Your specialist access changed. Reopen Chat and review the current choices before starting.")
-        current_start_guard()
-        kwargs["effect_guard"] = current_start_guard
+            if caller_suites(request) != kwargs["allowed_suites"]:
+                raise HTTPException(409, "Your specialist access changed. Reopen Chat and review the current choices before starting.")
+    current_start_guard()
+    kwargs["effect_guard"] = current_start_guard
     if max_dollars is not None:
         kwargs["max_dollars"] = max_dollars
     if conversation_id is not None:

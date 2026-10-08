@@ -176,6 +176,38 @@ def test_live_cloud_probe_records_only_status(monkeypatch):
     assert calls == [{"model": "production", "max_tokens": 16}]
 
 
+def test_reached_provider_cap_is_not_recorded_as_a_failed_connection_test(monkeypatch):
+    """The cap check is local: nothing was sent, so the receipt must not say the
+    provider failed."""
+    from maverick.llm import LLM
+    from maverick.provider_cost_cap import ProviderCapExceeded
+    from maverick_dashboard import integration_readiness
+    from maverick_dashboard.integration_readiness import probe_provider
+
+    class FakeAzure:
+        deployment = "production"
+
+    route = SimpleNamespace(api_key="secret", base_url="https://sample.openai.azure.com",  # pragma: allowlist secret
+                            headers_dict=lambda: None, environment_dict=dict)
+
+    def capped(name, cost):
+        raise ProviderCapExceeded(name, 10.0, 10.0, "2026-10")
+
+    monkeypatch.setattr(LLM, "_provider_client_config", lambda self, name: route)
+    monkeypatch.setattr("maverick.providers.get_provider_client", lambda *args, **kwargs: FakeAzure())
+    monkeypatch.setattr("maverick.llm.model_for_role", lambda role: "anthropic:sample")
+    monkeypatch.setattr("maverick.llm._enforce_provider_cap", capped)
+    monkeypatch.setattr("maverick.budget._lookup_price_quote", lambda spec:
+                        SimpleNamespace(input_per_mtok=1.0, output_per_mtok=1.0))
+    result = probe_provider("azure", {})
+    assert result["verified"] is None
+    assert result["evidence"] == {"kind": "budget_limit", "external_live_verified": False}
+    assert "ProviderCapExceeded" not in result["detail"]
+    receipt = integration_readiness.record("provider", "azure", {}, verified=result["verified"],
+                                           detail=result["detail"], evidence=result["evidence"])
+    assert receipt["status"] == "unknown"
+
+
 def test_bedrock_probe_uses_saved_model_and_refuses_a_mismatched_default(monkeypatch):
     from maverick.llm import LLM
     from maverick_dashboard.integration_readiness import probe_provider
