@@ -10,7 +10,8 @@ dashboard origin, not a hosted service.
         data-maverick-title="Ask Lightwork"></script>
 ```
 
-- `data-maverick-url` — base URL of your dashboard (where `/chat/send` lives).
+- `data-maverick-url` — base URL of your dashboard (where `/chat/send` lives); it
+  must be the origin the page itself is served from.
 - `data-maverick-title` — header/button label.
 
 The widget `fetch`es `POST {base}/chat/send` with `credentials: include`, so the

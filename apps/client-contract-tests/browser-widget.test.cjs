@@ -193,11 +193,16 @@ test('changing connection rejects an old start acknowledgement and keeps the new
   assert.equal(fixture.doc.querySelector('#prompt').value,'original draft');fixture.close();
 });
 
-async function widget(fetch, retained) {
+async function widget(fetch, retained, attributes) {
   const dom=new JSDOM('<!doctype html><body></body>',{url:'http://127.0.0.1:8765/page',runScripts:'outside-only'});
   const timers=clock();
   Object.assign(dom.window,{fetch,AbortController,TextDecoder,setTimeout:timers.setTimeout,clearTimeout:timers.clearTimeout});
   if(retained) dom.window.localStorage.setItem('lightwork.pending-chat.v1:http://127.0.0.1:8765',retained);
+  if(attributes) { // the embedding <script> tag the widget reads its settings from
+    const tag=dom.window.document.createElement('script');
+    for(const [name,value] of Object.entries(attributes)) tag.setAttribute(name,value);
+    Object.defineProperty(dom.window.document,'currentScript',{get:()=>tag});
+  }
   dom.window.eval(read('web/widget/maverick-widget.js'));
   const form=dom.window.document.querySelector('form'), input=form.querySelector('input'),send=form.querySelector('button');
   function submit(){form.dispatchEvent(new dom.window.Event('submit',{cancelable:true}));}
@@ -238,6 +243,19 @@ test('widget requires exact same-origin goal redirect, retaining drafts on login
   fixture.input.value='goal'; fixture.submit(); await flush();
   assert.match(fixture.dom.window.document.body.textContent,/Goal accepted/);
   assert.equal(fixture.input.value,''); assert.equal(fixture.send.disabled,false);
+  fixture.close();
+});
+
+test('a cross-origin data-maverick-url is refused with its real reason before anything is stored or sent',async()=>{
+  let calls=0;
+  const fixture=await widget(async()=>{calls++;return new Promise(()=>{});},undefined,{'data-maverick-url':'https://dashboard.example'});
+  fixture.input.value='goal';fixture.submit();await flush();
+  const text=fixture.dom.window.document.body.textContent;
+  assert.equal(calls,0);assert.equal(fixture.input.value,'goal');
+  assert.equal(fixture.dom.window.localStorage.length,0);
+  assert.match(text,/refused before sending/);assert.match(text,/own origin/);assert.match(text,/https:\/\/dashboard\.example/);
+  assert.doesNotMatch(text,/request identity/);
+  assert.equal(fixture.send.disabled,false);
   fixture.close();
 });
 
