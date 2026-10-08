@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext client.ts environment.ts environment.test.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0"
+    "@modelcontextprotocol/sdk": "^1.32.1"
   },
   "overrides": {
     "@hono/node-server": "2.0.12",
