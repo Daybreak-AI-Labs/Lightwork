@@ -41,6 +41,20 @@
       <artifactId>mcp</artifactId>
       <version>${mcp.sdk.version}</version>
     </dependency>
+    <!-- The BOM above already resolves these to ${jackson.version} in the real
+         build. They are declared directly because dependency scanners do not
+         apply a BOM import to transitive artifacts and would otherwise report
+         the SDK's Jackson 3.0.3 cohort that this build never uses. -->
+    <dependency>
+      <groupId>tools.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>tools.jackson.core</groupId>
+      <artifactId>jackson-core</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
   </dependencies>
 
   <build>
