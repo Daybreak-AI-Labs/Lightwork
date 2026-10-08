@@ -49,11 +49,78 @@ def test_cycle_is_off_by_default_and_leased(tmp_path, monkeypatch):
     config.reset_config_cache()
     called = []
     monkeypatch.setattr("maverick.daily_digest.run_digest_cycle",
-                        lambda world, **kw: called.append(sorted(kw["principals"])) or {"sent": 0})
+                        lambda world, **kw: called.extend(kw["principals"]) or {"sent": 0})
     monkeypatch.setattr(sched, "_recipients", lambda: ["user:b", "user:a"])
     assert sched.scheduler_cycle("h1", now=1000.0) == {"sent": 0}
-    assert called == [["user:a", "user:b"]]
+    assert sorted(called) == ["user:a", "user:b"]  # each recipient, one at a time
     assert sched.scheduler_cycle("h2", now=1001.0) is None  # h1 holds the lease
+
+
+def _digest_enabled(tmp_path):
+    from maverick import config
+
+    (tmp_path / "config.toml").write_text("[my_work]\ndigest_enable = true\n")
+    config.reset_config_cache()
+
+
+def _slow_sender(monkeypatch, sched, clock, *, seconds, other_worker_tries):
+    """A fake ``run_digest_cycle`` whose every recipient takes ``seconds``; after
+    each one the other worker's loop wakes and tries its own cycle."""
+    state = {"busy": False, "sent": [], "other_tried": [], "other_sent": []}
+
+    def run(world, *, principals, **kwargs):
+        if state["busy"]:  # the other worker got a lease and reached the sender
+            state["other_sent"].extend(principals)
+            return {"sent": len(principals)}
+        state["busy"] = True
+        try:
+            for principal in principals:
+                state["sent"].append(principal)
+                clock["t"] += seconds
+                state["other_tried"].append(other_worker_tries())
+        finally:
+            state["busy"] = False
+        return {"sent": len(principals)}
+
+    monkeypatch.setattr("maverick.daily_digest.run_digest_cycle", run)
+    return state
+
+
+def test_a_slow_cycle_renews_its_lease_so_a_second_worker_never_resends(tmp_path, monkeypatch):
+    from maverick_dashboard import daily_digest_scheduler as sched
+
+    _digest_enabled(tmp_path)
+    monkeypatch.setattr(sched, "_recipients", lambda: ["user:a", "user:b", "user:c"])
+    clock = {"t": 1000.0}
+
+    def fake_clock():
+        return clock["t"]
+
+    # Three recipients at 70 s each: 210 s in all, well past the 120 s lease.
+    state = _slow_sender(monkeypatch, sched, clock, seconds=70.0,
+                         other_worker_tries=lambda: sched.scheduler_cycle("B", clock=fake_clock))
+    assert sched.scheduler_cycle("A", clock=fake_clock) == {"sent": 3}
+    assert state["sent"] == ["user:a", "user:b", "user:c"]
+    assert state["other_tried"] == [None, None, None]  # B never got the lease mid-cycle
+    assert state["other_sent"] == []
+
+
+def test_a_cycle_that_loses_its_lease_stops_before_the_next_recipient(tmp_path, monkeypatch):
+    from maverick_dashboard import daily_digest_scheduler as sched
+
+    _digest_enabled(tmp_path)
+    monkeypatch.setattr(sched, "_recipients", lambda: ["user:a", "user:b", "user:c"])
+    clock = {"t": 1000.0}
+
+    def fake_clock():
+        return clock["t"]
+
+    # The first send hangs for 300 s: A's lease lapses and B takes it over.
+    state = _slow_sender(monkeypatch, sched, clock, seconds=300.0,
+                         other_worker_tries=lambda: sched.scheduler_cycle("B", clock=fake_clock))
+    assert sched.scheduler_cycle("A", clock=fake_clock) == {"sent": 1}
+    assert state["sent"] == ["user:a"]  # A gave up instead of sending the rest again
+    assert state["other_sent"] == ["user:a", "user:b", "user:c"]
 
 
 def test_recipients_union_roster_links_and_preferences(monkeypatch):

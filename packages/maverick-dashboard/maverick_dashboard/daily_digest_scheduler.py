@@ -2,8 +2,9 @@
 
 Off by default (``[my_work] digest_enable``). Every ``digest_poll_seconds``
 it takes a short file lease (so two dashboard workers on one host never
-send the same summary twice), asks ``maverick.daily_digest`` to send
-whatever is due, and backs off (doubling, capped) after a failed cycle.
+send the same summary twice) and renews it before each recipient, asks
+``maverick.daily_digest`` to send whatever is due, and backs off (doubling,
+capped) after a failed cycle.
 """
 from __future__ import annotations
 
@@ -112,8 +113,13 @@ def _sees_everything(principal: str) -> bool:
     return is_dashboard_admin(principal)
 
 
-def scheduler_cycle(holder: str, *, now: float | None = None) -> dict[str, Any] | None:
-    """One pass: send every due summary. ``None`` when disabled or not leased."""
+def scheduler_cycle(holder: str, *, now: float | None = None,
+                    clock=time.time) -> dict[str, Any] | None:
+    """One pass: send every due summary. ``None`` when disabled or not leased.
+
+    The lease is renewed before each recipient, so a slow cycle (channel
+    timeouts) never outlives it while another worker's loop wakes; if a renewal
+    finds another live holder, the rest of the cycle is left to that worker."""
     from maverick.config import config_source_errors, get_my_work
     from maverick.daily_digest import run_digest_cycle
 
@@ -124,12 +130,21 @@ def scheduler_cycle(holder: str, *, now: float | None = None) -> dict[str, Any] 
         return None
     if not get_my_work().get("digest_enable"):
         return None
-    if not acquire_lease(holder, now=now):
+    if not acquire_lease(holder, now=clock() if now is None else now):
         return None
-    return run_digest_cycle(
-        _world(), principals=_recipients(), can_decide=_can_decide,
-        sees_everything=_sees_everything, now=now,
-    )
+    world = _world()
+    options = {"can_decide": _can_decide, "sees_everything": _sees_everything, "now": now}
+    summary: dict[str, Any] | None = None
+    for principal in _recipients():
+        if summary is not None and not acquire_lease(holder, now=clock() if now is None else now):
+            log.warning("daily digest: the send lease was lost mid-cycle; "
+                        "the rest is left to its new holder")
+            break
+        part = run_digest_cycle(world, principals=[principal], **options)
+        summary = part if summary is None else {
+            key: summary.get(key, 0) + value if isinstance(value, int) else value
+            for key, value in part.items()}
+    return summary if summary is not None else run_digest_cycle(world, principals=[], **options)
 
 
 def _scheduler_loop(stop: threading.Event, holder: str, poll_seconds: float) -> None:

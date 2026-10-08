@@ -287,6 +287,19 @@ def original(request, reference):
         return result
 
 
+def _access_holds(current, reviewed):
+    """Whether the access a person reviewed under still holds on a later request.
+
+    The source address and second-factor flag are not part of what is reviewed:
+    ``authority`` re-checks the workspace's allowed addresses and second-factor
+    policy on this very request, and each scheduled run checks them again for
+    the reviewed address. So a changed network or a stronger sign-in does not
+    void the review; a weaker sign-in, or any other change, still does."""
+    keys = (set(current) | set(reviewed)) - {"address", "mfa"}
+    return (all(current.get(key) == reviewed.get(key) for key in keys)
+            and (bool(current.get("mfa")) or not reviewed.get("mfa")))
+
+
 def create(request, reference, body):
     from .automation_queue import queue, start
     value = unseal(reference)
@@ -297,7 +310,7 @@ def create(request, reference, body):
         if prior["found"]:
             return prior
         def current():
-            if authority(request, value["authority"]["context"], write=True) != value["authority"]:
+            if not _access_holds(authority(request, value["authority"]["context"], write=True), value["authority"]):
                 raise HTTPException(409, "Your access changed. Review the current report schedule again.")
             recipe = unseal(value["payload"]["report_recipe"])
             runtime = _build_runtime(request.app, tenant_id=value["authority"]["tenant"], request=request)
@@ -307,7 +320,7 @@ def create(request, reference, body):
                 raise HTTPException(409, "A selected record changed. Review its current contents before scheduling.")
             if time.time() >= min(value["expires"], value["runs"][0]):
                 raise HTTPException(409, "This review expired. Review current choices again; no new schedule was created.")
-            if authority(request, value["authority"]["context"], write=True) != value["authority"]:
+            if not _access_holds(authority(request, value["authority"]["context"], write=True), value["authority"]):
                 raise HTTPException(409, "Your access changed. Review current choices again.")
         current()
         queue().enqueue_once(KIND, value["payload"], idempotency_key="report-schedule:"+value["operation"],
