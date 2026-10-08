@@ -594,3 +594,40 @@ def test_checkpoint_lookup_requires_context_and_rechecks_current_permission(monk
     monkeypatch.setattr(recovery_api, "require_global_permission", revoked)
     result = client.post(endpoint, headers=headers, json=body)
     assert result.status_code == 403
+
+
+def handoff_request(monkeypatch, publish):
+    from maverick import installation_handoff
+    client = api_client()
+    headers = context(client)
+    monkeypatch.setattr(recovery_api, "isolated", lambda app: True)
+    grant = {"id": "a" * 32, "authorization": "a" * 32 + ":" + "b" * 64}
+    monkeypatch.setattr(recovery_api.installation_recovery, "authorize", lambda **kwargs: dict(grant))
+    monkeypatch.setattr(installation_handoff, "publish", publish)
+    discarded = []
+    monkeypatch.setattr(recovery_api.installation_recovery, "discard_authorization",
+                        lambda token, *, actor: discarded.append((token, actor)))
+    body = {"confirm": True, "confirm_all_workspaces": True, "review_id": "c" * 32, "native_handoff": True}
+    response = client.post("/api/v1/recovery/installation/authorize", headers=headers, json=body)
+    return response, discarded, grant
+
+
+def test_a_published_handoff_keeps_its_grant_for_the_native_application(monkeypatch):
+    response, discarded, grant = handoff_request(monkeypatch, lambda token, *, actor_label: {"id": grant_id(token)})
+    assert response.status_code == 200
+    assert response.json()["native_handoff"] is True
+    assert discarded == []
+
+
+def test_a_handoff_that_cannot_be_published_retires_the_grant_the_browser_never_received(monkeypatch):
+    def refused(token, *, actor_label):
+        raise recovery_api.installation_recovery.MaintenanceError("The native handoff could not be saved.")
+    response, discarded, grant = handoff_request(monkeypatch, refused)
+    assert response.status_code == 409
+    assert grant["authorization"] not in response.text
+    assert [token for token, _ in discarded] == [grant["authorization"]]
+    assert discarded[0][1]                                  # retired under the administrator's own name
+
+
+def grant_id(token):
+    return token.split(":", 1)[0]

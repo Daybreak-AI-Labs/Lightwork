@@ -1233,3 +1233,47 @@ def test_upgrade_requires_exact_review_and_rejects_changed_reviewed_bytes(instal
     with pytest.raises(maintenance.MaintenanceError, match="exact native review"):
         maintenance.prepare(grant["authorization"])
     assert not (maintenance._store() / "active.json").exists()
+
+
+# ---- a refused or unusable authorization leaves nothing behind ------------------
+
+def point_directories(home):
+    store = home / "backups" / "installation-recovery"
+    return [path for path in store.iterdir() if path.is_dir() and len(path.name) == 32]
+
+
+def test_an_expired_native_review_is_refused_before_any_point_directory_exists(installation):
+    home, *_ = installation
+    with pytest.raises(maintenance.MaintenanceError, match="expired or changed"):
+        maintenance.authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True, review_id="a" * 32)
+    assert point_directories(home) == []
+
+
+def test_an_unconfirmed_signing_transition_is_refused_without_leaving_a_point_directory(installation):
+    from maverick.installation_handoff import save_review
+    home, *_ = installation
+    review = save_review({"version": "1.0.1", "runtime_sha256": digest(b"new-runtime"),
+                          "installer_sha256": digest(b"new"), "signature": "fixture-reviewed-signature"})
+    with pytest.raises(maintenance.MaintenanceError, match="Explicitly confirm"):
+        maintenance.authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True,
+                              review_id=review["id"], identity_transition="{}", transition_sha256="0" * 64)
+    assert point_directories(home) == []
+
+
+def test_a_grant_that_cannot_be_handed_on_is_retired_and_frees_its_slot(installation):
+    home, *_ = installation
+    grant = reviewed_authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True)
+    assert len(point_directories(home)) == 1
+    maintenance.discard_authorization(grant["authorization"], actor="global-admin")
+    assert maintenance.status()["recovery_points"] == []
+    assert [row["id"] for row in maintenance.status()["retirement_history"]] == [grant["id"]]
+    with pytest.raises(maintenance.MaintenanceError, match="expired or was retired"):
+        maintenance._grant(grant["authorization"])
+
+
+def test_discarding_is_best_effort_and_never_masks_the_error_that_caused_it(installation):
+    grant = reviewed_authorize(actor="global-admin", isolated=True, confirm_all_workspaces=True)
+    maintenance.discard_authorization(grant["authorization"], actor="global-admin")
+    maintenance.discard_authorization(grant["authorization"], actor="global-admin")   # already retired
+    maintenance.discard_authorization("not-a-token", actor="global-admin")
+    maintenance.discard_authorization(None, actor="global-admin")

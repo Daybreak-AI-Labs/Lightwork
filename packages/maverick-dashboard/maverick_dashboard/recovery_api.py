@@ -208,8 +208,14 @@ async def authorize_installation(request: Request, body: InstallationIn):
                             if body.identity_transition is not None or body.transition_sha256 is not None else {}))
     if body.native_handoff:
         from maverick.installation_handoff import publish
-        result = await _call(publish, result["authorization"],
-                             actor_label=_authorization_principal(request) or "Authenticated local administrator")
+        try:
+            result = await _call(publish, result["authorization"],
+                                 actor_label=_authorization_principal(request) or "Authenticated local administrator")
+        except BaseException:
+            # The browser never receives the token, so nothing could use this
+            # grant; retire it rather than leave it holding a recovery slot.
+            await _call(installation_recovery.discard_authorization, result["authorization"], actor=actor)
+            raise
         result["native_handoff"] = True
     return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
 

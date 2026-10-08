@@ -46,3 +46,25 @@ def test_generic_upgrade_cannot_use_protected_handoff(store, monkeypatch):
     monkeypatch.setattr(handoff.recovery, "_grant", lambda token: (None, {"operation": "upgrade"}))
     with pytest.raises(handoff.recovery.MaintenanceError, match="exact reviewed"):
         handoff.publish("unused", actor_label="Admin")
+
+
+def test_a_non_ascii_review_id_is_a_refusal_not_a_type_error(store):
+    release = dict(version="1.2.3", runtime_sha256="a" * 64, installer_sha256="b" * 64, signature="signed")
+    handoff.save_review(release)
+    with pytest.raises(handoff.recovery.MaintenanceError, match="expired or changed"):
+        handoff.reviewed_release("é" * 32)
+
+
+@pytest.mark.parametrize("damage", ["unauthenticated", "unreadable", "malformed"])
+def test_an_unusable_review_file_is_no_review_and_never_breaks_the_status_read(store, monkeypatch, damage):
+    release = dict(version="1.2.3", runtime_sha256="a" * 64, installer_sha256="b" * 64, signature="signed")
+    first = handoff.save_review(release)
+    if damage == "malformed":
+        store["native-review.json"] = {"kind": "native-release-review", "expires_at": 99999999999}
+    else:
+        def refuse(path):
+            raise handoff.recovery.MaintenanceError("not authentic") if damage == "unauthenticated" else OSError("locked")
+        monkeypatch.setattr(handoff.recovery, "_read", refuse)
+    assert handoff.current_review() is None
+    with pytest.raises(handoff.recovery.MaintenanceError, match="expired or changed"):
+        handoff.reviewed_release(first["id"])
