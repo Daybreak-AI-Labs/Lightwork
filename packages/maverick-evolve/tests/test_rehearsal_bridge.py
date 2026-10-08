@@ -41,3 +41,20 @@ def test_max_cases_caps_the_queue(tmp_path):
     _write_queue(q, [{"prompt": f"case {i}", "evidence": i, "scope": "local"}
                      for i in range(1, 8)])
     assert len(cases_from_rehearsals(q, max_cases=3)) == 3
+
+
+def test_default_queue_works_without_the_kernel(tmp_path, monkeypatch):
+    import sys
+
+    from maverick_evolve import rehearsal_bridge
+
+    # `import maverick.dreaming` fails as it does where only evolve is installed.
+    monkeypatch.setitem(sys.modules, "maverick.dreaming", None)
+    q = tmp_path / "rehearsals.ndjson"
+    monkeypatch.setattr(rehearsal_bridge, "DEFAULT_REHEARSALS", tmp_path / "nope.ndjson")
+    assert rehearsal_bridge.cases_from_rehearsals() == []  # no queue yet: empty, not an ImportError
+    _write_queue(q, [{"prompt": "fix the flaky export", "evidence": 3, "scope": "local"}])
+    monkeypatch.setattr(rehearsal_bridge, "DEFAULT_REHEARSALS", q)
+    cases = rehearsal_bridge.cases_from_rehearsals()
+    assert [c.prompt for c in cases] == ["fix the flaky export"]
+    assert cases[0].check("DONE: handled") is True and cases[0].check("Stopped: budget") is False

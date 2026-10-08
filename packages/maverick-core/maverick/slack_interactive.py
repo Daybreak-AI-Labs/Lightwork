@@ -109,7 +109,7 @@ def verify_slack_signature(
     except ValueError:
         return False
     current = time.time() if now is None else float(now)
-    if abs(current - sent) > tolerance:
+    if not abs(current - sent) <= tolerance:  # not ">": a NaN age must fail too
         return False
     if not str(signature).startswith(SIGNATURE_VERSION + "="):
         return False

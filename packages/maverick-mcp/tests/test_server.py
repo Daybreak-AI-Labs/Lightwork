@@ -484,6 +484,17 @@ class TestProtocol2025_11_25:
         assert "fusion reactors" in text
         assert "deep" in text
 
+    def test_prompts_get_treats_null_arguments_as_omitted(self):
+        s = MCPServer()
+        # Some clients serialize an omitted optional field as null (tools/call
+        # accepts it too); other non-objects are still invalid params.
+        out = s.handle_prompts_get({"name": "draft_message", "arguments": None})
+        assert "Tone: professional" in out["messages"][0]["content"]["text"]
+        for bad in ([], [1], 0, "x", False):
+            with pytest.raises(_ProtocolError) as exc:
+                s.handle_prompts_get({"name": "draft_message", "arguments": bad})
+            assert exc.value.code == -32602
+
     def test_prompts_get_unknown_raises(self):
         s = MCPServer()
         with pytest.raises(_ProtocolError):

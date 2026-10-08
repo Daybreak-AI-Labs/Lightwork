@@ -42,8 +42,11 @@ def cases_from_rehearsals(
     missing or empty — callers fall back to their synthetic case set.
     """
     if path is None:
-        from maverick.dreaming import rehearsals_path
-        p = rehearsals_path()
+        try:
+            from maverick.dreaming import rehearsals_path
+            p = rehearsals_path()
+        except ImportError:  # evolve can run without the kernel installed
+            p = DEFAULT_REHEARSALS
     else:
         p = Path(path)
     if not p.exists():

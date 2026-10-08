@@ -63,6 +63,17 @@ def test_signature_rejects_tampering_wrong_secret_and_replay():
     assert not verify_slack_signature(SECRET, timestamp=None, signature=None, body=body, now=now)
 
 
+def test_signature_rejects_a_non_finite_timestamp_even_when_it_is_signed():
+    from maverick.slack_interactive import verify_slack_signature
+
+    body = b"payload=%7B%7D"
+    for stamp in ("nan", "NaN", "inf", "-inf"):
+        sig = "v0=" + hmac.new(SECRET.encode(), f"v0:{stamp}:".encode() + body, hashlib.sha256).hexdigest()
+        # A NaN age compares false against every tolerance, so the freshness check
+        # must reject it explicitly (as webhooks.verify_signature does).
+        assert not verify_slack_signature(SECRET, timestamp=stamp, signature=sig, body=body, now=1_700_000_000)
+
+
 def test_form_and_payload_parsing():
     from maverick.slack_interactive import parse_form, parse_interaction_body, parse_slash_text
 
