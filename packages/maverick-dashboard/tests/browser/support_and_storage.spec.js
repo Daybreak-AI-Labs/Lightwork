@@ -77,7 +77,9 @@ test('Help keeps task reports local after review, copy, and download',async({pag
   await page.evaluate(()=>{window.__taskDraftCopies=[];Object.defineProperty(navigator,'clipboard',{
     configurable:true,value:{writeText:async text=>{window.__taskDraftCopies.push(text);}}
   });});
-  await page.locator('#issue-report-confirm').check();
+  // The first confirmation starts a fresh review and the page clears the box
+  // itself, so click() rather than check(), which fails if it sees the reset.
+  await page.locator('#issue-report-confirm').click();
   await expect(page.locator('#issue-report-body')).toHaveValue('Customer [REDACTED]');
   await expect(page.locator('#issue-report-confirm')).not.toBeChecked();
   await expect(copy).toBeDisabled();
