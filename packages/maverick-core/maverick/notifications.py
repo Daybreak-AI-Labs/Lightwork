@@ -134,6 +134,17 @@ def _load_config() -> dict:
         return {}
 
 
+def _header_text(value: str) -> str:
+    """An HTTP header value that is safe to send. httpx writes header text as
+    ASCII, so a title such as "Zürich" would fail before anything is sent;
+    ntfy decodes RFC 2047 encoded words, so non-ASCII text goes as one."""
+    if value.isascii():
+        return value
+    import base64
+
+    return "=?UTF-8?B?" + base64.b64encode(value.encode("utf-8")).decode("ascii") + "?="
+
+
 def _send_ntfy(title: str, body: str, priority: str, server: str, topic: str) -> bool:
     try:
         import httpx
@@ -146,7 +157,7 @@ def _send_ntfy(title: str, body: str, priority: str, server: str, topic: str) ->
         # The title is agent-controlled (the notify tool lets the model set
         # it). Strip CR/LF so it can't inject extra ntfy control headers /
         # split the header block.
-        "Title": title.replace("\r", " ").replace("\n", " "),
+        "Title": _header_text(title.replace("\r", " ").replace("\n", " ")),
         "Priority": prio_map.get(priority, "3"),
     }
     try:
@@ -554,8 +565,12 @@ def _tracked(backend, ident, *, cfg, title, body, priority, receipts, authorize,
             return result
     except Exception as exc:
         log.warning("notify dispatch unavailable: %s", type(exc).__name__)
-        if final != "delivered":
-            final = "unknown" if started else "failed"
+        if final == "delivered":
+            # The service accepted it; only recording that failed. It is not
+            # unsent, and the receipt keeps its conservative "sending" state so
+            # nothing replays it.
+            return True
+        final = "unknown" if started else "failed"
         if receipts is not None:
             try:
                 message = ("Delivery could not be confirmed. Check the destination before sending again." if started
@@ -612,7 +627,10 @@ def notify(
     # Opt-in batching: coalesce low/normal-priority pushes into a windowed
     # digest. High/urgent bypass; sync sends (tests, and the batcher's own
     # delivery) bypass so there's no recursion. No-op unless configured.
-    if batch and async_dispatch and delivery_key is None and priority not in ("high", "max", "urgent"):
+    # A send that must pass an authority check cannot wait in a batch: the
+    # batcher's own delivery does not carry the check, so it would skip it.
+    if (batch and async_dispatch and delivery_key is None and authorize is None
+            and priority not in ("high", "max", "urgent")):
         from .notification_batcher import shared as _shared_batcher
         batcher = _shared_batcher()
         if batcher is not None:

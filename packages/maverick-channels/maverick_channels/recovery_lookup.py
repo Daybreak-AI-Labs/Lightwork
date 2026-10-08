@@ -6,6 +6,7 @@ Only timestamps and stable evidence digests leave this module, never message tex
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import re
@@ -56,7 +57,8 @@ def imessage_page(channel, *, minimum: str, before: str | None) -> dict:
     if before is not None and (not re.fullmatch(r"[0-9]{1,19}", before) or int(before) > 2**63 - 1):
         raise ValueError("The source page changed; refresh lookup.")
     deadline = time.monotonic() + 5
-    with sqlite3.connect(CHAT_DB.resolve().as_uri() + "?mode=ro", uri=True, timeout=2) as connection:
+    # ``with connect()`` only ends a transaction; closing the handle is explicit.
+    with contextlib.closing(sqlite3.connect(CHAT_DB.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)) as connection:
         connection.execute("PRAGMA query_only = ON")
         connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
         rows = connection.execute("SELECT ROWID,date,guid FROM message WHERE ROWID >= ? AND (? IS NULL OR ROWID < ?) ORDER BY ROWID DESC LIMIT 51", (int(minimum), int(before) if before else None, int(before) if before else None)).fetchall()

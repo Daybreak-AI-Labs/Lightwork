@@ -277,6 +277,19 @@ class DeliveryJournal:
     def _surface_stale_claim(self, row):
         from maverick.privacy_ops import RecordConflict
 
+        if (row and not row.get("restore_hold") and row["delivery"] == "sending"
+                and row["updated_at"] < time.time() - STALE_CLAIM_SECONDS):
+            # A send that never recorded how it ended belongs to a process that
+            # stopped mid-send. It may have reached the person, so it becomes
+            # an unknown outcome: reviewable, compactable, and never replayed.
+            chunks = {key: ({**chunk, "state": "delivery_unknown"} if chunk.get("state") == "sending" else chunk)
+                      for key, chunk in row["chunks"].items()}
+            try:
+                return self.change(row, delivery="delivery_unknown", chunks=chunks,
+                                   reason="Delivery began but its process stopped before recording a result; "
+                                          "check the destination before sending again")
+            except RecordConflict:
+                return self.get(row["id"])
         if (row and not row.get("restore_hold") and row["execution"] == "execution_started_unconfirmed"
                 and row["updated_at"] < time.time() - STALE_CLAIM_SECONDS):
             try:

@@ -53,9 +53,11 @@ per-recipient backend lands, :func:`deliver` is the single seam to route by
 from __future__ import annotations
 
 import contextlib
+import datetime
 import hashlib
 import json
 import logging
+import math
 import time
 import uuid
 from collections.abc import Callable
@@ -229,6 +231,17 @@ def _link(path: str) -> str:
     return record_link(path)
 
 
+def _epoch(value: object) -> float | None:
+    """A usable deadline time, or ``None``. A record with a missing or
+    malformed time is skipped, so one bad row never hides every other alert
+    from its source."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) and number > 0 else None
+
+
 def _dsar_deadlines(now: float) -> list[Deadline]:
     from . import privacy_ops
     if not privacy_ops.enabled():
@@ -243,13 +256,13 @@ def _dsar_deadlines(now: float) -> list[Deadline]:
         assignee = str(r.get("assignee") or r.get("assigned_to") or "")
         # Per-jurisdiction fields when present (extended_until wins over due_at);
         # the single due_at is what every record carries today.
-        due = r.get("extended_until") or r.get("due_at")
+        due = _epoch(r.get("extended_until")) or _epoch(r.get("due_at"))
         if due:
-            out.append(Deadline("dsar", rid, title, float(due), link, assignee,
+            out.append(Deadline("dsar", rid, title, due, link, assignee,
                                 {"kind": r.get("kind"), "jurisdiction": r.get("jurisdiction")}))
-        ack = r.get("acknowledge_by")
+        ack = _epoch(r.get("acknowledge_by"))
         if ack and not r.get("acknowledged_at"):
-            out.append(Deadline("dsar_acknowledgement", rid, title, float(ack), link, assignee))
+            out.append(Deadline("dsar_acknowledgement", rid, title, ack, link, assignee))
     return out
 
 
@@ -262,10 +275,13 @@ def _incident_deadlines(now: float) -> list[Deadline]:
         if r.get("status") != "open" or r.get("notification") is not None:
             continue
         rid = str(r.get("id") or "")
+        due = _epoch(r.get("notify_deadline_at"))
+        if due is None:
+            continue
         out.append(Deadline("incident", rid, str(r.get("title") or "privacy incident"),
-                            float(r.get("notify_deadline_at") or 0), _link("/privacy#incidents"),
+                            due, _link("/privacy#incidents"),
                             str(r.get("assignee") or ""), {"severity": r.get("severity")}))
-    return [d for d in out if d.due_at > 0]
+    return out
 
 
 def _assessment_deadlines(now: float) -> list[Deadline]:
@@ -278,10 +294,12 @@ def _assessment_deadlines(now: float) -> list[Deadline]:
         title = f"{s.get('subject') or 'assessment'} ({s.get('type') or 'assessment'})"
         link = _link(f"/assessments#{rid}")
         assignee = str(s.get("assignee") or "")
-        if s.get("renewal_at"):
-            out.append(Deadline("assessment_renewal", rid, title, float(s["renewal_at"]), link, assignee))
-        if s.get("status") == "approved" and s.get("next_review_at"):
-            out.append(Deadline("assessment_review", rid, title, float(s["next_review_at"]), link, assignee))
+        renewal = _epoch(s.get("renewal_at"))
+        if renewal:
+            out.append(Deadline("assessment_renewal", rid, title, renewal, link, assignee))
+        review = _epoch(s.get("next_review_at"))
+        if s.get("status") == "approved" and review:
+            out.append(Deadline("assessment_review", rid, title, review, link, assignee))
     return out
 
 
@@ -295,8 +313,8 @@ def _vendor_deadlines(now: float) -> list[Deadline]:
             continue
         vid = str(v.get("id") or "")
         for c in v.get("contracts") or []:
-            renews = float(c.get("renews_at") or 0)
-            if renews <= 0:
+            renews = _epoch(c.get("renews_at")) if isinstance(c, dict) else None
+            if renews is None:
                 continue
             kind = str(c.get("kind") or "contract")
             out.append(Deadline("vendor_contract", f"{vid}:{kind}",
@@ -580,26 +598,43 @@ class _RetryBook:
         self.dirty = False
 
 
+@contextlib.contextmanager
+def _using_world(world: Any):
+    """``world`` itself, or one opened here and closed here (a connection to a
+    shared database is otherwise left open per call)."""
+    if world is not None:
+        yield world
+        return
+    from .world_model import close_world_if_owned, open_world
+
+    opened = open_world()
+    try:
+        yield opened
+    finally:
+        close_world_if_owned(opened)
+
+
 def alerts_for(record_type: str, record_id: str, *, world: Any = None, limit: int = 50) -> list[dict]:
     """What was sent about one record, newest first (the record page's
     "Alerts" section)."""
-    if world is None:
-        from .world_model import open_world
-        world = open_world()
-    return _rows(world, "SELECT * FROM deadline_alerts WHERE workspace = ? AND record_type = ?"
-                        " AND record_id = ? ORDER BY sent_at DESC LIMIT ?",
-                 (_workspace(), str(record_type)[:64], str(record_id)[:128], max(1, min(int(limit), 500))))
+    with _using_world(world) as active:
+        return _rows(active, "SELECT * FROM deadline_alerts WHERE workspace = ? AND record_type = ?"
+                             " AND record_id = ? ORDER BY sent_at DESC LIMIT ?",
+                     (_workspace(), str(record_type)[:64], str(record_id)[:128], max(1, min(int(limit), 500))))
 
 
 def recent_alerts(*, world: Any = None, limit: int = 100) -> list[dict]:
-    if world is None:
-        from .world_model import open_world
-        world = open_world()
-    return _rows(world, "SELECT * FROM deadline_alerts WHERE workspace = ? ORDER BY sent_at DESC LIMIT ?",
-                 (_workspace(), max(1, min(int(limit), 500))))
+    with _using_world(world) as active:
+        return _rows(active, "SELECT * FROM deadline_alerts WHERE workspace = ? ORDER BY sent_at DESC LIMIT ?",
+                     (_workspace(), max(1, min(int(limit), 500))))
 
 
 # ---------------------------------------------------------------- messages
+def _local_date(moment: float, localtime: Callable[[float], time.struct_time]) -> datetime.date:
+    local = localtime(moment)
+    return datetime.date(local.tm_year, local.tm_mon, local.tm_mday)
+
+
 def _when(due_at: float, now: float, localtime: Callable[[float], time.struct_time]) -> str:
     remaining = due_at - now
     stamp = time.strftime("%d %b %Y %H:%M", localtime(due_at))
@@ -611,7 +646,9 @@ def _when(due_at: float, now: float, localtime: Callable[[float], time.struct_ti
     if remaining >= 2 * _DAY:
         return f"is due in {int(remaining // _DAY)} days ({stamp})"
     if remaining >= _DAY:
-        return f"is due tomorrow ({stamp})"
+        # Between 24 and 48 hours can be tomorrow or the day after.
+        ahead = (_local_date(due_at, localtime) - _local_date(now, localtime)).days
+        return f"is due tomorrow ({stamp})" if ahead <= 1 else f"is due in {ahead} days ({stamp})"
     return f"is due in {max(1, int(remaining // _HOUR))} hour(s) ({stamp})"
 
 
@@ -704,16 +741,15 @@ def _one_cycle_at_a_time():
     alert as unsent and both send it, and the second ledger row would then fail
     on the unique index. A lock that cannot be set up is logged and skipped so
     alerts still go out."""
-    try:
-        from .file_lock import cross_process_lock
-        from .paths import data_dir
+    with contextlib.ExitStack() as stack:
+        try:
+            from .file_lock import cross_process_lock
+            from .paths import data_dir
 
-        guard = cross_process_lock(data_dir("deadline-alert-cycle"))
-    except Exception as exc:  # noqa: BLE001 -- unsafe to overlap, worse to stop alerting
-        log.warning("deadline_alerts: cycles are not serialised: %s", type(exc).__name__)
-        yield
-        return
-    with guard:
+            # The lock is taken here, on entry, not when the guard is built.
+            stack.enter_context(cross_process_lock(data_dir("deadline-alert-cycle")))
+        except Exception as exc:  # noqa: BLE001 -- unsafe to overlap, worse to stop alerting
+            log.warning("deadline_alerts: cycles are not serialised: %s", type(exc).__name__)
         yield
 
 
@@ -728,8 +764,8 @@ def run_cycle(
     """Evaluate every deadline and send what is new. Returns a summary.
 
     One cycle runs at a time; an overlapping call waits for the running one."""
-    with _one_cycle_at_a_time():
-        return _run_cycle(now=now, world=world, config=config, notify=notify, localtime=localtime)
+    with _one_cycle_at_a_time(), _using_world(world) as active:
+        return _run_cycle(now=now, world=active, config=config, notify=notify, localtime=localtime)
 
 
 def _run_cycle(
@@ -742,9 +778,6 @@ def _run_cycle(
 ) -> dict[str, Any]:
     cfg = settings(config)
     current = time.time() if now is None else float(now)
-    if world is None:
-        from .world_model import open_world
-        world = open_world()
     summary: dict[str, Any] = {"evaluated": 0, "sent": 0, "held_quiet": 0, "already_sent": 0,
                                "not_sent": 0, "unconfirmed": 0, "backing_off": 0, "alerts": [],
                                "enabled": cfg["enabled"]}
@@ -777,7 +810,7 @@ def _run_cycle(
             for alert in due:
                 title, body = message_for(alert, current, localtime=localtime)
                 outcome = deliver(title, body, urgent=alert.urgent, recipient=alert.recipient, notify=notify)
-                _settle(world, alert, body, outcome, current, "immediate", summary, retries)
+                _settle_safely(world, alert, body, outcome, current, "immediate", summary, retries)
     finally:
         retries.save(current)
     return summary
@@ -793,7 +826,11 @@ def _settle(world, alert: Alert, message: str, outcome: Delivery | int, current:
     """
     if not isinstance(outcome, Delivery):  # a plain count of accepting backends
         outcome = Delivery(max(int(outcome or 0), 0))
-    hooks = int(_emit_webhook(alert, world) or 0)
+    try:
+        hooks = int(_emit_webhook(alert, world) or 0)
+    except Exception as exc:  # noqa: BLE001 -- a webhook is a second channel, never the reason an alert is lost
+        log.warning("deadline_alerts: webhook delivery failed: %s", type(exc).__name__)
+        hooks = 0
     outcome = Delivery(outcome.accepted + max(hooks, 0), outcome.uncertain)
     if outcome.status == "not_sent":
         summary["not_sent"] += 1
@@ -807,18 +844,56 @@ def _settle(world, alert: Alert, message: str, outcome: Delivery | int, current:
     summary["sent" if outcome.status == "accepted" else "unconfirmed"] += 1
 
 
+def _settle_safely(world, alert: Alert, message: str, outcome: Delivery | int, current: float, mode: str,
+                   summary: dict[str, Any], retries: _RetryBook) -> None:
+    """Record one sent alert without letting a failure to do so stop the cycle.
+
+    The alert may already have gone out, so it is counted as unconfirmed and
+    waits before it is tried again; the rest of the cycle carries on."""
+    try:
+        _settle(world, alert, message, outcome, current, mode, summary, retries)
+    except Exception as exc:  # noqa: BLE001 -- e.g. the ledger database is locked
+        log.warning("deadline_alerts: could not record the %s %s alert: %s",
+                    alert.deadline.record_type, alert.state, type(exc).__name__)
+        retries.failed(alert, current)
+        summary["unconfirmed"] += 1
+
+
+# Backends refuse an over-long message (Pushover 1024 characters, Discord 2000),
+# and a refusal is a definite failure that is retried: a digest that grew past
+# the smallest limit would then never be delivered. A digest is therefore sent
+# in parts that each fit.
+_DIGEST_LIMIT = 900
+
+
+def _digest_parts(recipient: str, lines: list[tuple[Alert, str]]) -> list[list[tuple[Alert, str]]]:
+    parts: list[list[tuple[Alert, str]]] = [[]]
+    size = len(f"{len(lines)} deadline(s) need attention. For: {recipient}.\n")
+    for alert, line in lines:
+        cost = len(line) + 3
+        if parts[-1] and size + cost > _DIGEST_LIMIT:
+            parts.append([])
+            size = len(f"{len(lines)} deadline(s) need attention. For: {recipient}.\n")
+        parts[-1].append((alert, line))
+        size += cost
+    return parts
+
+
 def _send_digest(pending, current, cfg, world, notify, localtime, summary, retries) -> None:
     by_recipient: dict[str, list[Alert]] = {}
     for alert in pending:
         by_recipient.setdefault(alert.recipient, []).append(alert)
     for recipient, alerts in by_recipient.items():
-        lines = [message_for(a, current, localtime=localtime)[1] for a in alerts]
-        body = f"{len(alerts)} deadline(s) need attention. For: {recipient}.\n" + "\n".join(f"- {ln}" for ln in lines)
-        urgent = any(a.urgent for a in alerts)
-        outcome = deliver(f"Deadlines for {recipient}", body, urgent=urgent, recipient=recipient, notify=notify)
-        for alert in alerts:
-            _settle(world, alert, message_for(alert, current, localtime=localtime)[1], outcome, current,
-                    "digest", summary, retries)
+        lines = [(a, message_for(a, current, localtime=localtime)[1]) for a in alerts]
+        parts = _digest_parts(recipient, lines)
+        for number, part in enumerate(parts, 1):
+            body = (f"{len(part)} deadline(s) need attention. For: {recipient}.\n"
+                    + "\n".join(f"- {line}" for _, line in part))
+            title = f"Deadlines for {recipient}" + (f" ({number}/{len(parts)})" if len(parts) > 1 else "")
+            urgent = any(a.urgent for a, _ in part)
+            outcome = deliver(title, body, urgent=urgent, recipient=recipient, notify=notify)
+            for alert, line in part:
+                _settle_safely(world, alert, line, outcome, current, "digest", summary, retries)
 
 
 __all__ = [

@@ -52,3 +52,38 @@ def test_mastodon_outage_never_yields_checkpoint(monkeypatch):
     channel = lookup.configured("mastodon", {"enabled": True, "instance": "source.invalid", "access_token": "synthetic", "allowed_user_ids": ["allowed"]})
     with pytest.raises(httpx.HTTPStatusError):
         lookup.lookup(channel, minimum="1", before=None)
+
+
+def test_the_local_message_database_handle_is_closed_after_a_lookup(tmp_path, monkeypatch):
+    path = tmp_path / "chat.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE message(date INTEGER, guid TEXT, text TEXT)")
+        conn.execute("INSERT INTO message VALUES(800000000000000000, 'guid-1', 'private')")
+    monkeypatch.setattr(imessage, "CHAT_DB", path)
+    monkeypatch.setattr(imessage.platform, "system", lambda: "Darwin")
+    opened = []
+    real = sqlite3.connect
+
+    class Tracked:
+        def __init__(self, connection):
+            self._connection = connection
+            opened.append(self)
+            self.closed = False
+
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
+        def __enter__(self):
+            return self._connection.__enter__()
+
+        def __exit__(self, *exc):
+            return self._connection.__exit__(*exc)
+
+        def close(self):
+            self.closed = True
+            self._connection.close()
+
+    monkeypatch.setattr(lookup.sqlite3, "connect", lambda *a, **k: Tracked(real(*a, **k)))
+    channel = lookup.configured("imessage", {"enabled": True, "allowed_user_ids": ["allowed"]})
+    lookup.lookup(channel, minimum="1", before=None)
+    assert opened and all(handle.closed for handle in opened)

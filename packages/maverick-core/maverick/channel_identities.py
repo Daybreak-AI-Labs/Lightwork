@@ -177,13 +177,15 @@ def link(channel: str, external_id: str, principal: str, *, actor: str,
         if isinstance(existing, dict) and existing.get("principal") not in (None, who):
             raise ChannelIdentityError(
                 "that chat account is already linked to a different person")
+        # Granting access is audited first: if the deployment's audit policy
+        # refuses (AuditRefused), no unaudited link is left behind.
+        _audit("channel_identity_linked", channel=name, external_id=ext, principal=who,
+               actor=actor, method=method)
         data["links"][key] = {
             "principal": who, "linked_at": time.time(),
             "linked_by": str(actor or ""), "method": method,
         }
         _write(data)
-    _audit("channel_identity_linked", channel=name, external_id=ext, principal=who,
-           actor=actor, method=method)
     return {"channel": name, "external_id": ext, "principal": who}
 
 
@@ -258,13 +260,15 @@ def redeem_link_code(channel: str, external_id: str, code: str, *,
         existing = data["links"].get(_key(name, ext))
         if isinstance(existing, dict) and existing.get("principal") not in (None, who):
             return None
+        # Audited before the code is spent and the link exists: a refusal
+        # leaves the code redeemable and no unaudited link behind.
+        _audit("channel_identity_linked", channel=name, external_id=ext, principal=who,
+               actor=who, method="code")
         del data["codes"][digest]
         data["links"][_key(name, ext)] = {
             "principal": who, "linked_at": current, "linked_by": who, "method": "code",
         }
         _write(data)
-    _audit("channel_identity_linked", channel=name, external_id=ext, principal=who,
-           actor=who, method="code")
     return who
 
 

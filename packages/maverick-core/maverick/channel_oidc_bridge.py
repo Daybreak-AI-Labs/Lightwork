@@ -152,6 +152,15 @@ def _audit(action: str, *, principal: str, channel: str) -> None:
         raise BridgeError("The identity change could not be recorded.")
 
 
+def _record_revocation(action: str, *, principal: str, channel: str) -> None:
+    """Audit a revocation that has already taken effect. If the audit cannot be
+    written the error says so; repeating the revocation finishes the removal."""
+    try:
+        _audit(action, principal=principal, channel=channel)
+    except BridgeError as exc:
+        raise BridgeError("Access was revoked, but the change could not be recorded in the audit log.") from exc
+
+
 def _membership_current(subject: str, workspace: str) -> bool:
     principal = "user:" + subject
     try:
@@ -327,10 +336,11 @@ def revoke(link_id: str, *, actor: str) -> bool:
         row = data["links"].get(link_id)
         if not isinstance(row, dict) or row.get("workspace") != _workspace():
             return False
-        _audit("revocation_requested", principal=actor, channel=row["provider"][0])
+        # Revoke first: an audit outage must not leave a compromised chat
+        # account able to act. Only a link that is "active" resolves.
         row["status"] = "revoked"
         _write(data)
-        _audit("access_revoked", principal=actor, channel=row["provider"][0])
+        _record_revocation("access_revoked", principal=actor, channel=row["provider"][0])
         del data["links"][link_id]
         _write(data)
     return True
@@ -346,10 +356,9 @@ def unlink(sub: str, issuer: str, audience: str, link_id: str) -> bool:
                 or row.get("issuer") != iss or row.get("audience") != aud
                 or row.get("workspace") != _workspace()):
             return False
-        _audit("disconnection_requested", principal="user:" + subject, channel=row["provider"][0])
         row["status"] = "revoked"
         _write(data)
-        _audit("access_revoked", principal="user:" + subject, channel=row["provider"][0])
+        _record_revocation("access_revoked", principal="user:" + subject, channel=row["provider"][0])
         del data["links"][link_id]
         _write(data)
     return True

@@ -278,3 +278,60 @@ def test_the_platform_mailers_own_transport_login_connect_and_data_failures(monk
         monkeypatch.setattr(smtplib, "SMTP", fake)
         monkeypatch.setattr(smtplib, "SMTP_SSL", fake)
         assert _checked({}) == expected, fake.__name__
+
+
+# ---- ntfy titles, receipts and batching ------------------------------------------------
+
+def test_a_non_ascii_ntfy_title_is_sent_as_an_rfc2047_word_not_a_local_encoding_error(monkeypatch):
+    """httpx writes header text as ASCII, so "Zürich" used to fail before any
+    request existed and was then recorded as an unknown outcome."""
+    from email.header import decode_header, make_header
+
+    import httpx
+    from maverick import notifications as n
+
+    sent = []
+
+    def post(url, content=None, headers=None, timeout=None):
+        httpx.Request("POST", url, content=content, headers=headers)        # what httpx itself would build
+        sent.append(headers)
+        return httpx.Response(200)
+
+    monkeypatch.setattr(httpx, "post", post)
+    assert n._send_ntfy("Due soon: José from Zürich", "body", "default", "https://ntfy.example", "topic") is True
+    title = sent[0]["Title"]
+    assert title.isascii()
+    assert str(make_header(decode_header(title))) == "Due soon: José from Zürich"
+    assert n._send_ntfy("Plain title", "body", "default", "https://ntfy.example", "topic") is True
+    assert sent[1]["Title"] == "Plain title"
+
+
+def test_a_delivered_notification_whose_receipt_cannot_be_updated_is_still_delivered(monkeypatch):
+    from maverick import notifications as n
+
+    class Receipts:
+        def update(self, ident, state, message, **kwargs):
+            if state in ("delivered", "failed", "unknown"):
+                raise OSError("receipt file locked")
+
+    monkeypatch.setattr(n, "_dispatch", lambda backend, **kwargs: True)
+    monkeypatch.setattr(n, "_load_config", dict)
+    states = []
+    result = n._tracked("ntfy", "id", cfg={}, title="t", body="b", priority="default",
+                        receipts=Receipts(), authorize=None, states=states)
+    assert result is True and states == ["delivered"]
+
+
+def test_a_send_that_needs_an_authority_check_is_never_batched(monkeypatch):
+    import maverick.notification_batcher as nb
+    from maverick import notifications as n
+
+    class Batcher:
+        def submit(self, *args, **kwargs):
+            raise AssertionError("an authorized send must not wait in a batch that skips its check")
+
+    checked = []
+    monkeypatch.setattr(nb, "shared", lambda: Batcher())
+    monkeypatch.setattr(n, "_load_config", lambda: {"backends": ["ntfy"], "delivery_receipts": False})
+    monkeypatch.setattr(n, "_requested", lambda cfg, backends: ["none"])
+    n.notify("hi", async_dispatch=True, authorize=lambda: checked.append(True))

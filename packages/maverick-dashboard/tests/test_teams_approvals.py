@@ -323,3 +323,13 @@ def test_teams_settings_are_in_the_catalog():
     assert "channels.teams.allowed_users" in catalog.BY_ID
     assert catalog.BY_ID["channels.teams.approvals_enabled"].control == "toggle"
     assert catalog.BY_ID["channels.teams.allowed_tenants"].control == "list"
+
+
+def test_an_expired_request_never_shows_its_stored_envelope_as_plain_detail():
+    from maverick.approval_cards import APPROVAL_DETAIL_PREFIX
+    from maverick_dashboard.approval_decisions import approval_view
+
+    aid, _ = _approval(card=_card(expires_at=time.time() - 5))
+    detail = approval_view(aid)["approval"]["detail"]
+    assert APPROVAL_DETAIL_PREFIX not in detail and "Email invoice 42" not in detail
+    assert "decide-by time has passed" in detail

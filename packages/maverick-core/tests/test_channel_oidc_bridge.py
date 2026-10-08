@@ -202,12 +202,35 @@ def test_failed_revocation_audit_leaves_account_disabled(monkeypatch):
         real_audit(action, **kwargs)
 
     monkeypatch.setattr(bridge, "_audit", fail_completed)
-    with pytest.raises(bridge.BridgeError, match="audit unavailable"):
+    with pytest.raises(bridge.BridgeError, match="Access was revoked, but"):
         bridge.revoke(link_id, actor="user:admin")
     assert bridge.resolve("slack", ACCOUNT, TEAM, SENDER) is None
     assert bridge.all_links()[0]["status"] == "revoked"
     monkeypatch.setattr(bridge, "_audit", real_audit)
     assert bridge.revoke(link_id, actor="user:admin")
+    assert bridge.all_links() == []
+
+
+@pytest.mark.parametrize("how", ["revoke", "unlink"])
+def test_no_audit_at_all_never_keeps_a_chat_account_connected(monkeypatch, how):
+    """Cutting access off must not wait for the audit log: a compromised chat
+    account stays disabled even when every audit write fails."""
+    _confirmed()
+    link_id = bridge.links_for("alice", ISSUER, AUDIENCE)[0]["id"]
+    real_audit = bridge._audit
+
+    def unavailable(action, **kwargs):
+        raise bridge.BridgeError("The identity change could not be recorded.")
+
+    monkeypatch.setattr(bridge, "_audit", unavailable)
+    with pytest.raises(bridge.BridgeError, match="Access was revoked, but"):
+        if how == "revoke":
+            bridge.revoke(link_id, actor="user:admin")
+        else:
+            bridge.unlink("alice", ISSUER, AUDIENCE, link_id)
+    assert bridge.resolve("slack", ACCOUNT, TEAM, SENDER) is None
+    monkeypatch.setattr(bridge, "_audit", real_audit)
+    assert bridge.revoke(link_id, actor="user:admin")        # repeating finishes the removal
     assert bridge.all_links() == []
 
 

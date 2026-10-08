@@ -81,12 +81,37 @@ def decide_by(expires_at: object) -> str:
     return when.strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _lines(value: object, *, limit: int = MAX_TEXT) -> list[tuple[str, bool]]:
+    """``(line, after_blank_line)`` pairs, whitespace trimmed per line, within
+    ``limit`` characters in all. A TextBlock does not keep a bare newline, so
+    each line becomes its own block."""
+    out: list[tuple[str, bool]] = []
+    used, gap = 0, False
+    for raw in str(value or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw.rstrip()
+        if not line.strip():
+            gap = bool(out)
+            continue
+        line = line[: limit - used]
+        if not line:
+            break
+        out.append((line, gap))
+        used += len(line)
+        gap = False
+    return out
+
+
 def text_card(text: str, *, title: str = "") -> dict:
-    """A plain reply as a card (used for long results and welcome text)."""
+    """A plain reply as a card (used for long results and welcome text). Line
+    breaks and paragraphs are kept."""
     body = []
     if title:
         body.append(_block(_text(title, limit=200), weight="bolder", size="medium"))
-    body.append(_block(_text(text)))
+    lines = _lines(text)
+    for line, after_blank in lines:
+        body.append(_block(line, spacing="medium" if after_blank else "default"))
+    if not lines:
+        body.append(_block(""))
     return _card(body)
 
 

@@ -588,3 +588,119 @@ def test_the_retry_store_prunes_old_entries_and_stays_bounded(world, tmp_path, m
     ds = [_deadline(record_id=f"C{i}", due_in=-DAY) for i in range(4)]
     _cycle(world, ds, lambda body, **kw: 0, now=NOW + 3600)
     assert len(json.loads(path.read_text(encoding="utf-8"))) == 2
+
+
+# ---- review round: the cycle survives one bad record, one bad write, one bad lock -------------
+
+def test_one_malformed_record_does_not_hide_the_rest_of_its_source(monkeypatch):
+    from maverick import privacy_ops
+    monkeypatch.setattr(privacy_ops, "enabled", lambda: True)
+    monkeypatch.setattr(privacy_ops, "list_dsars", lambda: [
+        {"id": "bad", "status": "open", "due_at": "2026-11-01", "kind": "access", "subject_id": "x"},
+        {"id": "nan", "status": "open", "due_at": float("nan"), "kind": "access", "subject_id": "x"},
+        {"id": "good", "status": "open", "due_at": NOW + DAY, "kind": "access", "subject_id": "y"},
+    ])
+    assert [d.record_id for d in da._dsar_deadlines(NOW)] == ["good"]
+    monkeypatch.setattr(privacy_ops, "list_incidents", lambda: [
+        {"id": "i1", "status": "open", "notify_deadline_at": "soon"},
+        {"id": "i2", "status": "open", "notify_deadline_at": NOW + HOUR, "title": "breach"},
+    ])
+    assert [d.record_id for d in da._incident_deadlines(NOW)] == ["i2"]
+
+
+def test_malformed_assessments_and_vendor_contracts_are_skipped_individually(monkeypatch):
+    from maverick import assessment
+    from maverick import vendor_management as vm
+    monkeypatch.setattr(assessment, "list_saved", lambda: [
+        {"id": "a1", "renewal_at": "never", "status": "approved", "next_review_at": NOW + DAY},
+        {"id": "a2", "renewal_at": NOW + DAY, "status": "approved"},
+    ])
+    found = {(d.record_type, d.record_id) for d in da._assessment_deadlines(NOW)}
+    assert found == {("assessment_review", "a1"), ("assessment_renewal", "a2")}
+    monkeypatch.setattr(vm, "enabled", lambda: True)
+    monkeypatch.setattr(vm, "list_vendors", lambda: [
+        {"id": "v1", "name": "Acme", "contracts": ["not-a-dict", {"kind": "dpa", "renews_at": "x"},
+                                                   {"kind": "msa", "renews_at": NOW + DAY}]}])
+    assert [d.record_id for d in da._vendor_deadlines(NOW)] == ["v1:msa"]
+
+
+def test_an_alert_that_cannot_be_recorded_does_not_stop_the_others(world, monkeypatch):
+    real = da._record_sent
+
+    def flaky(world_, alert, *args, **kwargs):
+        if alert.deadline.record_id == "R1":
+            raise RuntimeError("database is locked")
+        return real(world_, alert, *args, **kwargs)
+
+    monkeypatch.setattr(da, "_record_sent", flaky)
+    first, second = _deadline(record_id="R1", due_in=DAY), _deadline(record_id="R2", due_in=DAY)
+    summary, sent = _run(world, [first, second])
+    assert len(sent) == 2                                      # both went out
+    assert [a["record_id"] for a in summary["alerts"]] == ["R2"]   # the second is on record
+    assert summary["unconfirmed"] == 1
+    monkeypatch.setattr(da, "_record_sent", real)
+    again, sent = _run(world, [first, second], sent=sent)
+    assert again["backing_off"] == 1 and len(sent) == 2        # waits before the unrecorded one is repeated
+
+
+def test_a_lock_that_cannot_be_taken_does_not_stop_alerts(world, monkeypatch):
+    import contextlib
+
+    from maverick import file_lock
+
+    @contextlib.contextmanager
+    def refusing(path, **kwargs):
+        raise OSError("lock directory is read-only")
+        yield
+
+    monkeypatch.setattr(file_lock, "cross_process_lock", refusing)
+    summary, sent = _run(world, [_deadline(due_in=DAY)])
+    assert summary["sent"] == 1 and len(sent) == 1
+
+
+def test_a_failure_inside_the_cycle_is_not_hidden_by_the_lock_fallback(world, monkeypatch):
+    monkeypatch.setattr(da, "evaluate", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError, match="boom"):
+        _run(world, [_deadline(due_in=DAY)])
+
+
+def test_a_big_digest_is_sent_in_parts_each_small_enough_for_the_smallest_backend(world):
+    deadlines = [_deadline(record_id=f"R{i}", due_in=DAY, title="access request " + "x" * 120) for i in range(12)]
+    summary, sent = _run(world, deadlines, config=_config(mode="digest"))
+    assert len(sent) > 1
+    assert all(len(body) <= da._DIGEST_LIMIT + 400 for _, body, _ in sent)     # one long line may overshoot, once
+    assert all(len(body) <= 1024 for _, body, _ in sent)
+    assert sent[0][0] == f"Deadlines for Dana (privacy owner) (1/{len(sent)})"
+    assert summary["sent"] == 12 and len(summary["alerts"]) == 12              # every alert is on record once
+    assert sum(body.count("\n- ") for _, body, _ in sent) == 12
+
+
+def test_a_small_digest_keeps_its_single_message_and_plain_title(world):
+    summary, sent = _run(world, [_deadline(record_id="A", due_in=DAY), _deadline(record_id="B", due_in=DAY)],
+                         config=_config(mode="digest"))
+    assert len(sent) == 1 and sent[0][0] == "Deadlines for Dana (privacy owner)"
+
+
+def test_a_deadline_two_calendar_days_away_is_not_called_tomorrow():
+    monday_23 = time.mktime((2026, 10, 5, 23, 0, 0, 0, 0, -1))
+    wednesday_04 = time.mktime((2026, 10, 7, 4, 0, 0, 0, 0, -1))          # 29 hours later
+    assert "is due in 2 days" in da._when(wednesday_04, monday_23, time.localtime)
+    tuesday_22 = time.mktime((2026, 10, 6, 22, 0, 0, 0, 0, -1))           # 23 hours later
+    assert da._when(tuesday_22, monday_23, time.localtime).startswith("is due in 23 hour")
+    tuesday_23_30 = monday_23 + 24.5 * HOUR
+    assert da._when(tuesday_23_30, monday_23, time.localtime).startswith("is due tomorrow")
+
+
+def test_a_world_opened_for_a_read_is_closed_again(monkeypatch, tmp_path):
+    from maverick import world_model
+    opened = []
+
+    class Tracked(WorldModel):
+        def close(self):
+            opened.append("closed")
+            super().close()
+
+    monkeypatch.setattr(world_model, "open_world", lambda *a, **k: Tracked(path=tmp_path / "w.db"))
+    assert da.recent_alerts() == []
+    assert da.alerts_for("dsar", "R1") == []
+    assert opened == ["closed", "closed"]
