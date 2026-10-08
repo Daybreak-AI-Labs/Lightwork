@@ -40,7 +40,24 @@ test('cancel and bounded output never become a successful zero-exit acknowledgem
     f.child.emit('close', 0, null); await result; assert.equal(f.killed(), 1);
   }
 });
-function connectionFixture({legacy = '', base = 'https://one.example', failStore = false, consent} = {}) {
+test('a streamed run is not stopped for printing more than the buffered-output limit', async () => {
+  const f = cli(), lines = []; const owner = f.ownCli('fixture', [], {onLine: line => lines.push(line)});
+  const chunk = Buffer.from('x'.repeat(1023) + '\n');
+  for (let i = 0; i < 1500; i++) f.child.stdout.emit('data', chunk);
+  f.child.emit('close', 0, null);
+  assert.equal((await owner.result).code, 0); assert.equal(lines.length, 1500); assert.equal(f.killed(), 0);
+});
+test('a streamed run is still stopped by one endless line or by a total the caller chose', async () => {
+  const endless = cli(); const first = endless.ownCli('fixture', [], {onLine() {}});
+  const endlessRejected = assert.rejects(first.result, /output limit.*unconfirmed/);
+  endless.child.stdout.emit('data', Buffer.alloc(1024 * 1024 + 1, 'x')); endless.child.emit('close', 0, null);
+  await endlessRejected; assert.equal(endless.killed(), 1);
+  const total = cli(); const second = total.ownCli('fixture', [], {onLine() {}, maxBytes: 16});
+  const totalRejected = assert.rejects(second.result, /output limit.*unconfirmed/);
+  total.child.stdout.emit('data', Buffer.from('ab\n'.repeat(6))); total.child.emit('close', 0, null);
+  await totalRejected; assert.equal(total.killed(), 1);
+});
+function connectionFixture({legacy = '', base = 'https://one.example', failStore = false, consent, fetch} = {}) {
   const settings = {dashboardUrl: base, dashboardToken: legacy}, secrets = new Map(), state = new Map(), warnings = [];
   const context = {secrets: {get: async key => secrets.get(key), store: async (key, value) => {
     if (failStore) throw new Error('protected store unavailable'); secrets.set(key, value);
@@ -50,7 +67,7 @@ function connectionFixture({legacy = '', base = 'https://one.example', failStore
     window: {showWarningMessage: async (...args) => { warnings.push(args[0]); return consent ? consent(settings, secrets) : 'Use this dashboard'; }}};
   const transport = source('apps/vscode-extension/src/eventWatch.ts');
   const {DashboardConnections} = source('apps/vscode-extension/src/dashboardConnection.ts', {
-    require: name => name === 'vscode' ? vscode : name === './eventWatch' ? transport : require(name)});
+    fetch, require: name => name === 'vscode' ? vscode : name === './eventWatch' ? transport : require(name)});
   let owner; owner = new DashboardConnections(context, () => owner.dispose());
   return {owner, settings, secrets, warnings};
 }
@@ -93,4 +110,26 @@ test('external helper aborts an owned stalled write without replaying it', async
   });
   const pending = assert.rejects(client.start('private title'), error => error.kind === 'unknown_effect' && !error.message.includes('private'));
   deadline(); await pending; assert.equal(requests, 1); assert.equal(aborts, 1); client.dispose();
+});
+function recordedFetch(sent) {
+  return async (url, options) => {
+    sent.push({url, options});
+    return new Response('{"ok":true}', {status: 200, headers: {'content-type': 'application/json'}});
+  };
+}
+test('a tokenless local write names the dashboard origin, which the dashboard requires and Node does not send', async () => {
+  const sent = [], base = 'http://127.0.0.1:8765';
+  const f = connectionFixture({base, fetch: recordedFetch(sent)});
+  const connection = {base, token: '', scope: 'scope', generation: 0};
+  await f.owner.request(connection, '/api/v1/goals/7/cancel', {});
+  await f.owner.request(connection, '/api/v1/goals');
+  assert.equal(sent[0].options.method, 'POST'); assert.equal(sent[0].options.headers.Origin, base);
+  assert.equal(sent[0].options.headers.Authorization, undefined);
+  assert.equal(sent[1].options.method, 'GET'); assert.equal('Origin' in sent[1].options.headers, false);
+});
+test('a token write keeps its bearer credential and names the same origin', async () => {
+  const sent = [], base = 'https://dashboard.example';
+  const f = connectionFixture({base, fetch: recordedFetch(sent)});
+  await f.owner.request({base, token: 'secret', scope: 'scope', generation: 0}, '/api/v1/goals/7/resume', {});
+  assert.equal(sent[0].options.headers.Authorization, 'Bearer secret'); assert.equal(sent[0].options.headers.Origin, base);
 });

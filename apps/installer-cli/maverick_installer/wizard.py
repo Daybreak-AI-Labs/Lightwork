@@ -4804,6 +4804,17 @@ def _pick_image_edit_models() -> dict[str, str]:
     return choices
 
 
+def _drop_self_connect_without_connections(advanced: dict[str, Any]) -> None:
+    """Employee-connected accounts are written only with named connections.
+
+    Say so instead of silently dropping the answer.
+    """
+    if advanced.get("connections_self_connect") and not advanced.get("connections"):
+        advanced["connections_self_connect"] = False
+        console.print("[yellow]Employees can connect their own accounts only when named connections are on. "
+                      "That answer was not saved. Turn on named connections to use it.[/yellow]")
+
+
 def pick_advanced() -> dict[str, Any]:
     """Configure advanced reasoning, learning, and governance features.
 
@@ -5910,6 +5921,7 @@ def pick_advanced() -> dict[str, Any]:
             default=False,
         ),
     }
+    _drop_self_connect_without_connections(advanced)
     # The governed sidecar is an extension of the external-agent boundary: its
     # clients authenticate through per-agent MCP credentials and then inherit
     # the same trust/revocation/control-plane posture. Keep the deployment
@@ -7498,7 +7510,10 @@ def _emit_kv(lines: list[str], k: str, v: Any) -> None:
     elif isinstance(v, (int, float)):
         lines.append(f"{k} = {v}")
     elif isinstance(v, list):
-        rendered = ", ".join(_toml_str(x) for x in v)
+        rendered = ", ".join(
+            str(x).lower() if isinstance(x, bool) else str(x) if isinstance(x, (int, float)) else _toml_str(x)
+            for x in v
+        )
         lines.append(f"{k} = [{rendered}]")
     else:
         lines.append(f"{k} = {_toml_str(v)}")

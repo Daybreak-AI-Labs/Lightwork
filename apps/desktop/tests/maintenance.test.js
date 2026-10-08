@@ -232,3 +232,57 @@ test("repair review hides the approval steps and saved history uses plain labels
     assert.equal(page.includes(phrase), false, phrase);
   }
 });
+
+const approval = operation => ({ actor_label: "An administrator", operation, expires_at: Math.floor(Date.now() / 1000) + 600,
+  scope: "This installation only.", old_version: "1.0.0", new_version: "1.0.1" });
+
+test("a rollback that used the protected approval no longer shows it as loaded", async () => {
+  const calls = [];
+  const elements = render(async command => {
+    calls.push(command);
+    if (command === "maintenance_status") return { version: "1.0.0", updates_configured: true };
+    if (command === "review_maintenance_handoff") return approval("rollback");
+    throw new Error("the installer could not be started");
+  });
+  await settle();
+  await elements["load-handoff"].handlers.click();
+  assert.equal(elements["rollback-install"].disabled, false);
+  await elements["rollback-install"].handlers.click();
+  assert.ok(calls.includes("rollback_desktop_update"));
+  assert.equal(elements["rollback-install"].disabled, true);
+  assert.match(elements["maintenance-authorization-hint"].textContent, /No code yet/);
+  await elements["rollback-install"].handlers.click();
+  assert.equal(calls.filter(command => command === "rollback_desktop_update").length, 1);
+});
+
+test("an upgrade that used the protected approval needs it loaded again before a retry", async () => {
+  const elements = render(async command => {
+    if (command === "maintenance_status") return { version: "1.0.0", updates_configured: true, reviewed_update: { review: "7", version: "1.0.1", notes: "" } };
+    if (command === "review_maintenance_handoff") return approval("upgrade");
+    if (command === "check_desktop_update") return { review: "7", version: "1.0.1", repair: false, notes: "" };
+    throw new Error("the download failed");
+  });
+  await settle();
+  await elements["check-update"].handlers.click();
+  await elements["load-handoff"].handlers.click();
+  assert.equal(elements["install-update"].disabled, false);
+  await elements["install-update"].handlers.click();
+  assert.match(elements["maintenance-details"].textContent, /download failed/);
+  assert.equal(elements["install-update"].disabled, true);
+  assert.match(elements["maintenance-authorization-hint"].textContent, /No code yet/);
+});
+
+test("a repair keeps the protected approval, which it never uses", async () => {
+  const elements = render(async command => {
+    if (command === "maintenance_status") return { version: "1.0.0", updates_configured: true };
+    if (command === "review_maintenance_handoff") return approval("rollback");
+    if (command === "check_desktop_update") return { review: "1", version: "1.0.0", repair: true, notes: "" };
+    throw new Error("signature mismatch");
+  });
+  await settle();
+  await elements["load-handoff"].handlers.click();
+  await elements["repair-install"].handlers.click();
+  await elements["install-update"].handlers.click();
+  assert.equal(elements["rollback-install"].disabled, false);
+});
+
