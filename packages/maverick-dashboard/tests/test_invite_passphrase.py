@@ -692,7 +692,7 @@ def test_a_reset_link_still_works_when_the_idp_changes_someone_else(workspace, t
 def test_the_owner_cannot_be_reset_this_way(workspace, tmp_path):
     refused = _reset(workspace, email=OWNER)
     assert refused.status_code == 403
-    assert "owner recovery" in refused.text
+    assert "installation owner's passphrase cannot be reset" in refused.text
     assert not (tmp_path / "dashboard-passphrase-resets.json").exists()
     local = workspace
     local.cookies.clear()

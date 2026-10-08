@@ -69,8 +69,7 @@ _PREFIX = "pwr_"
 RESET_TTL_SECONDS = 3600
 
 ONLY_OWNER = "Only the installation owner can reset a passphrase."
-OWNER_REFUSED = ("The installation owner's passphrase cannot be reset here. The owner signs in "
-                 "on the computer running Lightwork and uses owner recovery there.")
+OWNER_REFUSED = "The installation owner's passphrase cannot be reset from the Users page."
 NO_PASSPHRASE = ("This person has no passphrase and no access here, so there is nothing to reset or "
                  "give. Invite them from the Users page instead.")
 UNAVAILABLE = "Passphrase resets are unavailable right now. Ask your administrator to check Lightwork."
