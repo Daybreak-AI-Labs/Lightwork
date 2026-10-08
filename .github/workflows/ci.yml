@@ -1025,6 +1025,10 @@ jobs:
             'packaging==26.3'
           pip install -e './packages/maverick-core[postgres]'
           pip install -e ./packages/maverick-knowledge
+          # Event-origin goals take the dashboard's event registry lock before
+          # they start (maverick.event_admission), so the live Postgres start
+          # boundary tests need the dashboard package importable.
+          pip install -e ./packages/maverick-dashboard
           pip install \
             'psycopg==3.3.6' 'psycopg-binary==3.3.6' \
             'psycopg-pool==3.3.3' 'sqlalchemy==2.0.54'
