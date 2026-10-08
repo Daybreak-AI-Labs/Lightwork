@@ -183,6 +183,17 @@ function Stop-Recovery {
     throw 'The owned recovery workspace is still responding. A new recovery process was not started.'
 }
 
+function Save-NativeReview {
+    # The native application records the exact release it reviewed before the
+    # browser may authorize an upgrade. This is that native step, run through
+    # the same frozen helper; it authorizes nothing by itself.
+    return Protocol $runtime 'save-native-review' @{release=[ordered]@{
+        version=$newVersion
+        runtime_sha256=$metadata.runtime.sha256
+        installer_sha256=(Get-FileHash -LiteralPath $CandidateMsi -Algorithm SHA256).Hash.ToLowerInvariant()
+        signature=(Get-Content -Raw -LiteralPath ($CandidateMsi+'.sig')).Trim()}}
+}
+
 function Authorization([string]$rollbackId='', [string]$BridgeFile='') {
     $origin = 'http://127.0.0.1:8765'
     $bearer = 'Bearer ' + $env:MAVERICK_DASHBOARD_TOKEN
@@ -190,6 +201,16 @@ function Authorization([string]$rollbackId='', [string]$BridgeFile='') {
     $headers = @{Origin=$origin; Authorization=$bearer; 'X-Lightwork-Recovery-Context'=$status.context; 'X-Lightwork-Expected-Tenant'=$status.expected_tenant}
     $body = @{confirm=$true; confirm_all_workspaces=$true}
     if ($rollbackId) { $body.rollback_id=$rollbackId }
+    else {
+        # An upgrade is authorized only against the release the native
+        # application reviewed; the dashboard must show that exact review.
+        $saved = Save-NativeReview
+        $shown = (Invoke-RestMethod ($origin + '/api/v1/recovery/installation') -TimeoutSec 15 -Headers $headers).native_review
+        if (-not $shown -or $shown.id -cne $saved.id -or $shown.release_sha256 -cne $saved.release_sha256) {
+            throw 'Workspace recovery did not show the exact release the native application reviewed.'
+        }
+        $body.review_id = $saved.id
+    }
     if ($BridgeFile) {
         if ($rollbackId) { throw 'A rollback must use the originally admitted transition.' }
         $envelope = Get-Content -Raw -LiteralPath $BridgeFile

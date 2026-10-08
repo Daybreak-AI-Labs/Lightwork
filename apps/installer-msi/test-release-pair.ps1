@@ -152,7 +152,24 @@ function Assert-State([string]$fact='original') {
 function Authorization([string]$rollbackId='') {
     $headers=Headers; $status=Invoke-RestMethod ($script:origin+'/api/v1/recovery/status') -Headers $headers -TimeoutSec 30
     $headers['X-Lightwork-Recovery-Context']=$status.context; $headers['X-Lightwork-Expected-Tenant']=$status.expected_tenant
-    $body=@{confirm=$true;confirm_all_workspaces=$true}; if ($rollbackId) {$body.rollback_id=$rollbackId}
+    $body=@{confirm=$true;confirm_all_workspaces=$true}
+    if ($rollbackId) {$body.rollback_id=$rollbackId}
+    else {
+        # The installed (previous) release decides the contract. One that records
+        # the native application's release review requires an upgrade to name it;
+        # an earlier release has neither the review nor the field.
+        $installation=Invoke-RestMethod ($script:origin+'/api/v1/recovery/installation') -Headers $headers -TimeoutSec 30
+        if ($installation.PSObject.Properties.Name -contains 'native_review') {
+            $candidate=$pair.candidate
+            $saved=Protocol $runtime 'save-native-review' @{release=[ordered]@{
+                version=$candidate.version; runtime_sha256=$candidate.runtime_sha256
+                installer_sha256=(Get-FileHash -LiteralPath $packages.candidate -Algorithm SHA256).Hash.ToLowerInvariant()
+                signature=(Get-Content -Raw -LiteralPath ($packages.candidate+'.sig')).Trim()}}
+            $shown=(Invoke-RestMethod ($script:origin+'/api/v1/recovery/installation') -Headers $headers -TimeoutSec 30).native_review
+            if (-not $shown -or $shown.id -cne $saved.id -or $shown.release_sha256 -cne $saved.release_sha256) { throw 'Workspace recovery did not show the exact release the native application reviewed.' }
+            $body.review_id=$saved.id
+        }
+    }
     return Invoke-RestMethod ($script:origin+'/api/v1/recovery/installation/authorize') -Headers $headers -Method Post -ContentType 'application/json' -Body ($body|ConvertTo-Json) -TimeoutSec 30
 }
 function Execute-Retained($prepared,$grant) {
