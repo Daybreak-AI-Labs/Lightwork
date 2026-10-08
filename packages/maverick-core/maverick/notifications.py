@@ -64,19 +64,23 @@ def _network_unknown() -> None:
     _outcome.set(("unknown", "Delivery could not be confirmed. Check the destination before sending again.", False))
 
 
-def mark_transport_failure(exc: BaseException) -> None:
-    """Record why an HTTP send raised. A request that never connected (the host
-    could not be reached or the address is unusable) was never sent, so it is a
-    definite failure that may be retried after a wait; any other failure may
-    have reached the service and stays unconfirmed."""
+def never_sent(exc: BaseException) -> bool:
+    """Whether an HTTP send that raised ``exc`` provably never reached the service:
+    it never connected (the host could not be reached or the address is unusable)."""
     try:
         import httpx
 
-        never_sent = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout,
-                                      httpx.UnsupportedProtocol, httpx.InvalidURL))
+        return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout,
+                                httpx.UnsupportedProtocol, httpx.InvalidURL))
     except Exception:  # noqa: BLE001 -- no httpx: treat the result as unknown
-        never_sent = False
-    if never_sent:
+        return False
+
+
+def mark_transport_failure(exc: BaseException) -> None:
+    """Record why an HTTP send raised. A request that never connected was never
+    sent, so it is a definite failure that may be retried after a wait; any other
+    failure may have reached the service and stays unconfirmed."""
+    if never_sent(exc):
         _outcome.set(("failed", "The notification service could not be reached. Nothing was sent.", True))
     else:
         _network_unknown()

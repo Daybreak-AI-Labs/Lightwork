@@ -165,9 +165,15 @@ def validate_url(url: object) -> str:
     text = str(url or "").strip()
     if not text or len(text) > _MAX_URL:
         raise SubscriptionError("the address must be between 1 and 2048 characters")
-    parts = urlsplit(text)
+    try:
+        parts = urlsplit(text)
+        port = parts.port  # a non-numeric or out-of-range port raises ValueError
+    except ValueError as exc:
+        raise SubscriptionError("the address is not a valid web address") from exc
     if parts.scheme not in ("https", "http") or not parts.hostname:
         raise SubscriptionError("the address must start with https:// and name a server")
+    if port == 0 or any(c.isspace() or ord(c) < 32 for c in parts.netloc):
+        raise SubscriptionError("the address is not a valid web address")
     if parts.username or parts.password:
         raise SubscriptionError("the address must not carry a user name or password")
     try:
@@ -408,8 +414,17 @@ def targets_for(event_type: str, *, world: Any = None) -> list[dict]:
     """Every place ``event_type`` goes: enabled matching subscriptions plus the
     legacy ``[webhooks] outbound`` list (one virtual subscription per address)."""
     out: list[dict] = []
-    for sub in list_subscriptions(world=world, include_disabled=False):
-        if matches(sub["events"], event_type):
+    # Choosing targets needs no secret, so none is read here: one subscription
+    # whose saved secret cannot be verified must not make the whole lookup fail
+    # (and every healthy one stop receiving events). Its own delivery is refused
+    # and logged at send time instead (``_send_source``).
+    for sub in _rows(_world(world), "SELECT id, url, events FROM webhook_subscriptions"
+                     " WHERE workspace = ? AND enabled = 1 ORDER BY created_at", (workspace_id(),)):
+        try:
+            events = json.loads(sub.get("events") or '["*"]')
+        except ValueError:
+            events = ["*"]
+        if matches(events, event_type):
             out.append({"subscription_id": sub["id"], "url": sub["url"]})
     from .webhooks import _load_config_outbound
     urls, _secret = _load_config_outbound()
@@ -525,12 +540,15 @@ def _claim_delivery(world: Any, row: dict, stamp: float, *, retry: bool = False)
 
 
 def _delivery_state(code: object, attempts: int, stamp: float, exhausted: bool,
-                    rng: Callable[[], float]) -> tuple[str, float | None, float | None]:
+                    rng: Callable[[], float], *, never_sent: bool = False,
+                    ) -> tuple[str, float | None, float | None]:
     if type(code) is int and 200 <= code <= 299:
         return "delivered", None, stamp
     if exhausted:
         return "dead", None, None
-    if type(code) is not int or not 100 <= code <= 599:
+    # No response normally means the receiver may still have taken it. Only a
+    # send that provably never connected (``webhooks.NotSent``) is retried.
+    if not never_sent and (type(code) is not int or not 100 <= code <= 599):
         return "unknown", None, None
     delay = retry_delay(attempts, rng=rng)
     return ("dead", None, None) if delay is None else ("pending", stamp + delay, None)
@@ -538,8 +556,11 @@ def _delivery_state(code: object, attempts: int, stamp: float, exhausted: bool,
 
 def _finish_delivery(world: Any, row: dict, stamp: float, result: tuple,
                      exhausted: bool, rng: Callable[[], float]) -> dict:
+    from .webhooks import NotSent
+
     code, latency, snippet, error = result
-    status, next_at, delivered_at = _delivery_state(code, row["attempts"], stamp, exhausted, rng)
+    status, next_at, delivered_at = _delivery_state(code, row["attempts"], stamp, exhausted, rng,
+                                                    never_sent=isinstance(error, NotSent))
     code = code if type(code) is int and 100 <= code <= 599 else None
     history = _history(row)
     history[-1].update({"state": status, "status_code": code, "latency_ms": latency,
