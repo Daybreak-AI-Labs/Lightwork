@@ -226,6 +226,7 @@ from .auth import (
     require_global_permission,
     require_page_permission,
     require_permission,
+    require_personal_write,
     require_suite,
     require_unscoped_board,
     stored_automation_identity,
@@ -443,7 +444,7 @@ def select_active_tenant(request: Request, tenant_id: str | None) -> dict:
     from maverick.authority_effects import authority_effect_fence
 
     with authority_effect_fence():
-        require_permission(request, "view")
+        require_personal_write(request)
         import os
 
         if os.environ.get("MAVERICK_TENANT", "").strip():
@@ -12520,6 +12521,9 @@ def pack_editing_denial(request: Request) -> str | None:
     principal = caller_principal(request)
     if principal is not None and not is_dashboard_admin(principal):
         return "pack editing requires a dashboard admin"
+    # A pinned admin's API key is still capped by the scopes it was given.
+    if principal is not None and not has_permission(request, "admin"):
+        return "pack editing requires an API key with the administrator scope"
     from maverick.config import get_features
 
     if not get_features().get("pack_editing", True):
@@ -12531,6 +12535,7 @@ def pack_editing_denial(request: Request) -> str | None:
 
 
 def _require_pack_editing(request: Request) -> None:
+    require_permission(request, "admin")  # key scopes and the owner's role cap
     denial = pack_editing_denial(request)
     if denial is not None:
         raise HTTPException(status_code=403, detail=denial)
@@ -13901,9 +13906,9 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
     response.headers["Cache-Control"] = "private, no-store"
     expected_context = request.headers.get("X-Lightwork-Copilot-Context")
     if expected_context is not None:
-        import hmac
+        from .auth import constant_time_equals
 
-        if not hmac.compare_digest(expected_context, context_for(request)):
+        if not constant_time_equals(expected_context, context_for(request)):
             raise HTTPException(409, "Your account or workspace changed. Reopen Copilot before sending this question.")
     check_goal_rate_limit(request, source="copilot")
     msg = payload.message.strip()
@@ -14539,6 +14544,7 @@ def _require_role_editing(request: Request) -> None:
     principal = caller_principal(request)
     if principal is not None and not is_dashboard_admin(principal):
         raise HTTPException(status_code=403, detail="role editing requires dashboard admin")
+    require_permission(request, "admin")  # key scopes and the owner's role cap
 
     from maverick.config import get_features
 

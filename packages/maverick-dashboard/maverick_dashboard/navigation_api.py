@@ -11,7 +11,6 @@ never offered. Nothing here grants access: a pin is only a link.
 """
 from __future__ import annotations
 
-import hmac
 from typing import Literal
 from urllib.parse import parse_qsl, urlencode
 
@@ -160,7 +159,7 @@ def _check_context(request: Request, supplied: str) -> bool:
     from .draft_api import context_for
 
     try:
-        return hmac.compare_digest(supplied, context_for(request))
+        return auth.constant_time_equals(supplied, context_for(request))
     except HTTPException:
         return False
 
@@ -196,6 +195,7 @@ def change_pin(request: Request, body: PinChange) -> JSONResponse:
 
     app = _app()
     app._require_same_origin(request)
+    auth.require_personal_write(request)
     principal = _principal(request)
     if not _check_context(request, body.context):
         raise HTTPException(409, "The account or workspace changed. Reload the page before changing pins.")
@@ -235,6 +235,7 @@ def remember_page(request: Request, body: PageVisit) -> JSONResponse:
     """
     app = _app()
     app._require_same_origin(request)
+    auth.require_personal_write(request)
     nothing = JSONResponse({"recorded": False}, headers=_PRIVATE)
     principal = auth.caller_principal(request)
     if not principal or not preferences.enabled() or not _check_context(request, body.context):
@@ -574,6 +575,7 @@ def arrange_areas(
 
     app = _app()
     app._require_same_origin(request)
+    auth.require_personal_write(request)
     principal = _principal(request)
     if not _check_context(request, context):
         raise HTTPException(409, "The account or workspace changed. Reload the page before arranging areas.")

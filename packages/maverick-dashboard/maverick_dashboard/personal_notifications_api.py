@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import time
 from typing import Any, Literal
 
@@ -293,7 +292,8 @@ class PreferencesIn(BaseModel):
 def _binding(request, expected):
     from .draft_api import context_for
     _app()._require_same_origin(request)
-    if not hmac.compare_digest(expected, context_for(request)):
+    auth.require_personal_write(request)
+    if not auth.constant_time_equals(expected, context_for(request)):
         raise HTTPException(409, "Your account or workspace changed. Reload personal alerts.")
 
 

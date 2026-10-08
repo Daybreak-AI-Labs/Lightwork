@@ -304,7 +304,7 @@ def me_preferences(
     digest_enabled: str = Form(""),
     send_when_empty: str = Form(""),
 ) -> RedirectResponse:
-    auth.require_permission(request, "view")
+    auth.require_personal_write(request)
     _app()._require_same_origin(request)
     from maverick import user_preferences
 
@@ -339,7 +339,11 @@ def _preference_refusal(reason: str) -> HTTPException:
 @router.post("/me/channels/link-code")
 def me_link_code(request: Request, channel: str = Form(...)) -> HTMLResponse:
     """A one-time code the person sends from the chat app (``/lightwork link``)."""
-    auth.require_permission(request, "view")
+    auth.require_personal_write(request)
+    # The linked chat account starts tasks and decides approvals as this
+    # person, so a key must hold both of those scopes to mint its code.
+    auth.require_api_key_scope(request, "tasks:write")
+    auth.require_api_key_scope(request, "approvals:decide")
     _app()._require_same_origin(request)
     from maverick import channel_identities
 
@@ -359,7 +363,7 @@ def me_link_code(request: Request, channel: str = Form(...)) -> HTMLResponse:
 @router.post("/me/channels/unlink")
 def me_unlink(request: Request, channel: str = Form(...),
               external_id: str = Form(...)) -> RedirectResponse:
-    auth.require_permission(request, "view")
+    auth.require_personal_write(request)
     _app()._require_same_origin(request)
     from maverick import channel_identities
 
@@ -375,7 +379,7 @@ def me_unlink(request: Request, channel: str = Form(...),
 @router.post("/me/digest/send-now")
 async def me_send_now(request: Request) -> RedirectResponse:
     """Send today's summary to me right away (a test of the linked channels)."""
-    auth.require_permission(request, "view")
+    auth.require_personal_write(request)
     _app()._require_same_origin(request)
     from maverick import channel_identities, daily_digest, user_preferences
 

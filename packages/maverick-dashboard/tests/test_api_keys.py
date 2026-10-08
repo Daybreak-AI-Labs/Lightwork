@@ -608,3 +608,339 @@ def test_corrupt_store_refuses_every_key(monkeypatch, tmp_path):
     data = json.dumps({"keys": {"k": {"id": "k", "label": "x"}}, "service_accounts": {}})
     api_keys.store_path().write_text(data)
     assert api_keys.verify("lwk_" + "q" * 43)[0] is None
+
+
+# ---- personal-state mutators honour the key's scopes -------------------------
+
+def test_read_only_key_cannot_change_the_owner_s_personal_state(monkeypatch):
+    """A tasks:read key could mint a chat link code (a sign-in for the owner's
+    role) or point the owner's daily summary at another address, because the
+    personal pages only asked for the view floor."""
+    _sign_in_map(monkeypatch)
+    from maverick import channel_identities, user_preferences
+    from maverick_dashboard import rbac
+    rbac.set_role("user:alice", "operator")
+    c = _client()
+    read_key = _create(c, "alice", scopes=["tasks:read"]).json()["secret"]
+
+    def post(path, headers, **data):
+        return c.post(path, data=data, headers=headers, follow_redirects=False)
+
+    refused = [
+        post("/me/channels/link-code", _key(read_key), channel="slack"),
+        post("/me/preferences", _key(read_key), time_zone="UTC", digest_hour=8,
+             email="attacker@example.com", digest_enabled="on"),
+        post("/me/channels/unlink", _key(read_key), channel="slack", external_id="U1"),
+        post("/me/digest/send-now", _key(read_key)),
+        c.put("/api/v1/workspace/active-tenant", json={"tenant_id": None}, headers=_key(read_key)),
+    ]
+    assert [r.status_code for r in refused] == [403] * 5, [r.text for r in refused]
+    assert all("does not have a scope" in r.json()["detail"] for r in refused)
+    # Nothing was issued or saved on the owner's account.
+    assert user_preferences.get_preferences("user:alice")["email"] == ""
+    assert channel_identities.principal_for("slack", "U_ATTACKER") is None
+
+    # Reading the same page still works for the read-only key.
+    assert c.get("/api/v1/me/work", headers=_key(read_key)).status_code == 200
+
+
+def test_write_key_and_the_signed_in_owner_still_use_personal_state(monkeypatch):
+    _sign_in_map(monkeypatch)
+    from maverick import user_preferences
+    from maverick_dashboard import rbac
+    rbac.set_role("user:alice", "operator")
+    c = _client()
+    write_key = _create(c, "alice", scopes=["tasks:write"]).json()["secret"]
+    both_key = _create(c, "alice", scopes=["tasks:write", "approvals:decide"]).json()["secret"]
+
+    def post(path, headers, **data):
+        return c.post(path, data=data, headers=headers, follow_redirects=False)
+
+    # The signed-in owner (no key) is unchanged, whatever the role floor.
+    assert post("/me/channels/link-code", _as("alice"), channel="slack").status_code == 200
+    saved = post("/me/preferences", _as("alice"), time_zone="UTC", digest_hour=9,
+                 email="alice@example.com", digest_enabled="on")
+    assert saved.status_code == 303
+    assert user_preferences.get_preferences("user:alice")["digest_hour"] == 9
+
+    # A write-scope key may adjust preferences and the workspace picker ...
+    saved = post("/me/preferences", _key(write_key), time_zone="UTC", digest_hour=10,
+                 email="alice@example.com", digest_enabled="on")
+    assert saved.status_code == 303
+    assert user_preferences.get_preferences("user:alice")["digest_hour"] == 10
+    assert c.put("/api/v1/workspace/active-tenant", json={"tenant_id": None},
+                 headers=_key(write_key)).status_code == 200
+    # ... but a chat link lets the chat account both start tasks and decide
+    # approvals, so a key needs both of those scopes to mint its code.
+    refused = post("/me/channels/link-code", _key(write_key), channel="slack")
+    assert refused.status_code == 403
+    assert post("/me/channels/link-code", _key(both_key), channel="slack").status_code == 200
+
+
+# ---- mount prefix --------------------------------------------------------------
+
+def test_key_scope_is_chosen_from_the_route_not_the_mount_prefix(monkeypatch):
+    """Behind a mount prefix the request path still starts with it; the scope a
+    key needs must come from the route inside the application."""
+    _sign_in_map(monkeypatch)
+    from maverick_dashboard import rbac
+    from maverick_dashboard.app import app
+
+    rbac.set_role("user:alice", "operator")
+    plain = _client()
+    task_key = _create(plain, "alice", scopes=["tasks:write"]).json()["secret"]
+    approval_key = _create(plain, "alice", scopes=["approvals:decide"]).json()["secret"]
+    mounted = TestClient(app, headers=ORIGIN, root_path="/lw")
+
+    # Same answers as the unprefixed paths in the scope test above.
+    assert mounted.get("/lw/api/v1/approvals", headers=_key(task_key)).status_code == 403
+    assert mounted.get("/lw/api/v1/approvals", headers=_key(approval_key)).status_code == 200
+    assert mounted.post("/lw/api/v1/approvals/424242/approve", headers=_key(task_key)).status_code == 403
+    assert mounted.post("/lw/api/v1/approvals/424242/approve", headers=_key(approval_key)).status_code == 404
+
+
+# ---- pack editing honours key scopes -------------------------------------------
+
+def test_read_key_of_a_pinned_admin_cannot_use_the_pack_editing_routes(monkeypatch, tmp_path):
+    _sign_in_map(monkeypatch)
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
+    from maverick_dashboard import rbac
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:alice")
+    rbac.set_role("user:alice", "admin")
+    c = _client()
+    read_key = _create(c, "alice", scopes=["tasks:read"]).json()["secret"]
+    write_key = _create(c, "alice", scopes=["tasks:write"]).json()["secret"]
+    admin_key = _create(c, "alice", scopes=["settings:write"]).json()["secret"]
+
+    routes = (
+        ("/api/v1/agents/finance_ap/validate", {}),
+        ("/api/v1/agents/finance_ap/publish-check", {}),
+        ("/api/v1/agents/finance_ap/override", {}),
+        ("/api/v1/agents/finance_ap/graduate", {"expected_generation": "0" * 64}),
+        ("/api/v1/roles/writer/override", {}),
+    )
+    for path, body in routes:
+        for secret in (read_key, write_key):
+            refused = c.post(path, json=body, headers=_key(secret))
+            assert refused.status_code == 403, (path, refused.status_code, refused.text)
+            assert "does not have a scope" in refused.json()["detail"]
+        # A key with an administrator scope still reaches the route's own logic,
+        # as does the pinned admin signed in.
+        assert c.post(path, json=body, headers=_key(admin_key)).status_code != 403, path
+        assert c.post(path, json=body, headers=_as("alice")).status_code != 403, path
+
+
+# ---- break-glass audit window ---------------------------------------------------
+
+def test_break_glass_requests_keep_failing_while_their_audit_is_refused(monkeypatch):
+    """The hourly window must start only once a row was written; otherwise the
+    first request fails and every later one is admitted unaudited."""
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "static-break-glass-token-for-tests")  # pragma: allowlist secret
+    import maverick.audit as audit_pkg
+    from maverick.audit import AuditRefused
+    rows = []
+    refuse = {"on": True}
+
+    def audit_event(kind, **payload):
+        if refuse["on"]:
+            raise AuditRefused("custody unavailable")
+        rows.append(kind)
+        return True
+
+    monkeypatch.setattr(audit_pkg, "audit_event", audit_event)
+    from maverick_dashboard.app import app
+    c = TestClient(app, headers=ORIGIN, raise_server_exceptions=False)
+    tok = {"Authorization": "Bearer static-break-glass-token-for-tests"}
+
+    codes = [c.get("/api/v1/account/me", headers=tok).status_code for _ in range(4)]
+    assert all(code >= 400 for code in codes), codes
+    assert rows == []
+
+    refuse["on"] = False
+    assert c.get("/api/v1/account/me", headers=tok).status_code == 200
+    assert c.get("/api/v1/account/me", headers=tok).status_code == 200
+    assert len(rows) == 1  # written once, then rate-limited for the hour
+
+
+# ---- a key bound to a workspace fails closed ------------------------------------
+
+def _workspace_key(monkeypatch, secret_scopes=("tasks:read",)):
+    """Alice (an operator, not a global admin) is a member of workspace ``acme``
+    and holds a key bound to it."""
+    _sign_in_map(monkeypatch)
+    from maverick.tenant import registry
+    from maverick_dashboard import rbac
+    rbac.set_role("user:alice", "operator")
+    registry.create_tenant("acme")
+    rbac.set_tenant_role("acme", "user:alice", "operator")
+    c = _client()
+    created = _create(c, "alice", scopes=list(secret_scopes), workspace="acme")
+    assert created.status_code == 201, created.text
+    return c, created.json()["secret"]
+
+
+def test_key_bound_to_a_workspace_stops_working_when_the_workspace_is_paused(monkeypatch):
+    c, secret = _workspace_key(monkeypatch)
+    from maverick.tenant import registry
+    # A route with no permission call of its own, so only the pin can refuse it.
+    assert c.get("/api/v1/flywheel", headers=_key(secret)).status_code == 200
+
+    registry.suspend_tenant("acme")
+    refused = c.get("/api/v1/flywheel", headers=_key(secret))
+    assert refused.status_code == 403, refused.text
+    assert "workspace" in refused.json()["detail"].lower()
+    # The owner's own browser session still falls back to the default workspace.
+    assert c.get("/api/v1/flywheel", headers=_as("alice")).status_code == 200
+
+
+def test_key_bound_to_a_workspace_stops_working_when_its_owner_leaves(monkeypatch):
+    c, secret = _workspace_key(monkeypatch)
+    from maverick_dashboard import rbac
+    assert c.get("/api/v1/flywheel", headers=_key(secret)).status_code == 200
+
+    rbac.remove_tenant_role("acme", "user:alice")
+    refused = c.get("/api/v1/flywheel", headers=_key(secret))
+    assert refused.status_code == 403, refused.text
+    assert c.get("/api/v1/account/me", headers=_key(secret)).status_code == 403
+
+
+# ---- service account role and key store stay in step -----------------------------
+
+def _refuse_audit_kind(monkeypatch, kind_name):
+    """Refuse only one audit kind; every other row is written as usual."""
+    import maverick.audit as audit_pkg
+    real = audit_pkg.audit_event
+
+    def audit_event(kind, **payload):
+        if kind == getattr(audit_pkg.EventKind, kind_name):
+            raise audit_pkg.AuditRefused("custody unavailable")
+        return real(kind, **payload)
+
+    monkeypatch.setattr(audit_pkg, "audit_event", audit_event)
+
+
+def test_refused_service_account_audit_leaves_no_role_behind(monkeypatch):
+    from maverick.audit import AuditRefused
+    from maverick_dashboard import api_keys, rbac
+    _refuse_audit_kind(monkeypatch, "SERVICE_ACCOUNT_CHANGED")
+
+    with pytest.raises(AuditRefused):
+        api_keys.create_service_account("billing", "admin", actor="user:root")
+
+    assert api_keys.list_service_accounts() == []
+    # No orphan admin-role principal for an account that does not exist.
+    assert rbac.get_stored_role("user:svc:billing") is None
+    assert "user:svc:billing" not in rbac.list_users()
+
+
+def test_service_account_creation_still_assigns_the_role(monkeypatch):
+    from maverick_dashboard import api_keys, rbac
+    account = api_keys.create_service_account("billing", "operator", actor="user:root")
+    assert account.principal == "user:svc:billing"
+    assert rbac.get_stored_role("user:svc:billing") == "operator"
+    assert [a.slug for a in api_keys.list_service_accounts()] == ["billing"]
+
+
+def test_disable_service_account_retry_finishes_a_failed_role_removal(monkeypatch):
+    from maverick_dashboard import api_keys, rbac
+    api_keys.create_service_account("billing", "operator", actor="user:root")
+    real_remove = rbac.remove_user
+    failing = {"on": True}
+
+    def remove_user(principal, **kwargs):
+        if failing["on"]:
+            raise OSError("roster unavailable")
+        return real_remove(principal, **kwargs)
+
+    monkeypatch.setattr(rbac, "remove_user", remove_user)
+    with pytest.raises(OSError):
+        api_keys.disable_service_account("billing", actor="user:root")
+    # The account is already off, but its role is still on the roster.
+    assert api_keys.get_service_account("billing").disabled_at is not None
+    assert rbac.get_stored_role("user:svc:billing") == "operator"
+
+    failing["on"] = False
+    api_keys.disable_service_account("billing", actor="user:root")
+    assert rbac.get_stored_role("user:svc:billing") is None
+
+
+# ---- a damaged store fails closed, whatever the damage ---------------------------
+
+def _damaged_store(*, scopes=None, action=None, state=None):
+    key = {"id": "k1", "label": "x", "owner": "user:alice", "prefix": "lwk_abcd",
+           "secret_sha256": "0" * 64, "scopes": scopes if scopes is not None else ["tasks:read"],
+           "workspace": "", "created_at": 1.0, "expires_at": 2.0, "created_by": "",
+           "last_used_at": None, "last_used_ip": "", "revoked_at": None, "grace_until": None,
+           "replaced_by": "", "rotated_from": ""}
+    request = {"operation": "a" * 32, "actor": "user:alice", "context": "b" * 64,
+               "binding": "c" * 64, "action": action or "create",
+               "state": state or "started", "key_id": "", "recorded_at": 1.0}
+    return {"keys": {"k1": key}, "service_accounts": {}, "issuance_requests": {"a" * 32: request}}
+
+
+@pytest.mark.parametrize("damage", [
+    {"scopes": [["tasks:read"]]},
+    {"scopes": [{"tasks:read": 1}]},
+    {"action": ["create"]},
+    {"action": {"create": True}},
+    {"state": ["started"]},
+])
+def test_unhashable_damage_in_the_store_is_a_store_error_not_a_crash(damage):
+    from maverick_dashboard import api_keys
+    api_keys.store_path().write_text(json.dumps(_damaged_store(**damage)))
+
+    with pytest.raises(api_keys.ApiKeyStoreError):
+        api_keys.list_keys()
+    verified, reason = api_keys.verify("lwk_" + "q" * 43)
+    assert verified is None and "unavailable" in reason
+
+
+def test_damaged_store_answers_401_for_a_key_and_503_for_the_listing(monkeypatch):
+    _sign_in_map(monkeypatch)
+    from maverick_dashboard import api_keys, rbac
+    rbac.set_role("user:alice", "operator")
+    api_keys.store_path().write_text(json.dumps(_damaged_store(scopes=[["tasks:read"]])))
+    from maverick_dashboard.app import app
+    c = TestClient(app, headers=ORIGIN, raise_server_exceptions=False)
+
+    keyed = c.get("/api/v1/account/me", headers=_key("lwk_" + "q" * 43))
+    assert keyed.status_code == 401 and "unavailable" in keyed.json()["detail"]
+    listing = c.get("/api/v1/api-keys", headers=_as("alice"))
+    assert listing.status_code == 503, listing.text
+
+
+def test_read_only_key_cannot_write_the_owner_s_preferences_or_alert_settings(monkeypatch):
+    """The saved choices (display, chat defaults, alert muting, pinned pages, the
+    sidebar layout) belong to the owner's account, so a key needs a write scope."""
+    _sign_in_map(monkeypatch)
+    from maverick_dashboard import rbac
+    rbac.set_role("user:alice", "operator")
+    c = _client()
+    read_key = _create(c, "alice", scopes=["tasks:read"]).json()["secret"]
+    write_key = _create(c, "alice", scopes=["tasks:write"]).json()["secret"]
+    ctx = "x" * 64
+    routes = [
+        ("/api/v1/preferences", {"expected_revision": "0" * 64, "context": ctx, "changes": {}}),
+        ("/api/v1/preferences/original", {"expected_revision": "0" * 64, "context": ctx, "changes": {},
+                                          "operation_id": "a" * 32}),
+        ("/api/v1/preferences/display", {"key": "theme", "value": "dark", "context": ctx}),
+        ("/api/v1/preferences/profile/import", {"profile": {}}),
+        ("/api/v1/navigation/pins", {"op": "add", "href": "/overview", "context": ctx}),
+        ("/api/v1/navigation/recent", {"path": "/overview", "context": ctx}),
+        ("/api/v1/notifications/personal/preferences",
+         {"context": ctx, "expected_revision": "0" * 64, "preferences": {}}),
+        ("/api/v1/notifications/personal/seen", {"context": ctx, "item_id": "0" * 64}),
+        ("/api/v1/notifications/personal/mute", {"context": ctx, "item_id": "0" * 64, "scope": "task"}),
+        ("/api/v1/notifications/personal/unmute", {"context": ctx, "scope": "task", "key": "1"}),
+    ]
+    for path, body in routes:
+        refused = c.post(path, json=body, headers=_key(read_key))
+        assert refused.status_code == 403, (path, refused.status_code, refused.text)
+        assert "does not have a scope" in refused.json()["detail"], path
+        # The same call with a write scope, or by the signed-in owner, is judged on its merits.
+        for headers in (_key(write_key), _as("alice")):
+            answered = c.post(path, json=body, headers=headers)
+            assert answered.status_code != 403 or "does not have a scope" not in answered.text, path
+    refused = c.post("/navigation/areas", data={"op": "up", "area": "Work", "context": ctx},
+                     headers=_key(read_key), follow_redirects=False)
+    assert refused.status_code == 403 and "does not have a scope" in refused.json()["detail"]

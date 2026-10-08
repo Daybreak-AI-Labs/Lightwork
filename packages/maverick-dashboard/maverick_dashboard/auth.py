@@ -394,10 +394,21 @@ def caller_principal(request: Request) -> str | None:
     return name if isinstance(name, str) and name else None
 
 
-def _dashboard_token_authenticated(request) -> bool:
-    """Whether this request carries the configured static dashboard bearer."""
+def constant_time_equals(supplied: str, expected: str) -> bool:
+    """Constant-time equality for text a caller supplied.
+
+    ``hmac.compare_digest`` raises ``TypeError`` for a ``str`` holding any
+    non-ASCII character, which turned a crafted header or JSON field into a
+    500 instead of the refusal a wrong ASCII value gets. Compare the bytes;
+    ``surrogatepass`` keeps a lone surrogate distinct from every real character."""
     import hmac
 
+    return hmac.compare_digest(supplied.encode("utf-8", "surrogatepass"),
+                               expected.encode("utf-8", "surrogatepass"))
+
+
+def _dashboard_token_authenticated(request) -> bool:
+    """Whether this request carries the configured static dashboard bearer."""
     from ._shared import dashboard_token
 
     expected = dashboard_token()
@@ -405,7 +416,7 @@ def _dashboard_token_authenticated(request) -> bool:
         return False
     authorization = request.headers.get("authorization", "")
     supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
-    return bool(supplied) and hmac.compare_digest(supplied, expected)
+    return bool(supplied) and constant_time_equals(supplied, expected)
 
 
 def auth_genuinely_off() -> bool:
@@ -524,6 +535,14 @@ def _pin_tenant_from_principal(request: Request, principal: VerifiedPrincipal) -
         if not is_active(selected) or not workspace_tenants.principal_can_select(
             name, selected
         ):
+            if bound:
+                # A key acts only inside its workspace. Falling back to the
+                # default workspace would run it somewhere it was never given.
+                raise HTTPException(
+                    status_code=403,
+                    detail="This API key's workspace is paused or its owner is no longer a "
+                           "member of it. Ask a workspace administrator.",
+                )
             request.state.workspace_tenant_denied = selected
             return
         request.state.tenant_pin_token = set_tenant(selected)
@@ -660,7 +679,7 @@ def _api_key_allows(request, permission: str, *, api_scope: str | None = None) -
         # The approval queue has operator-gated reads as well as decisions and
         # claim/release actions. A task key must not borrow their shared RBAC
         # atom, while an approval key must not operate unrelated task routes.
-        path = str(getattr(getattr(request, "url", None), "path", "") or "")
+        path = route_path(request)
         vendor_decision = (path.startswith("/api/v1/vendor-onboarding/cases/")
                            and path.endswith(("/review", "/approve-action")))
         api_scope = (
@@ -728,6 +747,17 @@ def require_permission(request: Request, permission: str, *, api_scope: str | No
                else has_permission(request, permission))
     if not allowed:
         raise _permission_denied(request, permission, api_scope=api_scope)
+
+
+def require_personal_write(request: Request) -> None:
+    """The ``view`` floor for a person's own settings; a key also needs a write scope.
+
+    Everyone signed in changes their own choices at the view floor. A bearer key
+    acts as its owner, so a read-only key must not change the owner's account
+    (chat links, the daily-summary address, the workspace picker)."""
+    require_permission(request, "view")
+    if api_key_permissions(request) is not None:
+        require_permission(request, "operate")
 
 
 def has_global_permission(request: Request, permission: str) -> bool:
@@ -1026,13 +1056,15 @@ def _audit_break_glass(connection) -> None:
     last = _break_glass_last_audit[0]
     if last is not None and now - last < _BREAK_GLASS_AUDIT_INTERVAL:
         return
-    _break_glass_last_audit[0] = now
     from maverick.audit import EventKind, audit_event
 
     client = connection.client.host if getattr(connection, "client", None) else ""
     path = str(getattr(getattr(connection, "url", None), "path", "") or "")
     audit_event(EventKind.BREAK_GLASS_TOKEN_USED, agent="static-dashboard-operator",
                 path=path, client=client or "")
+    # Start the window only once a row exists: a refused audit leaves it open so
+    # the next request is refused too instead of being admitted unrecorded.
+    _break_glass_last_audit[0] = now
 
 
 def _authenticate_api_key(connection, token: str) -> VerifiedPrincipal:

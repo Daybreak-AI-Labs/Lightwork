@@ -157,10 +157,11 @@ def update_preferences(request: Request, body: PreferenceUpdate) -> JSONResponse
 
 def _update_preferences(request: Request, body: PreferenceUpdate) -> JSONResponse:
     _app()._require_same_origin(request)
+    auth.require_personal_write(request)
     principal = _principal(request)
     if body.thread is not None and body.scope != "personal":
         raise HTTPException(422, "Conversation styles belong to one person; choose Personal scope.")
-    if not hmac.compare_digest(body.context, context_for(request)):
+    if not auth.constant_time_equals(body.context, context_for(request)):
         raise HTTPException(409, "The account or workspace changed. Reload before saving preferences.")
     if body.scope == "organization":
         auth.require_global_permission(request, "admin")
@@ -204,7 +205,7 @@ def _update_preferences(request: Request, body: PreferenceUpdate) -> JSONRespons
 def _effect_guard(request, body, principal):
     def guard():
         with auth.fresh_configuration():
-            if _principal(request) != principal or not hmac.compare_digest(body.context, context_for(request)):
+            if _principal(request) != principal or not auth.constant_time_equals(body.context, context_for(request)):
                 raise HTTPException(409, "Your account, workspace or access changed. Review your retained choices again.")
             if body.scope == "organization":
                 auth.require_global_permission(request, "admin")
@@ -248,8 +249,9 @@ def _validate_chat_defaults(request, body):
 @router.post('/api/v1/preferences/original')
 def original_preferences(request: Request, body: PreferenceUpdate):
     _app()._require_same_origin(request)
+    auth.require_personal_write(request)
     principal = _principal(request)
-    if not body.operation_id or not hmac.compare_digest(body.context, context_for(request)):
+    if not body.operation_id or not auth.constant_time_equals(body.context, context_for(request)):
         raise HTTPException(409, "The account or workspace changed. This original save cannot be read here.")
     if body.scope == "organization":
         auth.require_global_permission(request, "admin")
@@ -261,7 +263,7 @@ def original_preferences(request: Request, body: PreferenceUpdate):
         expected_revision=body.expected_revision, operation_id=body.operation_id, thread=_thread(request, body.thread),
         specialist_revision=body.specialist_revision)
     current = _state(request, body.thread)
-    if _principal(request) != principal or not hmac.compare_digest(body.context, context_for(request)):
+    if _principal(request) != principal or not auth.constant_time_equals(body.context, context_for(request)):
         raise HTTPException(409, "Your account, workspace or access changed. Private preferences cannot be released.")
     with auth.fresh_configuration():
         if body.scope == "organization":
@@ -285,13 +287,13 @@ class DisplayUpdate(BaseModel):
 @router.post('/api/v1/preferences/display')
 def display_preference(request: Request, body: DisplayUpdate) -> JSONResponse:
     _app()._require_same_origin(request)
-    auth.require_permission(request, "view")
+    auth.require_personal_write(request)
     # The legacy header key meant interface language, never response language.
     if body.key == "language":
         body = body.model_copy(update={"key": "interface_language"})
     _check_display(body.key, body.value)
     context = context_for(request)
-    if not hmac.compare_digest(body.context, context):
+    if not auth.constant_time_equals(body.context, context):
         raise HTTPException(409, "Your account or workspace changed. Reload before changing preferences.")
     principal = auth.caller_principal(request)
     if principal and preferences.enabled() and body.key in preferences.state(principal)["locked"]:
@@ -354,6 +356,7 @@ class PersonalProfileImport(BaseModel):
 @router.post('/api/v1/preferences/profile/import')
 def import_personal_profile(request: Request, body: PersonalProfileImport):
     _app()._require_same_origin(request)
+    auth.require_personal_write(request)
     _profiles_allowed(request)
     from .draft_store import validate_payload
     data = body.profile
