@@ -579,16 +579,19 @@ def arrange_areas(
     principal = _principal(request)
     if not _check_context(request, context):
         raise HTTPException(409, "The account or workspace changed. Reload the page before arranging areas.")
-    nav = app._nav_context(request).get("nav_areas")
-    if not nav:
-        raise HTTPException(409, "Areas navigation is not turned on for your account.")
-    offered = [item["title"] for item in nav["sidebar"]]
-    if op != "reset" and area not in {*offered, *(item["title"] for item in nav["hidden"])}:
-        raise HTTPException(403, "Only areas you can open can be arranged.")
-    if op == "hide" and offered == [area]:
-        raise HTTPException(422, "Keep at least one area in the sidebar.")
     for attempt in (1, 2):
         state = preferences.state(principal)
+        # Build the layout from what is saved now (the shell caches the preferences it
+        # read first), so a change made in another window is kept, not overwritten.
+        request.state.experience_preferences = state
+        nav = app._nav_context(request).get("nav_areas")
+        if not nav:
+            raise HTTPException(409, "Areas navigation is not turned on for your account.")
+        offered = [item["title"] for item in nav["sidebar"]]
+        if op != "reset" and area not in {*offered, *(item["title"] for item in nav["hidden"])}:
+            raise HTTPException(403, "Only areas you can open can be arranged.")
+        if op == "hide" and offered == [area]:
+            raise HTTPException(422, "Keep at least one area in the sidebar.")
         try:
             preferences.save(principal, scope="personal",
                              changes={"navigation_areas": _arranged(offered, op, area)},

@@ -67,8 +67,10 @@ def _projection(request, actor: str, *, world=None) -> tuple[list[dict], list[di
     for goal, state_revision, result_revision in _goal_pages(world, actor):
         if goal.owner != actor:
             continue
-        if request is not None:
-            auth.assert_goal_access(request, goal)
+        # A task the person started but can no longer open (a department grant
+        # was removed) is left out; it must not fail every other alert.
+        if request is not None and not auth.can_access_goal(request, goal):
+            continue
         tasks.append({"id": goal.id, "title": goal.title})
         project_id = getattr(goal, "project_id", None)
         if project_id:

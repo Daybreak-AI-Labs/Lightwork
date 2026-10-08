@@ -355,6 +355,42 @@ def test_people_arrange_their_own_areas_and_can_go_back_to_their_roles_layout(mo
     assert _Shell(client.get("/goals").text).areas[:2] == ["/home", "/goals"]
 
 
+def test_arranging_areas_keeps_an_edit_made_in_another_window(monkeypatch, tmp_path):
+    """The layout an edit builds on is the one saved now, not the one the request
+    first read: hiding one area must not bring back one hidden a moment earlier
+    in another window."""
+    from maverick import experience_preferences
+    from maverick_dashboard import app as app_mod
+
+    client = _client(monkeypatch, tmp_path)
+    _areas_on(monkeypatch)
+    monkeypatch.setattr(experience_preferences, "enabled", lambda: True)
+    _as(monkeypatch, "user:ann", "admin")
+    html = client.get("/goals").text
+    context = html.split('name="lightwork-preference-context" content="', 1)[1].split('"', 1)[0]
+
+    real, seen = app_mod._nav_context, []
+
+    def racing(request):
+        ctx = real(request)
+        if not seen:
+            seen.append([item["title"] for item in ctx["nav_areas"]["sidebar"]])
+            state = experience_preferences.state("user:ann")
+            experience_preferences.save(
+                "user:ann", scope="personal",
+                changes={"navigation_areas": [t for t in seen[0] if t != "Settings"]},
+                expected_revision=state["revision"])  # the other window hides Settings
+        return ctx
+
+    monkeypatch.setattr(app_mod, "_nav_context", racing)
+    hidden = client.post("/navigation/areas", data={"op": "hide", "area": "Work", "context": context},
+                         follow_redirects=False)
+    assert hidden.status_code == 303, hidden.text
+    saved = experience_preferences.state("user:ann")["values"]["navigation_areas"]
+    assert "Work" in seen[0] and "Settings" in seen[0]
+    assert saved == [t for t in seen[0] if t not in {"Settings", "Work"}]
+
+
 # -- The tree-test kit -------------------------------------------------------------
 
 @pytest.mark.parametrize("mode", ["classic", "areas"])

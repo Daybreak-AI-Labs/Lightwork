@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -504,3 +505,37 @@ def test_empty_queue_offers_owned_decisions(monkeypatch, tmp_path):
     assert 'class="btn mv-empty__action" href="#request-decision-history"' in text
     assert 'id="request-decision-history"' in text and "Decisions on your requests" in text
     assert 'id="request-decision-more"' in text and "/static/lightwork-approval-history.js" in text
+
+
+# ---- the decision does its blocking work off the event loop ------------------------
+
+@pytest.mark.parametrize("verb,status", [("approve", "approved"), ("deny", "denied")])
+def test_decision_routes_run_the_blocking_decision_in_a_worker_thread(monkeypatch, tmp_path, verb, status):
+    """The handlers are ``async`` only to read the JSON body. The decision itself
+    (database commit, audit signing, cross-process locks) is synchronous and must
+    not run on the event loop, where it would stall every other request."""
+    import asyncio
+
+    from fastapi import Response
+    from fastapi.testclient import TestClient
+    from maverick_dashboard import api
+    from maverick_dashboard.app import app
+
+    _isolate(monkeypatch, tmp_path)
+    approval_id = _world(tmp_path).create_approval("rm-rf", risk="low")
+    seen = []
+
+    def decide(request, approval_id, payload, got_status, **_kwargs):
+        try:
+            asyncio.get_running_loop()
+            seen.append("event loop")
+        except RuntimeError:
+            seen.append("worker thread")
+        assert got_status == status
+        return Response(status_code=204)
+
+    monkeypatch.setattr(api, "_decide_approval", decide)
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+    response = client.post(f"/api/v1/approvals/{approval_id}/{verb}", json={})
+    assert response.status_code == 204, response.text
+    assert seen == ["worker thread"]

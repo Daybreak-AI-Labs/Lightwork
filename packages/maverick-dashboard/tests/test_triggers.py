@@ -629,3 +629,34 @@ def test_create_trigger_cannot_overwrite_another_owner(monkeypatch, tmp_path):
     assert r.status_code == 409
     got = triggers_store.get_trigger("shared")
     assert got["owner"] == "user:bob" and got["params"] == {"topic": "x"}   # untouched
+
+
+def test_static_token_operator_manages_the_triggers_it_created(monkeypatch, tmp_path):
+    """With a static dashboard token the owner is stored as ``user:local`` but the
+    list, re-save and delete filtered by the token's empty owner, so a created
+    trigger vanished from the list, could not be replaced and could not be deleted."""
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "static-operator-token-for-tests")  # pragma: allowlist secret
+    monkeypatch.setattr("maverick.audit.audit_event", lambda *a, **k: True)
+    from maverick_dashboard import triggers_store
+    from maverick_dashboard.app import app
+    c = TestClient(app, headers={"Origin": "http://testserver",
+                                 "Authorization": "Bearer static-operator-token-for-tests"})
+    body = {"template": "weekly-report", "params": {"topic": "rivals"}}
+
+    assert c.post("/api/v1/triggers", json=body).status_code == 201
+    assert triggers_store.get_trigger("weekly-report")["owner"] == "user:local"
+    assert [t["name"] for t in c.get("/api/v1/triggers").json()["triggers"]] == ["weekly-report"]
+    again = c.post("/api/v1/triggers", json={**body, "params": {"topic": "partners"}})
+    assert again.status_code == 201, again.text
+    assert triggers_store.get_trigger("weekly-report")["params"] == {"topic": "partners"}
+    assert c.delete("/api/v1/triggers/weekly-report").status_code == 200
+    assert c.get("/api/v1/triggers").json()["triggers"] == []
+
+    # Another owner's trigger stays hidden from, and untouchable by, the token.
+    triggers_store.set_trigger("theirs", "weekly-report", {"topic": "y"}, owner="user:bob")
+    assert c.get("/api/v1/triggers").json()["triggers"] == []
+    assert c.delete("/api/v1/triggers/theirs").status_code == 404
+    taken = c.post("/api/v1/triggers", json={**body, "name": "theirs"})
+    assert taken.status_code == 409
+    assert triggers_store.get_trigger("theirs")["owner"] == "user:bob"

@@ -411,3 +411,99 @@ def test_the_workspace_this_installation_is_fixed_to_is_recognised_by_identity(s
     monkeypatch.delenv("MAVERICK_TENANT")
     monkeypatch.setattr("maverick.client.client_id", lambda: "bound-client")
     assert workspace_erasure._is_pinned_workspace("bound-client") is True          # the [client] id binding too
+
+
+# ---- audit outage: reducing actions apply first, granting actions audit first ----
+
+def _refuse_global_audit(monkeypatch):
+    import maverick.audit as audit
+
+    def refuse(*_args, **_kwargs):
+        raise audit.AuditRefused("custody unavailable")
+
+    monkeypatch.setattr(audit, "record_global", refuse)
+
+
+def _accept_global_audit(monkeypatch):
+    import maverick.audit as audit
+
+    monkeypatch.setattr(audit, "record_global", lambda *args, **kwargs: True)
+
+
+def test_suspend_stands_when_its_audit_is_refused_and_the_message_says_so(monkeypatch):
+    assert client.post("/api/v1/admin/tenants", json={"id": "acme"}).status_code == 201
+    _refuse_global_audit(monkeypatch)
+    response = client.post("/api/v1/admin/tenants/acme/suspend")
+    assert response.status_code == 503
+    # Access-reducing: an audit outage must never keep access alive.
+    assert client.get("/api/v1/admin/tenants/acme").json()["status"] == "suspended"
+    detail = response.json()["detail"]
+    assert "paused" in detail and "refused to record" in detail
+    assert "nothing was changed" not in detail.lower()
+
+
+def test_resume_is_audited_before_it_happens(monkeypatch):
+    assert client.post("/api/v1/admin/tenants", json={"id": "acme"}).status_code == 201
+    assert client.post("/api/v1/admin/tenants/acme/suspend").status_code == 200
+    _refuse_global_audit(monkeypatch)
+    response = client.post("/api/v1/admin/tenants/acme/resume")
+    assert response.status_code == 503
+    # Access-granting: with no activity record the workspace stays paused.
+    assert client.get("/api/v1/admin/tenants/acme").json()["status"] == "suspended"
+    assert "nothing was changed" in response.json()["detail"].lower()
+    _accept_global_audit(monkeypatch)
+    assert client.post("/api/v1/admin/tenants/acme/resume").json()["status"] == "active"
+
+
+def test_delete_stands_when_its_audit_is_refused_and_a_retry_records_it(monkeypatch):
+    assert client.post("/api/v1/admin/tenants", json={"id": "gone"}).status_code == 201
+    _refuse_global_audit(monkeypatch)
+    response = client.request("DELETE", "/api/v1/admin/tenants/gone")
+    assert response.status_code == 503
+    assert client.get("/api/v1/admin/tenants/gone").status_code == 404
+    detail = response.json()["detail"]
+    assert "removed" in detail and "refused to record" in detail
+    assert "nothing was changed" not in detail.lower()
+    _accept_global_audit(monkeypatch)
+    assert client.request("DELETE", "/api/v1/admin/tenants/gone").status_code == 204
+
+
+def test_restore_is_audited_before_it_happens(monkeypatch):
+    assert client.post("/api/v1/admin/tenants", json={"id": "back"}).status_code == 201
+    assert client.request("DELETE", "/api/v1/admin/tenants/back").status_code == 204
+    _refuse_global_audit(monkeypatch)
+    response = client.post("/api/v1/admin/tenants/back/restore")
+    assert response.status_code == 503
+    assert "nothing was changed" in response.json()["detail"].lower()
+    assert client.get("/api/v1/admin/tenants/back").status_code == 404
+    assert client.get("/api/v1/admin/tenants/removed/list").json()[0]["restorable"] is True
+    _accept_global_audit(monkeypatch)
+    restored = client.post("/api/v1/admin/tenants/back/restore")
+    assert restored.status_code == 200 and restored.json()["status"] == "suspended"
+
+
+def test_tenant_role_routes_take_the_cross_process_fence_off_the_event_loop(monkeypatch):
+    """Nothing in these handlers is awaited, so declaring them ``async`` ran the
+    cross-process authority fence and the role files on the event loop."""
+    import asyncio
+    import contextlib
+
+    import maverick.authority_effects as effects
+
+    assert client.post("/api/v1/admin/tenants", json={"id": "acme"}).status_code == 201
+    seen = []
+
+    @contextlib.contextmanager
+    def fence():
+        try:
+            asyncio.get_running_loop()
+            seen.append("event loop")
+        except RuntimeError:
+            seen.append("worker thread")
+        yield
+
+    monkeypatch.setattr(effects, "authority_effect_fence", fence)
+    assert client.put("/api/v1/admin/tenants/acme/roles/user:bob", json={"role": "viewer"}).status_code == 204
+    assert client.get("/api/v1/admin/tenants/acme/roles").json() == {"user:bob": "viewer"}
+    assert client.request("DELETE", "/api/v1/admin/tenants/acme/roles/user:bob").status_code == 204
+    assert seen and set(seen) == {"worker thread"}

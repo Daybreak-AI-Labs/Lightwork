@@ -6,8 +6,6 @@ out of a tenant). No active tenant / no membership => unchanged global behaviour
 """
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 
@@ -151,9 +149,7 @@ def test_remove_active_per_user_tenant_role_allowed_under_per_user_tenancy(
         # The gate reads the request's workspace-people context header.
         from starlette.requests import Request
         request = Request({"type": "http", "method": "DELETE", "path": "/", "headers": [], "query_string": b""})
-        response = asyncio.run(
-            api.remove_tenant_role(request, "api:user:alice", "user:alice")
-        )
+        response = api.remove_tenant_role(request, "api:user:alice", "user:alice")
         assert response.status_code == 204
         assert rbac.get_tenant_role("api:user:alice", "user:alice") is None
         assert auth.role_for_principal("user:alice") == "viewer"

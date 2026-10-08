@@ -33,7 +33,7 @@ def _projection(monkeypatch, goals, *, questions=None, approvals=(), states=None
         list_projects=lambda **_: [], get_project=lambda _id: None,
         pending_approvals=lambda: list(approvals),
         approval_state=lambda approval_id: (states or {}).get(approval_id))
-    monkeypatch.setattr(api.auth, "assert_goal_access", lambda *_: None)
+    monkeypatch.setattr(api.auth, "can_access_goal", lambda *_: True)
     monkeypatch.setattr(api.auth, "has_permission", lambda *_: True)
     monkeypatch.setattr(api.auth, "caller_suites", lambda *_: None)
     monkeypatch.setattr(flow_approval_inbox, "pending_for_request",
