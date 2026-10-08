@@ -397,7 +397,7 @@ ROWS = [
   'Rechercher des actions par nom ou description…',
   'Aktionen nach Name oder Beschreibung suchen…',
   '名前または説明で操作を検索…',
-  '请输入不低于 0 美元、最多两位小数的支出上限；留空表示不设上限。'),
+  '按名称或说明搜索操作…'),
  ('Search connectors', 'Rechercher des connecteurs', 'Verbindungen suchen', 'コネクターを検索', '搜索连接器'),
  ('Describe what you want or provide a document. Lightwork drafts it for you to refine, save and run. You '
   'can also build it by hand.',

@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from maverick_dashboard import auth, i18n, i18n_journeys, preferences_api
+from maverick_dashboard import auth, i18n, i18n_journey_workflow, i18n_journeys, preferences_api
 
 
 def test_selected_journey_bindings_have_actual_catalog_entries():
@@ -13,6 +13,17 @@ def test_selected_journey_bindings_have_actual_catalog_entries():
     missing = {name: page["bound_sources_missing_catalog"] for name, page in report["pages"].items()
                if page["bound_sources_missing_catalog"]}
     assert missing == {}, f"Bound journey controls still fall back to English: {missing}"
+
+
+def test_action_search_placeholder_is_translated_not_borrowed_from_another_message():
+    rows = {source: dict(zip(i18n_journeys.TRANSLATION_LANGS, translations, strict=True))
+            for source, *translations in i18n_journey_workflow.ROWS}
+    search = rows["Search actions by name or description…"]
+    # Every language renders a search prompt, and none reuses the spending-limit validation text.
+    assert search["zh"] == "按名称或说明搜索操作…"
+    limit = rows["Enter a spending limit of $0 or more with at most two decimal places, or leave it empty for no limit."]
+    assert all("支出" not in text and "限" not in text for text in (search["zh"], search["ja"])) and "limit" not in search["fr"].lower()
+    assert search["zh"] != limit["zh"]
 
 
 def request(*, query="", accept="", cookies=None):
