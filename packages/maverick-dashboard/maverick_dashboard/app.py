@@ -3551,7 +3551,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         for error in errors:
             if isinstance(error, dict) and "input" in error:
                 error["input"] = "[redacted]"
-    return JSONResponse({"detail": errors}, status_code=422)
+    try:
+        return JSONResponse({"detail": errors}, status_code=422)
+    except UnicodeEncodeError:
+        # The error echoes the rejected input, and a lone surrogate in a JSON
+        # string cannot be written as UTF-8: escape it instead of answering 500.
+        return Response(json.dumps({"detail": errors}), status_code=422, media_type="application/json")
 
 
 @app.exception_handler(TaskLimitConfigError)

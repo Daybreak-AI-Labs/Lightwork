@@ -468,10 +468,19 @@ def page(request: Request):
     return templates.TemplateResponse(request, "flow_comparisons.html", {}, headers={"Cache-Control": "no-store, private"})
 
 
+def _read(function):
+    """A read route's work, with the release page's refusals and a plain 422 for a
+    choice the person can still fix (these messages are written for them)."""
+    try:
+        return release._native_call(function)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @router.get(API)
 def listing(request: Request, flow_id: str = ""):
     if flow_id:
-        return release._native_call(lambda: options(request, flow_id))
+        return _read(lambda: options(request, flow_id))
     _tenant, owner, context = _binding(request, Response())
     flows = store.list_flow_summaries(owner=owner, bounded=True)
     if len(flows) > 100:
@@ -489,12 +498,12 @@ def case_detail(request: Request, flow_id: str, run_id: str, output: str):
         value = source["original_result"]
         source["original_result"] = "Yes" if value is True else "No" if value is False else str(value) if value is not None else "No result recorded"
         return source
-    return release._native_call(read)
+    return _read(read)
 
 
 @router.get(API + "/history")
 def retained_history(request: Request, flow_id: str):
-    return release._native_call(lambda: history(request, flow_id))
+    return _read(lambda: history(request, flow_id))
 
 
 @router.post(API)
@@ -514,7 +523,7 @@ async def start(request: Request):
 
 @router.get(API + "/{identifier}")
 def read(request: Request, identifier: str):
-    return release._native_call(lambda: view(request, identifier))
+    return _read(lambda: view(request, identifier))
 
 
 @router.get("/static/lightwork-local-flow-comparisons.js")

@@ -163,3 +163,14 @@ def test_retained_comparison_lists_show_the_newest_fifty(harness, monkeypatch):
     assert release.status_code == 200, release.text
     [flow] = release.json()["flows"]
     assert [row["id"] for row in flow["comparisons"]] == newest_first
+
+
+def test_a_bad_workflow_choice_is_a_plain_refusal_not_a_server_error(harness, monkeypatch):
+    journey = _journey(harness, monkeypatch)
+    history = harness.client.get(API + "/history", params={"flow_id": "not a saved workflow!"})
+    assert history.status_code == 422, history.text
+    assert "Choose a saved workflow" in history.json()["detail"]
+    case = harness.client.get(API + "/case", params={"flow_id": journey.source.id, "run_id": "r", "output": "nope"})
+    assert case.status_code == 422, case.text
+    assert "Choose a current result" in case.json()["detail"]
+

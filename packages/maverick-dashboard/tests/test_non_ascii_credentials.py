@@ -101,3 +101,12 @@ def test_copilot_context_header(client):
 
     assert ask("0" * 64).status_code == 409
     assert ask(b"caf\xe9").status_code == 409
+
+
+def test_a_lone_surrogate_in_a_rejected_body_is_a_422_not_a_500(client):
+    """The 422 echoes the rejected input; UTF-8 cannot encode a lone surrogate."""
+    refused = _post(client, "/api/v1/navigation/pins", {"op": ["\ud800"], "href": "/overview", "context": "x"})
+    assert refused.status_code == 422, (refused.status_code, refused.text)
+    assert refused.headers["content-type"].startswith("application/json")
+    assert refused.json()["detail"]
+
