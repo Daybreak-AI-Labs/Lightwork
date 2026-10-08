@@ -814,3 +814,34 @@ def test_lost_workspace_membership_history_refuses_new_provisioning(monkeypatch,
     rbac.tenant_store_path().unlink()
     with pytest.raises(registry.TenantRegistryError):
         registry._legacy_role_names()
+
+
+def test_a_role_change_that_could_not_be_taken_back_does_not_claim_nothing_changed(monkeypatch, tmp_path):
+    """The shared handler says nothing was changed for an unreadable role list;
+    that is false when a refused change could not be rolled back."""
+    from fastapi.testclient import TestClient
+    from maverick_dashboard import rbac
+    from maverick_dashboard.app import app
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    paths = {"/__rollback": rbac.RosterRollbackError("rollback failed"),
+             "/__unreadable": rbac.RbacStoreError("role list is damaged")}
+
+    def raiser(error):
+        def route():
+            raise error
+        return route
+
+    before = len(app.router.routes)
+    for path, error in paths.items():
+        app.add_api_route(path, raiser(error), methods=["GET"])
+    try:
+        client = TestClient(app, base_url="http://127.0.0.1:8765", raise_server_exceptions=False)
+        rolled_back = client.get("/__rollback", headers={"Accept": "application/json"})
+        unreadable = client.get("/__unreadable", headers={"Accept": "application/json"})
+    finally:
+        del app.router.routes[before:]
+    assert rolled_back.status_code == unreadable.status_code == 503
+    assert "nothing was changed" not in rolled_back.json()["detail"]
+    assert "may now include it" in rolled_back.json()["detail"]
+    assert "nothing was changed and no access was granted" in unreadable.json()["detail"]

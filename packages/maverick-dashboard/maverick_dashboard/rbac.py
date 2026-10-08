@@ -57,6 +57,11 @@ class RbacStoreError(RuntimeError):
     """
 
 
+class RosterRollbackError(RbacStoreError):
+    """A role change was refused by the activity log and putting the role list
+    back failed, so the list may now hold the change."""
+
+
 class RosterMissingError(RbacStoreError):
     """A role list was recorded on this installation, but the roster file is gone.
 
@@ -562,7 +567,7 @@ def _audit_role_change_with_rollback(
         try:
             rollback()
         except Exception as rollback_exc:
-            raise RbacStoreError(
+            raise RosterRollbackError(
                 "audit refused RBAC mutation and roster rollback failed"
             ) from rollback_exc
         raise
@@ -712,7 +717,7 @@ def reset_missing_rosters(*, actor: str = "") -> list[str]:
                 try:
                     path.unlink()
                 except OSError as rollback_exc:
-                    raise RbacStoreError(
+                    raise RosterRollbackError(
                         "audit refused the role list reset and rollback failed"
                     ) from rollback_exc
                 raise
