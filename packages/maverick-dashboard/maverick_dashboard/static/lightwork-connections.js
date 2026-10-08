@@ -217,6 +217,7 @@
     var body;
     if (action === 'save') { try { body=readBody(); } catch (error) { say(error.message,true); return; } if (!form.reportValidity()) return; }
     busy=true; controls();
+    var sent=false, followUpFailed=false;
     try {
       var impactVersion=null;
       if (action === 'remove' || (action === 'save' && editing)) {
@@ -228,6 +229,7 @@
       if (accessLost) return;
       var url='/api/v1/connections' + (action === 'save' ? '' : '/' + encodeURIComponent(record.name) + (action === 'test' ? '/test' : '?' + new URLSearchParams({expected_revision:record.revision,impact_version:impactVersion,context:context})));
       say(action === 'test' ? 'Checking service access.' : 'Saving your change.');
+      sent=true;
       var result=await request(url,{method:action === 'remove' ? 'DELETE' : 'POST',body:action === 'save' ? JSON.stringify(body) : undefined});
       if (accessLost) return;
       if (action === 'save' && (!result || result.name !== body.name || typeof result.revision !== 'string')) throw new Error('Save receipt is unreadable.');
@@ -236,14 +238,18 @@
       if (action === 'save') {
         clearSecrets(); editing=null; unknownBinding=false; nameEl.readOnly=false; preset.disabled=false; connEl.disabled=false;
         baseEl.readOnly=Boolean(catalog[connEl.value] && catalog[connEl.value].reference_data); credentialFields(connEl.value);
-        if (thenTest && !discoveryPreset(body.connector) && !evidencePreset(body.connector)) { await request('/api/v1/connections/'+encodeURIComponent(body.name)+'/test',{method:'POST'}); }
+        if (thenTest && !discoveryPreset(body.connector) && !evidencePreset(body.connector)) {
+          // The save is already recorded; a failing follow-up check is its own result, not an unconfirmed save.
+          try { await request('/api/v1/connections/'+encodeURIComponent(body.name)+'/test',{method:'POST'}); } catch (testError) { if (accessLost) return; followUpFailed=true; }
+        }
       }
-      say(action === 'remove' ? 'Local connection removed. Provider authorization has not been revoked.' : action === 'test' ? 'Check recorded. Review its scope and time on the connection row.' : 'Connection saved. Review the separate service or source check before running work.');
+      say(action === 'remove' ? 'Local connection removed. Provider authorization has not been revoked.' : action === 'test' ? 'Check recorded. Review its scope and time on the connection row.' : followUpFailed ? 'Connection saved, but the follow-up service check could not be completed. Run the check from the connection row.' : 'Connection saved. Review the separate service or source check before running work.');
       await load();
     } catch (error) {
       if (accessLost) return;
       if (error.status === 409 && action === 'save') { showConflict(body); await load(); }
       else if (error.status && error.status < 500) say(window.mvErrorText ? mvErrorText(error,'complete this connection action') : 'The action was refused. Refresh and review the current record.',true);
+      else if (!sent) { say(error.message || 'Nothing was sent. Your entered values are kept.', true); }
       else { uncertain=true; clearSecrets(); say('Result not confirmed. Refresh connections and review the saved record before making another change. No request will be replayed.',true); }
     } finally { busy=false; controls(); }
   }

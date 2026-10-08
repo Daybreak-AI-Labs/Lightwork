@@ -14,6 +14,9 @@
   var conversationAvailable = false;
   var statusAvailable = false;
   var historyGeneration = 0;
+  // Counts local clears. It ends in-flight replies without moving historyGeneration,
+  // which must always equal what the server reports (a replayed clear changes nothing there).
+  var clearEpoch = 0;
   var historyRevision = "";
   var conversationVersion = 0;
   var replyPending = false;
@@ -467,13 +470,13 @@
   async function sendTaskQuestion(question, clearInput) {
     if (blocked || stale || busy || taskQuestionBusy || replyPending || !loaded || !statusAvailable) { return; }
     taskQuestionBusy = true;
-    var generation = historyGeneration;
+    var generation = historyGeneration, epoch = clearEpoch;
     setBusy(busy);
     announce("Checking your task status without an AI model.");
     try {
       var data = await request("/messages", "POST", { message: question, mode: "task_status",
         expected_revision: policy.revision, expected_history_generation: generation });
-      if (generation !== historyGeneration) { return; }
+      if (generation !== historyGeneration || epoch !== clearEpoch) { return; }
       acceptAnswer(data, question);
       if (clearInput) { el("ec-message").value = ""; }
       announce("Task check ready. Your ongoing work is unchanged.");
@@ -602,7 +605,7 @@
       if (blocked || detail.operation !== "companion.clear_history" ||
           !["confirmed", "replayed"].includes(detail.status)) { return; }
       // Invalidate in-flight replies before re-reading the owner-bound source.
-      historyGeneration += 1;
+      clearEpoch += 1;
       historyRevision = "";
       conversationVersion += 1;
       messages = [];
@@ -636,13 +639,13 @@
       replyPending = true;
       replyNetworkBusy = id;
       newReplyWarning = false;
-      var generation = historyGeneration;
+      var generation = historyGeneration, epoch = clearEpoch;
       setBusy(busy);
       replyNotice("Your companion is preparing a draft. Refresh can update your active tasks while you wait.", true, true);
       try {
         var data = await request("/messages", "POST", { message: question, mode: "conversation", request_id: id,
           expected_revision: policy.revision, expected_history_generation: generation }, 120000);
-        if (id !== replyRequestId || generation !== historyGeneration) { return; }
+        if (id !== replyRequestId || generation !== historyGeneration || epoch !== clearEpoch) { return; }
         acceptAnswer(data, question);
         input.value = "";
         replyPending = false;

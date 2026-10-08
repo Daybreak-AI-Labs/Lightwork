@@ -14,15 +14,16 @@ const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard
 const settle = async () => { for (let i = 0; i < 20; i += 1) await new Promise((r) => setImmediate(r)); };
 const T0 = 1_800_000_000;
 
-function page({ endsIn = 600, renew = "renew", status, renewReply, storage, confirm = true } = {}) {
+const POLICY_FORM = `<form id="policy"><input name="title"><textarea name="body"></textarea><input type="password" name="password">
+    <input name="api_token"></form>`;
+function page({ endsIn = 600, renew = "renew", status, renewReply, storage, confirm = true, formHtml = POLICY_FORM } = {}) {
   const navigations = [];
   const console_ = new VirtualConsole();
   console_.on("jsdomError", (e) => { if (/navigation/i.test(String(e && e.message))) navigations.push(e.message); });
   const dom = new JSDOM(`<head>
     <meta name="lightwork-session-expires" content="${T0 + endsIn}"><meta name="lightwork-session-now" content="${T0}">
     <meta name="lightwork-session-renew" content="${renew}"><meta name="lightwork-session-sign-in" content="/auth/local-login"></head>
-    <body><main><form id="policy"><input name="title"><textarea name="body"></textarea><input type="password" name="password">
-    <input name="api_token"></form></main></body>`,
+    <body><main>${formHtml}</main></body>`,
   { url: "https://lightwork.test/policies/edit?id=4", runScripts: "outside-only", virtualConsole: console_ });
   const w = dom.window;
   let clock = T0 * 1000;
@@ -128,5 +129,49 @@ test("a company sign-in signs in again instead of renewing", async () => {
     assert.equal(p.confirms.length, 1);
     assert.ok(!p.calls.some((c) => c.url === "/auth/session/renew"));
     assert.equal(p.navigations.length, 1, "goes to sign in, with return_to");
+  } finally { p.close(); }
+});
+
+const CHOICE_FORM = `<form id="policy"><input name="title"><select name="priority"><option value="low">Low</option>
+  <option value="high">High</option></select><select name="owner"><option value="">Choose</option><option value="ana">Ana</option></select>
+  <textarea name="body"></textarea></form>`;
+
+test("a drop-down choice is put back too, not only the ones left on their empty option", async () => {
+  const key = "lightwork.session-kept:/policies/edit?id=4";
+  const p = page({ endsIn: 30 * 86400, formHtml: CHOICE_FORM, storage: { key, value: { at: T0 * 1000, forms: [
+    { key: "#policy", values: { priority: "high", owner: "ana", title: "Travel policy" } }] } } });
+  try {
+    const form = p.doc.getElementById("policy");
+    assert.equal(form.elements.priority.value, "high", "a choice that started on a real first option");
+    assert.equal(form.elements.owner.value, "ana");
+    assert.equal(form.elements.title.value, "Travel policy");
+  } finally { p.close(); }
+});
+
+test("a drop-down with nothing kept for it stays on the option the page gave it", async () => {
+  const key = "lightwork.session-kept:/policies/edit?id=4";
+  const p = page({ endsIn: 30 * 86400, formHtml: CHOICE_FORM, storage: { key, value: { at: T0 * 1000, forms: [
+    { key: "#policy", values: { title: "Kept" } }] } } });
+  try {
+    const form = p.doc.getElementById("policy");
+    assert.equal(form.elements.title.value, "Kept");
+    assert.equal(form.elements.priority.value, "low");
+    assert.equal(form.elements.owner.value, "");
+  } finally { p.close(); }
+});
+
+test("the end of sign-in does not take the cursor out of what is being typed, and is announced as an alert", async () => {
+  const key = "lightwork.session-kept:/policies/edit?id=4";
+  const p = page({ endsIn: 600, confirm: false, storage: { key, value: { at: T0 * 1000, forms: [{ key: "#policy", values: { title: "Kept" } }] } },
+    status: (now) => (now < T0 + 600 ? { signed_in: true, expires_at: T0 + 600, now } : { signed_in: false }) });
+  try {
+    const body = p.doc.getElementById("policy").elements.body;
+    body.focus();
+    assert.equal(p.doc.querySelector(".mv-session-notice").getAttribute("role"), "status", "the restore notice is a status");
+    await p.advanceTo(481);
+    await p.advanceTo(601);
+    const notice = p.doc.querySelector(".mv-session-notice");
+    assert.equal(notice.getAttribute("role"), "alert", "the end of sign-in reuses the notice and must be an alert");
+    assert.equal(p.doc.activeElement, body, "typing is not interrupted");
   } finally { p.close(); }
 });

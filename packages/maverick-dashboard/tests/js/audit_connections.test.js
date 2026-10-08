@@ -60,3 +60,48 @@ test('unknown adapters remain read-only rather than changing binding on submit',
   d.getElementById('cx-form').dispatchEvent(new dom.window.Event('submit',{cancelable:true}));
   await tick();assert.equal(writes,0);dom.window.close();
 });
+
+test('a failure before anything is sent keeps the typed credentials and the page usable', async () => {
+  let writes = 0;
+  const dom = fixture(async (url, options = {}) => {
+    if (options.method === 'POST') writes++;
+    return response(url.endsWith('/catalog') ? {connectors: [{name: 'long_tail', label: 'Long tail', key_setup_supported: true}]}
+                                              : {connections: [record], context: 'workspace'});
+  });
+  await tick(); await tick();
+  const w = dom.window, d = w.document;
+  d.querySelector('#cx-list button').click();
+  d.getElementById('cx-token').value = 'a-new-secret-key';
+  w.lightworkConnectionImpact.review = async () => { throw new Error('Workspace changed. Reopen this page before saving.'); };
+  d.getElementById('cx-form').dispatchEvent(new w.Event('submit', {cancelable: true}));
+  await tick(); await tick();
+  assert.equal(writes, 0, 'nothing may be sent');
+  assert.equal(d.getElementById('cx-token').value, 'a-new-secret-key', 'the typed key is kept');
+  assert.match(d.getElementById('cx-msg').textContent, /Workspace changed/);
+  assert.doesNotMatch(d.getElementById('cx-msg').textContent, /not confirmed/);
+  assert.equal(d.querySelector('#cx-form button[type="submit"]').disabled, false, 'the page is not locked');
+  dom.window.close();
+});
+
+test('a follow-up check that fails after a recorded save is reported as such and refreshes the list', async () => {
+  const lists = [];
+  const dom = fixture(async (url, options = {}) => {
+    if (url.endsWith('/catalog')) return response({connectors: [{name: 'long_tail', label: 'Long tail', key_setup_supported: true}]});
+    if (url.endsWith('/test')) return response({detail: 'The service did not answer.'}, 409);
+    if (options.method === 'POST') return response({name: 'brand-new', revision: 'r1'});
+    lists.push(url);
+    return response({connections: [], context: 'workspace'});
+  });
+  await tick(); await tick();
+  const w = dom.window, d = w.document, loadedBefore = lists.length;
+  d.getElementById('cx-name').value = 'brand-new';
+  d.getElementById('cx-connector').value = 'long_tail';
+  d.getElementById('cx-token').value = 'a-new-secret-key';
+  d.getElementById('cx-base').value = 'https://service.example';
+  d.getElementById('cx-save-test').click();
+  await tick(); await tick(); await tick();
+  assert.match(d.getElementById('cx-msg').textContent, /saved, but the follow-up service check could not be completed/);
+  assert.equal(d.getElementById('cx-conflict').hidden, true, 'a failed check is not an edit conflict');
+  assert.ok(lists.length > loadedBefore, 'the list is read again after the save');
+  dom.window.close();
+});

@@ -54,7 +54,11 @@
       chunks.forEach(chunk => { bytes.set(chunk, start); start += chunk.length; });
       let value;
       try { value = JSON.parse(new TextDecoder().decode(bytes)); } catch (_) { throw new Error('The saved result could not be read. Read the original operation before continuing.'); }
-      if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : 'The challenge could not be checked. Review its saved state.');
+      if (!response.ok) {
+        const refusal = new Error(typeof value.detail === 'string' ? value.detail : 'The challenge could not be checked. Review its saved state.');
+        refusal.status = response.status;
+        throw refusal;
+      }
       return value;
     } catch (error) {
       if (controller.signal.aborted) throw new Error('The connection ended before its saved result could be read. Read the original operation; no check will be repeated.');
@@ -114,7 +118,7 @@
   async function mutate(path, body, prompt, identity, tracked) {
     if (busy || !state) return;
     const context = state.context, ticket = generation;
-    let submitted = false, result, failure;
+    let submitted = false, refused = false, result, failure;
     lock(true);
     try {
       const okText = {'': 'Build challenge', '/import': 'Review this file', '/setup': body.enabled ? 'Allow challenges' : 'Stop challenges'}[path]
@@ -125,7 +129,12 @@
       result = await request(path, {...body, context, confirm: true});
     } catch (error) {
       failure = error;
-      if (submitted && state?.context === context) {
+      // The server turned a new challenge or file away before saving anything (a full
+      // list, a file it does not support): there is no original to read back, so the
+      // pending marker must not keep this page from trying again.
+      refused = submitted && tracked && (path === '' || path === '/import') && error.status >= 400 && error.status < 500;
+      if (refused) savePending(null);
+      else if (submitted && state?.context === context) {
         try {
           if (identity) {
             const checked = await request('/' + encodeURIComponent(identity));
@@ -148,7 +157,7 @@
       await refresh(result.record.id);
       if (state?.context === context) await inspect(result.record.id);
     } else if (result) { await refresh(); status.textContent = result.detail; }
-    else { status.textContent = failure.message + ' Its outcome may be recorded. Read the original saved operation before another check.'; lock(false); }
+    else { status.textContent = failure.message + (refused ? '' : ' Its outcome may be recorded. Read the original saved operation before another check.'); lock(false); }
   }
   const operation = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
   generate.addEventListener('submit', event => {

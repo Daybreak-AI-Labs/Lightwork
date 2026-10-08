@@ -87,3 +87,52 @@ test('during a run the composer says in plain words what each kind of message wi
   for(const text of Object.values(said))assert.doesNotMatch(text,/billable|runner|consumes|snapshot/);p.dom.window.close();});
 test('an explicit workspace off says plainly that sending during a task is off',async()=>{const p=page({...state(),enabled:false});await tick();assert.equal(p.api.available,false);assert.equal(p.api.disabledByPolicy,true);assert.match(p.doc.getElementById('conversation-inbox-status').textContent,/^Sending messages during a task is turned off for this workspace\./);p.dom.window.close();});
 test('the plain explanation is translated',async()=>{const english="Lightwork saves this note for the current task. You check it once more, then the task reads it at its next safe point. It doesn't start a new task or undo steps already done.";const p=page(state(),null,{[english]:{text:'Note enregistrée.',lang:'fr'}});await tick();p.doc.getElementById('conversation-send-mode').value='guidance';p.api.updateComposer({asking:false,running:true,status:'active'});assert.equal(p.doc.getElementById('conversation-send-explanation').textContent,'Note enregistrée.');p.dom.window.close();});
+
+test('an answer that cannot be read is an unconfirmed result, never a change of account', async () => {
+  const p = page(); await tick(); compose(p, 'Private text the answer must not erase');
+  p.set(async () => ({ok: true, status: 200, redirected: false, json: async () => { throw new SyntaxError('truncated'); }}));
+  await p.api.send(p.form);
+  assert.equal(p.doc.getElementById('answer-input').value, 'Private text the answer must not erase');
+  assert.ok(p.dom.window.sessionStorage.getItem('lightwork:pending-message:context:4'), 'the receipt reference must survive');
+  assert.doesNotMatch(p.doc.getElementById('conversation-inbox-status').textContent, /account or workspace changed/);
+  assert.match(p.doc.getElementById('conversation-inbox-status').textContent, /unconfirmed/);
+  assert.equal(p.clears, 0);
+  p.dom.window.close();
+});
+
+test('an edit locked by an unconfirmed save opens fully again after it is resolved', async () => {
+  const p = page(state([item])); await tick();
+  button(p, 'Edit pending text or files').click();
+  p.doc.getElementById('conversation-inbox-edit-text').value = 'Revised';
+  p.set(async () => { throw new Error('Network unavailable'); });
+  p.doc.getElementById('conversation-inbox-edit').dispatchEvent(new p.dom.window.Event('submit', {bubbles: true, cancelable: true}));
+  await tick();
+  assert.equal(p.doc.getElementById('conversation-inbox-edit-new-files').disabled, true);
+  p.set(async () => p.response({...state([{...item, revision: 2, text: 'Revised'}]), item: {...item, revision: 2, text: 'Revised'}}));
+  p.doc.getElementById('conversation-inbox-edit').dispatchEvent(new p.dom.window.Event('submit', {bubbles: true, cancelable: true}));
+  await tick();
+  button(p, 'Edit pending text or files').click();
+  assert.equal(p.doc.getElementById('conversation-inbox-edit-text').readOnly, false);
+  assert.equal(p.doc.getElementById('conversation-inbox-edit-new-files').disabled, false);
+  p.dom.window.close();
+});
+
+test('naming an operation does not need a secure browser context', async () => {
+  const p = page(); await tick(); compose(p);
+  Object.defineProperty(p.dom.window.crypto, 'randomUUID', {value: undefined, configurable: true});
+  p.set(async () => p.response({...state([{...item, files: []}]), item: {...item, text: 'Send while current task runs', files: []}}));
+  await p.api.send(p.form);
+  assert.match(formBody(p.calls.at(-1)).operation_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  p.dom.window.close();
+});
+
+test('a page restored from the browser cache refreshes and keeps polling', async () => {
+  const p = page(); await tick();
+  p.dom.window.dispatchEvent(new p.dom.window.Event('pagehide'));
+  const before = p.calls.filter(call => call.url.endsWith('/4')).length;
+  const restored = new p.dom.window.Event('pageshow'); restored.persisted = true;
+  p.dom.window.dispatchEvent(restored);
+  await tick();
+  assert.ok(p.calls.filter(call => call.url.endsWith('/4')).length > before, 'a restored page reads the inbox again');
+  p.dom.window.close();
+});

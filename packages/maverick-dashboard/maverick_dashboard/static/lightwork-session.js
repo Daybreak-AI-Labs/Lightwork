@@ -62,6 +62,14 @@
     } catch (_) { /* private mode: nothing more can be kept */ }
     return forms.length;
   }
+  function untouched(c) {
+    if (c.tagName === 'SELECT') {
+      var shown = null, i;
+      for (i = 0; i < c.options.length; i += 1) { if (c.options[i].defaultSelected) { shown = c.options[i]; break; } }
+      return c.value === (shown ? shown.value : (c.options.length && !c.multiple ? c.options[0].value : ''));
+    }
+    return !c.value || c.value === c.defaultValue;
+  }
   function restore() {
     var saved = null;
     try { saved = JSON.parse(sessionStorage.getItem(KEY) || 'null'); sessionStorage.removeItem(KEY); } catch (_) { return; }
@@ -74,7 +82,7 @@
         if (!keepable(c) || !(c.name in entry.values)) return;
         var v = entry.values[c.name];
         if (c.type === 'checkbox' || c.type === 'radio') c.checked = Array.isArray(v) && v.indexOf(c.value) >= 0;
-        else if (!c.value || c.value === c.defaultValue) c.value = v;
+        else if (untouched(c)) c.value = v;
         else return;
         c.dispatchEvent(new Event('input', {bubbles: true}));
         c.dispatchEvent(new Event('change', {bubbles: true}));
@@ -93,6 +101,7 @@
       var main = document.querySelector('main') || document.body;
       main.insertBefore(notice, main.firstChild);
     }
+    notice.setAttribute('role', ended ? 'alert' : 'status');
     notice.textContent = '';
     var line = document.createElement('p'); line.textContent = text; notice.appendChild(line);
     if (ended) {
@@ -109,7 +118,9 @@
     var kept = snapshot();
     say(t(kept ? 'Your sign-in has ended. What you typed on this page is kept. Sign in again to come back here and carry on.'
       : 'Your sign-in has ended. Sign in again to come back to this page.'), true);
-    var link = notice.querySelector('a'); if (link) link.focus();
+    var link = notice.querySelector('a'), at = document.activeElement;
+    var typing = at && (/^(INPUT|TEXTAREA|SELECT)$/.test(at.tagName) || at.isContentEditable);
+    if (link && !typing) link.focus();
   }
 
   // ---- the timer -----------------------------------------------------------

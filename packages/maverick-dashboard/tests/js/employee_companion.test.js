@@ -387,3 +387,33 @@ test("refresh rechecks a displayed exact reply before preserving any source-deri
   assert.equal(ui.el("ec-retained-reply").hidden, true);assert.equal(ui.el("ec-retained-answer").textContent, "");
   assert.equal(ui.calls.length, 4);assert.equal(ui.calls.every(call => call.options.method === "GET"), true);
 });
+
+test("a replayed Copilot clear does not leave the page ahead of the server and ignoring its updates", async t => {
+  // The server did not change the generation (it replayed an earlier clear), so what it reports next is
+  // equal to what the page already holds; those updates must still be applied.
+  const ui = await setup([snapshot({history_generation: 4}),
+    snapshot({history_generation: 4, policy: policy({revision: 5}), tasks: [{id: 7, title: "Quarterly review", status: "active"}]})]);
+  t.after(() => ui.dom.window.close());
+  ui.document.dispatchEvent(new ui.window.CustomEvent("lightwork:product-operation-complete",
+    {detail: {operation: "companion.clear_history", status: "replayed"}}));
+  await tick();
+  assert.equal(ui.calls.length, 2);
+  assert.match(ui.document.body.textContent, /Quarterly review/);
+});
+
+test("a reply that was in flight when the history was cleared is dropped", async t => {
+  let release;
+  const slow = () => new Promise(resolve => { release = () => resolve(response(reply({
+    message: {role: "assistant", kind: "task_status", content: "Late answer about private history.", sources: []}}))); });
+  const ui = await setup([snapshot(), slow, snapshot({history: [], history_generation: 0})]);
+  t.after(() => ui.dom.window.close());
+  ui.el("ec-message").value = "What is running?";
+  submit(ui, "ec-message-form");
+  await tick();
+  ui.document.dispatchEvent(new ui.window.CustomEvent("lightwork:product-operation-complete",
+    {detail: {operation: "companion.clear_history", status: "confirmed"}}));
+  await tick();
+  release();
+  await tick();
+  assert.doesNotMatch(ui.el("ec-messages").textContent, /Late answer/);
+});

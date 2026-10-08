@@ -21,9 +21,10 @@
       try {
         const response = await fetch('/auth/company-saml-recovery' + path, {method:'POST', credentials:'same-origin', cache:'no-store', redirect:'error',
           headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal:abort.signal});
+        // A sign-in or access refusal discards private entries even when a gateway answers it without a JSON body.
+        if (response.status === 401 || response.status === 403) { generation++; phrase.value = ''; choices.replaceChildren(); invalidate(); }
         const data = await readJSON(response);
         if (!response.ok) {
-          if (response.status === 401 || response.status === 403) { generation++; phrase.value = ''; choices.replaceChildren(); invalidate(); }
           throw new Error(typeof data.detail === 'string' ? data.detail.slice(0,2000) : 'The request was refused. Read its original outcome before another review.');
         }
         return data;
@@ -85,9 +86,9 @@
     const abort = new AbortController(), timeout = setTimeout(() => abort.abort(), 20000);
     try {
       const response = await fetch(base + path, { credentials: 'same-origin', redirect: 'error', cache: 'no-store', ...options, signal: abort.signal });
+      if (response.status === 401 || response.status === 403) clear();
       const data = await readJSON(response);
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) clear();
         throw new Error(typeof data.detail === 'string' ? data.detail : 'This sign-in operation was refused. Your entered work is kept.');
       }
       if (context && data.context && data.context !== context) { clear(); throw new Error('Your current sign-in context changed. Private choices were cleared.'); }
