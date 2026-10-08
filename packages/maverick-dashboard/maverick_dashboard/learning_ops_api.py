@@ -1022,10 +1022,14 @@ async def turn_flywheel(request: Request, body: FlywheelStartIn):
     from . import learning_flywheel as cycle
     cycle._authority(request, write=True)
     try:
+        # unseal_from_str passes plain text through, so a hand-written review must be refused first.
+        if not crypto_at_rest.is_sealed_str(body.token):
+            raise ValueError("unsealed review")
         material = json.loads(crypto_at_rest.unseal_from_str(body.token))
-        if material["purpose"] != "lightwork.flywheel.v1":
+        if (set(material) != {"purpose", "prepared", "operation", "expires"} or material["purpose"] != "lightwork.flywheel.v1"
+                or not isinstance(material["prepared"], dict) or not isinstance(material["operation"], str)):
             raise ValueError("review purpose")
-    except (ValueError, TypeError, KeyError) as exc:
+    except (ValueError, TypeError, KeyError, crypto_at_rest.EncryptionUnavailable) as exc:
         raise HTTPException(409, "This cycle review is unavailable. Refresh and review current work again.") from exc
     result = await run_in_threadpool(cycle.start, request, material["prepared"], material["operation"], expires=material["expires"])
     return JSONResponse(result, headers={"Cache-Control": "private, no-store"})

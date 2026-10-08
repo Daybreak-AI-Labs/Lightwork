@@ -293,6 +293,38 @@ def test_flywheel_turn_runs_the_kernel_and_is_recorded_first(client, monkeypatch
     assert [r["action"] for r in audit_rows] == ["flywheel_turn"] and seen == [1]
 
 
+def test_flywheel_turn_accepts_only_a_sealed_review_with_complete_material(client, monkeypatch, audit_rows):
+    from maverick import crypto_at_rest, data_engine, flywheel
+    monkeypatch.setattr(data_engine, "enabled", lambda: True)
+    ran: list[int] = []
+    monkeypatch.setattr(flywheel, "run_once", lambda steps, **_kwargs: ran.append(1))
+    _current, review = _flywheel_review(client)
+    assert review.status_code == 200, review.text
+    sealed = review.json()["token"]
+    assert crypto_at_rest.is_sealed_str(sealed)
+    turn = f"{LO}/flywheel/turn"
+
+    # A hand-written plain-JSON review is not a review this server produced.
+    plain = crypto_at_rest.unseal_from_str(sealed)
+    assert json.loads(plain)["purpose"] == "lightwork.flywheel.v1"
+    forged = client.post(turn, json={"token": plain, "confirmed": True})
+    assert forged.status_code == 409 and "unavailable" in forged.json()["detail"], forged.text
+
+    # Sealed material that lacks part of the review is refused cleanly, not as a server error.
+    material = json.loads(plain)
+    for broken in ({key: value for key, value in material.items() if key != "prepared"},
+                   {key: value for key, value in material.items() if key != "operation"},
+                   {**material, "prepared": "not an object"}, [material]):
+        token = crypto_at_rest.seal_to_str(json.dumps(broken))
+        refused = client.post(turn, json={"token": token, "confirmed": True})
+        assert refused.status_code == 409 and "unavailable" in refused.json()["detail"], (broken, refused.text)
+    # So is a sealed review whose protected contents were altered.
+    altered = sealed[:-4] + ("AAAA" if not sealed.endswith("AAAA") else "BBBB")
+    tampered = client.post(turn, json={"token": altered, "confirmed": True})
+    assert tampered.status_code == 409 and "unavailable" in tampered.json()["detail"], tampered.text
+    assert ran == [] and audit_rows == []
+
+
 # ---- self-coaching extras ----------------------------------------------------------------
 
 def _harness(monkeypatch, tmp_path, *, corpus: bool = True, ledger: str = ""):
