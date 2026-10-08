@@ -1036,7 +1036,9 @@ def _erasure_save(tid, saved, check):
 
 def _erasure_unlink(root, entries, check):
     """Guard every actual unlink, keeping any interrupted attempt unknown."""
-    for entry in sorted(entries, key=lambda e: (e["path"].count("/"), len(e["path"])), reverse=True):
+    # Deepest first, with the root ('.') below every top-level name: it shares their
+    # '/' count and, for a one-character name, their length.
+    for entry in sorted(entries, key=lambda e: (-1 if e["path"] == "." else e["path"].count("/"), len(e["path"])), reverse=True):
         check()
         path = root if entry["path"] == "." else root / entry["path"]
         # Check every parent again: no link introduced after the reviewed walk

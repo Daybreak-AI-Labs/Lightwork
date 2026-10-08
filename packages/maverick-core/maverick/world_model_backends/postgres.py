@@ -3415,7 +3415,8 @@ class PostgresWorldModel:
         kv_memory, the primary ASI06 control, runs regardless of backend).
         """
         from ..fact_revision import normalize_tags
-        from ..world_model import _temporal_memory_enabled
+        from ..world_model import _refuse_withheld_placeholder, _temporal_memory_enabled
+        _refuse_withheld_placeholder(value)
         encoded_tags = json.dumps(normalize_tags(tags)) if tags is not None else None
         now = time.time()
         tenant = _active_tenant()
@@ -4035,7 +4036,15 @@ class PostgresWorldModel:
         from ..world_model import _notify_approval_created
 
         _notify_approval_created(self, int(row[0]), provenance)
+        self._emit_approval_event("approval.created", int(row[0]), {"risk": risk, "action": action})
         return int(row[0])
+
+    def _emit_approval_event(self, event: str, approval_id: int, payload: dict) -> None:
+        """Webhook subscribers hear about approvals, as on SQLite; call it only
+        after the transaction has committed. Never raises."""
+        from ..world_model import WorldModel
+
+        WorldModel._emit_approval_event(self, event, approval_id, payload)
 
     def get_approval(self, approval_id: int):
         frag, params = _tenant_scope()
@@ -4447,6 +4456,7 @@ class PostgresWorldModel:
         """Acknowledge signed delivery and apply any now-safe final outcome."""
         outbox_scope, outbox_params = _approval_outbox_scope()
         approval_scope, approval_params = _tenant_scope()
+        finalized: tuple[str, str] | None = None
         with self._tx() as cur:
             cur.execute(
                 "SELECT event_id, approval_id, status, decided_by, final_status, "
@@ -4512,9 +4522,15 @@ class PostgresWorldModel:
                         sql += " AND " + approval_scope
                         values += approval_params
                     cur.execute(sql, tuple(values))
+                    if cur.rowcount > 0:
+                        finalized = (final[0], final[1])
             if effect_guard is not None:
                 effect_guard()
-            return True
+        # Only after the guard passed and the transaction committed (as on SQLite).
+        if finalized is not None:
+            self._emit_approval_event("approval.decided", approval_id,
+                                      {"status": finalized[0], "decided_by": finalized[1] or ""})
+        return True
 
     def decide_approval(self, approval_id: int, status: str,
                         decided_by: str | None = None) -> bool:
@@ -4550,7 +4566,12 @@ class PostgresWorldModel:
                 p += params
             with self._tx() as cur:
                 cur.execute(sql, tuple(p))
-                return cur.rowcount > 0
+                decided = cur.rowcount > 0
+            if decided:
+                self._emit_approval_event("approval.decided", approval_id,
+                                          {"status": status, "decided_by": decided_by or "",
+                                           "action": appr.action})
+            return decided
 
         approver = (decided_by or "").strip()
         if not approver:

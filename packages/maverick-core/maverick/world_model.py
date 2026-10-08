@@ -926,6 +926,15 @@ def _enc_field(text: str | None) -> str | None:
 _UNSEALED_WITHHELD = "‹withheld: unsealed value in an encrypted store›"
 
 
+def _refuse_withheld_placeholder(value: str) -> None:
+    """Never seal the read-side placeholder over the value it stands in for."""
+    if value == _UNSEALED_WITHHELD:
+        raise ValueError(
+            "This fact's saved value cannot be read yet, so it was left unchanged. "
+            "Run 'maverick encryption migrate', then try again."
+        )
+
+
 def _dec_field(text: str | None, *, at_rest: bool | None = None) -> str | None:
     """Unseal a stored field from a sealed column when at-rest encryption is on.
 
@@ -3010,6 +3019,7 @@ class WorldModel:
         evolution. An unchanged value refreshes provenance without a new version.
         """
         from .fact_revision import normalize_tags
+        _refuse_withheld_placeholder(value)
         encoded_tags = json.dumps(normalize_tags(tags)) if tags is not None else None
         now = time.time()
         enc = _enc_field(value)
@@ -3919,11 +3929,13 @@ class WorldModel:
                     ).rowcount
                     if applied:
                         finalized = (final["final_status"], final["decided_by"])
-            if finalized is not None:
-                self._emit_approval_event("approval.decided", approval_id,
-                                          {"status": finalized[0], "decided_by": finalized[1] or ""})
             self._check_effect_guard(effect_guard)
-            return True
+        # Subscribers hear of the decision only once the guard has passed and the
+        # transaction has committed; a rollback must not leave "approved" sent.
+        if finalized is not None:
+            self._emit_approval_event("approval.decided", approval_id,
+                                      {"status": finalized[0], "decided_by": finalized[1] or ""})
+        return True
 
     def decide_approval(self, approval_id: int, status: str,
                         decided_by: str | None = None) -> bool:

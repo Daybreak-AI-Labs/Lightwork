@@ -119,3 +119,28 @@ def test_reclaim_plaintext_concat_unchanged_without_encryption(tmp_path, monkeyp
     n = wm.reclaim_orphan_goals(max_age_seconds=0)
     assert n == 1
     assert wm.get_goal(gid).result == "prior" + _MARKER
+
+
+@requires_crypto
+def test_a_withheld_fact_value_cannot_be_written_back_over_the_original(monkeypatch, tmp_path):
+    """Strict mode withholds a legacy plaintext fact as a placeholder. Writing that
+    placeholder back (the tag editor round-trips ``fact_record``'s value) would seal
+    it over the real value and destroy it."""
+    from maverick.world_model import _UNSEALED_WITHHELD, WorldModel
+    db = tmp_path / "world.db"
+    wm = WorldModel(db)
+    wm.upsert_fact("policy:retention", "keep invoices for seven years")  # at-rest off: plaintext
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_STRICT", "1")
+
+    item = wm.fact_record("policy:retention")
+    assert item["value"] == _UNSEALED_WITHHELD
+    with pytest.raises(ValueError, match="encryption migrate"):
+        wm.upsert_fact("policy:retention", item["value"], tags=["finance"], expected_revision=item["revision"])
+
+    raw = sqlite3.connect(str(db)).execute(
+        "SELECT value FROM facts WHERE key=?", ("policy:retention",)).fetchone()[0]
+    assert raw == "keep invoices for seven years"
+    # A real value still writes (and is sealed) as before.
+    wm.upsert_fact("policy:retention", "keep invoices for ten years")
+    assert wm.fact_record("policy:retention")["value"] == "keep invoices for ten years"

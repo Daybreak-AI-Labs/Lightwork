@@ -268,3 +268,31 @@ def test_legacy_decision_api_cannot_bypass_an_active_audit_outbox(tmp_path):
     state = world.approval_state(quorum)
     assert state["status"] == "pending"
     assert state["approved_count"] == 1
+
+
+def test_a_refused_delivery_commit_tells_no_webhook_subscriber_the_approval_was_decided(tmp_path, monkeypatch):
+    from maverick.world_model import WorldModel
+
+    world = WorldModel(tmp_path / "world.db")
+    approval_id = world.create_approval("shell", risk="high")
+    event = world.decide_approval_audited(approval_id, "approved", decided_by="user:dana")
+    told = []
+    monkeypatch.setattr(world, "_emit_approval_event", lambda *args, **kwargs: told.append(args))
+    calls = []
+
+    def guard():
+        calls.append(1)
+        if len(calls) == 2:  # the guard that runs just before the commit
+            raise PermissionError("authority changed")
+
+    with pytest.raises(PermissionError):
+        world.mark_approval_audit_delivered(event.event_id, effect_guard=guard)
+
+    # The transaction rolled back, so the approval is still pending and nobody was told otherwise.
+    assert world.get_approval(approval_id).status == "pending"
+    assert world.get_approval_audit_event(event.event_id).delivered_at is None
+    assert told == []
+
+    assert world.mark_approval_audit_delivered(event.event_id) is True
+    assert world.get_approval(approval_id).status == "approved"
+    assert [args[:2] for args in told] == [("approval.decided", approval_id)]

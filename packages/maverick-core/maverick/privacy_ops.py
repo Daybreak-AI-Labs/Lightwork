@@ -3705,7 +3705,6 @@ def set_incident_affected_people(incident_id: str, affected_people: int | None,
     saved = _INCIDENT.update(incident_id, _mut)
     if saved is not None:
         saved = _audit_mutation(_INCIDENT, "incident", saved)
-        _emit_record_event("incident.affected_people_updated", "incident", saved)
     return saved
 
 

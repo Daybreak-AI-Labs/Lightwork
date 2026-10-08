@@ -1875,3 +1875,23 @@ class TestDsarOutcomes:
         assert dsar["answered"] == 2
         assert dsar["handled_on_time"] == 1
         assert dsar["answered_late"] == 1
+
+
+def test_every_webhook_event_the_privacy_records_emit_is_in_the_catalogue():
+    # webhook_events.emit drops an unlisted name with a warning, so a typo or an
+    # invented name means subscribers silently receive nothing.
+    import re
+
+    from maverick import webhook_events
+
+    source = (Path(privacy_ops.__file__)).read_text(encoding="utf-8")
+    emitted = set(re.findall(r'_emit_record_event\(\s*"([a-z_.]+)"', source))
+    assert "dsar.opened" in emitted and "incident.closed" in emitted
+    assert emitted <= set(webhook_events.EVENT_TYPES)
+
+
+def test_revising_the_affected_people_sends_no_event_the_catalogue_does_not_know(caplog):
+    incident = privacy_ops.open_incident("Misdirected batch", affected_people=120, reported_by="ops")
+    with caplog.at_level("WARNING", logger="maverick.webhook_events"):
+        privacy_ops.set_incident_affected_people(incident["id"], 80, updated_by="ops")
+    assert "unknown event type" not in caplog.text
