@@ -882,7 +882,13 @@ class _DeliveryAttempt:
             _assert_work_allowed()
             if not self.authorize():
                 raise DeliveryNotSent("Channel sender authorization changed before sending")
-            await asyncio.to_thread(_require_reply_source, row)
+            try:
+                await asyncio.to_thread(_require_reply_source, row)
+            except PermissionError as exc:
+                # Refused before the provider is called: nothing was sent, so the
+                # chunk stays retryable (recorded unknown, a non-idempotent
+                # channel would refuse every replay and the reply never go out).
+                raise DeliveryNotSent(str(exc)) from exc
             if not self.authorize():
                 raise DeliveryNotSent("Channel sender authorization changed before sending")
             result = await call()

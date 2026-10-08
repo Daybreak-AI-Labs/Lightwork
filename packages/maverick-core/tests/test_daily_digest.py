@@ -452,6 +452,34 @@ def test_a_channel_failing_mid_send_is_unconfirmed_and_not_resent(tmp_path, reco
         daily_digest.register_digest_sender("teams", None)
 
 
+def test_an_audit_refusal_after_the_send_neither_replays_nor_stops_the_cycle(tmp_path, recorded, monkeypatch):
+    import maverick.audit as audit
+    from maverick import channel_identities, daily_digest, user_preferences
+    from maverick.audit.errors import AuditRefused
+
+    world = _world(tmp_path)
+    _seed(world)
+    sent = []
+    monkeypatch.setattr(daily_digest, "_send_slack",
+                        lambda p, d, links, prefs: sent.append(p) or True)
+
+    channel_identities.link("slack", "U1", "user:alice", actor="admin")
+    channel_identities.link("slack", "U2", "user:bob", actor="admin")
+
+    def refuse(kind, **fields):
+        raise AuditRefused("the audit sink refuses writes")
+    monkeypatch.setattr(audit, "audit_event", refuse)
+    people = ["user:alice", "user:bob"]
+
+    def cycle(now):
+        return daily_digest.run_digest_cycle(world, principals=people, can_decide=lambda p: True, now=now)
+    first = cycle(NOON)
+    assert first["sent"] == 2 and sent == ["user:alice", "user:bob"]
+    for person in people:
+        assert user_preferences.get_preferences(person)["last_digest_date"] == "2026-07-01"
+    assert cycle(NOON + 300)["sent"] == 0 and len(sent) == 2  # no copy on the next poll
+
+
 class _Smtp:
     def __init__(self, refused):
         self.refused = refused

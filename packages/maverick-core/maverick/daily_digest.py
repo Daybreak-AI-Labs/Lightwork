@@ -530,10 +530,16 @@ def send_digest(principal: str, digest: dict[str, Any], *, links: list[dict[str,
             continue
         delivery = _attempt(channel, sender, principal, digest, by_channel[channel], prefs)
         ok = delivery == "accepted"
-        audit.audit_event(
-            audit.EventKind.DIGEST_SENT, agent="system:daily-digest", recipient=principal,
-            channel=channel, ok=ok, delivery=delivery, **digest["counts"],
-        )
+        try:
+            audit.audit_event(
+                audit.EventKind.DIGEST_SENT, agent="system:daily-digest", recipient=principal,
+                channel=channel, ok=ok, delivery=delivery, **digest["counts"],
+            )
+        except Exception:  # noqa: BLE001 -- the send already happened; see below
+            # The record is written after the send, so a refusal (AuditRefused
+            # included) cannot undo it. Raising here would leave the day open and
+            # send the same summary again on every poll, and stop everyone after.
+            log.warning("digest audit for %s failed after the send", channel, exc_info=True)
         outcomes.append({"channel": channel, "ok": ok, "delivery": delivery})
     return outcomes
 
