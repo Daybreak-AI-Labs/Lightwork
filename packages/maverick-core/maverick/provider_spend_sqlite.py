@@ -81,6 +81,49 @@ def _publish_seal(legacy: Path, database: Path) -> None:
     atomic_write_text(seal_path(legacy), _digest_file(database) + "\n", mode=0o600)
 
 
+def _mark_seal_pending(legacy: Path) -> None:
+    """Flag the seal before a commit so a writer that stops between its SQLite
+    commit and its new seal (crash, ENOSPC) leaves a state :func:`ensure` can
+    recover. Without the flag a seal mismatch is damage and stays fatal."""
+    recorded = atomic_read_text(seal_path(legacy)).split()[0]
+    atomic_write_text(seal_path(legacy), recorded + " pending\n", mode=0o600)
+
+
+def _seal_pending(legacy: Path) -> bool:
+    try:
+        return atomic_read_text(seal_path(legacy)).split()[1:] == ["pending"]
+    except OSError:
+        return False  # a missing seal is reported by _connect
+
+
+def _recover_pending_seal(legacy: Path, database: Path, cap) -> None:
+    """Re-seal a ledger whose writer stopped between its commit and its seal.
+
+    A seal flagged pending was written under the authority lock, so once this
+    caller holds that lock no writer is mid-flight: the writer died. SQLite
+    rolls back a hot journal on open; the ledger is then re-sealed only if it
+    passes its own integrity check and every ledger invariant. Unflagged
+    mismatches (tampering after a clean commit) never reach this path.
+    """
+    if not _seal_pending(legacy):
+        return
+    with cross_process_lock(legacy, strict=True):
+        if not _seal_pending(legacy):
+            return  # the writer finished while this caller waited for the lock
+        ensure_private_file(database, 0o600)
+        connection = sqlite3.connect(str(database), timeout=15, isolation_level=None)
+        try:
+            connection.execute("PRAGMA busy_timeout=15000")
+            connection.execute("BEGIN")
+            if connection.execute("PRAGMA quick_check").fetchone() != ("ok",):
+                raise sqlite3.DatabaseError("provider accounting database failed validation")
+            _read_complete(connection, cap)
+            connection.commit()
+        finally:
+            connection.close()
+        _publish_seal(legacy, database)
+
+
 def _connect(database: Path) -> sqlite3.Connection:
     # Never let sqlite3 create an apparently fresh authority after publication.
     if not database.is_file():
@@ -88,8 +131,8 @@ def _connect(database: Path) -> sqlite3.Connection:
     ensure_private_file(database, 0o600)
     seal = database.with_suffix(".sqlite3.seal")
     ensure_private_file(seal, 0o600)
-    recorded = atomic_read_text(seal).strip()
-    if len(recorded) != 64 or recorded != _digest_file(database):
+    recorded, _, flag = atomic_read_text(seal).strip().partition(" ")
+    if len(recorded) != 64 or flag not in {"", "pending"} or recorded != _digest_file(database):
         raise sqlite3.DatabaseError("provider accounting integrity seal does not match")
     connection = sqlite3.connect(str(database), timeout=15, isolation_level=None)
     connection.execute("PRAGMA busy_timeout=15000")
@@ -167,6 +210,7 @@ def ensure(legacy: Path, cap) -> Path:
         ensure_private_file(marker, 0o600)
         if not database.is_file():
             raise sqlite3.DatabaseError("provider accounting database is missing")
+        _recover_pending_seal(legacy, database, cap)
         return database
     # The old JSON source and the authority switch share one lock with every
     # local writer. cross_process_lock is re-entrant for read/recovery callers
@@ -402,6 +446,7 @@ def mutate(legacy: Path, period: str, provider: str, operation, cap, *,
                 # counter, receipt or attempt changed: keep their durable bytes.
                 connection.rollback()
                 return result
+            _mark_seal_pending(legacy)
             if attempt_claim is not None:
                 connection.execute(
                     "INSERT INTO attempts VALUES(?, ?, ?, ?, ?)",

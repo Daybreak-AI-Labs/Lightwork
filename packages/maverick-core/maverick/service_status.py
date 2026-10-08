@@ -2,8 +2,9 @@
 a connection can't be used, or the database is read-only (CTL-5).
 
 The circuit breaker (:mod:`maverick.circuit_breaker`) pauses an AI provider
-after repeated errors (``llm:<provider>`` keys) and lets one test request
-through once its cooldown ends. This module turns that state into the three
+after repeated errors (``llm:<provider>`` keys, or ``llm:<provider>:route:<hash>``
+for a native client) and lets one test request through once its cooldown ends.
+This module turns that state into the three
 things a person needs: what is affected, what happens to running tasks, and
 when Lightwork checks again. It looks at every provider this workspace uses
 (the role models and their backup models), so one healthy backup reads as
@@ -81,7 +82,13 @@ def current(*, breakers: list[dict] | None = None, in_use: set[str] | None = Non
     for row in breakers:
         key = str(row.get("key") or "")
         if key.startswith("llm:") and row.get("state") in _PAUSED_STATES:
-            paused[key[4:].lower()] = row
+            # llm._dispatch_client keys a native client's breaker
+            # ``llm:<provider>:route:<sha256>``: name the provider, and keep one
+            # row (the most recently opened) when several routes are paused.
+            provider = key[4:].split(":route:", 1)[0].lower()
+            held = paused.get(provider)
+            if held is None or float(row.get("opened_at") or 0) >= float(held.get("opened_at") or 0):
+                paused[provider] = row
     if not paused:
         return None
     if in_use is None:
