@@ -52,6 +52,7 @@ per-recipient backend lands, :func:`deliver` is the single seam to route by
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -540,7 +541,9 @@ class _RetryBook:
         if not entry or entry.get("setup") != self.setup:
             return False
         try:
-            return now < float(entry.get("next_at") or 0)
+            # A failure stamped later than now was recorded by a wrong clock;
+            # its wait must not hold the alert back once the clock is right.
+            return float(entry.get("at") or 0) <= now < float(entry.get("next_at") or 0)
         except (TypeError, ValueError):
             return False
 
@@ -695,6 +698,25 @@ def _emit_webhook(alert: Alert, world: Any) -> int:
 
 
 # --------------------------------------------------------------- run cycle
+@contextlib.contextmanager
+def _one_cycle_at_a_time():
+    """The scheduler and a manual "run now" must not overlap: both would see an
+    alert as unsent and both send it, and the second ledger row would then fail
+    on the unique index. A lock that cannot be set up is logged and skipped so
+    alerts still go out."""
+    try:
+        from .file_lock import cross_process_lock
+        from .paths import data_dir
+
+        guard = cross_process_lock(data_dir("deadline-alert-cycle"))
+    except Exception as exc:  # noqa: BLE001 -- unsafe to overlap, worse to stop alerting
+        log.warning("deadline_alerts: cycles are not serialised: %s", type(exc).__name__)
+        yield
+        return
+    with guard:
+        yield
+
+
 def run_cycle(
     *,
     now: float | None = None,
@@ -703,7 +725,21 @@ def run_cycle(
     notify: Callable[..., int] | None = None,
     localtime: Callable[[float], time.struct_time] = time.localtime,
 ) -> dict[str, Any]:
-    """Evaluate every deadline and send what is new. Returns a summary."""
+    """Evaluate every deadline and send what is new. Returns a summary.
+
+    One cycle runs at a time; an overlapping call waits for the running one."""
+    with _one_cycle_at_a_time():
+        return _run_cycle(now=now, world=world, config=config, notify=notify, localtime=localtime)
+
+
+def _run_cycle(
+    *,
+    now: float | None,
+    world: Any,
+    config: dict | None,
+    notify: Callable[..., int] | None,
+    localtime: Callable[[float], time.struct_time],
+) -> dict[str, Any]:
     cfg = settings(config)
     current = time.time() if now is None else float(now)
     if world is None:

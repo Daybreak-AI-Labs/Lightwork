@@ -489,6 +489,47 @@ def test_definite_failures_back_off_5_10_20_40_60_minutes_then_hourly(world):
     assert waiting["backing_off"] == 1 and waiting["not_sent"] == 0 and waiting["already_sent"] == 0
 
 
+def test_overlapping_cycles_send_each_alert_once(world, monkeypatch):
+    """The scheduler and a manual "run now" can overlap: neither may send an
+    alert the other is sending, or fail on the ledger row the other wrote."""
+    import threading
+
+    monkeypatch.setattr(da, "collect", lambda **kw: [_deadline(record_id="R1", due_in=DAY),
+                                                      _deadline(record_id="R2", due_in=DAY)])
+    sent, outcomes, errors = [], [], []
+    start = threading.Barrier(2)
+
+    def notify(body, **kw):
+        time.sleep(0.15)
+        sent.append(kw.get("title"))
+        return 1
+
+    def cycle():
+        try:
+            start.wait(10)
+            outcomes.append(da.run_cycle(now=NOW, world=world, config=_config(), notify=notify))
+        except Exception as exc:  # noqa: BLE001 -- the test reports it
+            errors.append(exc)
+
+    threads = [threading.Thread(target=cycle) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(60)
+    assert errors == []
+    assert len(sent) == 2
+    assert sum(o["sent"] for o in outcomes) == 2 and sum(o["already_sent"] for o in outcomes) == 2
+
+
+def test_a_wait_recorded_by_a_wrong_clock_does_not_hold_back_the_retry(world):
+    d = _deadline(record_id="C1", due_in=-DAY)
+    year = 365 * DAY
+    assert _cycle(world, [d], lambda body, **kw: 0, now=NOW + year)["not_sent"] == 1  # clock a year ahead
+    # The clock is corrected and the channel works: the alert goes out now, not in a year.
+    fixed = _cycle(world, [d], lambda body, **kw: 1, now=NOW + 60)
+    assert fixed["sent"] == 1 and fixed["backing_off"] == 0
+
+
 def test_changing_the_notification_setup_ends_the_wait_at_once(world, tmp_path):
     d = _deadline(record_id="B2", due_in=-DAY)
     for m in (0, 5, 15, 35):
