@@ -52,6 +52,20 @@ async function confirmSave(ui){
   host.querySelector('[data-save-review]').click();for(let i=0;i<6;i++)await tick();
 }
 const sent=call=>JSON.parse(call.options.body);
+test('the cohort value report keeps its own field state and never marks pilot work unsaved',async()=>{
+  const ui=await setup([report()]);await open(ui);
+  const leaving=()=>{const event=new ui.w.Event('beforeunload',{cancelable:true});ui.w.dispatchEvent(event);return event.defaultPrevented;};
+  const cohort=ui.d.getElementById('ov-pilot');
+  cohort.append(new ui.w.Option('A pilot','OPL-test'));cohort.value='OPL-test';
+  cohort.dispatchEvent(new ui.w.Event('change',{bubbles:true}));
+  ui.d.getElementById('ov-baseline-form').querySelector('input,select,textarea').dispatchEvent(new ui.w.Event('input',{bubbles:true}));
+  assert.equal(leaving(),false);
+  // Entered pilot work still guards the page, so the check above is meaningful.
+  ui.d.querySelector('#op-report input[name="baseline_minutes"]').dispatchEvent(new ui.w.Event('input',{bubbles:true}));
+  assert.equal(leaving(),true);
+  ui.dom.window.close();
+});
+
 test('record picker, missing coverage, source titles and unknown values render honestly',async()=>{
   const ui=await setup([report()]);await open(ui);
   assert.equal(ui.d.querySelectorAll('#op-planned-cases select').length,4);

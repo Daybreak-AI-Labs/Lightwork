@@ -522,9 +522,10 @@
   window.LightworkOutcomePilots={open,renderReview};
   document.addEventListener('lightwork:copilot-selection',event=>{const selection=event.detail&&event.detail.selection;if(!selection||selection.kind!=='outcome_pilot'||selection.id!==publishedSelection)ownsSelection=false;});
   $('op-original-check').addEventListener('click',()=>void readOriginal());
-  // Provider cost allocations save directly and redraw the report, so their
-  // fields are not unsaved pilot work that would keep the old report shown.
-  const pilotWork=target=>!$('op-guided-review').contains(target)&&!target.closest('#op-provider-costs');
+  // Provider cost allocations save directly and redraw the report, and the
+  // cohort value report keeps its own fields and saves, so neither is unsaved
+  // pilot work that would block opening another pilot or leaving the page.
+  const pilotWork=target=>!$('op-guided-review').contains(target)&&!target.closest('#op-provider-costs, [data-own-controls]');
   root.addEventListener('input',event=>{if(pilotWork(event.target)){dirty=true;invalidateReview();}});
   root.addEventListener('change',event=>{if(pilotWork(event.target)&&event.target!==chosen&&event.target.id!=='op-review-reference'){dirty=true;invalidateReview();}});
   function contextChanged(event){if(event.detail&&event.detail.reason==='selection')return;clearAuthority();status.textContent='Your account, workspace or access changed. Private pilot details were cleared. Reload this page.';}
