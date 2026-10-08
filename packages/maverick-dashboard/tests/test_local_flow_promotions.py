@@ -12,7 +12,12 @@ from maverick.flow.evolve import attach_learned_operator, remove_learned_operato
 from maverick.flow.learned_operator import synthesize
 from maverick.paths import tenant_scope
 from maverick.tenant.registry import create_tenant, get_tenant
+from maverick_dashboard import local_flow_promotions as release_module
 from maverick_dashboard import rbac, workspace_tenants
+
+# Import the app while collecting: a cold import inside the harness fixture would
+# claim this workspace id for the test's home before the test creates it.
+from maverick_dashboard.app import app as _installed_app  # noqa: F401
 
 from test_support.action_episode_api import OWNER, TENANT
 from test_support.action_episode_api import harness as harness
@@ -180,3 +185,90 @@ def test_native_rule_only_practice_independent_copilot_release_canary_and_restor
                 with store.active_release_guard(source.id, expected_release_id=old["release_id"]):
                     pytest.fail("Old waiting work regained activation")
     assert not harness.calls
+
+
+def _enable(harness, monkeypatch):
+    monkeypatch.setenv("MAVERICK_CANDIDATE_PROMOTION", "1")
+    monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "local")
+    harness.flags["learned_operators"] = True
+    if get_tenant(TENANT) is None:
+        create_tenant(TENANT)
+    for actor in (OWNER, "user:admin"):
+        rbac.set_role(actor, "admin", actor="user:admin")
+        rbac.set_tenant_role(TENANT, actor, "admin", actor="user:admin")
+        workspace_tenants.set_selection(actor, TENANT)
+
+
+def _taught(flow_id):
+    return Flow(id=flow_id, name="Calculate order total", owner=OWNER, start="calculate", nodes={
+        "calculate": FlowNode(id="calculate", kind="agent", brief="Calculate total", output="total", label="Calculate total")})
+
+
+def _published(harness, monkeypatch):
+    """A rule-only taught workflow with its exact baseline published."""
+    _enable(harness, monkeypatch)
+    with tenant_scope(tenant=TENANT):
+        source = store.save_flow(attach_learned_operator(_taught("taught-release"), "calculate", _artifact(False)))
+    context = harness.client.get(LOCAL).json()["context"]
+    saved = harness.client.post(LOCAL + "/rules-only", json={
+        "context": context, "confirm": True, "flow_id": source.id, "version": source.version, "revision": source.revision})
+    assert saved.status_code == 200, saved.text
+    with tenant_scope(tenant=TENANT):
+        baseline = store.load_flow(source.id)
+    published = harness.client.post("/api/v1/flows/" + source.id + "/publish",
+                                    json={"version": baseline.version, "revision": baseline.revision})
+    assert published.status_code == 200, published.text
+    with tenant_scope(tenant=TENANT):
+        return baseline, store.load_published_bundle(source.id)[1]
+
+
+def _runs(flow, count, *, status, release_id=""):
+    for _ in range(count):
+        store.save_run(store.FlowRun(run_id=store.new_run_id(), flow_id=flow.id, status=status, owner=OWNER, release_id=release_id))
+
+
+def test_one_unreadable_publication_does_not_hide_the_other_workflows(harness, monkeypatch):
+    _enable(harness, monkeypatch)
+    with tenant_scope(tenant=TENANT):
+        for flow_id in ("good-flow", "bad-flow"):
+            store.save_flow(attach_learned_operator(_taught(flow_id), "calculate", _artifact(False)))
+        pointer = store._published_pointer_path("bad-flow")
+        pointer.parent.mkdir(parents=True, exist_ok=True)
+        pointer.write_text("{not json", encoding="utf-8")
+        with pytest.raises(store.FlowSnapshotError):
+            store.load_published_bundle("bad-flow")
+    response = harness.client.get(LOCAL)
+    assert response.status_code == 200, response.text
+    assert [row["id"] for row in response.json()["flows"]] == ["good-flow"]
+
+
+def test_pending_work_fingerprint_covers_waiting_runs_older_than_the_latest_fifty(harness, monkeypatch):
+    baseline, published = _published(harness, monkeypatch)
+    monkeypatch.setattr(release_module, "_target_record", lambda *_args: {
+        "tenant": TENANT, "owner": OWNER, "flow_id": baseline.id, "binding": "0" * 64})
+    with tenant_scope(tenant=TENANT):
+        waiting = store.FlowRun(run_id=store.new_run_id(), flow_id=baseline.id, status="queued", owner=OWNER,
+                                release_id=published["release_id"])
+        store.save_run(waiting)
+        _runs(baseline, 60, status="completed", release_id=published["release_id"])
+        observed = release_module.LocalFlowDeployment().observe(TENANT, release_module.TARGET)
+    assert observed.pending_intents_sha256 == release_module._sha([(waiting.run_id, "queued", published["release_id"])])
+
+
+def test_practice_run_picker_finds_a_practice_run_buried_under_real_runs(harness, monkeypatch):
+    baseline, published = _published(harness, monkeypatch)
+
+    def no_work(*_args, **_kwargs):
+        pytest.fail("A rule-only flow must never invoke AI or connected tools")
+
+    with tenant_scope(tenant=TENANT):
+        candidate = store.save_flow(attach_learned_operator(baseline, "calculate", _artifact(True)),
+                                    expected_version=baseline.version, expected_revision=baseline.revision)
+        practice = execution.execute(candidate, owner=OWNER, data={"quantity": 2, "unit_price": 3},
+                                     agent_runner=no_work, action_runner=no_work, record_outcomes=False)
+        assert practice.status == "completed" and practice.dry_run is True
+        _runs(candidate, 60, status="completed", release_id=published["release_id"])
+    response = harness.client.get(LOCAL)
+    assert response.status_code == 200, response.text
+    [flow] = response.json()["flows"]
+    assert [row["id"] for row in flow["practice_runs"]] == [practice.run_id]

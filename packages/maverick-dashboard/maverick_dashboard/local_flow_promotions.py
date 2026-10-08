@@ -474,8 +474,9 @@ class LocalFlowDeployment:
                 raise CandidatePromotionConflict("The selected workflow has no current compatible publication.")
             _retained_bundle(*active)
             release = active[1]
-            pending = [(run.run_id, run.status, run.release_id) for run in store.list_run_metadata(flow_id=flow.id)
-                       if run.status in runner.ACTIVE_STATUSES]
+            # Keyset paging over active statuses only: newer finished runs must not hide older waiting work.
+            pending = [(run.run_id, run.status, run.release_id)
+                       for run in store.iter_run_metadata(batch_size=200, flow_id=flow.id, statuses=runner.ACTIVE_STATUSES)]
             return DeploymentObservation(tenant, TARGET, release["release_digest"], STATE, INTENTS,
                 _sha(["no outside effects", flow.owner, flow.revision]), _sha(pending), record["binding"], True,
                 _sha([release, pending, record["binding"]]))
@@ -593,6 +594,22 @@ class Selection(BaseModel):
     bundle_sha: str = Field(default="", pattern=r"^(?:[a-f0-9]{64})?$")
 
 
+def _practice_runs(flow, owner, bundle, limit=50):
+    """The newest finished practice runs of this exact bundle, found without reading run files."""
+    runs = []
+    # A practice (dry) run is pinned to its bundle's release digest, so the index
+    # selects just those runs however many real runs came after them.
+    for run in store.iter_run_metadata(batch_size=100, flow_id=flow.id, owner=owner,
+            release_id=bundle["bundle_sha"], statuses={runner.STATUS_COMPLETED}):
+        if (run.dry_run and _successful_execution(run)
+                and run.definition_digest == bundle["root"] and run.definition_version == flow.version
+                and run.definition_revision == flow.revision and run.subflow_digests == bundle["manifest"]):
+            runs.append(run)
+            if len(runs) == limit:
+                break
+    return runs
+
+
 def choices(request):
     from fastapi import Response
     from maverick.config import candidate_promotion_enabled
@@ -606,14 +623,13 @@ def choices(request):
             continue
         try:
             bundle = qualified_bundle(flow, permit_fallback=True)
-        except (ValueError, CandidatePromotionDenied, HTTPException):
+            published = store.load_published_bundle(flow.id)
+        except (ValueError, CandidatePromotionDenied, CandidatePromotionConflict, CandidatePromotionUnavailable,
+                HTTPException, store.FlowSnapshotError):
+            # One workflow with an unreadable or unqualified publication must not hide the others.
             continue
         root = bundle["root"]
-        runs = [run for run in store.list_runs(flow_id=flow.id, owner=actor)
-                if run.dry_run and _successful_execution(run)
-                and run.definition_digest == root and run.definition_version == flow.version
-                and run.definition_revision == flow.revision and run.subflow_digests == bundle["manifest"]]
-        published = store.load_published_bundle(flow.id)
+        runs = _practice_runs(flow, actor, bundle)
         checks = [{"id": row["id"], "when": row["created_at"], "cases": len(row["cases"])}
                   for row in comparison_rows if row.get("flow_id") == flow.id and row.get("owner") == actor
                   and row.get("root") == root and row.get("bundle_sha") == bundle["bundle_sha"]
@@ -626,9 +642,9 @@ def choices(request):
                       "root_rules_only": all(node.learned_fallback is False for node in flow.nodes.values() if node.kind == "agent"),
                       "rules_only": all(node.learned_fallback is False for child in bundle["flows"]
                                         for node in child.nodes.values() if node.kind == "agent"),
-                      "published": published is not None, "practice_runs": [{"id": run.run_id, "created": run.created} for run in runs[:50]],
+                      "published": published is not None, "practice_runs": [{"id": run.run_id, "created": run.created} for run in runs],
                       "baseline_version": published[0].version if published else None,
-                      "comparisons": checks[-50:],
+                      "comparisons": checks[:50],
                       "href": "/flows/" + flow.id})
     prepared = None
     try:
@@ -638,7 +654,7 @@ def choices(request):
             prepared = {"flow_id": record["flow_id"], "version": record["version"],
                         "bundle_sha": record["bundle_sha"], "practice_run": record["practice_run"],
                         "comparison_id": record.get("comparison_id", "")}
-    except (CandidatePromotionUnavailable, CandidatePromotionConflict, CandidatePromotionDenied):
+    except (CandidatePromotionUnavailable, CandidatePromotionConflict, CandidatePromotionDenied, store.FlowSnapshotError):
         pass
     return {"context": context, "enabled": candidate_promotion_enabled(), "flows": flows, "prepared": prepared,
             "detail": "Use a published rule-only baseline, then change and practice the new saved version. This checks readiness, not accuracy or improvement. One local release review is prepared per workspace at a time."}
