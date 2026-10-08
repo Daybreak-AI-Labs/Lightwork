@@ -186,6 +186,87 @@ def test_step_up_does_not_apply_without_the_policy_or_without_named_sign_in(clie
                       follow_redirects=False).status_code == 303
 
 
+# ---- the second factor is dated by the provider's auth_time ------------------------
+
+
+def _session_payload(client):
+    return verify_session(client.cookies.get(ol.SESSION_COOKIE), SESSION_SECRET)
+
+
+def test_old_auth_time_with_an_mfa_amr_is_not_a_fresh_second_factor(client, monkeypatch):
+    # A provider that silently reuses its own SSO session returns amr=mfa for a
+    # sign-in that happened hours ago; the callback's clock must not re-date it.
+    import time as _time
+
+    monkeypatch.setenv("MAVERICK_MFA_REQUIRE", "1")
+    old = int(_time.time()) - 6 * 3600
+    resp, _ = _login(client, monkeypatch, sub="admin-1",
+                     claims={"amr": ["mfa"], "auth_time": old})
+    assert resp.status_code == 303 and resp.headers["location"] == "/"
+    payload = _session_payload(client)
+    assert payload["mfa"] is True and payload["mfa_at"] == old
+    assert session_registry.get(payload["sid"]).mfa_at == old
+    refused = client.post("/users/set", data={"principal": "user:bob", "role": "admin"},
+                          follow_redirects=False)
+    assert refused.status_code == 403
+    assert refused.json()["reauthenticate"].startswith("/auth/login?fresh=1")
+
+
+def test_recent_auth_time_dates_the_second_factor(client, monkeypatch):
+    import time as _time
+
+    monkeypatch.setenv("MAVERICK_MFA_REQUIRE", "1")
+    recent = int(_time.time()) - 120
+    _login(client, monkeypatch, sub="admin-1", claims={"amr": ["mfa"], "auth_time": recent})
+    assert _session_payload(client)["mfa_at"] == recent
+    ok = client.post("/users/set", data={"principal": "user:bob", "role": "viewer"},
+                     follow_redirects=False)
+    assert ok.status_code == 303
+
+
+def test_unusable_auth_time_falls_back_to_the_sign_in_time(client, monkeypatch):
+    import time as _time
+
+    for n, bad in enumerate(("soon", True, _time.time() + 3600, float("nan"))):
+        other = TestClient(app, headers=ORIGIN)
+        ol._CONSUMED_TX_IDS.clear()
+        _login(other, monkeypatch, claims={"amr": ["mfa"], "auth_time": bad})
+        payload = _session_payload(other)
+        assert payload["mfa"] is True and payload["mfa_at"] == payload["iat"], n
+
+
+@pytest.mark.parametrize("claims", [
+    {"amr": ["mfa"]},                                         # no auth_time at all
+    {"amr": ["mfa"], "auth_time": 1_000_000},                 # years old
+    {"amr": ["mfa"], "auth_time": "not-a-time"},
+])
+def test_step_up_sign_in_without_a_fresh_auth_time_is_refused(client, monkeypatch, claims):
+    # ``?fresh=1`` asked the provider to authenticate again (max_age=0); an ID
+    # token that cannot show it did is no proof of a fresh second factor.
+    from urllib.parse import urlsplit
+
+    monkeypatch.setenv("MAVERICK_MFA_REQUIRE", "1")
+    resp, _ = _login(client, monkeypatch, claims=claims, path="/auth/login?fresh=1")
+    assert resp.status_code == 303
+    location = urlsplit(resp.headers["location"])
+    assert location.path == "/auth/error" and parse_qs(location.query)["reason"] == ["mfa"]
+    assert not client.cookies.get(ol.SESSION_COOKIE)
+
+
+def test_step_up_sign_in_with_a_new_auth_time_gives_a_fresh_session(client, monkeypatch):
+    import time as _time
+
+    monkeypatch.setenv("MAVERICK_MFA_REQUIRE", "1")
+    now = int(_time.time())
+    resp, _ = _login(client, monkeypatch, sub="admin-1", path="/auth/login?fresh=1",
+                     claims={"amr": ["mfa"], "auth_time": now - 5})
+    assert resp.status_code == 303 and resp.headers["location"] == "/"
+    assert _session_payload(client)["mfa_at"] == now - 5
+    ok = client.post("/users/set", data={"principal": "user:bob", "role": "viewer"},
+                     follow_redirects=False)
+    assert ok.status_code == 303
+
+
 # ---- sessions: sign out a device, sign out everywhere ------------------------------
 
 

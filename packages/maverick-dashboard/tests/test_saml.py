@@ -175,6 +175,24 @@ def test_extract_identity_rejects_none():
         saml_mod.extract_identity(None)
 
 
+def test_extract_identity_reads_authn_context_and_instant():
+    class _Response(_FakeResp):
+        def authn_info(self):
+            return [("urn:x:ac:otp", [], "2026-10-08T10:15:30Z")]
+
+    ident = saml_mod.extract_identity(_Response())
+    assert ident.authn_context == "urn:x:ac:otp"
+    assert ident.authn_instant == 1791454530.0
+    # No (or an unreadable) AuthnInstant is "unknown", never "just now".
+    assert saml_mod.extract_identity(_FakeResp()).authn_instant == 0.0
+
+    class _Garbled(_FakeResp):
+        def authn_info(self):
+            return [("urn:x:ac:otp", [], "yesterday")]
+
+    assert saml_mod.extract_identity(_Garbled()).authn_instant == 0.0
+
+
 def test_verify_acs_response_passes_outstanding_request_id(monkeypatch):
     fake = types.ModuleType("saml2")
     fake.BINDING_HTTP_POST = "post"
@@ -326,6 +344,40 @@ def test_acs_verifies_sets_session_and_redirects(_enabled, monkeypatch):
     payload = verify_session(cookie, SECRET)
     assert payload["sub"] == "opaque-name-id"
     assert payload["idp_email"] == "alice@example.com"
+
+
+_MFA_CONTEXT = "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken"
+
+
+def _acs_with(monkeypatch, *, n=1, **identity_fields):
+    monkeypatch.setattr(
+        saml_mod,
+        "verify_acs_response",
+        lambda r, *, request_id: saml_mod.SamlIdentity(
+            name_id="opaque-name-id", assertion_id=f"assertion-mfa-{n}",
+            authn_context=_MFA_CONTEXT, **identity_fields),
+    )
+    client = _client()
+    state = _arm_saml_tx(client, request_id="req-mfa-1", return_to="/goals",
+                         jti=f"tx-mfa-{n}")
+    res = client.post("/saml/acs", data={"SAMLResponse": "signed", "RelayState": state},
+                      follow_redirects=False)
+    assert res.status_code == 303
+    return verify_session(res.cookies.get("mvk_session"), SECRET)
+
+
+def test_acs_dates_the_second_factor_by_the_assertions_authn_instant(_enabled, monkeypatch):
+    # An IdP that reuses its own SSO session returns a TimeSyncToken context for
+    # an authentication from hours ago; the ACS's own clock must not re-date it.
+    old = float(int(time.time()) - 6 * 3600)
+    payload = _acs_with(monkeypatch, authn_instant=old)
+    assert payload["mfa"] is True and payload["mfa_at"] == old
+
+
+def test_acs_without_a_usable_authn_instant_dates_the_second_factor_now(_enabled, monkeypatch):
+    for n, instant in enumerate((0.0, time.time() + 3600)):  # unknown, or past any skew
+        payload = _acs_with(monkeypatch, n=n, authn_instant=instant)
+        assert payload["mfa"] is True and payload["mfa_at"] == payload["iat"]
 
 
 def test_acs_rejects_replayed_assertion(_enabled, monkeypatch, tmp_path):
