@@ -275,3 +275,43 @@ def test_concurrent_distinct_creates_never_exceed_postgres_capacity(
             tenant=tenant,
             namespace=namespace,
         )
+
+
+def test_archiving_moves_a_record_out_of_the_capped_namespace_unchanged(
+    governed_record_dsn,
+    shared_encryption_authority,
+):
+    """A full namespace's archived record keeps its revision and seal, stops
+    counting against the cap, and can come back to change again."""
+    del shared_encryption_authority
+    from maverick.governed_records import _archive_namespace
+
+    suffix = uuid.uuid4().hex
+    tenant = f"live-pg-archive-{suffix}"
+    namespace = f"live_pg_archive_{suffix}"
+    backend = PostgresGovernedRecordBackend(
+        namespace, "LGA", dsn=governed_record_dsn, require_bound_tenant=True,
+    )
+    now = time.time()
+    try:
+        with tenant_scope(tenant=tenant):
+            first = backend.save({"id": "LGA-first", "created_at": now, "updated_at": now, "note": "kept"},
+                                 expected_revision=0, max_records=1)
+            with pytest.raises(GovernedRecordCapacityError):
+                backend.save({"id": "LGA-second", "created_at": now, "updated_at": now},
+                             expected_revision=0, max_records=1)
+            assert backend.archive("LGA-first", expected_revision=first["revision"] + 1) is False
+            assert backend.archive("LGA-first", expected_revision=first["revision"]) is True
+            assert backend.load("LGA-first") is None
+            archived = backend.load_archived("LGA-first")
+            assert archived["note"] == "kept" and archived["revision"] == first["revision"]
+            backend.save({"id": "LGA-second", "created_at": now, "updated_at": now},
+                         expected_revision=0, max_records=1)
+            assert backend.restore("LGA-first") is True
+            assert backend.load("LGA-first")["revision"] == first["revision"]
+            assert backend.load_archived("LGA-first") is None
+            assert backend.restore("LGA-first") is False
+        assert _authoritative_count(governed_record_dsn, tenant=tenant, namespace=namespace) == 2
+    finally:
+        for name in (namespace, _archive_namespace(namespace)):
+            _delete_test_rows(governed_record_dsn, tenant=tenant, namespace=name)

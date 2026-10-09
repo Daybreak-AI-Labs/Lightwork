@@ -147,6 +147,14 @@ def _capacity_limit(value: object) -> int:
     return value
 
 
+def _archive_namespace(namespace: str) -> str:
+    """Where a full namespace moves its oldest delivered records (kept, not counted)."""
+    name = f"{namespace}-archive"
+    if len(name) <= 128:
+        return name
+    return namespace[:95] + "-" + hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:24] + "-archive"
+
+
 class GovernedRecordBackendError(RuntimeError):
     """A governed-record backend cannot preserve its persistence contract."""
 
@@ -234,8 +242,10 @@ class LocalGovernedRecordBackend:
             )
         if scope == "deployment_global":
             self._store = _DeploymentGlobalRecordStore(namespace, prefix)
+            self._archive = _DeploymentGlobalRecordStore(_archive_namespace(namespace), prefix)
         else:
             self._store = _RecordStore(namespace, prefix)
+            self._archive = _RecordStore(_archive_namespace(namespace), prefix)
         self.authority_scope = scope
         self.lookup_spec = lookup_spec
         self._lookup = LocalRecordLookup(self._store, lookup_spec) if lookup_spec else None
@@ -376,6 +386,39 @@ class LocalGovernedRecordBackend:
         except ValueError:
             return False
         return self._lookup.mutate(record_id, lambda: self._delete(record_id, expected_revision=expected_revision))
+
+    def load_archived(self, record_id: str) -> dict[str, Any] | None:
+        return self._archive.load(record_id)
+
+    def archive(self, record_id: str, *, expected_revision: int) -> bool:
+        """Move one delivered record, unchanged, out of the capped namespace."""
+        from .file_lock import cross_process_lock, ensure_private_directory
+
+        path, target = self._store._path(record_id), self._archive._path(record_id)  # noqa: SLF001
+        if path is None or target is None:
+            return False
+        ensure_private_directory(target.parent)
+        with cross_process_lock(path, strict=True):
+            current = self._store._read_path(path)  # noqa: SLF001 - backend-owned store
+            if (current is None or _RecordStore._revision(current) != expected_revision
+                    or _validated_audit_queue(current) or target.exists()):
+                return False
+            os.replace(path, target)
+        return True
+
+    def restore(self, record_id: str) -> bool:
+        """Move an archived record back so it can change again."""
+        from .file_lock import cross_process_lock, ensure_private_directory
+
+        path, source = self._store._path(record_id), self._archive._path(record_id)  # noqa: SLF001
+        if path is None or source is None or not source.exists():
+            return False
+        ensure_private_directory(path.parent)
+        with cross_process_lock(path, strict=True):
+            if path.exists() or self._archive._read_path(source) is None:  # noqa: SLF001
+                return False
+            os.replace(source, path)
+        return True
 
     def lookup(self, digest):
         if self._lookup is None:
@@ -1509,6 +1552,69 @@ class PostgresGovernedRecordBackend:
                     self._lookup.replace(cur, tenant, validated, None)
                 return True
 
+    def load_archived(self, record_id: str) -> dict[str, Any] | None:
+        try:
+            validated = _valid_record_id(record_id, self.prefix)
+        except ValueError:
+            return None
+        tenant = self._tenant_key()
+        with self._operation("load"):
+            with self._transaction(tenant) as cur:
+                cur.execute(
+                    "SELECT revision, record_json, created_at, updated_at "
+                    "FROM governed_records WHERE tenant_id=%s AND namespace=%s "
+                    "AND record_id=%s",
+                    (tenant, _archive_namespace(self.namespace), validated),
+                )
+                row = self._row(cur)
+                return None if row is None else _row_record(
+                    row, record_id=validated, prefix=self.prefix,
+                    require_encryption=self._require_encryption,
+                )
+
+    def _move(self, cur, tenant: str, record_id: str, source: str, target: str,
+              revision: int | None = None) -> bool:
+        sql = ("UPDATE governed_records SET namespace=%s WHERE tenant_id=%s AND namespace=%s "
+               "AND record_id=%s")
+        values: list[Any] = [target, tenant, source, record_id]
+        if revision is not None:
+            sql += " AND revision=%s"
+            values.append(revision)
+        sql += (" AND NOT EXISTS (SELECT 1 FROM governed_records WHERE tenant_id=%s "
+                "AND namespace=%s AND record_id=%s)")
+        values += [tenant, target, record_id]
+        cur.execute(sql, tuple(values))
+        return cur.rowcount == 1
+
+    def archive(self, record_id: str, *, expected_revision: int) -> bool:
+        """Move one delivered record, unchanged, out of the capped namespace."""
+        validated = _valid_record_id(record_id, self.prefix)
+        tenant = self._tenant_key()
+        with self._operation("archive"):
+            with self._transaction(tenant) as cur:
+                row = self._select_for_update(cur, tenant, validated)
+                if row is None:
+                    return False
+                current = _row_record(row, record_id=validated, prefix=self.prefix,
+                                      require_encryption=self._require_encryption)
+                if (_RecordStore._revision(current) != expected_revision
+                        or _validated_audit_queue(current)):
+                    return False
+                return self._move(cur, tenant, validated, self.namespace,
+                                  _archive_namespace(self.namespace), expected_revision)
+
+    def restore(self, record_id: str) -> bool:
+        """Move an archived record back so it can change again."""
+        try:
+            validated = _valid_record_id(record_id, self.prefix)
+        except ValueError:
+            return False
+        tenant = self._tenant_key()
+        with self._operation("restore"):
+            with self._transaction(tenant) as cur:
+                return self._move(cur, tenant, validated,
+                                  _archive_namespace(self.namespace), self.namespace)
+
     def lookup(self, digest):
         if self._lookup is None:
             raise RecordLookupUnavailable("record lookup is not configured")
@@ -1740,8 +1846,12 @@ class GovernedRecordStore:
         required_backend: str | None = None,
         authority_scope: str = "tenant",
         lookup_spec: RecordLookupSpec | None = None,
+        archive_when_full: bool = True,
     ) -> None:
         self.namespace = _required(namespace, "namespace", 128)
+        # A store that manages its own capacity (its own retention or a
+        # deliberate "remove one first" refusal) opts out of archiving.
+        self.archive_when_full = bool(archive_when_full)
         self.prefix = _required(prefix, "prefix", 16)
         self.record_type = _required(record_type, "record_type", 64)
         self.event_kind = _required(event_kind, "event_kind", 64)
@@ -2097,6 +2207,23 @@ class GovernedRecordStore:
         )
         backend = self._backend()
         guarded = _local_effect_guard(backend, effect_guard)
+        archiving = maximum is not None and self._archivable(backend)
+        if archiving:
+            # An archived record keeps its id: creating it again conflicts as before.
+            backend.restore(str(value.get("id") or ""))
+        try:
+            saved = self._save_new(backend, value, fence, maximum, guarded)
+        except GovernedRecordCapacityError:
+            if not archiving or not self._archive_oldest(backend, maximum):
+                raise
+            saved = self._save_new(backend, value, fence, maximum, guarded)
+        return self._flush(
+            saved,
+            backend=backend,
+        )
+
+    @staticmethod
+    def _save_new(backend, value, fence, maximum, guarded):
         if fence is None and maximum is None:
             saved = backend.save(value, expected_revision=0, **guarded)
         elif fence is not None and maximum is None:
@@ -2121,10 +2248,32 @@ class GovernedRecordStore:
                 max_records=maximum,
                 **guarded,
             )
-        return self._flush(
-            saved,
-            backend=backend,
-        )
+        return saved
+
+    def _archivable(self, backend) -> bool:
+        return (self.archive_when_full and self.lookup_spec is None
+                and callable(getattr(backend, "archive", None)))
+
+    def _archive_oldest(self, backend, maximum: int) -> int:
+        """Make room in a full namespace by archiving its oldest delivered records.
+
+        Archived records are kept unchanged and stay readable and updatable by
+        id; they only stop counting against the cap. Each move is first an
+        audited update, so a record whose activity record is not delivered
+        stays where it is. Returns how many records moved."""
+        rows = [row for row in backend.list(limit=maximum) if not row.get("_audit_pending")]
+        rows.sort(key=lambda row: (float(row.get("updated_at") or 0), str(row.get("id"))))
+        moved = 0
+        for row in rows[:max(1, maximum // 100)]:
+            try:
+                marked = self.update(row["id"], lambda current: None, expected_revision=row["revision"],
+                                     action="governed_record_archived", actor="governed-record retention")
+            except RecordConflict:
+                continue
+            if marked and not marked.get("_audit_pending") and backend.archive(
+                    marked["id"], expected_revision=marked["revision"]):
+                moved += 1
+        return moved
 
     def update(
         self,
@@ -2177,7 +2326,10 @@ class GovernedRecordStore:
                 **guarded,
             )
         if saved is None:
-            return None
+            if not self._archivable(backend) or not backend.restore(str(record_id or "")):
+                return None
+            return self.update(record_id, mutate, expected_revision=expected_revision, action=action,
+                               actor=actor, fence=fence, effect_guard=effect_guard)
         return self._flush(saved, backend=backend)
 
     def get(self, record_id: str) -> dict[str, Any] | None:
@@ -2186,7 +2338,11 @@ class GovernedRecordStore:
             namespace=self.namespace,
             help_text="Governed record store operations",
         )
-        return self._backend().load(record_id)
+        backend = self._backend()
+        found = backend.load(record_id)
+        if found is None and self._archivable(backend):
+            return backend.load_archived(record_id)
+        return found
 
     def list(self, *, limit: int | None = None) -> list[dict[str, Any]]:
         runtime_metrics.increment(

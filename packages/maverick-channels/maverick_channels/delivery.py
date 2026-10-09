@@ -184,7 +184,8 @@ class DeliveryJournal:
     def __init__(self, store=None):
         from maverick.governed_records import GovernedRecordStore
 
-        self.store = store or GovernedRecordStore("channel-deliveries", "chd", "channel_delivery")
+        self.store = store or GovernedRecordStore("channel-deliveries", "chd", "channel_delivery",
+                                                   archive_when_full=False)
 
     def get(self, record_id):
         return self.store.get(record_id)

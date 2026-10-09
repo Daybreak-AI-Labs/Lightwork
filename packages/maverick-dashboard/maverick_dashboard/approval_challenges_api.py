@@ -65,7 +65,8 @@ class Setup(Confirmed):
 
 
 def records():
-    return GovernedRecordStore("approval-challenges", "ACP", "approval_challenge", required_backend="local")
+    return GovernedRecordStore("approval-challenges", "ACP", "approval_challenge", required_backend="local",
+                               archive_when_full=False)
 
 
 def removals():

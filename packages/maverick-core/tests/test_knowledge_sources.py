@@ -54,13 +54,22 @@ def _prepared(service, interval, *, due=False):
             "embedding": _embedding()}, row
 
 
+def _fill_ledger_with_an_unarchivable_receipt(monkeypatch):
+    """A full ledger whose only receipt still awaits its activity record, so
+    archiving cannot make room and the create is refused."""
+    from maverick import audit
+
+    monkeypatch.setattr(native, "MAX_JOBS", 1)
+    with monkeypatch.context() as undelivered:
+        undelivered.setattr(audit, "record", lambda *args, **kwargs: False)
+        receipt = native.JOB_STORE.create({"id": "KNJ-" + "0" * 32, "source": "other", "tenant": TENANT, "owner": OWNER,
+                                           "state": "completed"}, action="knowledge_source.refresh_queued", actor=OWNER)
+    assert receipt.get("_audit_pending")
+
+
 def test_a_refresh_that_cannot_be_recorded_does_not_leave_the_source_claimed(service, monkeypatch):
     prepared, before = _prepared(service, 3600, due=True)
-    # The job ledger is full and its only receipt is another source's newest
-    # history, so nothing can be removed to make room.
-    monkeypatch.setattr(native, "MAX_JOBS", 1)
-    native.JOB_STORE.create({"id": "KNJ-" + "0" * 32, "source": "other", "tenant": TENANT, "owner": OWNER, "state": "completed"},
-                            action="knowledge_source.refresh_queued", actor=OWNER)
+    _fill_ledger_with_an_unarchivable_receipt(monkeypatch)
 
     with pytest.raises(Exception, match=r"."):
         service.start(prepared, "1" * 32)
@@ -101,156 +110,15 @@ def test_a_completed_refresh_stays_fresh_past_its_next_scheduled_refresh(service
         assert row["fresh_until"] - row["last_refresh"] == pytest.approx(86400, abs=5)
 
 
-# The refresh ledger is bounded. Once full, the oldest finished receipts that
-# nothing points at make room; each source keeps its newest history page.
-PAGE = 50
-OTHER = "KNS-" + "c" * 32
-
-
-def _job_id(n):
-    return f"KNJ-{n:032x}"
-
-
-def _seed(n, source, state="completed", **values):
-    return native.JOB_STORE.create({"id": _job_id(n), "source": source, "tenant": TENANT, "owner": OWNER, "state": state, **values},
-                                   action="test.seed", actor=OWNER)
-
-
-def _refresh(service, source, operation):
-    row = service.sources.get(source)
-    return service.start({"source": source, "plan_sha256": row["plan_sha256"], "revision": row["revision"], "embedding": _embedding()}, operation)
-
-
-@pytest.fixture
-def activity(monkeypatch):
-    from maverick import audit
-
-    log = SimpleNamespace(events=[], refuse=())
-
-    def record(kind, **row):
-        if row["action"] in log.refuse:
-            return False
-        log.events.append(row)
-        return True
-    monkeypatch.setattr(audit, "record", record)
-    return log
-
-
-def _pruned(activity):
-    return [row["record_id"] for row in activity.events if row["action"] == "knowledge_source.refresh_pruned"]
-
-
-def test_a_full_refresh_ledger_removes_its_oldest_finished_receipt_to_admit_a_refresh(service, monkeypatch, activity):
-    _, before = _prepared(service, 3600)
-    for n in range(PAGE + 2):  # two finished receipts older than the source's newest history page
-        _seed(n, before["id"], "failed" if n % 2 else "completed", items=[{"name": "Q3 board plan.docx", "state": "imported"}])
-    monkeypatch.setattr(native, "MAX_JOBS", PAGE + 2)
-    monkeypatch.setattr(native, "PRUNE_BATCH", 1, raising=False)
-
-    job = _refresh(service, before["id"], "e" * 32)
-
-    assert job["state"] == "queued" and service.sources.get(before["id"])["active_job"] == job["id"]
-    assert native.JOB_STORE.get(_job_id(0)) is None and native.JOB_STORE.get(_job_id(1)) is not None
-    assert native.JOB_STORE.count(maximum=1000) == PAGE + 2
-    # The removal is on the activity record first, as a digest only.
-    assert _pruned(activity) == [_job_id(0)]
-    event = next(row for row in activity.events if row["action"] == "knowledge_source.refresh_pruned")
-    assert len(event["record_sha256"]) == 64 and "Q3 board plan" not in repr(event)
-    # Refreshes keep working: the next one removes the next oldest receipt.
-    service._finish(service.jobs.get(job["id"]), "completed", "done", items=[], changed=0, unchanged=0, removed=0, snapshot="KNV-" + "b" * 32)
-    assert _refresh(service, before["id"], "f" * 32)["state"] == "queued"
-    assert native.JOB_STORE.get(_job_id(1)) is None and _pruned(activity) == [_job_id(0), _job_id(1)]
-    history = service.history(before["id"])
-    assert len(history["items"]) == PAGE and history["items"][0]["id"] == "KNJ-" + "f" * 32
-
-
-def test_active_uncertain_pending_and_referenced_refreshes_are_never_removed(service, monkeypatch, activity):
-    from maverick.governed_records import GovernedRecordCapacityError
-
-    _, before = _prepared(service, 3600)
-    version = {"dataset_id": "asset-2", "version": "remote-" + "1" * 32}
-    _seed(0, OTHER, reference=version)  # the receipt that recorded a retained snapshot's registry version
-    _seed(1, OTHER)  # its source's active refresh
-    for n, state in enumerate(("unconfirmed", "queued", "running", "publishing"), start=2):
-        _seed(n, OTHER, state)
-    activity.refuse = ("test.seed",)
-    assert _seed(6, OTHER).get("_audit_pending")  # its activity record is not delivered yet
-    activity.refuse = ()
-    _seed(7, OTHER)  # a retained save decision points at it
-    _seed(8, OTHER, "partial", unresolved_dollars=0.25)  # paid usage not yet resolved
-    _seed(9, OTHER, reference=version)  # a later receipt of the same registry version: removable
-    for n in range(10, 10 + PAGE):
-        _seed(n, OTHER)
-    native.SOURCE_STORE.create({"id": OTHER, "tenant": TENANT, "owner": OWNER, "plan": {"asset_id": "asset-2"}, "active_job": _job_id(1)},
-                               action="test.seed", actor=OWNER)
-    native.DECISION_STORE.create({"id": "KNO-" + "d" * 32, "tenant": TENANT, "owner": OWNER, "source": OTHER, "state": "confirmed",
-                                  "result": {"id": OTHER, "active_job": {"id": _job_id(7)}}}, action="test.seed", actor=OWNER)
-    monkeypatch.setattr(native, "MAX_JOBS", 10 + PAGE)
-
-    job = _refresh(service, before["id"], "e" * 32)
-
-    assert job["state"] == "queued"
-    assert native.JOB_STORE.get(_job_id(9)) is None and _pruned(activity) == [_job_id(9)]
-    assert all(native.JOB_STORE.get(_job_id(n)) is not None for n in [*range(9), *range(10, 10 + PAGE)])
-    # Nothing else is removable: the full ledger refuses the next refresh exactly as before.
-    service._finish(service.jobs.get(job["id"]), "completed", "done", items=[], changed=0, unchanged=0, removed=0, snapshot="KNV-" + "b" * 32)
-    with pytest.raises(GovernedRecordCapacityError):
-        _refresh(service, before["id"], "f" * 32)
-    assert service.sources.get(before["id"])["active_job"] is None
-    assert native.JOB_STORE.count(maximum=1000) == 10 + PAGE and _pruned(activity) == [_job_id(9)]
-
-
-def test_each_source_keeps_its_newest_history_page(service, monkeypatch, activity):
-    _, before = _prepared(service, 3600)
-    for n in range(PAGE):  # the oldest receipts in the ledger, but all of them are OTHER's newest page
-        _seed(n, OTHER)
-    for n in range(PAGE, 2 * PAGE + 2):
-        _seed(n, before["id"])
-    monkeypatch.setattr(native, "MAX_JOBS", 2 * PAGE + 2)
-
-    assert _refresh(service, before["id"], "e" * 32)["state"] == "queued"
-
-    assert all(native.JOB_STORE.get(_job_id(n)) is not None for n in range(PAGE))
-    assert sorted(_pruned(activity)) == [_job_id(PAGE), _job_id(PAGE + 1)]
-    assert all(native.JOB_STORE.get(_job_id(n)) is not None for n in range(PAGE + 2, 2 * PAGE + 2))
-    assert len(service.history(before["id"])["items"]) == PAGE
-    assert native.JOB_STORE.count(maximum=1000) <= 2 * PAGE + 2
-
-
-def test_a_receipt_is_not_removed_until_its_removal_is_on_the_activity_record(service, monkeypatch, activity):
-    from maverick.governed_records import GovernedRecordCapacityError
-
-    _, before = _prepared(service, 3600)
-    for n in range(PAGE + 2):
-        _seed(n, before["id"], items=[{"name": "Q3 board plan.docx", "state": "imported"}])
-    monkeypatch.setattr(native, "MAX_JOBS", PAGE + 2)
-    monkeypatch.setattr(native, "PRUNE_BATCH", 1, raising=False)
-    activity.refuse = ("knowledge_source.refresh_pruned",)
-
-    with pytest.raises(GovernedRecordCapacityError):
-        _refresh(service, before["id"], "e" * 32)
-
-    oldest = native.JOB_STORE.get(_job_id(0))
-    assert oldest is not None and oldest["items"] and oldest.get("_audit_pending")
-    assert native.JOB_STORE.get(_job_id(1)).get("_audit_pending") is None
-    assert service.sources.get(before["id"])["active_job"] is None and _pruned(activity) == []
-    # Once the activity record is delivered, that same receipt is removed and the refresh is admitted.
-    activity.refuse = ()
-    assert _refresh(service, before["id"], "f" * 32)["state"] == "queued"
-    assert native.JOB_STORE.get(_job_id(0)) is None and native.JOB_STORE.get(_job_id(1)) is not None
-    assert _pruned(activity) == [_job_id(0)]
-
-
 def test_a_scheduled_failure_still_backs_off_when_its_receipt_cannot_be_kept(service, monkeypatch):
     """A refresh that fails before it starts (for example its review) records a
-    withheld receipt and backs the source off. With a full ledger and nothing
-    removable the receipt is refused, but the source must still back off rather
-    than be retried on the scheduler's next 2-second cycle."""
+    withheld receipt and backs the source off. When the full ledger cannot make
+    room the receipt is refused, but the source must still back off rather than
+    be retried on the scheduler's next 2-second cycle."""
     from maverick.governed_records import GovernedRecordCapacityError
 
     _, before = _prepared(service, 3600, due=True)
-    _seed(0, OTHER)  # another source's newest history: nothing can be removed
-    monkeypatch.setattr(native, "MAX_JOBS", 1)
+    _fill_ledger_with_an_unarchivable_receipt(monkeypatch)
 
     with pytest.raises(GovernedRecordCapacityError):
         native.KnowledgeSources.record_scheduled_error(service.sources.get(before["id"]), RuntimeError("review failed"))
@@ -258,3 +126,15 @@ def test_a_scheduled_failure_still_backs_off_when_its_receipt_cannot_be_kept(ser
     row = service.sources.get(before["id"])
     assert row["state"] == "withheld" and row["projection_allowed"] is False
     assert row["next_refresh"] >= time.time() + 3600 - 60 and before["next_refresh"] < time.time()
+
+
+def test_a_full_ledger_archives_its_oldest_receipt_and_admits_the_refresh(service, monkeypatch):
+    prepared, before = _prepared(service, 3600, due=True)
+    monkeypatch.setattr(native, "MAX_JOBS", 1)
+    native.JOB_STORE.create({"id": "KNJ-" + "0" * 32, "source": "other", "tenant": TENANT, "owner": OWNER, "state": "completed"},
+                            action="knowledge_source.refresh_queued", actor=OWNER)
+
+    assert service.start(prepared, "5" * 32)["state"] == "queued"
+    # The older receipt is kept and readable; it no longer counts against the cap.
+    assert native.JOB_STORE.get("KNJ-" + "0" * 32)["state"] == "completed"
+    assert native.JOB_STORE.count() == 1

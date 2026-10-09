@@ -49,7 +49,7 @@ def store(*, requests=False):
         return GovernedRecordStore("runtime-policy-requests", "RPR", "runtime_policy_request",
                                    authority_scope="deployment_global")
     return GovernedRecordStore("runtime-policy-copies", "RPC", "runtime_policy_copy",
-                               authority_scope="deployment_global")
+                               authority_scope="deployment_global", archive_when_full=False)
 
 
 def source():

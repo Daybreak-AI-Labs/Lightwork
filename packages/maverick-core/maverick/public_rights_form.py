@@ -78,7 +78,7 @@ _DEFAULTS = {
     "max_message_chars": 4000,
 }
 
-_PROPERTIES = GovernedRecordStore("rights_form_properties", "RFP", "rights_form_property")
+_PROPERTIES = GovernedRecordStore("rights_form_properties", "RFP", "rights_form_property", archive_when_full=False)
 
 
 class PublicRightsFormError(ValueError):

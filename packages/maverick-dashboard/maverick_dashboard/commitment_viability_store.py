@@ -33,7 +33,7 @@ from maverick.constant_time import text_equals
 from maverick.governed_records import GovernedRecordStore
 from maverick.privacy_ops import RecordConflict
 
-STORE = GovernedRecordStore("commitment_viability", "CMV", "commitment_viability")
+STORE = GovernedRecordStore("commitment_viability", "CMV", "commitment_viability", archive_when_full=False)
 ARCHIVE = GovernedRecordStore("commitment_viability_archive", "CMA", "commitment_viability_archive")
 LIMIT = 1_000
 SCHEMA = "lightwork.commitment-viability-pilot.v1"

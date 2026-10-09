@@ -23,10 +23,6 @@ from .privacy_ops import RecordConflict
 
 MAX_SOURCES, MAX_JOBS, MAX_TEXT_BYTES = 100, 10000, 256 * 1024
 MAX_WALL_SECONDS = 300
-# A full refresh ledger makes room by removing its oldest finished receipts in
-# small batches; every source keeps its newest history page (50 rows).
-KEEP_JOBS_PER_SOURCE, PRUNE_BATCH = 50, 100
-FINISHED_JOB_STATES = frozenset({"completed", "partial", "failed", "withheld"})
 SOURCE_STORE = GovernedRecordStore("knowledge-remote-sources", "KNS", "knowledge_remote_source")
 JOB_STORE = GovernedRecordStore("knowledge-source-refreshes", "KNJ", "knowledge_source_refresh")
 SNAPSHOT_STORE = GovernedRecordStore("knowledge-source-snapshots", "KNV", "knowledge_source_snapshot")
@@ -60,43 +56,6 @@ def source_ref(identifier, version):
     if not re.fullmatch(r"KNS-[a-f0-9]{32}", identifier) or not re.fullmatch(r"[a-f0-9]{32}", version):
         raise ValueError("Choose a recorded Knowledge source snapshot.")
     return f"catalog:remote-knowledge/{identifier}/{version}"
-
-
-def _make_room(tenant, jobs, sources):
-    """Remove the oldest finished refresh receipts nothing points at once the ledger is full.
-
-    Never removed: an active, in-flight or uncertain refresh, one with pending
-    activity or unresolved paid usage, one a retained save decision shows, the
-    first receipt of each registry version, or a source's newest history page.
-    Each removal is first an audited update carrying the receipt's digest; an
-    undelivered activity record stops pruning, so the create fails as before.
-    """
-    if jobs.count(maximum=MAX_JOBS) < MAX_JOBS:
-        return
-    listed, decisions = sources.list(limit=MAX_SOURCES + 1), DECISION_STORE.list(limit=MAX_JOBS + 1)
-    if len(listed) > MAX_SOURCES or len(decisions) > MAX_JOBS:
-        return  # an incomplete view cannot show what still points at a receipt
-    keep = {row.get("active_job") for row in listed}
-    keep.update(((row.get("result") or {}).get("active_job") or {}).get("id") for row in decisions)
-    rows, versions, recent = sorted(jobs.list(limit=MAX_JOBS + 1), key=lambda row: (row.get("created_at", 0), row["id"])), set(), {}
-    for row in rows:
-        version = digest(row["reference"]) if row.get("reference") else None
-        if version and version not in versions:
-            versions.add(version)
-            keep.add(row["id"])
-        recent.setdefault(row.get("source"), []).append(row["id"])
-    for ids in recent.values():
-        keep.update(ids[-KEEP_JOBS_PER_SOURCE:])
-    candidates = [row for row in rows if row["id"] not in keep and row.get("tenant") == tenant and row.get("state") in FINISHED_JOB_STATES
-                  and not row.get("unresolved_dollars") and (row.get("pruned_sha256") or not row.get("_audit_pending"))]
-    for row in candidates[:PRUNE_BATCH]:
-        if not row.get("pruned_sha256"):
-            row = jobs.update(row["id"], lambda current: current.update(pruned_sha256=digest({key: value for key, value in current.items() if key != "_audit_pending"})),
-                              expected_revision=row["revision"], action="knowledge_source.refresh_pruned", actor="knowledge-source retention")
-        elif row.get("_audit_pending"):
-            row = jobs._flush(row)  # an earlier removal's activity record is retried first
-        if row is None or row.get("_audit_pending") or not jobs.delete(row["id"], expected_revision=row["revision"]):
-            return
 
 
 def _safe_error(exc):
@@ -242,7 +201,6 @@ class KnowledgeSources:
             job_id, full = "KNJ-" + digest([source["id"], source.get("next_refresh")])[:32], None
             if JOB_STORE.get(job_id) is None:
                 try:
-                    _make_room(source["tenant"], JOB_STORE, SOURCE_STORE)
                     JOB_STORE.create({"id": job_id, "source": source["id"], "tenant": source["tenant"], "owner": source["owner"],
                                       "state": "withheld", "message": _safe_error(exc), "items": [], "observed_dollars": 0.0, "unresolved_dollars": 0.0},
                                      action="knowledge_source.scheduled_refresh_withheld", actor="knowledge-source worker", max_records=MAX_JOBS, effect_guard=same_source)
@@ -394,7 +352,6 @@ class KnowledgeSources:
             if claimed.get("_audit_pending"):
                 return {"id": job_id, "state": "unconfirmed", "message": "Refresh admission has a retained pending activity record. It will not run automatically."}
             try:
-                _make_room(self.tenant, self.jobs, self.sources)
                 job = self.jobs.create({"id": job_id, "source": row["id"], "tenant": self.tenant, "owner": self.actor, "plan": row["plan"],
                                         "plan_sha256": row["plan_sha256"], "binding": digest(prepared), "state": "queued", "deadline": time.time() + MAX_WALL_SECONDS,
                                         "prepared": prepared, "items": [], "changed": 0, "unchanged": 0, "removed": 0,
