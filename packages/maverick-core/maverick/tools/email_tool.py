@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import ssl
 from typing import Any
 
 from . import Tool
@@ -98,13 +99,16 @@ def _send(args: dict[str, Any]) -> str:
     msg.set_content(body)
 
     try:
+        # Verify the certificate and host name before the password is sent:
+        # smtplib's own default context checks neither.
+        tls = ssl.create_default_context()
         if port == 465:
-            with smtplib.SMTP_SSL(host, port, timeout=30) as s:
+            with smtplib.SMTP_SSL(host, port, timeout=30, context=tls) as s:
                 s.login(user, pw)
                 s.send_message(msg)
         else:
             with smtplib.SMTP(host, port, timeout=30) as s:
-                s.starttls()
+                s.starttls(context=tls)
                 s.login(user, pw)
                 s.send_message(msg)
     except Exception as e:
@@ -130,7 +134,7 @@ def _list_inbox(args: dict[str, Any]) -> str:
     criterion = "UNSEEN" if args.get("unread_only") else "ALL"
 
     try:
-        with imaplib.IMAP4_SSL(host) as m:
+        with imaplib.IMAP4_SSL(host, ssl_context=ssl.create_default_context()) as m:
             m.login(user, pw)
             m.select(folder)
             # UID commands, never m.search()/m.fetch(): plain SEARCH/FETCH
@@ -194,7 +198,7 @@ def _fetch(args: dict[str, Any]) -> str:
         return "ERROR: invalid folder name (control character)"
 
     try:
-        with imaplib.IMAP4_SSL(host) as m:
+        with imaplib.IMAP4_SSL(host, ssl_context=ssl.create_default_context()) as m:
             m.login(user, pw)
             m.select(folder)
             # UID FETCH, not m.fetch(): the uid came from list_inbox's UID
