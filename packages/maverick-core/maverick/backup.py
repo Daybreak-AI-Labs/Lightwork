@@ -46,6 +46,7 @@ from typing import Any, BinaryIO
 from urllib.parse import quote
 
 from . import file_lock
+from .constant_time import text_equals
 
 log = logging.getLogger(__name__)
 
@@ -284,7 +285,7 @@ def _verify_authentication(
     if not isinstance(signature, str) or len(signature) != 64:
         raise BackupError(f"{label} signature is malformed")
     expected = hmac.new(key, _canonical_body(document), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, signature.lower()):
+    if not text_equals(expected, signature.lower()):
         raise BackupError(f"{label} signature verification failed")
     return key
 

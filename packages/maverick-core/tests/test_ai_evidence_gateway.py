@@ -879,6 +879,25 @@ def test_policy_history_rolls_over_at_256_without_orphaning_receipts(
     assert gateway.verify_interaction_receipt(historical)
 
 
+def test_non_ascii_policy_text_and_tenant_compare_without_type_error(monkeypatch):
+    # Canonical JSON keeps non-ASCII text, and hmac.compare_digest raised
+    # TypeError for equal values: re-archiving a snapshot whose disclosure is
+    # not ASCII, or reading a receipt that carries a Unicode tenant id.
+    _enable(monkeypatch)
+    monkeypatch.setenv("MAVERICK_TENANT", "équipe-santé")
+    policy = _policy(disclosure_text="Divulgación: contenido generado por IA — revísalo.")
+    assert policy["revision"] == 1
+    snapshot = gateway._policy_record("default")["current"]
+    gateway._archive_policy_snapshot(snapshot, actor="policy-admin")
+    gateway._archive_policy_snapshot(snapshot, actor="policy-admin")
+    assert len(gateway._POLICY_SNAPSHOTS.list(limit=10)) == 1
+
+    delivery = _deliver()
+    receipt = gateway.get_interaction_receipt(delivery["receipt"]["receipt_id"])
+    assert receipt is not None
+    assert receipt["signed_receipt"]["tenant_id"] == "équipe-santé"
+
+
 def test_summary_treats_tampered_receipt_as_not_ready(monkeypatch):
     _enable(monkeypatch)
     _policy()
@@ -1629,6 +1648,27 @@ def test_index_tamper_and_missing_segment_state_never_verify_clean(monkeypatch):
         match="exists without authenticated index state",
     ):
         ledger.state()
+
+
+def test_non_ascii_index_metadata_is_rebuilt_not_a_type_error(monkeypatch):
+    # A damaged derivative index is rebuilt from the signed ledger; non-ASCII
+    # metadata used to raise TypeError from hmac.compare_digest instead.
+    _enable(monkeypatch)
+    _policy()
+    _deliver(conversation_id="one", idempotency_key="one")
+    ledger = gateway._receipt_ledger()
+    expected = ledger.state()
+    connection = sqlite3.connect(ledger.index_path)
+    try:
+        connection.execute(
+            "UPDATE metadata SET value=? WHERE key='state_hash'",
+            ("é" * 64,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    assert ledger.state().total_receipts == expected.total_receipts
+    assert ledger.verify_integrity() == (True, "")
 
 
 def test_targeted_reads_verify_historical_segment_signatures(monkeypatch):

@@ -23,7 +23,6 @@ by :mod:`maverick.unified_audit` without copying source payloads.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import math
 import re
@@ -35,6 +34,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import InvalidTenantError, canonical_tenant_id
 from .unified_audit import SOURCE_ACTION_CODES, SourceRecord, build_source_record
@@ -817,7 +817,7 @@ class AIGovernanceLoopStore:
         ).fetchone()
         if row is None:
             return None
-        if not hmac.compare_digest(str(row["request_sha256"]), request_sha256):
+        if not text_equals(str(row["request_sha256"]), request_sha256):
             raise AIGovernanceLoopConflict(
                 "idempotency key was already used for a different operation"
             )
@@ -895,7 +895,7 @@ class AIGovernanceLoopStore:
                     if normalized.source_revision < old_revision:
                         raise AIGovernanceLoopConflict("trigger is out of order")
                     if normalized.source_revision == old_revision:
-                        if not hmac.compare_digest(normalized.source_sha256, old_sha):
+                        if not text_equals(normalized.source_sha256, old_sha):
                             raise AIGovernanceLoopConflict(
                                 "trigger revision is bound to different content"
                             )
@@ -1097,7 +1097,7 @@ class AIGovernanceLoopStore:
             or lease.asset_id != row["asset_id"]
             or lease.generation != int(row["lease_generation"])
             or row["lease_token_sha256"] is None
-            or not hmac.compare_digest(
+            or not text_equals(
                 hashlib.sha256(lease.token.encode("utf-8")).hexdigest(),
                 str(row["lease_token_sha256"]),
             )
@@ -1233,7 +1233,7 @@ class AIGovernanceLoopStore:
                 self._assert_authority_progress(current, normalized)
                 derived = self._derive(current, normalized)
                 no_change = (
-                    hmac.compare_digest(str(current["authorities_sha256"]), authorities_sha256)
+                    text_equals(str(current["authorities_sha256"]), authorities_sha256)
                     and current["state"] == derived.state
                     and current["policy_decision"] == normalized.policy_decision
                     and current["enforcement_decision"] == normalized.enforcement_decision
@@ -1635,7 +1635,7 @@ class AIGovernanceLoopStore:
             target = row["rollback_target_revision"]
             if (
                 row["rollback_authorization_sha256"] is None
-                or not hmac.compare_digest(str(row["rollback_authorization_sha256"]), authorization)
+                or not text_equals(str(row["rollback_authorization_sha256"]), authorization)
                 or target is None
             ):
                 raise AIGovernanceLoopConflict("rollback authorization is stale")
@@ -1655,7 +1655,7 @@ class AIGovernanceLoopStore:
                     "payload": target_payload,
                 }
             )
-            if not hmac.compare_digest(str(target_row["event_sha256"]), target_event_sha256):
+            if not text_equals(str(target_row["event_sha256"]), target_event_sha256):
                 raise AIGovernanceLoopIntegrityError("rollback target commitment is invalid")
             # Restoring a historical *projection* cannot rewind its external
             # authorities. Reconciliation is therefore mandatory before this
@@ -1818,13 +1818,13 @@ class AIGovernanceLoopStore:
         authorities = json.loads(str(case["authorities_json"]))
         if _canonical(authorities).decode("ascii") != str(case["authorities_json"]):
             raise AIGovernanceLoopIntegrityError("case authorities are not canonical")
-        if not hmac.compare_digest(str(case["authorities_sha256"]), _sha256(authorities)):
+        if not text_equals(str(case["authorities_sha256"]), _sha256(authorities)):
             raise AIGovernanceLoopIntegrityError("case authority commitment is invalid")
         previous = GENESIS_SHA256
         for expected_sequence, row in enumerate(rows, start=1):
             if int(row["sequence"]) != expected_sequence:
                 raise AIGovernanceLoopIntegrityError("history sequence is discontinuous")
-            if not hmac.compare_digest(str(row["previous_sha256"]), previous):
+            if not text_equals(str(row["previous_sha256"]), previous):
                 raise AIGovernanceLoopIntegrityError("history predecessor is invalid")
             payload = json.loads(str(row["payload_json"]))
             if _canonical(payload).decode("ascii") != str(row["payload_json"]):
@@ -1845,10 +1845,10 @@ class AIGovernanceLoopStore:
                     "payload": payload,
                 }
             )
-            if not hmac.compare_digest(str(row["event_sha256"]), expected):
+            if not text_equals(str(row["event_sha256"]), expected):
                 raise AIGovernanceLoopIntegrityError("history event commitment is invalid")
             previous = expected
-        if not rows or not hmac.compare_digest(str(case["last_event_sha256"]), previous):
+        if not rows or not text_equals(str(case["last_event_sha256"]), previous):
             raise AIGovernanceLoopIntegrityError("case history tip is invalid")
         latest = rows[-1]
         expected_projection = self._event_payload(
@@ -1887,7 +1887,7 @@ class AIGovernanceLoopStore:
                 previous_sha256=str(audit_row["previous_sha256"]),
                 record_sha256=str(audit_row["record_sha256"]),
             )
-            if record.sequence != sequence or not hmac.compare_digest(
+            if record.sequence != sequence or not text_equals(
                 record.previous_sha256, previous
             ):
                 raise AIGovernanceLoopIntegrityError("unified-audit source chain is discontinuous")

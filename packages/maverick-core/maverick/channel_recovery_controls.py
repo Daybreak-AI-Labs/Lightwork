@@ -12,6 +12,7 @@ import re
 from datetime import datetime, timezone
 
 from . import channel_recovery as channels
+from .constant_time import text_equals
 
 
 def _require(condition, message="Review the connected-service details again."):
@@ -141,7 +142,7 @@ def readback(marker, item, answers, expected_token, path, **kwargs):
         _require(set(answers) == {"kind", "receipt"})
         hold = record["restore_hold"]
         _require(hold["state"] == "resolved" and isinstance(answers["receipt"], str)
-                 and hmac.compare_digest(answers["receipt"], hold["readback_sha256"]),
+                 and text_equals(answers["receipt"], hold["readback_sha256"]),
                  "The recorded review changed. Refresh before finishing it.")
         return copy.deepcopy(hold["readback"])
     kind = _kind(item)

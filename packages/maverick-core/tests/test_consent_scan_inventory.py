@@ -17,6 +17,7 @@ from maverick.consent_preferences import ConsentPreferenceStore
 from maverick.consent_scan_inventory import (
     ConsentScanBridgeError,
     ConsentScanConflict,
+    ConsentScanIntegrityError,
     ConsentScanInventory,
     ConsentScanLeaseError,
     ConsentScanNotFound,
@@ -496,6 +497,29 @@ def test_property_schedule_cas_idempotency_and_exact_origin_boundaries(
     assert environment.inventory.list_properties("tenant-b")["items"] == []
     with pytest.raises(ConsentScanNotFound):
         environment.inventory.get_property("tenant-b", "property-shop")
+
+
+def test_non_ascii_stored_digests_are_refused_not_type_errors(
+    environment: Environment,
+) -> None:
+    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # of the idempotency conflict and integrity refusals.
+    _seed(environment)
+    with sqlite3.connect(environment.inventory.path) as connection:
+        connection.execute("DROP TRIGGER consent_scan_idempotency_no_update")
+        connection.execute("UPDATE consent_scan_idempotency SET request_sha256 = ?", ("é" * 64,))
+        connection.execute("UPDATE consent_scan_properties SET record_sha256 = ?", ("é" * 64,))
+    with pytest.raises(ConsentScanConflict, match="rebound"):
+        environment.inventory.upsert_property(
+            "tenant-a",
+            "property-shop",
+            [ORIGIN],
+            [START_URL],
+            expected_revision=0,
+            idempotency_key="property-create",
+        )
+    with pytest.raises(ConsentScanIntegrityError, match="property"):
+        environment.inventory.get_property("tenant-a", "property-shop")
 
 
 def test_due_claim_success_quarantines_unknown_and_preserves_completeness(

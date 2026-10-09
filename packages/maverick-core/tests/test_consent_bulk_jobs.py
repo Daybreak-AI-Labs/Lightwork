@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from maverick.consent_bulk_jobs import (
     ConsentBulkJobConflict,
+    ConsentBulkJobError,
     ConsentBulkJobLimits,
     ConsentBulkJobStore,
     ConsentBulkJobValidationError,
@@ -157,6 +159,32 @@ def test_create_is_idempotent_and_rebinding_is_rejected(tmp_path: Path) -> None:
             "tenant-a",
             **{**kwargs, "items": _export_items("profile-b")},
         )
+
+
+def test_non_ascii_stored_digests_are_refused_not_type_errors(tmp_path: Path) -> None:
+    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # of the store's idempotency conflict and integrity refusals.
+    now = [1_800_000_000.0]
+    store = _store(tmp_path, now)
+    store.ensure_credit_account("tenant-a", initial_credits=2)
+    kwargs = {
+        "kind": "export",
+        "operation": "export_receipts",
+        "items": _export_items("profile-a"),
+        "actor_sha256": _digest("operator"),
+        "scheduled_for": None,
+        "idempotency_key": "export-request-non-ascii",
+    }
+    store.create_job("tenant-a", **kwargs)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DROP TRIGGER consent_bulk_idempotency_no_update")
+        connection.execute("DROP TRIGGER consent_bulk_events_no_update")
+        connection.execute("UPDATE consent_bulk_idempotency SET request_sha256=?", ("é" * 64,))
+        connection.execute("UPDATE consent_bulk_events SET event_sha256=?", ("é" * 64,))
+    with pytest.raises(ConsentBulkJobConflict, match="different content"):
+        store.create_job("tenant-a", **kwargs)
+    with pytest.raises(ConsentBulkJobError, match="event integrity"):
+        store.verify_integrity("tenant-a")
 
 
 def test_queued_cancel_refunds_and_terminal_cancel_is_rejected(tmp_path: Path) -> None:

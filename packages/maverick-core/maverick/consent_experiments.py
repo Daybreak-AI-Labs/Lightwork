@@ -32,6 +32,7 @@ from statistics import NormalDist
 from typing import Any, Protocol
 
 from . import consent_storage
+from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -808,14 +809,14 @@ class ConsentExperimentAuthority:
         if (
             canonical != row["definition_json"]
             or definition_sha != row["definition_sha256"]
-            or not hmac.compare_digest(expected_mac, str(row["definition_mac"]))
+            or not text_equals(expected_mac, str(row["definition_mac"]))
             or definition.get("experiment_id") != experiment
             or definition.get("schema") != EXPERIMENT_SCHEMA
             or row["state"] not in _STATES
         ):
             raise ConsentExperimentIntegrityError("stored experiment definition failed integrity")
         expected_state_mac = _mac(key, self._state_body(row))
-        if not hmac.compare_digest(expected_state_mac, str(row["state_mac"])):
+        if not text_equals(expected_state_mac, str(row["state_mac"])):
             raise ConsentExperimentIntegrityError("stored experiment state failed integrity")
         return row, definition
 
@@ -828,12 +829,12 @@ class ConsentExperimentAuthority:
             or int(row["failures"]) < 0
             or int(row["outcomes"]) > int(row["exposures"])
             or int(row["successes"]) + int(row["failures"]) != int(row["outcomes"])
-            or not hmac.compare_digest(_mac(key, body), str(row["record_mac"]))
+            or not text_equals(_mac(key, body), str(row["record_mac"]))
         ):
             raise ConsentExperimentIntegrityError("stored aggregate failed integrity")
 
     def _verify_dedupe(self, row: sqlite3.Row, key: bytes) -> None:
-        if not hmac.compare_digest(_mac(key, self._dedupe_body(row)), str(row["record_mac"])):
+        if not text_equals(_mac(key, self._dedupe_body(row)), str(row["record_mac"])):
             raise ConsentExperimentIntegrityError("stored dedupe record failed integrity")
 
     @staticmethod
@@ -897,7 +898,7 @@ class ConsentExperimentAuthority:
             "request_sha256": row["request_sha256"],
             "result": result,
         }
-        if not hmac.compare_digest(_mac(integrity_key, body), str(row["result_mac"])):
+        if not text_equals(_mac(integrity_key, body), str(row["result_mac"])):
             raise ConsentExperimentIntegrityError("stored idempotency result failed integrity")
         if not hmac.compare_digest(str(row["request_sha256"]), request_sha256):
             raise ConsentExperimentConflict(
@@ -1018,7 +1019,7 @@ class ConsentExperimentAuthority:
             "previous_mac": event["previous_mac"],
             "created_at": float(event["created_at"]),
         }
-        if event["previous_mac"] is not None or not hmac.compare_digest(
+        if event["previous_mac"] is not None or not text_equals(
             _mac(integrity_key, body),
             str(event["event_mac"]),
         ):
@@ -2390,7 +2391,7 @@ class ConsentExperimentAuthority:
                 ).fetchone()
                 if existing is not None:
                     result = _loads(existing["result_json"], "analysis result")
-                    if not isinstance(result, dict) or not hmac.compare_digest(
+                    if not isinstance(result, dict) or not text_equals(
                         _mac(integrity_key, result), str(existing["result_mac"])
                     ):
                         raise ConsentExperimentIntegrityError(
@@ -2555,7 +2556,7 @@ class ConsentExperimentAuthority:
                 if (
                     int(audit["event_index"]) != expected_index
                     or audit["previous_mac"] != previous_mac
-                    or not hmac.compare_digest(
+                    or not text_equals(
                         _mac(integrity_key, body), str(audit["event_mac"])
                     )
                 ):
@@ -2579,7 +2580,7 @@ class ConsentExperimentAuthority:
             analysis_export: list[dict[str, Any]] = []
             for analysis in analyses:
                 result = _loads(analysis["result_json"], "analysis result")
-                if not isinstance(result, dict) or not hmac.compare_digest(
+                if not isinstance(result, dict) or not text_equals(
                     _mac(integrity_key, result), str(analysis["result_mac"])
                 ):
                     raise ConsentExperimentIntegrityError("analysis export failed integrity")

@@ -589,6 +589,30 @@ def test_tampered_definition_and_aggregate_are_rejected(
         separate.audit_export("tenant-a", "banner-copy-v1")
 
 
+def test_non_ascii_stored_macs_are_integrity_errors_not_type_errors(
+    authority: ConsentExperimentAuthority,
+) -> None:
+    # A MAC column edited to non-ASCII text used to raise TypeError from
+    # hmac.compare_digest instead of the integrity refusal.
+    _create_and_activate(authority)
+    with sqlite3.connect(authority.path) as connection:
+        connection.execute(
+            "UPDATE consent_experiment_aggregates SET record_mac = ? WHERE tenant = ?",
+            ("é" * 64, "tenant-a"),
+        )
+        connection.commit()
+    with pytest.raises(ConsentExperimentIntegrityError, match="aggregate"):
+        authority.audit_export("tenant-a", "banner-copy-v1")
+    with sqlite3.connect(authority.path) as connection:
+        connection.execute(
+            "UPDATE consent_experiments SET state_mac = ? WHERE tenant = ?",
+            ("é" * 64, "tenant-a"),
+        )
+        connection.commit()
+    with pytest.raises(ConsentExperimentIntegrityError, match="state"):
+        authority.get_experiment("tenant-a", "banner-copy-v1")
+
+
 def test_analysis_never_declares_a_winner_before_minimum_sample(
     authority: ConsentExperimentAuthority,
 ) -> None:

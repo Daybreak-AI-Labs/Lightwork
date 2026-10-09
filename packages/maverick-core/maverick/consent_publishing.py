@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import hmac
 import ipaddress
 import json
 import math
@@ -44,6 +43,7 @@ from urllib.parse import urlsplit
 
 from . import consent_publication_signing as publication_signing
 from . import consent_storage
+from .constant_time import text_equals
 from .file_lock import (
     cross_process_lock,
     ensure_private_directory,
@@ -924,7 +924,7 @@ class ConsentPublishingStore:
         ).fetchone()
         if row is None:
             return None
-        if not hmac.compare_digest(str(row["request_sha256"]), request_sha256):
+        if not text_equals(str(row["request_sha256"]), request_sha256):
             raise PublishingIdempotencyConflict(
                 "idempotency key was already used for different content"
             )
@@ -975,7 +975,7 @@ class ConsentPublishingStore:
             "revision": int(row["revision"]),
         }
         expected = _sha256(body)
-        if not hmac.compare_digest(expected, str(row["record_sha256"])):
+        if not text_equals(expected, str(row["record_sha256"])):
             raise ConsentPublishingError("stored property digest is invalid")
         return {
             **body,
@@ -1165,7 +1165,7 @@ class ConsentPublishingStore:
             "payload": payload,
         }
         expected = _sha256(body)
-        if not hmac.compare_digest(expected, str(row["resource_sha256"])):
+        if not text_equals(expected, str(row["resource_sha256"])):
             raise ConsentPublishingError("stored publishing resource digest is invalid")
         return {
             **body,
@@ -1864,7 +1864,7 @@ class ConsentPublishingStore:
         if not isinstance(bundle, dict):
             raise ConsentPublishingError("stored publication bundle is invalid")
         actual_bundle_sha = _sha256(bundle, maximum=_MAX_BUNDLE_BYTES)
-        if not hmac.compare_digest(actual_bundle_sha, str(row["bundle_sha256"])):
+        if not text_equals(actual_bundle_sha, str(row["bundle_sha256"])):
             raise ConsentPublishingError("stored publication bundle is invalid")
         action = str(row["action"])
         if action == "withdraw":
@@ -1899,7 +1899,7 @@ class ConsentPublishingStore:
             "created_at": float(row["created_at"]),
         }
         expected = _sha256(body)
-        if not hmac.compare_digest(expected, str(row["publication_sha256"])):
+        if not text_equals(expected, str(row["publication_sha256"])):
             raise ConsentPublishingError("stored publication digest is invalid")
         return {**body, "publication_sha256": expected}
 
@@ -2104,7 +2104,7 @@ class ConsentPublishingStore:
         if (
             public_key not in trusted_public_keys
             or key_id != publication_signing.key_id_for(public_key)
-            or not hmac.compare_digest(
+            or not text_equals(
                 str(signature_row["publication_sha256"]),
                 publication["publication_sha256"],
             )
@@ -2307,7 +2307,7 @@ class ConsentPublishingStore:
                     maximum=_MAX_BUNDLE_BYTES,
                 )
                 actual_bundle_sha = _sha256(bundle, maximum=_MAX_BUNDLE_BYTES)
-                if not hmac.compare_digest(
+                if not text_equals(
                     actual_bundle_sha,
                     str(target["bundle_sha256"]),
                 ):

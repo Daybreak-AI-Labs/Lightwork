@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -2099,7 +2100,7 @@ class ComplianceScopingStore:
             raise ComplianceScopingIntegrityError("scope export body digest is invalid")
         key = self._signing_key_resolver(export.tenant_id, export.signing_key_ref)
         expected = hmac.new(key, _canonical(export.body), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, export.signature_hmac_sha256):
+        if not text_equals(expected, str(export.signature_hmac_sha256)):
             raise ComplianceScopingIntegrityError("scope export signature is invalid")
 
     def purge_expired(

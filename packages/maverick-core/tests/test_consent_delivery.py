@@ -1043,6 +1043,27 @@ def test_audit_chain_is_tenant_scoped_and_valid(tmp_path: Path) -> None:
         store.verify_audit_chain("tenant-a")
 
 
+def test_non_ascii_stored_digests_are_refused_not_type_errors(tmp_path: Path) -> None:
+    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # of the idempotency conflict and audit-integrity refusals.
+    path = tmp_path / "delivery.db"
+    store = _store(path)
+    _enroll(store)
+    _enqueue(store, key="stable-key")
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TRIGGER delivery_idempotency_no_update")
+        connection.execute("DROP TRIGGER delivery_audit_no_update")
+        connection.execute("UPDATE delivery_idempotency SET request_sha256=?", ("é" * 64,))
+        connection.execute("UPDATE delivery_audit SET details_sha256=?", ("é" * 64,))
+        connection.commit()
+    with pytest.raises(ConsentDeliveryIdempotencyConflict):
+        _enqueue(store, key="stable-key")
+    with pytest.raises(ConsentDeliveryError, match="details changed"):
+        store.verify_audit_chain("tenant-a")
+    with pytest.raises(ConsentDeliveryError, match="details changed"):
+        store.list_audit("tenant-a")
+
+
 def test_privacy_posture_and_database_contain_no_key_material(tmp_path: Path) -> None:
     path = tmp_path / "delivery.db"
     store = _store(path)

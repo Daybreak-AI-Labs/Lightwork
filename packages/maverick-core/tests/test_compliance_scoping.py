@@ -722,6 +722,37 @@ def test_signature_and_row_tampering_are_detected(authority) -> None:
         store.verify_integrity("tenant-a")
 
 
+def test_non_ascii_export_signature_is_an_integrity_error_not_a_type_error(authority) -> None:
+    # An edited non-ASCII signature used to raise TypeError from
+    # hmac.compare_digest instead of the signature refusal.
+    store, actor, clock = authority
+    publish_questionnaire(store, actor)
+    assessment = answer_all(store, create_assessment(store, actor, clock))
+    _finalized, exported = compute_finalize_export(store, actor, clock, assessment)
+    with sqlite3.connect(store.path) as connection:
+        row = connection.execute(
+            "SELECT payload_json FROM scope_exports WHERE tenant_id=? AND export_id=?",
+            ("tenant-a", exported.export_id),
+        ).fetchone()
+        payload = json.loads(row[0])
+        payload["signature_hmac_sha256"] = "é" * 64
+        canonical = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+        )
+        connection.execute(
+            "UPDATE scope_exports SET payload_json=?,integrity_sha256=? "
+            "WHERE tenant_id=? AND export_id=?",
+            (
+                canonical,
+                hashlib.sha256(canonical.encode("ascii")).hexdigest(),
+                "tenant-a",
+                exported.export_id,
+            ),
+        )
+    with pytest.raises(scoping.ComplianceScopingIntegrityError, match="signature"):
+        store.get_export("tenant-a", exported.export_id)
+
+
 def test_honest_local_product_boundaries() -> None:
     assert scoping.ComplianceScopingStore.product_boundaries() == {
         "provider_neutral": True,

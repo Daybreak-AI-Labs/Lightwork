@@ -662,6 +662,26 @@ def test_revocation_history_integrity_and_direct_tamper_detection(tmp_path: Path
         environment.store.verify_integrity(TENANT)
 
 
+def test_non_ascii_tenant_and_stored_digest_are_refused_not_a_type_error(
+    tmp_path: Path,
+) -> None:
+    # Tenant ids may be Unicode and a stored digest can be edited; either used
+    # to raise TypeError from hmac.compare_digest instead of the store's errors.
+    environment = _environment(tmp_path)
+    artifact = _artifact()
+    _register(environment, artifact)
+    record = _analyze(environment, artifact)
+    with pytest.raises(evidence.EvidenceAnalysisNotFound):
+        environment.store.get("tenant-é", record.analysis_id)
+    with sqlite3.connect(environment.path) as connection:
+        connection.execute(
+            "UPDATE ai_evidence_analyses SET integrity_sha256=? WHERE analysis_id=?",
+            ("é" * 64, record.analysis_id),
+        )
+    with pytest.raises(evidence.EvidenceAnalysisIntegrityError):
+        environment.store.get(TENANT, record.analysis_id)
+
+
 def test_retention_due_and_purge_remove_record_history_and_replays(tmp_path: Path) -> None:
     environment = _environment(tmp_path)
     artifact = _artifact()

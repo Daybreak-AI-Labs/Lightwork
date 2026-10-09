@@ -52,6 +52,7 @@ from .ai_benchmark_exchange_transport import (
     VersionedEd25519TrustRoots,
     _validate_export_package,
 )
+from .constant_time import text_equals
 from .file_lock import (
     atomic_read_text,
     atomic_write_text,
@@ -537,7 +538,7 @@ class BenchmarkCoordinatorService:
         def accept(state: dict[str, Any]) -> dict[str, Any]:
             prior = state["receipts"].get(operation)
             if prior is not None:
-                if not hmac.compare_digest(prior["request_sha256"], request_digest):
+                if not text_equals(prior["request_sha256"], request_digest):
                     raise BenchmarkCoordinatorIdempotencyConflict(
                         "coordinator idempotency key is bound to different content"
                     )

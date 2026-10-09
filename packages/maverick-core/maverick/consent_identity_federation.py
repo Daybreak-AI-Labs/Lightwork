@@ -34,6 +34,7 @@ from .consent_preferences import (
     ConsentNotFound,
     ConsentPreferenceStore,
 )
+from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 
 SCHEMA_VERSION = 1
@@ -456,7 +457,7 @@ def _validate_verified_claims(
         or claims.subject != claims.subject.strip()
         or not claims.subject.isprintable()
         or not isinstance(claims.nonce, str)
-        or not hmac.compare_digest(claims.nonce, expectation.nonce)
+        or not text_equals(claims.nonce, expectation.nonce)
         or not isinstance(claims.key_id, str)
         or not _KID_RE.fullmatch(claims.key_id)
     ):
@@ -630,7 +631,7 @@ class ConsentIdentityFederationStore:
             raise ConsentIdentityFederationIntegrityError("stored pairing material is invalid")
         digest = _sha256(record)
         if (
-            not hmac.compare_digest(digest, str(row["record_sha256"]))
+            not text_equals(digest, str(row["record_sha256"]))
             or record.get("pairing_id") != row["pairing_id"]
             or record.get("code_sha256") != row["code_sha256"]
             or record.get("tenant_id") != row["tenant_id"]
@@ -663,7 +664,7 @@ class ConsentIdentityFederationStore:
             or record.get("revision") != row["revision"]
             or record.get("updated_at") != row["updated_at"]
             or record.get("retention_until") != row["retention_until"]
-            or not hmac.compare_digest(_sha256(record), str(row["record_sha256"]))
+            or not text_equals(_sha256(record), str(row["record_sha256"]))
         ):
             raise ConsentIdentityFederationIntegrityError(
                 "stored identity unlink operation changed"
@@ -682,7 +683,7 @@ class ConsentIdentityFederationStore:
         if (
             not _DIGEST_RE.fullmatch(body["target_fingerprint"])
             or body["revision"] < 1
-            or not hmac.compare_digest(
+            or not text_equals(
                 _sha256(body),
                 str(row["binding_sha256"]),
             )
@@ -1047,7 +1048,7 @@ class ConsentIdentityFederationStore:
                 if record["status"] not in {"pending", "authorizing"}:
                     raise ConsentIdentityFederationDenied("pairing cannot be authorized")
                 recovering = record["status"] == "authorizing"
-                if not hmac.compare_digest(
+                if not text_equals(
                     hashlib.sha256(oidc_nonce.encode("utf-8")).hexdigest(),
                     str(record["nonce_sha256"]),
                 ):
@@ -1123,11 +1124,11 @@ class ConsentIdentityFederationStore:
                 if recovering:
                     if (
                         record.get("known_profile_id") != known_profile_id
-                        or not hmac.compare_digest(
+                        or not text_equals(
                             str(record.get("subject_binding_sha256", "")),
                             subject_binding,
                         )
-                        or not hmac.compare_digest(
+                        or not text_equals(
                             str(record.get("oidc_verification_sha256", "")),
                             verification_sha,
                         )
@@ -1175,7 +1176,7 @@ class ConsentIdentityFederationStore:
                 source.tenant_id,
                 known_profile_id,
             )
-            if known.get("identity_kind") != "known" or not hmac.compare_digest(
+            if known.get("identity_kind") != "known" or not text_equals(
                 str(known.get("subject_sha256", "")), subject_binding
             ):
                 raise ConsentIdentityFederationConflict(
@@ -1196,7 +1197,7 @@ class ConsentIdentityFederationStore:
                 source.tenant_id,
                 known_profile_id,
             )
-            if known.get("identity_kind") != "known" or not hmac.compare_digest(
+            if known.get("identity_kind") != "known" or not text_equals(
                 str(known.get("subject_sha256", "")), subject_binding
             ):
                 raise ConsentIdentityFederationConflict(
@@ -1254,7 +1255,7 @@ class ConsentIdentityFederationStore:
                 if (
                     current["status"] != "authorizing"
                     or current.get("known_profile_id") != known_profile_id
-                    or not hmac.compare_digest(
+                    or not text_equals(
                         str(current.get("subject_binding_sha256", "")), subject_binding
                     )
                 ):
@@ -1312,7 +1313,7 @@ class ConsentIdentityFederationStore:
             try:
                 _row, record = self._load_capability(connection, raw_code)
                 record = self._expire_if_needed(connection, record, now)
-                if record["status"] != "authorized" or not hmac.compare_digest(
+                if record["status"] != "authorized" or not text_equals(
                     challenge, str(record["code_challenge"])
                 ):
                     raise ConsentIdentityFederationDenied("pairing cannot be redeemed")
@@ -1553,7 +1554,7 @@ class ConsentIdentityFederationStore:
                 str(source_profile.get("link_sha256", "")), source_link
             )
             or known_profile.get("identity_kind") != "known"
-            or not hmac.compare_digest(
+            or not text_equals(
                 str(known_profile.get("subject_sha256", "")), subject_binding
             )
         ):
@@ -1627,7 +1628,7 @@ class ConsentIdentityFederationStore:
             ).fetchone()
             if row is not None:
                 prepared = self._unlink_operation(row)
-                if not hmac.compare_digest(
+                if not text_equals(
                     str(prepared.get("request_sha256", "")),
                     request_sha,
                 ):
@@ -1636,7 +1637,7 @@ class ConsentIdentityFederationStore:
                     )
                 if prepared["status"] == "completed":
                     result = prepared.get("core_result")
-                    if not isinstance(result, dict) or not hmac.compare_digest(
+                    if not isinstance(result, dict) or not text_equals(
                         _sha256(result),
                         str(prepared.get("core_result_sha256", "")),
                     ):
@@ -1826,7 +1827,7 @@ class ConsentIdentityFederationStore:
                 current_operation = self._unlink_operation(operation_row)
                 if current_operation["status"] == "completed":
                     stored = current_operation.get("core_result")
-                    if not isinstance(stored, dict) or not hmac.compare_digest(
+                    if not isinstance(stored, dict) or not text_equals(
                         _sha256(stored),
                         str(current_operation.get("core_result_sha256", "")),
                     ):
@@ -1879,7 +1880,7 @@ class ConsentIdentityFederationStore:
                 elif (
                     pairing["status"] != "revoked"
                     or pairing.get("unlink_operation_key_sha256") != operation_sha
-                    or not hmac.compare_digest(
+                    or not text_equals(
                         str(pairing.get("unlink_result_sha256", "")),
                         result_sha,
                     )
@@ -2011,7 +2012,7 @@ class ConsentIdentityFederationStore:
                         or pairing.get("unlink_operation_key_sha256")
                         != operation["operation_key_sha256"]
                         or not isinstance(result, dict)
-                        or not hmac.compare_digest(
+                        or not text_equals(
                             _sha256(result),
                             str(operation.get("core_result_sha256", "")),
                         )
@@ -2080,9 +2081,9 @@ class ConsentIdentityFederationStore:
                 }
                 event_sha = _sha256(body)
                 if (
-                    not hmac.compare_digest(payload_sha, str(row["payload_sha256"]))
+                    not text_equals(payload_sha, str(row["payload_sha256"]))
                     or row["previous_event_sha256"] != previous
-                    or not hmac.compare_digest(event_sha, str(row["event_sha256"]))
+                    or not text_equals(event_sha, str(row["event_sha256"]))
                 ):
                     raise ConsentIdentityFederationIntegrityError("stored pairing audit changed")
                 previous_by_pairing[pairing_id] = event_sha

@@ -37,7 +37,6 @@ registered into the base registry only when the operator opts in
 from __future__ import annotations
 
 import functools
-import hmac
 import re
 import secrets
 import uuid
@@ -49,6 +48,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from .config import env_flag
+from .constant_time import text_equals
 
 #: Staged-write kinds a session may propose. Every one changes the store or an
 #: order, so every one waits for a human. A shopper session stages only
@@ -615,7 +615,7 @@ class ProposalLedger:
                 "a staged change is decided by a person, never by an agent principal"
             )
         expected = self._tokens.get(change.proposal_id, "")
-        if not expected or not hmac.compare_digest(expected, str(approval.token or "")):
+        if not expected or not text_equals(expected, str(approval.token or "")):
             raise ApprovalRequired("approval token does not match this proposal")
         return change
 

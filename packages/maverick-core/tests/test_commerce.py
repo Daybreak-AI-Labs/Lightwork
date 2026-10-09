@@ -300,6 +300,19 @@ def test_reject_closes_a_proposal():
         m.apply(change.proposal_id, Approval(approver="user:bob", token=token))
 
 
+def test_non_ascii_approval_token_is_refused_not_a_crash():
+    # The token comes from the human approval path; a non-ASCII value used to
+    # raise TypeError out of hmac.compare_digest instead of ApprovalRequired.
+    m = _merchant()
+    change = m.stage_change("price", "sku-trail-01", {"price": 119.0}, "match MAP")
+    token = m.ledger.approval_token(change.proposal_id)
+    with pytest.raises(ApprovalRequired):
+        m.apply(change.proposal_id, Approval(approver="user:alice", token="é" * len(token)))
+    with pytest.raises(ApprovalRequired):
+        m.reject(change.proposal_id, Approval(approver="user:alice", token=" " + token))
+    assert m.pending()
+
+
 def test_failed_apply_keeps_the_proposal_pending():
     m = _merchant()
     change = m.stage_change("price", "sku-trail-01", {"price": -1}, "bad")

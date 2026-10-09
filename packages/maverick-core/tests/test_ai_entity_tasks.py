@@ -257,6 +257,38 @@ def test_history_tampering_is_detected(tmp_path) -> None:
         store.get_task("tenant-a", created.task_id)
 
 
+def test_non_ascii_text_is_refused_not_a_type_error(tmp_path) -> None:
+    # Tenant ids may be Unicode, and stored digests can be edited; either used
+    # to raise TypeError from hmac.compare_digest instead of the store's errors.
+    store, _clock, _current, _actor, _maintenance = _store(tmp_path)
+    created = store.create_task(
+        "tenant-a",
+        entity_id="model.customer-support",
+        entity_revision=4,
+        kind="review",
+        title="Review evidence",
+        idempotency_key="non-ascii-create",
+    )
+    with pytest.raises(tasks.AIEntityTaskNotFound):
+        store.get_task("tenant-é", created.task_id)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DROP TRIGGER ai_entity_task_operation_no_update")
+        connection.execute("DROP TRIGGER ai_entity_task_history_no_update")
+        connection.execute("UPDATE ai_entity_task_operations SET request_sha256=?", ("é" * 64,))
+        connection.execute("UPDATE ai_entity_task_history SET event_sha256=?", ("é" * 64,))
+    with pytest.raises(tasks.AIEntityTaskConflict):
+        store.create_task(
+            "tenant-a",
+            entity_id="model.customer-support",
+            entity_revision=4,
+            kind="review",
+            title="Review evidence",
+            idempotency_key="non-ascii-create",
+        )
+    with pytest.raises(tasks.AIEntityTaskIntegrityError):
+        store.history("tenant-a", created.task_id)
+
+
 def test_terminal_retention_purge_keeps_replay_tombstone(tmp_path) -> None:
     store, clock, _current, _actor, maintenance = _store(tmp_path)
     created = store.create_task(

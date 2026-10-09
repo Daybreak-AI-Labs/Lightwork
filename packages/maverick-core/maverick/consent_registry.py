@@ -22,6 +22,7 @@ import re
 import time
 from typing import Any
 
+from .constant_time import text_equals
 from .governed_records import GovernedRecordStore
 
 RECEIPT_SCHEMA = "lightwork.consent-receipt.v1"
@@ -704,7 +705,7 @@ def ingest_consent_webhook(
         hashlib.sha256,
     ).hexdigest()
     provided = str(signature or "").strip().lower().removeprefix("sha256=")
-    if not hmac_mod.compare_digest(expected, provided):
+    if not text_equals(expected, provided):
         raise PermissionError("webhook signature mismatch")
     try:
         payload = json.loads(bytes(body) or b"{}")

@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from . import consent_storage
+from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -871,7 +872,7 @@ class ConsentPreferenceStore:
                     "operation_key_sha256",
                 )
             )
-            or not hmac.compare_digest(_sha256(body), str(row["record_sha256"]))
+            or not text_equals(_sha256(body), str(row["record_sha256"]))
         ):
             raise ConsentPreferencesError("stored profile link authority integrity failed")
         return {**body, "record_sha256": str(row["record_sha256"])}
@@ -963,7 +964,7 @@ class ConsentPreferenceStore:
                 body["action"] not in _LINK_ACTIONS
                 or body["link_revision"] != expected_revision
                 or body["previous_event_sha256"] != previous
-                or not hmac.compare_digest(event_sha, str(row["event_sha256"]))
+                or not text_equals(event_sha, str(row["event_sha256"]))
             ):
                 raise ConsentPreferencesError("stored profile link history integrity failed")
             for name in (
@@ -1290,7 +1291,7 @@ class ConsentPreferenceStore:
                     or body.get("event_type") != event["event_type"]
                     or body.get("created_at") != event["created_at"]
                     or _canonical(body).decode("ascii") != event["payload_json"]
-                    or not hmac.compare_digest(_sha256(body), str(event["payload_sha256"]))
+                    or not text_equals(_sha256(body), str(event["payload_sha256"]))
                 ):
                     raise ConsentPreferencesError("stored subject deletion event integrity failed")
                 payload = body.get("payload")
@@ -1400,7 +1401,7 @@ class ConsentPreferenceStore:
         ).fetchone()
         if row is None:
             return None
-        if not hmac.compare_digest(str(row["request_sha256"]), request_sha256):
+        if not text_equals(str(row["request_sha256"]), request_sha256):
             raise ConsentIdempotencyConflict(
                 "idempotency key was already used for different content"
             )
@@ -1979,7 +1980,7 @@ class ConsentPreferenceStore:
                     raise ConsentValidationError(
                         "anonymous_profile_id is not an anonymous profile"
                     )
-                if hmac.compare_digest(
+                if text_equals(
                     str(known_row["subject_sha256"]),
                     str(anonymous_row["subject_sha256"]),
                 ):
@@ -2213,7 +2214,7 @@ class ConsentPreferenceStore:
             "actor_sha256": str(row["actor_sha256"]),
             "updated_at": float(row["updated_at"]),
         }
-        if not hmac.compare_digest(_sha256(body), str(row["record_sha256"])):
+        if not text_equals(_sha256(body), str(row["record_sha256"])):
             raise ConsentPreferencesError("stored profile lifecycle integrity failed")
         return {**body, "record_sha256": str(row["record_sha256"])}
 
@@ -2740,7 +2741,7 @@ class ConsentPreferenceStore:
             "actor_sha256": str(row["actor_sha256"]),
             "updated_at": float(row["updated_at"]),
         }
-        if not hmac.compare_digest(_sha256(body), str(row["record_sha256"])):
+        if not text_equals(_sha256(body), str(row["record_sha256"])):
             raise ConsentPreferencesError("stored receipt lifecycle integrity failed")
         return {**body, "record_sha256": str(row["record_sha256"])}
 
@@ -3333,7 +3334,7 @@ class ConsentPreferenceStore:
                 "source": str(row["source"]),
                 "created_at": float(row["created_at"]),
             }
-            if not hmac.compare_digest(_sha256(body), str(row["record_sha256"])):
+            if not text_equals(_sha256(body), str(row["record_sha256"])):
                 raise ConsentPreferencesError("stored consent restoration floor integrity failed")
             highest = max(highest, body["receipt_sequence"])
         return highest
@@ -3536,7 +3537,7 @@ class ConsentPreferenceStore:
                         "actor_sha256": str(override_row["actor_sha256"]),
                         "updated_at": float(override_row["updated_at"]),
                     }
-                    if not hmac.compare_digest(
+                    if not text_equals(
                         _sha256(body), str(override_row["record_sha256"])
                     ):
                         raise ConsentPreferencesError(
@@ -3650,7 +3651,7 @@ class ConsentPreferenceStore:
         events: list[dict[str, Any]] = []
         for row in rows:
             body = _loads(row["payload_json"], "outbox event")
-            if not isinstance(body, dict) or not hmac.compare_digest(
+            if not isinstance(body, dict) or not text_equals(
                 _sha256(body), str(row["payload_sha256"])
             ):
                 raise ConsentPreferencesError("stored outbox event integrity failed")
@@ -3894,7 +3895,7 @@ class ConsentPreferenceStore:
             raise ConsentNotFound("receipt does not exist in this tenant")
         result = self._receipt_output(row, tenant=tenant)
         body = {key: value for key, value in result.items() if key != "receipt_sha256"}
-        if not hmac.compare_digest(_sha256(body), result["receipt_sha256"]):
+        if not text_equals(_sha256(body), result["receipt_sha256"]):
             raise ConsentPreferencesError("stored receipt integrity failed")
         return result
 
@@ -4056,7 +4057,7 @@ class ConsentPreferenceStore:
                     "stored consent outbox payload is invalid"
                 )
             payload_sha256 = str(row["payload_sha256"])
-            if not hmac.compare_digest(payload_sha256, _sha256(body)):
+            if not text_equals(payload_sha256, _sha256(body)):
                 raise ConsentPreferencesError(
                     "stored consent outbox payload failed integrity verification"
                 )

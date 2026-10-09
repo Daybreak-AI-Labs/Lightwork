@@ -649,6 +649,23 @@ def test_cas_and_exact_idempotency_replay_and_rebind(tmp_path: Path) -> None:
         )
 
 
+def test_non_ascii_stored_digests_are_refused_not_type_errors(tmp_path: Path) -> None:
+    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # of the idempotency conflict and integrity refusals.
+    path = tmp_path / "publishing.sqlite3"
+    store = _store(path)
+    tenant = "tenant-a"
+    _web_property(store, tenant, idempotency_key="property-request")
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TRIGGER publishing_idempotency_no_update")
+        connection.execute("UPDATE publishing_idempotency SET request_sha256 = ?", ("é" * 64,))
+        connection.execute("UPDATE publishing_properties SET record_sha256 = ?", ("é" * 64,))
+    with pytest.raises(PublishingIdempotencyConflict):
+        _web_property(store, tenant, idempotency_key="property-request")
+    with pytest.raises(ConsentPublishingError, match="property digest"):
+        store.catalog(tenant, kind="property")
+
+
 def test_rollback_creates_new_immutable_publication_and_restores_bundle(
     tmp_path: Path,
 ) -> None:

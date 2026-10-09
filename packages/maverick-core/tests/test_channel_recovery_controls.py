@@ -116,6 +116,19 @@ def test_interrupted_legacy_readback_keeps_exact_float_and_original_time(tmp_pat
     assert channel_recovery._digest(result) == original_proof
 
 
+def test_non_ascii_finish_receipt_is_refused_not_a_crash(tmp_path):
+    # The receipt is a submitted form value; non-ASCII text used to raise
+    # TypeError from hmac.compare_digest instead of the refusal below.
+    root, path, item, marker, answers = setup_record(tmp_path, "message")
+    options = dict(decryptor=None, tenant="acme", workspace=root)
+    token = controls.review_token(marker, item)
+    readback = controls.readback(marker, item, answers, token, path, **options)
+    channel_recovery.resolve(path, item, readback, actor="admin", **options)
+    with pytest.raises(ValueError, match="recorded review changed"):
+        controls.readback(marker, item, {"kind": "finish_recording", "receipt": "é" * 64},
+                          token, path, **options)
+
+
 def test_source_mutation_and_known_delivery_erasure_are_refused(tmp_path):
     root, path, item, marker, answers = setup_record(tmp_path, "message")
     options = dict(decryptor=None, tenant="acme", workspace=root)

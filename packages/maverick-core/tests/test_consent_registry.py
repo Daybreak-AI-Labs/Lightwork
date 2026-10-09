@@ -369,6 +369,19 @@ def test_webhook_verifies_hmac_then_maps_events(tmp_path, monkeypatch):
     assert prefs["purposes"]["marketing"]["status"] == "withdrawn"
 
 
+def test_webhook_non_ascii_signature_is_a_mismatch_not_a_crash(tmp_path, monkeypatch):
+    # The signature header is sender-controlled; a non-ASCII value used to
+    # raise TypeError from hmac.compare_digest instead of the mismatch refusal.
+    _enable_webhook(tmp_path, monkeypatch)
+    ts = _now()
+    body = json.dumps({"subject": "alice@example.com", "purpose": "marketing",
+                       "status": "OPT_IN"}).encode()
+    for signature in ("sha256=" + "é" * 64, "ÿ" + _signed(body, ts)[1:]):
+        with pytest.raises(PermissionError, match="signature"):
+            cr.ingest_consent_webhook(body, signature, ts)
+    assert cr.subject_preferences("alice@example.com")["purposes"] == {}
+
+
 def test_webhook_replay_guard(tmp_path, monkeypatch):
     _enable_webhook(tmp_path, monkeypatch)
     body = json.dumps({"subject": "alice@example.com",

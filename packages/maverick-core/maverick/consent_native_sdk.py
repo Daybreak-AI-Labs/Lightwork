@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import hmac
 import json
 import math
 import os
@@ -44,6 +43,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from . import consent_storage
+from .constant_time import text_equals
 from .file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -180,7 +180,7 @@ def _sha256(value: object, *, maximum: int = _MAX_JSON_BYTES) -> str:
 
 
 def _same(left: object, right: object) -> bool:
-    return isinstance(left, str) and isinstance(right, str) and hmac.compare_digest(left, right)
+    return isinstance(left, str) and isinstance(right, str) and text_equals(left, right)
 
 
 def _ref(value: object, label: str, pattern: re.Pattern[str] = _REF_RE) -> str:
