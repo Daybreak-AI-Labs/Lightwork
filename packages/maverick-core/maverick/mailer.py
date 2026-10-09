@@ -214,14 +214,21 @@ def _ses_send(from_addr: str, to: str, subject: str, body: str, *, before_effect
 
 def _smtp_transport(host: str, port: int, user: str, pw: str, msg, *, before_effect=None) -> None:
     import smtplib
+    import ssl
 
     from .authority_effects import authority_effect_fence
     started = False
     try:
-        constructor = smtplib.SMTP_SSL if port == 465 else smtplib.SMTP
-        with constructor(host, port, timeout=SMTP_TIMEOUT) as s:
+        # smtplib's own default context checks neither the certificate nor the
+        # host name; verify both before the password is sent.
+        tls = ssl.create_default_context()
+        if port == 465:
+            connection = smtplib.SMTP_SSL(host, port, timeout=SMTP_TIMEOUT, context=tls)
+        else:
+            connection = smtplib.SMTP(host, port, timeout=SMTP_TIMEOUT)
+        with connection as s:
             if port != 465:
-                s.starttls()
+                s.starttls(context=tls)
             s.login(user, pw)
             with authority_effect_fence() if before_effect else nullcontext():
                 if before_effect:
