@@ -108,3 +108,56 @@ def test_the_pack_catalogue_warms_before_the_slower_steps(monkeypatch):
     monkeypatch.setattr(route_identity, "iter_compatible_route_contexts", lambda _routes: order.append("routes") or [])
     dashboard._warm_dashboard_caches()
     assert order.index("agents") < order.index("routes")
+
+
+def test_a_stopped_dashboard_does_not_build_the_schema(monkeypatch):
+    """Shutdown ends the background warm-up: a stopped server (or a test's
+    TestClient) must not keep spending seconds of CPU on its schema."""
+    import threading
+
+    from maverick_dashboard import request_activity
+
+    built = []
+    monkeypatch.setattr(dashboard.app, "openapi", lambda: built.append(1))
+    stop = threading.Event()
+    stop.set()
+    assert dashboard._build_openapi_when_idle(quiet=0.0, sleep=lambda _s: None, stop=stop) is False
+    assert built == []
+
+    stop = threading.Event()
+    request_activity.started()
+    try:
+        assert dashboard._build_openapi_when_idle(quiet=0.0, sleep=lambda _s: stop.set(), stop=stop) is False
+    finally:
+        request_activity.finished()
+    assert built == [], "a stop that arrives while waiting for quiet also ends it"
+
+
+def test_leaving_the_lifespan_stops_its_warm_up_thread(monkeypatch, tmp_path):
+    """Every startup used to leave a warm-up thread behind that later built the
+    OpenAPI schema in whatever process it was in (dozens per test worker)."""
+    import threading
+    import time
+
+    from fastapi.testclient import TestClient
+    from maverick import world_model
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    dashboard._world_cache.clear()
+    built = []
+    monkeypatch.setattr(dashboard.app, "openapi", lambda: built.append(1))
+    monkeypatch.setattr(dashboard, "_warm_pack_catalogue", lambda: None)
+
+    def mine():
+        return {t for t in threading.enumerate() if t.name == "lightwork-warm-hooks"}
+
+    before = mine()
+    with TestClient(dashboard.app, headers={"Origin": "http://testserver"}):
+        started = mine() - before
+    assert started, "startup runs the warm-up in the background"
+    deadline = time.monotonic() + 120
+    for thread in started:
+        thread.join(max(0.0, deadline - time.monotonic()))
+        assert not thread.is_alive(), "the warm-up thread outlived its dashboard"
+    assert built == [], "a stopped dashboard never builds its schema"
+    dashboard._world_cache.clear()

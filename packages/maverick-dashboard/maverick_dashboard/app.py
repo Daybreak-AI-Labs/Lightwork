@@ -1001,7 +1001,7 @@ _WARM_TEMPLATES = ("base.html", "_navfinder.html", "index.html", "goals.html",
                    "chat.html", "approvals.html")
 
 
-def _warm_dashboard_caches() -> dict[str, float]:
+def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, float]:
     """Pay the dashboard's once-per-process first-hit costs now.
 
     Measured cold on a 4 vCPU box: first ``GET /`` 1.25 s (Jinja compile),
@@ -1015,6 +1015,8 @@ def _warm_dashboard_caches() -> dict[str, float]:
     timings: dict[str, float] = {}
 
     def _step(name: str, fn) -> None:
+        if stop is not None and stop.is_set():
+            return
         started = time.perf_counter()
         try:
             fn()
@@ -1077,21 +1079,25 @@ def _warm_pack_catalogue() -> None:
         log.debug("pack catalogue warm-up skipped", exc_info=True)
 
 
-def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float = 1800.0) -> bool:
+def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float = 1800.0,
+                             stop: threading.Event | None = None) -> bool:
     """Build the OpenAPI schema once the dashboard has been quiet for
     ``quiet`` seconds, so its seconds of CPU do not land on someone's first
     searches. Ten seconds, not one or two: a person opening the dashboard
     pauses that long only rarely while working, but often while a browser
     starts. A request for /openapi.json before then builds it on demand, as
-    FastAPI always did. Gives up after ``limit`` seconds of steady traffic."""
+    FastAPI always did. Gives up after ``limit`` seconds of steady traffic,
+    or as soon as ``stop`` is set (the dashboard is shutting down)."""
     from . import request_activity
 
     waited = 0.0
     while not request_activity.quiet_for(quiet):
-        if waited >= limit:
+        if waited >= limit or (stop is not None and stop.is_set()):
             return False
         sleep(0.5)
         waited += 0.5
+    if stop is not None and stop.is_set():
+        return False
     try:
         app.openapi()
     except Exception:  # pragma: no cover - the schema still builds on demand
@@ -1100,15 +1106,19 @@ def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float
     return True
 
 
-def _warm_goal_runtime() -> None:
+def _warm_goal_runtime() -> threading.Event:
     """Pay the kernel's once-per-process start-up cost (hook discovery across
     installed distributions, about 1.5 s cold) and the dashboard's first-hit
     costs (:func:`_warm_dashboard_caches`) now, in the background, instead of
     on the first request or chat turn after start. Fail-open: never blocks
-    startup."""
+    startup. Returns the event the lifespan sets on shutdown, so a stopped
+    dashboard does not keep warming (or build its schema) in the background."""
+    stop = threading.Event()
 
     def _warm() -> None:
         _warm_pack_catalogue()
+        if stop.is_set():
+            return
         try:
             import asyncio as _asyncio
 
@@ -1117,12 +1127,15 @@ def _warm_goal_runtime() -> None:
             _asyncio.run(hooks.ensure_loaded())
         except Exception:  # pragma: no cover - warm-up is best-effort
             log.debug("goal runtime warm-up skipped", exc_info=True)
-        timings = _warm_dashboard_caches()
+        if stop.is_set():
+            return
+        timings = _warm_dashboard_caches(stop)
         log.info("dashboard warm-up done: %s",
                  ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
-        _build_openapi_when_idle()
+        _build_openapi_when_idle(stop=stop)
 
     threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
+    return stop
 
 
 def repair_default_workspace() -> None:
@@ -1192,6 +1205,7 @@ async def _lifespan(app: FastAPI):
     from ._lifecycle import ShutdownSupervisor, register_main_components, shutdown_seconds
 
     runtime_receipt = None
+    warm_stop: threading.Event | None = None
     previous = getattr(app.state, "lifecycle_supervisor", None)
     if previous is not None:
         previous.assert_restart_allowed()
@@ -1228,7 +1242,7 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_knowledge_sources_scheduler)
         from .consent_delivery_scheduler import start_consent_delivery_scheduler
         await run_in_threadpool(start_consent_delivery_scheduler)
-        _warm_goal_runtime()
+        warm_stop = _warm_goal_runtime()
         try:
             from maverick_dashboard.security_api import start_hunter_scheduler
 
@@ -1336,6 +1350,8 @@ async def _lifespan(app: FastAPI):
         runtime_receipt = start_runtime_receipt("dashboard")
         yield
     finally:
+        if warm_stop is not None:
+            warm_stop.set()
         if runtime_receipt is not None:
             runtime_receipt.close()
         from .local_runtime_service import shutdown as stop_local_ai
