@@ -20,10 +20,11 @@ const showVendorSetup=process.env.LIGHTWORK_BROWSER_SHOW_VENDOR_SETUP==='1'?' --
 const ownServer=fs.readdirSync(__dirname).filter(name=>name.endsWith('.config.js')&&name!=='playwright.config.js')
   .map(name=>name.replace(/\.config\.js$/,'.spec.js'));
 // The expanded suite includes fresh owner, recovery and enterprise lifecycle
-// journeys. Allow the complete one-worker qualification run to finish; keep
+// journeys (about 194 tests, 30 to 40 minutes on a hosted runner). Allow the
+// complete one-worker qualification run to finish; keep
 // each test and assertion deadline unchanged so hangs remain failures.
 module.exports=defineConfig({
-  testDir:'.',testMatch:'*.spec.js',testIgnore:ownServer,fullyParallel:false,forbidOnly:!!process.env.CI,workers:1,retries:0,globalTimeout:1800000,
+  testDir:'.',testMatch:'*.spec.js',testIgnore:ownServer,fullyParallel:false,forbidOnly:!!process.env.CI,workers:1,retries:0,globalTimeout:2700000,
   outputDir:process.env.LIGHTWORK_BROWSER_OUTPUT||path.join(os.tmpdir(),'lightwork-browser-results'),
   timeout:45000,expect:{timeout:10000},
   reporter:[['list'],['html',{outputFolder:'browser-report',open:'never'}],['json',{outputFile:'test-results/results.json'}]],
