@@ -771,6 +771,40 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
             pass
         return "unavailable"
 
+    # Fixed codes for the reasons the native maintenance commands refuse; the
+    # page's own text never leaves the window.
+    TRANSITION_REFUSALS = (
+        ("Review and confirm the completed-upgrade rollback first", "rollback_unconfirmed"),
+        ("Load the protected administrator handoff", "authorization_missing"),
+        ("Use the rollback authorization from Workspace recovery", "not_a_rollback_grant"),
+        ("Copy the current maintenance authorization", "grant_unreadable"),
+        ("expired or was retired", "grant_retired"),
+        ("expired or was already used", "grant_expired_or_used"),
+        ("no longer matches this completed upgrade", "upgrade_not_recorded_as_completed"),
+        ("pre-upgrade snapshot changed", "snapshot_changed"),
+        ("still responding", "dashboard_still_responding"),
+        ("managed outside the desktop app", "dashboard_not_owned"),
+        ("still stopping", "owned_process_still_stopping"),
+        ("operation is unsupported", "operation_unsupported"),
+    )
+
+    def transition_refusal(self):
+        script = """
+const node = document.querySelector('#maintenance-details');
+const detail = node ? (node.textContent || '') : '';
+for (const [phrase, code] of arguments[0]) if (detail.includes(phrase)) return code;
+return detail ? 'other' : 'none';
+"""
+        try:
+            value = self.view.call("POST", self.view.session + "/execute/sync",
+                                   {"script": script, "args": [list(map(list, self.TRANSITION_REFUSALS))]})
+            codes = {code for _phrase, code in self.TRANSITION_REFUSALS} | {"other", "none"}
+            if isinstance(value, str) and value in codes:
+                return value
+        except (OSError, RuntimeError, KeyError):
+            pass
+        return "unavailable"
+
     def transition_progress(self, old_pids, expected_result=None):
         if expected_result is None:
             windows = app_windows(self.binary)
@@ -780,7 +814,9 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
         return state if state in {"visible_refusal", "incomplete", "completed"} else None
 
     def transition_diagnostic(self, old_pids):
-        result = {"page_state": self.transition_page_state(), "process_state_available": False,
+        page_state = self.transition_page_state()
+        result = {"page_state": page_state, "process_state_available": False,
+                  "refusal": self.transition_refusal() if page_state == "visible_refusal" else "none",
                   "installed_old_process": False, "installed_new_process": False, "retained_result_windows": 0}
         try:
             windows = app_windows(self.binary)

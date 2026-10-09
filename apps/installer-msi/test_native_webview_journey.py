@@ -190,7 +190,7 @@ def test_native_transition_diagnostics_never_replace_acceptance_checks(tmp_path,
         assert "private" not in json.dumps(journey.report)
         assert journey.report["checks"] == [] and "screenshot" not in actions
         diagnostic = journey.report["transition"]
-        assert set(diagnostic) == {"stage", "page_state", "process_state_available", "installed_old_process",
+        assert set(diagnostic) == {"stage", "page_state", "refusal", "process_state_available", "installed_old_process",
                                    "installed_new_process", "retained_result_windows"}
         expected = ("completion_receipt" if mode == "missing-receipt" else
                     "version_verification" if mode == "wrong-version" else
@@ -533,9 +533,47 @@ def test_transition_diagnostic_enumerates_only_bounded_exact_retained_fixture_pa
     monkeypatch.setattr(module, "app_windows", windows)
     diagnostic = journey.transition_diagnostic({7})
     assert len(called) <= 21
-    assert diagnostic == {"page_state": "unavailable", "process_state_available": True,
+    assert diagnostic == {"page_state": "unavailable", "process_state_available": True, "refusal": "none",
                           "installed_old_process": True, "installed_new_process": True, "retained_result_windows": 20}
     assert "private" not in json.dumps(diagnostic)
+
+
+def test_transition_refusal_names_only_a_fixed_reason_code(modules):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is needed for the actual browser-script contract check")
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    scripts = []
+
+    class View:
+        session = "/session/synthetic"
+
+        def call(self, _method, _path, payload):
+            scripts.append(payload)
+            return "private page text"
+
+    journey.view = View()
+    assert journey.transition_refusal() == "unavailable"
+    payload = scripts[0]
+    source = """
+const assert = require('node:assert/strict');
+const classify = new Function(SCRIPT);
+let detail = '';
+global.document = {querySelector(selector){assert.equal(selector, '#maintenance-details');
+  return {textContent: detail}}};
+const table = ARGS[0];
+detail = 'Error: This maintenance authorization expired or was already used. Review it again in Workspace recovery. private';
+assert.equal(classify(table), 'grant_expired_or_used');
+detail = 'Error: Lightwork is still responding. Installation has not started; retry after it closes.';
+assert.equal(classify(table), 'dashboard_still_responding');
+detail = 'Error: Use the rollback authorization from Workspace recovery.';
+assert.equal(classify(table), 'not_a_rollback_grant');
+detail = 'private unknown failure'; assert.equal(classify(table), 'other');
+detail = ''; assert.equal(classify(table), 'none');
+""".replace("SCRIPT", json.dumps(payload["script"])).replace("ARGS", json.dumps(payload["args"]))
+    result = subprocess.run([node, "-e", source], capture_output=True, text=True, check=False, timeout=10)
+    assert result.returncode == 0, result.stderr
 
 
 def test_startup_probe_restores_runtime_and_preserves_primary_failure(tmp_path, modules):
