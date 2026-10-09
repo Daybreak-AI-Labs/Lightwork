@@ -971,7 +971,8 @@ def test_first_owner_records_the_window_and_port_when_the_dashboard_is_never_rea
     assert deadlines == [120]
     assert journey.password not in str(error.value) and "private" not in str(error.value)
     expected = {"page": "bundled_splash", "splash_status": "still_starting", "trouble_visible": True,
-                "ready": True, "listener": "not_listening", "latency_ms": 3, "startup_process": process}
+                "ready": True, "listener": "not_listening", "latency_ms": 3, "startup_process": process,
+                "dashboard_stacks": "not_running"}
     assert journey.report["window_at_deadline"] == expected
     assert journey.report["checks"] == [] and "owner_setup" not in journey.report
     written = json.loads((tmp_path / "acceptance.json").read_text(encoding="utf-8"))
@@ -1112,3 +1113,127 @@ def test_first_launch_records_who_answered_the_dashboard_port_beforehand(tmp_pat
     assert journey.report["port_before_first_launch"] == "answered_ready"
     assert launched == [[str(tmp_path / "maverick-desktop.exe")],
                         [str(tmp_path / "maverick-recovery-desktop.exe"), "--maintenance-result"]]
+
+
+SPY_DUMP = """Process 4242: C:\\Users\\private-person\\AppData\\Local\\Lightwork\\maverick.exe dashboard --private-token abc
+Python v3.12.10 (C:\\Users\\private-person\\AppData\\Local\\Temp\\_MEI1234\\python312.dll)
+
+Thread 0x1A2C (idle): "MainThread"
+    select (selectors.py:314)
+    _run_once (asyncio\\base_events.py:1898)
+    _lifespan (C:\\Users\\private-person\\AppData\\Local\\Temp\\_MEI1234\\maverick_dashboard\\app.py:1350)
+Thread 7788 (active+gil): "desktop-control"
+    readline (C:\\private dir\\odd name.py:12)
+    _read_desktop_control (maverick_dashboard\\_server.py:20)
+Thread 0x9 (idle): "private name with \\"quote"
+    run (threading.py:982)
+"""
+
+
+def test_reduced_stacks_keep_only_thread_names_and_code_locations(modules):
+    module, _ = modules
+    assert module.reduced_stacks(SPY_DUMP) == [
+        "thread MainThread (idle)",
+        "  selectors.py:314:select",
+        "  base_events.py:1898:_run_once",
+        "  app.py:1350:_lifespan",
+        "thread desktop-control (active+gil)",
+        "  other:12:readline",
+        "  _server.py:20:_read_desktop_control",
+        "thread other (unknown)",
+        "  threading.py:982:run",
+    ]
+    assert "private" not in "\n".join(module.reduced_stacks(SPY_DUMP))
+    many = "".join(f'Thread {index} (idle): "worker-{index}"\n    run (threading.py:982)\n' for index in range(60))
+    bounded = module.reduced_stacks(many, threads=3, frames=1)
+    assert bounded == ["thread worker-0 (idle)", "  threading.py:982:run", "thread worker-1 (idle)",
+                       "  threading.py:982:run", "thread worker-2 (idle)", "  threading.py:982:run"]
+
+
+def test_dashboard_processes_are_only_this_apps_frozen_dashboard_tree(modules):
+    module, _ = modules
+    listing = [
+        {"ProcessId": 10, "ParentProcessId": 1, "Name": "maverick-desktop.exe"},
+        {"ProcessId": 20, "ParentProcessId": 10, "Name": "maverick.exe"},
+        {"ProcessId": 21, "ParentProcessId": 20, "Name": "maverick.exe"},
+        {"ProcessId": 22, "ParentProcessId": 10, "Name": "msedgewebview2.exe"},
+        {"ProcessId": 30, "ParentProcessId": 99, "Name": "maverick.exe"},
+        {"ProcessId": "40", "ParentProcessId": 10, "Name": "maverick.exe"},
+        "private",
+    ]
+    assert module.dashboard_processes(listing, 10) == [20, 21]
+    assert module.dashboard_processes({"ProcessId": 20, "ParentProcessId": 10, "Name": "MAVERICK.EXE"}, 10) == [20]
+    assert module.dashboard_processes(listing, 99) == [30]
+    assert module.dashboard_processes(listing, 5) == []
+
+
+@pytest.mark.parametrize("failure,expected", [
+    (None, "captured"), ("listing", "listing_unavailable"), ("empty", "no_dashboard_process"),
+    ("install", "tool_unavailable"), ("dump", "captured"),
+])
+def test_dashboard_stacks_capture_only_reduced_frames(tmp_path, modules, monkeypatch, failure, expected):
+    import types
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.directory = tmp_path
+    journey.app = types.SimpleNamespace(pid=10)
+    calls = []
+
+    def command(arguments, *, env=None, timeout=90):
+        calls.append(arguments)
+        name = Path(arguments[0]).name
+        if name.startswith("pwsh"):
+            if failure == "listing":
+                raise RuntimeError("synthetic listing failure")
+            rows = [] if failure == "empty" else [{"ProcessId": 20, "ParentProcessId": 10, "Name": "maverick.exe"}]
+            return json.dumps(rows)
+        if "pip" in arguments:
+            if failure == "install":
+                raise RuntimeError("synthetic install failure")
+            target = Path(arguments[arguments.index("--target") + 1])
+            (target / "bin").mkdir(parents=True)
+            (target / "bin/py-spy.exe").write_bytes(b"synthetic")
+            return ""
+        assert arguments[1:] == ["dump", "--pid", "20"]
+        if failure == "dump":
+            raise RuntimeError("synthetic dump failure")
+        return SPY_DUMP
+
+    monkeypatch.setattr(module, "command", command)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "C:/tools/pwsh.exe")
+    assert journey.dashboard_stacks() == expected
+    written = tmp_path / "dashboard-stacks.txt"
+    if expected != "captured":
+        assert not written.exists()
+        return
+    text = written.read_text(encoding="utf-8")
+    assert "private" not in text
+    if failure == "dump":
+        assert text == "process 0: unavailable\n"
+    else:
+        assert text.startswith("process 0\nthread MainThread (idle)\n  selectors.py:314:select\n")
+    install = next(arguments for arguments in calls if "pip" in arguments)
+    assert install[-1] == module.PY_SPY == "py-spy==0.4.0" and "--only-binary=:all:" in install
+
+
+def test_deadline_captures_stacks_only_for_a_running_dashboard(tmp_path, modules, monkeypatch):
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.directory = journey.state = tmp_path
+    journey.password = "synthetic-private-form-value"  # pragma: allowlist secret - noncredential redaction fixture
+    journey.report = {"checks": []}
+
+    class View:
+        session = "/session/synthetic"
+
+        def wait(self, _condition, **_kwargs):
+            raise RuntimeError("synthetic deadline")
+
+    journey.view = View()
+    monkeypatch.setattr(journey, "startup_diagnostic", lambda: {"page": "bundled_splash"})
+    monkeypatch.setattr(journey, "loopback_probe", lambda: {"listener": "not_listening", "latency_ms": 3})
+    monkeypatch.setattr(journey, "startup_process", lambda: {"process_state": "running"})
+    monkeypatch.setattr(journey, "dashboard_stacks", lambda: "captured")
+    with pytest.raises(RuntimeError, match="bounded window_at_deadline diagnostics"):
+        journey.first_owner()
+    assert journey.report["window_at_deadline"]["dashboard_stacks"] == "captured"

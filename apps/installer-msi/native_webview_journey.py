@@ -14,6 +14,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -71,6 +72,51 @@ STARTUP_ERROR_TYPES = (
 STARTUP_PROCESS_STATES = ("running", "exited", "not_started", "unavailable", "unreported", "bridge_unavailable")
 _STARTUP_FRAME = re.compile(r"(?:[A-Za-z0-9_.-]{1,64}\.py|other):[0-9]{1,7}:[A-Za-z_<>][A-Za-z0-9_<>]{0,63}")
 _STARTUP_EXIT = re.compile(r"none|0x[0-9a-f]{1,8}|-?[0-9]{1,10}")
+# Pinned profiler, installed only into the disposable journey directory when
+# the app's own dashboard runs but never serves, to see where startup waits.
+PY_SPY = "py-spy==0.4.0"
+_SPY_THREAD = re.compile(r'Thread (?:0x)?[0-9A-Fa-f]{1,16} \(([a-z+ ]{1,32})\): "([^"\r\n]{0,128})"')
+_SPY_FRAME = re.compile(r"\s+([A-Za-z_<>][A-Za-z0-9_<>.]{0,63}) \((.+):([0-9]{1,7})\)")
+
+
+def reduced_stacks(dump: str, *, threads: int = 40, frames: int = 30) -> list[str]:
+    """Thread names and ``file.py:line:function`` frames from a py-spy dump.
+
+    The process line, paths, arguments and anything else are dropped."""
+    kept, seen, depth = [], 0, 0
+    for line in dump.splitlines():
+        if line.strip().startswith("Thread "):
+            seen += 1
+            if seen > threads:
+                break
+            thread = _SPY_THREAD.fullmatch(line.strip())
+            name = thread.group(2) if thread and re.fullmatch(r"[A-Za-z0-9_ .:-]{1,64}", thread.group(2)) else "other"
+            kept.append(f"thread {name} ({thread.group(1) if thread else 'unknown'})")
+            depth = 0
+            continue
+        frame = _SPY_FRAME.fullmatch(line)
+        if frame and seen and depth < frames:
+            base = re.split(r"[\\/]", frame.group(2))[-1]
+            base = base if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}\.py", base) else "other"
+            kept.append(f"  {base}:{frame.group(3)}:{frame.group(1)}")
+            depth += 1
+    return kept
+
+
+def dashboard_processes(listing, root: int) -> list[int]:
+    """``maverick.exe`` processes started by ``root``, including the frozen bootloader's child."""
+    children: dict[int, list[dict]] = {}
+    for row in listing if isinstance(listing, list) else [listing]:
+        if (isinstance(row, dict) and type(row.get("ProcessId")) is int
+                and type(row.get("ParentProcessId")) is int):
+            children.setdefault(row["ParentProcessId"], []).append(row)
+    found, queue = [], [root]
+    while queue and len(found) < 8:
+        for row in sorted(children.get(queue.pop(0), []), key=lambda item: item["ProcessId"]):
+            if str(row.get("Name", "")).lower() == "maverick.exe" and row["ProcessId"] not in found:
+                found.append(row["ProcessId"])
+                queue.append(row["ProcessId"])
+    return found
 
 
 def verified_driver_version(directory: Path, runtime_version: str, output: str) -> str:
@@ -340,8 +386,10 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
         try:
             self.view.wait(lambda: self.view.call("GET", self.view.session + "/url").startswith("http://127.0.0.1:8765/"), timeout=120)
         except (OSError, RuntimeError, KeyError):
-            self.report["window_at_deadline"] = {**self.startup_diagnostic(), **self.loopback_probe(),
-                                                 "startup_process": self.startup_process()}
+            window = {**self.startup_diagnostic(), **self.loopback_probe(), "startup_process": self.startup_process()}
+            window["dashboard_stacks"] = (self.dashboard_stacks()
+                                          if window["startup_process"]["process_state"] == "running" else "not_running")
+            self.report["window_at_deadline"] = window
             self.record("first-launch-and-named-owner")
             raise RuntimeError("The native window never reached the local dashboard; bounded window_at_deadline diagnostics were retained.") from None
         self.view.navigate("http://127.0.0.1:8765/start")
@@ -463,6 +511,34 @@ return ask('startup_support_report').then((report) => ask('dashboard_diagnostics
                 or type(value["output_kb"]) is not int or not 0 <= value["output_kb"] <= 256):
             return fallback
         return value
+
+    def dashboard_stacks(self) -> str:
+        # Only this app's dashboard process tree, only after it ran without
+        # serving; every failure is a fixed reason, never the original error.
+        try:
+            listing = json.loads(command([shutil.which("pwsh") or "pwsh", "-NoLogo", "-NoProfile", "-NonInteractive",
+                "-Command", "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name"
+                " | ConvertTo-Json -Compress"], timeout=60))
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            return "listing_unavailable"
+        pids = dashboard_processes(listing, self.app.pid)
+        if not pids:
+            return "no_dashboard_process"
+        tools = self.directory / "py-spy"
+        try:
+            command([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
+                     "--only-binary=:all:", "--target", str(tools), PY_SPY], timeout=240)
+            spy = next(iter(sorted(tools.rglob("py-spy.exe"))))
+        except (OSError, RuntimeError, StopIteration, subprocess.SubprocessError):
+            return "tool_unavailable"
+        lines = []
+        for index, pid in enumerate(pids):
+            try:
+                lines += [f"process {index}", *reduced_stacks(command([str(spy), "dump", "--pid", str(pid)], timeout=60))]
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                lines.append(f"process {index}: unavailable")
+        (self.directory / "dashboard-stacks.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return "captured"
 
     def loopback_probe(self, port: int = LOOPBACK_PORT, timeout: float = 5.0):
         # The desktop shell's own identity handshake (apps/desktop-runtime
