@@ -337,6 +337,12 @@ def build_app(directory):
     return dashboard.app
 
 
+# Longer than any idle gap between a spec's API calls. With uvicorn's 5-second
+# default, the server could close a pooled keep-alive connection just as
+# Playwright's request context reused it, failing the call with ECONNRESET.
+KEEP_ALIVE_SECONDS = 75
+
+
 def block_outbound():
     original = socket.socket.connect
 
@@ -380,7 +386,7 @@ def main():
         app = build_app(directory)
         if args.show_vendor_setup:
             app.state.vendor_onboarding_demo = False
-        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning", timeout_keep_alive=KEEP_ALIVE_SECONDS)
 
 
 if __name__ == "__main__":

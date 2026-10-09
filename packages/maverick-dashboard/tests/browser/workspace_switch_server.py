@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import HTTPException, Request
-from server import block_outbound, environment, exit_cleanly_on_sigterm
+from server import KEEP_ALIVE_SECONDS, block_outbound, environment, exit_cleanly_on_sigterm
 
 
 def build(directory: Path, *, fixed: bool = False):
@@ -81,4 +81,5 @@ if __name__ == "__main__":
     parser.add_argument("--fixed", action="store_true")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="lightwork-workspace-acceptance-") as temporary:
-        uvicorn.run(build(Path(temporary), fixed=args.fixed), host="127.0.0.1", port=args.port, log_level="warning")
+        uvicorn.run(build(Path(temporary), fixed=args.fixed), host="127.0.0.1", port=args.port, log_level="warning",
+                    timeout_keep_alive=KEEP_ALIVE_SECONDS)

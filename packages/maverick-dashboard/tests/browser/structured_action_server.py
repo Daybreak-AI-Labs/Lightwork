@@ -97,7 +97,7 @@ def main():
                 return {"calls": copy.deepcopy(calls), "saved": flow.nodes["dispatch"].params}
 
         import uvicorn
-        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning", timeout_keep_alive=server.KEEP_ALIVE_SECONDS)
 
 
 if __name__ == "__main__":

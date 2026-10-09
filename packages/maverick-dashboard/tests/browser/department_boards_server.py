@@ -130,7 +130,7 @@ def main():
                     "foreign": foreign_goal, "removed": removed_goal, "running": running}
 
         import uvicorn
-        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="critical")
+        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="critical", timeout_keep_alive=server.KEEP_ALIVE_SECONDS)
 
 
 if __name__ == "__main__":
