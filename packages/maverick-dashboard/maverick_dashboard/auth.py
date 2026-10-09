@@ -401,10 +401,9 @@ def constant_time_equals(supplied: str, expected: str) -> bool:
     non-ASCII character, which turned a crafted header or JSON field into a
     500 instead of the refusal a wrong ASCII value gets. Compare the bytes;
     ``surrogatepass`` keeps a lone surrogate distinct from every real character."""
-    import hmac
+    from maverick.constant_time import text_equals
 
-    return hmac.compare_digest(supplied.encode("utf-8", "surrogatepass"),
-                               expected.encode("utf-8", "surrogatepass"))
+    return text_equals(supplied, expected)
 
 
 def _dashboard_token_authenticated(request) -> bool:
