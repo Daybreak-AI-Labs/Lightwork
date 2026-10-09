@@ -313,10 +313,15 @@ command = "lightwork-command-that-does-not-exist"
 def test_corrupt_config_is_visible_unavailable_not_empty(
     _isolate: Path, monkeypatch
 ):
-    _isolate.parent.mkdir(parents=True, exist_ok=True)
-    _isolate.write_text("[channels\n", encoding="utf-8")
+    # A running dashboard whose config is corrupted after start: its client
+    # binding (unbound here) was resolved at start, so sign-in is still
+    # recorded and the integration pages themselves report the failure.
+    from maverick import client as client_binding
     from maverick import config
 
+    client_binding.strict_client_id()
+    _isolate.parent.mkdir(parents=True, exist_ok=True)
+    _isolate.write_text("[channels\n", encoding="utf-8")
     config.reset_config_cache()
     token = "test-dashboard-admin-token"  # pragma: allowlist secret
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", token)

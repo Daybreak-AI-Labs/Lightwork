@@ -364,6 +364,29 @@ def _isolate_default_audit_writers():
 
 
 @pytest.fixture(autouse=True)
+def _reset_process_client_binding():
+    """Forget the process-wide client binding before and after every test.
+
+    ``client.client_id()`` resolves once per process, and the dashboard reads
+    ``tenants/<client>/world.db`` whenever a client is bound. A test that bound
+    a client without resetting left every later test on the same worker
+    reading another tenant's world: the load harness seeded goal 1 in its
+    pinned database and read 404 from the tenant one. Each test already gets
+    a fresh home, so a binding cached by an earlier test is always stale.
+    The core package's ``_reset_client_binding_cache`` does more; this name
+    differs so that fixture keeps its place after its own home isolation.
+    """
+    try:
+        from maverick import client
+    except Exception:  # pragma: no cover -- core not installed in this env
+        yield
+        return
+    client.reset_client_cache()
+    yield
+    client.reset_client_cache()
+
+
+@pytest.fixture(autouse=True)
 def _reset_cluster_halt_cache():
     """Forget the killswitch's cached cluster-wide halt after every test.
 
