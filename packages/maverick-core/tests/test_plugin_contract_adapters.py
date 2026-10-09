@@ -10,6 +10,7 @@ from maverick.sandbox import plugin_contracts as contracts
 
 
 def test_persona_invokes_real_renderer_and_rejects_wrong_result():
+    pytest.importorskip("jsonschema")  # the plugin-workbench extra validates contract schemas
     events = []
     assert contracts.execute("maverick.personas", lambda: events.append("render") or "Prompt", {}, lambda: events.append("dispatch")) == "Prompt"
     assert events == ["dispatch", "render"]
@@ -18,6 +19,7 @@ def test_persona_invokes_real_renderer_and_rejects_wrong_result():
 
 
 def test_skill_exercises_selection_and_native_rendering():
+    pytest.importorskip("jsonschema")  # the plugin-workbench extra validates contract schemas
     from maverick.skills import Skill
     skill = Skill("weather", ["weather forecast"], ["weather_read"], "Use the approved weather tool.", Path("synthetic.md"))
     result = contracts.execute("maverick.skills", skill, {"goal": "weather forecast"}, lambda: None)
@@ -29,6 +31,7 @@ def test_skill_exercises_selection_and_native_rendering():
 
 
 def test_channel_runs_start_send_stop_and_validates_reply():
+    pytest.importorskip("jsonschema")  # the plugin-workbench extra validates contract schemas
     from maverick_channels.base import Channel
     calls = []
     class Synthetic(Channel):
@@ -48,6 +51,7 @@ def test_channel_runs_start_send_stop_and_validates_reply():
 
 
 def test_schema_ref_and_invalid_sample_refuse_before_dispatch():
+    pytest.importorskip("jsonschema")  # the plugin-workbench extra validates contract schemas
     called = []
     def tool():
         return SimpleNamespace(input_schema={"type": "object", "$ref": "https://invalid.example/schema"}, fn=lambda _: called.append(True))
@@ -192,6 +196,7 @@ def test_portable_qualification_hash_deduplicates_windows_path_spellings(tmp_pat
 
 
 def test_node_malformed_schema_refuses_load_and_dispatch(monkeypatch):
+    pytest.importorskip("jsonschema")  # the plugin-workbench extra validates contract schemas
     from maverick import ts_plugin_host as host
     monkeypatch.setattr(host._PinnedCommand, "from_command", lambda command: command)
     monkeypatch.setattr(host, "_fetch_manifest", lambda command: ("maverick-plugin/2", [{"name": "broken", "inputSchema": "invalid"}]))

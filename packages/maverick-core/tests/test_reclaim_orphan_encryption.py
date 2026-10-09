@@ -128,6 +128,9 @@ def test_a_withheld_fact_value_cannot_be_written_back_over_the_original(monkeypa
     it over the real value and destroy it."""
     from maverick.world_model import _UNSEALED_WITHHELD, WorldModel
     db = tmp_path / "world.db"
+    # Write the legacy row with at-rest off explicitly: the production posture
+    # (MAVERICK_TEST_SECURE_DEFAULT=1) turns encryption on by default.
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     wm = WorldModel(db)
     wm.upsert_fact("policy:retention", "keep invoices for seven years")  # at-rest off: plaintext
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
