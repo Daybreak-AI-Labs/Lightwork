@@ -60,6 +60,9 @@ STARTUP_MARKERS = (
     ("control_closed", "owned desktop control channel closed"),
     ("traceback", "Traceback (most recent call last)"),
     ("exited", "Lightwork exited:"),
+    ("drain_requested", "Saving active work before closing Lightwork"),
+    ("drain_completed", "Lightwork completed graceful shutdown."),
+    ("drain_forced", "Graceful shutdown did not complete; stopping the owned process tree."),
 )
 STARTUP_ERROR_TYPES = (
     "AssertionError", "AttributeError", "ClientBindingError", "ConfigError", "ConnectionError", "DatabaseError",
@@ -314,6 +317,7 @@ class Journey:
                 raise RuntimeError("Recovery mode reported a refusal.")
         except (OSError, RuntimeError, KeyError):
             self.report["recovery_entry"] = self.recovery_diagnostic()
+            self.report["recovery_startup"] = self.startup_process()
             self.record(self.report["phase"])
             raise RuntimeError("Native recovery mode did not open; bounded recovery_entry diagnostics were retained.") from None
         self.report["recovery_entry"] = observed
@@ -342,7 +346,11 @@ const reasons = [
   ['Lightwork could not start:', 'launch_failed'],
   ['Open these controls from Lightwork Desktop.', 'native_bridge_unavailable'],
   ["Review and confirm this action in the app's recovery controls.", 'origin_refused'],
-  ['Startup state is unavailable.', 'state_unavailable']
+  ['Startup state is unavailable.', 'state_unavailable'],
+  ['The owned Lightwork process is still stopping.', 'previous_process_stopping'],
+  ['Dashboard shutdown timeout must be', 'shutdown_timeout_invalid'],
+  ['Port 8765', 'port_conflict'],
+  ['not allowed', 'command_refused']
 ];
 let reason = 'none';
 if (native && detail && detail !== 'No errors recorded.') {
@@ -358,7 +366,9 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
             if (not isinstance(value, dict) or set(value) != set(fallback)
                     or value["page"] not in {"bundled_recovery", "/workspace/recovery", "/auth/local-login", "/auth/login", "/start", "other"}
                     or value["reason"] not in {"none", "previous_workspace_running", "external_workspace", "startup_deadline",
-                                               "launch_failed", "native_bridge_unavailable", "origin_refused", "state_unavailable", "unclassified_refusal"}
+                                               "launch_failed", "native_bridge_unavailable", "origin_refused", "state_unavailable",
+                                               "previous_process_stopping", "shutdown_timeout_invalid", "port_conflict",
+                                               "command_refused", "unclassified_refusal"}
                     or type(value["controls_present"]) is not bool or type(value["ready"]) is not bool):
                 return fallback
             return value

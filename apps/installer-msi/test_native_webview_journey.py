@@ -283,14 +283,18 @@ def test_recovery_entry_keeps_controls_and_records_only_bounded_diagnostics(tmp_
             return False
 
     journey.view = View()
+    journey.startup_process = lambda: {"process_state": "unreported", "markers": ["drain_requested"]}
     if mode == "accepted":
         journey.recovery()
         assert actions[-2:] == ["#wrec-installation-confirm", ("#wrec-refresh", "disabled")]
+        assert "recovery_startup" not in journey.report
     else:
         with pytest.raises(RuntimeError, match="bounded recovery_entry diagnostics") as error:
             journey.recovery()
         assert "private" not in str(error.value)
         assert "#wrec-installation-confirm" not in actions
+        # The shell's own startup lines say whether the previous workspace drained.
+        assert journey.report["recovery_startup"] == {"process_state": "unreported", "markers": ["drain_requested"]}
     assert "private" not in json.dumps(journey.report)
     assert set(journey.report["recovery_entry"]) == {"page", "reason", "controls_present", "ready"}
     assert journey.report["checks"] == []
@@ -324,6 +328,14 @@ global.document = {readyState:'complete',get cookie(){throw Error('cookie access
 assert.deepEqual(inspect(),{page:'bundled_recovery',reason:'none',controls_present:false,ready:true});
 detail = 'The previous workspace is still responding. private excluded context';
 assert.equal(inspect().reason,'previous_workspace_running');
+detail = 'The owned Lightwork process is still stopping. Maintenance and recovery have not started.';
+assert.equal(inspect().reason,'previous_process_stopping');
+detail = 'Dashboard shutdown timeout must be finite and between 0 and 300 seconds.';
+assert.equal(inspect().reason,'shutdown_timeout_invalid');
+detail = 'Port 8765 belongs to an unrecognized service; no process was stopped.';
+assert.equal(inspect().reason,'port_conflict');
+detail = 'switch_recovery_mode not allowed. Permissions associated with this command: private';
+assert.equal(inspect().reason,'command_refused');
 detail = 'Error: private arbitrary error';
 assert.equal(inspect().reason,'unclassified_refusal');
 assert.equal(JSON.stringify(inspect()).includes('private'),false);
