@@ -409,8 +409,11 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
             self.view.wait(lambda: self.view.call("GET", self.view.session + "/url").startswith("http://127.0.0.1:8765/"), timeout=120)
         except (OSError, RuntimeError, KeyError):
             window = {**self.startup_diagnostic(), **self.loopback_probe(), "startup_process": self.startup_process()}
-            window["dashboard_stacks"] = (self.dashboard_stacks()
-                                          if window["startup_process"]["process_state"] == "running" else "not_running")
+            # Skip only when the shell reported no live dashboard; an unknown
+            # state may be the hung process the stacks exist to explain.
+            window["dashboard_stacks"] = ("not_running"
+                                          if window["startup_process"]["process_state"] in {"exited", "not_started"}
+                                          else self.dashboard_stacks())
             self.report["window_at_deadline"] = window
             self.record("first-launch-and-named-owner")
             raise RuntimeError("The native window never reached the local dashboard; bounded window_at_deadline diagnostics were retained.") from None
@@ -553,15 +556,21 @@ return ask('startup_support_report').then((report) => ask('dashboard_diagnostics
             command([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
                      "--only-binary=:all:", "--target", str(tools), PY_SPY], timeout=240)
             spy = next(iter(sorted(tools.rglob("py-spy.exe"))))
-        except (OSError, RuntimeError, StopIteration, subprocess.SubprocessError):
+        except (OSError, RuntimeError, ValueError, StopIteration, subprocess.SubprocessError):
             return "tool_unavailable"
-        lines = []
+        lines, dumped = [], False
         for index, pid in enumerate(pids):
             try:
                 lines += [f"process {index}", *reduced_stacks(command([str(spy), "dump", "--pid", str(pid)], timeout=60))]
-            except (OSError, RuntimeError, subprocess.SubprocessError):
+                dumped = True
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
                 lines.append(f"process {index}: unavailable")
-        (self.directory / "dashboard-stacks.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        if not dumped:
+            return "dump_failed"
+        try:
+            (self.directory / "dashboard-stacks.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError:
+            return "write_failed"
         return "captured"
 
     def loopback_probe(self, port: int = LOOPBACK_PORT, timeout: float = 5.0):

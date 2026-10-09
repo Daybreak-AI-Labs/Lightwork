@@ -1321,7 +1321,8 @@ def test_dashboard_processes_are_only_this_apps_frozen_dashboard_tree(modules):
 
 @pytest.mark.parametrize("failure,expected", [
     (None, "captured"), ("listing", "listing_unavailable"), ("empty", "no_dashboard_process"),
-    ("install", "tool_unavailable"), ("dump", "captured"),
+    ("install", "tool_unavailable"), ("install_decode", "tool_unavailable"), ("dump", "dump_failed"),
+    ("dump_decode", "dump_failed"), ("write", "write_failed"),
 ])
 def test_dashboard_stacks_capture_only_reduced_frames(tmp_path, modules, monkeypatch, failure, expected):
     import types
@@ -1339,9 +1340,12 @@ def test_dashboard_stacks_capture_only_reduced_frames(tmp_path, modules, monkeyp
                 raise RuntimeError("synthetic listing failure")
             rows = [] if failure == "empty" else [{"ProcessId": 20, "ParentProcessId": 10, "Name": "maverick.exe"}]
             return json.dumps(rows)
+        undecodable = UnicodeDecodeError("cp1252", b"\x81", 0, 1, "synthetic private bytes")
         if "pip" in arguments:
             if failure == "install":
                 raise RuntimeError("synthetic install failure")
+            if failure == "install_decode":
+                raise undecodable
             target = Path(arguments[arguments.index("--target") + 1])
             (target / "bin").mkdir(parents=True)
             (target / "bin/py-spy.exe").write_bytes(b"synthetic")
@@ -1349,26 +1353,32 @@ def test_dashboard_stacks_capture_only_reduced_frames(tmp_path, modules, monkeyp
         assert arguments[1:] == ["dump", "--pid", "20"]
         if failure == "dump":
             raise RuntimeError("synthetic dump failure")
+        if failure == "dump_decode":
+            raise undecodable
         return SPY_DUMP
 
     monkeypatch.setattr(module, "command", command)
     monkeypatch.setattr(module.shutil, "which", lambda _name: "C:/tools/pwsh.exe")
-    assert journey.dashboard_stacks() == expected
     written = tmp_path / "dashboard-stacks.txt"
+    if failure == "write":
+        written.mkdir()
+    assert journey.dashboard_stacks() == expected
     if expected != "captured":
-        assert not written.exists()
+        assert not written.is_file()
         return
     text = written.read_text(encoding="utf-8")
     assert "private" not in text
-    if failure == "dump":
-        assert text == "process 0: unavailable\n"
-    else:
-        assert text.startswith("process 0\nthread MainThread (idle)\n  selectors.py:314:select\n")
+    assert text.startswith("process 0\nthread MainThread (idle)\n  selectors.py:314:select\n")
     install = next(arguments for arguments in calls if "pip" in arguments)
     assert install[-1] == module.PY_SPY == "py-spy==0.4.0" and "--only-binary=:all:" in install
 
 
-def test_deadline_captures_stacks_only_for_a_running_dashboard(tmp_path, modules, monkeypatch):
+@pytest.mark.parametrize("state,expected", [
+    ("running", "captured"), ("unreported", "captured"), ("unavailable", "captured"),
+    ("bridge_unavailable", "captured"), ("unavailable_to_driver", "captured"),
+    ("exited", "not_running"), ("not_started", "not_running"),
+])
+def test_deadline_skips_stacks_only_when_the_shell_reports_no_live_dashboard(tmp_path, modules, monkeypatch, state, expected):
     module, _ = modules
     journey = module.Journey.__new__(module.Journey)
     journey.directory = journey.state = tmp_path
@@ -1384,8 +1394,8 @@ def test_deadline_captures_stacks_only_for_a_running_dashboard(tmp_path, modules
     journey.view = View()
     monkeypatch.setattr(journey, "startup_diagnostic", lambda: {"page": "bundled_splash"})
     monkeypatch.setattr(journey, "loopback_probe", lambda: {"listener": "not_listening", "latency_ms": 3})
-    monkeypatch.setattr(journey, "startup_process", lambda: {"process_state": "running"})
+    monkeypatch.setattr(journey, "startup_process", lambda: {"process_state": state})
     monkeypatch.setattr(journey, "dashboard_stacks", lambda: "captured")
     with pytest.raises(RuntimeError, match="bounded window_at_deadline diagnostics"):
         journey.first_owner()
-    assert journey.report["window_at_deadline"]["dashboard_stacks"] == "captured"
+    assert journey.report["window_at_deadline"]["dashboard_stacks"] == expected
