@@ -58,6 +58,15 @@ def test_export_envelope_shape_and_signature():
     assert ok, reason
 
 
+def test_verify_envelope_refuses_a_lone_surrogate_pubkey_without_raising():
+    # verify_envelope never raises: a peer's JSON can carry a lone surrogate.
+    env = _export()
+    peers = _peers_for(env)
+    env["pubkey"] = "\ud800"
+    ok, reason = verify_envelope(env, expected_schema=SCHEMA, peers=peers)
+    assert not ok and "pinned key" in reason
+
+
 def test_export_accepts_catalog_entries_and_strips_self_asserted_aggregates():
     entry = CatalogEntry(
         name="x", version="1.2.3", kind="skills", summary="s", source="gh:a:b",

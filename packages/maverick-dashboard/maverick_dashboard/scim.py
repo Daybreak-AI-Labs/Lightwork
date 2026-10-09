@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import hmac
 import json
 import math
 import threading
@@ -93,7 +92,7 @@ def _token_matches(token: str, secret: str) -> bool:
         want = secret[len("sha256:"):].strip().lower()
         got = hashlib.sha256(token.encode("utf-8")).hexdigest()
         return text_equals(got, want)
-    return hmac.compare_digest(token.encode("utf-8"), secret.encode("utf-8"))
+    return text_equals(token, secret)
 
 
 def _scim_error(status: int, detail: str, *, scim_type: str | None = None) -> JSONResponse:

@@ -72,6 +72,7 @@ from typing import Any
 from .a2a import build_agent_card, parse_remote_card
 from .audit.events import EventKind
 from .capability_boot import negotiate_boot
+from .constant_time import text_equals
 
 log = logging.getLogger(__name__)
 
@@ -459,11 +460,11 @@ def _match_token(peers: Iterable[Peer], token: str) -> Peer | None:
     Scans every peer without an early exit so timing doesn't reveal which
     entry matched; a peer configured with an empty token never authenticates.
     """
-    presented = (token or "").encode()
+    presented = token or ""
     matched: Peer | None = None
     matches = 0
     for p in peers:
-        if p.token and hmac.compare_digest(p.token.encode(), presented):
+        if p.token and text_equals(p.token, presented):
             matches += 1
             if matched is None:
                 matched = p

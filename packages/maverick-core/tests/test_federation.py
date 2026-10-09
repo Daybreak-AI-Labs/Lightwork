@@ -133,6 +133,11 @@ def test_duplicate_peer_tokens_are_ambiguous_and_cannot_authenticate():
     ) is None
 
 
+def test_a_lone_surrogate_token_matches_no_peer():
+    # A peer's JSON auth_token can carry a lone surrogate; it authenticates nobody.
+    assert federation._match_token([Peer("a", "a:1", "secret-a")], "\ud800") is None
+
+
 def test_disabled_by_default_and_env_opt_in(monkeypatch):
     monkeypatch.delenv("MAVERICK_FEDERATION_ENABLED", raising=False)
     assert federation.federation_enabled() is False

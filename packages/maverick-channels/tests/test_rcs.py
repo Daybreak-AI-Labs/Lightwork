@@ -148,6 +148,18 @@ def test_body_token_handshake_rejects_oversized_body():
     assert not ch.handler.await_count
 
 
+def test_body_token_handshake_refuses_a_lone_surrogate_token():
+    # JSON can carry a lone surrogate (\ud800); it is a wrong token, not a 500.
+    ch = _channel()
+    client = TestClient(ch._app)
+
+    r = client.post("/webhook/rcs", content=b'{"secret": "s", "clientToken": "\\ud800"}',
+                    headers={"content-type": "application/json"})
+
+    assert r.status_code == 403
+    assert not ch.handler.await_count
+
+
 def test_unlisted_msisdn_ignored(monkeypatch):
     ch = _channel()
     ch.send = AsyncMock()
