@@ -377,12 +377,24 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
 
     def authorization(self, *, rollback=False) -> str:
         self.recovery()
-        self.view.click("#wrec-installation-confirm")
+        # The page defaults to the protected desktop handoff, which shows no
+        # code. This journey carries the manual code fallback the page offers.
+        if self.view.property("#wrec-installation-handoff", "checked") is not False:
+            self.view.click("#wrec-installation-handoff")
+            if self.view.property("#wrec-installation-handoff", "checked") is not False:
+                raise RuntimeError("Workspace recovery did not offer its manual approval code.")
         if rollback:
             # Select the real option with WebDriver key input, not JS mutation.
+            # Choosing a point clears the confirmation, so confirm after it.
             self.view.keyboard("#wrec-installation-point", "\ue015")
+        self.view.click("#wrec-installation-confirm")
+        if rollback:
             self.view.click("#wrec-installation-rollback")
         else:
+            try:
+                self.view.wait(lambda: self.view.property("#wrec-installation-authorize", "disabled") is False, timeout=30)
+            except RuntimeError:
+                raise RuntimeError("Workspace recovery offered no upgrade authorization; the native release review is missing or expired.") from None
             self.view.click("#wrec-installation-authorize")
         return self.view.wait(lambda: self.view.property("#wrec-installation-code", "value"))
 
@@ -669,11 +681,18 @@ return {ready: document.readyState === 'complete', path, form_rejected: !!alert,
     def transition(self, *, rollback=False):
         name = "signed-native-rollback" if rollback else "signed-native-upgrade"
         self.record(name)
-        authorization = self.authorization(rollback=rollback)
-        self.menu("Install & updates")
         version = self.metadata["version"]
         pieces = version.split(".")
         newer = ".".join(pieces[:2] + [str(int(pieces[2]) + 1)])
+        if not rollback:
+            # Check for updates records the exact release review that Workspace
+            # recovery requires before it authorizes a protected upgrade.
+            self.menu("Install & updates")
+            self.assert_version(version)
+            self.view.click("#check-update")
+            self.view.wait(lambda: newer in self.view.text("#update-version"))
+        authorization = self.authorization(rollback=rollback)
+        self.menu("Install & updates")
         self.assert_version(newer if rollback else version)
         if not rollback:
             self.view.click("#check-update")

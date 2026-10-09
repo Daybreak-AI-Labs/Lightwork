@@ -199,6 +199,118 @@ def test_native_transition_diagnostics_never_replace_acceptance_checks(tmp_path,
         assert diagnostic["installed_old_process"] == (expected == "process_relaunch")
 
 
+def test_native_upgrade_checks_for_updates_before_recovery_authorizes_it(tmp_path, modules):
+    # Workspace recovery authorizes an upgrade only for the exact release the
+    # native app reviewed, so Check for updates must come first.
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.metadata = {"version": "0.1.7"}
+    journey.report = {"checks": []}
+    journey.directory = tmp_path
+    steps = []
+
+    class Stop(Exception):
+        pass
+
+    class View:
+        def click(self, selector):
+            steps.append(("click", selector))
+
+        def text(self, selector):
+            assert selector == "#update-version"
+            return "Version 0.1.8 is available."
+
+        def wait(self, condition, **_kwargs):
+            return condition()
+
+    def authorization(**kwargs):
+        steps.append(("authorization", kwargs))
+        raise Stop
+
+    journey.view = View()
+    journey.menu = lambda label: steps.append(("menu", label))
+    journey.assert_version = lambda expected: steps.append(("version", expected))
+    journey.authorization = authorization
+    with pytest.raises(Stop):
+        journey.transition()
+    assert steps == [("menu", "Install & updates"), ("version", "0.1.7"), ("click", "#check-update"),
+                     ("authorization", {"rollback": False})]
+    # A rollback needs no new release review.
+    steps.clear()
+    with pytest.raises(Stop):
+        journey.transition(rollback=True)
+    assert steps == [("authorization", {"rollback": True})]
+
+
+class _RecoveryPage:
+    """Synthetic Workspace recovery controls: the handoff box starts checked, as shipped."""
+
+    def __init__(self, *, review=True, handoff_toggles=True):
+        self.review, self.handoff_toggles = review, handoff_toggles
+        self.handoff, self.confirmed, self.code, self.clicks = True, False, "", []
+
+    def click(self, selector):
+        self.clicks.append(selector)
+        if selector == "#wrec-installation-handoff" and self.handoff_toggles:
+            self.handoff = not self.handoff
+        if selector == "#wrec-installation-confirm":
+            self.confirmed = not self.confirmed
+        if selector in {"#wrec-installation-authorize", "#wrec-installation-rollback"} and self.confirmed:
+            # The page issues a visible code only for the manual fallback.
+            self.code = "" if self.handoff else "a" * 32 + ":" + "b" * 64
+
+    def keyboard(self, selector, _text):
+        self.clicks.append(selector)
+        if selector == "#wrec-installation-point":
+            # As shipped: choosing another point clears the confirmation.
+            self.confirmed = False
+
+    def property(self, selector, name):
+        return {("#wrec-installation-handoff", "checked"): self.handoff,
+                ("#wrec-installation-authorize", "disabled"): not self.review,
+                ("#wrec-installation-code", "value"): self.code}[(selector, name)]
+
+    def wait(self, condition, **_kwargs):
+        value = condition()
+        if not value:
+            raise RuntimeError("The expected native UI transition did not complete before its deadline.")
+        return value
+
+
+def _authorizing_journey(module, page):
+    journey = module.Journey.__new__(module.Journey)
+    journey.recovery = lambda: None
+    journey.view = page
+    return journey
+
+
+@pytest.mark.parametrize("rollback", [False, True])
+def test_recovery_authorization_takes_the_manual_code_instead_of_the_default_handoff(modules, rollback):
+    module, _ = modules
+    page = _RecoveryPage()
+    assert _authorizing_journey(module, page).authorization(rollback=rollback) == "a" * 32 + ":" + "b" * 64
+    assert page.clicks == (["#wrec-installation-handoff", "#wrec-installation-point", "#wrec-installation-confirm",
+                            "#wrec-installation-rollback"] if rollback else
+                           ["#wrec-installation-handoff", "#wrec-installation-confirm", "#wrec-installation-authorize"])
+    assert page.handoff is False
+
+
+def test_recovery_without_a_manual_code_choice_stops_before_authorizing(modules):
+    module, _ = modules
+    page = _RecoveryPage(handoff_toggles=False)
+    with pytest.raises(RuntimeError, match="did not offer its manual approval code"):
+        _authorizing_journey(module, page).authorization()
+    assert page.clicks == ["#wrec-installation-handoff"]
+
+
+def test_recovery_without_a_native_review_names_the_missing_upgrade_authorization(modules):
+    module, _ = modules
+    page = _RecoveryPage(review=False)
+    with pytest.raises(RuntimeError, match="native release review is missing or expired"):
+        _authorizing_journey(module, page).authorization()
+    assert page.clicks == ["#wrec-installation-handoff", "#wrec-installation-confirm"]
+
+
 def test_relaunch_uses_fresh_driver_without_deleting_dead_browser_session(tmp_path, modules, monkeypatch):
     module, _ = modules
     journey = module.Journey.__new__(module.Journey)
