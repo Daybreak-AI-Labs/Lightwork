@@ -393,3 +393,159 @@ def fresh_human_decision(monkeypatch):
         )
 
     monkeypatch.setattr(consent, "require_consent", decide)
+
+
+# --- TEMPORARY CI diagnostic: wrong at-rest key in personal alerts -----------
+# Hosted CI (shard 4) intermittently fails every personal-alerts test in one
+# worker with "wrong at-rest key"; it has not reproduced locally. This records
+# who writes the recipients file, which key each load resolved, and the first
+# test after which process-wide crypto/tenant/client state is not the default,
+# and prints them on that failure. Remove once the cause is fixed.
+import collections  # noqa: E402
+import hashlib  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import traceback  # noqa: E402
+
+_ATREST_WRITES: collections.deque = collections.deque(maxlen=40)
+_ATREST_LOADS: collections.deque = collections.deque(maxlen=40)
+_ATREST_STATE_CHANGES: collections.deque = collections.deque(maxlen=40)
+_ATREST_THREAD_CHANGES: collections.deque = collections.deque(maxlen=60)
+_ATREST_LAST: dict = {}
+
+
+def _atrest_fp(key) -> str:
+    return hashlib.sha256(bytes(key)).hexdigest()[:8] if key else "-"
+
+
+def _atrest_frames(limit=8) -> str:
+    frames = [f for f in traceback.extract_stack()[:-2] if "site-packages" not in f.filename]
+    return " > ".join(f"{f.filename.rsplit('/', 1)[-1]}:{f.lineno}:{f.name}" for f in frames[-limit:])
+
+
+def _atrest_context() -> dict:
+    from maverick import client, crypto_at_rest, paths
+    try:
+        key_path = str(crypto_at_rest._key_path())
+    except Exception as exc:  # noqa: BLE001 - diagnostic only
+        key_path = f"<{type(exc).__name__}>"
+    return {
+        "force_external": crypto_at_rest._FORCE_EXTERNAL_FLEET_KEY.get(),
+        "force_deployment": crypto_at_rest._FORCE_DEPLOYMENT_KEY.get(),
+        "tenant_ctx": paths._TENANT.get(),
+        "key_path_override": str(crypto_at_rest._KEY_PATH) if crypto_at_rest._KEY_PATH else None,
+        "shared_key": _atrest_fp(crypto_at_rest._SHARED_KEY_BYTES),
+        "client_cached": repr(client._cached)[:40],
+        "client_strict": repr(client._strict_cached)[:40],
+        "key_path": key_path,
+        "home": os.environ.get("MAVERICK_HOME"),
+        "env_tenant": os.environ.get("MAVERICK_TENANT"),
+        "env_client": os.environ.get("MAVERICK_CLIENT_ID"),
+        "env_key_set": bool(os.environ.get("MAVERICK_ENCRYPTION_KEY")),
+    }
+
+
+def _atrest_install() -> None:
+    try:
+        from maverick import crypto_at_rest
+        from maverick import personal_notification_recipients as recipients
+    except Exception:  # noqa: BLE001 - core not installed in this env
+        return
+    load, write = crypto_at_rest._load_or_create_key, recipients.atomic_write_bytes
+
+    def traced_load():
+        key = load()
+        _ATREST_LOADS.append((time.time(), threading.current_thread().name,
+                              str(crypto_at_rest._key_path()), _atrest_fp(key)))
+        return key
+
+    def traced_write(path, data, **kwargs):
+        _ATREST_WRITES.append((time.time(), threading.current_thread().name, str(path),
+                               bytes(data[:8]), _atrest_context(), _atrest_frames()))
+        return write(path, data, **kwargs)
+
+    crypto_at_rest._load_or_create_key = traced_load
+    recipients.atomic_write_bytes = traced_write
+
+
+_atrest_install()
+
+
+@pytest.fixture(autouse=True)
+def _atrest_track_process_state(request):
+    yield
+    try:
+        state = _atrest_context()
+    except Exception:  # noqa: BLE001 - diagnostic only
+        return
+    state = {k: v for k, v in state.items() if k not in {"key_path", "home"}}
+    if state != _ATREST_LAST.get("state"):
+        _ATREST_STATE_CHANGES.append((request.node.nodeid, state))
+        _ATREST_LAST["state"] = state
+    names = {t.name for t in threading.enumerate()}
+    previous = _ATREST_LAST.get("threads", set())
+    if names != previous:
+        _ATREST_THREAD_CHANGES.append((request.node.nodeid, sorted(names - previous), sorted(previous - names)))
+        _ATREST_LAST["threads"] = names
+
+
+def _atrest_keys_report(home) -> list[str]:
+    from pathlib import Path
+    lines = []
+    root = Path(home) if home else None
+    if root is None or not root.exists():
+        return [f"home missing: {home}"]
+    keys = {}
+    for path in sorted(root.rglob("*.key")):
+        try:
+            keys[str(path)] = bytes.fromhex(path.read_text().strip())
+        except Exception as exc:  # noqa: BLE001 - diagnostic only
+            lines.append(f"key {path}: <{type(exc).__name__}>")
+    for path, key in keys.items():
+        lines.append(f"key {path} fp={_atrest_fp(key)}")
+    for blob_path in sorted(root.rglob("recipients.enc")):
+        blob = blob_path.read_bytes()
+        opened = []
+        try:
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+            body = blob[7:]
+            for path, key in keys.items():
+                try:
+                    AESGCM(key).decrypt(body[:12], body[12:], None)
+                    opened.append(path)
+                except Exception:  # noqa: BLE001, S112 - try every candidate key
+                    continue
+        except Exception as exc:  # noqa: BLE001 - diagnostic only
+            opened.append(f"<{type(exc).__name__}>")
+        lines.append(f"blob {blob_path} head={blob[:8]!r} size={len(blob)} "
+                     f"mtime={blob_path.stat().st_mtime:.3f} opens_with={opened}")
+    return lines
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    if report.when != "call" or not report.failed or "wrong at-rest key" not in str(report.longrepr):
+        return
+    lines = [f"now={time.time():.3f} main={_atrest_context()}"]
+    try:
+        lines += _atrest_keys_report(os.environ.get("MAVERICK_HOME"))
+    except Exception as exc:  # noqa: BLE001 - diagnostic only
+        lines.append(f"keys report failed: {type(exc).__name__}: {exc}")
+    lines.append("-- recipients writes (time, thread, path, head, context, stack):")
+    lines += [repr(row) for row in _ATREST_WRITES]
+    lines.append("-- last key loads (time, thread, key path, fp):")
+    lines += [repr(row) for row in list(_ATREST_LOADS)[-25:]]
+    lines.append("-- process state changes (after test):")
+    lines += [repr(row) for row in _ATREST_STATE_CHANGES]
+    lines.append("-- thread set changes (after test: added, removed):")
+    lines += [repr(row) for row in _ATREST_THREAD_CHANGES]
+    lines.append("-- live threads:")
+    frames = sys._current_frames()
+    for thread in threading.enumerate():
+        frame = frames.get(thread.ident)
+        stack = traceback.extract_stack(frame)[-6:] if frame else []
+        where = " > ".join(f"{f.filename.rsplit('/', 1)[-1]}:{f.lineno}:{f.name}" for f in stack)
+        lines.append(f"{thread.name} daemon={thread.daemon}: {where}")
+    report.sections.append(("at-rest diagnostics", "\n".join(lines)))
