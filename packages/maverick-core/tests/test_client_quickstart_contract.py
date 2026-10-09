@@ -340,7 +340,7 @@ def test_typescript_client_dependency_and_ci_security_gates():
         "'packaging==26.3'",
     ):
         assert workflow.count(packaging_tool) == 2
-    assert 'go-version: "1.26.6"' in workflow
+    assert 'go-version: "1.26.9"' in workflow
     assert "go-version-file:" not in workflow
     assert "go run -mod=readonly ." in workflow
 
