@@ -43,6 +43,34 @@ from native_webview_fixture import (
 
 # The desktop shell's fixed loopback dashboard port (apps/desktop-runtime probe_address).
 LOOPBACK_PORT = 8765
+# Fixed lines the desktop shell (apps/desktop-runtime) and the dashboard server
+# write while the owned dashboard starts; only these names leave the page.
+STARTUP_MARKERS = (
+    ("startup_begun", "Starting Lightwork on this computer."),
+    ("spawn_failed", "Lightwork could not start:"),
+    ("no_output", "No startup output was recorded."),
+    ("server_process", "Started server process"),
+    ("waiting_for_startup", "Waiting for application startup."),
+    ("startup_failed", "Application startup failed."),
+    ("startup_complete", "Application startup complete."),
+    ("listening", "Uvicorn running on"),
+    ("bind_failed", "error while attempting to bind"),
+    ("control_unavailable", "owned desktop control pipe is unavailable"),
+    ("control_closed", "owned desktop control channel closed"),
+    ("traceback", "Traceback (most recent call last)"),
+    ("exited", "Lightwork exited:"),
+)
+STARTUP_ERROR_TYPES = (
+    "AssertionError", "AttributeError", "ClientBindingError", "ConfigError", "ConnectionError", "DatabaseError",
+    "EncryptionUnavailable", "FileExistsError", "FileNotFoundError", "ImportError", "IntegrityError",
+    "InvalidTenantError", "IsADirectoryError", "KeyError", "MemoryError", "ModuleNotFoundError", "NameError",
+    "NotADirectoryError", "OSError", "OperationalError", "PermissionError", "RecursionError", "RuntimeError",
+    "SystemExit", "TimeoutError", "TypeError", "UnicodeDecodeError", "UnicodeEncodeError", "ValidationError",
+    "ValueError",
+)
+STARTUP_PROCESS_STATES = ("running", "exited", "not_started", "unavailable", "unreported", "bridge_unavailable")
+_STARTUP_FRAME = re.compile(r"(?:[A-Za-z0-9_.-]{1,64}\.py|other):[0-9]{1,7}:[A-Za-z_<>][A-Za-z0-9_<>]{0,63}")
+_STARTUP_EXIT = re.compile(r"none|0x[0-9a-f]{1,8}|-?[0-9]{1,10}")
 
 
 def verified_driver_version(directory: Path, runtime_version: str, output: str) -> str:
@@ -187,6 +215,9 @@ class Journey:
         self.attach()
 
     def start(self, binary: Path | None = None, *arguments: str):
+        if "port_before_first_launch" not in self.report:
+            # The shell spawns no dashboard if one already answers at launch.
+            self.report["port_before_first_launch"] = self.loopback_probe()["listener"]
         self.active_binary = binary or self.binary
         self.app = subprocess.Popen([str(self.active_binary), *arguments], env=self.env, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -309,7 +340,8 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
         try:
             self.view.wait(lambda: self.view.call("GET", self.view.session + "/url").startswith("http://127.0.0.1:8765/"), timeout=120)
         except (OSError, RuntimeError, KeyError):
-            self.report["window_at_deadline"] = {**self.startup_diagnostic(), **self.loopback_probe()}
+            self.report["window_at_deadline"] = {**self.startup_diagnostic(), **self.loopback_probe(),
+                                                 "startup_process": self.startup_process()}
             self.record("first-launch-and-named-owner")
             raise RuntimeError("The native window never reached the local dashboard; bounded window_at_deadline diagnostics were retained.") from None
         self.view.navigate("http://127.0.0.1:8765/start")
@@ -371,6 +403,66 @@ return {page, splash_status: node ? (states.find(([prefix]) => text.startsWith(p
         except (OSError, RuntimeError, KeyError):
             result = fallback
         return result
+
+    def startup_process(self):
+        # The shell's own startup report and startup messages, classified in the
+        # page: only fixed names, an allowlisted exception type, the exit code
+        # and traceback frames as file.py:line:function leave it, never text,
+        # paths or the report's correlation id.
+        script = "const markers = " + json.dumps(STARTUP_MARKERS) + ", known = " + json.dumps(STARTUP_ERROR_TYPES) + ";" + """
+const core = window.__TAURI__ && window.__TAURI__.core;
+const empty = (state) => ({process_state: state, packaged_runtime: 'unknown', exit_code: 'none', markers: [],
+  error_type: 'none', frames: [], output_kb: 0});
+if (!core || typeof core.invoke !== 'function') return empty('bridge_unavailable');
+const ask = (name) => core.invoke(name).then((value) => value, () => null);
+// The report first: reading the messages reaps an exited process.
+return ask('startup_support_report').then((report) => ask('dashboard_diagnostics').then((log) => {
+  const states = ['running', 'exited', 'not_started', 'unavailable'];
+  const available = report ? report.packaged_runtime_available : undefined;
+  const text = typeof log === 'string' ? log.slice(-262144) : '';
+  const exit = /Lightwork exited: exit (?:code|status): (0x[0-9a-fA-F]{1,8}|-?[0-9]{1,10})/.exec(text);
+  let error_type = 'none', frames = [], current = null;
+  for (const line of text.split(/\\r?\\n/).map((value) => value.trim())) {
+    if (line.startsWith('Traceback (most recent call last)')) { current = []; continue; }
+    const frame = /^File "([^"]*)", line ([0-9]{1,7}), in ([A-Za-z_<>][A-Za-z0-9_<>]{0,63})$/.exec(line);
+    if (frame && current) {
+      const name = frame[1].split(/[\\\\/]/).pop();
+      current.push((/^[A-Za-z0-9_.-]{1,64}\\.py$/.test(name) ? name : 'other') + ':' + frame[2] + ':' + frame[3]);
+      continue;
+    }
+    const error = /^(?:[A-Za-z_][A-Za-z0-9_]*\\.)*([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Unavailable|Exit))(?::|$)/.exec(line);
+    if (error) {
+      error_type = known.includes(error[1]) ? error[1] : 'other';
+      if (current) { frames = current.slice(-8); current = null; }
+    }
+  }
+  return {process_state: report && states.includes(report.process_state) ? report.process_state : 'unreported',
+    packaged_runtime: available === true ? 'present' : available === false ? 'missing'
+      : available === null ? 'not_pinned' : 'unknown',
+    exit_code: exit ? exit[1].toLowerCase() : 'none',
+    markers: markers.filter(([, needle]) => text.includes(needle)).map(([name]) => name),
+    error_type, frames, output_kb: Math.min(256, Math.ceil(text.length / 1024))};
+}));
+"""
+        fallback = {"process_state": "unavailable_to_driver", "packaged_runtime": "unknown", "exit_code": "none",
+                    "markers": [], "error_type": "none", "frames": [], "output_kb": 0}
+        names = [name for name, _needle in STARTUP_MARKERS]
+        try:
+            value = self.view.call("POST", self.view.session + "/execute/sync", {"script": script, "args": []})
+        except (OSError, RuntimeError, KeyError):
+            return fallback
+        if (not isinstance(value, dict) or set(value) != set(fallback)
+                or value["process_state"] not in STARTUP_PROCESS_STATES
+                or value["packaged_runtime"] not in {"present", "missing", "not_pinned", "unknown"}
+                or not isinstance(value["exit_code"], str) or not _STARTUP_EXIT.fullmatch(value["exit_code"])
+                or not isinstance(value["markers"], list) or len(set(map(str, value["markers"]))) != len(value["markers"])
+                or not all(isinstance(item, str) and item in names for item in value["markers"])
+                or value["error_type"] not in {"none", "other", *STARTUP_ERROR_TYPES}
+                or not isinstance(value["frames"], list) or len(value["frames"]) > 8
+                or not all(isinstance(item, str) and _STARTUP_FRAME.fullmatch(item) for item in value["frames"])
+                or type(value["output_kb"]) is not int or not 0 <= value["output_kb"] <= 256):
+            return fallback
+        return value
 
     def loopback_probe(self, port: int = LOOPBACK_PORT, timeout: float = 5.0):
         # The desktop shell's own identity handshake (apps/desktop-runtime

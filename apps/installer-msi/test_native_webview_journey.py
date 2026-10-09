@@ -963,13 +963,152 @@ def test_first_owner_records_the_window_and_port_when_the_dashboard_is_never_rea
 
     journey.view = View()
     monkeypatch.setattr(journey, "loopback_probe", lambda: {"listener": "not_listening", "latency_ms": 3})
+    process = {"process_state": "exited", "packaged_runtime": "present", "exit_code": "3", "markers": ["traceback"],
+               "error_type": "RuntimeError", "frames": ["_server.py:57:serve"], "output_kb": 2}
+    monkeypatch.setattr(journey, "startup_process", lambda: process)
     with pytest.raises(RuntimeError, match="bounded window_at_deadline diagnostics") as error:
         journey.first_owner()
     assert deadlines == [120]
     assert journey.password not in str(error.value) and "private" not in str(error.value)
     expected = {"page": "bundled_splash", "splash_status": "still_starting", "trouble_visible": True,
-                "ready": True, "listener": "not_listening", "latency_ms": 3}
+                "ready": True, "listener": "not_listening", "latency_ms": 3, "startup_process": process}
     assert journey.report["window_at_deadline"] == expected
     assert journey.report["checks"] == [] and "owner_setup" not in journey.report
     written = json.loads((tmp_path / "acceptance.json").read_text(encoding="utf-8"))
     assert written["window_at_deadline"] == expected and written["phase"] == "first-launch-and-named-owner"
+
+
+def test_startup_process_reads_the_app_startup_state_with_fixed_vocabulary(modules):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is needed for the actual browser-script contract check")
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    scripts = []
+
+    class View:
+        session = "/session/synthetic"
+
+        def call(self, _method, path, payload):
+            assert path.endswith("/execute/sync") and payload["args"] == []
+            scripts.append(payload["script"])
+            return {"private": "unexpected driver payload"}
+
+    journey.view = View()
+    assert journey.startup_process() == {
+        "process_state": "unavailable_to_driver", "packaged_runtime": "unknown", "exit_code": "none",
+        "markers": [], "error_type": "none", "frames": [], "output_kb": 0}
+    source = """
+const assert = require('node:assert/strict');
+const inspect = new Function(SCRIPT);
+let report = null, log = '', calls = [];
+global.window = {__TAURI__: {core: {invoke(name) {
+  calls.push(name);
+  if (name === 'startup_support_report') return report instanceof Error ? Promise.reject(report) : Promise.resolve(report);
+  if (name === 'dashboard_diagnostics') return log instanceof Error ? Promise.reject(log) : Promise.resolve(log);
+  throw Error('unexpected command ' + name);
+}}}};
+(async () => {
+  report = {schema: 'lightwork.startup-support.v1', process_state: 'exited', packaged_runtime_available: true,
+    correlation_id: 'private-correlation'};
+  log = [
+    'Starting Lightwork on this computer.',
+    'INFO:     Started server process [4242]',
+    'INFO:     Waiting for application startup.',
+    'Traceback (most recent call last):',
+    '  File "C:\\\\Users\\\\private-person\\\\AppData\\\\Local\\\\Lightwork\\\\_internal\\\\maverick_dashboard\\\\_server.py", line 57, in serve',
+    '  File "C:\\\\private\\\\weird name.py", line 9, in <module>',
+    'RuntimeError: owned desktop control pipe is unavailable at C:\\\\Users\\\\private-person',
+    'Lightwork exited: exit code: 0xC0000005',
+  ].join('\\r\\n');
+  let observed = await inspect();
+  assert.deepEqual(calls, ['startup_support_report', 'dashboard_diagnostics']);
+  assert.deepEqual(observed, {process_state: 'exited', packaged_runtime: 'present', exit_code: '0xc0000005',
+    markers: ['startup_begun', 'server_process', 'waiting_for_startup', 'control_unavailable', 'traceback', 'exited'],
+    error_type: 'RuntimeError', frames: ['_server.py:57:serve', 'other:9:<module>'], output_kb: 1});
+  assert.equal(JSON.stringify(observed).includes('private'), false);
+  report = {process_state: 'running', packaged_runtime_available: null};
+  log = 'Starting Lightwork on this computer.\\nINFO:     Application startup complete.\\nINFO:     Uvicorn running on http://127.0.0.1:8765';
+  observed = await inspect();
+  assert.equal(observed.process_state, 'running'); assert.equal(observed.packaged_runtime, 'not_pinned');
+  assert.deepEqual(observed.markers, ['startup_begun', 'startup_complete', 'listening']);
+  assert.equal(observed.exit_code, 'none'); assert.equal(observed.error_type, 'none'); assert.deepEqual(observed.frames, []);
+  report = {process_state: 'private-state', packaged_runtime_available: false};
+  log = 'ValueError: private\\nmaverick.crypto_at_rest.EncryptionUnavailable: private\\nPrivateCustomError: private\\nLightwork exited: exit code: 3';
+  observed = await inspect();
+  assert.equal(observed.process_state, 'unreported'); assert.equal(observed.packaged_runtime, 'missing');
+  assert.equal(observed.error_type, 'other'); assert.equal(observed.exit_code, '3');
+  log = 'maverick.crypto_at_rest.EncryptionUnavailable: private detail';
+  assert.equal((await inspect()).error_type, 'EncryptionUnavailable');
+  report = new Error('private refusal'); log = new Error('private refusal');
+  assert.deepEqual(await inspect(), {process_state: 'unreported', packaged_runtime: 'unknown', exit_code: 'none',
+    markers: [], error_type: 'none', frames: [], output_kb: 0});
+  report = {process_state: 'not_started', packaged_runtime_available: true};
+  log = 'No startup output was recorded. Lightwork may already be running independently.';
+  observed = await inspect();
+  assert.equal(observed.process_state, 'not_started'); assert.deepEqual(observed.markers, ['no_output']);
+  delete global.window.__TAURI__;
+  assert.deepEqual(await inspect(), {process_state: 'bridge_unavailable', packaged_runtime: 'unknown', exit_code: 'none',
+    markers: [], error_type: 'none', frames: [], output_kb: 0});
+})().catch((error) => { console.error(error); process.exit(1); });
+""".replace("SCRIPT", json.dumps(scripts[0]))
+    result = subprocess.run([node, "-e", source], capture_output=True, text=True, check=False, timeout=10)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("value", [
+    {"process_state": "running", "packaged_runtime": "present", "exit_code": "none", "markers": ["startup_begun"],
+     "error_type": "none", "frames": [], "output_kb": 1},
+    {"process_state": "exited", "packaged_runtime": "missing", "exit_code": "-1", "markers": ["traceback", "exited"],
+     "error_type": "ModuleNotFoundError", "frames": ["app.py:1350:_lifespan", "other:9:<module>"], "output_kb": 256},
+])
+def test_startup_process_keeps_a_well_formed_classification(modules, value):
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+
+    class View:
+        session = "/session/synthetic"
+
+        def call(self, _method, _path, _payload):
+            return value
+
+    journey.view = View()
+    assert journey.startup_process() == value
+
+
+@pytest.mark.parametrize("change", [
+    {"process_state": "private"}, {"packaged_runtime": True}, {"exit_code": "C:\\private"}, {"exit_code": 3},
+    {"markers": ["private"]}, {"markers": ["traceback", "traceback"]}, {"markers": "traceback"},
+    {"error_type": "PrivateError"}, {"frames": ["C:\\private\\app.py:1:f"]}, {"frames": ["app.py:1:f"] * 9},
+    {"output_kb": True}, {"output_kb": 257}, {"extra": "private"},
+])
+def test_startup_process_refuses_anything_outside_its_vocabulary(modules, change):
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    value = {"process_state": "running", "packaged_runtime": "present", "exit_code": "none", "markers": [],
+             "error_type": "none", "frames": [], "output_kb": 0, **change}
+
+    class View:
+        session = "/session/synthetic"
+
+        def call(self, _method, _path, _payload):
+            return value
+
+    journey.view = View()
+    assert journey.startup_process()["process_state"] == "unavailable_to_driver"
+
+
+def test_first_launch_records_who_answered_the_dashboard_port_beforehand(tmp_path, modules, monkeypatch):
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.binary, journey.env, journey.report = tmp_path / "maverick-desktop.exe", {}, {"checks": []}
+    probes, launched = [], []
+    monkeypatch.setattr(journey, "loopback_probe", lambda: probes.append(1) or {"listener": "answered_ready", "latency_ms": 4})
+    monkeypatch.setattr(journey, "attach", lambda: None)
+    monkeypatch.setattr(module.subprocess, "Popen", lambda arguments, **_kwargs: launched.append(arguments) or object())
+    journey.start()
+    journey.start(tmp_path / "maverick-recovery-desktop.exe", "--maintenance-result")
+    assert probes == [1]
+    assert journey.report["port_before_first_launch"] == "answered_ready"
+    assert launched == [[str(tmp_path / "maverick-desktop.exe")],
+                        [str(tmp_path / "maverick-recovery-desktop.exe"), "--maintenance-result"]]
