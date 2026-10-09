@@ -31,10 +31,10 @@ concurrency:
 jobs:
   customer-browser-journeys:
     runs-on: ubuntu-24.04
-    # The default journeys alone are allowed 30 minutes by playwright.config.js
+    # The default journeys alone are allowed 45 minutes by playwright.config.js
     # (globalTimeout); the own-server journeys and the setup journeys run after
     # them in this job, so the job bound must sit above that, not below it.
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       PIP_CONSTRAINT: ${{ github.workspace }}/requirements/ci.txt
     steps:
