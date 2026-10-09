@@ -13,6 +13,10 @@ pub const DASHBOARD_URL: &str = "http://127.0.0.1:8765/";
 const MAX_LOG_BYTES: usize = 32 * 1024;
 const OWNED_STOP_DEADLINE: Duration = Duration::from_secs(5);
 const DESKTOP_DRAIN: &[u8] = b"LIGHTWORK_DESKTOP_DRAIN_V1\n";
+/// Windows reports a refused loopback connection only after about two seconds
+/// (2.1 to 2.2 s on hosted runners). A shorter connect budget read a free port
+/// as `Unavailable`, so the shell refused to start its own dashboard.
+const READINESS_CONNECT_TIMEOUT: Duration = Duration::from_millis(3000);
 
 type Logs = Arc<Mutex<String>>;
 
@@ -78,7 +82,7 @@ fn readiness_headers(headers: &[u8]) -> Readiness {
 
 fn probe_address(address: SocketAddr) -> Readiness {
     let started = Instant::now();
-    let mut stream = match TcpStream::connect_timeout(&address, Duration::from_millis(400)) {
+    let mut stream = match TcpStream::connect_timeout(&address, READINESS_CONNECT_TIMEOUT) {
         Ok(stream) => stream,
         Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
             return Readiness::NotRunning
@@ -576,6 +580,19 @@ mod tests {
             Readiness::SetupRequired
         );
         assert_eq!(readiness_headers(b"HTTP/1.1 200 OK\r\nx-lightwork-service: dashboard-v1\r\nX-Lightwork-Service: dashboard-v1"), Readiness::Conflict);
+    }
+
+    #[test]
+    fn a_free_port_reads_as_not_running_even_where_refusal_is_slow() {
+        use std::net::TcpListener;
+        // Hosted Windows runners took 2.1 to 2.2 s to refuse a free loopback
+        // port; anything shorter made the shell refuse to start its dashboard.
+        assert!(READINESS_CONNECT_TIMEOUT >= Duration::from_millis(3000));
+        let address = TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        assert_eq!(probe_address(address), Readiness::NotRunning);
     }
 
     #[test]
