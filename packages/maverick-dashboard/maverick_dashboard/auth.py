@@ -1048,7 +1048,8 @@ def _audit_break_glass(connection) -> None:
     no scopes, so its use is audited. One row per process per hour keeps the
     record useful (a script using the token would otherwise write a row per
     call); the row names the path and client of the first use in the window.
-    An audit refusal propagates: a request that cannot be recorded fails.
+    An audit refusal propagates, and a write that was not made (``audit_event``
+    returns False) is refused too: a request that cannot be recorded fails.
     """
     import time as _time
 
@@ -1060,8 +1061,12 @@ def _audit_break_glass(connection) -> None:
 
     client = connection.client.host if getattr(connection, "client", None) else ""
     path = str(getattr(getattr(connection, "url", None), "path", "") or "")
-    audit_event(EventKind.BREAK_GLASS_TOKEN_USED, agent="static-dashboard-operator",
-                path=path, client=client or "")
+    if not audit_event(EventKind.BREAK_GLASS_TOKEN_USED, agent="static-dashboard-operator",
+                       path=path, client=client or ""):
+        raise HTTPException(
+            status_code=503,
+            detail="The activity record is unavailable, so the dashboard token cannot be used right now.",
+        )
     # Start the window only once a row exists: a refused audit leaves it open so
     # the next request is refused too instead of being admitted unrecorded.
     _break_glass_last_audit[0] = now

@@ -762,6 +762,34 @@ def test_break_glass_requests_keep_failing_while_their_audit_is_refused(monkeypa
     assert len(rows) == 1  # written once, then rate-limited for the hour
 
 
+def test_break_glass_requests_keep_failing_while_their_audit_is_not_written(monkeypatch):
+    """An unwritable audit sink makes ``audit_event`` return False instead of
+    raising. No row exists, so the request fails and the window stays shut."""
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "static-break-glass-token-for-tests")  # pragma: allowlist secret
+    import maverick.audit as audit_pkg
+    attempts = []
+    written = {"ok": False}
+
+    def audit_event(kind, **payload):
+        if getattr(kind, "value", kind) == "break_glass_token_used":
+            attempts.append(written["ok"])
+        return written["ok"]
+
+    monkeypatch.setattr(audit_pkg, "audit_event", audit_event)
+    from maverick_dashboard.app import app
+    c = TestClient(app, headers=ORIGIN, raise_server_exceptions=False)
+    tok = {"Authorization": "Bearer static-break-glass-token-for-tests"}
+
+    codes = [c.get("/api/v1/account/me", headers=tok).status_code for _ in range(3)]
+    assert codes == [503, 503, 503], codes
+    assert attempts == [False, False, False]  # every request tried to record itself
+
+    written["ok"] = True
+    assert c.get("/api/v1/account/me", headers=tok).status_code == 200
+    assert c.get("/api/v1/account/me", headers=tok).status_code == 200
+    assert attempts == [False, False, False, True]  # then rate-limited for the hour
+
+
 # ---- a key bound to a workspace fails closed ------------------------------------
 
 def _workspace_key(monkeypatch, secret_scopes=("tasks:read",)):
