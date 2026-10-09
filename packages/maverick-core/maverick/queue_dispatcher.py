@@ -39,6 +39,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from .constant_time import text_equals
+
 log = logging.getLogger(__name__)
 
 JOB_NAME = "maverick.run_goal"
@@ -578,7 +580,7 @@ def _verify_envelope(raw: Any) -> dict[str, Any]:
     expected = _envelope_sig(payload, key)
     if not (
         isinstance(signature, str)
-        and hmac.compare_digest(signature, expected)
+        and text_equals(signature, expected)
     ):
         raise QueueSecurityError("queue envelope signature is missing or invalid")
     _validate_envelope(payload)

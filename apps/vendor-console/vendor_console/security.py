@@ -39,7 +39,8 @@ def verify_password(password: str, stored: str) -> bool:
             return False
         dk = hashlib.pbkdf2_hmac(
             "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iters_s))
-        return hmac.compare_digest(dk.hex(), hash_hex)
+        return hmac.compare_digest(dk.hex().encode("utf-8", "surrogatepass"),
+                                   hash_hex.encode("utf-8", "surrogatepass"))
     except (ValueError, AttributeError):
         return False
 
@@ -83,7 +84,8 @@ def totp_match_step(secret_b32: str, code: str, *, at: float | None = None,
     for drift in range(-window, window + 1):
         step = base + drift
         if step > after_step and hmac.compare_digest(
-                _totp_at(secret_b32, now + drift * 30), code):
+                _totp_at(secret_b32, now + drift * 30).encode("utf-8", "surrogatepass"),
+                code.encode("utf-8", "surrogatepass")):
             return step
     return None
 

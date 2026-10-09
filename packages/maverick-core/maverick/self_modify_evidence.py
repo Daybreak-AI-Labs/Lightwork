@@ -28,6 +28,8 @@ import secrets
 import string
 from dataclasses import dataclass
 
+from .constant_time import text_equals
+
 TEST_EVIDENCE_PROTOCOL = "maverick.test-evidence.v1"
 _MAX_AUTHORITY_CHARS = 256
 _MAX_COMMAND_CHARS = 1_000_000
@@ -316,7 +318,7 @@ def validate_test_evidence(
     if any(
         type(observed) is not str
         or type(expected) is not str
-        or not hmac.compare_digest(observed, expected)
+        or not text_equals(observed, expected)
         for observed, expected in bindings
     ):
         return None

@@ -49,6 +49,8 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qs
 
+from .constant_time import text_equals
+
 log = logging.getLogger(__name__)
 
 SIGNATURE_VERSION = "v0"
@@ -117,7 +119,7 @@ def verify_slack_signature(
     expected = SIGNATURE_VERSION + "=" + hmac.new(
         signing_secret.encode("utf-8"), base, hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(expected, str(signature).strip())
+    return text_equals(expected, str(signature).strip())
 
 
 def parse_form(body: bytes) -> dict[str, str]:

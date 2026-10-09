@@ -165,6 +165,18 @@ def test_challenge_failures(prop):
     assert prf.check_challenge("garbage", "3") is False
 
 
+def test_non_ascii_challenge_signature_is_a_failed_challenge(prop):
+    # The token comes back from an anonymous browser; accented text where the
+    # signature belongs is a wrong answer, not a server error.
+    challenge = prf.new_challenge(now=_NOW)
+    expires, nonce, _signature = challenge["token"].split(".")
+    forged = f"{expires}.{nonce}.{'é' * 64}"
+    answer = _answer(challenge["question"])
+    assert prf.check_challenge(forged, answer, now=_NOW) is False
+    with pytest.raises(prf.ChallengeFailed):
+        _submit(_payload(challenge_token=forged, challenge_answer=answer))
+
+
 def test_rate_limits_per_ip_and_per_email(prop):
     for _ in range(3):
         _submit(_payload(email=f"{_}@example.com"))

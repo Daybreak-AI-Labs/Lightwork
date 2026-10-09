@@ -93,6 +93,27 @@ def test_cross_authority_substitution_is_rejected():
     assert evidence.validate_test_evidence(backend, request, swapped) is None
 
 
+def test_non_ascii_authority_is_compared_not_crashed():
+    # Readiness admits any printable authority identity, so an accented one
+    # must still bind exactly and a different one must be the normal refusal.
+    class _AccentedBackend(_Backend):
+        test_evidence_authority = "spiffe://lightwork/évaluateur/key-1"
+
+    backend = _AccentedBackend()
+    assert evidence.evidence_backend_readiness(backend).ready is True
+    request = _request()
+    counts = evidence.validate_test_evidence(
+        backend, request, backend.exec_authenticated_tests(request),
+    )
+    assert counts == evidence.AuthenticatedTestCounts(3, 1, skipped=1)
+    swapped = evidence.AuthenticatedTestEvidence.for_request(
+        request,
+        authority="spiffe://attaquant/évaluateur/key-9",
+        counts=evidence.AuthenticatedTestCounts(100, 0),
+    )
+    assert evidence.validate_test_evidence(backend, request, swapped) is None
+
+
 def test_wrong_artifact_or_execution_context_is_rejected():
     backend = _Backend()
     request = _request()

@@ -88,8 +88,10 @@ def require_operator(authorization: str = Header("")) -> None:
     if creds is None:
         raise _auth_error(401, "Operator authentication required.")
     username, password = creds
-    if not (secrets.compare_digest(username, OPERATOR_USER)
-            and secrets.compare_digest(password, OPERATOR_TOKEN)):
+    if not (secrets.compare_digest(username.encode("utf-8", "surrogatepass"),
+                                   OPERATOR_USER.encode("utf-8", "surrogatepass"))
+            and secrets.compare_digest(password.encode("utf-8", "surrogatepass"),
+                                       OPERATOR_TOKEN.encode("utf-8", "surrogatepass"))):
         raise _auth_error(401, "Operator authentication required.")
 
 

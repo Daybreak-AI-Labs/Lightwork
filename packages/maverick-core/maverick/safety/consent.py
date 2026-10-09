@@ -50,6 +50,7 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
 
+from ..constant_time import text_equals
 from ..file_lock import (
     atomic_create_bytes,
     atomic_read_bytes,
@@ -467,7 +468,7 @@ def _load_records_unlocked(path: Path, key: bytes | None) -> list[dict]:
         ):
             raise ConsentLedgerError("consent ledger timestamp is invalid")
         unsigned = {name: value for name, value in record.items() if name != "mac"}
-        if not hmac.compare_digest(record["mac"], _record_mac(key, unsigned)):
+        if not text_equals(record["mac"], _record_mac(key, unsigned)):
             raise ConsentLedgerError("consent ledger signature is invalid")
         previous = record["mac"]
         records.append(record)

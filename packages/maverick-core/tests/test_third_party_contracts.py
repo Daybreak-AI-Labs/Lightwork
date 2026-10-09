@@ -477,3 +477,23 @@ def test_authority_shape_is_closed_and_self_verifying() -> None:
     assert authority.schema == AUTHORITY_SCHEMA
     with pytest.raises(ThirdPartyContractValidationError, match="digest"):
         replace(authority, vendor_revision=8).normalized()
+
+
+def test_non_ascii_tenant_ids_are_compared_not_crashed(tmp_path: Path) -> None:
+    # Tenant ids may be any NFC text: an accented id from another workspace is
+    # the normal not-found, and a workspace named with an accent still works.
+    store = _store(tmp_path / "plain")
+    with pytest.raises(ThirdPartyContractNotFound):
+        store.list_records("tenant-é")
+
+    accented = ThirdPartyContractStore(
+        tmp_path / "accented.sqlite3",
+        tenant_id="atelier-café",
+        vendor_authority_resolver=lambda *_: _authority(2_500.0, tenant="atelier-café"),
+        principal_resolver=lambda: "principal-1",
+        maintenance_authorizer=lambda: True,
+        config_gate=lambda: None,
+        retention_seconds=86_400,
+        clock=lambda: 2_500.0,
+    )
+    assert accented.context_record_count("atelier-café") == 0

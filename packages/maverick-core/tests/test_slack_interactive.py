@@ -63,6 +63,17 @@ def test_signature_rejects_tampering_wrong_secret_and_replay():
     assert not verify_slack_signature(SECRET, timestamp=None, signature=None, body=body, now=now)
 
 
+def test_signature_rejects_a_non_ascii_signature_header():
+    from maverick.slack_interactive import verify_slack_signature
+
+    # Starlette decodes headers as latin-1, so the header can carry accents.
+    body = b"payload=%7B%7D"
+    now = 1_700_000_000
+    stamp, _sig = _sign(body, now)
+    forged = "v0=" + "é" * 64
+    assert verify_slack_signature(SECRET, timestamp=stamp, signature=forged, body=body, now=now) is False
+
+
 def test_signature_rejects_a_non_finite_timestamp_even_when_it_is_signed():
     from maverick.slack_interactive import verify_slack_signature
 

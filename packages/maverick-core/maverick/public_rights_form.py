@@ -40,6 +40,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from . import rights_deadlines, rights_templates
+from .constant_time import text_equals
 from .governed_records import GovernedRecordStore
 
 log = logging.getLogger(__name__)
@@ -317,7 +318,7 @@ def check_challenge(token: str, answer: object, *, now: float | None = None) -> 
         return False
     if expires < moment or len(nonce) != 16:
         return False
-    if not hmac.compare_digest(_sign(value, expires, nonce), signature):
+    if not text_equals(_sign(value, expires, nonce), signature):
         return False
     with _secret_lock:
         if nonce in _burned_set:

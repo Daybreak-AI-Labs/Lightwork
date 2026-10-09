@@ -121,6 +121,20 @@ def test_operator_console_rejects_unauthenticated_clients(client):
     assert tc.get("/", **operator).status_code == 200
 
 
+@pytest.mark.parametrize("auth", [
+    ("opérateur", "test-operator-token"),
+    ("operator", "jeton-é"),
+])
+def test_operator_console_rejects_non_ascii_credentials(client, auth):
+    # Basic credentials decode as UTF-8, so accents arrive as text: they are
+    # wrong credentials (401), not a server error.
+    tc, _module, operator = client
+    response = tc.get("/", auth=auth)
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"].startswith("Basic")
+    assert tc.get("/", **operator).status_code == 200
+
+
 def test_evaluation_mode_caps_open_requests(client):
     tc, module, _operator = client
     assert module.LICENSE["mode"] == "evaluation"
