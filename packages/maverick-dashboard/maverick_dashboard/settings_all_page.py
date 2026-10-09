@@ -227,11 +227,10 @@ def _resolve_deferred_tools(layers: dict[str, Any]) -> dict[str, Any]:
     from maverick.config import env_flag
     from maverick.config_resets import apply_to_base
 
+    # The kernel ignores a value it cannot read, so only a readable one locks.
     environment = env_flag("MAVERICK_DEFERRED_TOOLS")
     if environment is not None:
         return {"source": "deployment", "locked": True, "value": environment, "known": True}
-    if os.environ.get("MAVERICK_DEFERRED_TOOLS", "").strip():
-        return {"source": "deployment", "locked": True, "value": None, "known": False}
     layers = {**layers, "base": apply_to_base(layers["base"], layers["here"])}
     for path in (("capabilities", "deferred_tools"), ("tools", "deferred_loading")):
         for name in ("tenant", "operator", "here", "base"):
