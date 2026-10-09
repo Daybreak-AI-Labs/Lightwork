@@ -71,8 +71,10 @@ actions within clauses, records multiple supported activities and exposes
 `supported`, `contextual`, `ambiguous`, `unknown` or `corrected` confidence.
 These are evidence labels, not calibrated probabilities. It never executes
 instructions from analyzed content and cannot mint an execution receipt.
-Unsupported wording/languages stay unknown and may be corrected by an authorized
-owner. Audited explicit intent changes in continuing work append a new estimate;
+Guidance questions such as “Explain how to draft an RFP” and quoted task names
+do not receive the deliverable benchmark. Unsupported wording/languages stay
+unknown and may be corrected by an authorized owner. Audited explicit intent
+changes in continuing work append a new estimate;
 an unexecuted follow-up does not revalue already performed work. User corrections
 take precedence over subsequent inference.
 
@@ -260,7 +262,7 @@ configuration, privacy and reporting regressions are also checked.
 | 4: audited execution | Strict native receipts and flow driver seam; `test_goal_status_without_audit_does_not_award_value`, native driver test |
 | 5: optional confirmation | Default off, separate opinion receipt, revisions preserved; core/API/browser checks |
 | 6: tenant-specific benchmark | Governed override/version + deliberate recalculation; tenant override arithmetic test |
-| 7: unknown inputs | Abstention, size review, missing cost, mixed currency; unknown/receipt/currency tests |
+| 7: unknown inputs | Abstention for guidance/quoted task names, size review, missing cost, mixed currency; guidance/unknown/receipt/currency tests |
 | 8: rework/failure | One business credit, all attempt costs, partial unvalued, native workflow residual above linked agent spend; duplicate/failure/partial/driver tests |
 | 9: reconciled rollups | Unique work totals, overlapping attribution, native Savings numeric bridge; parent/agent and driver tests |
 | 10: dashboard explanation | Clickable population and source/assumption/history detail; browser desktop and narrow checks |
@@ -273,7 +275,7 @@ configuration, privacy and reporting regressions are also checked.
 | 17: duplicate/interrupted flows | Deterministic reservation, native CAS, recover same saved draft; repeat/interruption API tests |
 | 18: post-adoption feedback | Native generation/selection linkage, separate before/after cost reference; outcome/driver/handoff tests |
 | 19: historical explainability | Original snapshots survive corrections, override and proposal maturation; history tests |
-| 20: intuitive complete journey | Chromium drives the native opportunity → draft → explicit publish → cancelled/confirmed start → input approval → agent execution → result approval → outcomes → identical Copilot/dashboard totals; only paid inference is replaced by a synthetic runner |
+| 20: intuitive complete journey | Chromium drives the native opportunity → draft → explicit publish → cancelled/confirmed start → input approval → queued agent execution → result approval → outcomes → identical Copilot/dashboard totals; the agent runner supplies synthetic output, cost and a completion receipt |
 
 ## Operation coverage
 
@@ -299,7 +301,8 @@ are obtained from current authorized records.
 
 October 9 recheck added regressions for explicit invoice boundaries, multiple
 RFP components, unexecuted intent changes, existing-workflow outcome readback,
-Copilot business-name clarification and ambiguity, dashboard scope parity,
+Copilot business-name clarification and ambiguity, numeric period/cost/activity
+comparisons, guidance versus deliverable intent, dashboard scope parity,
 pending audit access, reviewed settings/benchmark changes, and additional native
 workflow spend above linked agent episodes.
 
@@ -313,8 +316,9 @@ Recorded local results before the final rebased qualification:
 - Chromium feature journeys: **3 passed**, including native publication, cancelled
   and confirmed starts, input approval, queued agent execution, result approval,
   opportunity conversion, outcome readback and identical Copilot/dashboard totals.
-  Paid inference alone is replaced with a synthetic runner; outbound calls are
-  blocked. Separate checks cover manual preparation, repeated draft clicks,
+  The agent runner supplies synthetic output, cost and a completion receipt;
+  native workflow admission, queue, approvals, receipt ingestion and reporting
+  run normally, with outbound calls blocked. Separate checks cover manual preparation, repeated draft clicks,
   390-pixel layout, keyboard focus, unavailable/retry states and scoped axe checks.
 - Dashboard DOM tests: **2,295 passed**; desktop JavaScript tests: **36 passed**.
 - Adjacent Copilot, flow, installer and release-packaging tests: **783 passed**.

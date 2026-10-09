@@ -116,6 +116,11 @@ def _object_pattern(obj):
 # Cache taxonomy rules only; customer requests/classifications are never cached.
 NEW_WORK = re.compile(r"\b(?:another|separate|new|different|second|third)\s+(?:" +
                       "|".join(_object_pattern(obj) for obj in OBJECTS) + r"|task|project)\b")
+GUIDANCE = re.compile(
+    r"\b(?:how\s+(?:to|(?:can|do|should|would)\s+(?:i|we))\b|"
+    r"(?:explain|describe|teach|show)\s+(?:(?:me|us)\s+)?(?:how|whether)\b|"
+    r"what\s+does\b.*\bmean\b|(?:classify|categorize|label)\s+(?:this|that|the|my)\b)"
+)
 
 
 def _units(request, intents):
@@ -160,12 +165,17 @@ def instruction(text: str) -> str:
     text = re.split(r"```|\n\s*>|\n\s*(?:source|document|context|transcript|attachment)\s*:",
                     text, maxsplit=1, flags=re.IGNORECASE)[0]
     text = re.sub(r'"[^"\n]*"|“[^”\n]*”|<[^>]*>.*?</[^>]*>', " quoted material ", text, flags=re.DOTALL)
+    text = re.sub(r"(?<!\w)'[^'\n]+'(?!\w)|‘[^’\n]*’", " quoted material ", text)
     return text[:1200].strip().casefold()
 
 
 def _clause_intents(request):
     matches = []
     for clause in re.split(r"[;\n]|\b(?:and|then)\s+(?=(?:draft|write|review|check|summari[sz]e|extract|analy[sz]e|reconcile|translate)\b)", request):
+        # Advice about doing a task is not a request for that deliverable.
+        # We have no guidance-effort benchmark, so leave it unvalued.
+        if GUIDANCE.search(clause):
+            continue
         clause = re.sub(r"\b(?:perform|conduct|do|provide|run)\s+(?:an?\s+)?(?=(?:financial\s+|data\s+)?analysis\b)", "analyze ", clause)
         found = []
         for obj in OBJECTS:

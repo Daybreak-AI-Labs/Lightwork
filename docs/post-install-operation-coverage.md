@@ -14,7 +14,7 @@ decision, reuse and draft controls. Company analytics do not grant employee-chat
 access. Native builder publication, run admission and human approval gates remain
 explicit. A Chromium journey exercised publication, cancelled/confirmed starts,
 input approval, native queued agent work, result approval, linked outcomes and
-Copilot/dashboard parity, with only paid inference replaced by a synthetic runner.
+Copilot/dashboard parity, with the agent runner replaced by a synthetic runner.
 Least-privilege PostgreSQL qualified ledger isolation and repeated processing.
 See [the operation/acceptance map and qualification limits](intent-work-value.md).
 No live provider, production deployment or causal labor-saving claim is qualified.

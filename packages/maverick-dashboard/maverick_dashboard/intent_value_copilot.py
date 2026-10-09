@@ -135,6 +135,42 @@ def reset_guide_token(request, token, permissions):
     return "" if _prior(request, token, permissions) is not None else token
 
 
+def _comparison(request, query, result):
+    left, right = (datetime.fromisoformat(query[key]) for key in ("start", "end"))
+    previous_end = left - timedelta(days=1)
+    previous = {**query, "end": previous_end.date().isoformat(), "start": (previous_end - (right - left)).date().isoformat()}
+    earlier = read_report(request, **previous)
+    before, current = earlier["totals"], result["totals"]
+    previous_costs, current_costs = before["known_execution_costs"], current["known_execution_costs"]
+    cost_changes = {unit: round(current_costs.get(unit, 0) - previous_costs.get(unit, 0), 6)
+                    for unit in sorted(set(previous_costs) | set(current_costs))}
+    old_intents = {row["id"]: row for row in earlier["by_intent"]}
+    new_intents = {row["id"]: row for row in result["by_intent"]}
+    changes = []
+    for identifier in sorted(set(old_intents) | set(new_intents)):
+        old, new = old_intents.get(identifier, {}), new_intents.get(identifier, {})
+        count = new.get("performed_work", 0) - old.get("performed_work", 0)
+        changes.append({"id": identifier, "label": (new or old)["label"], "performed_work_change": count,
+                        "previous": old, "current": new})
+    changes.sort(key=lambda row: abs(row["performed_work_change"]), reverse=True)
+    result["comparison"] = before
+    result["comparison_detail"] = {"start": previous["start"], "end": previous["end"],
+                                   "cost_changes": cost_changes, "intent_changes": changes}
+    prior_cost = ", ".join(_money(value, unit) for unit, value in previous_costs.items()) or "no known cost records"
+    reply = (f" The previous equal-length period ({previous['start']} through {previous['end']}, UTC) had "
+             f"{before['performed_work']} performed work items, {_money(before['gross_estimated_labor_value'], before['currency'])} "
+             f"estimated gross value, known execution costs {prior_cost}, and "
+             f"{_money(before['net_estimated_benefit'], before['currency'])} estimated net benefit.")
+    if cost_changes:
+        reply += " Known execution cost change " + "; ".join(_money(value, unit) for unit, value in cost_changes.items()) + "."
+    if changes:
+        reply += " Activity changes in performed work: " + "; ".join(
+            f"{row['label']} {row['performed_work_change']:+d}" for row in changes[:5]) + ". Multi-intent contributions can overlap."
+    if before["cost_incomplete"] or earlier["incomplete"]:
+        reply += " The earlier period also has incomplete evidence or cost coverage."
+    return reply + " Inspect contributing work and its estimate history for changed assumptions; this comparison does not establish a causal reason."
+
+
 def _answer(request, message, page, token, permissions):
     normalized = " ".join(message.casefold().strip().rstrip("?!. ").split())
     prior = _prior(request, token, permissions)
@@ -166,15 +202,7 @@ def _answer(request, message, page, token, permissions):
         reply += " Evidence or cost coverage is incomplete; missing cost is not free execution."
     reply += " Labor value uses benchmark assumptions, not measured cash savings."
     if normalized.startswith("why"):
-        left = datetime.fromisoformat(query["start"])
-        right = datetime.fromisoformat(query["end"])
-        previous_end = left - timedelta(days=1)
-        previous = {**query, "end": previous_end.date().isoformat(), "start": (previous_end - (right - left)).date().isoformat()}
-        before = read_report(request, **previous)["totals"]
-        reply += (f" The previous equal-length period had {before['performed_work']} performed work items and "
-                  f"{_money(before['gross_estimated_labor_value'], before['currency'])} estimated gross value. "
-                  "Differences reflect completed work, its intent/assumptions, and costs in each period; the evidence does not establish a causal reason.")
-        result["comparison"] = before
+        reply += _comparison(request, query, result)
     if "which agent" in normalized or "contributed" in normalized:
         entries = sorted((row for row in result["by_entity"] if row["kind"] == "agents"),
                          key=lambda row: row["gross_estimated_labor_value"] or 0, reverse=True)

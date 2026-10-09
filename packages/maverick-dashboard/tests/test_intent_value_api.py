@@ -153,6 +153,14 @@ def test_metric_copilot_matches_dashboard_and_retains_followup_scope(context):
     answer = response.json()
     assert answer["metrics"]["totals"] == expected
     assert "benchmark" in answer["reply"].lower()
+    explanation = client.post("/api/v1/copilot", headers=headers(), json={"message": "Why did that number fall?", "page": "/work-value", "conversation_token": answer["conversation_token"]})
+    assert explanation.status_code == 200, explanation.text
+    explained = explanation.json()
+    assert explained["metrics"]["totals"] == expected
+    assert explained["metrics"]["comparison_detail"]["cost_changes"] == {"USD": 2}
+    assert explained["metrics"]["comparison_detail"]["intent_changes"][0]["id"] == "rfp.draft"
+    assert "known execution costs" in explained["reply"] and "change USD 2.00" in explained["reply"]
+    assert "does not establish a causal reason" in explained["reply"]
     next_response = client.post("/api/v1/copilot", headers=headers(), json={"message": "What about last month?", "page": "/work-value", "conversation_token": answer["conversation_token"]})
     assert next_response.status_code == 200, next_response.text
     assert next_response.json()["metrics"]["scope"] == "company"

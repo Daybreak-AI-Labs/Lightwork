@@ -58,6 +58,20 @@ def test_taxonomy_covers_business_and_distinguishes_actions():
     assert taxonomy.classify("Perform financial analysis")["intents"] == ["financial_analysis.analyze"]
 
 
+def test_guidance_and_quoted_task_names_do_not_receive_deliverable_value(world):
+    for request in ("Explain how to draft an RFP", "How do I review an RFP?",
+                    "What do you think? 'Draft an RFP'", "What does ‘draft an RFP’ mean?",
+                    "Classify this as draft an RFP"):
+        assert taxonomy.classify(request)["intents"] == []
+    assert taxonomy.classify("Could you draft an RFP?")["intents"] == ["rfp.draft"]
+    assert taxonomy.classify("Explain this financial analysis")["intents"] == ["financial_analysis.analyze"]
+    goal(world, "Explain how to draft an RFP")
+    totals = report(world)["totals"]
+    assert totals["performed_work"] == totals["unvalued_work"] == 1
+    assert totals["gross_estimated_labor_value"] == 0
+    assert totals["net_estimated_benefit"] is None
+
+
 def test_ten_prompts_retries_reopen_and_separate_work(world):
     root = goal(world)
     for _ in range(9):
@@ -363,8 +377,8 @@ def test_native_flow_driver_emits_value_receipt_and_links_its_agent(world, monke
     flow = Flow(id="test-rfp", name="RFP", owner="alice", start="prepare",
         nodes={"prepare": FlowNode(id="prepare", kind="agent", brief="Draft an RFP", output="result")})
     store.save_flow(flow)
-    # The production driver and agent-goal adapter run; only the paid provider
-    # runner is replaced with a synthetic native episode and terminal receipt.
+    # The production driver and agent-goal adapter run; the agent runner is
+    # replaced with a synthetic native episode and terminal receipt.
     def local_runner(gid, **kwargs):
         eid = world.start_episode(gid)
         world.end_episode(eid, "Synthetic work", "success", cost_dollars=2)
@@ -407,7 +421,8 @@ def value_postgres(world, postgres_test_dsn, monkeypatch):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     crypto_at_rest._reset_shared_key_identity_for_testing()
     governed_records._reset_process_authority_pin_for_testing()
-    role, password = "iv_test_" + secrets.token_hex(8), secrets.token_urlsafe(32)
+    role = "iv_test_" + secrets.token_hex(8)
+    password = secrets.token_urlsafe(32)
     with psycopg.connect(postgres_test_dsn, autocommit=True) as admin:
         admin.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOBYPASSRLS").format(sql.Identifier(role), sql.Literal(password)))
         try:

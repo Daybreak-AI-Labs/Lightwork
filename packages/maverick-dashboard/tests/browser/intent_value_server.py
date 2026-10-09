@@ -9,7 +9,7 @@ import server
 
 
 def install_execution_fixture(app):
-    """Keep native publication, queue, approvals and audit; replace paid AI only."""
+    """Keep native workflow controls; stub the agent runner and its paid calls."""
     from maverick import audit, runner
     from maverick_dashboard import api
 
