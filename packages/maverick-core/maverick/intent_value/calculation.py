@@ -20,7 +20,7 @@ NOTICE = (
 )
 
 
-def assumptions(intents, *, size="standard", specialists=()):
+def assumptions(intents, *, size="standard", specialists=(), units=None):
     from ..config import get_value
 
     cfg = settings()
@@ -30,7 +30,7 @@ def assumptions(intents, *, size="standard", specialists=()):
         cfg.update(hourly_rate=rates.pop(), labor_provenance="Company specialist/department labor-rate configuration")
     return {"method": METHOD, "benchmarks": [benchmark(identifier) for identifier in intents],
             "hourly_rate": cfg["hourly_rate"], "currency": cfg["currency"],
-            "labor_provenance": cfg["labor_provenance"], "size": size,
+            "labor_provenance": cfg["labor_provenance"], "size": size, "units": dict(units or {}),
             "manual_work": "Only the benchmark component multiplied by Lightwork's share is credited; retained review minutes are subtracted. Other manual work is outside scope."}
 
 
@@ -56,9 +56,10 @@ def estimate(source, inputs):
               "gross": None if source["performed_at"] is not None else 0.0}
     if state != "estimated":
         return result
-    minutes = sum(max(0, row["minutes"] * row["attributable_share"] - row["review_minutes"]) for row in components.values())
-    low = sum(max(0, row["low_minutes"] * row["attributable_share"] - row["review_minutes"]) for row in components.values())
-    high = sum(max(0, row["high_minutes"] * row["attributable_share"] - row["review_minutes"]) for row in components.values())
+    def effort(field):
+        return sum(max(0, row[field] * row["attributable_share"] - row["review_minutes"]) * inputs.get("units", {}).get(key, 1)
+                   for key, row in components.items())
+    minutes, low, high = effort("minutes"), effort("low_minutes"), effort("high_minutes")
     value = minutes * inputs["hourly_rate"] / 60
     result.update(avoided_minutes=round(minutes, 2), potential_gross=round(value, 2),
                   range=[round(low * inputs["hourly_rate"] / 60, 2), round(high * inputs["hourly_rate"] / 60, 2)],

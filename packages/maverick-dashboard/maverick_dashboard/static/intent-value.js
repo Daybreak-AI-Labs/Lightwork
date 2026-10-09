@@ -47,7 +47,8 @@
   }
   function render() {
     options($('iv-intent'), benchmarks.map(row => [row.id, row.label]), 'All activities');
-    const entities = report.by_entity.map(row => [row.kind + '|' + row.id, row.kind.replace(/s$/, '') + ': ' + row.id]);
+    const entityKinds = {processes: 'Workflow', specialists: 'Specialist', agents: 'Agent'};
+    const entities = report.by_entity.map(row => [row.kind + '|' + row.id, entityKinds[row.kind] + ': ' + (row.label || row.id)]);
     const selected = $('iv-entity').value;
     if (selected && !entities.some(row => row[0] === selected)) entities.push([selected, selected.replace('|', ': ')]);
     options($('iv-entity'), entities, 'All contributors');
@@ -134,6 +135,8 @@
         node('p', input.hourly_rate + ' ' + input.currency + ' per hour · ' + input.labor_provenance), node('h3', 'Execution evidence'));
       body.append(node('p', detail.evidence.length ? detail.evidence.map(row => row.kind + ': ' + row.status + ', ' + new Date(row.at * 1000).toLocaleString() + ', receipt ' + row.id.slice(0, 12) + (row.full_task ? ', full component' : ', partial component')).join('; ') : 'Observation only. No eligible Lightwork completion receipt is available.'));
       body.append(node('h3', 'Calculation assumptions'));
+      body.append(node('p', 'Deliverables per business object: ' + Object.entries(input.units || {}).map(([key, count]) =>
+        (benchmarks.find(item => item.object === key)?.label.replace(/^\S+\s+/, '') || key) + ' × ' + count).join('; ') + '. Overlapping activities for the same deliverable are not added together.'));
       input.benchmarks.filter(Boolean).forEach(row => body.append(node('p', row.id.replaceAll('.', ' ') + ': ' + row.minutes + ' minutes (' + row.low_minutes + '–' + row.high_minutes + '), Lightwork share ' + row.attributable_share + ', retained review ' + row.review_minutes + ' minutes. Version ' + row.version + ', effective ' + row.effective_date + '. ' + row.scope + '. ' + row.provenance)));
       body.append(node('h3', 'Execution costs'));
       body.append(node('p', 'Gross labor estimate range: ' + (last.range ? last.range.map(value => money(value, input.currency)).join(' to ') : 'Unavailable') + '. ' + last.component_policy));
@@ -154,9 +157,21 @@
     const sizeLabel = node('label', 'Scope assumption'), size = node('select'); size.setAttribute('aria-label', 'Work size');
     options(size, [['standard', 'Fits the benchmark component'], ['large', 'Larger or uncertain; leave unvalued']]); size.value = row.classification.size; sizeLabel.append(size);
     const reasonLabel = node('label', 'Reason'), reason = node('input'); reason.required = true; reason.maxLength = 1000; reason.setAttribute('aria-label', 'Correction reason'); reasonLabel.append(reason);
-    const save = node('button', 'Correct and recalculate', 'btn'); save.type = 'submit'; form.append(label, sizeLabel, reasonLabel, save);
+    const quantities = node('div'), unitInputs = new Map();
+    function quantitiesForSelection() {
+      const previous = new Map([...unitInputs].map(([key, input]) => [key, input.value])); unitInputs.clear(); quantities.replaceChildren();
+      [...select.selectedOptions].forEach(option => {
+        const item = benchmarks.find(item => item.id === option.value); if (unitInputs.has(item.object)) return;
+        const name = item.label.replace(/^\S+\s+/, ''), label = node('label', 'Number of deliverables: ' + name), input = node('input');
+        input.type = 'number'; input.min = '1'; input.max = '50'; input.step = '1'; input.required = true;
+        input.value = previous.get(item.object) || String(row.classification.units?.[item.object] || 1);
+        input.setAttribute('aria-label', 'Number of deliverables: ' + name); label.append(input); quantities.append(label); unitInputs.set(item.object, input);
+      });
+    }
+    select.addEventListener('change', quantitiesForSelection); quantitiesForSelection();
+    const save = node('button', 'Correct and recalculate', 'btn'); save.type = 'submit'; form.append(label, quantities, sizeLabel, reasonLabel, save);
     form.addEventListener('submit', event => { event.preventDefault(); perform(save, async () => {
-      await request('/work/' + row.id + '/correct', 'POST', {revision: row.revision, intents: [...select.selectedOptions].map(option => option.value), size: size.value, reason: reason.value}); await load(); await openWork(row.id);
+      await request('/work/' + row.id + '/correct', 'POST', {revision: row.revision, intents: [...select.selectedOptions].map(option => option.value), units: Object.fromEntries([...unitInputs].map(([key, input]) => [key, Number(input.value)])), size: size.value, reason: reason.value}); await load(); await openWork(row.id);
     }); }); body.append(form);
     const recalc = button('Recalculate with current benchmarks', () => perform(recalc, async () => {
       await request('/work/' + row.id + '/recalculate', 'POST', {revision: row.revision}); await load(); await openWork(row.id);
@@ -192,7 +207,8 @@
     const cap = evidence.capability;
     const use = button(cap ? 'Use existing ' + cap.kind + ': ' + cap.label : 'Start this work in Chat', () => perform(use, async () => {
       const result = await request('/opportunities/' + row.id + '/use', 'POST', {revision: row.revision});
-      body.append(node('p', result.message), link('Continue to selected capability', result.href)); await load();
+      await load(); const current = proposals.find(item => item.id === row.id); if (current) openOpportunity(current);
+      $('iv-detail-body').append(node('p', result.message), link('Continue to selected capability', result.href));
     }));
     if (!['declined', 'deferred'].includes(row.status)) actions.append(use);
     if (cap) {
@@ -206,7 +222,8 @@
           const saved = await request('/opportunities/' + row.id + '/decision', 'POST', {revision, decision: 'adjust', manual_steps: [...manual]}); revision = saved.revision;
         }
         const result = await request('/opportunities/' + row.id + '/build', 'POST', {revision});
-        body.append(node('p', result.message), link('Open draft in workflow builder', result.href)); await load();
+        await load(); const current = proposals.find(item => item.id === row.id); if (current) openOpportunity(current);
+        $('iv-detail-body').append(node('p', result.message), link('Open draft in workflow builder', result.href));
       })); actions.append(build);
     }
     [['adjust', 'Save manual-step choices'], ['defer', 'Defer'], ['decline', 'Keep current process'], ['reopen', 'Reopen suggestion']].filter(([decision]) => decision !== 'adjust' || !row.draft_id).forEach(([decision, label]) => {

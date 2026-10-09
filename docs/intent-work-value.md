@@ -47,7 +47,7 @@ Reopening is explicit. None of these decisions deletes an existing process.
 | Domain profiles and owned native flows | Accessible capability matching prefers an existing process; reuse does not create a duplicate builder |
 | `flow.evolve`, node outcomes/tool traces | Existing supported evolution signals are shown in reuse explanations; linked execution costs update the next-review reference without overwriting forecasts |
 | Ekko `governed_candidate_projection` | Live owner/device/consent-bound patterns appear with native evidence/draft links; no raw event content is copied, no business intent or executed benefit is fabricated |
-| Copilot sealed conversation context, product operations | Provider-free metric answers call `read_report`; scoped follow-ups are sealed to tenant/account/current permissions. Reviewed correction, recalculation, decision, use and draft operations call the native endpoints |
+| Copilot sealed conversation context, product operations | Provider-free metric answers call `read_report`; scoped follow-ups are sealed to tenant/account/current permissions. Reviewed correction, recalculation, optional confirmation, company assumptions, benchmark override, decision, use and draft operations call the native endpoints |
 | Dashboard route catalogue, Jinja shell, shared style tokens | `/work-value`, native explanation dialog, responsive report, opportunities, benchmark/rate controls, error and retry states |
 | Installer and All settings | `[intent_value] enabled` and `recommendations` controls; optional completion confirmation defaults off |
 
@@ -72,22 +72,28 @@ actions within clauses, records multiple supported activities and exposes
 These are evidence labels, not calibrated probabilities. It never executes
 instructions from analyzed content and cannot mint an execution receipt.
 Unsupported wording/languages stay unknown and may be corrected by an authorized
-owner. Explicit changes in a continuing request append a new estimate; user
-corrections take precedence over subsequent inference.
+owner. Audited explicit intent changes in continuing work append a new estimate;
+an unexecuted follow-up does not revalue already performed work. User corrections
+take precedence over subsequent inference.
 
 Ten related prompts or retries are one work item, not ten task credits. Parent
 links and native flow retry/origin IDs take precedence over text similarity.
 An explicit separate/new deliverable request or a separate root task creates
-another item. Uncertain grouping is stated in the drilldown. Distinct tasks are
+another item across every supported business object, including invoices. Explicit
+bounded quantities are retained per object and can be corrected in the work
+explanation. More than 50 deliverables or documents over ten pages require scope
+review. Uncertain grouping is stated in the drilldown. Distinct tasks are
 not inferred from conversation elapsed time or model latency.
 
 For each distinct business object, the largest applicable component is used;
 overlapping draft/review/extraction components are not added. Different business
 objects can contribute separate components. This avoids awarding the same
-document's full benchmark several times.
+document's full benchmark several times. Two independently requested documents
+count as two deliverable components in one business work item; drafting and
+reviewing those same two documents still use the largest component twice.
 
 ```
-attributable avoided minutes = max(0, component minutes × Lightwork share − retained review minutes)
+attributable avoided minutes = deliverable count × max(0, component minutes × Lightwork share − retained review minutes)
 gross estimated labor value = attributable avoided minutes × applicable hourly rate / 60
 estimated net benefit = gross estimated labor value − same-scope, same-period known execution costs
 ```
@@ -236,7 +242,7 @@ connection and learning controls remain the existing ones.
   native evidence is present.
 - Complete invoice/subscription/external-tool coverage, causal time savings,
   calibrated inference probabilities, inferred external data bindings and
-  deployment-scale Postgres/load qualification are not claimed. No paid-provider
+  deployment-scale/load qualification are not claimed. No paid-provider
   test, production migration, deployment or merge is part of this delivery.
 
 ## Requirement and verification map
@@ -255,11 +261,11 @@ configuration, privacy and reporting regressions are also checked.
 | 5: optional confirmation | Default off, separate opinion receipt, revisions preserved; core/API/browser checks |
 | 6: tenant-specific benchmark | Governed override/version + deliberate recalculation; tenant override arithmetic test |
 | 7: unknown inputs | Abstention, size review, missing cost, mixed currency; unknown/receipt/currency tests |
-| 8: rework/failure | One business credit, all attempt costs, partial unvalued; duplicate/failure/partial/driver tests |
+| 8: rework/failure | One business credit, all attempt costs, partial unvalued, native workflow residual above linked agent spend; duplicate/failure/partial/driver tests |
 | 9: reconciled rollups | Unique work totals, overlapping attribution, native Savings numeric bridge; parent/agent and driver tests |
 | 10: dashboard explanation | Clickable population and source/assumption/history detail; browser desktop and narrow checks |
-| 11: Copilot parity | `read_report` shared with dashboard, sealed period/entity context; parity/follow-up API and browser checks |
-| 12: access boundaries | Tenant/account/content and reviewed-operation boundaries; company metadata and cross-tenant tests |
+| 11: Copilot parity | Shared `read_report`, current dashboard filters, sealed period/entity clarification, business-name resolution and ambiguity rejection; API and native execution browser checks |
+| 12: access boundaries | Tenant/account/content, pending audit and reviewed-operation boundaries; company metadata, cross-tenant and least-privilege PostgreSQL tests |
 | 13: opportunity conversion | Explicit handoff, exact task link, separate remaining potential; handoff/conversion test |
 | 14: recommendation quality | Distinct-work and cost support, existing capability preference, versioned maturing proposal; recommendation tests |
 | 15: retained control | Manual preparation, required reviews, persistent defer/decline; core/API/browser checks |
@@ -267,7 +273,7 @@ configuration, privacy and reporting regressions are also checked.
 | 17: duplicate/interrupted flows | Deterministic reservation, native CAS, recover same saved draft; repeat/interruption API tests |
 | 18: post-adoption feedback | Native generation/selection linkage, separate before/after cost reference; outcome/driver/handoff tests |
 | 19: historical explainability | Original snapshots survive corrections, override and proposal maturation; history tests |
-| 20: intuitive complete journey | Browser opportunity → evidence → correction/manual controls → native draft, plus explicit adoption/outcome and Copilot parity integration tests |
+| 20: intuitive complete journey | Chromium drives the native opportunity → draft → explicit publish → cancelled/confirmed start → input approval → agent execution → result approval → outcomes → identical Copilot/dashboard totals; only paid inference is replaced by a synthetic runner |
 
 ## Validation record
 

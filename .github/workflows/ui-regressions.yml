@@ -81,6 +81,7 @@ jobs:
             ${{ runner.temp }}/lightwork-browser-results
             packages/maverick-dashboard/tests/browser/browser-report
             packages/maverick-dashboard/tests/browser/test-results/results.json
+            .browser-results-intent-value
           retention-days: 14
 
       - name: Explicit synthetic setup and connection recovery journeys

@@ -5,7 +5,7 @@ import copy
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
@@ -30,6 +30,7 @@ class CorrectionIn(RevisionIn):
     intents: list[str] = Field(max_length=4)
     size: Literal["standard", "large"] = "standard"
     reason: str = Field(min_length=1, max_length=1000)
+    units: dict[str, Annotated[int, Field(strict=True, ge=1, le=50)]] | None = Field(default=None, max_length=4)
 
 
 class SettingsIn(RevisionIn):
@@ -111,8 +112,27 @@ def read_report(request, *, start="", end="", scope="own", intent="", entity_kin
     result = calculation.report(rows, start=left, end=right, intent=intent, entity_kind=entity_kind, entity_id=entity_id)
     from maverick.intent_value.reconciliation import bridge
     result["legacy_bridge"] = bridge(_world(), rows, result)
+    _label_entities(request, result["by_entity"])
     result.update(scope=scope, checked_at=time.time(), incomplete=any(row.get("_audit_pending") for row in rows))
     return result
+
+
+def _label_entities(request, entities):
+    from maverick.domain import available_domains
+    from maverick.flow import store
+
+    from .api import _can_access_flow
+
+    names = {flow.id: flow.name for flow in store.list_flows() if _can_access_flow(request, flow)}
+    domains = available_domains()
+    for row in entities:
+        kind, identifier = row["kind"], row["id"]
+        if kind == "processes":
+            row["label"] = names.get(identifier, "Related task contribution" if identifier.startswith("goal:") else "Workflow contribution")
+        elif kind == "specialists" and identifier in domains and auth.domain_suites_allowed(request, identifier):
+            row["label"] = domains[identifier].description.split(":")[0][:100]
+        else:
+            row["label"] = identifier.replace("_", " ").capitalize()
 
 
 @router.get("")
@@ -129,6 +149,8 @@ def work(request, identifier, *, write=False, company=False):
     owner = auth.goal_owner_filter(request)
     if row["owner"] != owner and (write or not company):
         raise HTTPException(404, "This work item is unavailable.")
+    if row.get("_audit_pending"):
+        raise HTTPException(503, "This work item's audit record is pending. Refresh the report to retry before inspecting or changing it.")
     world = _world()
     if not company and any(not auth.can_access_goal(request, world.get_goal(gid)) for gid in row["source"]["goal_ids"]):
         raise HTTPException(404, "This work item's source is no longer accessible.")
@@ -170,7 +192,7 @@ def work_endpoint(request: Request, identifier: str, scope: Literal["own", "comp
 def correct_endpoint(request: Request, identifier: str, body: CorrectionIn):
     def run():
         work(request, identifier, write=True)
-        return service.correct(identifier, intents=body.intents, size=body.size, expected_revision=body.revision,
+        return service.correct(identifier, intents=body.intents, size=body.size, units=body.units, expected_revision=body.revision,
             reason=body.reason, actor=auth.caller_principal(request) or "local", guard=lambda: work(request, identifier, write=True))
     return _mutation(_call(run))
 
@@ -268,8 +290,9 @@ def opportunities_endpoint(request: Request, include_decided: bool = False, devi
         for proposal in proposals:
             if proposal.get("_audit_pending") or (not include_decided and proposal["status"] in {"declined", "deferred"}):
                 continue
+            outcome = opportunities.outcome(proposal, rows)
             proposal = {key: value for key, value in proposal.items() if key not in {"owner", "_audit_pending"}}
-            proposal["outcome"] = opportunities.outcome(proposal, rows) if not proposal.get("draft_id") else opportunities.outcome({**proposal, "owner": auth.goal_owner_filter(request)}, rows)
+            proposal["outcome"] = outcome
             visible.append(proposal)
         from .intent_value_discovery import read as discovery
         return {"opportunities": visible, "external_observations": discovery(request, device_id),

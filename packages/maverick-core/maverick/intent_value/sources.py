@@ -64,6 +64,15 @@ def _goal_rows(world):
     return goals, origins, turns, memberships
 
 
+def _classify_goal(goal):
+    detected = classify(goal.title)
+    return detected if detected["intents"] else classify(goal.title + "\n" + (goal.description or ""))
+
+
+def _intent_revision(goal):
+    return bool(re.match(r"\s*(?:actually|instead|now|correction)\b", goal.title, re.IGNORECASE))
+
+
 def _group_goals(goals, origins, memberships):
     by_id, anchors, output = {goal.id: goal for goal in goals}, {}, {}
     for goal in sorted(goals, key=lambda value: value.id):
@@ -76,9 +85,7 @@ def _group_goals(goals, origins, memberships):
         # revisions. Owner mismatch, cycles and missing parents never borrow
         # another person's economic credit.
         key = anchors.get(parent.id) if parent and parent.owner == goal.owner else None
-        detected = classify(goal.title)
-        if not detected["intents"]:
-            detected = classify(goal.title + "\n" + (goal.description or ""))
+        detected = _classify_goal(goal)
         if detected["new_work"]:
             key = None
         if key is None:
@@ -105,7 +112,7 @@ def _group_goals(goals, origins, memberships):
             for intent in detected["intents"]:
                 if intent not in item["observed_intents"]:
                     item["observed_intents"].append(intent)
-            if re.match(r"\s*(?:actually|instead|now|correction)\b", goal.title, re.IGNORECASE):
+            if _intent_revision(goal):
                 item["classification"] = {**detected, "reason": "The requested activity explicitly changed during related work."}
         item["last_observed_at"] = max(item["last_observed_at"], goal.created_at)
     return output, anchors
@@ -113,7 +120,8 @@ def _group_goals(goals, origins, memberships):
 
 def _observation(key, owner, at, classification):
     return {"key": key, "owner": owner, "observed_at": at, "last_observed_at": at,
-            "classification": classification, "observed_intents": list(classification["intents"]),
+            "classification": classification, "executed_classification": None,
+            "observed_intents": list(classification["intents"]),
             "sources": [], "goal_ids": [], "flow_runs": [], "specialists": [], "agents": [],
             "processes": [], "evidence": [], "costs": [], "actions": [], "performed_at": None,
             "partial_execution": False, "provider_evidence": [],
@@ -159,6 +167,7 @@ def _flow_rows(output, anchors, goals, flow_audit):
                     and row["revision"] == run.definition_revision and row["release_id"] == run.release_id]
         if receipts:
             item["evidence"].extend({**row, "full_task": True} for row in receipts)
+            item["executed_classification"] = detected
         else:
             item["evidence"].extend({**row, "full_task": False} for row in flow_audit.get(run.run_id, [])
                 if row["revision"] == run.definition_revision and row["release_id"] == run.release_id)
@@ -173,7 +182,7 @@ def _flow_rows(output, anchors, goals, flow_audit):
                 item = output[key]
                 anchors[goal.id] = key
                 item["goal_ids"].append(goal.id)
-                item["sources"].append({"kind": "goal", "id": str(goal.id), "at": goal.created_at})
+                item["sources"].append({"kind": "goal", "id": str(goal.id), "at": goal.created_at, "flow_run": anchor[5:]})
                 item["specialists"].extend([goal.domain] if goal.domain else [])
                 item["agents"].extend([goal.execution_principal] if goal.execution_principal and not goal.execution_principal.startswith("user:") else [])
 
@@ -183,7 +192,7 @@ def collect(world) -> list[dict]:
     audit_goals, audit_flows, actions, agents = audit_population()
     output, anchors = _group_goals(goals, origins, memberships)
     _flow_rows(output, anchors, goals, audit_flows)
-    for goal in goals:
+    for goal in sorted(goals, key=lambda value: value.id):
         item = output.get(anchors.get(goal.id))
         if item is None:
             continue
@@ -191,6 +200,8 @@ def collect(world) -> list[dict]:
         # completion receipt can award its full business-component estimate.
         if not item["flow_runs"]:
             item["evidence"].extend({**row, "full_task": item["key"] == f"goal:{goal.id}"} for row in audit_goals.get(goal.id, []))
+            if audit_goals.get(goal.id) and (item["key"] == f"goal:{goal.id}" or _intent_revision(goal)):
+                item["executed_classification"] = _classify_goal(goal)
         item["actions"].extend(actions.get(goal.id, set()))
         item["agents"].extend(agents.get(goal.id, set()))
     for item in output.values():
@@ -217,10 +228,7 @@ def collect(world) -> list[dict]:
         output[key]["sources"].append({"kind": "turn", "id": str(row[0]), "at": row[3]})
     for item in output.values():
         _provider_costs(item)
-        if item["flow_runs"] and any(cost.get("goal_id") for cost in item["costs"]):
-            # The flow's reserved/runtime amount includes its agents. Use the
-            # underlying episodes once; never sum parent and child spend.
-            item["costs"] = [cost for cost in item["costs"] if not cost["id"].startswith("flow:")]
+        _flow_cost_residuals(item)
         for field in ("specialists", "agents", "processes", "actions"):
             item[field] = sorted(set(item[field]))
         item["evidence"] = list({row["id"]: row for row in item["evidence"]}.values())
@@ -229,6 +237,31 @@ def collect(world) -> list[dict]:
             item["performed_at"] = min(row["at"] for row in full or item["evidence"])
         item["source_digest"] = digest(item)
     return sorted(output.values(), key=lambda item: (item["observed_at"], item["key"]))
+
+
+def _flow_cost_residuals(item):
+    """Native flow spend includes its agents; preserve any additional spend."""
+    retained = []
+    for cost in item["costs"]:
+        if not cost["id"].startswith("flow:"):
+            retained.append(cost)
+            continue
+        gids = {int(source["id"]) for source in item["sources"] if source.get("flow_run") == cost["id"][5:]}
+        children = [row for row in item["costs"] if row.get("goal_id") in gids]
+        if not children:
+            retained.append(cost)
+            continue
+        known = sum(row["amount"] or 0 for row in children if row["currency"] == "USD")
+        residual = max(0, (cost["amount"] or 0) - known)
+        if residual and all(row["currency"] == "USD" for row in children):
+            retained.append({**cost, "id": cost["id"] + ":residual", "amount": residual,
+                             "status": "Native workflow spend above linked agent costs",
+                             "time_basis": "Allocated to the native workflow update time"})
+        if any(row["currency"] != "USD" for row in children):
+            # Conversion cannot establish overlap. Keep the native total as
+            # explanation metadata instead of summing incompatible estimates.
+            item["cost_limitations"].append("Native USD workflow spend cannot be reconciled with linked costs in another currency.")
+    item["costs"] = retained
 
 
 def _provider_costs(item):
@@ -273,7 +306,7 @@ def _provider_costs(item):
             residual = max(0, sum(cost["amount"] or 0 for cost in related) - known) if usd else 0
             item["costs"] = [cost for cost in item["costs"] if cost not in related]
             if residual:
-                item["costs"].append({"id": f"runtime-residual:{gid}:{period}", "amount": residual,
+                item["costs"].append({"id": f"runtime-residual:{gid}:{period}", "goal_id": gid, "amount": residual,
                     "currency": "USD", "basis": "estimated", "at": max(cost["at"] for cost in related),
                     "complete": False, "status": "Unallocated runtime amount above linked provider receipts"})
         item["cost_limitations"].append("Provider receipts replace overlapping runtime estimates. Receipt day allocation and unmatched runtime residuals are estimated; invoice and call coverage remain incomplete.")

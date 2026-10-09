@@ -94,6 +94,56 @@ def test_correction_cost_explanation_and_default_confirmation(context):
     assert client.post(BASE + "/work/" + row["id"] + "/confirm", headers=headers(), json={"revision": updated["revision"]}).status_code == 422
 
 
+def test_deliverable_correction_preserves_evidence_and_previous_quantity(context):
+    client, world = context
+    seed(world)
+    row = get(client)["rows"][0]
+    original = get(client, "/work/" + row["id"])
+    response = client.post(BASE + "/work/" + row["id"] + "/correct", headers=headers(), json={
+        "revision": row["revision"], "intents": ["rfp.draft", "rfp.review"], "units": {"rfp": 2},
+        "reason": "Two independent RFP deliverables, each drafted and reviewed."})
+    assert response.status_code == 200, response.text
+    changed = get(client, "/work/" + row["id"])
+    assert changed["evidence"] == original["evidence"]
+    assert changed["estimates"][0] == original["estimates"][0]
+    assert changed["estimates"][-1]["gross"] == 2 * original["estimates"][-1]["gross"]
+    assert get(client)["totals"]["performed_work"] == 1
+    rejected = client.post(BASE + "/work/" + row["id"] + "/correct", headers=headers(), json={
+        "revision": changed["revision"], "intents": ["rfp.draft"], "units": {"invoice": 50}, "reason": "Wrong object"})
+    assert rejected.status_code == 422
+
+
+def test_pending_audit_cannot_release_detail_or_accept_correction(context, monkeypatch):
+    client, world = context
+    seed(world)
+    monkeypatch.setattr(audit, "record", lambda *args, **kwargs: False)
+    report = get(client)
+    assert report["incomplete"] and report["rows"] == []
+    row = service.WORKS.list(limit=10)[0]
+    assert client.get(BASE + "/work/" + row["id"], headers=headers()).status_code == 503
+    response = client.post(BASE + "/work/" + row["id"] + "/correct", headers=headers(), json={
+        "revision": row["revision"], "intents": ["rfp.review"], "reason": "Cannot outrun pending audit"})
+    assert response.status_code == 503
+
+
+def test_copilot_honors_dashboard_filters_and_ambiguity(context):
+    client, world = context
+    seed(world)
+    answer = client.post("/api/v1/copilot", headers=headers(), json={
+        "message": "What is the net benefit?", "page": "/work-value?intent=rfp.review&scope=own"})
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["metrics"]["totals"] == get(client, "?intent=rfp.review")["totals"]
+    save_existing_process(client)
+    response = client.post("/api/v1/flows", headers=headers(), json={"flow": {
+        "id": "other-proposal", "name": "Bid preparation", "start": "prepare",
+        "nodes": [{"id": "prepare", "kind": "agent", "brief": "Draft an RFP"}]}})
+    assert response.status_code == 201, response.text
+    ambiguous = client.post("/api/v1/copilot", headers=headers(), json={
+        "message": "What did process Bid preparation cost?", "page": "/work-value"})
+    assert ambiguous.status_code == 200
+    assert "Which process" in ambiguous.json()["reply"] and "metrics" not in ambiguous.json()
+
+
 def test_metric_copilot_matches_dashboard_and_retains_followup_scope(context):
     client, world = context
     seed(world)
@@ -265,6 +315,47 @@ def test_existing_chat_handoff_links_execution_and_converts_potential_once(conte
     assert current["next_review_reference"]["sample_count"] == 1
 
 
+def save_existing_process(client):
+    response = client.post("/api/v1/flows", headers=headers(), json={"flow": {
+        "id": "proposal-process", "name": "Bid preparation", "start": "prepare", "nodes": [
+            {"id": "prepare", "kind": "agent", "brief": "Draft an RFP", "output": "result"}]}})
+    assert response.status_code == 201, response.text
+    return store.load_flow("proposal-process")
+
+
+def test_existing_process_adoption_outcomes_remain_readable(context):
+    client, world = context
+    seed(world, count=3)
+    flow = save_existing_process(client)
+    proposal = get(client, "/opportunities")["opportunities"][0]
+    assert proposal["current_evidence"]["capability"]["id"] == flow.id
+    response = client.post(BASE + "/opportunities/" + proposal["id"] + "/use", headers=headers(), json={"revision": proposal["revision"]})
+    assert response.status_code == 200, response.text
+    run = store.FlowRun(run_id="reused-value-run", flow_id=flow.id, owner=flow.owner,
+        status="completed", created=time.time(), updated=time.time(), cost_dollars=1, definition_revision=flow.revision)
+    store.save_run(run)
+    audit.audit_event("control_plane_action", agent="flow", action="intent_value.flow_state", run_id=run.run_id,
+        status="completed", definition_revision=flow.revision, release_id="", performed_work_nodes=1)
+    current = get(client, "/opportunities")["opportunities"][0]
+    assert current["outcome"]["observed_runs"] == 1
+    assert get(client)["totals"]["performed_work"] == 4
+
+
+def test_copilot_resolves_entity_clarification_by_business_name(context):
+    client, _world = context
+    flow = save_existing_process(client)
+    response = client.post("/api/v1/copilot", headers=headers(), json={"message": "What ROI has this process delivered?", "page": "/work-value"})
+    assert response.status_code == 200, response.text
+    answer = response.json()
+    assert "Which process" in answer["reply"]
+    assert answer.get("conversation_token")
+    followup = client.post("/api/v1/copilot", headers=headers(), json={"message": "Bid preparation", "page": "/work-value", "conversation_token": answer["conversation_token"]})
+    assert followup.status_code == 200, followup.text
+    expected = get(client, "?entity_kind=processes&entity_id=" + flow.id)
+    assert followup.json()["metrics"]["totals"] == expected["totals"]
+    assert "Bid preparation" in followup.json()["reply"]
+
+
 def test_copilot_native_read_and_reviewed_correction(context, monkeypatch):
     from maverick_dashboard import product_operations as operations
     client, world = context
@@ -286,3 +377,35 @@ def test_copilot_native_read_and_reviewed_correction(context, monkeypatch):
     response = client.post(base + "/execute", headers=headers(), json={"token": prepared["token"], "confirmed": True})
     assert response.status_code == 200, response.text
     assert get(client)["rows"][0]["intents"] == ["rfp.review"]
+
+
+@pytest.mark.parametrize(("kind", "arguments", "path"), [
+    ("settings", {"hourly_rate": 48, "currency": "USD", "completion_confirmation": True}, "/settings"),
+    ("benchmark", {"identifier": "rfp.draft", "minutes": 100, "low_minutes": 50, "high_minutes": 150,
+                   "attributable_share": 0.5, "review_minutes": 20, "reason": "Company timing study"}, "/benchmarks"),
+])
+def test_copilot_admin_assumptions_require_review_preserve_history_and_deduplicate(context, monkeypatch, kind, arguments, path):
+    from maverick_dashboard import product_operations as operations
+
+    client, world = context
+    seed(world)
+    original = get(client)["totals"]
+    monkeypatch.setattr(operations, "_gate", lambda request: auth.require_permission(request, "operate"))
+    base, scope = "/api/v1/copilot/product-operations", {"page": "/work-value", "selection": {}}
+    catalogue = client.post(base + "/catalog", headers=headers("root"), json=scope).json()
+    action = next(row for row in catalogue["operations"] if row["id"] == "learning.work_value_" + kind)
+    prior = get(client, path, user="root")
+    response = client.post(base + "/prepare", headers=headers("root"), json={**scope, "context": catalogue["context"],
+        "operation": action["id"], "revision": action["revision"], "arguments": arguments})
+    assert response.status_code == 200, response.text
+    assert get(client, path, user="root") == prior
+    token = response.json()["token"]
+    executed = client.post(base + "/execute", headers=headers("root"), json={"token": token, "confirmed": True})
+    assert executed.status_code == 200, executed.text
+    current = get(client, path, user="root")
+    replay = client.post(base + "/execute", headers=headers("root"), json={"token": token, "confirmed": True})
+    assert replay.status_code == 409  # Native reviewed-operation tokens become stale after the change.
+    assert get(client, path, user="root") == current and current != prior
+    assert get(client)["totals"] == original
+    ordinary = client.post(base + "/catalog", headers=headers(), json=scope).json()
+    assert action["id"] not in {row["id"] for row in ordinary["operations"]}

@@ -94,6 +94,30 @@ ACTIONS = {
     "translate": ("Translate", r"translate|locali[sz]e", 0.5),
 }
 BY_OBJECT = {obj.id: obj for obj in OBJECTS}
+COUNTS = {word: index for index, word in enumerate(
+    ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"), start=1)}
+
+
+def _object_pattern(obj):
+    terms = {*obj.terms, obj.label.casefold()}
+    for term in tuple(terms):
+        if term.endswith("analysis"):
+            terms.add(term[:-2] + "es")
+        elif term.endswith("y") and not term.endswith(("ay", "ey")):
+            terms.add(term[:-1] + "ies")
+        elif not term.endswith("s"):
+            terms.add(term + "s")
+    return r"(?:" + "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True)) + r")"
+
+
+def _units(request, intents):
+    units = {}
+    count = r"(\d{1,3}|" + "|".join(COUNTS) + r")"
+    for identifier in intents:
+        obj = BY_OBJECT[identifier.split(".")[0]]
+        matches = re.findall(r"\b" + count + r"\s+(?:(?:separate|distinct|new|different)\s+)?" + _object_pattern(obj) + r"\b", request)
+        units[obj.id] = max([int(value) if value.isdigit() else COUNTS[value] for value in matches] or [1])
+    return units
 
 
 def definition(identifier: str) -> dict | None:
@@ -137,7 +161,7 @@ def _clause_intents(request):
         clause = re.sub(r"\b(?:perform|conduct|do|provide|run)\s+(?:an?\s+)?(?=(?:financial\s+|data\s+)?analysis\b)", "analyze ", clause)
         found = []
         for obj in OBJECTS:
-            if not any(re.search(r"\b" + re.escape(term) + r"\b", clause) for term in (*obj.terms, obj.label.casefold())):
+            if not re.search(r"\b" + _object_pattern(obj) + r"\b", clause):
                 continue
             if obj.id == "document" and found:
                 continue
@@ -156,7 +180,8 @@ def _clause_intents(request):
 
 def classify(text: str, *, previous: list[str] | None = None) -> dict:
     request = instruction(text)
-    new_work = bool(re.search(r"\b(?:another|separate|new|different)\s+(?:rfp|proposal|task|document|report|project)\b", request))
+    objects = "|".join(_object_pattern(obj) for obj in OBJECTS)
+    new_work = bool(re.search(r"\b(?:another|separate|new|different|second|third)\s+(?:" + objects + r"|task|project)\b", request))
     followup = bool(re.match(r"(?:please\s+)?(?:revise|update|change|shorten|expand|fix that|try again|make it|add |remove |continue|actually|instead|also )", request))
     matches = _clause_intents(request)
     # A follow-up action can change intent without treating ten revisions as
@@ -172,6 +197,8 @@ def classify(text: str, *, previous: list[str] | None = None) -> dict:
         reason = "Requested action and business object matched; confirm if inaccurate." if matches else "No sufficiently specific requested business activity was recognized."
     if len(matches) > 4:
         matches, confidence, reason = [], "ambiguous", "Too many plausible activities; choose the intended work."
-    size = "large" if re.search(r"\b(?:complex|comprehensive|extensive)\b|\b(?:[2-9]\d|\d{3,})[- ]page", request) else "standard"
+    units = _units(request, matches)
+    size = "large" if (re.search(r"\b(?:complex|comprehensive|extensive)\b|\b(?:1[1-9]|[2-9]\d|\d{3,})[- ]pages?", request)
+                       or any(value > 50 for value in units.values())) else "standard"
     return {"intents": list(dict.fromkeys(matches)), "confidence": confidence, "reason": reason,
-            "new_work": new_work, "size": size, "version": VERSION}
+            "new_work": new_work, "size": size, "units": units, "version": VERSION}

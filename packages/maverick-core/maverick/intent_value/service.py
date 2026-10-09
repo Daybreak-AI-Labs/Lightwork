@@ -19,10 +19,18 @@ def _label(intents):
     return "; ".join(definition(identifier)["label"] for identifier in intents) or "Unclassified work"
 
 
+def _classification_changed(row, classified):
+    if row["intents"] != classified["intents"] or row["classification"]["size"] != classified["size"]:
+        return True
+    objects = {identifier.split(".")[0] for identifier in classified["intents"]}
+    old, new = row["classification"].get("units", {}), classified.get("units", {})
+    return any(old.get(key, 1) != new.get(key, 1) for key in objects)
+
+
 def _snapshot(row, *, reason, actor, refresh_assumptions=False):
     if len(row["estimates"]) >= MAX_HISTORY:
         raise ValueError("This work item needs estimate-history archival before another recalculation.")
-    inputs = (calculation.assumptions(row["intents"], size=row["classification"]["size"], specialists=row["source"]["specialists"])
+    inputs = (calculation.assumptions(row["intents"], size=row["classification"]["size"], specialists=row["source"]["specialists"], units=row["classification"].get("units", {}))
               if refresh_assumptions or not row["estimates"] else copy.deepcopy(row["estimates"][-1]["assumptions"]))
     value = calculation.estimate(row["source"], inputs)
     value.update(version=len(row["estimates"]) + 1, at=time.time(), reason=reason, actor=actor,
@@ -37,13 +45,14 @@ def refresh(world):
     observations = sources.collect(world)
     live = set()
     for source in observations:
+        classified = source.get("executed_classification") or source["classification"]
         identifier = "IVW-" + digest([source["key"], source["owner"]])[:32]
         live.add(identifier)
         current = WORKS.get(identifier)
         if current is None:
             row = {"id": identifier, "owner": source["owner"], "source": source,
-                   "intents": list(source["classification"]["intents"]),
-                   "classification": source["classification"], "estimates": [], "corrections": [],
+                   "intents": list(classified["intents"]),
+                   "classification": classified, "estimates": [], "corrections": [],
                    "confirmations": [], "deleted": False, "corrected": False}
             row["label"] = _label(row["intents"])
             _snapshot(row, reason="Original estimate", actor="system")
@@ -52,11 +61,10 @@ def refresh(world):
             except RecordConflict:
                 continue  # Concurrent refresh already owns this identity.
         elif current["source"]["source_digest"] != source["source_digest"] or current.get("deleted"):
-            def update(row, source=source):
+            def update(row, source=source, classified=classified):
                 row.update(source=source, deleted=False)
-                if (not row["corrected"] and source["classification"]["intents"]
-                        and row["intents"] != source["classification"]["intents"]):
-                    row.update(intents=source["classification"]["intents"], classification=source["classification"])
+                if not row["corrected"] and classified["intents"] and _classification_changed(row, classified):
+                    row.update(intents=classified["intents"], classification=classified)
                     row["label"] = _label(row["intents"])
                     _snapshot(row, reason="Requested intent became identifiable or explicitly changed", actor="system", refresh_assumptions=True)
                 else:
@@ -81,19 +89,25 @@ def refresh(world):
     return conversions(WORKS.list(limit=sources.MAX_RECORDS + 1))
 
 
-def correct(identifier, *, intents, size, expected_revision, reason, actor, guard):
+def correct(identifier, *, intents, size, expected_revision, reason, actor, guard, units=None):
     if len(intents) > 4 or len(set(intents)) != len(intents) or any(definition(value) is None for value in intents):
         raise ValueError("Choose up to four distinct business activities, or none if unknown.")
     if size not in {"standard", "large"} or not reason.strip():
         raise ValueError("Choose a size assumption and explain the correction.")
+    objects = {definition(identifier)["object"] for identifier in intents}
+    if units is not None and (set(units) - objects or any(type(value) is not int or not 1 <= value <= 50 for value in units.values())):
+        raise ValueError("Choose 1–50 deliverables for each selected business object; use uncertain size for larger batches.")
     def update(row):
         if row.get("deleted"):
             raise ValueError("The source work was removed.")
+        previous_units = row["classification"].get("units", {})
+        corrected_units = {key: (units if units is not None else previous_units).get(key, 1) for key in objects}
         row["corrections"].append({"at": time.time(), "actor": actor, "reason": reason[:1000],
-                                   "before": row["intents"], "after": intents, "size": size})
+                                   "before": row["intents"], "after": intents, "size": size,
+                                   "before_units": previous_units, "units": corrected_units})
         row.update(intents=list(intents), label=_label(intents), corrected=True,
                    classification={**row["classification"], "intents": list(intents), "confidence": "corrected", "size": size,
-                                   "reason": "Authorized user correction"})
+                                   "reason": "Authorized user correction", "units": corrected_units})
         _snapshot(row, reason="Intent correction: " + reason[:1000], actor=actor, refresh_assumptions=True)
     return WORKS.update(identifier, update, expected_revision=expected_revision, action="intent_value.corrected", actor=actor, effect_guard=guard)
 

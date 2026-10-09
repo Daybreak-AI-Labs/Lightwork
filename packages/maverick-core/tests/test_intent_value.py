@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import secrets
 import time
 
 import pytest
@@ -296,6 +298,34 @@ def test_outcome_compares_estimates_and_keeps_failed_attempt_costs(world):
     assert value["after_known_cost_per_run"] == 4
 
 
+def test_new_business_work_in_same_thread_is_separate_beyond_rfp(world):
+    root = goal(world, "Review an invoice")
+    goal(world, "Review another invoice", parent=root)
+    result = report(world)
+    assert result["totals"]["performed_work"] == 2
+    assert len(result["rows"]) == 2
+
+
+def test_observed_intent_change_cannot_revalue_already_executed_work(world):
+    root = goal(world)
+    before = report(world)
+    goal(world, "Now analyze financial analysis", parent=root, performed=False, cost=None)
+    after = report(world)
+    assert after["totals"]["gross_estimated_labor_value"] == before["totals"]["gross_estimated_labor_value"]
+    assert after["rows"][0]["intents"] == ["rfp.draft"]
+    stored = service.WORKS.get(after["rows"][0]["id"])
+    assert "financial_analysis.analyze" in stored["source"]["observed_intents"]
+
+
+def test_multiple_explicit_deliverables_preserve_count_and_component_overlap(world):
+    goal(world, "Draft two RFPs and review those two RFPs")
+    result = report(world)
+    single = taxonomy.definition("rfp.draft")["benchmark"]
+    avoided = single["minutes"] * single["attributable_share"] - single["review_minutes"]
+    assert result["totals"]["gross_estimated_labor_value"] == 2 * avoided
+    assert result["totals"]["performed_work"] == 1
+
+
 def test_measured_receipts_replace_runtime_and_reprocessing_does_not_double_count(world, monkeypatch):
     from datetime import datetime, timezone
 
@@ -351,6 +381,66 @@ def test_native_flow_driver_emits_value_receipt_and_links_its_agent(world, monke
     assert result["totals"]["performed_work"] == 1
     assert result["totals"]["known_execution_costs"] == {"USD": 2}
     assert result["rows"][0]["processes"] == [flow.id]
+    # A workflow can incur additional action/child costs beyond the agent's
+    # episode. Parent/agent reconciliation must retain that residual once.
+    run.cost_dollars = 5
+    store.save_run(run)
+    assert report(world)["totals"]["known_execution_costs"] == {"USD": 5}
     # A dry run never produces an economic work item.
     execution.execute(flow, owner="alice", agent_runner=lambda *_: ("mock", 1.0), action_runner=lambda *_: (None, None), record_outcomes=False)
     assert report(world)["totals"]["performed_work"] == 1
+
+
+@pytest.fixture
+def value_postgres(world, postgres_test_dsn, monkeypatch):
+    import psycopg
+    from maverick import crypto_at_rest, governed_records
+    from maverick.world_model_backends.postgres import PostgresWorldModel
+    from psycopg import sql
+    from psycopg.conninfo import make_conninfo
+
+    del world  # Reuse isolated policy/audit fixtures; execution sources are real Postgres.
+    key = secrets.token_bytes(32)
+    monkeypatch.setenv("MAVERICK_ENCRYPTION_KEY", key.hex())
+    monkeypatch.setenv("MAVERICK_ENCRYPTION_KEY_DIGEST", "sha256:" + hashlib.sha256(key).hexdigest())
+    monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "postgres")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    crypto_at_rest._reset_shared_key_identity_for_testing()
+    governed_records._reset_process_authority_pin_for_testing()
+    role, password = "iv_test_" + secrets.token_hex(8), secrets.token_urlsafe(32)
+    with psycopg.connect(postgres_test_dsn, autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOBYPASSRLS").format(sql.Identifier(role), sql.Literal(password)))
+        try:
+            admin.execute(sql.SQL("CREATE SCHEMA {} AUTHORIZATION {}").format(sql.Identifier(role), sql.Identifier(role)))
+            dsn = make_conninfo(postgres_test_dsn, user=role, password=password, options=f"-c search_path={role}")
+            monkeypatch.setenv("MAVERICK_PG_DSN", dsn)
+            with PostgresWorldModel(dsn=dsn) as pg:
+                yield pg
+        finally:
+            admin.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(role)))
+            admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+            crypto_at_rest._reset_shared_key_identity_for_testing()
+            governed_records._reset_process_authority_pin_for_testing()
+
+
+def test_live_postgres_value_ledger_tenant_isolation_and_reprocessing(value_postgres):
+    pg = value_postgres
+    with tenant_scope(tenant="value-test"):
+        root = goal(pg)
+        goal(pg, "Revise this RFP", parent=root)
+        goal(pg)
+        goal(pg)
+        first = report(pg)
+        assert first["totals"]["performed_work"] == 3
+        assert first["totals"]["known_execution_costs"] == {"USD": 8}
+        assert report(pg)["totals"] == first["totals"]
+        proposals = opportunities.evaluate(service.refresh(pg), owner="alice", capabilities=[])
+        assert proposals[0]["current_evidence"]["draft_supported"]
+        original = service.WORKS.get(first["rows"][0]["id"])
+        corrected = service.correct(original["id"], intents=["rfp.review"], size="standard",
+            expected_revision=original["revision"], reason="Actual review", actor="alice", guard=lambda: None)
+        assert corrected["estimates"][0] == original["estimates"][0]
+        assert report(pg)["totals"]["performed_work"] == 3
+        with tenant_scope(tenant="other-value-tenant"):
+            assert report(pg)["totals"]["performed_work"] == 0
+            assert service.WORKS.list(limit=100) == []
