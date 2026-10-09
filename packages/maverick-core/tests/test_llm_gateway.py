@@ -108,6 +108,20 @@ def test_wrong_bearer_is_refused_and_never_forwarded():
     assert gw.list_callers() == []
 
 
+def test_non_ascii_bearer_is_refused_not_raised():
+    # The bearer comes from the Authorization header of an auth-exempt route:
+    # non-ASCII text is a wrong bearer (401), not a TypeError.
+    def exploding_upstream(url, headers, body):
+        raise AssertionError("must not be called")
+
+    status, payload = gw.handle_chat_completion(
+        _body(), caller_token="gw-sécret", upstream=exploding_upstream,
+    )
+    assert status == 401
+    assert "bearer" in payload["error"]["message"].lower()
+    assert gw.verify_gateway_bearer("é") is False
+
+
 def test_screening_refusals_are_explained():
     streaming, payload = gw.handle_chat_completion(
         _body(stream=True), caller_token="gw-secret", upstream=_ok_upstream,

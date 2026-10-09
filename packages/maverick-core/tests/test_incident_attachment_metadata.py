@@ -173,6 +173,15 @@ def test_exact_authority_media_and_scope_fail_closed(tmp_path, monkeypatch):
             store.list_for_incident("alpha", "privacy", incident["id"])
 
 
+def test_non_ascii_tenant_scope_is_not_found(tmp_path, monkeypatch):
+    # Tenant ids may be any Unicode text; another tenant's name is a miss,
+    # not a TypeError from the comparison.
+    store, _clock, _principal, incident, _document = _fixture_store(tmp_path, monkeypatch)
+    with tenant_scope(tenant="alpha"):
+        with pytest.raises(iam.IncidentAttachmentNotFound):
+            store.list_for_incident("béta", "privacy", incident["id"])
+
+
 def test_update_rebinds_current_incident_and_document_with_cas(tmp_path, monkeypatch):
     store, _clock, _principal, incident, document = _fixture_store(
         tmp_path, monkeypatch

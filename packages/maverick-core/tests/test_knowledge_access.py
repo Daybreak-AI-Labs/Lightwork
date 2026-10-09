@@ -1952,6 +1952,52 @@ def test_correction_requires_an_independent_reviewer_before_any_mutation(access)
     assert registry.inspect("tenant-a", source)["state"] == "approved"
 
 
+def test_correction_reviewer_independence_compares_non_ascii_names(access):
+    # Principal names may be any Unicode text: a self-review is refused and a
+    # different reviewer proceeds, rather than either raising TypeError.
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "unicode-correction")
+    request = service.submit_request(
+        "tenant-a",
+        "user:josé",
+        source,
+        request_type="correction",
+        reason="Correct the source.",
+        request_key="unicode-correction-case",
+        proposed_correction="Corrected source text.",
+    )
+
+    with pytest.raises(KnowledgeRequestConflict, match="different named reviewer"):
+        service.decide_request(
+            "tenant-a",
+            "user:josé",
+            request["id"],
+            expected_revision=request["revision"],
+            decision="approve",
+            evidence_sha256=_sha("self review"),
+        )
+    with pytest.raises(KnowledgeRequestConflict, match="different named reviewer"):
+        service._ensure_correction_replacement(
+            "tenant-a",
+            {
+                "request_type": "correction",
+                "requested_by": "user:josé",
+                "decided_by": "user:josé",
+            },
+        )
+
+    decided = service.decide_request(
+        "tenant-a",
+        "user:zoë",
+        request["id"],
+        expected_revision=request["revision"],
+        decision="approve",
+        evidence_sha256=_sha("independent review"),
+    )
+    assert decided["status"] == "approved"
+    assert decided["replacement_status"] == "approved"
+
+
 def test_correction_recovers_after_replacement_approval_before_prior_retirement(
     access,
     monkeypatch,

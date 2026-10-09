@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from . import administration_document_access as document_access
+from .constant_time import text_equals
 from .file_lock import (
     ensure_private_directory,
     ensure_private_file,
@@ -1217,7 +1218,7 @@ class GovernedDocumentVault:
         principal_ref: str,
         document_ref: str,
     ) -> document_access.DocumentAuthority:
-        if not hmac.compare_digest(_tenant(tenant_id), self.tenant_id):
+        if not text_equals(_tenant(tenant_id), self.tenant_id):
             raise VaultNotFound("document_vault_document_not_found")
         principal = _principal(principal_ref)
         record = self.get(document_ref)

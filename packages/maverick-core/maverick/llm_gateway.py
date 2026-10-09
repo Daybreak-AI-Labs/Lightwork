@@ -30,7 +30,6 @@ kernel Budget would cap someone else's bill with the platform's knobs.
 from __future__ import annotations
 
 import hashlib
-import hmac as hmac_mod
 import json
 import logging
 import os
@@ -42,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from . import runtime_metrics
+from .constant_time import text_equals
 from .governed_records import GovernedRecordStore, RecordConflict
 
 log = logging.getLogger(__name__)
@@ -383,7 +383,7 @@ def _team_for_token(caller_token: str, settings: Mapping[str, Any]) -> str | Non
         else:
             expected = (os.environ.get(env_name, "") if env_name else "") \
                 or _team_password(team)
-        if expected and hmac_mod.compare_digest(token, expected):
+        if expected and text_equals(token, expected):
             matched.append(team)
     # A malformed deployment environment with duplicate secret VALUES should
     # not make budget identity ambiguous.  Fail closed instead of selecting

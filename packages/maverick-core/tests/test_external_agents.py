@@ -429,6 +429,20 @@ def test_screen_approval_poll_is_owner_scoped_and_rejects_stale_binding():
     assert current["parameters_sha256"]
 
 
+def test_screen_approval_poll_refuses_a_non_ascii_binding():
+    # The binding arrives in the agent's query string: non-ASCII text is a
+    # stale binding (409), not a TypeError from the comparison.
+    _enroll(max_risk="high")
+    verdict = xa.screen("sf-quotebot", "send_contract", risk="high")
+
+    with pytest.raises(xa.ApprovalBindingMismatch, match="binding changed"):
+        xa.approval_status(
+            "sf-quotebot",
+            verdict["approval_id"],
+            expected_binding_sha256="é" * 64,
+        )
+
+
 def test_screen_fails_closed_on_scanner_error_and_shield_block():
     _enroll()
 

@@ -33,6 +33,13 @@ def test_commitment_hides_and_binds():
     assert t.commit("idea")["commitment"] != c["commitment"]  # salted: not guessable
 
 
+def test_non_ascii_commitment_does_not_open():
+    # The commitment is the holder's published text: non-ASCII is a failed
+    # opening, not a TypeError from the comparison.
+    c = t.commit("idea")
+    assert t.opens("é" * 64, c["salt"], "idea") is False
+
+
 def test_recognition_is_not_conception():
     d, _ = _dossier()
     m = t.conception_map(d)

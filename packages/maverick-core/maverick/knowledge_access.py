@@ -20,6 +20,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 
+from .constant_time import text_equals
 from .governed_records import GovernedRecordCapacityError, GovernedRecordStore
 from .knowledge_retrieval import LexicalProjection, SearchCursor, digest, rank, retrieval_passage
 from .paths import canonical_tenant_id, tenant_scope
@@ -2284,7 +2285,7 @@ class KnowledgeAccessService:
             return record
         reviewer = str(record.get("decided_by") or "")
         requester = str(record.get("requested_by") or "")
-        if not reviewer or hmac.compare_digest(reviewer, requester):
+        if not reviewer or text_equals(reviewer, requester):
             raise KnowledgeRequestConflict(
                 "correction approval requires a different named reviewer"
             )
@@ -2558,7 +2559,7 @@ class KnowledgeAccessService:
                 exact_decision == "approve"
                 and current.get("request_type") == "correction"
                 and status not in {"approved", "denied"}
-                and hmac.compare_digest(str(current.get("requested_by") or ""), reviewer)
+                and text_equals(str(current.get("requested_by") or ""), reviewer)
             ):
                 raise KnowledgeRequestConflict(
                     "correction approval requires a different named reviewer"

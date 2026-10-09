@@ -26,6 +26,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from .constant_time import text_equals
 from .governed_document_vault import (
     DEFAULT_MEDIA_TYPES as STOCK_VAULT_MEDIA_TYPES,
 )
@@ -788,7 +789,7 @@ class IncidentAttachmentStore:
         return actor
 
     def _require_tenant(self, tenant_id: object) -> None:
-        if not hmac.compare_digest(_tenant(tenant_id), self.tenant_id):
+        if not text_equals(_tenant(tenant_id), self.tenant_id):
             raise IncidentAttachmentNotFound("incident attachment was not found")
 
     def _resolve_incident(self, incident_kind: str, incident_id: str) -> IncidentAuthority:

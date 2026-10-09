@@ -21,6 +21,7 @@ import os
 import time
 
 from ..approval_cards import ApprovalCardError, digest
+from ..constant_time import text_equals
 
 _DEFAULT_TTL = 7 * 24 * 3600      # a week to act on an approval
 _DECISIONS = ("approved", "rejected")
@@ -175,7 +176,7 @@ def verify_token(token: str, *, now: float | None = None) -> dict | None:
     tenant = str(payload.get("t") or "")
     secret = _secret_for_tenant(tenant)
     try:
-        valid_sig = bool(secret) and hmac.compare_digest(
+        valid_sig = bool(secret) and text_equals(
             sig, _sign(body.encode("ascii"), secret or ""))
     except (UnicodeEncodeError, ValueError):
         return None

@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from .budget import Budget, BudgetExceeded
+from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -1063,7 +1064,7 @@ class GovernanceAgentStore:
             raise GovernanceAgentConfigError(
                 "governance-agent tenant snapshot authority is invalid"
             )
-        if not secrets.compare_digest(snapshot.tenant_id, tenant):
+        if not text_equals(snapshot.tenant_id, tenant):
             raise GovernanceAgentConfigError(
                 "governance-agent tenant snapshot authority is misbound"
             )
