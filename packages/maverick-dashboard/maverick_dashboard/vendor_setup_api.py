@@ -16,7 +16,12 @@ from maverick.vendor_onboarding import deployment_readiness
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import rbac, scim_groups, settings_store
-from .auth import caller_principal, require_global_permission, role_for_principal
+from .auth import (
+    caller_principal,
+    constant_time_equals,
+    require_global_permission,
+    role_for_principal,
+)
 from .draft_api import context_for
 from .workflow_readiness import supplier_setup_readiness
 
@@ -66,7 +71,7 @@ def _authority(request, response, payload=None):
     response.headers["Cache-Control"] = "private, no-store"
     fingerprint, loaded = _configuration()
     supplied = request.headers.get("X-Lightwork-Setup-Context")
-    if supplied is not None and not hmac.compare_digest(supplied, context_for(request)):
+    if supplied is not None and not constant_time_equals(supplied, context_for(request)):
         raise HTTPException(409, "Your account or workspace changed. Reload setup.")
     if payload is not None:
         from .app import _require_same_origin

@@ -1,7 +1,6 @@
 """Account-bound in-app pilot planning and observation entry."""
 from __future__ import annotations
 
-import hmac
 import json
 import secrets
 import time
@@ -25,7 +24,12 @@ from . import (
     outcome_pilot_sources,
     outcome_pilots,
 )
-from .auth import caller_principal, require_global_permission, require_permission
+from .auth import (
+    caller_principal,
+    constant_time_equals,
+    require_global_permission,
+    require_permission,
+)
 from .draft_api import context_for
 
 REVIEW_PURPOSE = "lightwork.outcome-pilot-review.v1"
@@ -127,7 +131,7 @@ def _context(request, *, mutation=False):
         raise HTTPException(403, "Outcome measurement is disabled in Settings or configuration is unavailable.")
     context = context_for(request)
     header = request.headers.get("X-Lightwork-Pilot-Context")
-    if (mutation or header is not None) and not hmac.compare_digest(header or "", context):
+    if (mutation or header is not None) and not constant_time_equals(header or "", context):
         raise HTTPException(409, {
             "code": "pilot_context_changed",
             "message": "The account or workspace changed. Reload the pilot page.",

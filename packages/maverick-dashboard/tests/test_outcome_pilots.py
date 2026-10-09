@@ -177,6 +177,17 @@ def test_release_readiness_route_explains_missing_setup_without_exposing_candida
     assert "normal workflow pilot" in response.json()["readiness"]["next_action"]
 
 
+def test_non_ascii_pilot_context_header_is_refused_as_changed_context(monkeypatch):
+    monkeypatch.setattr(api, "context_for", lambda _request: "alice")
+    monkeypatch.setattr(api, "require_permission", lambda *_args: None)
+    response = TestClient(app, headers={"Origin": "http://testserver"}).get(
+        "/api/v1/outcome-pilots/release-candidates",
+        headers={"X-Lightwork-Pilot-Context": "alicé".encode()},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "pilot_context_changed"
+
+
 def test_improvement_plan_freezes_trusted_versions_but_never_claims_causal_lift(records, monkeypatch):
     value = _candidate_release()
     adapter = SimpleNamespace(observe=lambda tenant, target: _deployment())

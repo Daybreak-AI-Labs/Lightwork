@@ -631,6 +631,23 @@ def test_acs_rejects_relay_state_mismatch_before_verification(_enabled, monkeypa
     assert res.status_code == 401
 
 
+def test_acs_rejects_non_ascii_relay_state_as_a_mismatch_not_a_server_error(
+    _enabled, monkeypatch
+):
+    def _should_not_verify(*args, **kwargs):
+        raise AssertionError("non-ASCII RelayState reached verification")
+
+    monkeypatch.setattr(saml_mod, "verify_acs_response", _should_not_verify)
+    client = _client()
+    _arm_saml_tx(client, state="expected-state")
+    res = client.post(
+        "/saml/acs",
+        data={"SAMLResponse": "signed", "RelayState": "expected-st\u00e4te"},
+        follow_redirects=False,
+    )
+    assert res.status_code == 401
+
+
 def test_acs_rejects_assertion_without_replay_id(_enabled, monkeypatch):
     monkeypatch.setattr(
         saml_mod,

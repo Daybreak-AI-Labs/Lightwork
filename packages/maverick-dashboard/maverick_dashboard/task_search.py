@@ -98,7 +98,7 @@ def page(request, query, *, cursor="", limit=100, expected="", allow_empty=False
     if len(query) > 256 or not query and not allow_empty:
         raise HTTPException(422, "Enter up to 256 characters to search your tasks.")
     current = context(request)
-    if expected and not hmac.compare_digest(expected, current):
+    if expected and not auth.constant_time_equals(expected, current):
         raise HTTPException(409, "Your signed-in account, workspace or access changed. Reload Tasks before reading private results.")
     before = _position(cursor, query, current)
     limit = max(1, min(int(limit), 100))

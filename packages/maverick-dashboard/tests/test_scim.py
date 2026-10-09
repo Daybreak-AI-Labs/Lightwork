@@ -88,6 +88,12 @@ class TestAuth:
         assert c.get("/scim/v2/Users", headers=_auth(tok)).status_code == 200
         assert c.get("/scim/v2/Users", headers=_auth("wrong")).status_code == 401
 
+    def test_non_ascii_hashed_secret_refuses_with_401_not_a_server_error(self, monkeypatch):
+        # A hashed secret pasted with a stray non-ASCII character matches no
+        # bearer; it must not turn every provisioning call into a 500.
+        monkeypatch.setenv("MAVERICK_SCIM_TOKEN", "sha256:abc\u2026")  # pragma: allowlist secret
+        assert _client().get("/scim/v2/Users", headers=_auth("wrong")).status_code == 401
+
     def test_deprovision_revokes_live_sessions(self, client):
         # Deprovisioning must end current access (#58), not just future logins:
         # the SCIM user's identifiers get a revocation epoch so live sessions die.

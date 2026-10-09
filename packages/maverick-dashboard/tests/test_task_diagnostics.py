@@ -46,3 +46,19 @@ def test_expiry_and_missing_audit_refuse_download(monkeypatch,expired,audit_ok,s
     with pytest.raises(HTTPException) as error:
         diagnostic.download(object(),'OTD-a',digest)
     assert error.value.status_code == status
+
+
+def test_non_ascii_download_digest_is_refused_as_a_mismatch(monkeypatch):
+    _download(monkeypatch)
+    with pytest.raises(HTTPException) as error:
+        diagnostic.download(object(), 'OTD-a', 'é' * 64)
+    assert error.value.status_code == 409
+
+
+def test_non_ascii_prepare_context_is_refused_before_reading_the_task(monkeypatch):
+    monkeypatch.setattr(diagnostic, '_app', lambda: SimpleNamespace(_require_same_origin=lambda request: None))
+    monkeypatch.setattr(diagnostic, 'context_for', lambda _: 'context-a')
+    monkeypatch.setattr(diagnostic, '_goal', lambda *args: pytest.fail('non-ASCII context reached the task'))
+    with pytest.raises(HTTPException) as error:
+        diagnostic.prepare_report(object(), 7, diagnostic.PrepareIn(context='context-ä'))
+    assert error.value.status_code == 409

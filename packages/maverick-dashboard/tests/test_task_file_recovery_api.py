@@ -91,6 +91,12 @@ def test_foreign_admin_context_and_arbitrary_path_cannot_restore(fixture):
     assert response.status_code == 422
 
 
+def test_non_ascii_file_context_header_is_refused_as_changed_not_a_server_error(fixture):
+    client, _, goal, _ = fixture
+    response = client.get(f"/api/v1/task-files/{goal}", headers={"X-Lightwork-File-Context": "contéxt".encode()})
+    assert response.status_code == 409, response.text
+
+
 def test_deployment_managed_capture_is_not_waived(fixture, monkeypatch):
     client, _, goal, _ = fixture
     monkeypatch.setenv("LIGHTWORK_WORKSPACE_JOURNAL", "0")

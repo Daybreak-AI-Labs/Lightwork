@@ -143,6 +143,14 @@ def test_receipt_read_rechecks_current_goal_owner(isolated):
     assert response.status_code == 404
 
 
+def test_non_ascii_task_model_context_is_refused_as_changed_without_a_start(isolated):
+    client, world, runs = isolated
+    response = client.post("/api/v1/goals", headers={"Idempotency-Key": "non-ascii-model-context"},
+                           json={"title": "Review", "task_model": "any-model", "task_model_context": "contéxt"})
+    assert response.status_code == 409, response.text
+    assert not runs and world.list_goals() == []
+
+
 def _revoke_when_dispatch_begins(monkeypatch):
     """Authority is lost after the route finished and before the run is admitted."""
     from maverick_dashboard import task_model_selection_api

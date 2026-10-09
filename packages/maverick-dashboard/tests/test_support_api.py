@@ -80,6 +80,13 @@ def test_expired_context_or_admin_cannot_collect_or_download_preview(support):
     assert not audits
 
 
+def test_non_ascii_support_context_header_is_refused_as_changed_not_a_server_error(support):
+    client, _identity, audits = support
+    stale = {"X-Lightwork-Support-Context": "contéxt".encode()}
+    assert client.post("/api/v1/support/preview", headers=stale, json={}).status_code == 409
+    assert not audits
+
+
 def test_preview_expiry_and_encryption_refuse_unreviewed_download(support, monkeypatch):
     client, identity, audits = support
     preview = client.post("/api/v1/support/preview", json={}).json()

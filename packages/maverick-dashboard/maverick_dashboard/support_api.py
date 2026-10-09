@@ -25,7 +25,12 @@ from maverick.paths import data_dir
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import has_global_permission, require_global_permission, require_permission
+from .auth import (
+    constant_time_equals,
+    has_global_permission,
+    require_global_permission,
+    require_permission,
+)
 from .draft_api import context_for
 
 router = APIRouter()
@@ -51,7 +56,7 @@ def _admit(request: Request) -> str:
     if not _enabled():
         raise HTTPException(403, "Support report collection is disabled in Settings or its configuration is unavailable.")
     context = context_for(request)
-    if not hmac.compare_digest(request.headers.get("X-Lightwork-Support-Context", ""), context):
+    if not constant_time_equals(request.headers.get("X-Lightwork-Support-Context", ""), context):
         raise HTTPException(409, "The workspace or signed-in account changed. Reload Help before preparing a report.")
     return context
 

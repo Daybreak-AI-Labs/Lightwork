@@ -1,8 +1,6 @@
 """Plain task-local AI choices; never modifies installed model settings."""
 from __future__ import annotations
 
-import hmac
-
 from fastapi import APIRouter, HTTPException, Request, Response
 from maverick import task_model_selection as native
 
@@ -32,7 +30,7 @@ def selection(request, model="", effort="", context="", *, request_identity=None
         return None
     if request_identity is not None and not request_identity.strip():
         raise HTTPException(422, "Keep one request identity for this AI choice and read its original admission before retrying.")
-    if not isinstance(context, str) or not hmac.compare_digest(context, context_for(request)):
+    if not isinstance(context, str) or not auth.constant_time_equals(context, context_for(request)):
         raise HTTPException(409, "Account or workspace changed. Refresh the AI choices before starting.")
     try:
         value = native.validate({"model": model, "effort": effort})

@@ -432,6 +432,12 @@ def test_key_creation_needs_same_account_context_and_explicit_true(monkeypatch):
     assert client.post(path, json={"confirm": True}, headers=headers).status_code == 409
 
 
+def test_non_ascii_recovery_context_header_is_refused_as_changed_not_a_server_error():
+    client = api_client()
+    headers = {**context(client), "X-Lightwork-Recovery-Context": "contéxt".encode()}
+    assert client.post("/api/v1/recovery/key", json={"confirm": True}, headers=headers).status_code == 409
+
+
 def test_installation_retirement_requires_global_authority_context_and_explicit_review(monkeypatch):
     client = api_client()
     headers = context(client)

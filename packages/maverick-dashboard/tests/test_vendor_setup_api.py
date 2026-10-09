@@ -147,6 +147,11 @@ def test_stale_credentials_context_or_role_cannot_bind(client):
     assert bind(client, credential(name="foreign-jira", owner="user:foreign")).status_code == 409
 
 
+def test_non_ascii_setup_context_header_is_refused_as_changed_not_a_server_error(client):
+    response = client.get("/api/v1/vendor-setup", headers={"X-Lightwork-Setup-Context": "contéxt".encode()})
+    assert response.status_code == 409, response.text
+
+
 def test_authority_generation_compare_and_swap_and_stable_resource_owner(client):
     activate(client)
     credential_a = credential()

@@ -158,6 +158,15 @@ def test_mutation_requires_current_review_fixed_catalog_and_same_origin():
     assert app.state.voice_setup.job is None
 
 
+def test_non_ascii_voice_context_header_is_refused_as_changed_not_a_server_error():
+    c = client()
+    _headers, body = review(c)
+    stale = {"X-Lightwork-Voice-Context": "contéxt".encode()}
+    assert c.get(ENDPOINT, headers=stale).status_code == 409
+    assert c.post(ENDPOINT + "/download", headers=stale, json=body).status_code == 409
+    assert app.state.voice_setup.job is None
+
+
 def test_tenant_admin_cannot_control_shared_model_and_old_account_context_is_refused(monkeypatch):
     c = client()
     headers, body = review(c)

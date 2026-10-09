@@ -17,7 +17,7 @@ from maverick.file_lock import ensure_private_directory
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import _authorization_principal, require_global_permission
+from .auth import _authorization_principal, constant_time_equals, require_global_permission
 from .recovery_mode import enabled, isolated
 
 router = APIRouter()
@@ -35,7 +35,7 @@ def _admit(request: Request, *, mutation: bool = False) -> str:
         context = _context(request)
     except (recovery.RecoveryError, OSError, ValueError) as exc:
         raise HTTPException(409, str(exc)) from exc
-    if mutation and not hmac.compare_digest(request.headers.get("X-Lightwork-Recovery-Context", ""), context):
+    if mutation and not constant_time_equals(request.headers.get("X-Lightwork-Recovery-Context", ""), context):
         raise HTTPException(409, "The workspace or signed-in account changed. Reload recovery before continuing.")
     return context
 

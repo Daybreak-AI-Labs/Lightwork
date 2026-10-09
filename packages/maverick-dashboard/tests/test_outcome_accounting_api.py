@@ -212,6 +212,20 @@ def test_stale_account_or_workspace_context_fails_before_store_access(client, mo
     assert "workspace changed" in response.text
 
 
+def test_non_ascii_context_header_is_refused_as_stale_not_a_server_error(client, monkeypatch):
+    browser, _ = client
+    monkeypatch.setattr(
+        api.default_service, "portfolio_report",
+        lambda **kwargs: pytest.fail("non-ASCII context reached the store"),
+    )
+    response = browser.get(
+        "/api/v1/outcome-accounting",
+        headers={"X-Lightwork-Pilot-Context": "workspace-contéxt".encode()},
+    )
+    assert response.status_code == 409
+    assert "workspace changed" in response.text
+
+
 def test_portfolio_api_is_paginated_and_never_embeds_full_event_histories(client):
     browser, _ = client
     headers = {"X-Test-Admin": "1"}

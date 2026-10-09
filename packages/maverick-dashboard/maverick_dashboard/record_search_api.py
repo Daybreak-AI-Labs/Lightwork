@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 from typing import Literal
 from urllib.parse import quote
@@ -12,7 +11,7 @@ from maverick import config
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import require_permission
+from .auth import constant_time_equals, require_permission
 from .draft_api import context_for
 from .record_search import search
 from .record_search_sources import sources_for
@@ -52,7 +51,7 @@ async def search_records(request: Request, response: Response, body: SearchIn):
     context = page_context(request).get("record_search_context")
     if not context:
         raise HTTPException(403, "Record search is disabled in Settings or configuration is unavailable.")
-    if not hmac.compare_digest(request.headers.get("X-Lightwork-Search-Context", ""), context):
+    if not constant_time_equals(request.headers.get("X-Lightwork-Search-Context", ""), context):
         raise HTTPException(409, "The account or workspace changed. Reload before searching records.")
     response.headers["Cache-Control"] = "private, no-store"
     if body.mode == "knowledge":

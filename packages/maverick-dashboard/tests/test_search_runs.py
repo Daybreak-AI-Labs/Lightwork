@@ -41,6 +41,12 @@ def test_search_path_not_shadowed_by_goal_id():
     assert any("report" in g["title"].lower() for g in resp.json())
 
 
+def test_search_page_refuses_a_non_ascii_context_header_as_changed():
+    resp = client.get("/api/v1/goals/search-page", params={"q": "billing"},
+                      headers={"X-Lightwork-Task-Search-Context": "contéxt".encode()})
+    assert resp.status_code == 409, resp.text
+
+
 def test_goals_page_renders_search_box():
     resp = client.get("/goals")
     assert resp.status_code == 200

@@ -697,6 +697,7 @@ async def saml_acs(request: Request):
         return JSONResponse(
             {"detail": "SAML needs the browser-login session secret"}, status_code=503
         )
+    from maverick.constant_time import text_equals
     from maverick.web_session import verify_session
 
     raw_tx = request.cookies.get(TX_COOKIE)
@@ -729,7 +730,7 @@ async def saml_acs(request: Request):
     relay_state = str(form.get("RelayState") or "")
     if not saml_response:
         return _tx_error("missing SAMLResponse", status_code=400)
-    if not relay_state or not secrets.compare_digest(relay_state, tx_state):
+    if not relay_state or not text_equals(relay_state, tx_state):
         log.warning("SAML ACS: RelayState mismatch (possible login CSRF)")
         return _tx_error("invalid SAML login transaction", status_code=401)
     relay = _safe_relay_state(return_to, cfg.default_relay_state)

@@ -1,7 +1,6 @@
 """Native project planning, reviewed writes and current-source reads."""
 from __future__ import annotations
 
-import hmac
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -15,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from . import rbac
-from .auth import caller_principal, require_permission
+from .auth import caller_principal, constant_time_equals, require_permission
 from .draft_api import context_for
 from .project_reviews_api import _eligible
 
@@ -127,7 +126,7 @@ async def _call(request, response, operation, *, write=False):
     require_enabled(request)
     response.headers["Cache-Control"] = "private, no-store"
     supplied = request.headers.get("X-Lightwork-Project-Context")
-    if (write and supplied is None) or (supplied is not None and not hmac.compare_digest(supplied, context_for(request))):
+    if (write and supplied is None) or (supplied is not None and not constant_time_equals(supplied, context_for(request))):
         raise HTTPException(409, "Your account or workspace changed. Reload this project before continuing.")
     try:
         return await run_in_threadpool(operation)
