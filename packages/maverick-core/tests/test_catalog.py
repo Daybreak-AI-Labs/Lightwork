@@ -262,3 +262,8 @@ def test_load_catalog_timeout_bounds_the_fetch(monkeypatch):
     catalog.load_catalog("skills", indexes=["https://down"])
     assert calls["timeout"] == catalog.FETCH_TIMEOUT
     assert catalog._FETCH_TIMEOUT.get() is None  # reset after the call
+
+
+def test_verify_sha256_refuses_a_lone_surrogate_pin_without_raising():
+    # Catalog JSON can carry a lone surrogate; it is a mismatch, not an exception.
+    assert catalog.verify_sha256(b"content", "\ud800") is False

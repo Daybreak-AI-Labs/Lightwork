@@ -342,3 +342,9 @@ def test_goal_with_no_episodes_mints_zero_receipt(tmp_path):
     assert payload["total_dollars"] == 0
     assert payload["started_at"] is None and payload["ended_at"] is None
     assert br.verify(line, KEY) == br.VALID
+
+
+def test_a_lone_surrogate_signature_is_invalid_not_a_crash():
+    # Receipt JSON can carry a lone surrogate ("\ud800"); verify() classifies, never raises.
+    receipt = json.dumps({"payload": {"count": 1}, "sig": "\ud800"})
+    assert br.verify(receipt, "k" * 32) == br.INVALID

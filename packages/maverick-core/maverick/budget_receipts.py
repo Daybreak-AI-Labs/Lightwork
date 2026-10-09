@@ -49,6 +49,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import file_lock
+from .constant_time import text_equals
 from .paths import data_dir
 
 # Serializes the read-prev -> hash-link -> append sequence within this process;
@@ -198,7 +199,7 @@ def _read_head(chain_path: Path, key: str) -> int | None:
     except (ValueError, TypeError, KeyError):
         return -1
     expected = _sign({"count": count}, key)
-    return count if hmac.compare_digest(expected.encode(), sig.encode()) else -1
+    return count if text_equals(expected, sig) else -1
 
 
 def _write_head(chain_path: Path, count: int, key: str) -> None:
@@ -335,7 +336,7 @@ def verify(receipt_json: str, key: str) -> str:
     if not isinstance(payload, dict) or not isinstance(sig, str):
         return MALFORMED
     expected = _sign(payload, key)
-    return VALID if hmac.compare_digest(expected.encode(), sig.encode()) else INVALID
+    return VALID if text_equals(expected, sig) else INVALID
 
 
 def verify_chain(path: str | Path | None = None, key: str | None = None) -> ChainReport:

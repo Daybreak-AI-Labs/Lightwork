@@ -233,3 +233,8 @@ class TestCLI:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_verify_signature_refuses_a_lone_surrogate_signature_without_raising():
+    # A submitted manifest's JSON can carry a lone surrogate; it fails verification.
+    assert verify_signature({"signature": "sha256=\ud800"}, "topsecret") is False

@@ -50,7 +50,6 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import hashlib
-import hmac
 import json
 import logging
 import threading
@@ -58,6 +57,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .constant_time import text_equals
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -376,7 +376,7 @@ def verify_sha256(content: str | bytes, expected: str) -> bool:
         return False
     raw = content if isinstance(content, bytes) else content.encode("utf-8")
     actual = hashlib.sha256(raw).hexdigest()
-    return hmac.compare_digest(actual.encode(), expected.lower().encode())
+    return text_equals(actual, expected.lower())
 
 
 __all__ = [
