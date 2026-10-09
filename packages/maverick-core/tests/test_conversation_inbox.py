@@ -100,6 +100,31 @@ def test_guidance_requires_fresh_explicit_decision_and_exact_checkpoint_ack(setu
     assert restored == messages
 
 
+def test_compacted_history_does_not_redeliver_consumed_guidance(setup, monkeypatch):
+    world, goal, inbox, _ = setup
+    item = send(inbox, goal, mode="guidance", text="Use only the approved vendor list",
+                files=[module.file_record("vendors.txt", "text/plain", b"Approved vendors")])
+    approve(inbox, goal, item)
+    published, publish = [], module.publish_files
+    monkeypatch.setattr(module, "publish_files", lambda *args: published.append(args) or publish(*args))
+    messages = [{"role": "user", "content": "Original brief"}]
+    module.checkpoint(world, goal, checkpoint_id="12:root:3", messages=messages)
+    assert len(messages) == 2 and len(published) == 1
+    # Compaction summarized the delivered turn, and its marker, away.
+    compacted = [messages[0], {"role": "user", "content": "<stream-summary turns=\"5\">done</stream-summary>"}]
+    module.checkpoint(world, goal, checkpoint_id="12:root:4", messages=compacted)
+    module.checkpoint(world, goal, checkpoint_id="12:root:9", messages=compacted)
+    assert len(compacted) == 2 and len(published) == 1
+    # A history resumed from before the consuming checkpoint, or a retried
+    # episode, has not seen it and still receives the exact same guidance.
+    resumed = [messages[0]]
+    module.checkpoint(world, goal, checkpoint_id="12:root:2", messages=resumed)
+    assert resumed == messages
+    retried = [messages[0]]
+    module.checkpoint(world, goal, checkpoint_id="13:root:0", messages=retried)
+    assert retried == messages
+
+
 def test_revocation_and_disabled_modes_do_not_create_or_consume_work(setup, monkeypatch):
     world, goal, inbox, allowed = setup
     item = send(inbox, goal, mode="guidance")

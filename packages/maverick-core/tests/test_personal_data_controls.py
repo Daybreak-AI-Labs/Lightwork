@@ -137,3 +137,20 @@ def test_a_deleted_fact_is_used_in_none_of_ten_recalls_and_pausing_stops_all_rec
     assert memory.recall("dashboard", "alice") == []
     memory.update("user:alice", "dashboard", "alice", expected_revision=record["revision"], recall=True)
     assert "metric units" in " ".join(str(item) for item in memory.recall("dashboard", "alice"))
+
+
+def test_a_personal_correction_is_recalled_after_a_rebuild_refills_automatic_notes(personal_store, monkeypatch):
+    from maverick import user_notes
+    path = personal_store / "user_notes.ndjson"
+    row = {"channel": "dashboard", "user_id": "alice", "note": "I prefer metric units.", "source_ts": 1}
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    monkeypatch.setattr(user_notes, "default_path", lambda: path)
+    note = memory.records("dashboard", "alice")[0]
+    memory.update("user:alice", "dashboard", "alice", expected_revision=0, note=note["id"],
+                  operation="edit", replacement="I prefer imperial units.")
+    rebuilt = [{"channel": "dashboard", "user_id": "alice", "note": f"Automatic note {index}.", "source_ts": index}
+               for index in range(8)]
+    path.write_text("".join(json.dumps(r) + "\n" for r in rebuilt), encoding="utf-8")
+    recalled = memory.recall("dashboard", "alice", k=8)
+    assert len(recalled) == 8
+    assert "I prefer imperial units." in recalled

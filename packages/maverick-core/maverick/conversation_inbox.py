@@ -361,12 +361,27 @@ def publish_files(world, goal_id, files):
     SubmissionStore(world).admit(goal_id, published, verify_existing=True)
 
 
+def _delivered_earlier(acknowledgement, checkpoint_id):
+    """Whether this same run already passed the checkpoint that consumed it.
+
+    Checkpoint ids are ``<episode>:<agent>:<step>``. Compaction may summarize
+    the delivered turn and its marker away; only a history resumed from before
+    that checkpoint, or another run, has not seen the guidance.
+    """
+    run, _, step = str(checkpoint_id).rpartition(":")
+    then_run, _, then_step = str((acknowledgement or {}).get("checkpoint", "")).rpartition(":")
+    return (bool(run) and run == then_run and step.isdigit() and then_step.isdigit()
+            and int(step) > int(then_step))
+
+
 def checkpoint(world, goal_id, *, checkpoint_id, messages):
     """Deliver exact reviewed guidance at a root model-turn boundary.
 
 Consumed records replay into an absent checkpoint history after a crash, while
-the stable marker prevents duplicate insertion into an existing history. The
-receipt confirms delivery to this boundary, never semantic compliance.
+the stable marker prevents duplicate insertion into an existing history. A
+later checkpoint of the run that consumed it never replays it, even after
+compaction removed the marker. The receipt confirms delivery to this boundary,
+never semantic compliance.
 """
     from .authority_effects import authority_effect_fence
     if not policy()["enabled"] or "guidance" not in policy()["modes"]:
@@ -386,6 +401,8 @@ receipt confirms delivery to this boundary, never semantic compliance.
             inbox.target(goal_id)
             marker = "[Lightwork guidance receipt " + item["id"] + ":" + item["delivery_token"] + "]"
             if marker in history:
+                continue
+            if item["state"] == "consumed" and _delivered_earlier(item.get("acknowledgement"), checkpoint_id):
                 continue
             if item["state"] == "guidance_ready":
                 item = inbox.transition(goal_id, item["id"], revision=item["revision"], state="consuming",
