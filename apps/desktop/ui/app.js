@@ -8,7 +8,9 @@
   var FAST_MS = 600; // poll interval while we expect a quick startup
   var SLOW_MS = 2000; // poll interval after we've shown the trouble card
   var TROUBLE_MS = 6000; // elapsed time, independent of network completion
-  var PROBE_MS = 2500;
+  // Covers the native readiness check: up to 3 s to connect (Windows refuses a
+  // free port after about 2 s), then up to 2 s for the identity headers.
+  var PROBE_MS = 5500;
 
   var statusText = document.getElementById("status-text");
   var trouble = document.getElementById("trouble");

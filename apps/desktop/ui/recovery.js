@@ -10,7 +10,7 @@
         var result = await Promise.race([
           window.__TAURI__.core.invoke("dashboard_readiness"),
           new Promise(function (_, reject) {
-            timer = setTimeout(function () { controller.abort(); reject(new Error("Readiness request timed out.")); }, Math.min(5000, deadline - Date.now()));
+            timer = setTimeout(function () { controller.abort(); reject(new Error("Readiness request timed out.")); }, Math.min(5500, deadline - Date.now()));
           })
         ]);
         if (!result || result.service !== "lightwork-dashboard" || ["ready", "setup_required"].indexOf(result.state) < 0) {

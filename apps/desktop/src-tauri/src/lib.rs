@@ -22,8 +22,20 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuild
 use tauri::{Manager, RunEvent};
 
 #[tauri::command]
-fn retry_dashboard(state: tauri::State<'_, Dashboard>) -> Result<String, String> {
-    state.start()
+async fn retry_dashboard(app: tauri::AppHandle) -> Result<String, String> {
+    // The readiness check can take about two seconds on Windows; keep it off
+    // the main thread so the window stays responsive.
+    tauri::async_runtime::spawn_blocking(move || app.state::<Dashboard>().start())
+        .await
+        .map_err(|_| "The startup check could not complete.".to_string())?
+}
+
+/// Start (or confirm) the dashboard without holding up the window.
+fn start_in_background<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let _ = app.state::<Dashboard>().start();
+    });
 }
 
 #[tauri::command]
@@ -212,9 +224,6 @@ pub fn run() {
     // A different listener already occupying the dashboard port cannot mint a
     // native OAuth ticket accepted by this broker.
     let maintenance_result = std::env::args().any(|argument| argument == "--maintenance-result");
-    if !maintenance_result {
-        let _ = dashboard.start();
-    }
 
     let builder = tauri::Builder::default();
     #[cfg(windows)]
@@ -258,6 +267,10 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     window.navigate(bundled_page_url("maintenance.html"))?;
                 }
+            } else {
+                // The splash polls readiness itself, so the window need not
+                // wait for this check (about two seconds on Windows).
+                start_in_background(app.handle());
             }
             Ok(())
         })
@@ -316,9 +329,7 @@ pub fn run() {
                 }
             }
             "reconnect" => {
-                let _ = reconnect_dashboard(app, || {
-                    let _ = app.state::<Dashboard>().start();
-                });
+                let _ = reconnect_dashboard(app, || start_in_background(app));
             }
             _ => {}
         })

@@ -359,12 +359,20 @@ impl Dashboard {
     }
 
     pub fn start(&self) -> Result<String, String> {
+        self.start_with(dashboard_readiness)
+    }
+
+    fn start_with(&self, probe: impl FnOnce() -> Readiness) -> Result<String, String> {
+        // Windows takes about two seconds to refuse a free port. Probe without
+        // the state lock so support reports and diagnostics stay answerable;
+        // ensure_started still refuses a second owned child.
+        let readiness = probe();
         let mut control = self.0.lock().map_err(|_| "Startup state is unavailable.")?;
         let binary = control.binary.clone();
         let child_environment = control.child_environment.clone();
         control.drain_timeout = Some(configured_drain_timeout(&child_environment)?);
         let recovery = control.recovery;
-        let verified = match dashboard_readiness() {
+        let verified = match readiness {
             Readiness::Ready | Readiness::SetupRequired => true,
             Readiness::NotRunning => false,
             Readiness::Conflict => return Err("Port 8765 is occupied by an unrecognized service. No process was stopped. Close or reconfigure that service, then select Retry; use the support report if the conflict is unclear.".into()),
@@ -729,6 +737,36 @@ mod tests {
             Duration::ZERO,
         ));
         assert_eq!(probes, 1);
+    }
+
+    #[test]
+    fn startup_state_stays_answerable_while_the_readiness_probe_runs() {
+        // On Windows the probe waits about two seconds for a refused connect.
+        // Support reports and diagnostics must not wait behind it.
+        let dashboard = std::sync::Arc::new(Dashboard::with_binary(
+            std::env::temp_dir().join("lightwork-missing-probe-test-runtime.exe"),
+        ));
+        let (probing, probe_started) = std::sync::mpsc::channel();
+        let starter = {
+            let dashboard = dashboard.clone();
+            std::thread::spawn(move || {
+                dashboard.start_with(|| {
+                    probing.send(()).unwrap();
+                    std::thread::sleep(Duration::from_millis(1500));
+                    Readiness::Conflict
+                })
+            })
+        };
+        probe_started.recv().unwrap();
+        let began = Instant::now();
+        assert_eq!(
+            dashboard.startup_support().unwrap().process_state,
+            "not_started"
+        );
+        dashboard.diagnostics().unwrap();
+        assert!(began.elapsed() < Duration::from_millis(500));
+        // A conflicting listener still refuses to start a second dashboard.
+        assert!(starter.join().unwrap().is_err());
     }
 
     #[test]
