@@ -28,6 +28,8 @@ struct Control {
     child_environment: Vec<(OsString, OsString)>,
     recovery: bool,
     drain_timeout: Option<Duration>,
+    // Counts stop requests so a start that probed before one never launches after it.
+    stops: u64,
 }
 
 #[derive(Default)]
@@ -363,11 +365,24 @@ impl Dashboard {
     }
 
     fn start_with(&self, probe: impl FnOnce() -> Readiness) -> Result<String, String> {
+        let stops = self
+            .0
+            .lock()
+            .map_err(|_| "Startup state is unavailable.")?
+            .stops;
         // Windows takes about two seconds to refuse a free port. Probe without
         // the state lock so support reports and diagnostics stay answerable;
         // ensure_started still refuses a second owned child.
         let readiness = probe();
         let mut control = self.0.lock().map_err(|_| "Startup state is unavailable.")?;
+        if control.stops != stops {
+            // Quit, the updater's exit hook or maintenance stopped Lightwork
+            // while this check ran; launching now would outlive that stop.
+            return Err(
+                "Lightwork was stopped during the startup check. Select Retry to start it again."
+                    .into(),
+            );
+        }
         let binary = control.binary.clone();
         let child_environment = control.child_environment.clone();
         control.drain_timeout = Some(configured_drain_timeout(&child_environment)?);
@@ -492,6 +507,7 @@ fn stop_control_with_budget(
     grace: Duration,
     force: Duration,
 ) -> Result<Instant, String> {
+    control.stops = control.stops.wrapping_add(1);
     let start = Instant::now();
     let mut deadline = start + grace + force;
     if let Some(child) = control.child.as_mut() {
@@ -767,6 +783,27 @@ mod tests {
         assert!(began.elapsed() < Duration::from_millis(500));
         // A conflicting listener still refuses to start a second dashboard.
         assert!(starter.join().unwrap().is_err());
+    }
+
+    #[test]
+    fn a_start_whose_readiness_check_outlived_a_stop_launches_nothing() {
+        // Quitting, or the updater's exit hook, during the probe must not
+        // leave a newly launched dashboard behind the closing app.
+        let dashboard = Dashboard::with_binary(
+            std::env::temp_dir().join("lightwork-missing-stop-race-test-runtime.exe"),
+        );
+        let result = dashboard.start_with(|| {
+            dashboard.stop_owned();
+            Readiness::NotRunning
+        });
+        assert_eq!(
+            result.unwrap_err(),
+            "Lightwork was stopped during the startup check. Select Retry to start it again."
+        );
+        assert!(!dashboard
+            .diagnostics()
+            .unwrap()
+            .contains("Starting Lightwork"));
     }
 
     #[test]
