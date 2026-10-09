@@ -644,6 +644,48 @@ def test_approval_queue_lifecycle(world):
     assert world.decide_approval(aid, "denied") is False
 
 
+def test_approval_webhook_events_reach_subscribers_only_after_commit(world, monkeypatch):
+    """A subscriber to approval events gets a delivery for each one, and each
+    delivery starts only once a second connection can read the committed row."""
+    import psycopg
+    from maverick import approval_notify, audit, webhooks
+    from maverick import webhook_subscriptions as subs
+    from maverick.tools import _ssrf
+
+    monkeypatch.delenv("MAVERICK_WEBHOOK_SUBSCRIPTIONS", raising=False)
+    monkeypatch.setattr(audit, "record", lambda *a, **k: True)
+    monkeypatch.setattr(_ssrf, "resolve_pinned_ip", lambda host: "93.184.216.34")
+    monkeypatch.setattr(webhooks, "_load_config_outbound", lambda: ([], None))
+    monkeypatch.setattr(approval_notify, "approval_created", lambda *a, **k: None)
+    seen: list[tuple[str, dict]] = []
+
+    def committed_state(executor, fn, delivery_id):
+        with psycopg.connect(_DSN) as other:
+            rows = other.execute("SELECT id, status FROM approvals ORDER BY id").fetchall()
+        seen.append((delivery_id, dict(rows)))
+        return True
+
+    monkeypatch.setattr(webhooks, "_submit", committed_state)
+    sub = subs.create_subscription("https://hooks.example.com/a", events=["approval.*"],
+                                   world=world)
+
+    single = world.create_approval("payment", risk="high", detail="support")
+    assert world.decide_approval(single, "approved", decided_by="ana") is True
+    audited = world.create_approval("refund", risk="high", detail="support")
+    event = world.decide_approval_audited(audited, "denied", decided_by="ben")
+    assert event is not None and event.final_status == "denied"
+    assert world.mark_approval_audit_delivered(event.event_id) is True
+
+    deliveries = {d["id"]: d for d in subs.list_deliveries(world=world, subscription_id=sub["id"])}
+    told = [(deliveries[delivery_id]["event_type"], state) for delivery_id, state in seen]
+    assert told == [
+        ("approval.created", {single: "pending"}),
+        ("approval.decided", {single: "approved"}),
+        ("approval.created", {single: "approved", audited: "pending"}),
+        ("approval.decided", {single: "approved", audited: "denied"}),
+    ]
+
+
 def test_decide_approval_rejects_bad_status(world):
     aid = world.create_approval("do thing")
     with pytest.raises(ValueError, match="approved.*denied"):
