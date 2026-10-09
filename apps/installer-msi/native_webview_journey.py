@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import http.client
 import json
 import os
 import re
@@ -38,6 +39,9 @@ from native_webview_fixture import (
     update_server,
     webview_runtime,
 )
+
+# The desktop shell's fixed loopback dashboard port (apps/desktop-runtime probe_address).
+LOOPBACK_PORT = 8765
 
 
 def verified_driver_version(directory: Path, runtime_version: str, output: str) -> str:
@@ -301,7 +305,12 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
 
     def first_owner(self):
         self.record("first-launch-and-named-owner")
-        self.view.wait(lambda: self.view.call("GET", self.view.session + "/url").startswith("http://127.0.0.1:8765/"), timeout=120)
+        try:
+            self.view.wait(lambda: self.view.call("GET", self.view.session + "/url").startswith("http://127.0.0.1:8765/"), timeout=120)
+        except (OSError, RuntimeError, KeyError):
+            self.report["window_at_deadline"] = {**self.startup_diagnostic(), **self.loopback_probe()}
+            self.record("first-launch-and-named-owner")
+            raise RuntimeError("The native window never reached the local dashboard; bounded window_at_deadline diagnostics were retained.") from None
         self.view.navigate("http://127.0.0.1:8765/start")
         # Fresh installations now open owner setup directly; older first-run
         # pages still offer the explicit link.
@@ -329,6 +338,61 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
             raise RuntimeError("Native first-owner setup did not create its protected claim.")
         self.view.screenshot(self.directory / "first-owner.png")
         self.record("first-launch-and-named-owner", passed=True)
+
+    def startup_diagnostic(self):
+        # Classify in the browser with fixed vocabulary: startup messages, URLs,
+        # paths and cookies must never leave the page or enter CI artifacts.
+        script = """
+const origin = location.origin;
+const bundled = {'/': 'bundled_splash', '/index.html': 'bundled_splash',
+  '/recovery.html': 'bundled_recovery', '/maintenance.html': 'bundled_maintenance'};
+const page = origin === 'http://tauri.localhost' ? (bundled[location.pathname] || 'bundled_other')
+  : origin === 'http://127.0.0.1:8765' ? 'dashboard' : 'other';
+const splash = page === 'bundled_splash';
+const node = splash ? document.querySelector('#status-text') : null;
+const text = node ? (node.textContent || '').trim().slice(0, 256) : '';
+const states = [['Starting Lightwork', 'starting'], ['Opening your workspace', 'opening_workspace'],
+  ['Still starting', 'still_starting'], ['Trying again', 'retrying'],
+  ['Port 8765 is occupied by an unrecognized service', 'port_occupied']];
+const trouble = splash ? document.querySelector('#trouble') : null;
+return {page, splash_status: node ? (states.find(([prefix]) => text.startsWith(prefix)) || ['', 'unclassified'])[1] : 'none',
+  trouble_visible: !!trouble && trouble.getClientRects().length > 0, ready: document.readyState === 'complete'};
+"""
+        fallback = {"page": "unavailable", "splash_status": "none", "trouble_visible": False, "ready": False}
+        try:
+            result = self.view.call("POST", self.view.session + "/execute/sync", {"script": script, "args": []})
+            if (not isinstance(result, dict) or set(result) != set(fallback)
+                    or result["page"] not in {"bundled_splash", "bundled_recovery", "bundled_maintenance", "bundled_other", "dashboard", "other"}
+                    or result["splash_status"] not in {"none", "starting", "opening_workspace", "still_starting", "retrying",
+                                                       "port_occupied", "unclassified"}
+                    or type(result["trouble_visible"]) is not bool or type(result["ready"]) is not bool):
+                result = fallback
+        except (OSError, RuntimeError, KeyError):
+            result = fallback
+        return result
+
+    def loopback_probe(self, port: int = LOOPBACK_PORT, timeout: float = 3.0):
+        # The desktop shell's own identity handshake (apps/desktop-runtime
+        # readiness_headers): exactly one X-Lightwork-Service: dashboard-v1.
+        started = time.monotonic()
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+        try:
+            connection.request("GET", "/healthz", headers={"Cache-Control": "no-cache"})
+            response = connection.getresponse()
+            status, identity = response.status, response.getheader("X-Lightwork-Service")
+            response.read(0)
+        except ConnectionRefusedError:
+            listener = "not_listening"
+        except (OSError, http.client.HTTPException):
+            listener = "no_answer"
+        else:
+            if identity != "dashboard-v1":
+                listener = "answered_without_identity"
+            else:
+                listener = {200: "answered_ready", 503: "answered_setup_required"}.get(status, "answered_other_status")
+        finally:
+            connection.close()
+        return {"listener": listener, "latency_ms": min(3000, max(0, int((time.monotonic() - started) * 1000)))}
 
     def owner_diagnostic(self):
         # Classify in the browser: raw alert text, URLs, inputs and cookies must

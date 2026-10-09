@@ -831,3 +831,145 @@ def test_recovery_set_repair_opens_install_and_updates_before_reading_the_versio
     assert module.digest(journey.recovery_runtime) == module.digest(journey.runtime)
     assert module.digest(journey.recovery_installer) == module.digest(journey.base)
     assert marker.read_text(encoding="utf-8") == "before signed repair"
+
+
+def test_startup_diagnostic_executes_real_js_with_fixed_vocabulary(modules):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is needed for the actual browser-script contract check")
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    scripts = []
+
+    class View:
+        session = "/session/synthetic"
+
+        def call(self, _method, _path, payload):
+            scripts.append(payload["script"])
+            return {"private": "unexpected driver payload"}
+
+    journey.view = View()
+    assert journey.startup_diagnostic() == {
+        "page": "unavailable", "splash_status": "none", "trouble_visible": False, "ready": False}
+    source = """
+const assert = require('node:assert/strict');
+const inspect = new Function(SCRIPT);
+global.location = {origin:'http://tauri.localhost', pathname:'/', search:'?private', hash:'#private'};
+let status = 'Still starting\\u2026', trouble = true;
+global.document = {readyState:'complete', get cookie(){throw Error('cookie access forbidden')},
+  querySelector(selector){assert.ok(['#status-text', '#trouble'].includes(selector));
+    return selector === '#status-text' ? {textContent: status} : {getClientRects: () => trouble ? [{}] : []}}};
+assert.deepEqual(inspect(), {page:'bundled_splash', splash_status:'still_starting', trouble_visible:true, ready:true});
+status = 'Starting Lightwork\\u2026'; trouble = false;
+assert.deepEqual(inspect(), {page:'bundled_splash', splash_status:'starting', trouble_visible:false, ready:true});
+status = 'Opening your workspace\\u2026'; assert.equal(inspect().splash_status, 'opening_workspace');
+status = 'Trying again\\u2026'; assert.equal(inspect().splash_status, 'retrying');
+status = 'Port 8765 is occupied by an unrecognized service. private excluded context';
+assert.equal(inspect().splash_status, 'port_occupied');
+status = 'private arbitrary startup text'; assert.equal(inspect().splash_status, 'unclassified');
+assert.equal(JSON.stringify(inspect()).includes('private'), false);
+location.pathname = '/index.html'; assert.equal(inspect().page, 'bundled_splash');
+location.pathname = '/recovery.html';
+assert.deepEqual(inspect(), {page:'bundled_recovery', splash_status:'none', trouble_visible:false, ready:true});
+location.pathname = '/maintenance.html'; assert.equal(inspect().page, 'bundled_maintenance');
+location.pathname = '/private-bundled-page'; assert.equal(inspect().page, 'bundled_other');
+location.origin = 'http://127.0.0.1:8765'; location.pathname = '/private-path';
+assert.deepEqual(inspect(), {page:'dashboard', splash_status:'none', trouble_visible:false, ready:true});
+location.origin = 'https://example.test'; assert.equal(inspect().page, 'other');
+""".replace("SCRIPT", json.dumps(scripts[0]))
+    result = subprocess.run([node, "-e", source], capture_output=True, text=True, check=False, timeout=10)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("behavior,expected", [
+    ("ready", "answered_ready"), ("setup", "answered_setup_required"), ("other", "answered_other_status"),
+    ("no-identity", "answered_without_identity"), ("duplicate-identity", "answered_without_identity"),
+    ("wrong-identity", "answered_without_identity"), ("refused", "not_listening"), ("hang", "no_answer")])
+def test_loopback_probe_uses_the_desktop_shell_identity_handshake(modules, behavior, expected):
+    import socket
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server API
+            requests.append((self.path, self.headers.get("Cache-Control")))
+            if behavior == "hang":
+                import time
+                time.sleep(2)
+                return
+            self.send_response({"ready": 200, "setup": 503, "other": 404}.get(behavior, 200))
+            if behavior in {"ready", "setup", "other", "duplicate-identity"}:
+                self.send_header("X-Lightwork-Service", "dashboard-v1")
+            if behavior == "duplicate-identity":
+                self.send_header("X-Lightwork-Service", "dashboard-v1")
+            if behavior == "wrong-identity":
+                self.send_header("X-Lightwork-Service", "somebody-else")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *_args):
+            pass
+
+    if behavior == "refused":
+        with socket.socket() as free:
+            free.bind(("127.0.0.1", 0))
+            port = free.getsockname()[1]
+        server = None
+    else:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        server.daemon_threads = True
+        port = server.server_address[1]
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        observed = journey.loopback_probe(port=port, timeout=.4)
+    finally:
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+    assert set(observed) == {"listener", "latency_ms"}
+    assert observed["listener"] == expected
+    assert type(observed["latency_ms"]) is int and 0 <= observed["latency_ms"] <= 3000
+    if behavior != "refused":
+        assert requests == [("/healthz", "no-cache")]
+
+
+def test_first_owner_records_the_window_and_port_when_the_dashboard_is_never_reached(tmp_path, modules, monkeypatch):
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.directory = journey.state = tmp_path
+    journey.password = "synthetic-private-form-value"  # pragma: allowlist secret - noncredential redaction fixture
+    journey.report = {"checks": []}
+    deadlines = []
+
+    class View:
+        session = "/session/synthetic"
+
+        def call(self, method, path, payload=None):
+            if method == "GET":
+                return "http://tauri.localhost/private-path?token=private-query"
+            assert path.endswith("/execute/sync") and payload["args"] == []
+            return {"page": "bundled_splash", "splash_status": "still_starting", "trouble_visible": True, "ready": True}
+
+        def wait(self, _condition, **kwargs):
+            deadlines.append(kwargs["timeout"])
+            raise RuntimeError("synthetic private driver error " + journey.password)
+
+        def navigate(self, _address):
+            raise AssertionError("must not navigate before the dashboard answered")
+
+    journey.view = View()
+    monkeypatch.setattr(journey, "loopback_probe", lambda: {"listener": "not_listening", "latency_ms": 3})
+    with pytest.raises(RuntimeError, match="bounded window_at_deadline diagnostics") as error:
+        journey.first_owner()
+    assert deadlines == [120]
+    assert journey.password not in str(error.value) and "private" not in str(error.value)
+    expected = {"page": "bundled_splash", "splash_status": "still_starting", "trouble_visible": True,
+                "ready": True, "listener": "not_listening", "latency_ms": 3}
+    assert journey.report["window_at_deadline"] == expected
+    assert journey.report["checks"] == [] and "owner_setup" not in journey.report
+    written = json.loads((tmp_path / "acceptance.json").read_text(encoding="utf-8"))
+    assert written["window_at_deadline"] == expected and written["phase"] == "first-launch-and-named-owner"
