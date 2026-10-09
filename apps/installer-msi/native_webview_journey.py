@@ -402,6 +402,8 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
             raise RuntimeError("Native first-owner setup did not open its expected page.")
         self.view.fill('input[name="email"]', "native-owner@example.test")
         self.view.fill('input[name="password"]', self.password)
+        # Owner setup asks for the passphrase twice and will not submit otherwise.
+        self.view.fill('input[name="password2"]', self.password)
         self.view.click('input[name="confirm"]')
         # Enter activates the real submit button and verifies keyboard use.
         self.view.keyboard('button[type="submit"]', "\ue007")

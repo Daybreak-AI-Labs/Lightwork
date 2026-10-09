@@ -29,7 +29,7 @@ def test_first_owner_keeps_acceptance_and_records_only_bounded_diagnostics(tmp_p
     journey.report = {"checks": []}
     if mode == "accepted":
         (tmp_path / "dashboard-owner.json").write_text("synthetic claim", encoding="utf-8")
-    screenshots, observations, clicks = [], [], []
+    screenshots, observations, clicks, fills = [], [], [], {}
 
     class View:
         session = "/session/synthetic"
@@ -56,8 +56,8 @@ def test_first_owner_keeps_acceptance_and_records_only_bounded_diagnostics(tmp_p
         def click(self, selector):
             clicks.append(selector)
 
-        def fill(self, _selector, _value):
-            pass
+        def fill(self, selector, value):
+            fills[selector] = value
 
         def keyboard(self, _selector, _value):
             pass
@@ -75,6 +75,8 @@ def test_first_owner_keeps_acceptance_and_records_only_bounded_diagnostics(tmp_p
         assert journey.password not in str(error.value)
         assert screenshots == [] and journey.report["checks"] == []
     assert ('a[href="/auth/local-owner"]' in clicks) == (landing_path == "/start")
+    # Owner setup asks for the passphrase twice; one box left empty blocks the form.
+    assert fills['input[name="password"]'] == fills['input[name="password2"]'] == journey.password
     diagnostic = journey.report["owner_setup"]
     assert set(diagnostic) == {"ready", "path", "form_rejected", "rejection", "claim_exists"}
     assert diagnostic["claim_exists"] == (mode == "accepted")
@@ -584,6 +586,25 @@ def test_journey_id_selectors_exist_in_actual_bundled_and_dashboard_pages(module
         parser.feed(path.read_text(encoding="utf-8"))
     selectors = set(re.findall(r'["\']#([a-z][a-z0-9-]*)', Path(module.__file__).read_text(encoding="utf-8")))
     assert selectors and selectors <= ids, f"Missing real controls: {selectors - ids}"
+
+
+def test_journey_fills_every_required_owner_setup_field(modules):
+    module, _ = modules
+    templates = Path(__file__).parents[2] / "packages/maverick-dashboard/maverick_dashboard/templates"
+    required = set()
+
+    class Form(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            values = dict(attrs)
+            if tag == "input" and "required" in values and values.get("name"):
+                required.add(values["name"])
+
+    for name in ("local_owner.html", "_passphrase_fields.html"):
+        Form().feed((templates / name).read_text(encoding="utf-8"))
+    source = Path(module.__file__).read_text(encoding="utf-8")
+    assert required == {"email", "password", "password2", "confirm"}
+    missing = {name for name in required if f'input[name="{name}"]' not in source}
+    assert not missing, f"The native journey leaves required owner setup fields empty: {missing}"
 
 
 def test_failed_final_report_does_not_replace_original_error(tmp_path, modules, monkeypatch):
