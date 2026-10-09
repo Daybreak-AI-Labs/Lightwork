@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 VERSION = "2026-10-08.1"
+CLASSIFIER_VERSION = "2026-10-09.1"
 EFFECTIVE_DATE = "2026-10-08"
 PROVENANCE = (
     "Provisional Lightwork planning assumption, not a validated industry average. "
@@ -98,6 +100,7 @@ COUNTS = {word: index for index, word in enumerate(
     ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"), start=1)}
 
 
+@lru_cache(maxsize=128)
 def _object_pattern(obj):
     terms = {*obj.terms, obj.label.casefold()}
     for term in tuple(terms):
@@ -110,9 +113,14 @@ def _object_pattern(obj):
     return r"(?:" + "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True)) + r")"
 
 
+# Cache taxonomy rules only; customer requests/classifications are never cached.
+NEW_WORK = re.compile(r"\b(?:another|separate|new|different|second|third)\s+(?:" +
+                      "|".join(_object_pattern(obj) for obj in OBJECTS) + r"|task|project)\b")
+
+
 def _units(request, intents):
     units = {}
-    count = r"(\d{1,3}|" + "|".join(COUNTS) + r")"
+    count = r"(\d{1,6}|" + "|".join(COUNTS) + r")"
     for identifier in intents:
         obj = BY_OBJECT[identifier.split(".")[0]]
         matches = re.findall(r"\b" + count + r"\s+(?:(?:separate|distinct|new|different)\s+)?" + _object_pattern(obj) + r"\b", request)
@@ -180,8 +188,7 @@ def _clause_intents(request):
 
 def classify(text: str, *, previous: list[str] | None = None) -> dict:
     request = instruction(text)
-    objects = "|".join(_object_pattern(obj) for obj in OBJECTS)
-    new_work = bool(re.search(r"\b(?:another|separate|new|different|second|third)\s+(?:" + objects + r"|task|project)\b", request))
+    new_work = bool(NEW_WORK.search(request))
     followup = bool(re.match(r"(?:please\s+)?(?:revise|update|change|shorten|expand|fix that|try again|make it|add |remove |continue|actually|instead|also )", request))
     matches = _clause_intents(request)
     # A follow-up action can change intent without treating ten revisions as
@@ -201,4 +208,4 @@ def classify(text: str, *, previous: list[str] | None = None) -> dict:
     size = "large" if (re.search(r"\b(?:complex|comprehensive|extensive)\b|\b(?:1[1-9]|[2-9]\d|\d{3,})[- ]pages?", request)
                        or any(value > 50 for value in units.values())) else "standard"
     return {"intents": list(dict.fromkeys(matches)), "confidence": confidence, "reason": reason,
-            "new_work": new_work, "size": size, "units": units, "version": VERSION}
+            "new_work": new_work, "size": size, "units": units, "version": CLASSIFIER_VERSION}

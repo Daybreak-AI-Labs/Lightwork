@@ -275,43 +275,61 @@ configuration, privacy and reporting regressions are also checked.
 | 19: historical explainability | Original snapshots survive corrections, override and proposal maturation; history tests |
 | 20: intuitive complete journey | Chromium drives the native opportunity → draft → explicit publish → cancelled/confirmed start → input approval → agent execution → result approval → outcomes → identical Copilot/dashboard totals; only paid inference is replaced by a synthetic runner |
 
+## Operation coverage
+
+Every entry requires the feature to be enabled. Copilot writes additionally use
+the existing enabled operation family, sealed review and explicit confirmation.
+Dates and entity names are selected by the user; revisions and review references
+are obtained from current authorized records.
+
+| Customer job | Direct UI / Copilot | Shared authority and current-state contract | Result and recovery |
+| --- | --- | --- | --- |
+| Read scoped value, costs and evidence | Work value filters, metric cards and explanations / live questions and `work_value_read` | `read_report`, view, current tenant and source access; company scope requires unscoped analytics | Identical scoped numbers, coverage and assumptions; unreadable/pending sources show unavailable/incomplete, with refresh |
+| Correct activity, size or deliverable count | Work explanation / reviewed `work_value_correct` | Owned accessible work, operate, CAS, validated taxonomy/counts, audited mutation | Appended estimate/correction history; execution receipts unchanged; stale version requires fresh review |
+| Apply current assumptions to earlier work | Recalculate in explanation / `work_value_recalculate` | Same owned-work CAS and current tenant assumptions | Original and new estimates remain inspectable; audit-pending is not treated as success |
+| Record optional completion opinion | Optional explanation button / `work_value_confirm` | Setting enabled, owned accessible work, operate, CAS | Deduplicated opinion bound to current source state; never execution evidence; later revisions allowed |
+| Set labor rate/currency and optional confirmation | Company assumptions form / `work_value_settings` | Admin, CAS, deployment rate override remains authoritative | Versioned tenant setting; historical work unchanged until deliberate recalculation; stale replay rejected |
+| Override an effort benchmark | Named benchmark editor / `work_value_benchmark` | Admin, selected stable activity, validated interval/share/review, CAS | Versioned company provenance and prior assumptions; other tenants unchanged |
+| Retain manual steps, defer, decline or reopen | Opportunity explanation / `work_value_decision` | Own recommendation, operate, current evidence, CAS | Persistent decision history; unchanged declined suggestions hidden; created drafts edited through native builder |
+| Use an existing capability | Opportunity action / `work_value_use` | Current accessible specialist/process; current source and ownership checks | Native chat or builder handoff; subsequent actual work linked; selection starts no execution |
+| Create a populated draft | Opportunity build action / `work_value_build` | Current supported evidence, operate, native flow enablement, reservation and CAS | Same saved draft on duplicate/recovered clicks; changed/deleted generation refuses replacement; no activation |
+| Publish, run, approve and inspect adopted work | Existing workflow designer/run views / existing native workflow operations | Existing publication, release, connection, budget, queue and human approval controls | Audit-backed outcomes and separate before/after estimates; partial/failed costs retained; no additional platform credit |
+
 ## Validation record
 
-Focused synthetic verification is not full-product or paid-provider
-certification. Counts below overlap; they are not a sum of unique tests.
+October 9 recheck added regressions for explicit invoice boundaries, multiple
+RFP components, unexecuted intent changes, existing-workflow outcome readback,
+Copilot business-name clarification and ambiguity, dashboard scope parity,
+pending audit access, reviewed settings/benchmark changes, and additional native
+workflow spend above linked agent episodes.
 
-- Final core/API feature run: **36 passed**, including a positive forecast
-  followed by negative before/after improvement when failed-attempt costs are
-  included, and unavailable comparison when additional cost is unknown.
-- Final `MAVERICK_TEST_SECURE_DEFAULT=1` core/API run: **36 passed**.
-- Final Chromium journey/recovery run: **2 passed**. It exercises real dashboard
-  and native builder APIs with synthetic data, metric explanations, correction,
-  Copilot parity, retained manual steps, duplicate draft clicks, 390-pixel layout,
-  keyboard focus, unavailable/retry states and zero scoped axe WCAG violations.
-- Copilot, feature and installer correction rerun: **733 passed**. The initial
-  broader adjacent run had **1,238 passed and 7 failed**. Its failures were the
-  Copilot fallback interaction, page-registry expectation and five installer
-  step-count expectations; all seven pass in the targeted rerun. An intermediate
-  rerun still had one old step-count expectation; that also passes now.
-- Native flow execution/index/hardening regression run: **86 passed**.
-- Ruff, Vulture, JavaScript syntax, diff whitespace, plugin matrix, domain prose,
-  deprecations, gRPC contract, accessibility inventory, schema/release packaging,
-  migration governance and evaluator-anchor governance: **passed**. No Python
-  type checker is configured in this repository; the TypeScript SDK is unchanged.
-- Control/data-plane native queue/worker gate and serial soak: **passed**;
-  60 goals, four workers, no duplicates or lost work. The agent loop is stubbed
-  at its provider boundary, as in the existing harness.
-- Full `scripts/pre-push-lint.sh`: **failed only at the existing secret-baseline
-  gate**, with 19 findings in 13 files. Each flagged file's Git blob is identical
-  to base `cf3804fc18c56ea3efdd773e2e132142ec64b78c`. None belongs to this patch.
-  A separate scan of all 38 changed files using the same baseline settings found
-  **zero new findings**. The baseline and unrelated files were not altered.
-- Full-product, live paid-provider, complete invoice, production Postgres and
-  deployment-scale/load qualification: **not run**. No merge or deployment.
+Recorded local results before the final rebased qualification:
 
-The PR records the exact remote commit and GitHub check state. Earlier browser
-runs exposed missing static routes and narrow
-layout overflow, both fixed. A later signed-audit refresh exceeded the default
-five-second assertion wait while completing correctly; the explicit 15-second
-wait now matches these asynchronous checks. One final verification run was
-interrupted by the execution environment restart and was restarted.
+- Python 3.10 feature suite: **46 passed, 1 skipped**. The skip requires a live
+  PostgreSQL service; that feature test separately **passed** using a disposable
+  PostgreSQL 16 service, encryption and a non-superuser, non-BYPASSRLS role.
+- Secure-default feature suite: **46 passed, 1 skipped** for the same PostgreSQL
+  prerequisite. Existing live PostgreSQL backend tests: **98 passed**.
+- Chromium feature journeys: **3 passed**, including native publication, cancelled
+  and confirmed starts, input approval, queued agent execution, result approval,
+  opportunity conversion, outcome readback and identical Copilot/dashboard totals.
+  Paid inference alone is replaced with a synthetic runner; outbound calls are
+  blocked. Separate checks cover manual preparation, repeated draft clicks,
+  390-pixel layout, keyboard focus, unavailable/retry states and scoped axe checks.
+- Dashboard DOM tests: **2,295 passed**; desktop JavaScript tests: **36 passed**.
+- Adjacent Copilot, flow, installer and release-packaging tests: **783 passed**.
+- Ruff, Vulture and the 17 custom contract/governance commands: **passed**.
+  No Python type checker is configured. The TypeScript SDK is unchanged.
+
+PR #2539 was rebased onto `d741e73f4e70db8eddda212508ebda77398a4c75`, which
+contains the upstream Python 3.10, dependency, secret-baseline, native browser and
+desktop CI repairs from #2538. Those unrelated repairs are not duplicated in this
+feature's diff. The feature's HTML pattern was corrected, its own-server browser
+configuration is discovered by the native test runner, and live PostgreSQL
+coverage is included in the existing database job. Signed offline benchmark
+artifacts are regenerated from a clean source commit, without relaxing verification.
+
+The final PR verification record identifies the exact remote commit and final
+rebased results. Full-product certification, live paid-provider output quality,
+complete invoices, measured employee labor reduction and production/large-tenant
+load qualification are **not claimed**. No merge or deployment is performed.
