@@ -786,20 +786,41 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
         ("managed outside the desktop app", "dashboard_not_owned"),
         ("still stopping", "owned_process_still_stopping"),
         ("operation is unsupported", "operation_unsupported"),
+        ("Automatic restore is unavailable because spending", "accounting_changed"),
+        ("Pause Lightwork from the desktop maintenance controls", "not_paused"),
+        ("requires the single control plane lock", "control_plane_locked"),
+        ("Installation recovery is unfinished", "recovery_unfinished"),
+        ("does not match the verified release", "runtime_not_verified_release"),
     )
+
+    @staticmethod
+    def refusal_fingerprint(detail: str) -> str:
+        """The page script's fingerprint, for matching a retained code to its product text."""
+        sentence = re.sub(r"^Error:\s*", "", detail).split(". ")[0][:200]
+        value = 0x811C9DC5
+        units = sentence.encode("utf-16-le")  # JavaScript hashes UTF-16 code units
+        for index in range(0, len(units), 2):
+            value = ((value ^ int.from_bytes(units[index:index + 2], "little")) * 0x01000193) & 0xFFFFFFFF
+        return f"other:{value:08x}"
 
     def transition_refusal(self):
         script = """
 const node = document.querySelector('#maintenance-details');
 const detail = node ? (node.textContent || '') : '';
 for (const [phrase, code] of arguments[0]) if (detail.includes(phrase)) return code;
-return detail ? 'other' : 'none';
+if (!detail) return 'none';
+// An unlisted refusal leaves only an FNV-1a fingerprint of its first sentence,
+// which is fixed product text that support matches against the source.
+const sentence = detail.replace(/^Error:\\s*/, '').split('. ')[0].slice(0, 200);
+let hash = 0x811c9dc5;
+for (let i = 0; i < sentence.length; i++) hash = Math.imul(hash ^ sentence.charCodeAt(i), 0x01000193) >>> 0;
+return 'other:' + hash.toString(16).padStart(8, '0');
 """
         try:
             value = self.view.call("POST", self.view.session + "/execute/sync",
                                    {"script": script, "args": [list(map(list, self.TRANSITION_REFUSALS))]})
             codes = {code for _phrase, code in self.TRANSITION_REFUSALS} | {"other", "none"}
-            if isinstance(value, str) and value in codes:
+            if isinstance(value, str) and (value in codes or re.fullmatch(r"other:[0-9a-f]{8}", value)):
                 return value
         except (OSError, RuntimeError, KeyError):
             pass

@@ -569,11 +569,19 @@ detail = 'Error: Lightwork is still responding. Installation has not started; re
 assert.equal(classify(table), 'dashboard_still_responding');
 detail = 'Error: Use the rollback authorization from Workspace recovery.';
 assert.equal(classify(table), 'not_a_rollback_grant');
-detail = 'private unknown failure'; assert.equal(classify(table), 'other');
+detail = 'Error: Automatic restore is unavailable because spending differs. Protected files: world.db';
+assert.equal(classify(table), 'accounting_changed');
+detail = 'Error: A private unknown failure. More private text'; console.log(classify(table));
+detail = 'Error: Ünïcode refusal'; console.log(classify(table));
 detail = ''; assert.equal(classify(table), 'none');
 """.replace("SCRIPT", json.dumps(payload["script"])).replace("ARGS", json.dumps(payload["args"]))
     result = subprocess.run([node, "-e", source], capture_output=True, text=True, check=False, timeout=10)
     assert result.returncode == 0, result.stderr
+    # Only a fixed-width fingerprint of the first sentence leaves the window,
+    # and it matches the support-side computation exactly.
+    assert result.stdout.split() == [module.Journey.refusal_fingerprint("Error: A private unknown failure. More"),
+                                     module.Journey.refusal_fingerprint("Ünïcode refusal")]
+    assert "private" not in result.stdout
 
 
 def test_startup_probe_restores_runtime_and_preserves_primary_failure(tmp_path, modules):
