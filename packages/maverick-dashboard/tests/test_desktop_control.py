@@ -102,3 +102,54 @@ assert app.state.lifecycle_supervisor.phase == "stopped"
         if child.poll() is None:
             child.kill()
             child.communicate(timeout=5)
+
+
+def test_helpers_started_by_the_server_never_inherit_the_owned_pipe(tmp_path):
+    script = tmp_path / "synthetic_dashboard.py"
+    observed = tmp_path / "helper.txt"
+    ready = tmp_path / "ready.txt"
+    script.write_text('''
+import socket, subprocess, sys
+from contextlib import asynccontextmanager
+from pathlib import Path
+sys.path[:0] = sys.argv[3:]
+from fastapi import FastAPI
+from maverick_dashboard._server import DashboardServer
+observed, ready = map(Path, sys.argv[1:3])
+@asynccontextmanager
+async def lifespan(app):
+    # A helper started with the default stdin, as PowerShell and tool workers are.
+    try:
+        helper = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.stdout.write(repr(sys.stdin.buffer.read(64)))"],
+                                capture_output=True, text=True, timeout=3)
+        observed.write_text(helper.stdout, encoding="utf-8")
+    except subprocess.TimeoutExpired:
+        observed.write_text("blocked on the owned pipe", encoding="utf-8")
+    ready.write_text("ready", encoding="utf-8")
+    yield
+app = FastAPI(lifespan=lifespan)
+listener = socket.socket()
+listener.bind(("127.0.0.1", 0))
+DashboardServer(app, log_config=None).run(sockets=[listener])
+''', encoding="utf-8")
+    environment = {**os.environ, "MAVERICK_DESKTOP_CONTROL": "stdin-v1"}
+    package_root = Path(__file__).resolve().parents[1]
+    core_root = package_root.parent / "maverick-core"
+    child = subprocess.Popen([sys.executable, "-I", str(script), str(observed), str(ready),
+                              str(package_root), str(core_root)],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             env=environment, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:
+        deadline = time.monotonic() + 20
+        while not ready.exists() and child.poll() is None and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert ready.exists(), "synthetic child did not start"
+        # The helper saw end of input, not the desktop's open control pipe,
+        # and the drain command still reached the server.
+        assert observed.read_text(encoding="utf-8") == "b''"
+        stdout, stderr = child.communicate(DESKTOP_DRAIN, timeout=8)
+        assert child.returncode == 0, (stdout, stderr)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.communicate(timeout=5)

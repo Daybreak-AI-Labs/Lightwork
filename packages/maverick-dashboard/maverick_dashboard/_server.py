@@ -49,6 +49,14 @@ class DashboardServer(uvicorn.Server):
                 # A private raw duplicate avoids a daemon reader holding the
                 # interpreter's buffered stdin lock during unrelated SIGTERM.
                 stream = os.fdopen(os.dup(sys.stdin.fileno()), "rb", buffering=0)
+                # Helpers this server starts (PowerShell, tool workers) inherit
+                # standard input. Give them the null device: one reading the
+                # owned pipe waited until the desktop exited, or took its drain.
+                null = os.open(os.devnull, os.O_RDONLY)
+                try:
+                    os.dup2(null, sys.stdin.fileno())
+                finally:
+                    os.close(null)
             except (AttributeError, OSError, ValueError) as exc:
                 raise RuntimeError("owned desktop control pipe is unavailable") from exc
             threading.Thread(target=_read_desktop_control,
