@@ -757,11 +757,20 @@ async def knowledge_access_page(request: Request, response: Response):
     except Exception:  # noqa: BLE001 - unavailable is distinct from an empty inventory
         purpose_codes = []
         purpose_state = "unavailable"
+    try:
+        from maverick import knowledge_sources
+
+        # The saved-sources panel needs Document search too; without it the
+        # panel would only ask its API to refuse on every visit.
+        sources_available = knowledge_sources.enabled()
+    except Exception:  # noqa: BLE001 - the panel reports unreadable settings itself
+        sources_available = True
     nonce = secrets.token_urlsafe(18)
     page = templates.TemplateResponse(
         request,
         "knowledge_access.html",
         {
+            "knowledge_sources_available": sources_available,
             "knowledge_context": context,
             "knowledge_tenant": tenant,
             "knowledge_actor": actor,

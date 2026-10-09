@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -607,7 +608,7 @@ class ComplianceScopeActionStore:
         if not isinstance(value, dict) or value.get("tenant_id") != tenant:
             raise ComplianceScopeActionIntegrityError(f"{label} tenant binding is invalid")
         digest_value = _sha256(value)
-        if not hmac.compare_digest(digest_value, str(row["integrity_sha256"])):
+        if not text_equals(digest_value, str(row["integrity_sha256"])):
             raise ComplianceScopeActionIntegrityError(f"{label} integrity check failed")
         return value, digest_value
 
@@ -689,7 +690,7 @@ class ComplianceScopeActionStore:
             "SELECT * FROM scope_action_operations WHERE tenant_id=? AND idempotency_key=?",
             (tenant, operation),
         ).fetchone()
-        if row is not None and not hmac.compare_digest(request_sha, str(row["request_sha256"])):
+        if row is not None and not text_equals(request_sha, str(row["request_sha256"])):
             raise ComplianceScopeActionConflict(
                 "idempotency key was already used for a different request"
             )
@@ -996,8 +997,8 @@ class ComplianceScopeActionStore:
         plan: ScopeActionPlan,
     ) -> None:
         catalog = self._get_catalog(connection, tenant, plan.catalog_id, plan.catalog_version)
-        if catalog.status != "published" or not hmac.compare_digest(
-            catalog.definition_sha256, plan.catalog_sha256
+        if catalog.status != "published" or not text_equals(
+            catalog.definition_sha256, str(plan.catalog_sha256)
         ):
             raise ComplianceScopeActionIntegrityError("plan catalog authority pin is invalid")
 
@@ -2039,7 +2040,7 @@ class ComplianceScopeActionStore:
                 "scope-action export signing key must contain at least 32 bytes"
             )
         expected = hmac.new(key, _canonical(export.body), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, export.signature_hmac_sha256):
+        if not text_equals(expected, str(export.signature_hmac_sha256)):
             raise ComplianceScopeActionIntegrityError("scope-action export signature is invalid")
 
     def list_records(self, tenant_id: str, *, limit: int = 200) -> dict[str, tuple]:
@@ -2114,7 +2115,7 @@ class ComplianceScopeActionStore:
                                 dict(item) for item in plan.evidence_task_intents
                             ],
                         }
-                        if not hmac.compare_digest(_sha256(desired), plan.desired_sha256):
+                        if not text_equals(_sha256(desired), str(plan.desired_sha256)):
                             raise ComplianceScopeActionIntegrityError(
                                 "action plan desired digest is invalid"
                             )
@@ -2160,7 +2161,7 @@ class ComplianceScopeActionStore:
                     version=int(publication["version"]),
                 )
                 del definition
-                if not hmac.compare_digest(definition_sha, str(publication["definition_sha256"])):
+                if not text_equals(definition_sha, str(publication["definition_sha256"])):
                     raise ComplianceScopeActionIntegrityError(
                         "catalog publication definition binding is invalid"
                     )

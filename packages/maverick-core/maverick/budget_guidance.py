@@ -64,7 +64,12 @@ personal-quota headroom explicitly unavailable rather than an invented identity.
 """
     from .paths import current_tenant_id_strict
     from .quotas import UsageLedger, _quota_config
-    from .runner import clamp_task_limit, configured_max_dollars, configured_max_wall_seconds
+    from .runner import (
+        configured_max_dollars,
+        configured_max_wall_seconds,
+        requested_goal_dollars,
+        requested_goal_wall_seconds,
+    )
     from .tenant import registry
 
     for value in (max_dollars, max_wall_seconds):
@@ -88,8 +93,10 @@ personal-quota headroom explicitly unavailable rather than an invented identity.
     candidates = []
     try:
         task = {"max_dollars": configured_max_dollars(), "max_wall_seconds": configured_max_wall_seconds()}
-        result["effective"] = {"max_dollars": clamp_task_limit(max_dollars, task["max_dollars"]),
-                               "max_wall_seconds": clamp_task_limit(max_wall_seconds, task["max_wall_seconds"])}
+        # A request may exceed the first-install default, never an operator
+        # ceiling: the resolution goal launches (REST, worker, CLI) apply.
+        result["effective"] = {"max_dollars": requested_goal_dollars(max_dollars),
+                               "max_wall_seconds": requested_goal_wall_seconds(max_wall_seconds)}
         result["task_ceiling"] = task
         if result["effective"]["max_dollars"] is not None:
             candidates.append((result["effective"]["max_dollars"], "task"))

@@ -28,17 +28,14 @@ module.exports=async function start(browser,info,{fixed=false}={}){
     context=await browser.newContext({baseURL:origin,extraHTTPHeaders:{Origin:origin}});
     await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
     context.setDefaultTimeout(15000);context.setDefaultNavigationTimeout(30000);
-    const page=await context.newPage(),invite=log.match(/FIXTURE_ADMIN_INVITE=(\S+)/);
-    expect(invite,log).toBeTruthy();
-    await page.goto(invite[1]);
-    // Accepting sets the administrator's passphrase so they can sign back in later.
-    const passphrase='Synthetic workspace administrator passphrase'; // pragma: allowlist secret - disposable synthetic account fixture
-    await page.locator('input[name="password"]').fill(passphrase);await page.locator('input[name="password2"]').fill(passphrase);
-    await page.getByRole('button',{name:'Accept invitation',exact:true}).click();
-    // The saved grant is confirmed first; opening the workspace is a separate step.
-    await expect(page.getByRole('heading',{name:'Invitation accepted'})).toBeVisible();
-    await page.getByRole('button',{name:/^Open /}).click();
-    await expect(page).not.toHaveURL(/\/auth\/invite\//);
+    const page=await context.newPage(),passphrase=log.match(/FIXTURE_ADMIN_PASSPHRASE=(\S+)/);
+    expect(passphrase,log).toBeTruthy();
+    // The administrator already has an account, so they sign in; an invitation could never replace it.
+    await page.goto('/auth/local-login');
+    await page.locator('input[name="email"]').fill('acceptance-admin@example.test');
+    await page.locator('input[name="password"]').fill(passphrase[1]);
+    await page.getByRole('button',{name:'Sign in',exact:true}).click();
+    await expect(page).not.toHaveURL(/\/auth\/local-login/);
     expect((await context.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
     const state=async()=>{const response=await context.request.get('/__workspace_acceptance');expect(response.status(),await response.text()).toBe(200);return response.json();};
     return {origin,context,page,state,close};

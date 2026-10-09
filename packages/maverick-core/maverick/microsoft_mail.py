@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import os
 import re
 import uuid
 from contextlib import contextmanager
@@ -159,10 +160,19 @@ def credential(cfg):
 
 def _saved_configuration(cfg):
     current = (config.load_global_config().get("channels") or {}).get("email") or {}
-    keys = (*_BINDING, "email_auth", "imap_host", "smtp_host", "smtp_port", "imap_user", "smtp_user", "trusted_authserv_id")
+    keys = (*_BINDING, "email_auth", "imap_host", "smtp_host", "smtp_port", "imap_user", "smtp_user")
+    # Resolve both sides the way the email channel does: an unsaved value
+    # falls back to its environment variable.
     def people(value):
-        return {str(person).lower() for person in value} if isinstance(value, (list, tuple, set)) else None
+        if value is None:
+            value = os.environ.get("EMAIL_ALLOWED_USER_IDS", "").split(",")
+        if not isinstance(value, (list, tuple, set)):
+            return None
+        return {str(person).strip().lower() for person in value} - {""}
+    def server(value):
+        return str(value or os.environ.get("EMAIL_TRUSTED_AUTHSERV_ID", "")).strip()
     if (current.get("enabled") is not True or any(current.get(key) != cfg.get(key) for key in keys)
+            or server(current.get("trusted_authserv_id")) != server(cfg.get("trusted_authserv_id"))
             or people(current.get("allowed_user_ids")) != people(cfg.get("allowed_user_ids"))):
         raise PermissionError("Microsoft email settings changed. Apply the current settings to the chat service.")
 

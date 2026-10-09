@@ -1,8 +1,6 @@
 """Explicit browser approval and the native pairing/renewal protocol."""
 from __future__ import annotations
 
-import hmac
-
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -61,7 +59,7 @@ def _principal(request):
 def _binding(request, context):
     from .app import _require_same_origin
     _require_same_origin(request)
-    if not hmac.compare_digest(context, context_for(request)):
+    if not auth.constant_time_equals(context, context_for(request)):
         raise HTTPException(409, "Your account or workspace changed. Review pairing again.")
 
 

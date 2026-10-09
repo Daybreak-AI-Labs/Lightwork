@@ -101,7 +101,8 @@ def test_repository_constraints_are_exact_and_cover_current_environment():
 
     assert canonicalize_name("maverick-agent") in first_party
     assert constraints["tzdata"].specifier.contains("2026.4")
-    assert constraints["psycopg-pool"].specifier.contains("3.3.1")
+    # Bumped with psycopg 3.3.6 in 4fd34f7c; the Postgres CI job installs the same pin.
+    assert constraints["psycopg-pool"].specifier.contains("3.3.3")
 
 
 def test_workflow_and_build_pins_agree_with_dependency_constraints():

@@ -70,7 +70,11 @@ jobs:
 
   lint:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # The secret scan alone is ~18 CPU-minutes (two recorded-evidence files
+    # under docs/ux-audit-2026-09-30 carry a ~970 KB single line each and take
+    # ~4.3 minutes apiece on one core), which two hosted cores did not finish
+    # in the former 15.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -604,10 +608,13 @@ jobs:
     # for private repositories have two cores, so in-job parallelism alone
     # measured ~17 minutes at ~24,700 tests; at ~39,000 three slices ran out
     # the 20-minute bound, so four slices keep a leg inside it for one
-    # extra install each. The ceiling below is headroom for runner variance
-    # and setup, not the expected duration: a run that needs it is hung, and
-    # pytest-timeout/GNU timeout say where.
-    timeout-minutes: 30
+    # extra install each. At ~45,000 tests the slowest hosted slice needs more
+    # than that, so the parallel phase now allows 45 minutes (test-shard
+    # action) and the job 60. Beyond ~45,000 tests prefer more slices (and the
+    # matching required checks) over a longer ceiling. The ceiling below is
+    # headroom for runner variance and setup, not the expected duration: a run
+    # that needs all of it is hung, and pytest-timeout/GNU timeout say where.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -643,7 +650,7 @@ jobs:
     # identical to the single-job matrix they replace.
     name: test (${{ matrix.python-version }}, ${{ matrix.shard }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -750,7 +757,7 @@ jobs:
     # see the test job for why the ceiling is headroom, not expected duration.
     # The posture gate compares each slice against the (empty) baseline, so a
     # slice is a complete gate on its own.
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -822,7 +829,7 @@ jobs:
           # heavy_concurrency files alone on the box); both append to one
           # report so the gate sees every FAILED line. Exit 5 from the serial
           # phase means the slice has no heavy files.
-          timeout --verbose --signal=ABRT --kill-after=30s 20m \
+          timeout --verbose --signal=ABRT --kill-after=30s 45m \
             python -m pytest -q -p no:randomly -n auto --dist loadfile \
               --shard "${{ matrix.shard }}/4" -m "not heavy_concurrency" \
               --tb=no --timeout=180 --timeout-method=signal \
@@ -1025,6 +1032,10 @@ jobs:
             'packaging==26.3'
           pip install -e './packages/maverick-core[postgres]'
           pip install -e ./packages/maverick-knowledge
+          # Event-origin goals take the dashboard's event registry lock before
+          # they start (maverick.event_admission), so the live Postgres start
+          # boundary tests need the dashboard package importable.
+          pip install -e ./packages/maverick-dashboard
           pip install \
             'psycopg==3.3.6' 'psycopg-binary==3.3.6' \
             'psycopg-pool==3.3.3' 'sqlalchemy==2.0.54'

@@ -31,6 +31,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -875,8 +876,8 @@ class DocumentAccessStore:
         expected = canonical_sha256(material)
         if (
             material["schema_version"] != SCHEMA_VERSION
-            or not hmac.compare_digest(str(material["tenant_sha256"]), self.tenant_sha256)
-            or not hmac.compare_digest(expected, str(row["integrity_sha256"]))
+            or not text_equals(str(material["tenant_sha256"]), self.tenant_sha256)
+            or not text_equals(expected, str(row["integrity_sha256"]))
         ):
             raise DocumentAccessIntegrityError("document_access_metadata_invalid")
 
@@ -1108,7 +1109,7 @@ class DocumentAccessStore:
             if operation is None:
                 return None
             self._validate_operation_row(operation)
-            if str(operation["operation_type"]) != "mint" or not hmac.compare_digest(
+            if str(operation["operation_type"]) != "mint" or not text_equals(
                 str(operation["request_sha256"]), request_sha256
             ):
                 raise DocumentAccessConflict("document_access_idempotency_conflict")
@@ -1135,7 +1136,7 @@ class DocumentAccessStore:
             "completed_at": float(row["completed_at"]),
         }
         expected = self._operation_integrity(**values)
-        if not hmac.compare_digest(expected, str(row["integrity_sha256"])):
+        if not text_equals(expected, str(row["integrity_sha256"])):
             raise DocumentAccessIntegrityError("document_access_operation_integrity_invalid")
 
     def create_token(
@@ -1193,7 +1194,7 @@ class DocumentAccessStore:
             ).fetchone()
             if operation is not None:
                 self._validate_operation_row(operation)
-                if str(operation["operation_type"]) != "mint" or not hmac.compare_digest(
+                if str(operation["operation_type"]) != "mint" or not text_equals(
                     str(operation["request_sha256"]), request_sha256
                 ):
                     raise DocumentAccessConflict("document_access_idempotency_conflict")
@@ -1344,7 +1345,7 @@ class DocumentAccessStore:
                 self._validate_operation_row(prior)
                 if (
                     str(prior["operation_type"]) != "revoke"
-                    or not hmac.compare_digest(str(prior["request_sha256"]), request_sha)
+                    or not text_equals(str(prior["request_sha256"]), request_sha)
                     or str(prior["token_id"]) != selected
                 ):
                     raise DocumentAccessConflict("document_access_idempotency_conflict")
@@ -1486,7 +1487,7 @@ class DocumentAccessStore:
             ).fetchone()
             if prior is not None:
                 self._validate_claim_row(prior)
-                if not hmac.compare_digest(str(prior["request_sha256"]), request_sha):
+                if not text_equals(str(prior["request_sha256"]), request_sha):
                     raise DocumentAccessConflict("document_access_idempotency_conflict")
                 raise DocumentAccessConflict("document_access_claim_replay")
             record = self._get_record_on(connection, token_sha256=token_sha256)
@@ -1601,7 +1602,7 @@ class DocumentAccessStore:
         if values["state"] not in {"pending", "issued", "failed"}:
             raise DocumentAccessIntegrityError("document_access_claim_state_invalid")
         expected = self._claim_integrity(**values)
-        if not hmac.compare_digest(expected, str(row["integrity_sha256"])):
+        if not text_equals(expected, str(row["integrity_sha256"])):
             raise DocumentAccessIntegrityError("document_access_claim_integrity_invalid")
 
     def finalize_claim(
@@ -1697,7 +1698,7 @@ class DocumentAccessStore:
                 if (
                     str(prior["operation_type"]) != "purge"
                     or str(prior["token_id"]) != selected
-                    or not hmac.compare_digest(str(prior["request_sha256"]), request_sha)
+                    or not text_equals(str(prior["request_sha256"]), request_sha)
                 ):
                     raise DocumentAccessConflict("document_access_idempotency_conflict")
                 tombstone_row = connection.execute(
@@ -1774,7 +1775,7 @@ class DocumentAccessStore:
             tombstone_sha256=str(row["tombstone_sha256"]),
         )
         expected = canonical_sha256(_tombstone_material(tombstone))
-        if not hmac.compare_digest(expected, tombstone.tombstone_sha256):
+        if not text_equals(expected, tombstone.tombstone_sha256):
             raise DocumentAccessIntegrityError("document_access_tombstone_integrity_invalid")
         return tombstone
 

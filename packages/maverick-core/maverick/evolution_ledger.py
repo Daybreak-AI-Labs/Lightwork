@@ -32,6 +32,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .constant_time import text_equals
+
 EVOLUTION_LEDGER_SCHEMA = "lightwork.evolution-ledger-projection.v1"
 PROMOTION_RECEIPT_SCHEMA = "lightwork.evolution-promotion-receipt.v1"
 
@@ -949,7 +951,7 @@ def verify_promotion_receipt(
         or not hmac.compare_digest(signature_digest, supplied_signature_sha256)
         or not hmac.compare_digest(body["rung_sha256"], _digest("promotion-rung", rung))
         or payload_sha256 is None
-        or not hmac.compare_digest(str(body.get("payload_sha256") or ""), payload_sha256)
+        or not text_equals(str(body.get("payload_sha256") or ""), payload_sha256)
     ):
         return PromotionReceiptVerification(
             receipt_valid=True,

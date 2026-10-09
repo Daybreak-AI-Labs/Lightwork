@@ -26,6 +26,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
+from .constant_time import text_equals
 from .file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -569,7 +570,7 @@ class AIEntityTaskStore:
         ensure_private_file(self.path)
 
     def _require_tenant(self, tenant_id: object) -> None:
-        if not hmac.compare_digest(_tenant(tenant_id), self.tenant_id):
+        if not text_equals(_tenant(tenant_id), self.tenant_id):
             raise AIEntityTaskNotFound("AI-entity task was not found")
 
     def _resolve_entity(self, entity_id: str, entity_revision: int) -> AIEntityAuthority:
@@ -634,8 +635,8 @@ class AIEntityTaskStore:
         ).fetchone()
         if row is None:
             return None
-        if row["operation_type"] != operation_type or not hmac.compare_digest(
-            row["request_sha256"], request_sha256
+        if row["operation_type"] != operation_type or not text_equals(
+            str(row["request_sha256"]), request_sha256
         ):
             raise AIEntityTaskConflict("idempotency key is bound to another operation")
         task_row = connection.execute(
@@ -1099,7 +1100,7 @@ class AIEntityTaskStore:
                 or event.record.revision != event.revision
                 or event.previous_event_sha256 != previous_sha256
                 or row["previous_event_sha256"] != previous_sha256
-                or not hmac.compare_digest(event.event_sha256, _sha256(expected_body))
+                or not text_equals(str(event.event_sha256), _sha256(expected_body))
             ):
                 raise AIEntityTaskIntegrityError("AI-entity task history chain changed")
             previous_sha256 = event.event_sha256

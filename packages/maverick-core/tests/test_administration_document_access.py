@@ -423,6 +423,23 @@ def test_integrity_verification_detects_token_tampering(tmp_path):
         service.store.verify_integrity()
 
 
+def test_non_ascii_stored_digests_are_integrity_errors_not_type_errors(tmp_path):
+    # Edited ledger digests used to raise TypeError from hmac.compare_digest
+    # on the request paths instead of the store's integrity refusal.
+    service, *_rest = _service(tmp_path)
+    minted = service.mint_token("doc-non-ascii", idempotency_key="mint-non-ascii")
+    with sqlite3.connect(service.store.path) as connection:
+        connection.execute(
+            "UPDATE document_access_operations SET integrity_sha256=?", ("é" * 64,)
+        )
+    with pytest.raises(access.DocumentAccessIntegrityError, match="operation_integrity"):
+        service.mint_token("doc-non-ascii", idempotency_key="mint-non-ascii")
+    with sqlite3.connect(service.store.path) as connection:
+        connection.execute("UPDATE document_access_meta SET tenant_sha256=?", ("é" * 64,))
+    with pytest.raises(access.DocumentAccessIntegrityError, match="metadata_invalid"):
+        service.get_token(minted.record.token_id)
+
+
 def test_resolver_cannot_return_cross_tenant_or_unsafe_display_name(tmp_path):
     clock = Clock()
     store = access.DocumentAccessStore(

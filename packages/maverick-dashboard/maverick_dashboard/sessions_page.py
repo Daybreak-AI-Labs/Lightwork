@@ -13,8 +13,9 @@ Ending a session:
 
 A person may end only their own sessions; an administrator may end anyone's.
 Every revoke is a sensitive action (:mod:`step_up`) and writes one
-control-plane audit row. The activity log refusing that row refuses the
-revoke (503), never the other way round.
+control-plane audit row. Ending a sign-in takes effect first: the activity log
+refusing the row cannot keep someone signed in, so it is reported (503) after
+the fact instead. A bearer API key may not end sessions at all.
 """
 from __future__ import annotations
 
@@ -58,8 +59,12 @@ def _audit_revoke(request: Request, *, target: str, sid: str, count: int, everyw
             detail="signed out everywhere" if everywhere else "signed out one device",
         )
     except AuditRefused as exc:
-        raise HTTPException(status_code=503,
-                            detail="The activity log refused this change.") from exc
+        # Ending a sign-in is never held back by the log, so by now it has taken
+        # effect; say so rather than reporting a failure that did not happen.
+        raise HTTPException(
+            status_code=503,
+            detail="The sessions were signed out, but the activity log refused to record it. "
+                   "Tell an administrator.") from exc
 
 
 def _rows_for(request: Request, principal_filter: str | None, *, everyone: bool) -> list[dict]:
@@ -113,7 +118,18 @@ def _method_label(via: str) -> str:
             "proxy": "Company proxy"}.get(via, via or "Unknown")
 
 
+def _require_signed_in_person(request: Request) -> None:
+    """Ending sign-ins is for a signed-in person. A bearer key (even one that
+    can only read) must not end its owner's sessions, which would also end
+    every key the owner made."""
+    if auth.api_key_permissions(request) is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="An API key cannot end sign-in sessions. Sign in and use Account > Sessions.")
+
+
 def _revoke_one(request: Request, sid: str) -> dict:
+    _require_signed_in_person(request)
     principal, is_admin, current = _caller(request)
     step_up.require_recent_mfa(request, "revoke_sessions")
     try:
@@ -127,12 +143,17 @@ def _revoke_one(request: Request, sid: str) -> dict:
         raise HTTPException(status_code=403,
                             detail="Only an administrator can sign other people out.")
     actor = principal or "local administrator"
-    session_registry.revoke(sid, by=actor)
+    try:
+        session_registry.revoke(sid, by=actor)
+    except session_registry.SessionStoreError as exc:
+        raise HTTPException(status_code=503,
+                            detail="The session record cannot be read right now.") from exc
     _audit_revoke(request, target=record.principal, sid=sid, count=1, everywhere=False)
     return {"revoked": 1, "principal": record.principal, "current": sid == current}
 
 
 def _revoke_everywhere(request: Request, target: str | None) -> dict:
+    _require_signed_in_person(request)
     principal, is_admin, current = _caller(request)
     step_up.require_recent_mfa(request, "revoke_sessions")
     target = (target or "").strip() or principal

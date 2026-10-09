@@ -311,3 +311,20 @@ def test_work_discovery_projection_is_exact_owner_bound_and_consent_bound():
     assert len(calls) == before
     with pytest.raises(KnowledgeProjectionUnavailable, match="requires exact actor"):
         projector("tenant-a", reference, admission)
+
+
+def test_work_discovery_owner_check_compares_non_ascii_principals():
+    # Owners and actors are principal names, which may be any Unicode text: a
+    # different actor is refused rather than raising TypeError.
+    source_ref = work_discovery_source_ref("user:josé", "laptop-1")
+    reference = ResearchAssetRef("dataset", "source", "v1", _sha("work manifest"))
+    admission = _admission(reference, source_ref, _sha("work content"))
+    projector = ExistingKnowledgeContentProjector(work_discovery_factory=lambda *_: None)
+
+    with pytest.raises(KnowledgeProjectionUnavailable, match="another actor"):
+        projector.resolve_for_context(
+            "tenant-a",
+            reference,
+            admission,
+            _authority("tenant-a", "user:bob"),
+        )

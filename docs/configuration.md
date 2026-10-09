@@ -129,8 +129,8 @@ scan_output     = true
 # The Approvals page. A risky step waits this long for a decision (30
 # minutes; MAVERICK_CONSENT_DASHBOARD_TIMEOUT wins); after 10 minutes the
 # people who can decide get one in-app reminder, and with no decision in
-# time the step is refused. A request's card stays approvable for the wait,
-# at most an hour.
+# time the step is refused. A request's card stays approvable for the wait
+# plus the undo window below, at most an hour.
 dashboard_wait_seconds  = 1800
 # A decision can be undone for this long; the agent
 # only acts on an approval once the window has passed (0 = act at once,
@@ -287,12 +287,12 @@ mode = "observe"       # observe (default) | hold (experimental)
 # branch/switch/foreach/while/parallel/approval/delay/wait_event/scope/subflow/
 # setvar nodes) + the dashboard designer and triggers. OFF by default.
 enable      = false      # or MAVERICK_FLOWS=1
-# Autonomous self-improvement of live flows. Both OFF by default and also
+# Autonomous self-correction of live flows. OFF by default and also
 # toggleable from the dashboard Learning page.
 auto_evolve = false      # revert a node rewrite the loop measures as a regression
                          # (the safety net; or MAVERICK_FLOWS_AUTO=1)
-auto_apply  = false      # apply a proven improvement forward without a human
-                         # (needs auto_evolve on for the revert safety net)
+# auto_apply is retired: workflow suggestions always need a person's review,
+# so nothing is applied forward automatically and the dashboard refuses true.
 
 [governed_records]
 # Shared CAS record authority used by assurance products. "auto" keeps

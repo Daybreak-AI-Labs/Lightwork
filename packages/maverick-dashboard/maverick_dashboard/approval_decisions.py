@@ -434,6 +434,9 @@ def approval_view(approval_id: int, *, world=None) -> dict | None:
         card_status = "expired" if _time.time() >= card["expires_at"] else "current"
         if card_status == "expired":
             card = None
+            # ``detail`` is the stored envelope, which carries the exact
+            # command; an expired request shows a sentence, never that.
+            detail = "This request's decide-by time has passed. Reject it and ask for a new request."
     try:
         from .app import _approval_source
 

@@ -67,7 +67,7 @@ def check_context(request) -> str:
     auth.require_permission(request, "view")
     current = context(request)
     supplied = request.headers.get("X-Lightwork-Board-Context")
-    if supplied is not None and not hmac.compare_digest(supplied, current):
+    if supplied is not None and not auth.constant_time_equals(supplied, current):
         raise HTTPException(409, "Your account, workspace or department access changed. Reload this page before reading this board.")
     return current
 

@@ -14,7 +14,7 @@
   <p>Current direct role: <strong>{{ current_role | role_label if current_role else 'No direct membership' }}</strong>. Your administrator may have changed your access since acceptance.</p>
   {% else %}
   <p class="own__lede">The one-time link was used by your account, but the original access save was not confirmed.</p>
-  <p>Current membership alone cannot confirm that request. It will not be retried. Ask your administrator to check your workspace role and issue a replacement invitation if needed.</p>
+  <p>Current membership alone cannot confirm that request. It will not be retried. {% if passphrase_sign_in %}Ask your administrator to check your workspace role on the Users page and give it back if needed. Then sign in with your email and the passphrase you chose.{% else %}Ask your administrator to check your workspace role and issue a replacement invitation if needed.{% endif %}</p>
   {% endif %}
   {% if message %}<p class="own__alert" role="alert">{{ message }}</p>{% endif %}
   <div class="own__actions">
@@ -30,7 +30,7 @@
   {% if message %}<p class="own__alert" role="alert">{{ message }}</p>{% endif %}
   {% if state == 'local' %}
   <p>Choose a passphrase to finish. Next time, sign in with your email and this passphrase.
-    If you forget it, ask your administrator for a new invite.</p>
+    An invitation cannot replace it later, so keep it safe; if you forget it, ask the installation owner to reset it.</p>
   <form method="post" data-draft-recovery="off" id="owner-form" novalidate>
     <label class="own__field"><span>Email address</span>
       <input class="input" type="email" id="invite-email" autocomplete="username" value="{{ invite.email }}" readonly aria-describedby="invite-email-help">
@@ -61,7 +61,7 @@
   {% elif state == 'bind_failed' %}
   <h1 class="page-title">Invitation could not be completed</h1>
   <p class="own__lede">Your access save could not be confirmed. This one-time link cannot save access again.</p>
-  <p>Ask your administrator to check your current workspace role and send a new invitation link if needed.</p>
+  <p>{% if passphrase_sign_in %}Ask your administrator to check your current role on the Users page and give it back if needed. Then sign in with your email and the passphrase you chose.{% else %}Ask your administrator to check your current workspace role and send a new invitation link if needed.{% endif %}</p>
   {% elif state == 'gone' %}
   <h1 class="page-title">Invitation not available</h1>
   <p class="own__lede">This invitation link is invalid, expired, already used, or revoked.</p>

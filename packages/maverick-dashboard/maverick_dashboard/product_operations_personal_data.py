@@ -323,7 +323,7 @@ def execute(request, _selection, args, prepared, _operation_id, *, action):
 def recover(request, _selection, _args, prepared, _operation_id, *, action):
     actor = _authority(request, write=True)
     if action == "deletion_request" and actor == prepared["actor"]:
-        row = deletion.STORE.get("PDR-" + deletion._digest([actor, prepared["snapshot"]])[:40])
+        row = deletion.latest_request(actor, prepared["snapshot"])
         if row and row["owner"] == actor:
             return Outcome("unconfirmed" if row.get("_audit_pending") else "replayed", "This exact request is already saved; no deletion or review was repeated.", {"id": row["id"], "status": row["status"]})
     # Value equality is not evidence that this operation ran. Fresh registry and

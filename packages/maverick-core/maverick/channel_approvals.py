@@ -543,7 +543,8 @@ def require_current_card(approval: Any, *, binding: str | None, now: float | Non
                 "this approval predates exact-operation review; reject it and "
                 "ask the requester to prepare a fresh review"
             )
-        if not hmac.compare_digest(card["action"], approval.action):
+        # Bytes: a label with a non-ASCII character is not a TypeError.
+        if not hmac.compare_digest(str(card["action"]).encode(), str(approval.action).encode()):
             raise ApprovalCardError(
                 "the approval card does not match the queued action; request a fresh review"
             )
@@ -691,7 +692,9 @@ def decide_from_channel(
         state = world.approval_state(int(approval_id)) or {}
     except Exception:  # noqa: BLE001 -- the vote is durable; the read is diagnostic
         state = {}
-    status = str(state.get("status") or ("pending" if not delivered else decision))
+    # An unreadable state is not evidence that the vote settled the request: a
+    # multi-approver request is still pending after one approval.
+    status = str(state.get("status") or "pending")
     effective = bool(delivered and status != "pending")
     try:
         # The signed APPROVAL_DECISION above is the authority; this note says
@@ -769,20 +772,25 @@ def undo_decision(world: Any, approval_id: int, *, undone_by: str, channel: str,
     label = safe_action_label(before)
     previous = "approval" if before.status == "approved" else "rejection"
     where = "" if channel == "dashboard" else f" on {channel}"
-    recorded = audit.audit_event(
-        audit.EventKind.CONSENT_RESULT,
-        agent=who,
-        actor=who,
-        action="approval_decision_undone",
-        approval_id=int(approval_id),
-        previous_status=before.status,
-        previously_decided_by=before.decided_by or "",
-        channel=channel,
-        channel_user=str(channel_user or ""),
-        summary=(
-            f"{who} undid the {previous} of '{label}'{where}; it is waiting for a decision again."
-        ),
-    )
+    try:
+        recorded = audit.audit_event(
+            audit.EventKind.CONSENT_RESULT,
+            agent=who,
+            actor=who,
+            action="approval_decision_undone",
+            approval_id=int(approval_id),
+            previous_status=before.status,
+            previously_decided_by=before.decided_by or "",
+            channel=channel,
+            channel_user=str(channel_user or ""),
+            summary=(
+                f"{who} undid the {previous} of '{label}'{where}; it is waiting for a decision again."
+            ),
+        )
+    except audit.AuditRefused:
+        # The undo is already applied; report it as every other unrecorded
+        # undo is reported, not as a server error.
+        recorded = False
     if not recorded:
         raise ChannelApprovalRefused(
             "audit_failed",

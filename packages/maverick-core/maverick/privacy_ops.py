@@ -48,6 +48,8 @@ import time
 import uuid
 from pathlib import Path
 
+from .constant_time import text_equals
+
 log = logging.getLogger(__name__)
 
 _REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
@@ -2658,7 +2660,7 @@ def _load_dsar_export_artifact(
         return None
     expected = _dsar_export_digest(intent, bundle)
     digest = str(meta.get("sha256") or "")
-    if not digest or not hmac.compare_digest(digest, expected):
+    if not digest or not text_equals(digest, expected):
         return None
     return bundle, digest
 
@@ -3705,7 +3707,6 @@ def set_incident_affected_people(incident_id: str, affected_people: int | None,
     saved = _INCIDENT.update(incident_id, _mut)
     if saved is not None:
         saved = _audit_mutation(_INCIDENT, "incident", saved)
-        _emit_record_event("incident.affected_people_updated", "incident", saved)
     return saved
 
 

@@ -45,6 +45,9 @@
 </style>
 {% endblock %}
 {% block content %}
+{# Both the setup form and the request intake form use the shared error summary,
+   and the setup form is not rendered in the offline demonstration. #}
+{% from "_form_field.html" import error_summary %}
 <section id="vendor-onboarding" aria-labelledby="vo-title" data-api-base="/api/v1/vendor-onboarding" data-workspace-context="{{ connection_workspace_context }}" data-named-signin="{{ 'true' if vendor_named_signin else 'false' }}" data-offline-demo="{{ 'true' if offline_demo else 'false' }}">
   <h1 id="vo-title" class="page-title">AI vendor onboarding</h1>
   {% if offline_demo %}<p role="note"><strong>Offline simulation.</strong> All vendor evidence, reviewer identities and tickets in this demonstration are synthetic.</p>{% endif %}
@@ -72,7 +75,6 @@
     <p>Connect Jira (and optionally Google Drive) in <a href="/connections">Connections</a>, then choose them here.</p>
     <details><summary>Backups</summary><p>Lightwork's <a href="/workspace/recovery">workspace recovery</a> restores these requests, but not changes already made in Drive or Jira.</p></details>
     <p id="vs-owner"></p>
-    {% from "_form_field.html" import error_summary %}
     <form id="vs-form" data-mv-validate>
       {# CTL-3: the shared form-field pattern -- each problem next to its field and in a summary that takes focus. #}
       {{ error_summary('vs-form-errors') }}

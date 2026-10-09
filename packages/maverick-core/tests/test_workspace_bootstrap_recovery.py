@@ -592,6 +592,45 @@ def test_retained_key_install_resumes_exact_bytes_after_completion_receipt_failu
     assert recovery._read_bootstrap(actor="admin-a")["retained_keys"]["state"] == "installed"
 
 
+def test_hand_edited_non_ascii_key_file_is_refused_not_crashed(monkeypatch, tmp_path):
+    exported, recovery_key, custody, _, _, _, _ = _source_snapshot(monkeypatch, tmp_path)
+    _select_home(monkeypatch, tmp_path / "target-home")
+    recovery.configure_key(imported=recovery_key)
+    imported = recovery.import_archive(exported)
+    recovery.prepare_bootstrap(isolated=True, actor="admin-a", source_offline=True)
+    report = recovery.test_key_custody(
+        imported["id"], custody,
+        expected_sha256=imported["sha256"], actor="admin-a",
+    )
+    original = recovery._write_bootstrap
+
+    def fail_installed(record):
+        retained = record.get("retained_keys")
+        if isinstance(retained, dict) and retained.get("state") == "installed":
+            raise OSError("injected installed-receipt failure")
+        return original(record)
+
+    monkeypatch.setattr(recovery, "_write_bootstrap", fail_installed)
+    with pytest.raises(OSError, match="installed-receipt"):
+        recovery.install_retained_keys(
+            imported["id"], custody,
+            expected_sha256=imported["sha256"],
+            report_id=report["report_id"], isolated=True, actor="admin-a",
+        )
+    monkeypatch.setattr(recovery, "_write_bootstrap", original)
+    # An operator re-saves the key in an editor that adds a byte-order mark.
+    key_text = crypto_at_rest._KEY_PATH.read_text(encoding="utf-8").strip()
+    crypto_at_rest._KEY_PATH.write_text("﻿" + key_text, encoding="utf-8")
+
+    with pytest.raises(recovery.RecoveryError, match="differs from the reviewed custody copy"):
+        recovery.install_retained_keys(
+            imported["id"], custody,
+            expected_sha256=imported["sha256"], report_id=report["report_id"],
+            isolated=True, actor="admin-a",
+        )
+    assert recovery._read_bootstrap(actor="admin-a")["retained_keys"]["state"] == "installing"
+
+
 def test_retained_key_install_expiry_is_safe_and_reauthorization_preserves_receipt(
     monkeypatch, tmp_path,
 ):

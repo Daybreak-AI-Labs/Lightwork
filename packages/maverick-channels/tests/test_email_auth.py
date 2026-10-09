@@ -61,10 +61,35 @@ def test_multiple_from_headers_are_refused():
     assert authenticated_from(msg, "mx.example.com") == ""
 
 
-def test_server_identity_must_be_configured_before_email_channel_starts():
+def test_server_identity_must_be_configured_before_email_channel_starts(monkeypatch):
+    monkeypatch.delenv("EMAIL_TRUSTED_AUTHSERV_ID", raising=False)
     assert valid_trusted_mail_server("mx.example.com")
     assert not valid_trusted_mail_server("mx..example.com")
     with pytest.raises(ValueError, match="incoming mail server identity"):
         EmailChannel(lambda _: None, "imap.example.com", "bot@example.com", "p",
                      "smtp.example.com", "bot@example.com", "p",
                      allowed_user_ids=["alice@example.com"])
+
+
+def test_server_identity_set_in_the_environment_still_starts_email(monkeypatch):
+    # Deployments named their server with EMAIL_TRUSTED_AUTHSERV_ID before the
+    # [channels.email] setting existed; that is an explicit identity too.
+    from maverick.server import _wire_email
+
+    monkeypatch.setenv("EMAIL_TRUSTED_AUTHSERV_ID", "mx.example.com")
+    added = []
+
+    class Server:
+        _handle_message = staticmethod(lambda _: None)
+        add_channel = staticmethod(added.append)
+
+    cfg = {"imap_host": "imap.example.com", "imap_user": "bot@example.com", "imap_password": "p",
+           "smtp_host": "smtp.example.com", "smtp_user": "bot@example.com", "smtp_password": "p",
+           "allowed_user_ids": ["alice@example.com"]}
+    _wire_email(Server, cfg)
+    assert added[0].trusted_authserv_id == "mx.example.com"
+    _wire_email(Server, {**cfg, "trusted_authserv_id": "mail.example.com"})
+    assert added[1].trusted_authserv_id == "mail.example.com"   # the saved setting wins
+    monkeypatch.setenv("EMAIL_TRUSTED_AUTHSERV_ID", "mx..example.com")
+    with pytest.raises(ValueError, match="incoming mail server identity"):
+        _wire_email(Server, cfg)

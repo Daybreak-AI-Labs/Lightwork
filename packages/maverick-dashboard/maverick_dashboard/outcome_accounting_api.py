@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import math
 import struct
@@ -17,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
 from . import outcome_accounting_bridge
-from .auth import caller_principal, has_permission, require_permission
+from .auth import caller_principal, constant_time_equals, has_permission, require_permission
 from .draft_api import context_for
 
 router = APIRouter(prefix="/api/v1/outcome-accounting", tags=["outcome-accounting"])
@@ -160,7 +159,7 @@ def _scope(request: Request, *, mutation: bool = False) -> tuple[str | None, str
         )
     context = context_for(request)
     supplied = request.headers.get("X-Lightwork-Pilot-Context")
-    if (mutation or supplied is not None) and not hmac.compare_digest(supplied or "", context):
+    if (mutation or supplied is not None) and not constant_time_equals(supplied or "", context):
         raise HTTPException(
             409,
             "Your account or workspace changed. Reload outcome accounting before continuing.",

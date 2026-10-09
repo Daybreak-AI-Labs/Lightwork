@@ -93,7 +93,7 @@ def departure_snapshot(request, _selection, *, action="status"):
     cases = [{"id": row["id"], "revision": row["revision"], "principal": row["principal"], "status": row["status"]} for row in rows]
     fields = []
     if action == "begin":
-        fields = [_field("principal", "Employee", "select", choices=_choices((p["principal"], p["label"]) for p in people if not p["admin"])),
+        fields = [_field("principal", "Employee", "select", choices=_choices((p["principal"], p["label"]) for p in people if not p["admin"] and not p["departed"])),
                   _field("custodian", "Retained-data administrator", "select", choices=_choices((p["principal"], p["label"]) for p in people if p["active"] and p["admin"])),
                   _field("confirm_preservation", "Retain all data and preservation holds; this does not grant private-content access or verify provider revocation", "boolean", value=False)]
     elif action != "status":

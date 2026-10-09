@@ -437,9 +437,11 @@ async def test_connection_cancel_does_not_cancel_detached_task():
 async def test_http_many_result_waits_leave_get_cancel_and_health_responsive(monkeypatch):
     server, app = http_server(monkeypatch, tasks=True)
     release = threading.Event()
-    server._task_runner = lambda name, args, context=None: (release.wait(3), ok())[1]
+    server._task_runner = lambda name, args, context=None: (release.wait(30), ok())[1]
     headers = {"Authorization": "Bearer one-token"}
     waits = []
+    # Generous bounds for loaded CI runners: a call blocked behind the result
+    # waits would wait for the 30-second runner, far past any of them.
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as client:
         try:
             created = await client.post("/mcp", headers=headers, json={"id": 1, "method": "tools/call", "params": {"name": "maverick_start", "arguments": {"title": "local test"}, "task": {}}})
@@ -447,13 +449,13 @@ async def test_http_many_result_waits_leave_get_cancel_and_health_responsive(mon
             headers["Mcp-Session-Id"] = created.headers["Mcp-Session-Id"]
             waits = [asyncio.create_task(client.post("/mcp", headers=headers, json={"id": i + 10, "method": "tasks/result", "params": {"taskId": task_id}})) for i in range(20)]
             await eventually(lambda: server._task_store()._result_waiters == 20)
-            health = await asyncio.wait_for(client.get("/healthz"), 0.5)
+            health = await asyncio.wait_for(client.get("/healthz"), 5)
             assert health.status_code == 200
-            fetched = await asyncio.wait_for(client.post("/mcp", headers=headers, json={"id": 100, "method": "tasks/get", "params": {"taskId": task_id}}), 0.5)
+            fetched = await asyncio.wait_for(client.post("/mcp", headers=headers, json={"id": 100, "method": "tasks/get", "params": {"taskId": task_id}}), 5)
             assert fetched.json()["result"]["status"] == "working"
-            cancelled = await asyncio.wait_for(client.post("/mcp", headers=headers, json={"id": 101, "method": "tasks/cancel", "params": {"taskId": task_id}}), 0.5)
+            cancelled = await asyncio.wait_for(client.post("/mcp", headers=headers, json={"id": 101, "method": "tasks/cancel", "params": {"taskId": task_id}}), 5)
             assert cancelled.json()["result"]["status"] == "cancelled"
-            results = await asyncio.wait_for(asyncio.gather(*waits), 1)
+            results = await asyncio.wait_for(asyncio.gather(*waits), 5)
             assert all(r.json()["result"]["isError"] for r in results)
             assert not server._task_store()._tasks[task_id].future.done()
         finally:

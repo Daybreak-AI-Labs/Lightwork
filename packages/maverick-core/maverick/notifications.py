@@ -39,7 +39,9 @@ import logging
 import os
 import threading
 import uuid
+from collections.abc import Callable
 from contextvars import ContextVar, copy_context
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +62,47 @@ def _response_accepted(status: int) -> bool:
 
 def _network_unknown() -> None:
     _outcome.set(("unknown", "Delivery could not be confirmed. Check the destination before sending again.", False))
+
+
+def never_sent(exc: BaseException) -> bool:
+    """Whether an HTTP send that raised ``exc`` provably never reached the service:
+    it never connected (the host could not be reached or the address is unusable)."""
+    try:
+        import httpx
+
+        return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout,
+                                httpx.UnsupportedProtocol, httpx.InvalidURL))
+    except Exception:  # noqa: BLE001 -- no httpx: treat the result as unknown
+        return False
+
+
+def mark_transport_failure(exc: BaseException) -> None:
+    """Record why an HTTP send raised. A request that never connected was never
+    sent, so it is a definite failure that may be retried after a wait; any other
+    failure may have reached the service and stays unconfirmed."""
+    if never_sent(exc):
+        _outcome.set(("failed", "The notification service could not be reached. Nothing was sent.", True))
+    else:
+        _network_unknown()
+
+
+def mark_unconfirmed() -> None:
+    """Flag that a send made outside this module (a Slack DM) may have gone
+    out without a confirmation; :func:`send_checked` reports it."""
+    _network_unknown()
+
+
+def send_checked(send: Callable[[], Any]) -> tuple[Any, bool]:
+    """Run ``send`` and also say whether a transport inside it could not
+    confirm the result -- it may have been delivered, so never replay it
+    blindly. An exception propagates; callers treat it as unconfirmed too."""
+    token = _outcome.set(None)
+    try:
+        result = send()
+        state = _outcome.get()
+        return result, bool(state) and state[0] == "unknown"
+    finally:
+        _outcome.reset(token)
 
 
 _executor = None  # type: ignore[var-annotated]
@@ -95,6 +138,17 @@ def _load_config() -> dict:
         return {}
 
 
+def _header_text(value: str) -> str:
+    """An HTTP header value that is safe to send. httpx writes header text as
+    ASCII, so a title such as "Zürich" would fail before anything is sent;
+    ntfy decodes RFC 2047 encoded words, so non-ASCII text goes as one."""
+    if value.isascii():
+        return value
+    import base64
+
+    return "=?UTF-8?B?" + base64.b64encode(value.encode("utf-8")).decode("ascii") + "?="
+
+
 def _send_ntfy(title: str, body: str, priority: str, server: str, topic: str) -> bool:
     try:
         import httpx
@@ -107,7 +161,7 @@ def _send_ntfy(title: str, body: str, priority: str, server: str, topic: str) ->
         # The title is agent-controlled (the notify tool lets the model set
         # it). Strip CR/LF so it can't inject extra ntfy control headers /
         # split the header block.
-        "Title": title.replace("\r", " ").replace("\n", " "),
+        "Title": _header_text(title.replace("\r", " ").replace("\n", " ")),
         "Priority": prio_map.get(priority, "3"),
     }
     try:
@@ -121,7 +175,7 @@ def _send_ntfy(title: str, body: str, priority: str, server: str, topic: str) ->
         resp = httpx.post(url, content=body.encode("utf-8"), headers=headers, timeout=10.0)
         return _response_accepted(resp.status_code)
     except Exception as e:
-        _network_unknown()
+        mark_transport_failure(e)
         log.warning("notify ntfy failed: %s", type(e).__name__)
         return False
 
@@ -166,7 +220,7 @@ def _send_pushover(title: str, body: str, priority: str, cfg: dict | None = None
             return False
         return _response_accepted(resp.status_code)
     except Exception as e:
-        _network_unknown()
+        mark_transport_failure(e)
         log.warning("notify pushover failed: %s", type(e).__name__)
         return False
 
@@ -191,7 +245,7 @@ def _send_discord(title: str, body: str, url: str) -> bool:
         # The webhook URL IS the secret here, and httpx embeds the request URL
         # in str(e); log the exception TYPE only so a failed POST can't write the
         # full secret URL to the logs.
-        _network_unknown()
+        mark_transport_failure(e)
         log.warning("notify discord failed: %s", type(e).__name__)
         return False
 
@@ -209,7 +263,7 @@ def _send_slack(title: str, body: str, url: str) -> bool:
         return _response_accepted(resp.status_code)
     except Exception as e:
         # The webhook URL IS the secret (see _send_discord); log type only.
-        _network_unknown()
+        mark_transport_failure(e)
         log.warning("notify slack failed: %s", type(e).__name__)
         return False
 
@@ -291,14 +345,20 @@ def send_email(to: str, subject: str, text_body: str, *, html_body: str | None =
         # No dedicated alert server: the platform mailer's [email] account
         # (invitations use it) carries the plain-text version.
         try:
-            from .mailer import MailerError, configured, send
+            from .mailer import MailerError, MailerNotSent, configured, send
 
             if not configured():
                 return False
             send(recipient, str(subject or "Lightwork"), str(text_body or ""))
             return True
+        except MailerNotSent as e:
+            # The mailer's own "definitely not sent": it could not connect or
+            # log in, the recipient was refused, or sending is off. Stays a
+            # plain failure (safe to retry), never "unknown".
+            log.warning("notify email failed: %s", type(e).__name__)
+            return False
         except MailerError as e:
-            _network_unknown()
+            _network_unknown()  # the message may already be on the wire
             log.warning("notify email failed: %s", type(e).__name__)
             return False
     message = EmailMessage()
@@ -315,16 +375,24 @@ def send_email(to: str, subject: str, text_body: str, *, html_body: str | None =
     message.set_content(str(text_body or ""))
     if html_body:
         message.add_alternative(str(html_body), subtype="html")
+    on_the_wire = False
     try:
         with _smtp_session(mail) as smtp:
             if mail["tls"] == "starttls":
                 smtp.starttls(context=ssl.create_default_context())
             if mail["user"]:
                 smtp.login(mail["user"], mail["password"])
+            on_the_wire = True  # from here (MAIL FROM, RCPT TO, DATA) it may be delivered
             refused = smtp.send_message(message)
         return not refused
     except (OSError, smtplib.SMTPException, ssl.SSLError) as e:
-        _network_unknown()
+        # A failure before the message is handed over (connection refused, TLS,
+        # login) or an explicit refusal by the server sent nothing: a plain,
+        # retryable failure. Only a lost or unanswered hand-over is unknown.
+        refused_by_server = isinstance(e, (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused,
+                                           smtplib.SMTPDataError))
+        if on_the_wire and not refused_by_server:
+            _network_unknown()
         log.warning("notify email failed: %s", type(e).__name__)
         return False
 
@@ -332,13 +400,31 @@ def _legacy_url(section: dict, backend: str):
     # Older installers wrote ``webhook_url`` next to a single backend.
     return section.get("webhook_url") if section.get("backend") == backend else None
 
+def _ntfy_topic(cfg: dict) -> str | None:
+    # ``topic`` is what older installers wrote; keep honouring it.
+    return (_resolve_env_ref(cfg.get("ntfy_topic") or cfg.get("topic"))
+            or os.environ.get("MAVERICK_NTFY_TOPIC"))
+
+
+# The configuration key and environment variable of each webhook backend. The
+# key names are spelled out so the settings catalog can prove they are read here.
+_WEBHOOKS = {
+    "discord": ("discord_webhook", "DISCORD_NOTIFY_WEBHOOK_URL"),
+    "slack": ("slack_webhook", "SLACK_NOTIFY_WEBHOOK_URL"),
+}
+
+
+def _webhook_url(cfg: dict, backend: str) -> str:
+    """The saved or environment webhook URL of a ``discord`` / ``slack`` backend."""
+    key, env_name = _WEBHOOKS[backend]
+    return (_resolve_env_ref(cfg.get(key) or _legacy_url(cfg, backend))
+            or os.environ.get(env_name) or "")
+
+
 def _dispatch(backend: str, *, cfg: dict, title: str, body: str, priority: str) -> bool:
     if backend == "ntfy":
-        # ``topic`` is what older installers wrote; keep honouring it.
-        topic = _resolve_env_ref(cfg.get("ntfy_topic") or cfg.get("topic"))
         server = _resolve_env_ref(cfg.get("ntfy_server")) or "https://ntfy.sh"
-        if not topic:
-            topic = os.environ.get("MAVERICK_NTFY_TOPIC")
+        topic = _ntfy_topic(cfg)
         if not topic:
             log.debug("notify ntfy: no topic configured")
             return False
@@ -346,13 +432,9 @@ def _dispatch(backend: str, *, cfg: dict, title: str, body: str, priority: str) 
     if backend == "pushover":
         return _send_pushover(title, body, priority, cfg)
     if backend == "discord":
-        url = _resolve_env_ref(cfg.get("discord_webhook") or _legacy_url(cfg, "discord")) or \
-              os.environ.get("DISCORD_NOTIFY_WEBHOOK_URL")
-        return _send_discord(title, body, url or "")
+        return _send_discord(title, body, _webhook_url(cfg, "discord"))
     if backend == "slack":
-        url = _resolve_env_ref(cfg.get("slack_webhook") or _legacy_url(cfg, "slack")) or \
-              os.environ.get("SLACK_NOTIFY_WEBHOOK_URL")
-        return _send_slack(title, body, url or "")
+        return _send_slack(title, body, _webhook_url(cfg, "slack"))
     if backend == "email":
         mail = _email_config(cfg)
         if not mail["to"]:
@@ -361,6 +443,82 @@ def _dispatch(backend: str, *, cfg: dict, title: str, body: str, priority: str) 
         return send_email(mail["to"], title, body, cfg=cfg)
     log.warning("notify: unknown backend %r", backend)
     return False
+
+def _requested(cfg: dict, backends: list[str] | None) -> list[str]:
+    # Normalize: backend names are user-typed (config/TOML or the `backends`
+    # arg) and matched case-sensitively in _dispatch ("ntfy"/"discord"/...), so
+    # "Discord" / "Ntfy" / "None" would otherwise dispatch to no handler or
+    # skip the "none" filter -- a user who configured notifications silently
+    # gets none. Lowercase + strip; drop empties and the "none" sentinel.
+    return [
+        b.strip().lower()
+        for b in (backends or [cfg.get("backend", "ntfy")])
+        if isinstance(b, str) and b.strip().lower() not in ("", "none")
+    ]
+
+
+def configured_backends(backends: list[str] | None = None) -> list[str]:
+    """The backends :func:`notify` would really try: the ones named (else the
+    configured default) that have a destination set up -- an ntfy topic, a
+    webhook URL, Pushover keys or an email recipient. A caller with its own
+    retry policy uses it to skip a send that would fail before any backend
+    starts, so it leaves no failed delivery receipt behind."""
+    cfg = _load_config()
+    ready = []
+    for backend in dict.fromkeys(_requested(cfg, backends)):
+        if backend == "ntfy":
+            usable = bool(_ntfy_topic(cfg))
+        elif backend == "pushover":
+            usable = all(_pushover_credentials(cfg))
+        elif backend in ("discord", "slack"):
+            usable = bool(_webhook_url(cfg, backend))
+        elif backend == "email":
+            usable = bool(_email_config(cfg)["to"])
+        else:
+            usable = False
+        if usable:
+            ready.append(backend)
+    return ready
+
+
+# Waits (minutes) after the 1st, 2nd, ... definite failure of a send that is
+# retried on a schedule; the last one repeats (hourly).
+RETRY_MINUTES = (5, 10, 20, 40, 60)
+
+
+def retry_delay(failures: int) -> float:
+    """Seconds to wait after the ``failures``-th definite failure."""
+    return 60.0 * RETRY_MINUTES[min(max(int(failures), 1), len(RETRY_MINUTES)) - 1]
+
+
+# Environment settings that decide whether a channel can send. Only whether
+# each is set enters :func:`setup_fingerprint`, never its value.
+_SETUP_ENV = ("MAVERICK_NTFY_TOPIC", "PUSHOVER_USER_KEY", "PUSHOVER_APP_TOKEN", "DISCORD_NOTIFY_WEBHOOK_URL",
+              "SLACK_NOTIFY_WEBHOOK_URL", "SLACK_BOT_TOKEN", "EMAIL_PROVIDER", "EMAIL_USER", "EMAIL_APP_PASSWORD",
+              "EMAIL_FROM", "MAVERICK_EMAIL_DISABLE", "MAVERICK_SMTP_PASSWORD")
+
+
+def setup_fingerprint(*parts: object) -> str:
+    """A short fingerprint of what decides whether a notification can go out:
+    the config files (by size and modification time), which channel
+    environment settings are present, and any caller-supplied ``parts``
+    (linked accounts, registered channels). A caller backing off after a
+    definite failure retries at once when it changes."""
+    import hashlib
+    import json
+
+    from .config import config_path, dashboard_overrides_path, tenant_config_path
+
+    files = []
+    for path in (config_path(), dashboard_overrides_path(), tenant_config_path()):
+        try:
+            stat = path.stat() if path else None
+        except OSError:
+            stat = None
+        files.append([str(path or ""), stat.st_mtime_ns if stat else 0, stat.st_size if stat else 0])
+    material = {"files": files, "env": [bool(os.environ.get(name)) for name in _SETUP_ENV], "parts": parts}
+    return hashlib.sha256(json.dumps(material, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
+
 
 def _admit(cfg, requested, event, delivery_kind, retry):
     from .notification_receipts import DeliveryReceipts
@@ -387,10 +545,11 @@ def _admit(cfg, requested, event, delivery_kind, retry):
     return receipts, admitted
 
 
-def _tracked(backend, ident, *, cfg, title, body, priority, receipts, authorize):
+def _tracked(backend, ident, *, cfg, title, body, priority, receipts, authorize, states=None):
     from .authority_effects import authority_effect_fence
     token = _outcome.set(("failed", "Not sent. Check the channel configuration and installed backend dependencies.", True))
     started = False
+    final = "failed"
     try:
         with authority_effect_fence():
             if authorize is not None:
@@ -404,11 +563,18 @@ def _tracked(backend, ident, *, cfg, title, body, priority, receipts, authorize)
             outcome = _outcome.get()
             if result and outcome[0] != "delivered":
                 outcome = ("delivered", "Accepted by the notification service. This does not mean the person saw it.", False)
+            final = outcome[0] if outcome[0] in ("delivered", "failed", "unknown") else ("delivered" if result else "unknown")
             if receipts is not None:
                 receipts.update(ident, outcome[0], outcome[1], safe_to_retry=outcome[2])
             return result
     except Exception as exc:
         log.warning("notify dispatch unavailable: %s", type(exc).__name__)
+        if final == "delivered":
+            # The service accepted it; only recording that failed. It is not
+            # unsent, and the receipt keeps its conservative "sending" state so
+            # nothing replays it.
+            return True
+        final = "unknown" if started else "failed"
         if receipts is not None:
             try:
                 message = ("Delivery could not be confirmed. Check the destination before sending again." if started
@@ -419,6 +585,8 @@ def _tracked(backend, ident, *, cfg, title, body, priority, receipts, authorize)
         return False
     finally:
         _outcome.reset(token)
+        if states is not None:
+            states.append(final)
 
 
 def notify(
@@ -434,6 +602,7 @@ def notify(
     delivery_kind: str = "event",
     retry: bool = False,
     authorize=None,
+    outcomes: list[str] | None = None,
 ) -> int:
     """Queue a notification. Async returns accepted queue count, never proof of delivery.
 
@@ -444,6 +613,10 @@ def notify(
     pushes (``[notifications] batch_window_seconds``); high/urgent always go
     straight through, and with batching unconfigured this is a no-op. When an
     item is queued for a later batch, the call returns 0 (fired *now*).
+
+    ``outcomes`` (synchronous sends only) receives one final state per
+    dispatched backend: ``delivered`` (accepted), ``failed`` (definitely not
+    sent) or ``unknown`` (it may have been sent; never replay it blindly).
     """
     from . import practice
 
@@ -451,23 +624,17 @@ def notify(
         practice.record("alert", title, {"body": body, "priority": priority})
         return 0
     cfg = _load_config()
-    # Normalize: backend names are user-typed (config/TOML or the `backends`
-    # arg) and matched case-sensitively in _dispatch ("ntfy"/"discord"/...), so
-    # "Discord" / "Ntfy" / "None" would otherwise dispatch to no handler or
-    # skip the "none" filter -- a user who configured notifications silently
-    # gets none. Lowercase + strip; drop empties and the "none" sentinel.
-    requested = [
-        b.strip().lower()
-        for b in (backends or [cfg.get("backend", "ntfy")])
-        if isinstance(b, str) and b.strip().lower() not in ("", "none")
-    ]
+    requested = _requested(cfg, backends)
     if not requested:
         return 0
 
     # Opt-in batching: coalesce low/normal-priority pushes into a windowed
     # digest. High/urgent bypass; sync sends (tests, and the batcher's own
     # delivery) bypass so there's no recursion. No-op unless configured.
-    if batch and async_dispatch and delivery_key is None and priority not in ("high", "max", "urgent"):
+    # A send that must pass an authority check cannot wait in a batch: the
+    # batcher's own delivery does not carry the check, so it would skip it.
+    if (batch and async_dispatch and delivery_key is None and authorize is None
+            and priority not in ("high", "max", "urgent")):
         from .notification_batcher import shared as _shared_batcher
         batcher = _shared_batcher()
         if batcher is not None:
@@ -477,9 +644,9 @@ def notify(
     event = delivery_key or uuid.uuid4().hex
     receipts, admitted = _admit(cfg, requested, event, delivery_kind, retry)
 
-    def tracked(backend, ident):
+    def tracked(backend, ident, states=None):
         return _tracked(backend, ident, cfg=cfg, title=title, body=body,
-                        priority=priority, receipts=receipts, authorize=authorize)
+                        priority=priority, receipts=receipts, authorize=authorize, states=states)
 
     if async_dispatch:
         exec_ = _get_executor()
@@ -490,9 +657,12 @@ def notify(
     # Sync (for tests).
     fired = 0
     for backend, ident in admitted:
-        if tracked(backend, ident):
+        if tracked(backend, ident, outcomes):
             fired += 1
     return fired
 
 
-__all__ = ["email_configured", "notify", "send_email"]
+__all__ = [
+    "RETRY_MINUTES", "configured_backends", "email_configured", "mark_unconfirmed", "notify",
+    "retry_delay", "send_checked", "send_email", "setup_fingerprint",
+]

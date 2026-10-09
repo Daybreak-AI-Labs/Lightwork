@@ -302,7 +302,9 @@ def test_typescript_client_dependency_and_ci_security_gates():
     """Keep the reviewed SDK floor/overrides and audit gate from regressing."""
     client_root = _REPO_ROOT / "examples" / "clients" / "typescript"
     package = json.loads((client_root / "package.json").read_text(encoding="utf-8"))
-    assert package["dependencies"]["@modelcontextprotocol/sdk"] == "^1.30.0"
+    # 1.31.0 fixes GHSA-6qxp-vccf-f47h (OAuth client credentials sent to an
+    # unvalidated authorization server); the lock resolves 1.32.1.
+    assert package["dependencies"]["@modelcontextprotocol/sdk"] == "^1.32.1"
     assert package["devDependencies"]["@types/node"] == "22.20.1"
     assert "environment.test.ts" in package["scripts"]["test:environment"]
     assert "tsc --noEmit --strict" in package["scripts"]["typecheck"]
@@ -320,7 +322,7 @@ def test_typescript_client_dependency_and_ci_security_gates():
     }
 
     lock = json.loads((client_root / "package-lock.json").read_text(encoding="utf-8"))
-    assert lock["packages"]["node_modules/@modelcontextprotocol/sdk"]["version"] == "1.30.0"
+    assert lock["packages"]["node_modules/@modelcontextprotocol/sdk"]["version"] == "1.32.1"
 
     workflow = (
         _REPO_ROOT / ".github" / "workflows" / "mcp-clients.yml"
@@ -338,7 +340,7 @@ def test_typescript_client_dependency_and_ci_security_gates():
         "'packaging==26.3'",
     ):
         assert workflow.count(packaging_tool) == 2
-    assert 'go-version: "1.26.6"' in workflow
+    assert 'go-version: "1.26.9"' in workflow
     assert "go-version-file:" not in workflow
     assert "go run -mod=readonly ." in workflow
 

@@ -1956,13 +1956,8 @@ def pick_flows() -> dict[str, Any]:
         "Let flows self-correct (autonomous revert of a regressed rewrite)?", default=False
     ):
         out["auto_evolve"] = True
-        # Full autonomy: also APPLY a proposal forward (soften a failing action to
-        # an agent), not just revert. Strictly opt-in on top of self-correction,
-        # since a bad apply is auto-reverted only if the revert side is on.
-        if _q_confirm(
-            "Also let flows autonomously APPLY a learned rewrite (not just revert)?", default=False
-        ):
-            out["auto_apply"] = True
+        # Workflow suggestions always need a person's review; automatic forward
+        # apply was retired, so the wizard no longer offers [flows] auto_apply.
     return out
 
 
@@ -4809,6 +4804,17 @@ def _pick_image_edit_models() -> dict[str, str]:
     return choices
 
 
+def _drop_self_connect_without_connections(advanced: dict[str, Any]) -> None:
+    """Employee-connected accounts are written only with named connections.
+
+    Say so instead of silently dropping the answer.
+    """
+    if advanced.get("connections_self_connect") and not advanced.get("connections"):
+        advanced["connections_self_connect"] = False
+        console.print("[yellow]Employees can connect their own accounts only when named connections are on. "
+                      "That answer was not saved. Turn on named connections to use it.[/yellow]")
+
+
 def pick_advanced() -> dict[str, Any]:
     """Configure advanced reasoning, learning, and governance features.
 
@@ -5915,6 +5921,7 @@ def pick_advanced() -> dict[str, Any]:
             default=False,
         ),
     }
+    _drop_self_connect_without_connections(advanced)
     # The governed sidecar is an extension of the external-agent boundary: its
     # clients authenticate through per-agent MCP credentials and then inherit
     # the same trust/revocation/control-plane posture. Keep the deployment
@@ -7503,7 +7510,10 @@ def _emit_kv(lines: list[str], k: str, v: Any) -> None:
     elif isinstance(v, (int, float)):
         lines.append(f"{k} = {v}")
     elif isinstance(v, list):
-        rendered = ", ".join(_toml_str(x) for x in v)
+        rendered = ", ".join(
+            str(x).lower() if isinstance(x, bool) else str(x) if isinstance(x, (int, float)) else _toml_str(x)
+            for x in v
+        )
         lines.append(f"{k} = [{rendered}]")
     else:
         lines.append(f"{k} = {_toml_str(v)}")

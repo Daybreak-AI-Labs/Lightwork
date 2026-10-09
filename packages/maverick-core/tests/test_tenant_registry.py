@@ -347,3 +347,23 @@ def test_concurrent_suspend_and_quota_both_apply():
     rec = tr.get_tenant("acme")
     assert rec.status == tr.SUSPENDED
     assert rec.max_daily_dollars == 99.0
+
+
+def test_erasure_removes_children_before_a_one_character_top_level_name(tmp_path):
+    # The root entry '.' and a one-character top-level name share a sort depth and
+    # length; the root must still be removed last or rmdir fails (ENOTEMPTY).
+    tr.create_tenant("former")
+    root = tmp_path / "tenants" / "former"
+    (root / "x").mkdir()
+    (root / "x" / "y.txt").write_text("private", encoding="utf-8")
+    (root / "a").write_text("private", encoding="utf-8")
+    (root / "keep" / "deep").mkdir(parents=True)
+    (root / "keep" / "deep" / "z.txt").write_text("private", encoding="utf-8")
+    assert tr.delete_tenant("former") is True
+
+    review = tr.erasure_review("former")
+    result = tr.erase_removed_tenant("former", revision=review["revision"], operation="1" * 32,
+                                     actor="user:owner", context="test", previous_attempt=review["previous_attempt"])
+
+    assert result["result"] == "confirmed"
+    assert not root.exists()

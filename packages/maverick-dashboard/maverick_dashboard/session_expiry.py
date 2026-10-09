@@ -146,11 +146,6 @@ def renew_session(request: Request) -> JSONResponse:
     if principal is None:
         raise HTTPException(401, "Your sign-in has ended. Sign in again to continue.")
     token = mint_local_session(principal.sub, request=request)
-    old_sid = (principal.claims or {}).get("sid") or ""
-    if old_sid:
-        from . import session_registry
-
-        session_registry.revoke(old_sid, by="renewed")
     from maverick.web_session import verify_session
 
     from .invites import local_session_secret
@@ -159,7 +154,14 @@ def renew_session(request: Request) -> JSONResponse:
     minted = verify_session(token, local_session_secret()) or {}
     effective = _ends(minted)
     if effective is None:
+        # The replacement is not usable, so the sign-in the person still has
+        # must stay: ending it first would sign them out for nothing.
         raise HTTPException(401, "Your sign-in has ended. Sign in again to continue.")
+    old_sid = (principal.claims or {}).get("sid") or ""
+    if old_sid:
+        from . import session_registry
+
+        session_registry.revoke(old_sid, by="renewed")
     response = JSONResponse({"expires_at": effective}, headers=_HEADERS)
     _set_cookie(response, SESSION_COOKIE, token, max_age=ttl, secure=_cookie_secure(request))
     return response

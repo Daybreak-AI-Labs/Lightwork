@@ -92,10 +92,12 @@ export class DashboardConnections {
     const controller = new AbortController(); this.requests.add(controller);
     const timer = setTimeout(() => controller.abort(), 15000);
     try {
+      // Without a token the dashboard accepts a local write only from its own address, and Node sends no Origin unless asked.
       const response = await fetch(connection.base + path, {method: body === undefined ? "GET" : "POST", redirect: "error",
         signal: controller.signal, headers: {Accept: "application/json", "Content-Type": "application/json",
+          ...(body === undefined ? {} : {Origin: new URL(connection.base).origin}),
           ...(connection.token ? {Authorization: `Bearer ${connection.token}`} : {})},
-        body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store"});
+        body: body === undefined ? undefined : JSON.stringify(body)});
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) this.invalidate();
         await response.body?.cancel();

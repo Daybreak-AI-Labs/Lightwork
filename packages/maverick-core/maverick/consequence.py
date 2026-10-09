@@ -32,6 +32,30 @@ class ConsequenceWriteUncertain(RuntimeError):
     """The attempted report may be present; do not automatically submit it again."""
 
 
+def _discard_torn_tail(fd, end):
+    """Drop an unterminated final row left by an interrupted append.
+
+    Readers only ever see newline-terminated rows and the interrupted writer
+    never confirmed it, so every visible record is kept. The caller holds the
+    journal lock. Returns the new end of the journal.
+    """
+    keep = end
+    while keep > 0:
+        start = max(0, keep - 64 * 1024)
+        os.lseek(fd, start, os.SEEK_SET)
+        newline = os.read(fd, keep - start).rfind(b"\n")
+        if newline >= 0:
+            keep = start + newline + 1
+            break
+        keep = start
+    os.ftruncate(fd, keep)
+    os.fsync(fd)
+    if os.fstat(fd).st_size != keep:
+        raise OSError("consequence repair could not be verified")
+    log.warning("Discarded an incomplete final row from an interrupted consequence journal append")
+    return keep
+
+
 def _append(path, row):
     raw = (json.dumps(row, sort_keys=True) + "\n").encode("utf-8")
     fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_APPEND | getattr(os, "O_BINARY", 0), 0o600)
@@ -41,7 +65,11 @@ def _append(path, row):
             if end:
                 os.lseek(fd, end - 1, os.SEEK_SET)
                 if os.read(fd, 1) != b"\n":
-                    return False  # Do not join a new report onto a torn prior row.
+                    # Never join a new report onto a torn prior row.
+                    end = _discard_torn_tail(fd, end)
+        except OSError:
+            return False  # Nothing of this report was written.
+        try:
             if os.write(fd, raw) != len(raw):
                 raise OSError("incomplete consequence append")
             os.fsync(fd)

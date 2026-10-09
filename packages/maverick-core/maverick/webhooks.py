@@ -204,12 +204,19 @@ def _submit(executor, fn, *args) -> bool:
         raise
 
 
+class NotSent(str):
+    """The ``error`` of a failed send that provably never reached the receiver
+    (nothing connected). The delivery log retries it on its backoff; any other
+    failure with no status code may have been received and is not repeated."""
+
+
 def _post_result(url: str, body: bytes, headers: dict[str, str],
                  timeout: float) -> tuple[int | None, int, str, str]:
     """POST through the SSRF guard and report ``(status_code, latency_ms,
     response_snippet, error)`` -- the delivery log's raw material. A blocked
     host, a missing client or a transport failure gives ``status_code=None``
-    and a short error; nothing here raises."""
+    and a short error (a :class:`NotSent` one when nothing was sent); nothing
+    here raises."""
     from .secrets import scrub
     # Outbound webhook URLs frequently carry credentials in the query string
     # (?token=, ?api_key=, presigned ?sig=); scrub before logging so they don't
@@ -219,7 +226,7 @@ def _post_result(url: str, body: bytes, headers: dict[str, str],
         import httpx  # noqa: F401  (presence check; client built via _ssrf)
     except ImportError:
         log.warning("webhooks: httpx not installed; skipping %s", safe_url)
-        return None, 0, "", "httpx is not installed"
+        return None, 0, "", NotSent("httpx is not installed")
     # Route through the SSRF guard: an outbound URL comes from user config, but
     # a config that points at a loopback/metadata/internal host would let the
     # webhook dispatcher be used as an SSRF proxy. safe_client resolves once,
@@ -227,12 +234,12 @@ def _post_result(url: str, body: bytes, headers: dict[str, str],
     try:
         from .tools._ssrf import BlockedHost, safe_client
     except Exception:  # pragma: no cover - guard unavailable
-        return None, 0, "", "SSRF guard unavailable"
+        return None, 0, "", NotSent("SSRF guard unavailable")
     try:
         client = safe_client(url, timeout=timeout)
     except BlockedHost as e:
         log.warning("webhooks: %s blocked (SSRF guard): %s", safe_url, e)
-        return None, 0, "", f"blocked by the address guard: {scrub(str(e))[:120]}"
+        return None, 0, "", NotSent(f"blocked by the address guard: {scrub(str(e))[:120]}")
     started = time.monotonic()
     try:
         with client:
@@ -246,7 +253,10 @@ def _post_result(url: str, body: bytes, headers: dict[str, str],
     except Exception as e:
         latency = int((time.monotonic() - started) * 1000)
         log.warning("webhooks: %s failed: %s: %s", safe_url, type(e).__name__, scrub(str(e)))
-        return None, latency, "", f"{type(e).__name__}: {scrub(str(e))[:120]}"
+        from .notifications import never_sent
+
+        error = f"{type(e).__name__}: {scrub(str(e))[:120]}"
+        return None, latency, "", NotSent(error) if never_sent(e) else error
 
 
 def _post(url: str, body: bytes, headers: dict[str, str], timeout: float) -> None:

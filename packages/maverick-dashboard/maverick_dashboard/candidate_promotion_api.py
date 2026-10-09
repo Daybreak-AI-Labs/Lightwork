@@ -166,6 +166,9 @@ def _binding(
 async def _call(function: Callable, *args, **kwargs):
     try:
         return await run_in_threadpool(function, *args, **kwargs)
+    except HTTPException:
+        # A deliberate refusal already carries its own status and message.
+        raise
     except CandidatePromotionNotFound as exc:
         raise HTTPException(404, "Candidate promotion was not found in this workspace") from exc
     except CandidatePromotionDenied as exc:

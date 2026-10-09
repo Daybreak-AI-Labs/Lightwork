@@ -1,7 +1,6 @@
 """Named-recipient bundle preparation, acceptance, revocation and portable export."""
 from __future__ import annotations
 
-import hmac
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -56,7 +55,7 @@ def service(request, *, write=False):
     if write:
         _require_same_origin(request)
     supplied = request.headers.get("X-Lightwork-Bundle-Context")
-    if (write or supplied is not None) and not hmac.compare_digest(supplied or "", context_for(request)):
+    if (write or supplied is not None) and not auth.constant_time_equals(supplied or "", context_for(request)):
         raise product_error(409, "context_changed", "Your account or workspace changed. Reload bundles before continuing.")
     tenant = current_tenant_id_strict()
     try:

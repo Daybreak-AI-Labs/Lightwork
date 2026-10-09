@@ -114,7 +114,7 @@ def report_result(request, row):
 def prepare_report(request, goal_id, body, *, operation_id=None):
     with authority_effect_fence():
         _app()._require_same_origin(request)
-        if not hmac.compare_digest(body.context, context_for(request)):
+        if not auth.constant_time_equals(body.context, context_for(request)):
             raise product_error(409, "diagnostic_context_changed", "Your account or workspace changed. Reopen this task before preparing a report.")
         owner, goal = _goal(request, goal_id)
         identity = "OTD-" + (hashlib.sha256(operation_id.encode()).hexdigest()[:48] if operation_id else secrets.token_hex(16))
@@ -154,7 +154,7 @@ def download(request: Request, identity: str, sha256: str):
             raise product_error(403, "diagnostic_context_mismatch", "This report belongs to a different account or workspace context.")
         document = crypto_at_rest.unseal_from_str(row["sealed"])
         digest = hashlib.sha256(document.encode()).hexdigest()
-        if not hmac.compare_digest(digest, row["sha256"]) or not hmac.compare_digest(digest, sha256):
+        if not hmac.compare_digest(digest, row["sha256"]) or not auth.constant_time_equals(digest, sha256):
             raise product_error(409, "diagnostic_preview_changed", "The reviewed report does not match. Prepare and inspect a fresh preview.")
         if row.get("_audit_pending") or audit("owned_task_diagnostic_download", actor=owner or "local", agent=owner or "local",
             report_id=identity, task_id=row["goal_id"], sha256=digest) is not True:

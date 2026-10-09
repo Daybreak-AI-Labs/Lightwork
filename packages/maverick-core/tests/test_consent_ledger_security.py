@@ -58,6 +58,18 @@ def test_tampered_record_invalidates_the_authority(tmp_path):
     assert consent.list_grants(path=path) == []
 
 
+def test_non_ascii_tampered_signature_fails_closed(tmp_path):
+    path = tmp_path / "consent.ledger"
+    consent.grant_persistent("force-push", "main", path=path)
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["mac"] = "é" * 64
+    path.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+
+    assert consent._check_ledger("force-push", "main", path=path) is False
+    with pytest.raises(consent.ConsentLedgerError, match="signature"):
+        consent.grant_persistent("deploy", "prod", path=path)
+
+
 def test_grant_is_bound_to_exact_principal(tmp_path):
     path = tmp_path / "consent.ledger"
     with bind_principal("user:alice"):

@@ -19,7 +19,7 @@ from maverick.budget import Budget
 from maverick.candidate_promotion import CandidatePromotionConflict, CandidatePromotionDenied
 from maverick.flow import execution, runner, store
 from maverick.flow import learned_operator as operator
-from maverick.governed_records import GovernedRecordStore
+from maverick.governed_records import GovernedRecordStore, RecordConflict
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -198,7 +198,8 @@ def history(request, flow_id):
     retained = [{"id": row["id"], "when": row["created_at"], "state": row["state"]}
                 for row in rows if row.get("tenant") == tenant and row.get("owner") == owner
                 and row.get("flow_id") == flow_id]
-    return {"context": context, "comparisons": retained[-50:]}
+    # The store lists newest first, so the first rows are the latest ones.
+    return {"context": context, "comparisons": retained[:50]}
 
 
 def options(request, flow_id):
@@ -218,7 +219,7 @@ def options(request, flow_id):
             "baseline_version": baseline.version, "baseline_release": publication["release_id"],
             "included_workflows": _reviewed_versions(candidate, baseline, publication),
             "outputs": [{"value": name, "label": item["label"] + " · final result", "kind": item["kind"]} for name, item in outputs.items()],
-            "cases": cases, "comparisons": comparisons[-50:],
+            "cases": cases, "comparisons": comparisons[:50],
             "scope": "Up to five selected known cases from the latest 200 retained runs. Each complete rule version uses its own saved included workflows. Agreement with your expected answers is not untouched test performance, general accuracy or business value."}
 
 
@@ -363,7 +364,10 @@ def run(request, body):
         if row["binding"] != frozen["binding"]:
             raise CandidatePromotionConflict("This original comparison request belongs to different cases or answers. Review a new comparison.")
         return view(request, row["id"])
-    row = service.create(frozen, action="flow.comparison.authorize", actor=frozen["owner"], max_records=1000)
+    try:
+        row = service.create(frozen, action="flow.comparison.authorize", actor=frozen["owner"], max_records=1000)
+    except RecordConflict as exc:
+        raise CandidatePromotionConflict("This original comparison request was just recorded by another request. Check its retained comparison instead of starting it again.") from exc
     row = service.update(row["id"], lambda value: value.update(state="running"), expected_revision=row["revision"],
                          action="flow.comparison.start", actor=row["owner"])
     results = []
@@ -464,10 +468,19 @@ def page(request: Request):
     return templates.TemplateResponse(request, "flow_comparisons.html", {}, headers={"Cache-Control": "no-store, private"})
 
 
+def _read(function):
+    """A read route's work, with the release page's refusals and a plain 422 for a
+    choice the person can still fix (these messages are written for them)."""
+    try:
+        return release._native_call(function)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @router.get(API)
 def listing(request: Request, flow_id: str = ""):
     if flow_id:
-        return release._native_call(lambda: options(request, flow_id))
+        return _read(lambda: options(request, flow_id))
     _tenant, owner, context = _binding(request, Response())
     flows = store.list_flow_summaries(owner=owner, bounded=True)
     if len(flows) > 100:
@@ -485,12 +498,12 @@ def case_detail(request: Request, flow_id: str, run_id: str, output: str):
         value = source["original_result"]
         source["original_result"] = "Yes" if value is True else "No" if value is False else str(value) if value is not None else "No result recorded"
         return source
-    return release._native_call(read)
+    return _read(read)
 
 
 @router.get(API + "/history")
 def retained_history(request: Request, flow_id: str):
-    return release._native_call(lambda: history(request, flow_id))
+    return _read(lambda: history(request, flow_id))
 
 
 @router.post(API)
@@ -510,7 +523,7 @@ async def start(request: Request):
 
 @router.get(API + "/{identifier}")
 def read(request: Request, identifier: str):
-    return release._native_call(lambda: view(request, identifier))
+    return _read(lambda: view(request, identifier))
 
 
 @router.get("/static/lightwork-local-flow-comparisons.js")

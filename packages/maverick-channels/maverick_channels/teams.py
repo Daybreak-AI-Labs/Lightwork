@@ -47,6 +47,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -83,6 +84,10 @@ KEYS_REFRESH_COOLDOWN = 60.0
 TEXT_LIMIT = 4000
 DEFAULT_PORT = 8771
 _CONFIRM_RISKS = frozenset({"high", "critical"})
+# Teams expects an invoke answer within a few seconds; the in-place update of
+# the card is a courtesy that must not make the answer late.
+_INVOKE_UPDATE_SECONDS = 3.0
+_LINK_CODE = re.compile(r"[0-9A-Fa-f]{6,16}")  # what teams_identity.issue_link_code produces
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -368,7 +373,10 @@ class TeamsConnector:
         status, body = await self._transport(method, url, headers=headers, json_body=payload)
         if status in (401, 403, 404, 400, 413):
             raise DeliveryNotSent(f"Teams rejected the message ({status})")
-        if status == 429 or status >= 500:
+        if status == 429:
+            # Throttled before processing: nothing was posted, so it can be retried.
+            raise DeliveryNotSent("Teams is throttling this bot; the message was not sent")
+        if status >= 500:
             raise DeliveryUnknown(f"Teams did not confirm the message ({status})")
         if status >= 400:
             raise DeliveryNotSent(f"Teams rejected the message ({status})")
@@ -609,8 +617,12 @@ class TeamsChannel(Channel):
     async def _maybe_link(self, parsed: ParsedActivity) -> str | None:
         """``link <code>`` in chat redeems an administrator's one-time code."""
         words = parsed.text.split()
-        if len(words) != 2 or words[0].lower() != "link":
-            return None
+        if len(words) != 2 or words[0].lower() != "link" or not _LINK_CODE.fullmatch(words[1]):
+            return None  # "link pricing" is a request, not a code
+        from maverick.oidc import oidc_enabled
+
+        if oidc_enabled():
+            return None  # with company sign-in the legacy link store is not trusted
         from maverick.teams_identity import redeem_link_code
 
         conversation = None
@@ -632,7 +644,7 @@ class TeamsChannel(Channel):
             return JSONResponse({})
         if not parsed.conversation_id or not parsed.activity_id:
             raise HTTPException(status_code=400, detail="message identity required")
-        self._remember(parsed)
+        await asyncio.to_thread(self._remember, parsed)
         linked = await self._maybe_link(parsed)
         if linked is not None:
             await self.connector.send_activity(parsed.service_url, parsed.conversation_id,
@@ -760,7 +772,7 @@ class TeamsChannel(Channel):
             module = self._approval_module()
         except RuntimeError as exc:
             return message_response(str(exc))
-        self._remember(parsed)
+        await asyncio.to_thread(self._remember, parsed)
         principal = await self._approval_principal(parsed)
         if not principal:
             return message_response("Your Teams account isn't linked for this request. Connect it from My work.")
@@ -776,7 +788,7 @@ class TeamsChannel(Channel):
                                     "could not be checked. Reject it and ask for a new request.")
         if verb == "cancel":
             return card_response(approval_card(view["approval"], view["card"], source_label=view["source_label"]))
-        if verb == "approve" and view["approval"]["risk"] in _CONFIRM_RISKS:
+        if verb == "approve" and str(view["approval"]["risk"] or "").strip().lower() in _CONFIRM_RISKS:
             return card_response(confirm_card(view["approval"], binding=binding))
         try:
             if verb in ("approve", "approve_confirm"):
@@ -811,9 +823,11 @@ class TeamsChannel(Channel):
                                 decided=result)
         if parsed.reply_to_id:
             try:
-                await self.connector.update_activity(parsed.service_url, parsed.conversation_id,
-                                                     parsed.reply_to_id,
-                                                     {"attachments": [attachment(decided)]})
+                await asyncio.wait_for(
+                    self.connector.update_activity(parsed.service_url, parsed.conversation_id,
+                                                   parsed.reply_to_id,
+                                                   {"attachments": [attachment(decided)]}),
+                    _INVOKE_UPDATE_SECONDS)
             except Exception:  # noqa: BLE001 -- the invoke response still updates the presser's view
                 log.warning("teams: could not update the approval card in place", exc_info=True)
         return card_response(decided)
@@ -835,8 +849,10 @@ class TeamsChannel(Channel):
                              note="The earlier decision was undone; please decide again.")
         if parsed.reply_to_id:
             try:
-                await self.connector.update_activity(parsed.service_url, parsed.conversation_id,
-                                                     parsed.reply_to_id, {"attachments": [attachment(card)]})
+                await asyncio.wait_for(
+                    self.connector.update_activity(parsed.service_url, parsed.conversation_id,
+                                                   parsed.reply_to_id, {"attachments": [attachment(card)]}),
+                    _INVOKE_UPDATE_SECONDS)
             except Exception:  # noqa: BLE001
                 log.warning("teams: could not restore the approval card in place", exc_info=True)
         return card_response(card)
@@ -906,11 +922,17 @@ async def post_approval_card(connector: TeamsConnector, approval_id: int, *, lin
 def post_approval_to_linked_users(approval_id: int, *, cfg: dict | None = None, transport=None,
                                   decisions=None) -> list[str]:
     """Synchronous entry point used by :mod:`maverick.approval_notify`."""
+    from maverick.oidc import oidc_enabled
     from maverick.teams_identity import approver_links
 
     settings = channel_config(cfg)
     if not (settings["enabled"] and settings["approvals_enabled"] and settings["app_id"]
             and settings["app_password"]):
+        return []
+    if oidc_enabled():
+        # Decisions resolve through the sign-in bridge, which these legacy links
+        # do not feed; a card posted to them shows the request to people who
+        # then cannot act on it.
         return []
     links = approver_links()
     if not links:

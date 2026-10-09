@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import io
 import json
 import time
@@ -163,7 +162,7 @@ class DraftIn(BaseModel):
 
 def _binding(request, context):
     _app()._require_same_origin(request)
-    if not hmac.compare_digest(context_for(request), context):
+    if not auth.constant_time_equals(context_for(request), context):
         raise product_error(409, "activation_context_changed", "Your account or workspace changed. Reopen the saved draft before continuing.")
 
 
@@ -309,7 +308,7 @@ def get(request: Request, identity: str):
 
 def _accepted_result(request, row, fingerprint):
     result = _result(request, row)
-    if not result or not result["complete"] or not hmac.compare_digest(result["fingerprint"], fingerprint):
+    if not result or not result["complete"] or not auth.constant_time_equals(result["fingerprint"], fingerprint):
         raise product_error(409, "activation_result_changed", "The task is incomplete or its result changed. Review the current completed result before accepting it.")
     return result
 

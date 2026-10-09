@@ -17,7 +17,7 @@ export class Lightwork {
   private disposed = false;
 
   constructor(baseUrl: string, token: string, private timeoutMs = 15000,
-              private fetcher: typeof fetch = fetch) {
+              private fetcher: typeof fetch = (input, init) => fetch(input, init)) {
     const url = new URL(baseUrl);
     const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname.toLowerCase());
     if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash ||

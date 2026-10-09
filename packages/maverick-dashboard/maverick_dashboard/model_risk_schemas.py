@@ -1105,54 +1105,6 @@ class Article73SubmissionIn(Article73AuthorityIn):
     submitted_at: float | None = Field(None, gt=0)
 
 
-class GRCOutboundSourceIn(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    source_kind: Literal["finding", "risk_acceptance", "ai_incident"]
-    source_id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
-    asset_id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
-    severity: Literal["low", "medium", "high", "critical"]
-    summary: str = Field(..., min_length=1, max_length=8000)
-    source_revision: int = Field(..., ge=1)
-    source_digest: str = Field(..., pattern=r"^[0-9a-f]{64}$")
-    finding_type: str | None = Field(None, pattern=_GOVERNANCE_TOKEN)
-    finding_id: str | None = Field(None, pattern=_GOVERNANCE_TOKEN)
-    rationale: str | None = Field(None, min_length=1, max_length=8000)
-    reviewer: str | None = Field(None, min_length=1, max_length=256)
-    decided_at: float | None = Field(None, gt=0)
-    expires_at: float | None = Field(None, gt=0)
-    acceptance_status: Literal["accepted", "expired", "revoked"] | None = None
-    incident_source_id: str | None = Field(None, pattern=_GOVERNANCE_TOKEN)
-    incident_status: Literal["open", "contained", "resolved", "dismissed"] | None = None
-    occurred_at: float | None = Field(None, gt=0)
-    resolution: str = Field(default="", max_length=8000)
-
-    @model_validator(mode="after")
-    def require_kind_fields(self):
-        required = {
-            "finding": ("finding_type",),
-            "risk_acceptance": (
-                "finding_id",
-                "rationale",
-                "reviewer",
-                "decided_at",
-                "expires_at",
-                "acceptance_status",
-            ),
-            "ai_incident": (
-                "incident_source_id",
-                "incident_status",
-                "occurred_at",
-            ),
-        }[self.source_kind]
-        missing = [name for name in required if getattr(self, name) is None]
-        if missing:
-            raise ValueError(
-                f"{self.source_kind} requires: {', '.join(missing)}"
-            )
-        return self
-
-
 class AIBusinessIntakeFieldOut(BaseModel):
     path: str
     label: str

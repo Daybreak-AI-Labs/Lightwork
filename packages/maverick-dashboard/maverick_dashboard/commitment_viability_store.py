@@ -29,10 +29,11 @@ from maverick.commitment_viability import (
     explain_resource_gaps,
     propose_shared_dependencies,
 )
+from maverick.constant_time import text_equals
 from maverick.governed_records import GovernedRecordStore
 from maverick.privacy_ops import RecordConflict
 
-STORE = GovernedRecordStore("commitment_viability", "CMV", "commitment_viability")
+STORE = GovernedRecordStore("commitment_viability", "CMV", "commitment_viability", archive_when_full=False)
 ARCHIVE = GovernedRecordStore("commitment_viability_archive", "CMA", "commitment_viability_archive")
 LIMIT = 1_000
 SCHEMA = "lightwork.commitment-viability-pilot.v1"
@@ -196,7 +197,7 @@ def create(context: str, actor: str, body: dict) -> dict:
         prior = _owned(prior, context)
         if prior.get("retirement"):
             raise RecordConflict("This review is being archived. Open its saved history instead.")
-        if not hmac.compare_digest(str(prior.get("owner") or ""), actor):
+        if not text_equals(str(prior.get("owner") or ""), actor):
             raise PermissionError("Only the person who started this review can repeat its creation.")
         if prior.get("creation_request") != request:
             raise RecordConflict("This request reference was used for different work.")
@@ -266,7 +267,7 @@ def create(context: str, actor: str, body: dict) -> dict:
                              max_records=LIMIT)
     except RecordConflict as exc:
         prior = get(identifier, context)
-        if not hmac.compare_digest(str(prior.get("owner") or ""), actor):
+        if not text_equals(str(prior.get("owner") or ""), actor):
             raise PermissionError("Only the person who started this review can repeat its creation.") from exc
         if prior.get("creation_request") != request:
             raise
@@ -411,12 +412,12 @@ def record_trace(identifier: str, context: str, actor: str, body: dict) -> dict:
 
 def confirm(identifier: str, context: str, actor: str, body: dict) -> dict:
     prior = get(identifier, context)
-    if not hmac.compare_digest(str(prior.get("owner") or ""), actor):
+    if not text_equals(str(prior.get("owner") or ""), actor):
         raise PermissionError("Only the person who started this review can confirm its choices.")
 
     def mutate(current: dict) -> None:
         now = time.time()
-        if not hmac.compare_digest(str(current.get("owner") or ""), actor):
+        if not text_equals(str(current.get("owner") or ""), actor):
             raise PermissionError("Only the person who started this review can confirm its choices.")
         model = _snapshot(current["model"])
         revisions = _current_versions(current)
@@ -446,11 +447,11 @@ def _mark_retirement(identifier: str, context: str, actor: str, body: dict) -> d
     except LookupError:
         archived = archived_get(identifier, context)
         prior_revision = archived["source"]["retirement"]["expected_revision"]
-        if (not hmac.compare_digest(str(archived["retired_by"]), actor)
+        if (not text_equals(str(archived["retired_by"]), actor)
                 or body["expected_revision"] not in {prior_revision, archived["source"]["revision"]}):
             raise RecordConflict("This review was already archived. Open its saved history.") from None
         return archived
-    if not hmac.compare_digest(str(current.get("owner") or ""), actor):
+    if not text_equals(str(current.get("owner") or ""), actor):
         raise PermissionError("Only the person who started this review can finish and archive it.")
     marker = current.get("retirement")
     if marker:
@@ -466,7 +467,7 @@ def _mark_retirement(identifier: str, context: str, actor: str, body: dict) -> d
 
         def mark(record: dict) -> None:
             _owned(record, context)
-            if not hmac.compare_digest(str(record.get("owner") or ""), actor):
+            if not text_equals(str(record.get("owner") or ""), actor):
                 raise PermissionError("Only the person who started this review can finish and archive it.")
             if record.get("retirement"):
                 raise RecordConflict("This review is already being archived. Refresh its history.")

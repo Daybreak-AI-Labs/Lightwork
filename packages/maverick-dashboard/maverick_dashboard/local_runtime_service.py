@@ -324,6 +324,22 @@ def prepare(request, action):
             "context": context, "revision": current["revision"], "summary": summary}
 
 
+def _port_in_use(port):
+    """Whether a live service holds ``port``. Elsewhere a stopped server's
+    closing connections (TIME_WAIT) would fail a plain bind, so the probe sets
+    SO_REUSEADDR, which a live listener still refuses. On Windows that option
+    would bind over a live listener, and a plain bind already ignores closing
+    connections, so it stays unset."""
+    with socket.socket() as probe:
+        if os.name != "nt":
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError:
+            return True
+    return False
+
+
 class _BeforeStartRefused(Exception):
     """The exact native plan changed before any process was created."""
 
@@ -440,11 +456,8 @@ def apply(request, review):
         elif review["action"] == "start":
             plan = _plan()
             port = int(plan["endpoint"].rsplit(":", 1)[1])
-            with socket.socket() as probe:
-                try:
-                    probe.bind(("127.0.0.1", port))
-                except OSError as exc:
-                    raise HTTPException(409, "Another service is using this local AI address. Choose an available port; no duplicate server was started.") from exc
+            if _port_in_use(port):
+                raise HTTPException(409, "Another service is using this local AI address. Choose an available port; no duplicate server was started.")
             if _managed and _managed["runner"].process:
                 _managed["runner"].stop(_managed["runner"].process)
             saved["active"] = {"run": review["id"], "instance": _INSTANCE, "pid": None, "endpoint": plan["endpoint"],
@@ -457,11 +470,14 @@ def apply(request, review):
                 launcher.start()
                 saved["active"]["pid"] = runner.process.proc.pid
                 row.update(state="started", message="Your exact server start was accepted. Check service health before using the local model.")
-            except (_BeforeStartRefused, LocalRuntimeError):
+            except (_BeforeStartRefused, LocalRuntimeError, OSError) as exc:
                 if runner.process is None:
                     saved["active"] = None
                     _managed = None
-                    row.update(state="refused", message="Local AI preparation changed before any server was started. Refresh and review again.")
+                    row.update(state="refused", message=(
+                        "The model server program could not be started on this computer. Nothing is running; check that it is installed and try again."
+                        if isinstance(exc, OSError) else
+                        "Local AI preparation changed before any server was started. Refresh and review again."))
                 else:
                     saved["active"]["pid"] = runner.process.proc.pid
                     _save(saved)

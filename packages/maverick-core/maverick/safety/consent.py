@@ -50,6 +50,7 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
 
+from ..constant_time import text_equals
 from ..file_lock import (
     atomic_create_bytes,
     atomic_read_bytes,
@@ -467,7 +468,7 @@ def _load_records_unlocked(path: Path, key: bytes | None) -> list[dict]:
         ):
             raise ConsentLedgerError("consent ledger timestamp is invalid")
         unsigned = {name: value for name, value in record.items() if name != "mac"}
-        if not hmac.compare_digest(record["mac"], _record_mac(key, unsigned)):
+        if not text_equals(record["mac"], _record_mac(key, unsigned)):
             raise ConsentLedgerError("consent ledger signature is invalid")
         previous = record["mac"]
         records.append(record)
@@ -866,8 +867,11 @@ def _dashboard_timeout() -> float:
 
 def _approval_card_ttl() -> float:
     """How long a parked request's card stays approvable (seconds): the
-    dashboard wait, at least a minute and never more than an hour."""
-    return max(60.0, min(_dashboard_timeout(), _CARD_LIFETIME_CAP_SECONDS))
+    dashboard wait plus the undo grace (a decision made at the end of the wait
+    only settles after the grace, and the card is re-checked then), at least a
+    minute and never more than an hour."""
+    return max(60.0, min(_dashboard_timeout() + approval_undo_grace_seconds(),
+                         _CARD_LIFETIME_CAP_SECONDS))
 
 
 def dashboard_wait_seconds() -> float:
@@ -1448,7 +1452,15 @@ def _task_over(wm, goal_id: int | None) -> bool:
 def _withdraw_approval(wm, approval_id: int, by: str) -> None:
     """Take a request nobody can act on any more off the Approvals page."""
     try:
-        wm.decide_approval(approval_id, "denied", decided_by=by)
+        if wm.decide_approval(approval_id, "denied", decided_by=by):
+            return
+        # The immediate path refuses an approval that already carries audited
+        # votes or an undo marker: deny it through the signed-audit path.
+        event = wm.decide_approval_audited(approval_id, "denied", decided_by=by)
+        if event is not None:
+            from ..channel_approvals import audit_approval_decision
+
+            audit_approval_decision(wm, event)
     except Exception:  # pragma: no cover -- the refusal stands either way
         pass
 

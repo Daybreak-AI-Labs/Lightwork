@@ -131,6 +131,7 @@
   }
   el('pd-delete').addEventListener('submit', event => { event.preventDefault(); action(async () => {
     const scope = state.scopes.find(value => value.id === el('pd-delete-scope').value);
+    if (!scope) throw new Error('There is no verified conversation to review for deletion yet.');
     const selected = Array.from(el('pd-delete-stores').querySelectorAll('input:checked')).map(input => input.value);
     const body = {channel: scope.channel, user_id: scope.user_id, stores: selected};
     const preview = await call('/deletion-preview', body);

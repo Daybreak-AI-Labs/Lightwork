@@ -620,3 +620,85 @@ def test_token_failures_are_explained_plainly():
     assert "tenant" in explain_token_failure(400, {"error": "unauthorized_client",
                                                    "error_description": "AADSTS700016: ..."})
     assert "server error" in explain_token_failure(503, {})
+
+
+# --------------------------------------------------------------- review round
+
+def test_a_throttled_reply_was_not_sent_and_can_be_retried_but_a_server_error_is_unknown(rsa_key):
+    import asyncio
+    ch = _channel(rsa_key)
+    key = ("POST", "conversations/a%3Aconv1/activities")
+    ch.transport.responses[key] = (429, {})
+    with pytest.raises(teams_mod.DeliveryNotSent, match="throttling"):
+        asyncio.run(ch.send("a:conv1", "hello"))
+    ch.transport.responses[key] = (503, {})
+    with pytest.raises(teams_mod.DeliveryUnknown):
+        asyncio.run(ch.send("a:conv1", "hello"))
+
+
+def test_a_multiline_reply_keeps_its_lines_and_paragraphs_on_the_card():
+    from maverick_channels.teams_cards import result_card
+    card = result_card("Summary\n\n- a\n- b\r\n```\ncode\n```")
+    blocks = [b for b in card["body"] if b["type"] == "TextBlock"]
+    assert [b["text"] for b in blocks] == ["Lightwork", "Summary", "- a", "- b", "```", "code", "```"]
+    assert blocks[2].get("spacing") == "medium"                 # the blank line before the list
+    assert blocks[3].get("spacing") is None
+
+
+def test_only_a_link_code_is_a_link_attempt_and_never_under_company_sign_in(rsa_key, monkeypatch):
+    import asyncio
+
+    from maverick import oidc, teams_identity
+    ch = _channel(rsa_key)
+    parsed = parse_activity(_message("link pricing"), bot_id=ch.connector.bot_id)
+    assert asyncio.run(ch._maybe_link(parsed)) is None         # a request that begins with "link"
+    teams_identity.unlink(AAD_USER)
+    code = teams_identity.issue_link_code("user:carol", approver=False, actor="user:admin")
+    parsed = parse_activity(_message(f"link {code}"), bot_id=ch.connector.bot_id)
+    monkeypatch.setattr(oidc, "oidc_enabled", lambda: True)
+    assert asyncio.run(ch._maybe_link(parsed)) is None         # the legacy store is not trusted
+    assert teams_identity.principal_for(AAD_USER) is None
+    monkeypatch.setattr(oidc, "oidc_enabled", lambda: False)
+    assert "now linked to user:carol" in asyncio.run(ch._maybe_link(parsed))
+
+
+def test_approval_cards_are_not_posted_to_legacy_links_under_company_sign_in(monkeypatch):
+    from maverick import oidc, teams_identity
+    teams_identity.link(AAD_USER, "user:alice", approver=True)
+    teams_identity.remember_conversation(AAD_USER, {"service_url": SERVICE_URL, "conversation_id": "a:conv1",
+                                                    "tenant_id": TENANT, "user_id": "29:x"})
+    transport = FakeTransport()
+    cfg = {"enabled": True, "approvals_enabled": True, "app_id": APP_ID, "app_password": FAKE_SECRET,
+           "tenant_id": TENANT}
+    monkeypatch.setattr(oidc, "oidc_enabled", lambda: True)
+    assert teams_mod.post_approval_to_linked_users(7, cfg=cfg, transport=transport, decisions=FakeDecisions()) == []
+    assert transport.calls == []                                # nothing about the request left the server
+    monkeypatch.setattr(oidc, "oidc_enabled", lambda: False)
+    assert len(teams_mod.post_approval_to_linked_users(7, cfg=cfg, transport=transport,
+                                                       decisions=FakeDecisions())) == 1
+
+
+def test_a_risk_recorded_with_capitals_still_needs_the_second_confirmation(rsa_key):
+    _link()
+    ch = _channel(rsa_key, decisions=FakeDecisions(risk="High"))
+    first = _post(ch, rsa_key, _invoke("approve", risk="High")).json()
+    assert first["value"]["actions"][0]["verb"] == "approve_confirm"
+    assert not ch._decisions.calls
+
+
+def test_a_slow_in_place_card_update_cannot_make_the_invoke_answer_late(rsa_key, monkeypatch):
+    import asyncio
+    _link()
+
+    class Slow(FakeTransport):
+        async def __call__(self, method, url, **kwargs):
+            if method == "PUT":
+                await asyncio.sleep(5)
+            return await super().__call__(method, url, **kwargs)
+
+    ch = _channel(rsa_key, transport=Slow())
+    monkeypatch.setattr(teams_mod, "_INVOKE_UPDATE_SECONDS", 0.05)
+    started = time.monotonic()
+    response = _post(ch, rsa_key, _invoke("approve"))
+    assert response.status_code == 200 and "Approved by user:alice" in json.dumps(response.json()["value"])
+    assert time.monotonic() - started < 2.5

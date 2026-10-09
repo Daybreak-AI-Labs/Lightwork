@@ -203,6 +203,9 @@ def recall(channel, user_id, *, path=None, k=8, execution_identity=False):
         return []
     from .pilot_learning import excluded
     rows = records(channel, user_id, path=path)
+    # The person's own corrections come first, so a rebuild that refills the
+    # automatic notes can never push them out of the k recalled.
+    rows.sort(key=lambda row: not row.get("manual"))
     # Inspection still shows retained source records, but prompt enrichment
     # immediately stops using a source excluded after it was consolidated.
     return [row["note"] for row in rows

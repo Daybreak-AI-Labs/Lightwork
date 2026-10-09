@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path');
 const {JSDOM} = require('jsdom');
 const script = fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/static/lightwork-outcome-pilots.js'),'utf8');
-const template = fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/templates/outcome_pilots.html'),'utf8').replace(/{%[\s\S]*?%}/g,'').replace('{{ pilot_context }}','alice').replace("{{ 'true' if pilot_enabled else 'false' }}",'true');
+const templateFor = enabled => fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/templates/outcome_pilots.html'),'utf8').replace(/{%[\s\S]*?%}/g,'').replace('{{ pilot_context }}','alice').replace("{{ 'true' if pilot_enabled else 'false' }}",enabled);
+const template = templateFor('true');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function report() {
   return {context:'alice',id:'OPL-test',title:'<script>bad</script>',customer:'Example',workflow:'Review',criteria:'Good evidence',revision:2,
@@ -16,8 +17,8 @@ function report() {
     cases:[{id:'1',label:'A case',allocation:'holdout',status:'unmeasured',measurement:null,
       source:{href:'/chat/goal/1',version:'a'.repeat(64),accepted:false,runtime_cost_usd:null}}]};
 }
-async function setup(next) {
-  const dom = new JSDOM(template,{url:'https://lightwork.test',runScripts:'outside-only'});
+async function setup(next, enabled='true') {
+  const dom = new JSDOM(enabled==='true'?template:templateFor(enabled),{url:'https://lightwork.test',runScripts:'outside-only'});
   const w=dom.window,d=w.document,calls=[];
   w.HTMLElement.prototype.scrollIntoView=()=>{};  // browsers scroll the review into view; jsdom has no layout
   w.fetch=async(url,options)=>{
@@ -51,6 +52,20 @@ async function confirmSave(ui){
   host.querySelector('[data-save-review]').click();for(let i=0;i<6;i++)await tick();
 }
 const sent=call=>JSON.parse(call.options.body);
+test('the cohort value report keeps its own field state and never marks pilot work unsaved',async()=>{
+  const ui=await setup([report()]);await open(ui);
+  const leaving=()=>{const event=new ui.w.Event('beforeunload',{cancelable:true});ui.w.dispatchEvent(event);return event.defaultPrevented;};
+  const cohort=ui.d.getElementById('ov-pilot');
+  cohort.append(new ui.w.Option('A pilot','OPL-test'));cohort.value='OPL-test';
+  cohort.dispatchEvent(new ui.w.Event('change',{bubbles:true}));
+  ui.d.getElementById('ov-baseline-form').querySelector('input,select,textarea').dispatchEvent(new ui.w.Event('input',{bubbles:true}));
+  assert.equal(leaving(),false);
+  // Entered pilot work still guards the page, so the check above is meaningful.
+  ui.d.querySelector('#op-report input[name="baseline_minutes"]').dispatchEvent(new ui.w.Event('input',{bubbles:true}));
+  assert.equal(leaving(),true);
+  ui.dom.window.close();
+});
+
 test('record picker, missing coverage, source titles and unknown values render honestly',async()=>{
   const ui=await setup([report()]);await open(ui);
   assert.equal(ui.d.querySelectorAll('#op-planned-cases select').length,4);
@@ -314,5 +329,62 @@ test('a person who cannot review is told who can, without clearing the page',asy
   assert.match(ui.d.getElementById('op-review-note').textContent,/Only an administrator who did not create a pilot/);
   assert.equal(ui.d.getElementById('op-prior-exposure').value,'Kept notes');
   for(let i=0;i<10;i++)await tick();
+  ui.dom.window.close();
+});
+test('opening the plan while the page is still loading checks release readiness once loading finishes',async()=>{
+  const dom=new JSDOM(template,{url:'https://lightwork.test',runScripts:'outside-only'});
+  const w=dom.window,d=w.document,calls=[];let release;const listed=new Promise(resolve=>{release=resolve;});
+  const readiness={context:'alice',available:false,items:[],
+    readiness:{status:'setup_required',release_decisions:false,deployed_release_check:false,
+      next_action:'Ask an installation administrator to connect release controls. You can still plan a normal workflow pilot.'}};
+  w.fetch=async url=>{
+    calls.push(url);
+    if (/release-candidates$/.test(url)) return {ok:true,json:async()=>readiness};
+    if (/\/sources$/.test(url)) return {ok:true,json:async()=>({context:'alice',items:[],coverage:[]})};
+    await listed;return {ok:true,json:async()=>({context:'alice',items:[]})};
+  };
+  w.eval(script);await tick();
+  const details=d.getElementById('op-plan-details');Object.defineProperty(details,'open',{value:true});
+  details.dispatchEvent(new w.Event('toggle'));await tick();
+  assert.equal(calls.some(url=>/release-candidates$/.test(url)),false);
+  release();for(let i=0;i<10;i++)await tick();
+  assert.equal(calls.filter(url=>/release-candidates$/.test(url)).length,1);
+  assert.match(d.getElementById('op-candidate-status').textContent,/normal workflow pilot/);
+  dom.window.close();
+});
+test('saving pilot work leaves the cohort value report fields in their own states',async()=>{
+  const ui=await setup([]);
+  const own=ui.d.querySelector('[data-own-controls]');assert.ok(own);
+  const fields=[...own.querySelectorAll('button,input,select,textarea')];assert.ok(fields.length);
+  const before=fields.map(field=>field.disabled);assert.ok(before.includes(true));
+  const form=ui.d.getElementById('op-plan');form.elements.title.value='Unchanged';
+  ui.d.getElementById('op-candidate-refresh').click();for(let i=0;i<6;i++)await tick();
+  assert.deepEqual(fields.map(field=>field.disabled),before);
+  ui.dom.window.close();
+});
+const valueFields=ui=>[...ui.d.querySelector('[data-own-controls]').querySelectorAll('button,input,select,textarea')];
+test('the cohort value report closes with the page when workspace or access changes',async()=>{
+  for (const lose of [
+    async ui=>{ui.d.dispatchEvent(new ui.w.CustomEvent('lightwork:workspace-changed',{detail:{}}));},
+    async ui=>{await open(ui);},  // the answer to this request is a refusal
+  ]) {
+    const ui=await setup([()=>({ok:false,status:403,json:async()=>({detail:'Access changed.'})})]);
+    const fields=valueFields(ui);assert.ok(fields.length);
+    assert.ok(fields.some(field=>!field.disabled),'some report controls start usable');
+    await lose(ui);for(let i=0;i<6;i++)await tick();
+    assert.deepEqual(fields.filter(field=>!field.disabled).map(field=>field.id||field.name||field.tagName),[]);
+    assert.equal(ui.d.getElementById('outcome-pilots').dataset.valueLocked,'true');
+    // Later pilot work finishing cannot reopen it.
+    ui.d.getElementById('op-candidate-refresh').click();for(let i=0;i<6;i++)await tick();
+    assert.equal(fields.some(field=>!field.disabled),false);
+    ui.dom.window.close();
+  }
+});
+test('the cohort value report stays closed while workflow pilots are turned off',async()=>{
+  const ui=await setup([],'false');for(let i=0;i<6;i++)await tick();
+  const fields=valueFields(ui);assert.ok(fields.length);
+  assert.deepEqual(fields.filter(field=>!field.disabled).map(field=>field.id||field.name||field.tagName),[]);
+  assert.equal(ui.d.getElementById('outcome-pilots').dataset.valueLocked,'true');
+  assert.match(ui.d.getElementById('op-status').textContent,/turned off/);
   ui.dom.window.close();
 });

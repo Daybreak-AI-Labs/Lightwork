@@ -217,6 +217,7 @@ from .auth import (
     caller_principal,
     caller_suites,
     can_access_goal,
+    constant_time_equals,
     durable_automation_owner,
     execution_user_id_from_request,
     goal_owner_filter,
@@ -226,6 +227,7 @@ from .auth import (
     require_global_permission,
     require_page_permission,
     require_permission,
+    require_personal_write,
     require_suite,
     require_unscoped_board,
     stored_automation_identity,
@@ -443,7 +445,7 @@ def select_active_tenant(request: Request, tenant_id: str | None) -> dict:
     from maverick.authority_effects import authority_effect_fence
 
     with authority_effect_fence():
-        require_permission(request, "view")
+        require_personal_write(request)
         import os
 
         if os.environ.get("MAVERICK_TENANT", "").strip():
@@ -1185,9 +1187,15 @@ async def get_tenant(request: Request, tenant_id: str) -> TenantOut:
     return _to_tenant_out(_get_tenant_or_404(tenant_id))
 
 
-async def _audit_tenant_change(request: Request, kind: str, tenant_id: str, **payload) -> None:
+async def _audit_tenant_change(request: Request, kind: str, tenant_id: str, *,
+                               applied: str = "", **payload) -> None:
     """Record a workspace lifecycle change in the deployment-wide chain (the
-    same chain as tenant creation), so the activity log shows it."""
+    same chain as tenant creation), so the activity log shows it.
+
+    Access-granting changes (resume, restore) are recorded BEFORE they happen, so
+    a refusal means nothing changed. Access-reducing ones (pause, remove) take
+    effect first so an audit outage can never keep access alive; those pass
+    ``applied`` (what already happened) so the refusal says the change stands."""
     from maverick.audit import AuditRefused, audit_event
 
     actor = caller_principal(request) or "local"
@@ -1196,7 +1204,15 @@ async def _audit_tenant_change(request: Request, kind: str, tenant_id: str, **pa
             audit_event, kind, agent=actor, _global=True, actor=actor, tenant=tenant_id, **payload
         )
     except AuditRefused as exc:
-        raise HTTPException(status_code=503, detail="The activity log refused this change.") from exc
+        if applied:
+            raise HTTPException(status_code=503, detail=(
+                f"{applied}, but the activity log refused to record it. Try again; "
+                "if it keeps failing, tell an administrator."
+            )) from exc
+        raise HTTPException(
+            status_code=503,
+            detail="The activity log refused this change, so nothing was changed.",
+        ) from exc
 
 
 @router.post("/admin/tenants/{tenant_id}/suspend", response_model=TenantOut)
@@ -1206,7 +1222,8 @@ async def suspend_tenant(request: Request, tenant_id: str) -> TenantOut:
 
     _get_tenant_or_404(tenant_id)
     rec = tenant_registry.suspend_tenant(tenant_id)
-    await _audit_tenant_change(request, "tenant_suspended", tenant_id)
+    await _audit_tenant_change(request, "tenant_suspended", tenant_id,
+                               applied="The workspace was paused")
     return _to_tenant_out(rec)
 
 
@@ -1216,8 +1233,8 @@ async def resume_tenant(request: Request, tenant_id: str) -> TenantOut:
     from maverick.tenant import registry as tenant_registry
 
     _get_tenant_or_404(tenant_id)
-    rec = tenant_registry.resume_tenant(tenant_id)
     await _audit_tenant_change(request, "tenant_resumed", tenant_id)
+    rec = tenant_registry.resume_tenant(tenant_id)
     return _to_tenant_out(rec)
 
 
@@ -1341,6 +1358,7 @@ async def delete_tenant(
             "Workspace access is closed, but member cleanup could not be confirmed. Retry Remove."
         )) from exc
     await _audit_tenant_change(request, "tenant_deleted", tenant_id, purge=purge,
+                               applied="The workspace was removed",
                                revoked_members=revoked, cleared_selections=cleared,
                                local_selection_cleared=local_selection_cleared)
     return Response(status_code=204)
@@ -1366,6 +1384,7 @@ async def restore_tenant(request: Request, tenant_id: str) -> TenantOut:
     # retained workspace can be re-admitted; never reactivate former members.
     if not tenant_registry.tenant_retired(tenant_id):
         raise HTTPException(status_code=404, detail="removed workspace not found")
+    await _audit_tenant_change(request, "tenant_restored", tenant_id, status="suspended")
     try:
         rbac.clear_tenant_roles(tenant_id)
         workspace_tenants.clear_tenant_selections(tenant_id)
@@ -1376,7 +1395,6 @@ async def restore_tenant(request: Request, tenant_id: str) -> TenantOut:
         raise HTTPException(status_code=503, detail=(
             "Workspace recovery could not be confirmed. The records remain closed; refresh and retry."
         )) from exc
-    await _audit_tenant_change(request, "tenant_restored", tenant_id, status="suspended")
     return _to_tenant_out(rec)
 
 
@@ -1411,7 +1429,7 @@ def _reject_tenant_role_assignment_under_per_user_tenancy() -> None:
 
 
 @router.get("/admin/tenants/{tenant_id}/roles", response_model=dict[str, str])
-async def list_tenant_roles(request: Request, tenant_id: str) -> dict[str, str]:
+def list_tenant_roles(request: Request, tenant_id: str) -> dict[str, str]:
     from maverick.authority_effects import authority_effect_fence
 
     from . import rbac
@@ -1468,7 +1486,7 @@ def _protect_last_workspace_admin(tenant_id: str, principal: str, next_role: str
 
 
 @router.put("/admin/tenants/{tenant_id}/roles/{principal}", status_code=204)
-async def set_tenant_role(
+def set_tenant_role(
     request: Request,
     tenant_id: str,
     principal: str,
@@ -1513,7 +1531,7 @@ async def set_tenant_role(
 
 
 @router.delete("/admin/tenants/{tenant_id}/roles/{principal}", status_code=204)
-async def remove_tenant_role(
+def remove_tenant_role(
     request: Request,
     tenant_id: str,
     principal: str,
@@ -1642,6 +1660,15 @@ def create_goal(
 
 _REST_GOAL_MAX_DOLLARS = 100.0
 _REST_GOAL_MAX_WALL_SECONDS = 86_400.0
+
+
+def _rest_requested_dollars(requested: float | None) -> float | None:
+    """A requested dollar cap after the operator ceiling and the REST ceiling.
+
+    The same upper bound :func:`_rest_goal_limits` gives ``POST /goals``, for the
+    other REST routes that start a goal (compose, fleet run)."""
+    dollars = requested_goal_dollars(requested)
+    return None if dollars is None else min(dollars, _REST_GOAL_MAX_DOLLARS)
 
 
 def _rest_goal_limits(payload: GoalIn) -> dict[str, float | int]:
@@ -2352,7 +2379,7 @@ def _request_identity(request: Request) -> str | None:
     if expected:
         authorization = request.headers.get("authorization", "")
         supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
-        if supplied and hmac.compare_digest(supplied, expected):
+        if supplied and constant_time_equals(supplied, expected):
             return "auth:dashboard-token"
         raise HTTPException(
             status_code=401,
@@ -11608,9 +11635,8 @@ def list_triggers_endpoint(request: Request) -> dict:
     from maverick_dashboard import triggers_store
 
     triggers = triggers_store.list_triggers()
-    owner = goal_owner_filter(request)
-    if owner is not None:
-        triggers = [t for t in triggers if t.get("owner", "") == owner]
+    allowed_owners = _event_trigger_allowed_owners(request)
+    triggers = [t for t in triggers if t.get("owner", "") in allowed_owners]
     return {
         "triggers": triggers,
         "webhook_url": _WEBHOOK_RUN_PATH,
@@ -11671,11 +11697,9 @@ def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
     # set_trigger keys by slugify(name), so check the same slug for a foreign
     # owner before replacing it.
     default_name = payload.name or payload.template or payload.flow
-    owner_filter = goal_owner_filter(request)
-    if owner_filter is not None:
-        existing = triggers_store.get_trigger(triggers_store.slugify(default_name))
-        if existing is not None and existing.get("owner", "") != owner_filter:
-            raise HTTPException(status_code=409, detail="a trigger with that name already exists")
+    existing = triggers_store.get_trigger(triggers_store.slugify(default_name))
+    if existing is not None and existing.get("owner", "") not in _event_trigger_allowed_owners(request):
+        raise HTTPException(status_code=409, detail="a trigger with that name already exists")
     try:
         from maverick.paths import current_tenant_id
 
@@ -11718,7 +11742,9 @@ def delete_trigger_endpoint(request: Request, name: str) -> dict:
     # The ownership check happens atomically inside delete_trigger (one locked
     # read, no TOCTOU). 404 (not 403) so a cross-tenant probe can't distinguish
     # "exists but not yours" from "does not exist".
-    if not triggers_store.delete_trigger(name, owner=goal_owner_filter(request)):
+    existing = triggers_store.get_trigger(name)
+    if (existing is None or existing.get("owner", "") not in _event_trigger_allowed_owners(request)
+            or not triggers_store.delete_trigger(name, owner=existing.get("owner", ""))):
         raise HTTPException(status_code=404, detail="no trigger with that name")
     return {"deleted": name}
 
@@ -12520,6 +12546,9 @@ def pack_editing_denial(request: Request) -> str | None:
     principal = caller_principal(request)
     if principal is not None and not is_dashboard_admin(principal):
         return "pack editing requires a dashboard admin"
+    # A pinned admin's API key is still capped by the scopes it was given.
+    if principal is not None and not has_permission(request, "admin"):
+        return "pack editing requires an API key with the administrator scope"
     from maverick.config import get_features
 
     if not get_features().get("pack_editing", True):
@@ -12531,6 +12560,7 @@ def pack_editing_denial(request: Request) -> str | None:
 
 
 def _require_pack_editing(request: Request) -> None:
+    require_permission(request, "admin")  # key scopes and the owner's role cap
     denial = pack_editing_denial(request)
     if denial is not None:
         raise HTTPException(status_code=403, detail=denial)
@@ -13901,9 +13931,9 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
     response.headers["Cache-Control"] = "private, no-store"
     expected_context = request.headers.get("X-Lightwork-Copilot-Context")
     if expected_context is not None:
-        import hmac
+        from .auth import constant_time_equals
 
-        if not hmac.compare_digest(expected_context, context_for(request)):
+        if not constant_time_equals(expected_context, context_for(request)):
             raise HTTPException(409, "Your account or workspace changed. Reopen Copilot before sending this question.")
     check_goal_rate_limit(request, source="copilot")
     msg = payload.message.strip()
@@ -14539,6 +14569,7 @@ def _require_role_editing(request: Request) -> None:
     principal = caller_principal(request)
     if principal is not None and not is_dashboard_admin(principal):
         raise HTTPException(status_code=403, detail="role editing requires dashboard admin")
+    require_permission(request, "admin")  # key scopes and the owner's role cap
 
     from maverick.config import get_features
 
@@ -15496,7 +15527,9 @@ async def approve_approval(request: Request, approval_id: int) -> Response:
 
     require_approval_authority(request, action="approval.approve", resource=str(approval_id))
     payload = await _decision_payload(request)
-    return _decide_approval(request, approval_id, payload, "approved")
+    # The decision commits to the database, signs audit rows and takes
+    # cross-process locks: keep that off the event loop.
+    return await run_in_threadpool(_decide_approval, request, approval_id, payload, "approved")
 
 
 @router.post(
@@ -15525,7 +15558,7 @@ async def deny_approval(request: Request, approval_id: int) -> Response:
 
     require_approval_authority(request, action="approval.deny", resource=str(approval_id))
     payload = await _decision_payload(request)
-    return _decide_approval(request, approval_id, payload, "denied")
+    return await run_in_threadpool(_decide_approval, request, approval_id, payload, "denied")
 
 
 @router.post("/approvals/{approval_id}/undo")
@@ -15973,7 +16006,7 @@ def run_fleet_agent(
                         "Open Agent Factory to review its required actions, then try again."),
             )
         cap = domain_capability(prof, cap, agent_principal)
-    max_dollars = requested_goal_dollars(payload.max_dollars)
+    max_dollars = _rest_requested_dollars(payload.max_dollars)
 
     w = _world()
     goal_id = w.create_goal(
@@ -16580,7 +16613,7 @@ def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks) -> G
     )
     from maverick.runner import run_goal_in_background_async
 
-    max_dollars = requested_goal_dollars(payload.budget_dollars)
+    max_dollars = _rest_requested_dollars(payload.budget_dollars)
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
@@ -17629,11 +17662,18 @@ def set_flow_autonomy_endpoint(request: Request, payload: FlowAutonomyIn) -> dic
     kept off the blanket learning button because autonomously rewriting a live
     workflow is a heavier consequence than passive learning.
 
-    Two independent knobs: ``auto_evolve`` lets the loop revert a rewrite it
-    measures as a regression; ``auto_apply`` (which needs auto_evolve on for the
-    revert safety net) lets it apply an improvement forward without a human. Same
-    admin gate + deployment-wide overlay as the blanket toggle."""
+    ``auto_evolve`` lets the loop revert a rewrite it measures as a regression.
+    Automatic forward apply was retired: workflow suggestions always need a
+    person's review, so ``auto_apply: true`` is refused (false or absent is
+    accepted and keeps it off). Same admin gate + deployment-wide overlay as the
+    blanket toggle."""
     require_global_permission(request, "admin")
+    if payload.auto_apply is True:
+        raise HTTPException(
+            status_code=422,
+            detail="Workflow suggestions always need a person's review, so they cannot be "
+                   "applied automatically. Nothing was changed.",
+        )
     from maverick_dashboard import settings_store
 
     settings_store.set_flow_autonomy(auto_evolve=payload.auto_evolve, auto_apply=payload.auto_apply)

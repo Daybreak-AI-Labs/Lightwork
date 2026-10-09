@@ -71,6 +71,12 @@ class TestAuth:
         r = client.get("/scim/v2/Users", headers=_auth("nope"))
         assert r.status_code == 401
 
+    def test_configured_secret_that_is_not_valid_utf8_refuses_with_401(self, monkeypatch):
+        # Python decodes invalid UTF-8 in the environment as lone surrogates.
+        monkeypatch.setenv("MAVERICK_SCIM_TOKEN", "tok-\udcff")  # pragma: allowlist secret
+        r = _client().get("/scim/v2/Users", headers=_auth("tok-x"))
+        assert r.status_code == 401
+
     def test_comma_separated_rotation_accepts_old_and_new(self, monkeypatch):
         # During a rotation, old + new are both valid; a retired token is not.
         monkeypatch.setenv("MAVERICK_SCIM_TOKEN", "old-tok,new-tok")  # pragma: allowlist secret
@@ -87,6 +93,12 @@ class TestAuth:
         c = _client()
         assert c.get("/scim/v2/Users", headers=_auth(tok)).status_code == 200
         assert c.get("/scim/v2/Users", headers=_auth("wrong")).status_code == 401
+
+    def test_non_ascii_hashed_secret_refuses_with_401_not_a_server_error(self, monkeypatch):
+        # A hashed secret pasted with a stray non-ASCII character matches no
+        # bearer; it must not turn every provisioning call into a 500.
+        monkeypatch.setenv("MAVERICK_SCIM_TOKEN", "sha256:abc\u2026")  # pragma: allowlist secret
+        assert _client().get("/scim/v2/Users", headers=_auth("wrong")).status_code == 401
 
     def test_deprovision_revokes_live_sessions(self, client):
         # Deprovisioning must end current access (#58), not just future logins:

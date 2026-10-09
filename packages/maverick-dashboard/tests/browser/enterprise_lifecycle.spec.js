@@ -36,12 +36,22 @@ test('invited employee connects only an approved own account, shares a captured 
     expect((await value.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
     return page;
   }
+  async function signIn(value,email,passphrase){
+    const page=await value.newPage();page.on('pageerror',error=>errors.push(error.message));
+    await page.goto('/auth/local-login');
+    await page.locator('input[name="email"]').fill(email);await page.locator('input[name="password"]').fill(passphrase);
+    await page.getByRole('button',{name:'Sign in',exact:true}).click();
+    await expect(page).not.toHaveURL(/\/auth\/local-login/);
+    expect((await value.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
+    return page;
+  }
   try{
     await expect.poll(async()=>{if(child.exitCode!==null)throw Error('Fixture failed: '+serverLog);try{return(await fetch(origin+'/livez')).status;}catch(_){return 0;}},{timeout:120000,message:'Isolated enterprise fixture starts: '+serverLog}).toBe(200);
     const admin=await context({Origin:origin});
-    const administratorInvite=serverLog.match(/FIXTURE_ADMIN_INVITE=(\S+)/);
-    expect(administratorInvite).toBeTruthy();
-    await accept(admin,administratorInvite[1]);
+    // The administrator already has an account, so they sign in; an invitation could never replace it.
+    const administratorPassphrase=serverLog.match(/FIXTURE_ADMIN_PASSPHRASE=(\S+)/);
+    expect(administratorPassphrase).toBeTruthy();
+    await signIn(admin,'admin@browser.example.test',administratorPassphrase[1]);
     const fixtureResponse=await admin.request.get('/__enterprise_fixture');
     expect(fixtureResponse.status(),await fixtureResponse.text()).toBe(200);
     const fixture=await fixtureResponse.json();

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import time
 from datetime import datetime
@@ -160,7 +159,7 @@ class CaseIn(BaseModel):
 
 def _binding(request, context):
     _app()._require_same_origin(request)
-    if not hmac.compare_digest(context_for(request), context):
+    if not auth.constant_time_equals(context_for(request), context):
         raise product_error(409, "budget_context_changed", "Your account or workspace changed. Refresh before continuing.")
 
 

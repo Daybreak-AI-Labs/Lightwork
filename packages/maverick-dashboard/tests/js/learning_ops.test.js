@@ -30,6 +30,24 @@ const CYCLE = { context: CONTEXT, operation: OPERATION, recorded: true, confirme
   message: "The original cycle task is recorded. Read its current progress; nothing was repeated.",
   result: { message: "Looked at 12 tasks.", counts: { avoid: 1, habits: 1, ideas: 1 },
     stores: [{ Information: "Safeguards", "Recorded state": "Saved", Items: 1 }] } };
+const IMPORT = "/api/v1/learning-ops/self-harness/test-cases/import";
+const IMPORT_OPERATION = "fedcba9876543210fedcba9876543210";  // pragma: allowlist secret
+const IMPORT_TOKEN = "sealed:import";
+const FILE_TEXT = '{"claude-x": [{"goal": "Summarize the policy", "expected": "Three bullet points"}]}';
+const EXISTING = { goal: "Existing question", expected: "Existing answer" };
+const ADDED = { goal: "Summarize the policy", expected: "Three bullet points" };
+const IMPORT_NOTICE = "Review the complete file and current questions before importing. Reviews expire after 10 minutes.";
+// The controls the page must read before it unlocks, the complete review of one
+// chosen file, and an original import's saved outcome.
+const IMPORT_CONTROLS = { context: CONTEXT, revision: "v".repeat(64), total: 1, notice: IMPORT_NOTICE, requests: [] };
+const IMPORT_REVIEW = { context: CONTEXT, operation: IMPORT_OPERATION, token: IMPORT_TOKEN, notice: IMPORT_NOTICE,
+  replace: false, added: 1, total_now: 1, total_after: 2,
+  keys: [{ key: "claude-x", label: "Claude X", now: 1, after: 2 }],
+  file: { "claude-x": [ADDED] }, before: { "claude-x": [EXISTING] }, after: { "claude-x": [EXISTING, ADDED] } };
+const IMPORT_SAVED = { operation: IMPORT_OPERATION, context: CONTEXT, confirmed: true, cases: 1, replaced: false,
+  message: "The original import is confirmed. This is its saved outcome; later collection changes are separate. Nothing was repeated." };
+const IMPORT_UNCONFIRMED = { ...IMPORT_SAVED, confirmed: false,
+  message: "The original import is unconfirmed. Matching questions cannot prove it succeeded. Read current questions before another decision; nothing was repeated." };
 const JOB = (result) => ({ job: { id: "0123456789abcdef", kind: "learning_task", state: "done", can_stop: false, result } });  // pragma: allowlist secret
 
 function defaults() {
@@ -81,9 +99,10 @@ function defaults() {
     "/api/v1/learning-holdout-setup/review": { context: CONTEXT, operation: OPERATION, token: "sealed:holdout",
       changes: [{ label: "Change", after: "Initialize the hold-out record once; it is never replaced." }] },
     "/api/v1/learning-holdout-setup/save": { context: CONTEXT, operation: OPERATION, message: "The record was initialized.", current: "Ready." },
-    "/api/v1/learning-ops/self-harness/test-cases/import/preview": { replace: false, added: 1, total_now: 1, total_after: 2,
-      keys: [{ key: "claude-x", label: "Claude X", now: 1, after: 2 }] },
-    "/api/v1/learning-ops/self-harness/test-cases/import": { cases: 1, replaced: false },
+    // Question import: read the current controls (GET), review one exact file, then confirm it (POST).
+    [IMPORT]: (method) => method === "GET" ? IMPORT_CONTROLS : IMPORT_SAVED,
+    [IMPORT + "/preview"]: IMPORT_REVIEW,
+    [IMPORT + "/requests/" + IMPORT_OPERATION]: IMPORT_UNCONFIRMED,
   };
 }
 
@@ -103,7 +122,7 @@ async function fixture(markup, scripts, { answers = {}, confirm = true } = {}) {
     const method = init.method || "GET";
     let body = init.body;
     if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { /* raw */ } }
-    calls.push({ url, method, body });
+    calls.push({ url, method, body, headers: init.headers });
     let answer = table[url.split("?")[0]];
     if (typeof answer === "function") answer = answer(method, body);
     const status = answer && answer.__status ? answer.__status : (answer ? 200 : 404);
@@ -221,6 +240,26 @@ test("agent-building suggestions are chosen one at a time before any comparison"
   assert.equal(ui.calls.some((c) => c.method === "POST"), false, "choosing sends nothing");
 });
 
+// Helpers for the question-import tests below.
+const importCalls = (ui) => ui.calls.filter((c) => (c.url || "").startsWith(IMPORT + "?"));
+const bodyText = (body) => Buffer.from(body).toString("utf8");
+const applyButton = (ui, label) =>
+  Array.from(ui.doc.querySelectorAll("#lpo-cases-out button")).find((b) => label.test(b.textContent));
+
+function chooseFile(ui, text = FILE_TEXT) {
+  const file = new ui.window.File([text], "cases.json", { type: "application/json" });
+  Object.defineProperty(ui.doc.getElementById("lpo-import-file"), "files", { configurable: true, value: [file] });
+}
+
+async function reviewFile(ui, { replace = false } = {}) {
+  const how = ui.doc.getElementById("lpo-import-how");
+  how.value = replace ? "replace" : "merge";
+  how.dispatchEvent(new ui.window.Event("change"));
+  chooseFile(ui);
+  ui.doc.getElementById("lpo-import-check").click();
+  await ui.settle();
+}
+
 test("learned page tools: a reviewed meaning check and a previewed import", async (t) => {
   const ui = await fixture(LEARNED(), [learned]);
   t.after(() => ui.window.close());
@@ -244,18 +283,158 @@ test("learned page tools: a reviewed meaning check and a previewed import", asyn
   assert.match(ui.doc.getElementById("lpo-clash-out").textContent, /1 possible conflicts flagged by AI/);
   assert.match(ui.doc.getElementById("lpo-clash-out").textContent, /These ask for opposite things\./);
 
-  const input = ui.doc.getElementById("lpo-import-file");
-  const file = new ui.window.File(['{"claude-x": []}'], "cases.json", { type: "application/json" });
-  Object.defineProperty(input, "files", { value: [file] });
-  ui.doc.getElementById("lpo-import-check").click();
+  // Question import: unlocked only by the current context, nothing imported by
+  // the review, and the file imported once after its confirmation.
+  const $ = (id) => ui.doc.getElementById(id);
+  const reads = ui.calls.filter((c) => c.url === IMPORT && c.method === "GET");
+  assert.equal(reads.length, 1, "the page reads the current import controls first");
+  assert.equal($("lpo-import-check").disabled, false);
+  assert.match($("lpo-import-notice").textContent, /Reviews expire after 10 minutes/);
+  chooseFile(ui);
+  $("lpo-import-check").click();
   await ui.settle();
-  assert.match(ui.doc.getElementById("lpo-cases-status").textContent, /add 1 new test case/);
-  assert.equal(ui.calls.filter((c) => (c.url || "").startsWith("/api/v1/learning-ops/self-harness/test-cases/import?")).length, 0);
-  ui.doc.querySelector("#lpo-cases-out button").click();
+  const previews = ui.calls.filter((c) => (c.url || "").startsWith(IMPORT + "/preview"));
+  assert.equal(previews.length, 1);
+  assert.equal(previews[0].method, "POST");
+  assert.equal(previews[0].url, IMPORT + "/preview?replace=false");
+  assert.equal(previews[0].headers["X-Lightwork-Import-Context"], CONTEXT);
+  assert.equal(bodyText(previews[0].body), FILE_TEXT, "the complete chosen file is reviewed");
+  assert.equal(importCalls(ui).length, 0, "nothing is imported by the review");
+  const shown = $("lpo-cases-out").textContent;
+  assert.match(shown, /Claude X12/);
+  assert.match(shown, /Complete chosen file.*Question or task.*Summarize the policy.*Expected answer.*Three bullet points/s);
+  assert.match(shown, /Current saved questions.*Existing question.*Existing answer/s);
+  assert.match(shown, /Questions after this import.*Existing question.*Summarize the policy/s);
+  assert.match($("lpo-import-status").textContent, /Review the complete file and preserved questions before adding 1 new question\./);
+  const apply = applyButton(ui, /Add these reviewed questions/);
+  apply.click();
   await ui.settle();
-  const imported = ui.calls.find((c) => (c.url || "").startsWith("/api/v1/learning-ops/self-harness/test-cases/import?"));
-  assert.match(imported.url, /confirm=true&replace=false/);
-  assert.match(ui.doc.getElementById("lpo-cases-status").textContent, /Added 1 test case/);
+  const imported = importCalls(ui);
+  assert.equal(imported.length, 1);
+  assert.equal(imported[0].method, "POST");
+  assert.equal(imported[0].url, IMPORT + "?confirm=true&replace=false");
+  assert.equal(imported[0].headers["X-Lightwork-Import-Review"], IMPORT_TOKEN);
+  assert.equal(imported[0].headers["X-Lightwork-Import-Context"], CONTEXT);
+  assert.equal(bodyText(imported[0].body), FILE_TEXT, "the confirmed file is the reviewed file");
+  const asked = ui.calls.findIndex((c) => c.confirm);
+  assert.match(ui.calls[asked].confirm, /Add 1 new question from this reviewed file\? Current questions and their saved details stay in place\./);
+  assert.ok(ui.calls.indexOf(previews[0]) < asked && asked < ui.calls.indexOf(imported[0]), "preview, then confirmation, then import");
+  assert.match($("lpo-import-result").textContent, /The original import is confirmed\./);
+  assert.match($("lpo-import-status").textContent, /Read the original result for this import\. Refresh before reviewing another file\./);
+  assert.equal($("lpo-cases-out").textContent, "", "the reviewed file is cleared once imported");
+  assert.equal(ui.window.sessionStorage.getItem("lightwork-question-import"), null, "a confirmed original needs no recovery");
+});
+
+// ---- question import: confirmation, replacement, refusals and lost access ---
+
+test("declining the import confirmation imports nothing and keeps the review", async (t) => {
+  const ui = await fixture(LEARNED(), [learned], { confirm: false });
+  t.after(() => ui.window.close());
+  await reviewFile(ui);
+  const apply = applyButton(ui, /Add these reviewed questions/);
+  apply.click();
+  await ui.settle();
+  assert.match(ui.calls.find((c) => c.confirm).confirm, /Add 1 new question from this reviewed file\?/);
+  assert.equal(importCalls(ui).length, 0);
+  assert.equal(apply.disabled, false, "the review stays available");
+  assert.equal(ui.window.sessionStorage.getItem("lightwork-question-import"), null, "nothing to recover yet");
+  assert.match(ui.doc.getElementById("lpo-cases-out").textContent, /Complete chosen file/);
+});
+
+test("replacing every question names the consequence and sends the reviewed choice", async (t) => {
+  const ui = await fixture(LEARNED(), [learned]);
+  t.after(() => ui.window.close());
+  await reviewFile(ui, { replace: true });
+  const preview = ui.calls.find((c) => (c.url || "").startsWith(IMPORT + "/preview"));
+  assert.equal(preview.url, IMPORT + "/preview?replace=true");
+  assert.match(ui.doc.getElementById("lpo-import-status").textContent, /Replacement removes questions outside the file\./);
+  const apply = applyButton(ui, /Replace with this reviewed file/);
+  assert.match(apply.className, /btn--danger/);
+  assert.equal(importCalls(ui).length, 0);
+  apply.click();
+  await ui.settle();
+  assert.match(ui.calls.find((c) => c.confirm).confirm,
+    /Replace all 1 current questions with the 2 reviewed questions\? Questions outside this file will be removed\./);
+  const imported = importCalls(ui);
+  assert.equal(imported.length, 1);
+  assert.equal(imported[0].url, IMPORT + "?confirm=true&replace=true");
+  assert.equal(imported[0].headers["X-Lightwork-Import-Review"], IMPORT_TOKEN);
+});
+
+test("a refused review is shown plainly and nothing can be imported from it", async (t) => {
+  const refusal = "That file is not a test-case file Lightwork can read.";
+  const ui = await fixture(LEARNED(), [learned], { answers: { [IMPORT + "/preview"]: { __status: 422, detail: refusal } } });
+  t.after(() => ui.window.close());
+  await reviewFile(ui);
+  assert.equal(ui.doc.getElementById("lpo-import-status").textContent, refusal);
+  assert.equal(ui.doc.getElementById("lpo-cases-out").textContent, "");
+  assert.equal(importCalls(ui).length, 0);
+  assert.equal(ui.doc.getElementById("lpo-import-check").disabled, false, "a refused file can be replaced by another");
+});
+
+test("a refused or failed import is shown plainly, never repeated and its original can be read", async (t) => {
+  const refusal = "Learning storage, access or the review deadline changed. Review again; nothing was imported.";
+  const ui = await fixture(LEARNED(), [learned], { answers: {
+    [IMPORT]: (method) => method === "GET" ? IMPORT_CONTROLS : { __status: 409, detail: refusal } } });
+  t.after(() => ui.window.close());
+  const $ = (id) => ui.doc.getElementById(id);
+  await reviewFile(ui);
+  const apply = applyButton(ui, /Add these reviewed questions/);
+  apply.click();
+  await ui.settle();
+  assert.equal(importCalls(ui).length, 1);
+  assert.equal($("lpo-import-status").textContent,
+    refusal + " Read original result; this import will not be repeated. Your chosen file is kept.");
+  assert.equal($("lpo-import-result").textContent, "", "a refusal is not reported as an import");
+  // The same review cannot be sent twice.
+  apply.click();
+  await ui.settle();
+  assert.equal(importCalls(ui).length, 1);
+  // The original request was kept before anything was sent, so its outcome can be read back.
+  assert.equal($("lpo-import-original").value, IMPORT_OPERATION);
+  assert.match($("lpo-import-original").selectedOptions[0].textContent, /awaiting its result/);
+  assert.deepEqual(JSON.parse(ui.window.sessionStorage.getItem("lightwork-question-import")),
+    { context: CONTEXT, operation: IMPORT_OPERATION });
+  $("lpo-import-recover").click();
+  await ui.settle();
+  const original = ui.calls.find((c) => c.url === IMPORT + "/requests/" + IMPORT_OPERATION);
+  assert.equal(original.method, "GET");
+  assert.equal(original.headers["X-Lightwork-Import-Context"], CONTEXT);
+  assert.match($("lpo-import-result").textContent, /The original import is unconfirmed\..*nothing was repeated\./);
+  assert.equal(importCalls(ui).length, 1, "reading the original repeats nothing");
+});
+
+test("the import stays locked until the current context is read and locks again when access changes", async (t) => {
+  const down = await fixture(LEARNED(), [learned], { answers: {
+    [IMPORT]: { __status: 503, detail: "Learning storage is unavailable. Nothing was changed." } } });
+  t.after(() => down.window.close());
+  const $ = (id) => down.doc.getElementById(id);
+  assert.equal($("lpo-import-check").disabled, true);
+  assert.equal($("lpo-import-file").disabled, true);
+  assert.equal($("lpo-import-how").disabled, true);
+  assert.match($("lpo-import-status").textContent, /Learning storage is unavailable\. Nothing was changed\./);
+  chooseFile(down);
+  $("lpo-import-check").click();
+  await down.settle();
+  assert.equal(down.calls.filter((c) => (c.url || "").startsWith(IMPORT + "/preview")).length, 0, "no review without a context");
+
+  // Access lost while a review is open: the review is dropped and the controls lock.
+  const lost = await fixture(LEARNED(), [learned], { answers: { [IMPORT + "/preview"]: {
+    __status: 409, detail: { message: "Your account or workspace changed. Refresh the current import controls.", context_lost: true } } } });
+  t.after(() => lost.window.close());
+  const L = (id) => lost.doc.getElementById(id);
+  assert.equal(L("lpo-import-check").disabled, false);
+  await reviewFile(lost);
+  assert.equal(L("lpo-import-status").textContent, "Your account or access changed. Refresh the current controls before continuing.");
+  assert.equal(L("lpo-cases-out").textContent, "");
+  assert.equal(L("lpo-import-check").disabled, true);
+  assert.equal(L("lpo-import-file").disabled, true);
+  assert.equal(importCalls(lost).length, 0);
+  // Refreshing reads the current context again and unlocks.
+  L("lpo-import-refresh").click();
+  await lost.settle();
+  assert.equal(lost.calls.filter((c) => c.url === IMPORT && c.method === "GET").length, 2);
+  assert.equal(L("lpo-import-check").disabled, false);
 });
 
 test("the learned page names the exact setting to fill in first", async (t) => {

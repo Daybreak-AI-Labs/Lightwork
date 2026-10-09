@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 from . import backup, file_lock
+from .constant_time import text_equals
 from .paths import current_tenant_id_strict, data_dir
 from .recovery_authorities import authority_policy
 from .restore_validation import SCHEMA as REFERENCE_VALIDATION_SCHEMA
@@ -1120,7 +1121,7 @@ def install_retained_keys(  # noqa: C901 - crash-safe exact-key transaction
                         raise RecoveryError(
                             "An installed encryption key cannot be authenticated. Remain in recovery mode."
                         ) from exc
-                    if not hmac.compare_digest(existing_text.casefold(), expected_text):
+                    if not text_equals(existing_text.casefold(), expected_text):
                         raise RecoveryError(
                             "An installed encryption key differs from the reviewed custody copy. "
                             "Bootstrap recovery never replaces key custody."

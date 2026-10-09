@@ -42,7 +42,9 @@ test('pressing Stop once ends a working task, lists its progress and offers Try 
   await expect(stop).toHaveText('Stop task');
   await stop.click();
   // One action: no confirmation dialog stands between the person and Stop.
-  await expect(page.locator('#mv-confirm-ok')).toHaveCount(0);
+  // (The shell always holds the shared dialog; it must stay closed.)
+  await expect(page.locator('#mv-confirm')).not.toHaveAttribute('open', '');
+  await expect(page.locator('#mv-confirm-ok')).toBeHidden();
   await expect(page.locator('#status')).toHaveAttribute('data-status','cancelled');
   await expect(page.locator('#status')).toHaveText('Stopped');
   await expect(stop).toBeHidden();

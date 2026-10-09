@@ -1,7 +1,6 @@
 """Global-administrator review of provider accounting, with no provider retry."""
 from __future__ import annotations
 
-import hmac
 import json
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -13,7 +12,7 @@ from maverick.privacy_ops import RecordConflict
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import _authorization_principal, require_global_permission
+from .auth import _authorization_principal, constant_time_equals, require_global_permission
 from .recovery_mode import enabled, isolated
 
 router = APIRouter()
@@ -25,7 +24,7 @@ def _admit(request, *, mutation=False):
     actor = _authorization_principal(request) or "local"
     context = digest([spending.target(), actor])
     supplied = request.headers.get("X-Lightwork-Spending-Context")
-    if (mutation or supplied is not None) and not hmac.compare_digest(supplied or "", context):
+    if (mutation or supplied is not None) and not constant_time_equals(supplied or "", context):
         raise HTTPException(409, "Your account or workspace changed. Reload provider spending before continuing.")
     return actor, context
 

@@ -30,7 +30,9 @@ export function ownCli(cli: string, args: string[], options: {
     const consume = (data: Buffer, isStdout: boolean) => {
       if (finished) return;
       bytes += data.byteLength;
-      if (bytes > (options.maxBytes ?? 1024 * 1024)) { finish("The local command exceeded its output limit."); return; }
+      // A streamed run keeps no output, so only a total the caller chose or one endless line is bounded.
+      const limit = options.maxBytes ?? 1024 * 1024;
+      if (bytes > limit && (!options.onLine || options.maxBytes !== undefined)) { finish("The local command exceeded its output limit."); return; }
       const text = (isStdout ? stdoutDecoder : stderrDecoder).write(data);
       if (isStdout && !options.onLine) stdout += text;
       if (options.onLine) {
@@ -39,6 +41,7 @@ export function ownCli(cli: string, args: string[], options: {
         while ((at = line.indexOf("\n")) >= 0) {
           options.onLine(line.slice(0, at)); line = line.slice(at + 1);
         }
+        if (line.length > limit) { finish("The local command exceeded its output limit."); return; }
       }
     };
     child.stdout.on("data", (data: Buffer) => consume(data, true));

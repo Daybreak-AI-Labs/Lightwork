@@ -49,6 +49,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..constant_time import text_equals
+
 # Manifest format version. Bump on a breaking change to the manifest shape so
 # a verifier can refuse to diff manifests it can't interpret.
 MANIFEST_VERSION = 2
@@ -279,7 +281,7 @@ def verify_signature(manifest: dict[str, Any], secret: str) -> bool:
     if not isinstance(sig, str) or not sig.startswith("sha256="):
         return False
     body = {k: v for k, v in manifest.items() if k != "signature"}
-    return hmac.compare_digest(sig.encode(), sign_manifest(body, secret).encode())
+    return text_equals(sig, sign_manifest(body, secret))
 
 
 @dataclass

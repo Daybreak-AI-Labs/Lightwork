@@ -152,6 +152,8 @@
       var args = { review: selected, confirm: true };
       if (!repairReview && code()) args.authorization = code();
       get("maintenance-authorization").value = "";
+      // The native side spends a loaded protected approval on the first attempt, so stop showing it as loaded.
+      if (!repairReview) handoff = null;
       describeCode();
       await invoke("install_desktop_update", args);
       status("The installer has started. Lightwork will reopen when it finishes.");
@@ -207,6 +209,7 @@
     var args = resume ? { id: get("maintenance-incomplete").value, confirm: true } : { confirm: true };
     if (!resume && code()) args.authorization = code();
     get("maintenance-authorization").value = "";
+    if (!resume) handoff = null; // Spent by the first attempt, like a pasted code.
     describeCode();
     status(resume ? "Finishing the interrupted update. Lightwork will reopen with the result…" : "Getting ready to go back to the previous version. Lightwork will reopen with the result…");
     try { await invoke(resume ? "resume_desktop_maintenance" : "rollback_desktop_update", args); }

@@ -269,3 +269,115 @@ def test_post_approval_card_sends_blocks(monkeypatch, tmp_path):
     assert kw["channel"] == "C1" and kw["blocks"][-1]["type"] == "actions"
     assert "confirm" in kw["blocks"][-1]["elements"][0]
     assert ch.approvals_channel == "C1"
+
+
+def _viewer_decision_setup(monkeypatch, tmp_path):
+    """A pending request and a linked Slack user whose Lightwork role is only viewer."""
+    from maverick import channel_identities, slack_interactive
+    from maverick.approval_cards import encode_approval_detail
+    from maverick_dashboard import rbac
+
+    ch = _channel(monkeypatch, tmp_path)
+    card = _card()
+    aid = ch._world.create_approval("wire_funds", risk="medium", detail=encode_approval_detail(card))
+    rbac.set_role("user:viewer1", "viewer", actor="user:admin")
+    channel_identities.link("slack", "U123", "user:viewer1", actor="admin")
+    replies = []
+    monkeypatch.setattr(slack_interactive, "respond", lambda url, payload: replies.append(payload) or True)
+    return ch, aid, card, replies
+
+
+def test_socket_mode_button_refuses_a_viewer_like_the_http_receiver(monkeypatch, tmp_path):
+    from maverick.slack_interactive import ACTION_APPROVE, encode_button_value
+
+    ch, aid, card, replies = _viewer_decision_setup(monkeypatch, tmp_path)
+    payload = {"type": "block_actions", "user": {"id": "U123"}, "response_url": "https://hooks.slack.com/a",
+               "actions": [{"action_id": ACTION_APPROVE, "type": "button",
+                            "value": encode_button_value(aid, card["binding_sha256"])}]}
+    asyncio.run(ch._on_request(_client(), _req("interactive", payload)))
+    assert ch._world.get_approval(aid).status == "pending"
+    assert "can't decide approvals" in replies[-1]["text"]
+
+
+def test_socket_mode_slash_command_refuses_a_viewer(monkeypatch, tmp_path):
+    ch, aid, _card_, replies = _viewer_decision_setup(monkeypatch, tmp_path)
+    form = {"command": "/lightwork", "text": f"approve {aid}", "user_id": "U123", "channel_id": "D1",
+            "response_url": "https://hooks.slack.com/c"}
+    asyncio.run(ch._on_request(_client(), _req("slash_commands", form)))
+    assert ch._world.get_approval(aid).status == "pending"
+    assert "can't decide approvals" in replies[-1]["text"]
+    asyncio.run(ch._on_request(_client(), _req("slash_commands", {**form, "text": f"reject {aid}"})))
+    assert ch._world.get_approval(aid).status == "pending"
+
+
+def test_socket_mode_confirmation_modal_refuses_a_viewer(monkeypatch, tmp_path):
+    from maverick.slack_interactive import (
+        CONFIRM_BLOCK,
+        CONFIRM_INPUT,
+        CONFIRM_VIEW_CALLBACK,
+        confirm_view,
+    )
+
+    ch, aid, card, _replies = _viewer_decision_setup(monkeypatch, tmp_path)
+    from maverick.channel_approvals import card_content
+
+    view = confirm_view(card_content(ch._world.get_approval(aid)), binding=card["binding_sha256"],
+                        response_url="https://hooks.slack.com/a")
+    submission = {"type": "view_submission", "user": {"id": "U123"},
+                  "view": {"callback_id": CONFIRM_VIEW_CALLBACK, "private_metadata": view["private_metadata"],
+                           "state": {"values": {CONFIRM_BLOCK: {CONFIRM_INPUT: {"value": "APPROVE"}}}}}}
+    client = _client()
+    asyncio.run(ch._on_request(client, _req("interactive", submission)))
+    assert ch._world.get_approval(aid).status == "pending"
+    ack = client.send_socket_mode_response.await_args.args[0]["payload"]
+    assert ack["response_action"] == "errors"
+
+
+def test_socket_mode_decisions_fail_closed_without_an_authorizer(monkeypatch, tmp_path):
+    import sys
+
+    from maverick import channel_identities, slack_interactive
+    from maverick.approval_cards import encode_approval_detail
+    from maverick.slack_interactive import ACTION_APPROVE, encode_button_value
+
+    # No dashboard to supply the operate rule and none injected: nobody may decide.
+    monkeypatch.setitem(sys.modules, "maverick_dashboard.approval_decisions", None)
+    ch = _channel(monkeypatch, tmp_path)
+    card = _card()
+    aid = ch._world.create_approval("wire_funds", risk="medium", detail=encode_approval_detail(card))
+    channel_identities.link("slack", "U123", "user:alice", actor="admin")
+    replies = []
+    monkeypatch.setattr(slack_interactive, "respond", lambda url, payload: replies.append(payload) or True)
+    payload = {"type": "block_actions", "user": {"id": "U123"}, "response_url": "https://hooks.slack.com/a",
+               "actions": [{"action_id": ACTION_APPROVE, "type": "button",
+                            "value": encode_button_value(aid, card["binding_sha256"])}]}
+    asyncio.run(ch._on_request(_client(), _req("interactive", payload)))
+    assert ch._world.get_approval(aid).status == "pending"
+    assert replies[-1]["response_type"] == "ephemeral"
+
+
+def test_socket_mode_uses_an_injected_authorizer(monkeypatch, tmp_path):
+    from maverick import channel_identities, slack_interactive
+    from maverick.approval_cards import encode_approval_detail
+    from maverick.channel_approvals import ChannelApprovalRefused
+    from maverick.slack_interactive import ACTION_APPROVE, encode_button_value
+
+    seen = []
+
+    def authorize(principal, approval_id):
+        seen.append((principal, approval_id))
+        raise ChannelApprovalRefused("not_permitted", "Not for you.")
+
+    ch = _channel(monkeypatch, tmp_path, authorize=authorize)
+    card = _card()
+    aid = ch._world.create_approval("wire_funds", risk="medium", detail=encode_approval_detail(card))
+    channel_identities.link("slack", "U123", "user:alice", actor="admin")
+    replies = []
+    monkeypatch.setattr(slack_interactive, "respond", lambda url, payload: replies.append(payload) or True)
+    payload = {"type": "block_actions", "user": {"id": "U123"}, "response_url": "https://hooks.slack.com/a",
+               "actions": [{"action_id": ACTION_APPROVE, "type": "button",
+                            "value": encode_button_value(aid, card["binding_sha256"])}]}
+    asyncio.run(ch._on_request(_client(), _req("interactive", payload)))
+    assert seen == [("user:alice", aid)]
+    assert ch._world.get_approval(aid).status == "pending"
+    assert replies[-1]["text"] == "Not for you."

@@ -150,6 +150,11 @@ async function boundedResponseText(res: Response, signal: AbortSignal): Promise<
 }
 
 async function apiRequest<T>(cfg: Settings, path: string, signal?: AbortSignal, body?: object): Promise<T> {
+  return (await apiExchange<T>(cfg, path, signal, body)).data;
+}
+
+type Exchange<T> = {data: T; header: (name: string) => string | null};
+async function apiExchange<T>(cfg: Settings, path: string, signal?: AbortSignal, body?: object): Promise<Exchange<T>> {
   const error = connectionValidationError(cfg.baseUrl, cfg.token);
   if (error) throw new ApiError(error, undefined, "settings");
   // Packaged phones use the native byte-cap/no-redirect bridge. Expo Go and
@@ -192,11 +197,13 @@ async function apiRequest<T>(cfg: Settings, path: string, signal?: AbortSignal, 
       }
       const raw = await res.read();
       if (controller.signal.aborted) throw new ApiError("Request cancelled.", undefined, "cancelled");
+      let data: T;
       try {
-        return JSON.parse(raw) as T;
+        data = JSON.parse(raw) as T;
       } catch {
         throw new ApiError("The dashboard sent a reply this app could not read. Ask your administrator to check the dashboard address.", undefined, "protocol");
       }
+      return {data, header: res.header};
     })()]);
   } finally {
     clearTimeout(timer);
@@ -207,11 +214,18 @@ async function apiRequest<T>(cfg: Settings, path: string, signal?: AbortSignal, 
 async function requestTransport(url: string, method: string, headers: Record<string, string>, body: string | undefined, signal: AbortSignal) {
   if (nativePlatform) {
     const response = await nativeRequest(url, method, headers, body, signal);
+    // The bridges hand over only the response headers the client reads.
+    const received = response.headers && typeof response.headers === 'object' ? response.headers : {};
     return {status: response.status, ok: response.status >= 200 && response.status < 300,
-      read: async () => response.body};
+      read: async () => response.body,
+      header: (name: string) => {
+        const value = received[name.toLowerCase()];
+        return typeof value === 'string' ? value : null;
+      }};
   }
   const response = await fetch(url, {method, headers, body, signal, redirect: 'error', credentials: 'omit'});
-  return {status: response.status, ok: response.ok, read: () => boundedResponseText(response, signal)};
+  return {status: response.status, ok: response.ok, read: () => boundedResponseText(response, signal),
+    header: (name: string) => response.headers?.get?.(name) ?? null};
 }
 
 function apiGet<T>(cfg: Settings, path: string, signal?: AbortSignal): Promise<T> {
@@ -246,8 +260,17 @@ export function executeDeviceAction(cfg: Settings, token: string, signal?: Abort
   return apiRequest(cfg, '/api/v1/devices/actions/execute', signal, {token, confirmed: true});
 }
 
-export function listGoals(cfg: Settings, limit = 50, signal?: AbortSignal, offset = 0, status = "", beforeId?: number): Promise<Goal[]> {
-  return apiGet<Goal[]>(cfg, `/api/v1/goals?limit=${limit}&offset=${offset}&status=${encodeURIComponent(status)}${beforeId == null ? '' : `&before_id=${beforeId}`}`, signal);
+/* /api/v1/goals pages by the rows it scans, then leaves out any the reader may
+ * no longer open (a copied conversation whose source access ended). A page
+ * shorter than the limit is therefore not the end: Pagination-Has-More says
+ * whether more remain and Pagination-Next-Before-Id where to continue. Each is
+ * null when the dashboard did not send a readable value. */
+export type GoalPage = {goals: Goal[]; hasMore: boolean | null; nextBeforeId: number | null};
+export async function listGoals(cfg: Settings, limit = 50, signal?: AbortSignal, offset = 0, status = "", beforeId?: number): Promise<GoalPage> {
+  const reply = await apiExchange<Goal[]>(cfg, `/api/v1/goals?limit=${limit}&offset=${offset}&status=${encodeURIComponent(status)}${beforeId == null ? '' : `&before_id=${beforeId}`}`, signal);
+  const more = reply.header("Pagination-Has-More"), next = reply.header("Pagination-Next-Before-Id");
+  const nextBeforeId = next !== null && /^[1-9][0-9]{0,15}$/.test(next) && Number.isSafeInteger(Number(next)) ? Number(next) : null;
+  return {goals: reply.data, hasMore: more === "true" ? true : more === "false" ? false : null, nextBeforeId};
 }
 
 export function searchGoals(cfg: Settings, query: string, signal?: AbortSignal): Promise<Goal[]> {

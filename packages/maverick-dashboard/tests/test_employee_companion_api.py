@@ -1311,3 +1311,20 @@ def test_copilot_admin_metadata_and_lost_policy_response_do_not_read_or_repeat_c
     assert environment.view()["history"] == []
     assert _ok(environment.client.post(base + "/execute", headers=headers, json=payload))["status"] == "unconfirmed"
     assert calls == [True]
+
+
+def test_non_ascii_context_header_is_refused_like_any_other_wrong_one(environment):
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    environment.policy()
+    # Header text arrives decoded as latin-1, so e-acute is a non-ASCII str.
+    for value in ("0" * 64, b"caf\xe9"):
+        refused = environment.client.get(BASE, headers=_headers(context=value))
+        assert refused.status_code == 409, (value, refused.status_code, refused.text)
+    reviewed = environment.view()["context"]
+    request = Request({"type": "http", "method": "POST", "path": BASE + "/messages", "state": {},
+                       "headers": [(b"x-test-principal", ALICE.encode()), (CONTEXT.lower().encode(), b"caf\xe9")]})
+    with tenant_scope(tenant="acme"), pytest.raises(HTTPException) as refused:
+        companion._authority(request, reviewed_context=reviewed)
+    assert refused.value.status_code == 409

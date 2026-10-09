@@ -142,3 +142,21 @@ def test_both_preference_pages_offer_the_summary_preview(client_and_world):
         text = client.get(page).text
         assert 'data-digest-preview' in text, page
         assert "Preview today's summary" in text or "Preview today&#39;s summary" in text, page
+
+
+def test_a_task_the_person_can_no_longer_open_does_not_take_down_the_inbox(client_and_world, monkeypatch):
+    """A department grant that was removed leaves old tasks owned by the person but
+    closed to them; one such task used to answer 404 for the whole inbox."""
+    from maverick_dashboard import suite_grants
+
+    client, world = client_and_world
+    open_goal = _finished(world, "General task")
+    _finished(world, "Finance task", domain="finance_ap")
+    monkeypatch.setattr(suite_grants, "granted_suites", lambda _principal: frozenset({"legal"}))
+
+    inbox = client.get("/api/v1/notifications/personal")
+    assert inbox.status_code == 200, inbox.text
+    assert [row["goal_id"] for row in inbox.json()["items"]] == [open_goal]
+    summary = client.get("/api/v1/notifications/personal/summary")
+    assert summary.status_code == 200, summary.text
+    assert summary.json()["unseen"] == 1

@@ -16,7 +16,7 @@ import stat
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -577,14 +577,16 @@ def authorize(*, actor: str, isolated: bool, confirm_all_workspaces: bool,
                 raise MaintenanceError("Review the exact release in the native app before authorizing an upgrade.")
             if _usable_point_count() >= MAX_TICKETS:
                 raise MaintenanceError("The installation recovery store is full. Review and retire unused authorizations or obsolete recovery points in Workspace recovery.")
+            from .installation_handoff import reviewed_release
+            reviewed = reviewed_release(review_id)
             identifier = secrets.token_hex(16)
-            directory = file_lock.ensure_private_directory(_directory(identifier))
+            # The directory is created only once every check below has passed,
+            # so a refused authorization leaves nothing behind.
+            directory = _directory(identifier)
             record = {"schema": 1, "target": _target(), "id": identifier, "status": "authorized",
                       "old_version": workspace_recovery.version(), "old_runtime_sha256": backup._sha256(runtime),
-                      "installed_runtime": str(runtime), "created_at": time.time(), **_native_channel(runtime)}
-            if review_id is not None:
-                from .installation_handoff import reviewed_release
-                record["reviewed_new"] = reviewed_release(review_id)
+                      "installed_runtime": str(runtime), "created_at": time.time(), **_native_channel(runtime),
+                      "reviewed_new": reviewed}
             if identity_transition is not None:
                 if confirm_identity_transition is not True:
                     raise MaintenanceError("Explicitly confirm the reviewed change to installation signing trust.")
@@ -597,7 +599,15 @@ def authorize(*, actor: str, isolated: bool, confirm_all_workspaces: bool,
         nonce = secrets.token_hex(32)
         record.update(actor=actor, operation="rollback" if rollback_id else "upgrade",
                       grant_hash=hashlib.sha256(nonce.encode()).hexdigest(), expires_at=time.time() + 900)
-        _write(directory / "record.json", record)
+        created = not directory.exists()
+        file_lock.ensure_private_directory(directory)
+        try:
+            _write(directory / "record.json", record)
+        except BaseException:
+            if created:
+                with suppress(OSError):
+                    directory.rmdir()
+            raise
         return {"id": record["id"], "authorization": record["id"] + ":" + nonce,
                 "old_version": record["old_version"], "expires_at": record["expires_at"],
                 "scope": "all local workspaces and shared administration files"}
@@ -1515,6 +1525,21 @@ def retire(identifier: str, *, expected_sha256: str, actor: str, confirm: bool) 
         _write(directory / "record.json", record)
         _prune_retirement_history()
         return {"id": identifier, "retired": True}
+
+
+def discard_authorization(authorization: str, *, actor: str) -> None:
+    """Retire a grant that was issued but could not be handed on or staged.
+
+    The caller already holds the error that explains the failure, so this never
+    raises: a grant that cannot be retired here stays visible, with its expiry,
+    for an administrator to retire from Workspace recovery.
+    """
+    match = _TOKEN.fullmatch(authorization) if isinstance(authorization, str) else None
+    if match is None:
+        return
+    with suppress(OSError, ValueError, KeyError, MaintenanceError):
+        record = _read(_directory(match[1]) / "record.json")
+        retire(match[1], expected_sha256=_record_sha256(record), actor=actor, confirm=True)
 
 
 def status() -> dict:

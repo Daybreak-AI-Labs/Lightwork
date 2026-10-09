@@ -131,7 +131,8 @@ test('? opens help and shortcuts, go-to keys move between pages, and typing is n
   await page.locator('#navfinder-input').fill('');
   await page.keyboard.type('gt/?');
   await expect(page.locator('#navfinder-input')).toHaveValue('gt/?');
-  await expect(page).toHaveURL(/\/goals$/);
+  // Still on Tasks: the search only gives itself an address (?find=).
+  await expect(page).toHaveURL(/\/goals\?find=gt%2F%3F$/);
   await page.keyboard.press('Escape');
   // / opens the command menu (from anywhere that is not a field).
   await page.evaluate(() => document.activeElement && document.activeElement.blur());

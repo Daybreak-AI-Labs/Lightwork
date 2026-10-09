@@ -230,6 +230,34 @@ def test_promotion_receipt_verifies_signature_only_with_private_binding():
     assert invalid.approval_status == "receipt_invalid"
 
 
+def test_receipt_with_non_ascii_payload_digest_is_a_binding_mismatch():
+    from maverick.evolution_ledger import _digest
+
+    request = ApprovalRequest("candidate-kept-private", "code", "a" * 64)
+    receipt = build_promotion_receipt(
+        _record(
+            id=request.candidate_id,
+            rung=request.rung,
+            payload_sha256=request.payload_sha256,
+        )
+    )
+    # A self-consistent receipt supplied for verification can carry any text in
+    # its unchecked payload digest; that is a mismatch, not a TypeError.
+    forged = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
+    forged["payload_sha256"] = "é" * 64
+    forged["receipt_sha256"] = _digest("promotion-receipt", forged)
+
+    result = verify_promotion_receipt(
+        forged,
+        approval_request=request,
+        approval_signature="c" * 128,
+        trusted_pubkeys=[],
+    )
+
+    assert result.receipt_valid is True
+    assert result.approval_status == "private_binding_mismatch"
+
+
 def test_workspace_snapshot_id_is_not_misrepresented_as_a_content_digest():
     receipt = build_promotion_receipt(
         _record(

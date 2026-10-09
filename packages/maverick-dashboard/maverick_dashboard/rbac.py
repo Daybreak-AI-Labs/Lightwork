@@ -15,6 +15,18 @@ Safety invariants (see maverick_dashboard.auth):
   * The roster is control-plane data: one GLOBAL file, never per-tenant.
 
 Store: ``~/.maverick/dashboard-users.json`` (0600), ``{principal: role}``.
+Once any role is written, a private sibling marker
+(``dashboard-users.json.present``) records that a roster exists. A missing
+roster is then a refusal (:class:`RosterMissingError`), never a silent return
+to the authenticated-user default. A configured bootstrap admin keeps access
+and can restore the file from backup or explicitly start a new, empty roster
+(:func:`reset_missing_rosters`).
+
+The marker is written AFTER the roster, never before: a first roster write
+that fails (disk full, a sharing violation) must leave nothing behind, or every
+retry would find a marker with no roster and be refused. A roster without a
+marker is the state older installations are already in; the next read records
+it (:func:`_backfill_record`).
 """
 from __future__ import annotations
 
@@ -43,6 +55,31 @@ class RbacStoreError(RuntimeError):
     mutators therefore refuse present-but-invalid state instead of overwriting
     or broadening it.
     """
+
+
+class RosterRollbackError(RbacStoreError):
+    """A role change was refused by the activity log and putting the role list
+    back failed, so the list may now hold the change."""
+
+
+class RosterMissingError(RbacStoreError):
+    """A role list was recorded on this installation, but the roster file is gone.
+
+    Deleting, failing to restore, or misresolving the roster must not return
+    every demoted person to the default role.
+    """
+
+
+# What the person who runs Lightwork can do, in the words the sign-in page, the
+# Users page and the API refusal all share. An installation set up with the
+# local owner has no administrator in configuration, and the owner's admin role
+# lived only in the lost list, so the file-level step is part of the guidance.
+ROSTER_RECOVERY = (
+    "Restore the role list from a backup. Or have an administrator set up in configuration "
+    "start a new, empty role list on the Users page. If none is set up, add the owner's email "
+    "as user:name@company.com to [dashboard] admins in config.toml, or set "
+    "MAVERICK_DASHBOARD_ADMINS, then restart Lightwork and sign in to start a new list."
+)
 
 
 class RecoveryAuthorityError(ValueError):
@@ -351,6 +388,48 @@ def delete_custom_role(name: str, *, actor: str = "") -> None:
         )
 
 
+def _presence_marker(path: Path) -> Path:
+    """Private sibling recording that this roster has existed."""
+    return path.with_name(path.name + ".present")
+
+
+def _roster_recorded(path: Path) -> bool:
+    try:
+        _presence_marker(path).lstat()  # a dangling or odd entry still counts
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise RbacStoreError(f"RBAC roster state unreadable: {exc}") from exc
+    return True
+
+
+def _record_roster(path: Path) -> None:
+    """Durably note that ``path`` holds assigned roles (idempotent)."""
+    from maverick.file_lock import atomic_write_text
+
+    if not _roster_recorded(path):
+        atomic_write_text(_presence_marker(path),
+                          json.dumps({"schema": 1, "roster": path.name}, sort_keys=True))
+
+
+def _missing_roster(path: Path, label: str) -> dict:
+    if _roster_recorded(path):
+        raise RosterMissingError(
+            f"{label} is missing although this installation recorded one. {ROSTER_RECOVERY}"
+        )
+    return {}
+
+
+def _backfill_record(path: Path) -> None:
+    # Installations whose roster predates the marker gain it on first read.
+    try:
+        _record_roster(path)
+    except (OSError, RbacStoreError) as exc:
+        import logging
+
+        logging.getLogger(__name__).warning("RBAC roster marker not recorded: %s", exc)
+
+
 def _load() -> dict[str, str]:
     from maverick.file_lock import (
         atomic_read_text,
@@ -363,7 +442,7 @@ def _load() -> dict[str, str]:
     ensure_private_directory(maverick_home())
     ensure_private_directory(p.parent)
     if not p.exists():
-        return {}
+        return _missing_roster(p, "The role list")
     try:
         ensure_private_file(p)
         data = _decode_json_object(atomic_read_text(p), label="RBAC roster")
@@ -380,6 +459,7 @@ def _load() -> dict[str, str]:
         if not is_known_role(role):
             raise RbacStoreError(f"RBAC roster corrupt: invalid role for {principal!r}")
         out[principal] = role
+    _backfill_record(p)
     return out
 
 
@@ -406,7 +486,11 @@ def _write(data: dict[str, str]) -> None:
     # two concurrent dashboard workers (one os.replace moved it out from under
     # the other). Cross-process serialization of the RMW is in the mutators.
     from maverick.file_lock import atomic_write_text
-    atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True))
+    path = store_path()
+    atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))
+    # After the roster, so a failed first write leaves no marker behind. If this
+    # note cannot be written the roster still stands and the next read records it.
+    _backfill_record(path)
 
 
 def list_users() -> dict[str, str]:
@@ -483,7 +567,7 @@ def _audit_role_change_with_rollback(
         try:
             rollback()
         except Exception as rollback_exc:
-            raise RbacStoreError(
+            raise RosterRollbackError(
                 "audit refused RBAC mutation and roster rollback failed"
             ) from rollback_exc
         raise
@@ -561,7 +645,7 @@ def _load_tenant() -> dict[str, dict[str, str]]:
     ensure_private_directory(maverick_home())
     ensure_private_directory(p.parent)
     if not p.exists():
-        return {}
+        return _missing_roster(p, "The workspace role list")
     try:
         ensure_private_file(p)
         data = _decode_json_object(atomic_read_text(p), label="tenant RBAC roster")
@@ -589,13 +673,56 @@ def _load_tenant() -> dict[str, dict[str, str]]:
                 )
             clean[principal] = role
         out[tenant] = clean
+    _backfill_record(p)
     return out
 
 
 def _write_tenant(data: dict[str, dict[str, str]]) -> None:
     from maverick.file_lock import atomic_write_text
-    atomic_write_text(tenant_store_path(),
-                      json.dumps(data, indent=2, sort_keys=True))
+    path = tenant_store_path()
+    atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))
+    _backfill_record(path)  # after the roster, as in _write
+
+
+def missing_rosters() -> list[str]:
+    """Which recorded role lists are currently missing (``global``/``workspace``)."""
+    found = []
+    for name, path in (("global", store_path()), ("workspace", tenant_store_path())):
+        if not path.exists() and _roster_recorded(path):
+            found.append(name)
+    return found
+
+
+def reset_missing_rosters(*, actor: str = "") -> list[str]:
+    """Explicitly start new, empty role lists where recorded ones are missing.
+
+    Recovery for a configured bootstrap administrator when no backup can be
+    restored. Every former assignment is gone, so people fall back to group
+    roles or the configured default; the reset is audited. A present roster
+    (even a corrupt one) is never replaced here.
+    """
+    from maverick.audit import AuditRefused
+
+    reset = []
+    for name, path in (("global", store_path()), ("workspace", tenant_store_path())):
+        with _locked(path):
+            if path.exists() or not _roster_recorded(path):
+                continue
+            from maverick.file_lock import atomic_create_text
+
+            atomic_create_text(path, json.dumps({}, indent=2, sort_keys=True))
+            try:
+                _audit_role_change(actor, "*", f"{name}_roster_reset", "", "missing", "empty")
+            except AuditRefused:
+                try:
+                    path.unlink()
+                except OSError as rollback_exc:
+                    raise RosterRollbackError(
+                        "audit refused the role list reset and rollback failed"
+                    ) from rollback_exc
+                raise
+            reset.append(name)
+    return reset
 
 
 def _tenant_removed(tenant: str) -> bool:
@@ -671,6 +798,23 @@ def remove_tenant_role(tenant: str, principal: str, *, actor: str = "") -> None:
                 )
 
 
+def has_tenant_membership(principal: str) -> bool:
+    """Whether ``principal`` holds a direct role in any workspace."""
+    return bool(tenant_memberships(principal))
+
+
+def tenant_memberships(principal: str) -> dict[str, str]:
+    """Every workspace where ``principal`` holds a direct role: {workspace: role}."""
+    principal = (principal or "").strip()
+    return {tenant: members[principal] for tenant, members in sorted(_load_tenant().items())
+            if principal in members}
+
+
+def tenant_member_principals() -> set[str]:
+    """Every principal holding a direct role in any workspace."""
+    return {principal for members in _load_tenant().values() for principal in members}
+
+
 def list_tenant_roles(tenant: str) -> dict[str, str]:
     """All {principal: role} memberships within ``tenant``."""
     if _tenant_removed(tenant):
@@ -699,11 +843,13 @@ def clear_tenant_roles(tenant: str) -> int:
 
 
 __all__ = [
-    "ROLES", "PERMISSION_ATOMS", "RbacStoreError", "RecoveryAuthorityError",
+    "ROLES", "PERMISSION_ATOMS", "ROSTER_RECOVERY", "RbacStoreError", "RosterMissingError",
+    "RecoveryAuthorityError", "missing_rosters", "reset_missing_rosters",
     "store_path", "default_role",
     "permissions_for", "list_users", "get_stored_role", "set_role", "remove_user",
     "tenant_store_path", "get_tenant_role", "set_tenant_role",
-    "remove_tenant_role", "list_tenant_roles", "clear_tenant_roles",
+    "remove_tenant_role", "list_tenant_roles", "clear_tenant_roles", "has_tenant_membership",
+    "tenant_memberships", "tenant_member_principals",
     "custom_roles_path", "list_custom_roles", "known_roles", "is_known_role",
     "most_privileged", "set_custom_role", "delete_custom_role",
 ]

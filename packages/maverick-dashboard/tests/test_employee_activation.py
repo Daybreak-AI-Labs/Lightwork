@@ -121,6 +121,19 @@ def test_acceptance_is_invalidated_by_current_result_change(state):
     assert not activation.public(state['request'], state['store'].get(saved['id']))['result']['accepted']
 
 
+def test_non_ascii_context_or_fingerprint_is_refused_like_any_other_wrong_one(state):
+    with pytest.raises(HTTPException) as refused:
+        draft(state, context='café')
+    assert refused.value.status_code == 409
+    saved = draft(state)
+    state['goal'] = SimpleNamespace(id=8, owner='user:a', status='done', result='Reviewed answer', updated_at=1)
+    state['receipt'] = {'goal_id': 8}
+    for body in ({'context': 'café'}, {'context': 'context', 'result_fingerprint': 'café'}):
+        with pytest.raises(HTTPException) as refused:
+            activation.accept(state['request'], saved['id'], activation.ActionIn(expected_revision=1, confirmed=True, **body))
+        assert refused.value.status_code == 409
+
+
 @pytest.mark.asyncio
 async def test_recovering_admitted_draft_never_dispatches_again(state, monkeypatch):
     saved = draft(state)

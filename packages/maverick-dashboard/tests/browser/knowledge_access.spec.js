@@ -337,6 +337,8 @@ test('an administrator can archive a finished real request in the page while its
   await card.getByRole('button', {name: 'Approve and stop using this source'}).click();
   await expect(card).toContainText('approved');
   await page.getByRole('button', {name: 'Ready to archive'}).click();
+  // The view reloads its cards; open the new card, not the one being replaced.
+  await expect(page.locator('#ka-status')).toHaveText('Showing finished requests ready to archive.');
   await card.locator('summary').click();
   await expect(card.getByRole('button', {name: 'Move to finished archive'})).toBeVisible();
   page.once('dialog', dialog => dialog.accept());

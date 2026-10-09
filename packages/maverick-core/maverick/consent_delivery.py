@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from . import consent_storage
+from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -1028,7 +1029,7 @@ class ConsentDeliveryStore:
         ).fetchone()
         if row is None:
             return None
-        if not hmac.compare_digest(str(row["request_sha256"]), request_sha256):
+        if not text_equals(str(row["request_sha256"]), request_sha256):
             raise ConsentDeliveryIdempotencyConflict(
                 "idempotency key was already used for different delivery content"
             )
@@ -1968,7 +1969,7 @@ class ConsentDeliveryStore:
                     payload = _loads(row["payload_json"], "delivery payload")
                     if not isinstance(payload, dict):
                         raise ConsentDeliveryError("stored delivery payload is invalid")
-                    if not hmac.compare_digest(
+                    if not text_equals(
                         hashlib.sha256(_canonical(payload)).hexdigest(),
                         str(row["payload_sha256"]),
                     ):
@@ -2172,7 +2173,7 @@ class ConsentDeliveryStore:
                 if existing["state"] == "delivered":
                     if (
                         existing["lease_token"] == claim.lease_token
-                        and hmac.compare_digest(
+                        and text_equals(
                             str(existing["acknowledgement_sha256"]),
                             acknowledgement_sha256,
                         )
@@ -2647,7 +2648,7 @@ class ConsentDeliveryStore:
         result: list[dict[str, Any]] = []
         for row in rows:
             details = _loads(row["details_json"], "audit details")
-            if not isinstance(details, dict) or not hmac.compare_digest(
+            if not isinstance(details, dict) or not text_equals(
                 _sha256(details),
                 str(row["details_sha256"]),
             ):
@@ -2680,7 +2681,7 @@ class ConsentDeliveryStore:
             if row["previous_event_sha256"] != previous:
                 raise ConsentDeliveryError("delivery audit chain is broken")
             details = _loads(row["details_json"], "audit details")
-            if not isinstance(details, dict) or not hmac.compare_digest(
+            if not isinstance(details, dict) or not text_equals(
                 _sha256(details),
                 str(row["details_sha256"]),
             ):
@@ -2696,7 +2697,7 @@ class ConsentDeliveryStore:
                 "created_at": float(row["created_at"]),
             }
             computed = _sha256(body)
-            if not hmac.compare_digest(computed, str(row["event_sha256"])):
+            if not text_equals(computed, str(row["event_sha256"])):
                 raise ConsentDeliveryError("delivery audit event digest changed")
             previous = computed
         return {

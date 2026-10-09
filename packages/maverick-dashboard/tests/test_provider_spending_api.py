@@ -88,6 +88,12 @@ def test_actor_change_refuses_review_and_unavailable_diagnostics_do_not_expose_f
     assert failed.read_text(encoding="utf-8") == "{private malformed accounting fixture"
 
 
+def test_non_ascii_spending_context_header_is_refused_as_changed_not_a_server_error(browser):
+    stale = {"X-Lightwork-Spending-Context": "contéxt".encode()}
+    assert browser.get(api.BASE, headers=stale).status_code == 409
+    assert browser.post(api.BASE + "/export", headers=stale).status_code == 409
+
+
 def test_import_requires_actual_isolation_and_rejects_oversize_before_staging(browser, monkeypatch):
     context = headers(browser)
     assert browser.post(api.BASE + "/import", content=b"{}", headers=context).status_code == 409

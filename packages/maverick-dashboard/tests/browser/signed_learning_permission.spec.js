@@ -16,11 +16,26 @@ test('accepted examples need separate permission, and withdrawal stops a learned
     expect(runs).toHaveLength(2);
     expect(sourceCalls).toBe(4);
 
+    // Settings lists each feature; its switch is changed through the reviewed
+    // save in All settings.
     await page.goto('/settings#settings-features');
-    await expect(page.locator('#feature-copilot_operations input')).toBeVisible();
-    await page.locator('#feature-copilot_operations input').check();
-    await page.locator('form[action="/settings/features"] button[type="submit"]').click();
-    await expect(page.locator('form[action="/settings/features"] [data-save-status]')).toContainText('Saved');
+    await page.locator('#feature-copilot_operations').getByRole('link', {name: 'Review choice'}).click();
+    await expect(page).toHaveURL(/\/settings\/all\?id=features\.copilot_operations$/);
+    const feature = page.locator('[data-setting-id="features.copilot_operations"]');
+    const toggle = feature.getByRole('switch');
+    await expect(toggle).toBeVisible();
+    // The browser server is shared: an earlier journey may already have
+    // turned this on, and then there is nothing to save.
+    if (!(await toggle.isChecked())) {
+      await toggle.check();
+      await feature.locator('[data-save]').click();
+      const review = page.getByRole('dialog', {name: 'Review setting changes'});
+      await expect(review).toContainText('Include');
+      await review.getByRole('button', {name: 'Use reviewed changes'}).click();
+      await expect(feature.locator('[data-row-status]')).toHaveText('Saved.');
+    }
+    await page.reload();
+    await expect(toggle).toBeChecked();
 
     await page.goto('/workflows');
     await page.getByRole('link', {name: 'Learning examples'}).click();

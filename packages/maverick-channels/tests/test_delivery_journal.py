@@ -155,6 +155,33 @@ def test_chunk_recovery_preserves_confirmed_prefix_and_provider_ids(isolated):
     assert calls == [0, 1, 1]
 
 
+def test_refused_reply_source_leaves_the_chunk_retryable_and_never_calls_the_provider(isolated, monkeypatch):
+    calls, allowed = [], [False]
+
+    def require_source(row):
+        if not allowed[0]:
+            raise PermissionError("Current task ownership and source access are required for this reply")
+    monkeypatch.setattr(delivery, "_require_reply_source", require_source)
+
+    async def handler(msg):
+        return "answer"
+
+    async def send(reply):
+        calls.append(reply.text)
+        return "provider-1"
+
+    async def run():
+        args = dict(external_id="event1", account="account1", authorize=lambda: True, send=send, journal=isolated)
+        first = await Adapter(handler).process_message(_message(), **args)
+        assert first["delivery"] == "retryable" and first["chunks"]["reply"]["state"] == "retryable"
+        assert calls == []  # the provider was never reached
+        allowed[0] = True  # the ownership check passes again: the reply goes out
+        second = await Adapter(handler).process_message(_message(), **args)
+        assert second["delivery"] == "delivered"
+    asyncio.run(run())
+    assert calls == ["answer"]
+
+
 def test_account_and_payload_binding_and_capacity_do_not_evict_unknowns(isolated, monkeypatch):
     monkeypatch.setattr(delivery, "MAX_RECORDS", 2)
     first = isolated.admit(_message(), external_id="event1", account="account1")

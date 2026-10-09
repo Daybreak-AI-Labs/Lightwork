@@ -28,6 +28,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .constant_time import text_equals
 from .file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -543,7 +544,7 @@ class DROPManagementStore:
         if type(expected) is not DROPRecordAuthority:
             raise DROPManagementConflict("DROP record authority is unavailable")
         expected = expected.normalized()
-        if not hmac.compare_digest(expected.tenant_id, self.tenant_id):
+        if not text_equals(expected.tenant_id, self.tenant_id):
             raise DROPManagementNotFound("DROP request was not found")
         if expected.valid_until <= now:
             raise DROPManagementConflict("DROP record authority expired")
@@ -580,7 +581,7 @@ class DROPManagementStore:
         tenant_id: str,
         principal_ref: str,
     ) -> DROPPrincipalBinding:
-        if not hmac.compare_digest(_tenant(tenant_id), self.tenant_id):
+        if not text_equals(_tenant(tenant_id), self.tenant_id):
             raise DROPManagementNotFound("DROP request was not found")
         principal = _ref(principal_ref, "principal_ref")
         try:
@@ -1178,7 +1179,7 @@ class DROPManagementStore:
     ) -> tuple[DROPRecordAuthority, DROPDSARReceipt | None, DROPStatusEvidence | None]:
         authority = self._authority(payload)
         if (
-            not hmac.compare_digest(authority.tenant_id, self.tenant_id)
+            not text_equals(authority.tenant_id, self.tenant_id)
             or payload.get("request_type") != authority.request_type
             or payload.get("drop_id") != authority.drop_id
         ):

@@ -226,22 +226,22 @@ def test_flow_autonomy_toggle_enables_the_loop(tmp_path, monkeypatch):
     from maverick.config import reset_config_cache
     _isolate(tmp_path, monkeypatch)
     reset_config_cache()
-    # auto_apply alone does nothing (needs auto_evolve for the revert safety net)
-    snap = client.post("/api/v1/learning/flow-autonomy", json={"auto_apply": True}).json()
-    assert snap["flow_autonomy"]["auto_apply"] is False
     from maverick_dashboard import settings_store
-    assert settings_store.load_overlay()["flows"]["auto_apply"] is False
-    # turning auto_evolve on, then auto_apply, sticks
-    client.post("/api/v1/learning/flow-autonomy", json={"auto_evolve": True})
-    snap = client.post("/api/v1/learning/flow-autonomy", json={"auto_apply": True}).json()
-    assert snap["flow_autonomy"] == {"engine_on": True, "auto_evolve": True, "auto_apply": True}
-    # Disabling the safety-net clears auto_apply, so re-enabling auto_evolve
-    # later cannot silently arm forward rewrites without a fresh opt-in.
+    # Automatic forward apply is retired: suggestions always need review.
+    refused = client.post("/api/v1/learning/flow-autonomy", json={"auto_apply": True})
+    assert refused.status_code == 422
+    assert "always need a person's review" in refused.json()["detail"]
+    assert "flows" not in settings_store.load_overlay()
+    # turning auto_evolve on sticks; auto_apply stays off and true is still refused
+    snap = client.post("/api/v1/learning/flow-autonomy", json={"auto_evolve": True}).json()
+    assert snap["flow_autonomy"] == {"engine_on": True, "auto_evolve": True, "auto_apply": False}
+    assert client.post("/api/v1/learning/flow-autonomy",
+                       json={"auto_evolve": True, "auto_apply": True}).status_code == 422
+    snap = client.post("/api/v1/learning/flow-autonomy", json={"auto_apply": False}).json()
+    assert snap["flow_autonomy"] == {"engine_on": True, "auto_evolve": True, "auto_apply": False}
     snap = client.post("/api/v1/learning/flow-autonomy", json={"auto_evolve": False}).json()
     assert snap["flow_autonomy"]["auto_apply"] is False
-    client.post("/api/v1/learning/flow-autonomy", json={"auto_evolve": True})
-    snap = client.get("/api/v1/learning").json()
-    assert snap["flow_autonomy"] == {"engine_on": True, "auto_evolve": True, "auto_apply": False}
+    assert settings_store.load_overlay()["flows"]["auto_apply"] is False
 
 
 def test_flow_autonomy_requires_global_admin(tmp_path, monkeypatch):

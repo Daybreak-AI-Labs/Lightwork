@@ -45,18 +45,24 @@ def public_review(record: dict) -> dict:
 
 
 def current_review() -> dict | None:
-    path = recovery._store() / "native-review.json"
-    if not path.exists():
+    try:
+        path = recovery._store() / "native-review.json"
+        if not path.exists():
+            return None
+        record = recovery._read(path)
+        if record.get("kind") != "native-release-review" or record.get("expires_at", 0) <= time.time():
+            return None
+        return public_review(record)
+    except (OSError, ValueError, KeyError, TypeError, recovery.MaintenanceError):
+        # An unreadable or foreign review is no review. The Install & updates
+        # panel must still list and retire recovery points, and authorizing an
+        # upgrade fails closed ("expired or changed").
         return None
-    record = recovery._read(path)
-    if record.get("kind") != "native-release-review" or record.get("expires_at", 0) <= time.time():
-        return None
-    return public_review(record)
 
 
 def reviewed_release(identifier: str) -> dict:
     record = current_review()
-    if record is None or not secrets.compare_digest(str(record["id"]), identifier):
+    if record is None or not secrets.compare_digest(str(record["id"]).encode(), str(identifier).encode()):
         raise recovery.MaintenanceError("The exact native release review expired or changed. Check for updates again and review the new target.")
     return _release(record["release"])
 

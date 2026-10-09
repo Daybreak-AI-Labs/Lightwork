@@ -1572,6 +1572,7 @@ def test_bound_template_form_still_accepts(monkeypatch, tmp_path):
 def test_public_form_rate_limit_is_per_ip_not_url_token(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _register_form("signup")
+    _register_form("signup-two", name="accept-signup-two")
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "1")
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN", "100")
     from maverick_dashboard import app as dashboard_app
@@ -1581,10 +1582,27 @@ def test_public_form_rate_limit_is_per_ip_not_url_token(monkeypatch, tmp_path):
     first = _client("192.0.2.1")
     second = _client("192.0.2.2")
     assert first.post("/form/signup", json={"name": "first"}).status_code == 201
-    assert first.post("/form/forged-1", json={"name": "second"}).status_code == 429
-    assert first.post("/form/forged-2", json={"name": "third"}).status_code == 429
+    # A second real form does not buy a fresh window; an unknown token is
+    # refused before it reaches the limiter at all.
+    assert first.post("/form/signup-two", json={"name": "second"}).status_code == 429
+    assert first.post("/form/forged-1", json={"name": "third"}).status_code == 404
     assert second.post("/form/signup", json={"name": "another"}).status_code == 201
     assert set(dashboard_app._goal_times) == {"ip:192.0.2.1", "ip:192.0.2.2"}
+
+
+def test_unknown_form_tokens_never_spend_the_goal_ceiling_real_starts_share(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("signup")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "100")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN", "5")
+    from maverick_dashboard import app as dashboard_app
+
+    for index in range(6):
+        stranger = _client(f"198.51.100.{index + 1}")
+        assert stranger.post(f"/form/guess-{index}", json={"name": "x"}).status_code == 404
+    assert not dashboard_app._goal_times_global
+    dashboard_app.check_goal_rate_limit(None, source="task-start")  # a real start is still admitted
+    assert _client("192.0.2.9").post("/form/signup", json={"name": "real"}).status_code == 201
 
 
 @pytest.mark.parametrize("method", ["get", "post"])

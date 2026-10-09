@@ -35,6 +35,7 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from .constant_time import text_equals
 from .governed_records import GovernedRecordStore
 from .knowledge_access import KnowledgeActorAuthority, KnowledgeDocument
 from .paths import canonical_tenant_id, tenant_scope
@@ -618,7 +619,7 @@ class ExistingKnowledgeContentProjector:
         match = _WORK_REF.fullmatch(admission.source_ref)
         if match:
             owner = _decode_owner(match[1])
-            if not hmac.compare_digest(authority.principal, owner):
+            if not text_equals(authority.principal, owner):
                 raise KnowledgeProjectionUnavailable(
                     "work-discovery source belongs to another actor"
                 )

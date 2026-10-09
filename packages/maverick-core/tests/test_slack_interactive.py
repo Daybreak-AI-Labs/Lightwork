@@ -63,6 +63,28 @@ def test_signature_rejects_tampering_wrong_secret_and_replay():
     assert not verify_slack_signature(SECRET, timestamp=None, signature=None, body=body, now=now)
 
 
+def test_signature_rejects_a_non_ascii_signature_header():
+    from maverick.slack_interactive import verify_slack_signature
+
+    # Starlette decodes headers as latin-1, so the header can carry accents.
+    body = b"payload=%7B%7D"
+    now = 1_700_000_000
+    stamp, _sig = _sign(body, now)
+    forged = "v0=" + "é" * 64
+    assert verify_slack_signature(SECRET, timestamp=stamp, signature=forged, body=body, now=now) is False
+
+
+def test_signature_rejects_a_non_finite_timestamp_even_when_it_is_signed():
+    from maverick.slack_interactive import verify_slack_signature
+
+    body = b"payload=%7B%7D"
+    for stamp in ("nan", "NaN", "inf", "-inf"):
+        sig = "v0=" + hmac.new(SECRET.encode(), f"v0:{stamp}:".encode() + body, hashlib.sha256).hexdigest()
+        # A NaN age compares false against every tolerance, so the freshness check
+        # must reject it explicitly (as webhooks.verify_signature does).
+        assert not verify_slack_signature(SECRET, timestamp=stamp, signature=sig, body=body, now=1_700_000_000)
+
+
 def test_form_and_payload_parsing():
     from maverick.slack_interactive import parse_form, parse_interaction_body, parse_slash_text
 
@@ -408,6 +430,31 @@ def test_post_message_open_dm_and_respond_use_the_guarded_client(monkeypatch):
     monkeypatch.setattr(_ssrf, "safe_client", lambda url, **kw: (_ for _ in ()).throw(OSError("down")))
     assert send_dm("xoxb-fake", "U1", "hi") is False
     assert respond("", {}) is False
+
+
+class _NoReply(_Client):
+    def post(self, url, json=None, headers=None):
+        _Client.calls.append((url, json, headers))
+        raise TimeoutError("read timed out after the request was written")
+
+
+def test_a_message_that_may_have_reached_slack_is_reported_unconfirmed(monkeypatch):
+    from maverick.notifications import send_checked
+    from maverick.slack_interactive import send_dm
+    from maverick.tools import _ssrf
+
+    opened = {"ok": True, "channel": {"id": "D1"}}
+    clients = iter([_Client(_Response(body=opened)), _NoReply(None),
+                    _Client(_Response(body=opened)), _Client(_Response(status=502)),
+                    _Client(_Response(body=opened)), _Client(_Response(body={"ok": False, "error": "not_authed"})),
+                    _NoReply(None)])
+    monkeypatch.setattr(_ssrf, "safe_client", lambda url, **kw: next(clients))
+    # No answer, or a server error, after posting: it may be in the DM.
+    assert send_checked(lambda: send_dm("xoxb-fake", "U1", "hi")) == (False, True)
+    assert send_checked(lambda: send_dm("xoxb-fake", "U1", "hi")) == (False, True)
+    # Slack refusing the post, or the DM never opening, means nothing went out.
+    assert send_checked(lambda: send_dm("xoxb-fake", "U1", "hi")) == (False, False)
+    assert send_checked(lambda: send_dm("xoxb-fake", "U1", "hi")) == (False, False)
 
 
 def test_approval_card_in_the_shared_channel_says_why_it_is_there(tmp_path):

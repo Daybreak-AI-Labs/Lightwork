@@ -10,6 +10,7 @@ import pytest
 from maverick.consent_identity_federation import (
     ConsentIdentityFederationConflict,
     ConsentIdentityFederationDenied,
+    ConsentIdentityFederationIntegrityError,
     ConsentIdentityFederationStore,
     ConsentIdentitySettings,
     ConsentPairingContext,
@@ -244,6 +245,38 @@ def test_verified_oidc_contract_fails_closed(material, mutation):
             oidc_verifier=verifier_for(mutation=mutation),
             subject_digest_key=b"k" * 32,
         )
+
+
+def test_non_ascii_nonce_claim_and_stored_digest_are_refused_not_type_errors(material):
+    # The nonce claim comes from the presented IdP token and stored digests can
+    # be edited; non-ASCII text in either used to raise TypeError from
+    # hmac.compare_digest instead of the denial or integrity refusal.
+    _clock, _preferences, pairing, base = material
+    verifier = "n" * 64
+    challenge = pairing.begin_pairing(
+        base[digest("client:target")],
+        code_challenge=pkce(verifier),
+        ttl_seconds=300,
+    )
+    honest = verifier_for()
+
+    def non_ascii_nonce(token, expected):
+        return replace(honest(token, expected), nonce="é" * len(expected.nonce))
+
+    with pytest.raises(ConsentIdentityFederationDenied):
+        pairing.authorize_pairing(
+            challenge.pairing_code,
+            oidc_nonce=challenge.oidc_nonce,
+            oidc_token="signed-token",
+            source=base[digest("client:source")],
+            settings=settings(),
+            oidc_verifier=non_ascii_nonce,
+            subject_digest_key=b"k" * 32,
+        )
+    with sqlite3.connect(pairing.path) as connection:
+        connection.execute("UPDATE consent_identity_pairings SET record_sha256=?", ("é" * 64,))
+    with pytest.raises(ConsentIdentityFederationIntegrityError):
+        pairing.verify_integrity()
 
 
 def test_drift_cross_tenant_expiry_and_revocation_fail_closed(material):

@@ -358,6 +358,9 @@
             card.appendChild(remove); added.appendChild(card);
           });
         }
+        // The cards above were built while busy; disable them until the load
+        // finishes, or a click in between is silently dropped.
+        lock(true);
         var saved = await call('/api/v1/skills/learned-requests');
         if (started !== generation) return null;
         if (saved.context !== context) { changed(); return null; }

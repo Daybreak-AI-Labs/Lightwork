@@ -84,7 +84,8 @@ class Handler(BaseHTTPRequestHandler):
         if not CALLER_TOKEN:
             return self._send(503, b'{"error":"relay token is not configured"}')
         auth = self.headers.get("Authorization", "")
-        if not hmac.compare_digest(auth, f"Bearer {CALLER_TOKEN}"):
+        if not hmac.compare_digest(auth.encode("utf-8", "surrogatepass"),
+                                   f"Bearer {CALLER_TOKEN}".encode("utf-8", "surrogatepass")):
             return self._send(401, b'{"error":"unauthorized"}')
         try:
             length = int(self.headers.get("Content-Length") or 0)

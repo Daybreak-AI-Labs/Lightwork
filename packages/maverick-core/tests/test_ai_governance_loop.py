@@ -878,6 +878,28 @@ def test_history_and_projection_tampering_is_detected(
         projection.verify_integrity(ASSET)
 
 
+def test_non_ascii_stored_digests_are_refused_not_type_errors(
+    store: loop.AIGovernanceLoopStore,
+    clock: Clock,
+) -> None:
+    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # of the store's idempotency conflict and integrity refusals.
+    reader = Reader(snapshot(clock))
+    original = trigger(clock)
+    store.enqueue(original, idempotency_key="non-ascii-enqueue")
+    coordinator(store, reader).run_once(worker_id="worker")
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("UPDATE agl_operations SET request_sha256=?", ("é" * 64,))
+        connection.execute(
+            "UPDATE agl_history SET previous_sha256=? WHERE tenant_id=? AND asset_id=?",
+            ("é" * 64, TENANT, ASSET),
+        )
+    with pytest.raises(loop.AIGovernanceLoopConflict, match="idempotency"):
+        store.enqueue(original, idempotency_key="non-ascii-enqueue")
+    with pytest.raises(loop.AIGovernanceLoopIntegrityError, match="predecessor"):
+        store.verify_integrity(ASSET)
+
+
 def test_raw_data_credentials_principals_and_idempotency_keys_do_not_persist(
     store: loop.AIGovernanceLoopStore,
     clock: Clock,

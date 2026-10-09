@@ -485,6 +485,16 @@ def test_api_refuses_changed_context_or_disabled_feature(monkeypatch):
     assert client.get("/api/v1/action-center").status_code == 403
 
 
+def test_api_refuses_a_non_ascii_context_header_like_any_other_wrong_one(monkeypatch):
+    client, value = _client_model(monkeypatch)
+    item = value["items"][0]
+    body = {"expected_revision":0, "operation_id":"operation-00000001", "source_version":item["source_version"], "read":True}
+    # Header text arrives decoded as latin-1, so this is a non-ASCII str.
+    odd = {"X-Lightwork-Action-Context": b"caf\xe9"}
+    assert client.get("/api/v1/action-center", headers=odd).status_code == 409
+    assert client.put(f"/api/v1/action-center/{item['id']}/preference", json=body, headers=odd).status_code == 409
+
+
 def test_api_and_page_permission_floor_and_private_caching(monkeypatch):
     from maverick_dashboard import auth
     client, _ = _client_model(monkeypatch)

@@ -10,7 +10,9 @@ import hashlib
 import json
 import os
 import secrets
+import signal
 import socket
+import sys
 import tempfile
 import time
 from dataclasses import replace
@@ -123,7 +125,7 @@ def fake_connection_authorization(module):
                 "expires_in":3600, "token_type":"Bearer"}
 
     module._post_token = local_connection_token
-    module._provider_identity = lambda provider, token: {
+    module._provider_identity = lambda provider, token, **_identity_inputs: {
         "provider": provider, "subject": "browser-fixture-account",
         "display_name": "Browser Fixture Account", "email": "browser@example.test",
         "email_verified": True, "hosted_domain": "example.test",
@@ -335,6 +337,12 @@ def build_app(directory):
     return dashboard.app
 
 
+# Longer than any idle gap between a spec's API calls. With uvicorn's 5-second
+# default, the server could close a pooled keep-alive connection just as
+# Playwright's request context reused it, failing the call with ECONNRESET.
+KEEP_ALIVE_SECONDS = 75
+
+
 def block_outbound():
     original = socket.socket.connect
 
@@ -346,9 +354,23 @@ def block_outbound():
     socket.socket.connect = local_connect
 
 
+def exit_cleanly_on_sigterm():
+    """Turn SIGTERM into an ordinary exit so the temporary home is removed.
+
+    Playwright stops a fixture server with SIGTERM. uvicorn then shuts down and
+    raises the signal again under the previous handler; with the default one the
+    process ends there, before any TemporaryDirectory can delete its folder.
+    """
+    def stop(signum, frame):
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+
+
 def main():
     import uvicorn
 
+    exit_cleanly_on_sigterm()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8769)
     parser.add_argument(
@@ -364,7 +386,7 @@ def main():
         app = build_app(directory)
         if args.show_vendor_setup:
             app.state.vendor_onboarding_demo = False
-        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning", timeout_keep_alive=KEEP_ALIVE_SECONDS)
 
 
 if __name__ == "__main__":

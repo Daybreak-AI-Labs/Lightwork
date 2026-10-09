@@ -7,10 +7,13 @@ touch the real workspace, and the world DB is isolated per the usual pattern.
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+# The reviewed draft flow is shared with other Agent Factory tests.
+from test_support.agent_drafts import apply_draft as _apply_draft
+from test_support.agent_drafts import client
+from test_support.agent_drafts import publish as _publish
+from test_support.agent_drafts import publish_review as _publish_review
+from test_support.agent_drafts import review_draft as _review_draft
 
 
 def _clean_builtin_name() -> str:
@@ -19,46 +22,6 @@ def _clean_builtin_name() -> str:
         if not lint_profile(prof)[0]:
             return name
     raise AssertionError("no lint-error-clean built-in pack found")
-
-
-DRAFTS = "/api/v1/specialist-drafts"
-PUBLISH_REASON = "Reviewed specialist change approved for this test"
-
-
-def _review_draft(name, action, *, app=None, **fields):
-    """Review one Agent Factory decision on a specialist's complete draft."""
-    app = app or client
-    context = app.get(DRAFTS + "/history").json()["context"]
-    return app.post(DRAFTS + "/review", json={"name": name, "action": action, "context": context, **fields})
-
-
-def _apply_draft(review, *, app=None):
-    app = app or client
-    return app.post(DRAFTS + "/apply", json={"token": review.json()["token"], "confirmed": True})
-
-
-def _publish_review(name, entered, *, reason=PUBLISH_REASON, app=None):
-    """Save the complete draft, then prepare (not apply) its Publish review.
-
-    Direct live saves are retired: a definition changes only by publishing a
-    retained complete draft. Returns the first refusal, or the publish review."""
-    saved = _review_draft(name, "save", app=app, entered=entered)
-    if saved.status_code != 200:
-        return saved
-    applied = _apply_draft(saved, app=app)
-    if applied.status_code != 200 or not applied.json().get("confirmed"):
-        return applied
-    # The retained draft is the saved original itself (a brand-new agent has no
-    # active definition yet, so its original does not echo a draft link).
-    return _review_draft(name, "publish", app=app, selected="SPD-" + applied.json()["operation"], reason=reason)
-
-
-def _publish(name, entered, *, reason=PUBLISH_REASON, app=None):
-    """Save and publish a complete draft through Agent Factory's reviewed flow."""
-    review = _publish_review(name, entered, reason=reason, app=app)
-    if review.status_code != 200 or "token" not in review.json():
-        return review
-    return _apply_draft(review, app=app)
 
 
 @pytest.fixture(autouse=True)

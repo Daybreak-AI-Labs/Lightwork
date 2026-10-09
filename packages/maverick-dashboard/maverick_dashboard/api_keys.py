@@ -322,7 +322,7 @@ def _validate_key(key_id: object, rec: object) -> dict:
     if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha):
         raise ApiKeyStoreError(f"API key store corrupt: invalid digest for {key_id!r}")
     scopes = rec.get("scopes")
-    if not isinstance(scopes, list) or any(s not in SCOPES for s in scopes):
+    if not isinstance(scopes, list) or any(not isinstance(s, str) or s not in SCOPES for s in scopes):
         raise ApiKeyStoreError(f"API key store corrupt: invalid scopes for {key_id!r}")
     clean = {
         "id": key_id,
@@ -483,8 +483,8 @@ def _issuance_records(rows):
     fields = {"operation", "actor", "context", "binding", "action", "state", "key_id", "recorded_at"}
     for operation, row in rows.items():
         if (not isinstance(operation, str) or not re.fullmatch(r"[a-f0-9]{32}", operation) or not isinstance(row, dict)
-                or set(row) != fields or row["operation"] != operation or row["action"] not in {"create", "rotate", "revoke"}
-                or row["state"] not in {"started", "written", "confirmed"} or (row["state"] != "started" and not row["key_id"])
+                or set(row) != fields or row["operation"] != operation or row["action"] not in ("create", "rotate", "revoke")
+                or row["state"] not in ("started", "written", "confirmed") or (row["state"] != "started" and not row["key_id"])
                 or (row["state"] == "started" and row["key_id"])):
             raise ApiKeyStoreError("Access-key request history contains an invalid record")
         for key, pattern in (("context", r"[a-f0-9]{64}"), ("binding", r"[a-f0-9]{64}"), ("key_id", r"(?:[a-f0-9]{16})?")):
@@ -807,15 +807,17 @@ def create_service_account(slug, role, *, description="", actor: str) -> Service
             "created_at": now, "disabled_at": None,
         }
         _write(data)
+        # Recorded before the role exists: a refused row rolls back the one store,
+        # and no role is left on the roster for an account that was never created.
+        _audit_with_rollback(
+            _kind("SERVICE_ACCOUNT_CHANGED"), lambda: _write(prior), action="created",
+            account=text, role=role, actor=actor or "",
+        )
         try:
             rbac.set_role(principal, role, actor=actor)
         except Exception:
             _write(prior)
             raise
-        _audit_with_rollback(
-            _kind("SERVICE_ACCOUNT_CHANGED"), lambda: _write(prior), action="created",
-            account=text, role=role, actor=actor or "",
-        )
     return ServiceAccount(slug=text, description=desc, created_by=actor or "", created_at=now)
 
 
@@ -825,6 +827,7 @@ def disable_service_account(slug: str, *, actor: str) -> ServiceAccount:
     from . import rbac
 
     text = str(slug or "").strip().lower()
+    principal = service_account_principal(text)
     now = time.time()
     with _locked(store_path()):
         data = _load()
@@ -834,7 +837,6 @@ def disable_service_account(slug: str, *, actor: str) -> ServiceAccount:
         if rec["disabled_at"] is None:
             prior = json.loads(json.dumps(data))
             rec["disabled_at"] = now
-            principal = service_account_principal(text)
             for key in data["keys"].values():
                 if key["owner"] == principal and key["revoked_at"] is None:
                     key["revoked_at"] = now
@@ -843,7 +845,9 @@ def disable_service_account(slug: str, *, actor: str) -> ServiceAccount:
                 _kind("SERVICE_ACCOUNT_CHANGED"), lambda: _write(prior), action="disabled",
                 account=text, actor=actor or "",
             )
-            rbac.remove_user(principal, actor=actor)
+        # Outside the first-disable branch so a retry finishes a removal that failed
+        # after the account was already marked disabled (removing twice is harmless).
+        rbac.remove_user(principal, actor=actor)
     return get_service_account(text)  # type: ignore[return-value]
 
 

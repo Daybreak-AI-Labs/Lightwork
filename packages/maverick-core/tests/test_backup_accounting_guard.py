@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -148,3 +149,41 @@ def test_guard_authenticates_snapshot_before_trusting_accounting(recovery):
     with pytest.raises(backup.BackupError):
         backup.assert_accounting_unchanged(archive)
     assert (root / "provider_spend.json").read_text() == "current spend"
+
+
+def test_compiled_template_cache_never_blocks_recovery_but_goal_templates_do(recovery):
+    # A page first rendered after the snapshot writes a new compiled-template
+    # cache file; that must not block rollback, and restore must leave it alone.
+    root, archive = recovery
+    cache = file_lock.ensure_private_directory(root / "cache" / "templates")
+    file_lock.atomic_write_text(cache / "__jinja2_before.cache", "compiled before")
+    backup.create_backup(archive)
+    with tarfile.open(archive, "r:gz") as tar:
+        assert not any("cache/templates" in name for name in tar.getnames())
+    file_lock.atomic_write_text(cache / "__jinja2_after.cache", "compiled after")
+    file_lock.atomic_write_text(cache / "__jinja2_before.cache", "recompiled")
+    backup.assert_accounting_unchanged(archive)
+    goal_templates = file_lock.ensure_private_directory(root / "templates")
+    file_lock.atomic_write_text(goal_templates / "goal.json", "new goal template")
+    with pytest.raises(backup.BackupError, match="reconciliation"):
+        backup.assert_accounting_unchanged(archive)
+
+
+def test_session_registry_is_never_rewound_or_compared(recovery):
+    # Signed-in page views update last_seen; a restore must neither block on
+    # that nor bring back an older copy that would revive revoked sessions.
+    root, archive = recovery
+    sessions = root / "dashboard-sessions.sqlite3"
+    _database(sessions, "issued")
+    backup.create_backup(archive)
+    with tarfile.open(archive, "r:gz") as tar:
+        assert not any("dashboard-sessions" in name for name in tar.getnames())
+    _database(sessions, "revoked after the snapshot")
+    _database(root / "dashboard-sessions.sqlite3-journal", "transient")
+    backup.assert_accounting_unchanged(archive)
+    assert not any("dashboard-sessions" in name for name in backup._replacement_targets(root, {}))
+    # Only the top-level registry is exempt; another SQLite store still blocks.
+    tenant = file_lock.ensure_private_directory(root / "tenants" / "a")
+    _database(tenant / "dashboard-sessions.sqlite3", "x")
+    with pytest.raises(backup.BackupError, match="reconciliation"):
+        backup.assert_accounting_unchanged(archive)

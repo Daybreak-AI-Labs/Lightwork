@@ -90,3 +90,26 @@ def test_support_settings_hide_anything_that_is_not_a_secure_address_or_email(mo
         assert config.get_support() == {"status_page_url": "", "contact_email": ""}
     finally:
         config.reset_config_cache()
+
+
+def test_a_route_scoped_breaker_reads_as_its_provider_not_its_raw_key():
+    # llm._dispatch_client names a native client's breaker ``llm:<provider>:route:<sha256>``;
+    # the banner must name the provider, and that paused provider must not read as healthy.
+    route = "06fb22ec" * 8
+    status = service_status.current(breakers=[_row(f"anthropic:route:{route}", "open")],
+                                    in_use={"anthropic", "openai"})
+    assert status["level"] == "reduced"
+    assert status["affected"] == "Anthropic"
+    assert status["healthy"] == ["OpenAI"]
+    assert route not in status["title"] and "Route" not in status["title"]
+    assert status["checks"] == [{"provider": "Anthropic", "at": 1030.0}]
+
+
+def test_several_route_breakers_of_one_provider_are_one_paused_provider():
+    rows = [_row("openai:route:" + "a" * 64, "open", opened_at=1000.0),
+            _row("openai:route:" + "b" * 64, "half_open", opened_at=2000.0),
+            _row("openai", "closed")]
+    status = service_status.current(breakers=rows, in_use={"openai", "anthropic"})
+    assert status["affected"] == "OpenAI"
+    assert status["healthy"] == ["Anthropic"]
+    assert len(status["checks"]) == 1

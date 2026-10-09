@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 
 def enabled(app) -> bool:
@@ -66,6 +66,19 @@ class RecoveryOnlyMiddleware:
                        or (path.startswith("/static/") and scope.get("method") in {"GET", "HEAD"}))
             if scope["type"] == "websocket":
                 await send({"type": "websocket.close", "code": 1008})
+                return
+            if path == "/healthz":
+                # The desktop's readiness handshake needs the fixed identity;
+                # answer it without the deep checks, which open the workspace.
+                response = JSONResponse({"status": "recovery", "detail": "Local recovery mode is active."}, status_code=503,
+                                        headers={"Cache-Control": "no-store", "X-Lightwork-Service": "dashboard-v1"})
+                await response(scope, receive, send)
+                return
+            if path == "/" and scope.get("method") in {"GET", "HEAD"}:
+                # The desktop opens "/" once that identity answers (Reconnect,
+                # Open in browser); in recovery mode its home is recovery.
+                response = RedirectResponse("/workspace/recovery", status_code=303, headers={"Cache-Control": "no-store"})
+                await response(scope, receive, send)
                 return
             if not allowed:
                 response = JSONResponse({"detail": "Local recovery mode is active. Return to normal work from the desktop app after recovery."}, status_code=503,

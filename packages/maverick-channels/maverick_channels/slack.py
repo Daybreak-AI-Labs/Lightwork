@@ -70,6 +70,7 @@ class SlackChannel(Channel):
         thread_replies: bool | None = None,
         world=None,
         approvals_channel: str | None = None,
+        authorize=None,
     ):
         super().__init__(handler)
         if not _HAVE_SLACK:
@@ -109,6 +110,30 @@ class SlackChannel(Channel):
         # [channels.slack] approvals_channel: where new approval cards are posted.
         self.approvals_channel = (approvals_channel
                                   or os.environ.get("SLACK_APPROVALS_CHANNEL", "")).strip()
+        # ``authorize(principal, approval_id)``: the permission check a vote needs
+        # (see ``_vote_authority``); None means the dashboard's own rule.
+        self._authorize = authorize
+
+    def _vote_authority(self):
+        """The permission check for an approval vote, as the HTTP receivers apply it.
+
+        The injected one, else the dashboard's ``operate`` role rule (the linked
+        person must hold it, like a dashboard voter). With neither the kernel has
+        no roster to ask, so every decision is refused rather than let through.
+        """
+        if self._authorize is not None:
+            return self._authorize
+        try:
+            from maverick_dashboard.approval_decisions import _authority_for
+        except Exception:  # noqa: BLE001 -- the kernel runs without the dashboard
+            from maverick.channel_approvals import ChannelApprovalRefused
+
+            def refuse(principal, approval_id):
+                raise ChannelApprovalRefused(
+                    "not_permitted",
+                    "Approvals can't be decided from Slack here. Use the Lightwork dashboard.")
+            return refuse
+        return _authority_for("slack")
 
     def _authorized(self, msg, account):
         from maverick.oidc import oidc_enabled
@@ -242,7 +267,7 @@ class SlackChannel(Channel):
 
         outcome = await asyncio.to_thread(
             handle_view_submission, payload, world=self._approval_world(),
-            principal_for=self._principal_for,
+            principal_for=self._principal_for, authorize=self._vote_authority(),
         )
         await self._ack(client, req, (outcome or {}).get("ack"))
         if outcome and outcome.get("message"):
@@ -275,6 +300,7 @@ class SlackChannel(Channel):
         result = await asyncio.to_thread(
             handle_block_action, payload, world=self._approval_world(),
             principal_for=self._principal_for, open_view=open_view,
+            authorize=self._vote_authority(),
         )
         if result is not None:
             await asyncio.to_thread(respond, str(payload.get("response_url") or ""), result)
@@ -321,6 +347,7 @@ class SlackChannel(Channel):
             result = await asyncio.to_thread(
                 handle_slash_command, form, world=self._approval_world(),
                 principal_for=self._principal_for, ask=None,
+                authorize=self._vote_authority(),
             )
         await asyncio.to_thread(respond, str(form.get("response_url") or ""), result)
         return result

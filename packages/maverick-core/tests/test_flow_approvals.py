@@ -48,6 +48,14 @@ def test_tampered_token_is_rejected():
     assert approvals.verify_token(bad) is None
 
 
+def test_non_ascii_signature_is_rejected_not_raised():
+    tok = approvals.mint_token("run-1", "approved", cursor="a", prompt="ok?", updated=123.0)
+    body, _, sig = tok.partition(".")
+    # The link's query string is attacker-controlled: a non-ASCII signature is
+    # an invalid link, not a TypeError from the comparison.
+    assert approvals.verify_token(body + "." + "é" * len(sig)) is None
+
+
 def test_swapped_body_is_rejected():
     # a body from a different run won't match the signature of this one
     other = approvals.mint_token("run-OTHER", "approved", cursor="a", prompt="ok?", updated=123.0).partition(".")[0]

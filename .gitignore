@@ -50,6 +50,8 @@ coverage.xml
 /packages/maverick-dashboard/tests/browser/.app*/
 /.browser-runtime*/
 /.browser-results*/
+# Single-journey browser configs write .browser-<journey>-results here.
+/.browser-*-results/
 **/.browser-runtime*/
 **/.browser-results*/
 /liblightwork_*_probe.rmeta

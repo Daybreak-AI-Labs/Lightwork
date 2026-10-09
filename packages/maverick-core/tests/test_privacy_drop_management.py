@@ -24,14 +24,16 @@ def _digest(value: str) -> str:
 
 
 class Harness:
-    def __init__(self, tmp_path, *, request_type: str = "DataDeletion") -> None:
+    def __init__(
+        self, tmp_path, *, request_type: str = "DataDeletion", tenant: str = "tenant-a",
+    ) -> None:
         self.now = 1_800_000_000.0
         self.submit_calls = 0
         self.fail_after_submit = False
         self.receipt_created_offset = 0.0
         self.principal_aliases: dict[str, str] = {}
         self.authority = DROPRecordAuthority(
-            tenant_id="tenant-a",
+            tenant_id=tenant,
             drop_id=12345,
             broker_registration_sha256=_digest("broker-registration"),
             subject_binding_sha256=_digest("subject-binding"),
@@ -99,7 +101,7 @@ class Harness:
         self.principal_binding_resolver = principal_binding_resolver
         self.store = DROPManagementStore(
             tmp_path / "drop.sqlite3",
-            tenant_id="tenant-a",
+            tenant_id=tenant,
             authority_resolver=authority_resolver,
             dsar_submitter=submitter,
             status_evidence_resolver=lambda *args: self.evidence_resolver(*args),
@@ -432,6 +434,24 @@ def test_missing_audit_or_trigger_fails_integrity_and_blocks_purge(tmp_path) -> 
         h.store.purge_expired()
     with sqlite3.connect(h.store.path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM drop_requests").fetchone()[0] == 1
+
+
+def test_non_ascii_tenant_ids_are_compared_not_crashed(tmp_path) -> None:
+    # Tenant ids may be any NFC text. A workspace named with an accent works,
+    # and an accented id from another workspace is the normal not-found.
+    accented = Harness(tmp_path / "accented", tenant="atelier-café")
+    created = accented.store.create_request(
+        accented.authority, expected_revision=0, idempotency_key="create",
+    )
+    assert created.status == "PENDING"
+    assert accented.store.verify_integrity() is True
+
+    h = Harness(tmp_path / "plain")
+    foreign = DROPRecordAuthority(
+        **{**asdict(h.authority), "tenant_id": "tenant-é", "authority_sha256": ""}
+    )
+    with pytest.raises(DROPManagementNotFound):
+        h.store.create_request(foreign, expected_revision=0, idempotency_key="foreign")
 
 
 def test_product_boundaries_do_not_claim_external_acceptance(tmp_path) -> None:

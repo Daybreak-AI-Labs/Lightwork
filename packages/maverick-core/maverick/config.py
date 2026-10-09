@@ -1321,7 +1321,10 @@ def get_auth_mfa() -> dict:
         "step_up_minutes", DEFAULT_STEP_UP_MINUTES)
     try:
         minutes = int(float(str(minutes_raw)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: ``inf`` / ``1e999``
+        # An unusable window is invalid like any other: the documented default
+        # applies. Raising here would read as "policy unreadable" downstream and
+        # reject every named sign-in as missing a second factor.
         minutes = DEFAULT_STEP_UP_MINUTES
     if isinstance(minutes_raw, bool) or minutes < 1:
         minutes = DEFAULT_STEP_UP_MINUTES
@@ -1343,16 +1346,28 @@ def get_ip_allowlist() -> dict:
     workspace is chosen, so a workspace's own config.toml can narrow it for
     its members. An empty list allows every address. Unparsable entries are
     kept here as text; the dashboard's checker rejects them, never skips them.
+    A value of the wrong type raises ``ValueError``: the dashboard treats an
+    unreadable allowlist as allowing only the computer Lightwork runs on.
     """
-    cfg = (load_config().get("auth") or {}).get("ip_allowlist") or {}
-    if not isinstance(cfg, dict):
+    cfg = (load_config().get("auth") or {}).get("ip_allowlist")
+    if cfg is None:
         cfg = {}
+    if not isinstance(cfg, dict):
+        raise ValueError("auth.ip_allowlist must be a table with cidrs and workspace_cidrs")
+
+    def entries(key: str) -> list[str]:
+        # An empty list allows every address, so a value of the wrong type is an
+        # unreadable policy (callers fail closed), never an empty one.
+        value = cfg.get(key)
+        if value is not None and not isinstance(value, (str, list, tuple)):
+            raise ValueError(f"auth.ip_allowlist.{key} must be a list of addresses or ranges")
+        return _str_list(value, ())
+
     env = os.environ.get("MAVERICK_IP_ALLOWLIST")
-    cidrs = _str_list(env, ()) if env is not None and env.strip() else _str_list(
-        cfg.get("cidrs"), ())
+    cidrs = _str_list(env, ()) if env is not None and env.strip() else entries("cidrs")
     return {
         "cidrs": cidrs,
-        "workspace_cidrs": _str_list(cfg.get("workspace_cidrs"), ()),
+        "workspace_cidrs": entries("workspace_cidrs"),
     }
 
 

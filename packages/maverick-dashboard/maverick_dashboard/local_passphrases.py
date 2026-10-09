@@ -11,22 +11,27 @@ wrong passphrases the account waits one minute before the next try. The hash
 runs outside the store lock, and each client address may make ten sign-in
 attempts a minute (refused before any hashing). Only the
 hash is stored, in ``~/.maverick/dashboard-passphrases.json`` (0600). There is
-no reset by email: an administrator sends a new invitation, and accepting it
-replaces the passphrase. Any unreadable or malformed store fails closed.
+no reset by email, and an invitation never replaces an existing passphrase:
+otherwise anyone who can invite could set a colleague's passphrase and sign in
+as them. Only the installation owner, or a configured installation
+administrator, can reset a forgotten one (:mod:`passphrase_resets`). Any
+unreadable or malformed store fails closed.
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import math
 import secrets
 import threading
 import time
+from collections import OrderedDict
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request
 from maverick import file_lock
-from maverick.paths import maverick_home
+from maverick.paths import MAX_TENANT_SEGMENT_LENGTH, maverick_home
 
 from . import local_owner
 
@@ -38,13 +43,29 @@ _MAX_BYTES = 4 * 1024 * 1024
 _DUMMY_SALT = secrets.token_hex(16)
 
 NOT_ACCEPTED = (
-    "The email or passphrase was not accepted. If you joined with an invitation and have "
-    "no passphrase yet, or have forgotten it, ask your administrator for a new invite."
+    "The email or passphrase was not accepted. If you have not set a passphrase yet, ask your "
+    "administrator for an invitation. If you already have access here but no passphrase, ask the "
+    "installation owner for a link to choose one. An invitation cannot replace a passphrase you "
+    "already have; if you have forgotten it, ask the installation owner to reset it."
 )
 LOCKED = "Wait one minute before trying to sign in again."
 UNAVAILABLE = "Sign-in is unavailable right now. Ask your administrator to check Lightwork."
 NO_ACCESS = ("This account no longer has access to this workspace. "
-             "Ask your administrator for a new invite.")
+             "Ask your administrator to give your account access again.")
+# Refusal shown when an invitation names someone who can already sign in here.
+ACCOUNT_EXISTS = (
+    "This email already has a sign-in on this installation, so it cannot be invited: accepting "
+    "would replace that person's passphrase. If they have forgotten it, or have none yet, the "
+    "installation owner or an installation administrator can send them a link to choose one on "
+    "the Users page. To change their access, change their role there."
+)
+# The same refusal for everyone who may not see the installation's people: it
+# must read identically whatever made the invitation impossible, so it cannot
+# be used to find out who has an account, or which workspace holds them.
+NOT_INVITABLE = (
+    "This invitation could not be created for that email address. Check the address. If you "
+    "expected it to work, ask the installation owner or an installation administrator."
+)
 TOO_MANY = "Too many sign-in attempts. Wait a minute and try again."
 ATTEMPTS_PER_MINUTE = 10  # per client address, owner and colleagues alike
 
@@ -100,7 +121,7 @@ def _valid_row(email: object, row: object) -> bool:
             and type(row["failures"]) is int and 0 <= row["failures"] <= 5
             and isinstance(row["locked_until"], (int, float)) and math.isfinite(row["locked_until"])
             and isinstance(row["updated_at"], (int, float)) and math.isfinite(row["updated_at"])
-            and isinstance(row["tenant"], str) and len(row["tenant"]) <= 128
+            and isinstance(row["tenant"], str) and len(row["tenant"]) <= MAX_TENANT_SEGMENT_LENGTH
             and row["tenant"] == row["tenant"].strip())
 
 
@@ -137,20 +158,58 @@ def prepare(email: str, password: str) -> dict:
     return {"email": email, "salt": salt, "password_hash": local_owner._password(password, salt)}
 
 
+def has_account(email: str) -> bool:
+    """Whether ``email`` already has a passphrase here (unreadable store: 503)."""
+    file_lock.ensure_private_directory(maverick_home())
+    with _LOCK, file_lock.cross_process_lock(path(), strict=True):
+        return _normal(email) in _read()
+
+
+def emails() -> list[str]:
+    """Everyone who signs in here with a passphrase, sorted (unreadable store: 503)."""
+    file_lock.ensure_private_directory(maverick_home())
+    with _LOCK, file_lock.cross_process_lock(path(), strict=True):
+        return sorted(_read())
+
+
+def revoke(email: str, *, before_commit) -> dict | None:
+    """Remove one colleague's passphrase so it no longer signs in (a reset).
+
+    ``before_commit(row)`` runs under the store lock with the row about to be
+    removed (``None`` when there is none); if it raises, nothing is removed.
+    Returns the removed row."""
+    file_lock.ensure_private_directory(maverick_home())
+    with _LOCK, file_lock.cross_process_lock(path(), strict=True):
+        accounts = _read()
+        row = accounts.pop(_normal(email), None)
+        before_commit(None if row is None else dict(row))
+        if row is not None:
+            _write(accounts)
+        return row
+
+
 def store(prepared: dict, *, tenant: str = "") -> None:
-    """Save or replace one colleague's passphrase hash (and a clean lockout).
+    """Save one new colleague's passphrase hash (and a clean lockout).
 
     Called while the invitation is being consumed, so a link is never used up
-    without the passphrase that lets its colleague return."""
+    without the passphrase that lets its colleague return. An existing
+    passphrase is never replaced (409), even if it appeared after the
+    invitation was checked."""
     file_lock.ensure_private_directory(maverick_home())
     with _LOCK, file_lock.cross_process_lock(path(), strict=True):
         accounts = _read()
         email = prepared["email"]
-        if email not in accounts and len(accounts) >= _MAX_ACCOUNTS:
+        if email in accounts:
+            raise HTTPException(409, ACCOUNT_EXISTS)
+        if len(accounts) >= _MAX_ACCOUNTS:
             raise HTTPException(409, "This workspace has reached its limit of passphrase accounts.")
-        accounts[email] = {"salt": prepared["salt"], "password_hash": prepared["password_hash"],
-                           "failures": 0, "locked_until": 0, "tenant": (tenant or "").strip(),
-                           "updated_at": time.time()}
+        row = {"salt": prepared["salt"], "password_hash": prepared["password_hash"],
+               "failures": 0, "locked_until": 0, "tenant": (tenant or "").strip(),
+               "updated_at": time.time()}
+        if not _valid_row(email, row):
+            # One row the store cannot read back would refuse every sign-in.
+            raise HTTPException(422, "This workspace name cannot be used with passphrase sign-in.")
+        accounts[email] = row
         _write(accounts)
 
 
@@ -189,6 +248,7 @@ def login(request: Request, *, email: str, password: str) -> str:
             _write(accounts)
             salt, expected, tenant = row["salt"], row["password_hash"], row["tenant"]
     if row is None:
+        _count_unknown_attempt(email)  # an unknown email locks after five tries too
         local_owner._password(password, _DUMMY_SALT)  # same cost, outside the lock
         raise HTTPException(401, NOT_ACCEPTED)
     if not hmac.compare_digest(local_owner._password(password, salt), expected):
@@ -197,15 +257,18 @@ def login(request: Request, *, email: str, password: str) -> str:
         accounts = _read()
         current = accounts.get(email)
         if current is None or current["salt"] != salt or current["password_hash"] != expected:
-            raise HTTPException(401, NOT_ACCEPTED)  # replaced by a new invitation meanwhile
+            raise HTTPException(401, NOT_ACCEPTED)  # changed while the hash ran
         current.update(failures=0, locked_until=0)
         _write(accounts)
     principal = "user:" + email
-    from . import rbac
+    from . import auth, rbac
 
     # The default role for a signed-in person with no assignment is not
-    # "nothing", so a removed colleague must not get a session at all.
-    if rbac.get_stored_role(principal) is None and not (tenant and rbac.get_tenant_role(tenant, principal)):
+    # "nothing", so a removed colleague must not get a session at all. A
+    # configured administrator is always an administrator, whatever the role
+    # list says, so a lost list cannot lock them out of starting a new one.
+    if (not auth.is_dashboard_admin(principal) and rbac.get_stored_role(principal) is None
+            and not (tenant and rbac.get_tenant_role(tenant, principal))):
         raise HTTPException(403, NO_ACCESS)
     from maverick.oidc import VerifiedPrincipal
 
@@ -217,6 +280,25 @@ def login(request: Request, *, email: str, password: str) -> str:
 
 
 _ATTEMPTS = None
+_UNKNOWN: OrderedDict[str, tuple[int, float]] = OrderedDict()
+_UNKNOWN_LIMIT = 20_000
+
+
+def _count_unknown_attempt(email: str) -> None:
+    """Count a failed sign-in for an email with no account exactly as one for a
+    real account is counted, so five wrong tries and the one-minute wait look
+    the same for both. Only a hash is kept, and only the newest few thousand."""
+    key = hashlib.sha256(email.encode("utf-8")).hexdigest()
+    now = time.time()
+    with _LOCK:
+        failures, locked_until = _UNKNOWN.pop(key, (0, 0.0))
+        if locked_until > now:
+            _UNKNOWN[key] = (failures, locked_until)
+            raise HTTPException(429, LOCKED)
+        failures = min(5, failures + 1)
+        _UNKNOWN[key] = (failures, now + 60 if failures == 5 else 0.0)
+        while len(_UNKNOWN) > _UNKNOWN_LIMIT:
+            _UNKNOWN.popitem(last=False)
 
 
 def limit_attempts(request: Request) -> None:
@@ -240,9 +322,11 @@ def limit_attempts(request: Request) -> None:
 
 def reset_attempt_limit() -> None:
     """Tests only."""
+    _UNKNOWN.clear()
     if _ATTEMPTS is not None:
         _ATTEMPTS.reset()
 
 
-__all__ = ["NOT_ACCEPTED", "TOO_MANY", "available", "limit_attempts", "login", "owner_of", "prepare",
-           "require_same_origin", "reset_attempt_limit", "store"]
+__all__ = ["ACCOUNT_EXISTS", "NOT_ACCEPTED", "NOT_INVITABLE", "TOO_MANY", "available", "emails", "has_account",
+           "limit_attempts", "login", "owner_of", "prepare", "require_same_origin", "reset_attempt_limit",
+           "revoke", "store"]

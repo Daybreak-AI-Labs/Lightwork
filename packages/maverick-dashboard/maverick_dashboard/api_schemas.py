@@ -428,9 +428,10 @@ class DgmToggleIn(BaseModel):
 
 
 class FlowAutonomyIn(BaseModel):
-    """Toggle the autonomous flow self-improvement loop ([flows] auto_evolve /
-    auto_apply). Its own opt-in, distinct from the blanket learning button. Only
-    the fields provided are changed; ``auto_apply`` needs ``auto_evolve`` on."""
+    """Toggle the autonomous flow self-improvement loop ([flows] auto_evolve).
+    Its own opt-in, distinct from the blanket learning button. Only the fields
+    provided are changed. ``auto_apply`` is retired: only false is accepted,
+    because workflow suggestions always need review."""
     auto_evolve: bool | None = None
     auto_apply: bool | None = None
 

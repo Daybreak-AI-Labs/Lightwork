@@ -11,7 +11,6 @@ never offered. Nothing here grants access: a pin is only a link.
 """
 from __future__ import annotations
 
-import hmac
 from typing import Literal
 from urllib.parse import parse_qsl, urlencode
 
@@ -160,7 +159,7 @@ def _check_context(request: Request, supplied: str) -> bool:
     from .draft_api import context_for
 
     try:
-        return hmac.compare_digest(supplied, context_for(request))
+        return auth.constant_time_equals(supplied, context_for(request))
     except HTTPException:
         return False
 
@@ -196,6 +195,7 @@ def change_pin(request: Request, body: PinChange) -> JSONResponse:
 
     app = _app()
     app._require_same_origin(request)
+    auth.require_personal_write(request)
     principal = _principal(request)
     if not _check_context(request, body.context):
         raise HTTPException(409, "The account or workspace changed. Reload the page before changing pins.")
@@ -235,6 +235,7 @@ def remember_page(request: Request, body: PageVisit) -> JSONResponse:
     """
     app = _app()
     app._require_same_origin(request)
+    auth.require_personal_write(request)
     nothing = JSONResponse({"recorded": False}, headers=_PRIVATE)
     principal = auth.caller_principal(request)
     if not principal or not preferences.enabled() or not _check_context(request, body.context):
@@ -574,19 +575,23 @@ def arrange_areas(
 
     app = _app()
     app._require_same_origin(request)
+    auth.require_personal_write(request)
     principal = _principal(request)
     if not _check_context(request, context):
         raise HTTPException(409, "The account or workspace changed. Reload the page before arranging areas.")
-    nav = app._nav_context(request).get("nav_areas")
-    if not nav:
-        raise HTTPException(409, "Areas navigation is not turned on for your account.")
-    offered = [item["title"] for item in nav["sidebar"]]
-    if op != "reset" and area not in {*offered, *(item["title"] for item in nav["hidden"])}:
-        raise HTTPException(403, "Only areas you can open can be arranged.")
-    if op == "hide" and offered == [area]:
-        raise HTTPException(422, "Keep at least one area in the sidebar.")
     for attempt in (1, 2):
         state = preferences.state(principal)
+        # Build the layout from what is saved now (the shell caches the preferences it
+        # read first), so a change made in another window is kept, not overwritten.
+        request.state.experience_preferences = state
+        nav = app._nav_context(request).get("nav_areas")
+        if not nav:
+            raise HTTPException(409, "Areas navigation is not turned on for your account.")
+        offered = [item["title"] for item in nav["sidebar"]]
+        if op != "reset" and area not in {*offered, *(item["title"] for item in nav["hidden"])}:
+            raise HTTPException(403, "Only areas you can open can be arranged.")
+        if op == "hide" and offered == [area]:
+            raise HTTPException(422, "Keep at least one area in the sidebar.")
         try:
             preferences.save(principal, scope="personal",
                              changes={"navigation_areas": _arranged(offered, op, area)},

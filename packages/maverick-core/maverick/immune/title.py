@@ -22,9 +22,9 @@ offline against a public key.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import secrets
 
+from ..constant_time import text_equals
 from . import _ledger
 
 SCHEMA = "lightwork.discovery-title.v1"
@@ -41,7 +41,7 @@ def commit(content: str) -> dict[str, str]:
 
 def opens(commitment: str, salt: str, content: str) -> bool:
     digest = hashlib.sha256(bytes.fromhex(salt) + content.encode()).hexdigest()
-    return hmac.compare_digest(digest, commitment)
+    return text_equals(digest, commitment)
 
 
 def conception_map(dossier: dict) -> dict[str, list[str]]:

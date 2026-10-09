@@ -432,6 +432,12 @@ def test_key_creation_needs_same_account_context_and_explicit_true(monkeypatch):
     assert client.post(path, json={"confirm": True}, headers=headers).status_code == 409
 
 
+def test_non_ascii_recovery_context_header_is_refused_as_changed_not_a_server_error():
+    client = api_client()
+    headers = {**context(client), "X-Lightwork-Recovery-Context": "contéxt".encode()}
+    assert client.post("/api/v1/recovery/key", json={"confirm": True}, headers=headers).status_code == 409
+
+
 def test_installation_retirement_requires_global_authority_context_and_explicit_review(monkeypatch):
     client = api_client()
     headers = context(client)
@@ -594,3 +600,68 @@ def test_checkpoint_lookup_requires_context_and_rechecks_current_permission(monk
     monkeypatch.setattr(recovery_api, "require_global_permission", revoked)
     result = client.post(endpoint, headers=headers, json=body)
     assert result.status_code == 403
+
+
+def handoff_request(monkeypatch, publish):
+    from maverick import installation_handoff
+    client = api_client()
+    headers = context(client)
+    monkeypatch.setattr(recovery_api, "isolated", lambda app: True)
+    grant = {"id": "a" * 32, "authorization": "a" * 32 + ":" + "b" * 64}
+    monkeypatch.setattr(recovery_api.installation_recovery, "authorize", lambda **kwargs: dict(grant))
+    monkeypatch.setattr(installation_handoff, "publish", publish)
+    discarded = []
+    monkeypatch.setattr(recovery_api.installation_recovery, "discard_authorization",
+                        lambda token, *, actor: discarded.append((token, actor)))
+    body = {"confirm": True, "confirm_all_workspaces": True, "review_id": "c" * 32, "native_handoff": True}
+    response = client.post("/api/v1/recovery/installation/authorize", headers=headers, json=body)
+    return response, discarded, grant
+
+
+def test_a_published_handoff_keeps_its_grant_for_the_native_application(monkeypatch):
+    response, discarded, grant = handoff_request(monkeypatch, lambda token, *, actor_label: {"id": grant_id(token)})
+    assert response.status_code == 200
+    assert response.json()["native_handoff"] is True
+    assert discarded == []
+
+
+def test_a_handoff_that_cannot_be_published_retires_the_grant_the_browser_never_received(monkeypatch):
+    def refused(token, *, actor_label):
+        raise recovery_api.installation_recovery.MaintenanceError("The native handoff could not be saved.")
+    response, discarded, grant = handoff_request(monkeypatch, refused)
+    assert response.status_code == 409
+    assert grant["authorization"] not in response.text
+    assert [token for token, _ in discarded] == [grant["authorization"]]
+    assert discarded[0][1]                                  # retired under the administrator's own name
+
+
+def grant_id(token):
+    return token.split(":", 1)[0]
+
+
+def test_recovery_mode_still_identifies_itself_to_the_desktop_readiness_check(monkeypatch):
+    # The desktop's recovery page waits for /healthz to answer 200 or 503 with
+    # exactly one dashboard identity; the blanket 503 carried none, so entering
+    # recovery from the desktop app always ended in "did not respond".
+    async def no_deep_checks(**_kwargs):
+        raise AssertionError("Recovery mode must not open the workspace for a health probe")
+
+    monkeypatch.setattr("maverick_dashboard.app._health_response", no_deep_checks)
+    recovery_mode.configure(app, host="127.0.0.1")
+    with api_client() as client:
+        response = client.get("/healthz")
+        assert response.status_code == 503
+        assert response.headers.get_list("X-Lightwork-Service") == ["dashboard-v1"]
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json()["status"] == "recovery"
+        assert client.get("/readyz").status_code == 503
+        assert "x-lightwork-service" not in client.get("/get-started").headers
+        # The splash (Reconnect Lightwork) and Open in browser go to "/" once
+        # the identity answers; in recovery mode that is the recovery page.
+        for method in (client.get, client.head):
+            home = method("/", follow_redirects=False)
+            assert home.status_code == 303
+            assert home.headers["location"] == "/workspace/recovery"
+            assert home.headers["cache-control"] == "no-store"
+        assert client.post("/", follow_redirects=False).status_code == 503
+        assert client.get("/", follow_redirects=True).url.path == "/workspace/recovery"

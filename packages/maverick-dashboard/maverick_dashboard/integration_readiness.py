@@ -130,25 +130,29 @@ def _load_persisted() -> dict[str, dict[str, Any]]:
 def _persist(name: str, receipt: dict[str, Any]) -> None:
     """Write one provider receipt (fingerprint hash + outcome only) to disk."""
     try:
-        from maverick.file_lock import atomic_write_text
+        from maverick.file_lock import atomic_write_text, cross_process_lock
 
         from .provider_readiness import plain_reason
 
-        rows = _load_persisted()
-        rows[name] = {
-            "status": receipt["status"],
-            "verified": receipt["verified"],
-            "detail": receipt["detail"],
-            "reason": plain_reason(receipt["detail"]) if receipt["verified"] is False else "",
-            "tested_at": receipt["tested_at"],
-            "evidence": receipt.get("evidence") or {},
-            "fingerprint": receipt["fingerprint"],
-        }
-        atomic_write_text(
-            _receipts_path(),
-            json.dumps({"schema": 1, "providers": rows}, sort_keys=True, indent=1),
-            mode=0o600,
-        )
+        # Another dashboard worker may save a receipt for a different provider
+        # at the same moment; hold the file lock across read and write so
+        # neither erases the other's.
+        with cross_process_lock(_receipts_path()):
+            rows = _load_persisted()
+            rows[name] = {
+                "status": receipt["status"],
+                "verified": receipt["verified"],
+                "detail": receipt["detail"],
+                "reason": plain_reason(receipt["detail"]) if receipt["verified"] is False else "",
+                "tested_at": receipt["tested_at"],
+                "evidence": receipt.get("evidence") or {},
+                "fingerprint": receipt["fingerprint"],
+            }
+            atomic_write_text(
+                _receipts_path(),
+                json.dumps({"schema": 1, "providers": rows}, sort_keys=True, indent=1),
+                mode=0o600,
+            )
     except Exception:  # noqa: BLE001 -- a receipt that cannot be saved is still valid in-process
         return
 
@@ -335,6 +339,7 @@ def _probe_native_cloud(name: str) -> dict[str, Any]:
     """
     from maverick.budget import Budget, BudgetExceeded, UnpricedModelError, _lookup_price_quote
     from maverick.llm import LLM, _enforce_provider_cap, model_for_role
+    from maverick.provider_cost_cap import ProviderCapExceeded
     from maverick.providers import get_provider_client
 
     client = None
@@ -399,6 +404,14 @@ def _probe_native_cloud(name: str) -> dict[str, Any]:
         return {
             "verified": None,
             "detail": "the connection check exceeded its small spending or token limit",
+            "evidence": {"kind": "budget_limit", "external_live_verified": False},
+        }
+    except ProviderCapExceeded:
+        # The cap is checked here, before anything is sent: the provider was
+        # never contacted, so this is not a failed test.
+        return {
+            "verified": None,
+            "detail": "this provider has reached its spending ceiling for the period, so its connection was not checked",
             "evidence": {"kind": "budget_limit", "external_live_verified": False},
         }
     except Exception as exc:
@@ -873,7 +886,9 @@ def _email_configuration_problem(channel_config: dict[str, Any]) -> str:
     problem = configuration_problem(channel_config)
     if problem:
         return problem
-    if not valid_trusted_mail_server(channel_config.get("trusted_authserv_id")):
+    # Same fallback as the email channel: an unsaved setting uses the variable.
+    if not valid_trusted_mail_server(channel_config.get("trusted_authserv_id")
+                                     or os.environ.get("EMAIL_TRUSTED_AUTHSERV_ID")):
         return ("Set the server that checks incoming mail on the Channels page. "
                 "Until then, email cannot start work.")
     senders = normalize_allowlist(channel_config.get("allowed_user_ids"),

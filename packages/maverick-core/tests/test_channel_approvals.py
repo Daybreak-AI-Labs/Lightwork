@@ -440,3 +440,50 @@ def test_user_preferences_defaults_validation_and_send_marker():
     assert prefs.get_preferences("user:alice")["last_digest_date"] == "2026-09-30"
     assert prefs.principals_with_preferences() == ["user:alice"]
     assert "UTC" in prefs.time_zone_choices()
+
+
+# ---------------------------------------------------------- review round
+
+def test_an_action_label_with_a_non_ascii_character_can_still_be_approved(tmp_path, recorded):
+    from maverick.channel_approvals import decide_from_channel
+
+    world = _world(tmp_path)
+    card = _card(action="envoyer.résumé")
+    aid = _park(world, card=card, action="envoyer.résumé")
+    result = decide_from_channel(world, aid, "approved", principal="user:a", channel="slack",
+                                 binding=card["binding_sha256"])
+    assert result["status"] == "approved"
+
+
+def test_an_undo_the_audit_log_refuses_is_a_refusal_not_a_server_error(tmp_path, recorded, monkeypatch):
+    import maverick.audit as audit
+    from maverick.channel_approvals import (
+        ChannelApprovalRefused,
+        decide_from_channel,
+        undo_decision,
+    )
+
+    world = _world(tmp_path)
+    aid = _park(world, detail="x")
+    decide_from_channel(world, aid, "denied", principal="user:a", channel="slack")
+
+    def refused(*args, **kwargs):
+        raise audit.AuditRefused("policy requires off-host signing")
+
+    monkeypatch.setattr(audit, "audit_event", refused)
+    with pytest.raises(ChannelApprovalRefused) as exc:
+        undo_decision(world, aid, undone_by="user:a", channel="slack")
+    assert exc.value.reason == "audit_failed"
+    assert world.get_approval(aid).status == "pending"                 # the undo itself is not hidden
+
+
+def test_an_unreadable_approval_state_never_claims_the_request_settled(tmp_path, recorded, monkeypatch):
+    from maverick.channel_approvals import decide_from_channel
+
+    world = _world(tmp_path)
+    card = _card()
+    aid = _park(world, card=card)
+    monkeypatch.setattr(world, "approval_state", lambda approval_id: (_ for _ in ()).throw(OSError("busy")))
+    result = decide_from_channel(world, aid, "approved", principal="user:a", channel="slack",
+                                 binding=card["binding_sha256"])
+    assert result["status"] == "pending" and result["effective"] is False and result["undo_seconds"] == 0.0

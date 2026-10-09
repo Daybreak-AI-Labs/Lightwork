@@ -520,9 +520,11 @@ def listing(request, flow_id=""):
     with _writer(request):
         for summary in rows:
             budget.check()
-            candidate = _flow(request, summary["id"])
-            outputs = [{"value": node.output, "label": (node.label or "Taught step") + " answer"} for node in candidate.nodes.values() if node.output]
             try:
+                # One owned flow that cannot be loaded or checked is left out of
+                # the reference list; it must not take the whole picker with it.
+                candidate = _flow(request, summary["id"])
+                outputs = [{"value": node.output, "label": (node.label or "Taught step") + " answer"} for node in candidate.nodes.values() if node.output]
                 if outputs:
                     _reference(request, candidate.id, outputs[0]["value"])
                     references.append({"value": candidate.id, "label": candidate.name, "outputs": outputs})

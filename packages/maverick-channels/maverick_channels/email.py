@@ -26,6 +26,7 @@ import email
 import email.utils
 import imaplib
 import logging
+import os
 import re
 import smtplib
 import ssl
@@ -179,6 +180,9 @@ class EmailChannel(Channel):
         }
         if not self.allowed_user_ids:
             raise ValueError("Set EMAIL_ALLOWED_USER_IDS to restrict access")
+        # EMAIL_TRUSTED_AUTHSERV_ID named the server before the saved setting
+        # existed; an operator who set it has identified the server explicitly.
+        trusted_authserv_id = trusted_authserv_id or os.environ.get("EMAIL_TRUSTED_AUTHSERV_ID", "")
         if not valid_trusted_mail_server(trusted_authserv_id):
             raise ValueError("Set the incoming mail server identity before email can start work")
         self.trusted_authserv_id = trusted_authserv_id.strip()

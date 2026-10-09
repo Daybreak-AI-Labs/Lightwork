@@ -37,14 +37,27 @@ def _digest(value):
 
 
 def candidates():
-    from . import admin_pages, auth, rbac, scim_groups
+    """Everyone a departure can name: the people the Users page lists (role
+    holders, accepted invitations into the installation or a workspace,
+    administrators, people who signed in) plus anyone who already has a case.
+
+    ``departed`` marks a person who has a case and is no longer active; they
+    stay known so their case can be reviewed and closed, but are not offered
+    for a new departure."""
+    from . import admin_pages, auth, invites, rbac, scim_groups
     from .identity_format import humanize_principal
-    principals = set(rbac.list_users()) | set(admin_pages._signed_in_principals())
-    principals.update(row["principal"] for row in STORE.list() if isinstance(row.get("principal"), str))
-    return [{"principal": principal, "label": humanize_principal(principal).name,
-             "active": scim_groups.active_for_principal(principal) is not False,
-             "admin": "admin" in rbac.permissions_for(auth.global_role_for_principal(principal))}
-            for principal in sorted(principals) if principal.startswith("user:")]
+    people, _labels = admin_pages.known_people(rbac.list_users(), invites.list_invites())
+    labels = {person["principal"]: person["label"] for person in people}
+    cased = {row["principal"] for row in STORE.list() if isinstance(row.get("principal"), str)}
+    result = []
+    for principal in sorted(set(labels) | cased):
+        if not principal.startswith("user:"):
+            continue
+        active = scim_groups.active_for_principal(principal) is not False
+        result.append({"principal": principal, "label": labels.get(principal) or humanize_principal(principal).name,
+                       "active": active, "departed": principal in cased and not active,
+                       "admin": "admin" in rbac.permissions_for(auth.global_role_for_principal(principal))})
+    return result
 
 
 def _item_key(item):

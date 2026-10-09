@@ -795,6 +795,45 @@ def test_current_plan_must_match_latest_immutable_history(authority) -> None:
         store.verify_integrity("tenant-a")
 
 
+def test_non_ascii_stored_digests_are_integrity_errors_not_type_errors(authority) -> None:
+    # An edited export signature or row digest used to raise TypeError from
+    # hmac.compare_digest instead of the store's integrity refusal.
+    store, actor, clock, _scope, _calls, _applier = authority
+    approved = approve_plan(store, actor, clock)
+    store.export_plan(
+        "tenant-a",
+        approved.plan_id,
+        "export-a",
+        signing_key_ref="vault:scope-action-signing-v1",
+        retained_until=clock() + 5_000,
+        idempotency_key="export",
+    )
+    with sqlite3.connect(store.path) as connection:
+        row = connection.execute(
+            "SELECT payload_json FROM scope_action_exports WHERE tenant_id=? AND export_id=?",
+            ("tenant-a", "export-a"),
+        ).fetchone()
+        payload = json.loads(row[0])
+        payload["signature_hmac_sha256"] = "é" * 64
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+        )
+        connection.execute("DROP TRIGGER scope_action_export_no_update")
+        connection.execute(
+            "UPDATE scope_action_exports SET payload_json=?,integrity_sha256=? "
+            "WHERE tenant_id=? AND export_id=?",
+            (encoded, hashlib.sha256(encoded.encode("ascii")).hexdigest(), "tenant-a", "export-a"),
+        )
+        connection.execute(
+            "UPDATE scope_action_plans SET integrity_sha256=? WHERE tenant_id=? AND plan_id=?",
+            ("é" * 64, "tenant-a", approved.plan_id),
+        )
+    with pytest.raises(actions.ComplianceScopeActionIntegrityError, match="signature"):
+        store.get_export("tenant-a", "export-a")
+    with pytest.raises(actions.ComplianceScopeActionIntegrityError, match="integrity check"):
+        store.get_plan("tenant-a", approved.plan_id)
+
+
 def test_scoping_store_adapter_pins_scope_and_assessment() -> None:
     scope = SimpleNamespace(
         tenant_id="tenant-a",

@@ -101,3 +101,25 @@ def test_unreadable_store_fails_closed(tmp_path):
 ])
 def test_user_agent_summary(ua, expected):
     assert sr.user_agent_summary(ua) == expected
+
+
+def test_a_bearer_key_cannot_end_sessions_and_a_late_audit_refusal_is_reported_honestly(monkeypatch):
+    from fastapi import HTTPException
+    from maverick.audit import AuditRefused
+    from maverick_dashboard import auth, sessions_page
+
+    monkeypatch.setattr(auth, "api_key_permissions", lambda request: {"view"})
+    for call in (lambda: sessions_page._revoke_one(object(), "a" * 32),
+                 lambda: sessions_page._revoke_everywhere(object(), None)):
+        with pytest.raises(HTTPException) as refused:
+            call()
+        assert refused.value.status_code == 403 and "API key" in refused.value.detail
+
+    def refuse(*args, **kwargs):
+        raise AuditRefused("custody unavailable")
+
+    monkeypatch.setattr("maverick.audit.audit_event", refuse)
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:admin")
+    with pytest.raises(HTTPException) as late:
+        sessions_page._audit_revoke(object(), target="user:x", sid="", count=1, everywhere=True)
+    assert late.value.status_code == 503 and "were signed out" in late.value.detail

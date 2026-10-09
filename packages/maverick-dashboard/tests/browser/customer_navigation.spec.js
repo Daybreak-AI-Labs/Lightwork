@@ -51,6 +51,14 @@ for (const zoom of [1, 2]) test(`five customer destinations support keyboard nav
   await page.addInitScript(value => {
     document.addEventListener('DOMContentLoaded', () => {document.documentElement.style.zoom = String(value);});
   }, zoom);
+  // The finder's settings search (60 ms debounce) asks again as a name is
+  // typed, and a busy server can answer an earlier partial name last. Count
+  // them so Enter waits for every answer.
+  let settingsInFlight = 0;
+  const settingsSearch = request => new URL(request.url()).pathname === '/api/v1/settings/search';
+  page.on('request', request => { if (settingsSearch(request)) settingsInFlight += 1; });
+  for (const settled of ['requestfinished', 'requestfailed'])
+    page.on(settled, request => { if (settingsSearch(request)) settingsInFlight -= 1; });
   await page.goto('/start');
   // Knowledge is the governed knowledge-access page; the legacy Cortex console
   // is an advanced tool that no longer appears in customer navigation.
@@ -63,8 +71,11 @@ for (const zoom of [1, 2]) test(`five customer destinations support keyboard nav
     // the answer re-renders the results, so wait for it before selecting: the
     // selection stays put and Enter never aborts an in-flight request.
     const recordsSearched = page.waitForResponse(response => response.url().endsWith('/api/v1/records/search'), {timeout: 10000});
+    const settingsSearched = page.waitForResponse(response => response.url().endsWith(`/api/v1/settings/search?q=${encodeURIComponent(label)}`), {timeout: 10000});
     await page.keyboard.type(label);
     await recordsSearched;
+    await settingsSearched;
+    await expect.poll(() => settingsInFlight).toBe(0);
     const choice = page.locator(`#navfinder-results a[href="${path}"]`);
     await expect(choice).toBeVisible();
     // Select the existing registry option with the keyboard, including when

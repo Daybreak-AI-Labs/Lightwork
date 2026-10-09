@@ -211,10 +211,10 @@ class RcsChannel(Channel):
 
             payload = await self._small_handshake_payload(request)
             if "secret" in payload and "clientToken" in payload:
-                if not hmac.compare_digest(
-                    str(payload.get("clientToken") or "").encode("utf-8"),
-                    (self.webhook_token or "").encode("utf-8"),
-                ):
+                from maverick.constant_time import text_equals
+
+                # JSON can carry a lone surrogate, which strict UTF-8 cannot encode.
+                if not text_equals(str(payload.get("clientToken") or ""), self.webhook_token or ""):
                     raise HTTPException(status_code=403, detail="client token invalid")
                 return {"secret": payload["secret"]}
 

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from . import consent_storage
+from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -376,7 +377,7 @@ class ConsentCustomIndexStore:
             raise ConsentCustomIndexIntegrityError(
                 f"persisted {label} is not canonical JSON"
             ) from exc
-        if not isinstance(payload, dict) or not hmac.compare_digest(
+        if not isinstance(payload, dict) or not text_equals(
             _sha256(payload), str(row["integrity_sha256"])
         ):
             raise ConsentCustomIndexIntegrityError(
@@ -467,7 +468,7 @@ class ConsentCustomIndexStore:
             }
             if _sha256(body) != row["integrity_sha256"]:
                 raise ConsentCustomIndexIntegrityError("custom-index operation is corrupt")
-            if not hmac.compare_digest(request_sha, str(row["request_sha256"])):
+            if not text_equals(request_sha, str(row["request_sha256"])):
                 raise ConsentCustomIndexConflict(
                     "idempotency key was reused with a different request"
                 )

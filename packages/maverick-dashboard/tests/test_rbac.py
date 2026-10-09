@@ -598,3 +598,250 @@ def test_shared_halt_allows_admin(monkeypatch, tmp_path):
     assert r.status_code == 204
     assert fake_world.armed is False
     assert not (tmp_path / "HALT").exists()
+
+
+# ---------- a missing roster after roles were assigned ----------
+
+def test_fresh_install_without_a_roster_keeps_the_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import auth, rbac
+
+    assert not rbac.store_path().exists()
+    assert rbac.list_users() == {}
+    assert rbac.missing_rosters() == []
+    assert auth.role_for_principal("user:new") == "operator"
+
+
+def test_deleted_roster_after_assignment_denies_instead_of_promoting(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:boss")
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:demoted", "viewer")
+    rbac.store_path().unlink()
+
+    with pytest.raises(rbac.RosterMissingError):
+        rbac.list_users()
+    assert auth.role_for_principal("user:demoted") is None       # not the operator default
+    assert auth.role_for_principal("user:someone-else") is None
+    assert rbac.permissions_for(auth.role_for_principal("user:demoted")) == frozenset()
+    with pytest.raises(rbac.RbacStoreError):
+        rbac.set_role("user:new", "admin")
+    assert not rbac.store_path().exists()                       # never silently recreated
+    assert auth.role_for_principal("user:boss") == "admin"      # bootstrap admin keeps access
+    assert rbac.missing_rosters() == ["global"]
+
+
+def test_roster_from_before_the_marker_is_recorded_on_first_read(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import auth, rbac
+
+    path = rbac.store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"user:demoted": "viewer"}', encoding="utf-8")
+    path.chmod(0o600)
+    assert auth.role_for_principal("user:demoted") == "viewer"
+    path.unlink()
+    assert auth.role_for_principal("user:demoted") is None
+
+
+def test_corrupt_roster_with_marker_still_denies(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:demoted", "viewer")
+    rbac.store_path().write_text("{not json", encoding="utf-8")
+    assert auth.role_for_principal("user:demoted") is None
+    with pytest.raises(rbac.RbacStoreError):
+        rbac.reset_missing_rosters(actor="user:boss") or rbac.list_users()
+    assert rbac.store_path().read_text(encoding="utf-8") == "{not json"   # reset never replaces it
+
+
+def test_deleted_workspace_roster_denies_instead_of_falling_back(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import auth, rbac
+
+    monkeypatch.setattr("maverick.paths.current_tenant_id", lambda: "acme")
+    rbac.set_tenant_role("acme", "user:demoted", "viewer")
+    assert auth.role_for_principal("user:demoted") == "viewer"
+    rbac.tenant_store_path().unlink()
+    assert auth.role_for_principal("user:demoted") is None       # not the global default
+    with pytest.raises(rbac.RosterMissingError):
+        rbac.list_tenant_roles("acme")
+
+
+def test_bootstrap_admin_recovers_a_missing_roster(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:boss")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:demoted", "viewer")
+    rbac.store_path().unlink()
+
+    # Ordinary role changes are a plain refusal, not a 500 or a recreated roster.
+    _as(monkeypatch, "user:boss")
+    refused = c.post("/users/set", data={"principal": "user:x", "role": "viewer"},
+                     headers={"Accept": "application/json"})
+    assert refused.status_code == 503
+    assert refused.json()["code"] == "access_roles_unavailable"
+    assert not rbac.store_path().exists()
+
+    # Others cannot see or start the recovery.
+    _as(monkeypatch, "user:demoted")
+    assert c.get("/users").status_code == 403
+    assert c.post("/users/roster/reset", data={"confirm": "reset"}).status_code == 403
+
+    _as(monkeypatch, "user:boss")
+    page = c.get("/users")
+    assert page.status_code == 503
+    assert 'action="/users/roster/reset"' in page.text
+    assert c.post("/users/roster/reset", data={}).status_code == 422
+    assert not rbac.store_path().exists()
+    done = c.post("/users/roster/reset", data={"confirm": "reset"}, follow_redirects=False)
+    assert done.status_code == 303
+    assert rbac.list_users() == {}
+    assert c.post("/users/roster/reset", data={"confirm": "reset"}).status_code == 409
+    assert c.post("/users/set", data={"principal": "user:demoted", "role": "viewer"}).status_code == 200
+    assert auth.role_for_principal("user:demoted") == "viewer"
+
+
+def _break_writes_of(monkeypatch, name):
+    """Make every write of ``name`` fail, as a full disk or a Windows sharing
+    violation would. ``fault["armed"] = False`` clears the fault."""
+    import errno
+    from pathlib import Path
+
+    from maverick import file_lock
+
+    real = file_lock.atomic_write_text
+    fault = {"armed": True, "failed": 0}
+
+    def flaky(path, *args, **kwargs):
+        if fault["armed"] and Path(path).name == name:
+            fault["failed"] += 1
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(file_lock, "atomic_write_text", flaky)
+    return fault
+
+
+def test_a_failed_first_roster_write_leaves_nothing_behind_and_a_retry_succeeds(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import rbac
+
+    fault = _break_writes_of(monkeypatch, "dashboard-users.json")
+    with pytest.raises(OSError):
+        rbac.set_role("user:owner", "admin", actor="user:owner")
+    assert fault["failed"] == 1
+    marker = rbac.store_path().with_name("dashboard-users.json.present")
+    assert not rbac.store_path().exists() and not marker.exists()
+    # Nothing was recorded, so this is still a fresh install: no refusal, no wrong message.
+    assert rbac.list_users() == {}
+    assert rbac.missing_rosters() == []
+
+    fault["armed"] = False
+    rbac.set_role("user:owner", "admin", actor="user:owner")
+    assert rbac.list_users() == {"user:owner": "admin"}
+    assert marker.exists()
+    # The protection against a lost roster applies from the first successful write.
+    rbac.store_path().unlink()
+    assert rbac.missing_rosters() == ["global"]
+    with pytest.raises(rbac.RosterMissingError):
+        rbac.list_users()
+
+
+def test_a_failed_first_workspace_roster_write_leaves_provisioning_unblocked(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick.tenant import registry
+    from maverick_dashboard import rbac
+
+    fault = _break_writes_of(monkeypatch, "dashboard-tenant-roles.json")
+    with pytest.raises(OSError):
+        rbac.set_tenant_role("acme", "user:a", "viewer")
+    assert fault["failed"] == 1
+    marker = rbac.tenant_store_path().with_name("dashboard-tenant-roles.json.present")
+    assert not rbac.tenant_store_path().exists() and not marker.exists()
+    assert registry._legacy_role_names() == set()          # not "history is unavailable"
+    assert rbac.list_tenant_roles("acme") == {}
+    assert rbac.missing_rosters() == []
+
+    fault["armed"] = False
+    registry.create_tenant("acme")
+    rbac.set_tenant_role("acme", "user:a", "viewer")
+    assert rbac.get_tenant_role("acme", "user:a") == "viewer"
+    assert marker.exists()
+    assert registry._legacy_role_names()                   # now it is real history
+
+
+def test_a_marker_that_cannot_be_written_does_not_undo_a_role_change(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import rbac
+
+    fault = _break_writes_of(monkeypatch, "dashboard-users.json.present")
+    rbac.set_role("user:a", "viewer")                       # the roster is written and stands
+    assert rbac.list_users() == {"user:a": "viewer"}
+    marker = rbac.store_path().with_name("dashboard-users.json.present")
+    assert not marker.exists()
+
+    fault["armed"] = False
+    assert rbac.get_stored_role("user:a") == "viewer"       # the next read records it
+    assert marker.exists()
+    rbac.store_path().unlink()
+    assert rbac.missing_rosters() == ["global"]
+
+
+def test_the_missing_roster_refusal_names_the_file_level_recovery(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:a", "viewer")
+    rbac.store_path().unlink()
+    with pytest.raises(rbac.RosterMissingError) as caught:
+        rbac.list_users()
+    text = str(caught.value)
+    assert "roles were assigned" not in text
+    assert "[dashboard] admins" in text and "MAVERICK_DASHBOARD_ADMINS" in text and "backup" in text
+
+
+def test_lost_workspace_membership_history_refuses_new_provisioning(monkeypatch, tmp_path):
+    from maverick.tenant import registry
+    from maverick_dashboard import rbac
+
+    assert rbac.tenant_store_path().parent == rbac.store_path().parent
+    assert registry._legacy_role_names() == set()          # fresh install: clean history
+    rbac.set_tenant_role("acme", "user:a", "viewer")
+    assert registry._legacy_role_names()
+    rbac.tenant_store_path().unlink()
+    with pytest.raises(registry.TenantRegistryError):
+        registry._legacy_role_names()
+
+
+def test_a_role_change_that_could_not_be_taken_back_does_not_claim_nothing_changed(monkeypatch, tmp_path):
+    """The shared handler says nothing was changed for an unreadable role list;
+    that is false when a refused change could not be rolled back."""
+    from fastapi.testclient import TestClient
+    from maverick_dashboard import rbac
+    from maverick_dashboard.app import app
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    paths = {"/__rollback": rbac.RosterRollbackError("rollback failed"),
+             "/__unreadable": rbac.RbacStoreError("role list is damaged")}
+
+    def raiser(error):
+        def route():
+            raise error
+        return route
+
+    before = len(app.router.routes)
+    for path, error in paths.items():
+        app.add_api_route(path, raiser(error), methods=["GET"])
+    try:
+        client = TestClient(app, base_url="http://127.0.0.1:8765", raise_server_exceptions=False)
+        rolled_back = client.get("/__rollback", headers={"Accept": "application/json"})
+        unreadable = client.get("/__unreadable", headers={"Accept": "application/json"})
+    finally:
+        del app.router.routes[before:]
+    assert rolled_back.status_code == unreadable.status_code == 503
+    assert "nothing was changed" not in rolled_back.json()["detail"]
+    assert "may now include it" in rolled_back.json()["detail"]
+    assert "nothing was changed and no access was granted" in unreadable.json()["detail"]

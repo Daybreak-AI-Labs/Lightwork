@@ -620,6 +620,23 @@ def test_registry_capacity_and_audit_tampering_are_detected(tmp_path) -> None:
         registry.verify_integrity()
 
 
+def test_non_ascii_stored_digests_are_integrity_errors_not_type_errors(tmp_path) -> None:
+    # Edited digests used to raise TypeError from hmac.compare_digest in the
+    # shared comparison helper instead of the registry's integrity refusal.
+    _clock, authority, registry, _private, _device = _enrolled(tmp_path)
+    with sqlite3.connect(registry.path) as connection:
+        connection.execute("DROP TRIGGER native_consent_audit_no_update")
+        connection.execute("UPDATE native_consent_audit SET event_sha256=?", ("é" * 64,))
+        connection.execute(
+            "UPDATE native_consent_apps SET authority_sha256=? WHERE application_ref=?",
+            ("é" * 64, authority.application_ref),
+        )
+    with pytest.raises(NativeConsentIntegrityError, match="audit chain"):
+        registry.verify_integrity()
+    with pytest.raises(NativeConsentIntegrityError, match="application authority changed"):
+        registry.get_application(authority.application_ref)
+
+
 def test_household_link_and_rights_handoff_are_digest_only() -> None:
     linked = normalize_operation_payload(
         "link_profile",

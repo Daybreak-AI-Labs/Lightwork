@@ -55,3 +55,12 @@ test("owned local copies show expiry limits and safe native links without treati
   assert.ok(nodes.some(node=>node.href==='/deliverable-bundles?open=DLB-one'));
   assert.ok(nodes.some(node=>node.href==='/chat/goal/4'));
 });
+
+test("asking to review a deletion with no verified conversation says so in plain words", async () => {
+  const ui = fixture({});
+  ui.el("pd-delete").events.submit({preventDefault() {}});
+  await new Promise(resolve => setImmediate(resolve));
+  const shown = ui.el("pd-status").textContent;
+  assert.match(shown, /no verified conversation/i);
+  assert.doesNotMatch(shown, /Cannot read properties|undefined/);
+});

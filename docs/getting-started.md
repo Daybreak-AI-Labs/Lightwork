@@ -30,8 +30,9 @@ existing **Users** invitation controls. The email is a local identity label;
 Lightwork does not verify that mailbox. Keep invitation links private.
 
 The owner can sign in again on this computer at `/auth/local-login`. Invitees
-use their single-use invitation and its expiring session; an administrator can
-issue a new invitation when needed. In **Workspaces**, create and select the
+use their single-use invitation and its expiring session. Someone who already
+has a sign-in cannot be sent another invitation; if they forget their
+passphrase, the owner resets it from **Users**. In **Workspaces**, create and select the
 workspace, then grant each colleague workspace permissions and department
 access in **Users**. Project reviewers receive only explicitly shared captured
 results; reviewing one does not authorize execution of the underlying task.

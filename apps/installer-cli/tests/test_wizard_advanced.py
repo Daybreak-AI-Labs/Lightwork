@@ -1372,3 +1372,41 @@ def test_typical_cost_minimum_keeps_its_default_unless_changed(tmp_path, monkeyp
     config.reset_config_cache()
     assert typical_cost.min_runs() == 30
     config.reset_config_cache()
+
+
+def _answer_connections(monkeypatch, *, named, self_connect):
+    from maverick_installer import wizard
+
+    def confirm(prompt, *, default=False):
+        if "Named connections?" in prompt:
+            return named
+        if "connect their own read-only Google Drive" in prompt:
+            return self_connect
+        return default
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(wizard, "_q_select", lambda *a, default=None, **kw: default)
+    monkeypatch.setattr(wizard, "_q_text", lambda *a, default="", **kw: default)
+    monkeypatch.setattr(wizard, "_q_checkbox", lambda *a, **kw: [])
+    return wizard.pick_advanced()
+
+
+def test_employee_connected_accounts_need_named_connections_and_the_wizard_says_so(monkeypatch, capsys):
+    from maverick_installer import wizard
+
+    answers = _answer_connections(monkeypatch, named=False, self_connect=True)
+
+    assert answers["connections_self_connect"] is False
+    assert "only when named connections are on" in capsys.readouterr().out.replace("\n", " ")
+    written = tomllib.loads("\n".join(wizard._cfg_advanced(answers, [])))
+    assert "connections" not in written
+
+
+def test_employee_connected_accounts_are_written_with_named_connections(monkeypatch):
+    from maverick_installer import wizard
+
+    answers = _answer_connections(monkeypatch, named=True, self_connect=True)
+
+    written = tomllib.loads("\n".join(wizard._cfg_advanced(answers, [])))
+    assert written["connections"]["enable"] is True
+    assert written["connections"]["allow_self_connect"] is True

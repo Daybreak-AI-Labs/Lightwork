@@ -42,6 +42,7 @@ JSON Schema dialect on standalone calls. Legacy handlers still receive an object
 (non-object arguments normalize to `{}`) and must validate it. New integrations
 can use `defineValidatedTool({ ..., parseArgs, handler })`: the synchronous parser
 accepts `unknown`, returns a typed object or throws, and runs before handler entry.
+A parser that returns a Promise (an `async` function) is refused as `not_started`.
 Use a reviewed schema library's parser as an adapter if needed. A parser rejection
 is `effect: "not_started"` in protocol 2 and does not include parser error text or
 private arguments. Host-side validation remains a separate boundary.

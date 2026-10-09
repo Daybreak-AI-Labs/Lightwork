@@ -146,3 +146,41 @@ def test_fetch_unknown_charset_falls_back_to_utf8(monkeypatch):
     out = _fetch({"uid": "9"})
     assert not out.startswith("ERROR")
     assert "plain ascii body" in out
+
+
+def _verifies(context):
+    # The stdlib's own default (no context passed) checks neither the
+    # certificate nor the host name, so the app password goes to any server.
+    import ssl
+    return (isinstance(context, ssl.SSLContext) and context.verify_mode == ssl.CERT_REQUIRED
+            and context.check_hostname is True)
+
+
+def test_send_verifies_the_server_certificate_before_login(monkeypatch):
+    import smtplib
+
+    from maverick.tools.email_tool import _send
+    _creds(monkeypatch)
+    for port, constructor in (("465", "SMTP_SSL"), ("587", "SMTP")):
+        monkeypatch.setenv("EMAIL_SMTP_PORT", port)
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.__exit__.return_value = False
+        factory = MagicMock(return_value=conn)
+        monkeypatch.setattr(smtplib, constructor, factory)
+        out = _send({"to": "bob@example.com", "subject": "hi", "body": "b"})
+        assert out.startswith("sent"), out
+        if port == "465":
+            context = factory.call_args.kwargs.get("context")
+        else:
+            context = conn.starttls.call_args.kwargs.get("context")
+        assert _verifies(context), port
+
+
+def test_inbox_reads_verify_the_server_certificate_before_login(monkeypatch):
+    from maverick.tools.email_tool import _fetch, _list_inbox
+    _creds(monkeypatch)
+    for read in (lambda: _list_inbox({"limit": 1}), lambda: _fetch({"uid": "9"})):
+        _fake_imap(monkeypatch, [("OK", [None])])
+        read()
+        assert _verifies(imaplib.IMAP4_SSL.call_args.kwargs.get("ssl_context"))

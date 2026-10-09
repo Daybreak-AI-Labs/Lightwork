@@ -5,7 +5,6 @@ An uncertain store is never dispatched again by response recovery.
 """
 from __future__ import annotations
 
-import hmac
 import secrets
 import time
 
@@ -13,14 +12,14 @@ from fastapi import HTTPException
 from maverick.governed_operations import digest
 
 from . import retention_runs as native
-from .auth import caller_principal, require_global_permission
+from .auth import caller_principal, constant_time_equals, require_global_permission
 from .draft_api import context_for
 
 
 def authorize(request, expected_context=None):
     require_global_permission(request, "admin")
     context = context_for(request)
-    if expected_context is not None and not hmac.compare_digest(expected_context, context):
+    if expected_context is not None and not constant_time_equals(expected_context, context):
         raise HTTPException(409, "Your account or workspace changed. Reopen retention before continuing.")
     return caller_principal(request) or "local administrator", context
 

@@ -185,6 +185,22 @@ def test_send_now_reports_whether_anything_went_out(tmp_path, monkeypatch):
     assert seen[0][0] == "user:alice" and seen[0][1]["approvals"] == 1
 
 
+def test_send_now_says_when_a_summary_may_have_gone_out_unconfirmed(tmp_path, monkeypatch):
+    from maverick import channel_identities, daily_digest
+
+    _seed(tmp_path)
+    _as(monkeypatch, "user:alice")
+    client = _client()
+    channel_identities.link("slack", "U1", "user:alice", actor="admin")
+
+    def lost(p, d, links, prefs):
+        raise TimeoutError("no reply after posting")
+    monkeypatch.setattr(daily_digest, "_send_slack", lost)
+    location = client.post("/me/digest/send-now").headers["location"]
+    assert location == "/me?saved=unconfirmed"
+    assert "did not confirm it. Check your chat app or inbox before sending it again." in client.get(location).text
+
+
 # ---------------------------------------------------------- administrators
 
 def test_admin_links_and_unlinks_chat_accounts_on_users_page(tmp_path, monkeypatch):

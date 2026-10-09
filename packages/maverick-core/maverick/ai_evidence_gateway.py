@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .constant_time import text_equals
 from .governed_records import (
     GovernedRecordCapacityError,
     GovernedRecordStore,
@@ -964,7 +965,7 @@ def _archive_policy_snapshot(
             or existing.get("status") != "archived"
             or existing.get("policy_id") != policy_id
             or existing.get("policy_sha256") != policy_sha
-            or not hmac.compare_digest(
+            or not text_equals(
                 _canonical_json(existing.get("snapshot")),
                 _canonical_json(validated),
             )
@@ -985,7 +986,7 @@ def _archive_policy_snapshot(
         if (
             recovered is None
             or recovered.get("policy_sha256") != policy_sha
-            or not hmac.compare_digest(
+            or not text_equals(
                 _canonical_json(recovered.get("snapshot")),
                 _canonical_json(validated),
             )
@@ -2698,7 +2699,7 @@ def get_interaction_receipt(receipt_id: str) -> dict[str, Any] | None:
         signed.get("hash") != signed_row.get("hash")
         or signed.get("receipt_payload_sha256")
         != signed_row.get("receipt_payload_sha256")
-        or not hmac.compare_digest(
+        or not text_equals(
             _canonical_json(dict(signed)),
             _canonical_json(signed_row),
         )

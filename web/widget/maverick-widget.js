@@ -1,16 +1,18 @@
 /*
  * Lightwork embeddable widget (roadmap: 2028 H1 distribution — "embeddable widget").
  *
- * A dependency-free floating chat button that drops onto any page and talks to
- * a Lightwork dashboard's chat endpoint. Self-hostable: it posts to YOUR
- * dashboard origin, not a hosted service.
+ * A dependency-free floating chat button for pages served from a Lightwork
+ * dashboard's own origin; it talks to that dashboard's chat endpoint.
+ * Self-hostable: it posts to YOUR dashboard origin, not a hosted service.
  *
  * Usage:
  *   <script src="/widget/maverick-widget.js"
  *           data-maverick-url="https://your-dashboard.example.com"
  *           data-maverick-title="Ask Lightwork"></script>
  *
- * The dashboard must allow the embedding origin (CORS / same-origin policy).
+ * The page must be on that same origin: the widget sends the signed-in
+ * session's cookies and the dashboard sets no CORS headers, so a
+ * data-maverick-url on another origin is refused before anything is sent.
  */
 (function () {
   "use strict";
@@ -214,12 +216,16 @@
     e.preventDefault();
     var msg = input.value.trim();
     if (!msg || busy || unknown || !alive) return;
+    if (expectedOrigin !== location.origin) {
+      line("Lightwork", "Start refused before sending: this widget only works on the dashboard's own origin, but data-maverick-url names " +
+        expectedOrigin + ". Serve the widget from the dashboard itself or remove the attribute.");
+      return;
+    }
     busy = true;
     status.textContent = "Sending your request. Waiting for its receipt.";
     line("You", msg);
     controls();
     try {
-      if (expectedOrigin !== location.origin) throw new Error("The widget requires the dashboard's own origin.");
       if (localStorage.getItem(storageKey)) {
         pendingId = localStorage.getItem(storageKey);
         hold(); busy = false; controls(); return;

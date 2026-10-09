@@ -155,7 +155,19 @@
   }};
   ['lightwork:workspace-changed', 'lightwork:account-context-changed', 'lightwork:connection-access-lost'].forEach(name => document.addEventListener(name, clearPrivate));
   window.addEventListener('pagehide', clearPrivate);
-  run(async () => { await refresh(); const reference = retained();
+  run(async () => {
+    try { await refresh(); }
+    catch (error) {
+      // A failed first read must not leave the request list saying "Loading…".
+      // When access was lost the page is locked (Refresh included) and says to
+      // sign in or reload, so it must not also tell the person to use Refresh.
+      // Nothing was read, so there is no account or checkpoint to act on; the
+      // next successful refresh sets these from the real answer.
+      if (!current) el('acc-review').dataset.unavailable = el('acc-check').dataset.unavailable = 'true';
+      if (!current && !accessLost) el('acc-requests').replaceChildren(node('p', 'Saved copy requests could not be read. Use Refresh choices to try again.', 'muted'));
+      throw error;
+    }
+    const reference = retained();
     if (reference && /^[a-f0-9]{32}$/.test(reference)) {
       try { show(await request('/ACC-' + reference + '/original')); } catch (error) { notice(error.message); }
     }

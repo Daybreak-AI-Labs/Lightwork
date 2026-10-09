@@ -116,6 +116,27 @@ def test_middleware_allows_a_listed_address(monkeypatch):
     assert client.get("/api/v1/sessions").status_code == 200
 
 
+def test_installation_list_also_gates_the_websocket(monkeypatch):
+    """Starlette never runs ``@app.middleware("http")`` for a WebSocket, so the
+    run-events firehose has to apply the installation list itself, before
+    accepting."""
+    from maverick_dashboard import app as app_mod
+    from starlette.testclient import WebSocketDisconnect
+
+    app_mod._world_cache.clear()
+    gid = app_mod._world().create_goal("t", "d")
+    app_mod._world().set_goal_status(gid, "done", result="ok")
+    monkeypatch.setenv("MAVERICK_IP_ALLOWLIST", "10.0.0.0/8")
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+    assert client.get("/api/v1/sessions").status_code == 403
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(f"/ws/v1/runs/{gid}/events") as ws:
+            ws.receive_json()
+    monkeypatch.setenv("MAVERICK_IP_ALLOWLIST", "127.0.0.0/8")
+    with client.websocket_connect(f"/ws/v1/runs/{gid}/events") as ws:
+        assert ws.receive_json()["kind"] == "status"
+
+
 def test_config_list_is_read_and_env_wins(tmp_path, monkeypatch):
     _write_config(tmp_path, "[auth.ip_allowlist]\ncidrs = [\"192.0.2.0/24\"]\n")
     client = TestClient(app, headers={"Origin": "http://testserver"})
@@ -131,6 +152,15 @@ def test_unreadable_policy_allows_only_loopback(monkeypatch):
     monkeypatch.setattr(config, "config_source_errors", broken)
     assert ip_allowlist.installation_allows(_req(host="127.0.0.1")) is True
     assert ip_allowlist.installation_allows(_req(host="203.0.113.7")) is False
+
+
+@pytest.mark.parametrize("line", ["cidrs = 5", "cidrs = true", "workspace_cidrs = 7"])
+def test_a_mistyped_list_allows_only_loopback_instead_of_everyone(tmp_path, line):
+    _write_config(tmp_path, "[auth.ip_allowlist]\n" + line + "\n")
+    assert ip_allowlist.installation_allows(_req(host="127.0.0.1")) is True
+    assert ip_allowlist.installation_allows(_req(host="203.0.113.7")) is False
+    assert ip_allowlist.workspace_allows(_req(host="203.0.113.7")) is False
+    assert ip_allowlist.configured() is True
 
 
 # ---- the workspace gate ------------------------------------------------------------

@@ -432,29 +432,48 @@ def test_create_update_and_stale_cas_are_audited(monkeypatch):
         )
 
 
-def test_local_bounded_create_refuses_before_namespace_oversize(monkeypatch):
+def test_local_full_namespace_archives_its_oldest_record_instead_of_refusing(monkeypatch):
     import maverick.audit as audit
 
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
-    monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: True)
+    events: list[dict] = []
+    monkeypatch.setattr(audit, "record", lambda *_args, **row: events.append(row) or True)
     store = GovernedRecordStore("test_capacity", "TCP", "test_record")
-    first = store.create(
-        {"id": "TCP-first", "status": "open"},
-        action="create",
-        actor="operator",
-        max_records=1,
-    )
+    first = store.create({"id": "TCP-first", "status": "open"}, action="create",
+                         actor="operator", max_records=1)
 
-    with pytest.raises(
-        GovernedRecordCapacityError,
-        match="capacity has been reached",
-    ):
-        store.create(
-            {"id": "TCP-second", "status": "open"},
-            action="create",
-            actor="operator",
-            max_records=1,
-        )
+    second = store.create({"id": "TCP-second", "status": "open"}, action="create",
+                          actor="operator", max_records=1)
+
+    # The namespace stays at its cap; the oldest record is kept, not deleted.
+    assert [row["id"] for row in store.list()] == [second["id"]]
+    assert store.count() == 1
+    kept = store.get(first["id"])
+    assert kept["status"] == "open" and kept["revision"] == first["revision"] + 1
+    assert any(row.get("action") == "governed_record_archived" for row in events)
+    # Archived records stay updatable by id with ordinary compare-and-swap.
+    changed = store.update(first["id"], lambda row: row.update(status="closed"),
+                           expected_revision=kept["revision"], action="close", actor="operator")
+    assert changed["status"] == "closed" and changed["revision"] == kept["revision"] + 1
+    # Its id is still taken: creating it again conflicts exactly as before.
+    with pytest.raises(RecordConflict):
+        store.create({"id": "TCP-first", "status": "open"}, action="create",
+                      actor="operator", max_records=10)
+
+
+def test_local_full_namespace_never_archives_a_record_with_undelivered_activity(monkeypatch):
+    import maverick.audit as audit
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: False)
+    store = GovernedRecordStore("test_capacity", "TCP", "test_record")
+    first = store.create({"id": "TCP-first", "status": "open"}, action="create",
+                         actor="operator", max_records=1)
+    assert first.get("_audit_pending")
+
+    with pytest.raises(GovernedRecordCapacityError, match="capacity has been reached"):
+        store.create({"id": "TCP-second", "status": "open"}, action="create",
+                     actor="operator", max_records=1)
     assert [row["id"] for row in store.list()] == [first["id"]]
 
 
@@ -777,6 +796,9 @@ def test_postgres_bounded_create_is_tenant_transactional(monkeypatch):
         "test_capacity",
         "TCP",
     )
+    # This covers the admission lock and count; archiving a full namespace is
+    # covered against a live database in test_postgres_governed_records_capacity.
+    monkeypatch.setattr(GovernedRecordStore, "_archivable", lambda self, backend: False)
     with tenant_scope(tenant="alpha"):
         store.create(
             {"id": "TCP-first", "status": "open"},

@@ -8,7 +8,6 @@ payload. Companion content remains within its separate owner-bound policy.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import math
 import time
@@ -123,14 +122,14 @@ def _authority(request: Request, *, admin: bool = False, write: bool = False,
     context = hashlib.sha256(json.dumps(["employee-companion-v1", tenant, actor]).encode()).hexdigest()
     supplied = request.headers.get(_HEADER)
     if reviewed_context is not None:
-        if supplied is not None and not hmac.compare_digest(supplied, reviewed_context):
+        if supplied is not None and not auth.constant_time_equals(supplied, reviewed_context):
             raise HTTPException(409, "Your account or workspace changed. Review the companion policy again.")
         supplied = reviewed_context
     if write:
         from .app import _require_same_origin
 
         _require_same_origin(request)
-    if (write and supplied is None) or (supplied is not None and not hmac.compare_digest(supplied, context)):
+    if (write and supplied is None) or (supplied is not None and not auth.constant_time_equals(supplied, context)):
         raise HTTPException(409, {"code": "companion_context_changed",
                                   "message": "Your account or workspace changed. Reload the companion before continuing."})
     return actor, tenant, context

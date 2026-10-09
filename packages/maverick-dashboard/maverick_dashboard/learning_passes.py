@@ -50,12 +50,13 @@ def _requests():
 def _recent(models):
     """Strictly read the native recent window; never authorize tolerant-empty."""
     path = reflexion.default_path()
+    io_path = _windows_extended_path(path) if os.name == "nt" else path
     fields = tuple(reflexion.Reflexion.__dataclass_fields__)
     try:
         with reflexion._lock, cross_process_lock(path, strict=True):
             try:
-                named_before = os.stat(_windows_extended_path(path))
-                with open(_windows_extended_path(path), "rb") as handle:
+                named_before = os.stat(io_path)
+                with open(io_path, "rb") as handle:
                     before = os.fstat(handle.fileno())
                     # The existing miner scans the final 2,000 lines then uses
                     # the latest 500 by recorded time. Bound that exact window.
@@ -67,7 +68,7 @@ def _recent(models):
                 return [], os.path.normcase(str(path.resolve()))
             def identity(st):
                 return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
-            current = os.stat(_windows_extended_path(path))
+            current = os.stat(io_path)
             # Windows reports change-time on fstat but creation-time on stat.
             # Compare each clock within its own API; both must retain the same
             # physical file, size and modification time as the named source.

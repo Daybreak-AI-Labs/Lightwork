@@ -97,3 +97,47 @@ test('named profiles retain separate credentials and remove only the chosen prof
   await settings.activateProfile(remaining.profiles[0].id);
   assert.equal((await settings.loadSettings()).token, newer.token);
 });
+
+function profileStore(initial = {}) {
+  const values = new Map(Object.entries(initial));
+  const settings = source('src/settings.ts', {
+    'expo-secure-store': {
+      getItemAsync: async key => values.get(key) ?? null,
+      setItemAsync: async (key, value) => { values.set(key, value); },
+      deleteItemAsync: async key => { values.delete(key); },
+    },
+    './offlineCache': {purgeBundle: async () => {}, purgeAppBundles: async () => {}},
+  });
+  return {values, settings};
+}
+const third = {baseUrl: 'https://third.example.test', token: 'synthetic-third-token'};
+const LEGACY = 'maverick.connection.v1';
+
+test('removing every saved connection does not bring an older single connection back', async () => {
+  const {values, settings} = profileStore({[LEGACY]: JSON.stringify(connection)});
+  await settings.saveProfile('New workspace', newer);
+  assert.deepEqual(Array.from((await settings.listProfiles()).profiles, profile => profile.name).sort(), ['New workspace', 'Previous connection']);
+  for (const profile of (await settings.listProfiles()).profiles) await settings.removeProfile(profile.id);
+  await settings.saveProfile('Third workspace', third);
+  assert.deepEqual(Array.from((await settings.listProfiles()).profiles, profile => profile.name), ['Third workspace']);
+  assert.equal(JSON.stringify([...values.values()]).includes(connection.token), false);
+});
+
+test('removing the imported older connection removes its token from the device, and only then', async () => {
+  const {values, settings} = profileStore({[LEGACY]: JSON.stringify(connection)});
+  await settings.saveProfile('New workspace', newer);
+  const profiles = (await settings.listProfiles()).profiles;
+  await settings.removeProfile(profiles.find(profile => profile.name === 'New workspace').id);
+  assert.equal(values.has(LEGACY), true);
+  await settings.removeProfile(profiles.find(profile => profile.name === 'Previous connection').id);
+  assert.equal(values.has(LEGACY), false);
+});
+
+test('the first profile of an older install still imports the older connection once', async () => {
+  const {settings} = profileStore({[LEGACY]: JSON.stringify(connection)});
+  await settings.saveProfile('New workspace', newer);
+  await settings.saveProfile('Third workspace', third);
+  const names = Array.from((await settings.listProfiles()).profiles, profile => profile.name);
+  assert.deepEqual(names.sort(), ['New workspace', 'Previous connection', 'Third workspace']);
+});
+

@@ -208,7 +208,7 @@ def inventory(request, name):
                 for row in rows if row["action"] == "save" and row["state"] == "confirmed" and not row.get("_audit_pending")]
     earlier = [{"value": row["id"], "label": "Before " + ACTIONS[row["action"]].lower() + " · " +
                 time.strftime("%b %d, %Y %H:%M", time.localtime(row["created_at"]))}
-               for row in rows if row["action"] in {"publish", "restore"} and row.get("before", {}).get("profile")]
+               for row in rows if row["action"] in {"publish", "restore"} and row.get("before", {}).get("profile") and row["state"] != "not_started"]
     originals = [{"value": row["id"], "label": ACTIONS[row["action"]] + " · " +
                   time.strftime("%b %d, %Y %H:%M", time.localtime(row["created_at"]))} for row in rows]
     authority(request, context)
@@ -231,7 +231,7 @@ def saved_draft(request, identifier):
 def _target(request, action, identifier, source):
     row = _owned(request, identifier)
     if action == "restore":
-        if row["action"] not in {"publish", "restore"} or not row.get("before", {}).get("profile"):
+        if row["action"] not in {"publish", "restore"} or not row.get("before", {}).get("profile") or row["state"] == "not_started":
             raise HTTPException(409, "Choose an earlier retained definition.")
         entered = row["before"]["raw"] or row["before"]["profile"]
         patch, profile = _draft(request, row["name"], entered, {**source, "raw": {}})
@@ -250,7 +250,7 @@ def _uncertain(request, name, *, exclude_binding=None):
     rows = _rows(request, name)
     holds = []
     for row in rows:
-        if row.get("binding") == exclude_binding:
+        if row.get("binding") == exclude_binding or row["state"] == "not_started" and not row.get("_audit_pending"):
             continue
         run = tests.run_by_id(row["run"]) if row.get("run") else None
         run = tests.public_run(run) if run else None
@@ -399,8 +399,10 @@ def original(request, operation, *, prepared=None):
     if prepared is not None and row["binding"] != digest(prepared):
         raise HTTPException(409, "This original belongs to a different complete review.")
     confirmed = row["state"] == "confirmed" and not row.get("_audit_pending")
+    refused = row["state"] == "not_started" and not row.get("_audit_pending")
     result = {"context": row["context"], "operation": row["id"][4:], "confirmed": confirmed,
               "action": ACTIONS[row["action"]], "message": "The original decision is confirmed. Nothing was repeated." if confirmed else
+              "The original decision was refused before it changed anything. Nothing was repeated." if refused else
               "The original decision is unconfirmed. Some work may already have happened; no answer request or publication was repeated.",
               "recorded_at": row["updated_at"], "notice": NOTICE}
     try:
@@ -428,6 +430,7 @@ def apply(request, prepared, operation):
     authority(request, prepared["context"], write=True)
     if STORE.get(identifier) is not None:
         return original(request, identifier, prepared=prepared)
+    began, row = [], None
     with authority_effect_fence(), cross_process_lock(domain.user_dir() / f"{prepared['name']}.toml", strict=True):
         _guard(request, prepared)
         if STORE.get(identifier) is not None:
@@ -441,13 +444,16 @@ def apply(request, prepared, operation):
             if row.get("_audit_pending"):
                 return original(request, identifier, prepared=prepared)
             if prepared["action"] in {"try", "check"}:
-                return _start_answers(request, prepared, row)
+                return _start_answers(request, prepared, row, began)
             if prepared["action"] in {"publish", "restore"}:
-                return _publish(request, prepared, row)
+                return _publish(request, prepared, row, began)
             STORE.update(row["id"], lambda current: current.update(state="confirmed"), expected_revision=row["revision"],
                 action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared))
         except HTTPException:
             if STORE.get(identifier) is None:
+                raise
+            # A refusal before any change began is the real answer, not an unknown outcome.
+            if not began and _mark_not_started(prepared, row):
                 raise
         except Exception as exc:
             if STORE.get(identifier) is None:
@@ -455,7 +461,20 @@ def apply(request, prepared, operation):
         return original(request, identifier, prepared=prepared)
 
 
-def _publish(request, prepared, row):
+def _mark_not_started(prepared, row):
+    """Record that nothing began; any doubt about the record or its audit keeps it unconfirmed."""
+    try:
+        current = STORE.get(row["id"]) if row else None
+        if current is None or current["revision"] != row["revision"] or current.get("_audit_pending"):
+            return False
+        saved = STORE.update(row["id"], lambda value: value.update(state="not_started"), expected_revision=row["revision"],
+                             action="specialist_draft.refused", actor=prepared["actor"])
+        return saved is not None and not saved.get("_audit_pending")
+    except Exception:  # noqa: BLE001 - a record that cannot be marked stays unconfirmed
+        return False
+
+
+def _publish(request, prepared, row, began):
     from .api import AgentOverrideIn
     payload = AgentOverrideIn.model_validate({**prepared["patch"], "publish_without_passing_tests": bool(prepared["reason"]),
         "override_reason": prepared["reason"], "expected_generation": prepared["before"]["generation"]})
@@ -465,6 +484,8 @@ def _publish(request, prepared, row):
     def guard():
         _guard(request, prepared)
         _publication_current(request, prepared, payload)
+        # Once a guard passes, the replacement itself may happen.
+        began.append(True)
 
     domain_edit.write_override(prepared["name"], prepared["patch"], expected_generation=prepared["before"]["generation"], effect_guard=guard)
     published = digest(_source(request, prepared["name"]))
@@ -505,7 +526,7 @@ def _publication_admission(request, prepared, payload):
         _record_agent_autonomy_intent(request, prepared["name"], before, after)
 
 
-def _start_answers(request, prepared, row):
+def _start_answers(request, prepared, row, began):
     from . import workforce_ops_api as native
 
     def started(job, budget):
@@ -517,6 +538,8 @@ def _start_answers(request, prepared, row):
 
     native._start_customer_test_job(request, prepared["name"], operation_id=row["id"][4:],
         draft=prepared, draft_guard=lambda budget=None: _guard(request, prepared, budget=budget), draft_started=started)
+    # A refused admission raises above; once it returns, the worker may already be running.
+    began.append(True)
     return original(request, row["id"], prepared=prepared)
 
 

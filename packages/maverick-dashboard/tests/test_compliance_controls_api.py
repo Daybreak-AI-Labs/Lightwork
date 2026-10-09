@@ -141,6 +141,16 @@ def test_retention_periods_save_and_apply(monkeypatch):
     assert applied["receipt"]["status"] == "completed"
 
 
+def test_non_ascii_retention_context_header_is_refused_as_changed_not_a_server_error():
+    from maverick_dashboard import settings_store
+
+    stale = {"X-Lightwork-Retention-Context": "contéxt".encode()}
+    saved = client.post("/api/v1/compliance/retention", json={"messages_days": 365}, headers=stale)
+    assert saved.status_code == 409, saved.text
+    assert settings_store.load_overlay().get("retention", {}).get("messages_days") != 365
+    assert client.post("/api/v1/compliance/retention/preview", headers=stale).status_code == 409
+
+
 def test_keep_one_retention_period_preserves_omitted_fields_and_records_change(monkeypatch):
     from maverick import config
     from maverick_dashboard import settings_store

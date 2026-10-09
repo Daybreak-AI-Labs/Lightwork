@@ -90,13 +90,28 @@ def test_subflow_without_inputs_keeps_shared_data_behaviour():
 
 # ---- foreach runaway guard --------------------------------------------------
 
-def test_foreach_without_limit_caps_and_surfaces_truncation(monkeypatch):
+def test_foreach_without_limit_refuses_over_cap_and_surfaces_why(monkeypatch):
     from maverick.flow import runner
     monkeypatch.setattr(runner, "_FOREACH_DEFAULT_CAP", 5)
+    calls = []
+
+    def agent(n, br, d):
+        calls.append(br)
+        return (br, 1.0)
+
     body = _flow([FlowNode(id="x", kind="agent", brief="{{item}}", output="r")], start="x")
     f = _flow([FlowNode(id="a", kind="foreach", items="rows", var="item", body=body, output="out")])
-    r = run_flow(f, agent_fn=_ag, action_fn=lambda *a: ("", None),
+    r = run_flow(f, agent_fn=agent, action_fn=lambda *a: ("", None),
                  data={"rows": list(range(20))})       # no explicit limit
-    assert len(r.data["out"]) == 5                     # bounded to the default cap
-    assert r.data["_foreach_truncated"] is True        # and surfaced, not silent
+    # The implicit ceiling is not consent to drop the tail: nothing runs, and the
+    # refusal is surfaced instead of reporting a silent partial result as complete.
+    assert r.status == "failed"
+    assert calls == [] and "out" not in r.data and "_foreach_truncated" not in r.data
+    assert "processed no items" in r.error and "explicit item limit" in r.error
+    # A deliberately chosen limit still bounds the list to its prefix.
+    limited = _flow([FlowNode(id="a", kind="foreach", items="rows", var="item", body=body,
+                              output="out", limit=5)])
+    r = run_flow(limited, agent_fn=agent, action_fn=lambda *a: ("", None),
+                 data={"rows": list(range(20))})
+    assert r.status == "completed" and len(r.data["out"]) == 5 and len(calls) == 5
 

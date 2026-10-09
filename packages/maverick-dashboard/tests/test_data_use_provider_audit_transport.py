@@ -815,6 +815,29 @@ def test_watermark_overcoverage_and_origin_drift_fail_before_network(
     assert http.calls == []
 
 
+def test_non_ascii_configured_origin_is_origin_drift_not_a_crash(tmp_path: Path) -> None:
+    """The origin check admits any hostname under the provider suffix, so a
+    hand-edited non-ASCII origin must read as drift like any other change."""
+    store, binding = _store(tmp_path, "snowflake")
+    config = _config("snowflake", snowflake_watermark=True)
+    request = _request(binding, raw_statement_id="mutation-stmt-1")
+    http = MockHttp([])
+    transport = NativeProviderAuditTransport(
+        tenant_id=TENANT,
+        binding_store=store,
+        config=config,
+        watermark_authority_resolver=lambda _provider, _binding, covered: _accepted_watermark(
+            binding, covered_until=covered + 1
+        ),
+        http_transport=http,
+        clock=lambda: 13_000.0,
+    )
+    config["data_use_governance"]["snowflake"]["origin"] = "https://accté.snowflakecomputing.com"
+    with pytest.raises(DataUseProviderAuditPermanent, match="provider_binding_changed"):
+        transport.read(request, _lease(binding))
+    assert http.calls == []
+
+
 def test_transport_rechecks_mutated_audit_gate_before_network(tmp_path: Path) -> None:
     store, binding = _store(tmp_path, "snowflake")
     config = _config("snowflake", snowflake_watermark=True)

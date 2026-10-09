@@ -14,6 +14,14 @@ person's own hour in their own time zone through their linked channels:
 An empty summary is skipped unless the person opted into "send even when
 empty"; a person can turn the summary off on ``/me``. Every send is written
 to the audit log with the recipient, the channel and item counts only.
+
+The day counts as done only once a channel accepted the summary. When every
+channel definitely did not send it (nothing set up, or refused), it is tried
+again after a growing wait (:data:`RETRY_MINUTES`, then hourly) -- at once
+when the person's channels or the channel settings change -- so fixing the
+channel still delivers today's summary without an attempt (and an audit
+row) on every poll. When a channel may have sent it without confirming, it
+is not sent again.
 """
 from __future__ import annotations
 
@@ -24,6 +32,8 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
+
+from .notifications import RETRY_MINUTES, retry_delay
 
 log = logging.getLogger(__name__)
 
@@ -518,22 +528,78 @@ def send_digest(principal: str, digest: dict[str, Any], *, links: list[dict[str,
     for channel, sender in digest_senders().items():
         if channel not in by_channel:
             continue
+        delivery = _attempt(channel, sender, principal, digest, by_channel[channel], prefs)
+        ok = delivery == "accepted"
         try:
-            ok = bool(sender(principal, digest, by_channel[channel], prefs))
-        except Exception:  # noqa: BLE001 -- one channel failing never blocks the others
-            log.warning("digest send through %s failed", channel, exc_info=True)
-            ok = False
-        audit.audit_event(
-            audit.EventKind.DIGEST_SENT, agent="system:daily-digest", recipient=principal,
-            channel=channel, ok=ok, **digest["counts"],
-        )
-        outcomes.append({"channel": channel, "ok": ok})
+            audit.audit_event(
+                audit.EventKind.DIGEST_SENT, agent="system:daily-digest", recipient=principal,
+                channel=channel, ok=ok, delivery=delivery, **digest["counts"],
+            )
+        except Exception:  # noqa: BLE001 -- the send already happened; see below
+            # The record is written after the send, so a refusal (AuditRefused
+            # included) cannot undo it. Raising here would leave the day open and
+            # send the same summary again on every poll, and stop everyone after.
+            log.warning("digest audit for %s failed after the send", channel, exc_info=True)
+        outcomes.append({"channel": channel, "ok": ok, "delivery": delivery})
     return outcomes
+
+
+def _attempt(channel: str, sender: DigestSender, principal: str, digest: dict[str, Any],
+             links: list[dict[str, Any]], prefs: dict[str, Any]) -> str:
+    """``accepted``; ``not_sent`` (definitely not: nothing set up, or refused);
+    or ``unconfirmed`` (it may have gone out: the sender failed mid-send, or
+    the service did not confirm it). An unconfirmed summary is never resent."""
+    from .notifications import send_checked
+
+    try:
+        ok, unconfirmed = send_checked(lambda: bool(sender(principal, digest, links, prefs)))
+    except Exception:  # noqa: BLE001 -- one channel failing never blocks the others
+        log.warning("digest send through %s failed", channel, exc_info=True)
+        return "unconfirmed"
+    if ok:
+        return "accepted"
+    return "unconfirmed" if unconfirmed else "not_sent"
 
 
 # ----------------------------------------------------------------------------
 # Scheduling
 # ----------------------------------------------------------------------------
+
+def channel_setup(links: list[dict[str, Any]], prefs: dict[str, Any]) -> str:
+    """A short fingerprint of what decides whether this person's summary can
+    go out: their linked accounts and email, the registered channels and the
+    shared notification setup (:func:`maverick.notifications.setup_fingerprint`).
+    A change ends a back-off at once."""
+    from .notifications import setup_fingerprint
+
+    return setup_fingerprint(
+        sorted([str(link.get("channel")), str(link.get("external_id"))] for link in links),
+        str(prefs.get("email") or ""), sorted(digest_senders()))
+
+
+def _waiting(retry: dict[str, Any], local_date: str, setup: str, current: float) -> bool:
+    """Still inside today's back-off, with the channel setup unchanged."""
+    if retry.get("date") != local_date or retry.get("setup") != setup:
+        return False
+    try:
+        return current < float(retry.get("next_at") or 0)
+    except (TypeError, ValueError):
+        return False
+
+
+def _back_off(principal: str, retry: dict[str, Any], local_date: str, setup: str, current: float) -> None:
+    from . import user_preferences
+
+    same = retry.get("date") == local_date and retry.get("setup") == setup
+    try:
+        before = int(retry.get("failures") or 0) if same else 0
+    except (TypeError, ValueError):
+        before = 0
+    failures = before + 1
+    user_preferences.set_digest_retry(principal, {
+        "date": local_date, "failures": failures, "next_at": current + retry_delay(failures), "setup": setup,
+    })
+
 
 def due_now(prefs: dict[str, Any], *, now: float | None = None) -> tuple[bool, str]:
     """Whether the person's summary is due at ``now`` and their local date.
@@ -558,7 +624,8 @@ def run_digest_cycle(world, *, principals: list[str], can_decide: Callable[[str]
     from . import channel_identities, user_preferences
 
     current = time.time() if now is None else float(now)
-    summary = {"checked": 0, "sent": 0, "skipped_empty": 0, "skipped_unlinked": 0, "failed": 0}
+    summary = {"checked": 0, "sent": 0, "skipped_empty": 0, "skipped_unlinked": 0, "failed": 0,
+               "unconfirmed": 0, "backing_off": 0}
     for principal in principals:
         summary["checked"] += 1
         prefs = user_preferences.get_preferences(principal)
@@ -570,6 +637,11 @@ def run_digest_cycle(world, *, principals: list[str], can_decide: Callable[[str]
             summary["skipped_unlinked"] += 1
             user_preferences.mark_digest_sent(principal, local_date)
             continue
+        setup = channel_setup(links, prefs)
+        retry = user_preferences.digest_retry(principal)
+        if _waiting(retry, local_date, setup, current):
+            summary["backing_off"] += 1
+            continue
         digest = prepare_digest(
             world, principal, can_decide=can_decide(principal), prefs=prefs,
             sees_everything=bool(sees_everything and sees_everything(principal)), now=current,
@@ -578,17 +650,23 @@ def run_digest_cycle(world, *, principals: list[str], can_decide: Callable[[str]
             summary["skipped_empty"] += 1
             user_preferences.mark_digest_sent(principal, local_date)
             continue
-        outcomes = send_digest(principal, digest, links=links, prefs=prefs)
-        if any(o["ok"] for o in outcomes):
+        deliveries = {o["delivery"] for o in send_digest(principal, digest, links=links, prefs=prefs)}
+        if "accepted" in deliveries:
             summary["sent"] += 1
+        elif "unconfirmed" in deliveries:
+            summary["unconfirmed"] += 1  # it may have gone out: never resent
         else:
-            summary["failed"] += 1
+            summary["failed"] += 1  # definitely not sent: tried again after a wait
+            _back_off(principal, retry, local_date, setup, current)
+            continue
         user_preferences.mark_digest_sent(principal, local_date)
     return summary
 
 
 __all__ = [
     "RECENT_DAYS",
+    "RETRY_MINUTES",
+    "channel_setup",
     "compose_digest",
     "dashboard_url",
     "digest_senders",
@@ -598,6 +676,7 @@ __all__ = [
     "register_digest_sender",
     "render_html",
     "render_text",
+    "retry_delay",
     "run_digest_cycle",
     "send_digest",
     "subject",

@@ -223,3 +223,10 @@ def test_every_browser_read_rejects_changed_account_context_before_source_lookup
         response = client.get(api.BASE + suffix, headers=headers)
         assert response.status_code == 409, response.text
         assert "workspace changed" in response.json()["detail"]
+
+
+def test_non_ascii_review_context_header_is_refused_as_changed_not_a_server_error(setup):
+    client, _, _, _, _ = setup
+    response = client.get(api.BASE, headers={"X-Lightwork-Review-Context": "contéxt".encode()})
+    assert response.status_code == 409, response.text
+    assert "workspace changed" in response.json()["detail"]

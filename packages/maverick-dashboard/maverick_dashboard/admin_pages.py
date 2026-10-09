@@ -963,6 +963,23 @@ def _people(users: dict, labels: dict, extra) -> list[dict]:
     return sorted(seen.values(), key=lambda p: p["label"].lower())
 
 
+def known_people(role_map: dict, all_invites, verified: dict | None = None) -> tuple[list[dict], dict[str, str]]:
+    """The installation's people for every picker, and the readable label per sign-in id.
+
+    One source for the Users page and Departures: explicit role holders, people
+    who joined by an accepted invitation (installation-wide or into a
+    workspace), department grants, installation administrators and people who
+    have signed in. ``verified`` adds labels from company sign-in checks.
+    ``all_invites`` is passed in so each caller chooses how an unreadable
+    invitation store is handled."""
+    from . import suite_grants
+
+    labels = _invite_labels(all_invites)
+    labels.update(verified or {})
+    extra = [*suite_grants.list_grants(), *suite_grants.admin_principals(), *_signed_in_principals()]
+    return _people(role_map, labels, extra), labels
+
+
 def _users_context(request: Request) -> dict:
     """Template context for the /users page (shared with the invite handler)."""
     import os as _os
@@ -1051,6 +1068,8 @@ def _users_context(request: Request) -> dict:
              "invite_revoked": "Invitation revoked.",
              "role_saved": "Custom role saved.",
              "role_deleted": "Custom role deleted.",
+             "roster_reset": ("A new, empty role list was started. Earlier assignments are gone; "
+                              "assign roles again before relying on them."),
              "channel_linked": "Chat account linked.",
              "channel_unlinked": "Chat account unlinked."}.get(
         request.query_params.get("saved", ""), "")
@@ -1074,11 +1093,9 @@ def _users_context(request: Request) -> dict:
         all_invites = []
     workspace_options, wm_tenant = _workspace_options(request)
     role_map = rbac.list_users()
-    labels = _invite_labels(all_invites)
     from .company_signin_tests import verified_people
-    labels.update(verified_people(request))
+    people, labels = known_people(role_map, all_invites, verified_people(request))
     grants = suite_grants.list_grants()
-    people = _people(role_map, labels, [*grants, *bootstrap, *_signed_in_principals()])
     from .access_explanations import role_descriptions, standard_role
     from .first_login_defaults import preview as first_login_preview
     from .identity_format import role_label
@@ -1134,7 +1151,21 @@ def _users_context(request: Request) -> dict:
         "workspace_options": workspace_options,
         "wm_tenant": wm_tenant,
         "workspace_names": workspace_names,
+        "passphrase_resets": _passphrase_resets(request),
     }
+
+
+def _passphrase_resets(request: Request) -> dict | None:
+    """Colleagues whose passphrase this caller may reset, or None when the
+    caller may not reset any (only the installation owner)."""
+    from . import passphrase_resets
+    caller = passphrase_resets.can_reset(request)
+    if caller is None:
+        return None
+    try:
+        return {"accounts": passphrase_resets.accounts(caller), "unavailable": False}
+    except HTTPException:
+        return {"accounts": [], "unavailable": True}
 
 
 def _people_filter(request: Request, role_map: dict, labels: dict) -> dict:
@@ -1216,8 +1247,66 @@ def users_bulk_undo(request: Request, restore: list[str] = Form(default=[])) -> 
 def users_page(request: Request) -> HTMLResponse:
     """Admin: manage dashboard user roles (admin / operator / auditor / viewer)."""
     auth.require_permission(request, "admin")
-    return _app().templates.TemplateResponse(request, "users.html",
-                                             _users_context(request))
+    from . import rbac
+    try:
+        context = _users_context(request)
+    except rbac.RosterMissingError:
+        # Only an installation administrator (a configured bootstrap admin
+        # while roles are unreadable) may see or start the recovery.
+        auth.require_global_permission(request, "admin")
+        return _app().templates.TemplateResponse(request, "error.html", {
+            "status": 503, "title": "The role list is missing",
+            "message": ("Lightwork recorded a role list on this installation, but it is missing, so "
+                        "nobody's stored role is used and no access is granted from it. Restore "
+                        "dashboard-users.json (and dashboard-tenant-roles.json) from a backup, or "
+                        "start a new, empty role list and assign roles again."),
+            "path": request.url.path, "gate": "roster_missing", "reauthenticate": "", "feature": {},
+        }, status_code=503, headers={"Cache-Control": "private, no-store"})
+    return _app().templates.TemplateResponse(request, "users.html", context)
+
+
+@router.post("/users/roster/reset")
+def users_roster_reset(request: Request, confirm: str = Form("")) -> RedirectResponse:
+    """Explicitly start new, empty role lists where recorded ones are missing.
+
+    Recovery for an installation administrator when no backup can be
+    restored. Present rosters, including corrupt ones, are never replaced.
+    """
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    if confirm != "reset":
+        raise HTTPException(status_code=422, detail="Confirm that earlier role assignments are gone before starting a new role list.")
+    step_up.require_recent_mfa(request, "change_role")
+    from . import rbac
+    if not rbac.reset_missing_rosters(actor=auth.caller_principal(request) or "local"):
+        raise HTTPException(status_code=409, detail="No missing role list was found. Nothing was changed.")
+    return RedirectResponse("/users?saved=roster_reset", status_code=303)
+
+
+@router.post("/users/passphrase-reset", response_class=HTMLResponse)
+def users_passphrase_reset(request: Request, email: str = Form(...), confirm: str = Form("")) -> HTMLResponse:
+    """Reset a colleague's forgotten passphrase, or give a person with access but no
+    passphrase a first link, and show its one-time link ONCE.
+
+    Only the installation owner; never a workspace administrator or an
+    administrator named in configuration (see :mod:`passphrase_resets`)."""
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import local_passphrases, passphrase_resets
+    if not local_passphrases.available():
+        raise HTTPException(status_code=404, detail="Passphrase sign-in is not used in this workspace.")
+    passphrase_resets.actor(request)
+    if confirm != "reset":
+        raise HTTPException(status_code=422, detail=(
+            "Confirm the reset: it removes this person's passphrase and signs them out everywhere."))
+    step_up.require_recent_mfa(request, "reset_passphrase")
+    token, record = passphrase_resets.issue(request, email)
+    link = str(request.base_url).rstrip("/") + f"/auth/invite/reset/{token}"
+    return _app().templates.TemplateResponse(request, "users.html", {
+        **_users_context(request), "passphrase_reset_link": link,
+        "passphrase_reset_email": record["email"], "passphrase_reset_expires_at": record["expires_at"],
+        "passphrase_reset_first": record["first"],
+    }, headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/users/access", response_class=HTMLResponse)
@@ -1301,6 +1390,7 @@ def users_remove(request: Request, principal: str = Form(...), expected_standard
 def users_first_login_baseline(request: Request, expected_revision: str = Form(...), confirm: str = Form(...)):
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
+    step_up.require_recent_mfa(request, "change_role")
     if confirm != "existing-unassigned":
         raise HTTPException(422, "Review how existing unassigned accounts will change.")
     from .first_login_defaults import apply_conservative
@@ -1360,6 +1450,35 @@ def users_delete_custom_role(
     return RedirectResponse("/users?saved=role_deleted", status_code=303)
 
 
+def _existing_account_refusal(request: Request, email: str, *, scoped: bool = False,
+                              **payload) -> HTTPException:
+    """An invitation for someone who can already sign in: recorded and refused.
+
+    An installation administrator can already see every account, so they are told
+    why. A workspace administrator is told only that the invitation could not be
+    made: the same words whichever store matched and whether the person belongs
+    to another workspace, so the refusal cannot be used to look people up.
+    """
+    from .local_passphrases import ACCOUNT_EXISTS, NOT_INVITABLE
+    from .product_errors import background_save, product_error
+
+    _admin_audit(request, "invite_refused", email=(email or "").strip().lower(),
+                 reason="existing_local_account", **payload)
+    message = NOT_INVITABLE if scoped else ACCOUNT_EXISTS
+    if background_save(request):
+        return product_error(409, "invite_not_created" if scoped else "invite_existing_account",
+                             message, field_errors={"email": message})
+    return HTTPException(status_code=409, detail=message)
+
+
+def _invite_rate_refusal(request: Request, exc: Exception) -> HTTPException:
+    from .product_errors import background_save, product_error
+
+    if background_save(request):
+        return product_error(429, "invite_rate_limited", str(exc))
+    return HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": "600"})
+
+
 def _invite_refusal(reason: str) -> HTTPException:
     """An invite the store refused, in words for the person who typed it."""
     from .product_errors import product_error
@@ -1408,6 +1527,8 @@ def users_invite(request: Request, email: str = Form(...),
             guard()
             inv, token = invites.create_invite(email, role, created_by=invited_by,
                                               ttl_hours=ttl, before_effect=guard)
+    except invites.ExistingAccountError as exc:
+        raise _existing_account_refusal(request, email) from exc
     except ValueError as exc:
         from .product_errors import background_save
         if background_save(request):
@@ -1493,6 +1614,11 @@ def users_workspace_invite(
                 workspace_admin_invite=not installation_admin,
                 ttl_hours=ttl, before_effect=guard,
             )
+        except invites.ExistingAccountError as exc:
+            raise _existing_account_refusal(request, email, scoped=not installation_admin,
+                                            workspace=tenant) from exc
+        except invites.InviteRateLimited as exc:
+            raise _invite_rate_refusal(request, exc) from exc
         except ValueError as exc:
             from .product_errors import background_save
             if background_save(request):

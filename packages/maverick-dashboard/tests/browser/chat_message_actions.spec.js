@@ -37,8 +37,10 @@ test('a saved answer exposes the product and its print, copy, download and share
   await info.attach('print-view', {body: await page.screenshot({fullPage: true}), contentType: 'image/png'});
   await page.emulateMedia({media: 'screen'});
 
+  const answerActions = page.getByRole('group', {name: 'Answer actions', exact: true});
+  await expect(answerActions.getByRole('link', {name: 'Download Word document'})).toHaveAttribute('href', `/chat/goal/${fixture.review_goal}/download.docx`);
   const downloaded = page.waitForEvent('download');
-  await page.getByRole('link', {name: 'Download answer'}).click();
+  await answerActions.getByRole('link', {name: 'Download Markdown'}).click();
   expect((await downloaded).suggestedFilename()).toBe(`lightwork-answer-${fixture.review_goal}.md`);
 
   await page.getByRole('button', {name: 'Share', exact: true}).click();
@@ -130,7 +132,7 @@ test('message actions arrive after live completion without losing a reply or pri
   await earlier.getByRole('button', {name: 'Copy answer'}).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('Earlier answer as originally delivered.');
   const priorDownload = page.waitForEvent('download');
-  await earlier.getByRole('link', {name: 'Download answer'}).click();
+  await earlier.getByRole('link', {name: 'Download Markdown'}).click();
   const savedPrior = await priorDownload;
   const stream = await savedPrior.createReadStream();
   const chunks = [];
@@ -148,7 +150,7 @@ test('message actions arrive after live completion without losing a reply or pri
   await actions.getByRole('button', {name: 'Copy answer'}).click();
   await expect.poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).replace(/\r\n/g, '\n'))).toBe('## Finished answer\n\nDelivery is planned for Friday.');
   const downloaded = page.waitForEvent('download');
-  await actions.getByRole('link', {name: 'Download answer'}).click();
+  await actions.getByRole('link', {name: 'Download Markdown'}).click();
   expect((await downloaded).suggestedFilename()).toBe(`lightwork-answer-${fixture.goal_id}.md`);
   await actions.getByRole('button', {name: 'Share', exact: true}).click();
   await page.getByRole('button', {name: 'Review share link'}).click();

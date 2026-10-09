@@ -38,6 +38,7 @@ test("never-settling probes abort and expose recovery by elapsed six seconds", a
   const app = harness();
   await app.advance(6000);
   assert.equal(app.nodes.trouble.style.display, "block");
+  await app.advance(200);
   assert.ok(app.calls.length >= 2);
   assert.equal(app.calls[0].command, "dashboard_readiness");
   assert.notEqual(app.nodes.retry.disabled, true);
@@ -58,6 +59,16 @@ test("old success cannot navigate after retry but current usable onboarding does
   await app.advance(10000);
   assert.equal(app.navigation.length, 1);
   assert.equal(app.timers.size, 0);
+});
+
+test("a native answer inside its own connect and header budget still navigates", async () => {
+  const app = harness();
+  // Windows refuses a free port after about 2 s; a connection that opens late
+  // then has up to 2 s for its headers. Neither may be thrown away.
+  await app.advance(5000);
+  assert.equal(app.calls.length, 1);
+  app.calls[0].resolve({service: "lightwork-dashboard", state: "ready"}); await app.flush();
+  assert.deepEqual(app.navigation, ["http://127.0.0.1:8765/"]);
 });
 
 test("connection refusal retries and a slow startup recovers once", async () => {

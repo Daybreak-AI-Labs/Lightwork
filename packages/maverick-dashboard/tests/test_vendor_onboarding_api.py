@@ -1437,6 +1437,16 @@ def test_existing_dashboard_page_and_asset_are_usable(web):
     assert "innerHTML" not in asset.text
 
 
+def test_offline_demonstration_page_renders_its_request_form(web, monkeypatch):
+    """The demonstration hides setup, but the request form still has its error summary."""
+    client, *_ = web
+    monkeypatch.setattr(client.app.state, "vendor_onboarding_demo", True, raising=False)
+    response = client.get("/third-party/vendor-onboarding")
+    assert response.status_code == 200, response.text[:500]
+    assert "Offline simulation." in response.text
+    assert 'id="vo-intake-errors"' in response.text and 'id="vs-form"' not in response.text
+
+
 def test_vendor_page_gives_local_operator_an_individual_signin_path(web, monkeypatch):
     client, *_ = web
     monkeypatch.setattr("maverick_dashboard.vendor_onboarding_page.caller_principal", lambda _request: None)

@@ -523,6 +523,16 @@ def test_cross_tenant_resolution_fails_closed(store):
         )
 
 
+def test_non_ascii_tenant_resolution_is_not_found_not_type_error(store):
+    # Tenant ids may be any Unicode text; another tenant's name is a miss.
+    authority, _clock = store
+    record = ingest(store)
+    with pytest.raises(vault.VaultNotFound):
+        authority.resolve_authority(
+            "tenant-é", "principal-a", record.document_ref
+        )
+
+
 def test_historical_metadata_window_reaches_past_recent_five_hundred(store):
     authority, clock = store
     oldest = ingest(store)

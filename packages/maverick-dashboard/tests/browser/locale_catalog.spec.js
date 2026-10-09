@@ -31,8 +31,8 @@ test('English pages load no catalog and keep English product copy',async({page,c
   const requested=[];page.on('request',request=>{if(catalogPath.test(new URL(request.url()).pathname))requested.push(request.url());});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await chooseInterface(page,'en');await page.reload();
-  await expect(page.locator('.composer details > summary [data-product-copy]')).toHaveText(labels.en);
-  await expect(page.locator('.composer details > summary [data-product-copy]')).toHaveAttribute('lang','en');
+  await expect(page.locator('.composer details:has(textarea[name="description"]) > summary [data-product-copy]')).toHaveText(labels.en);
+  await expect(page.locator('.composer details:has(textarea[name="description"]) > summary [data-product-copy]')).toHaveAttribute('lang','en');
   await expect(page.locator('script[src*="/static/lightwork-i18n-catalog/"]')).toHaveCount(0);
   await expect(page.locator('link[href*="/static/lightwork-i18n-catalog/"]')).toHaveCount(0);
   expect(await page.evaluate(()=>window.LightworkI18n.text('Add details'))).toBe(labels.en);
@@ -55,8 +55,8 @@ for(const language of Object.keys(labels).filter(language=>language!=='en'))test
   expect(JSON.parse(metadata)).toMatchObject({language});expect(JSON.parse(metadata).catalog).toBeUndefined();
   expect(await page.evaluate(()=>window.LightworkJourneyCatalog.language)).toBe(language);
   const actual=language==='ar'?'en':language;
-  await expect(page.locator('.composer details > summary [data-product-copy]')).toHaveText(labels[language]);
-  await expect(page.locator('.composer details > summary [data-product-copy]')).toHaveAttribute('lang',actual);
+  await expect(page.locator('.composer details:has(textarea[name="description"]) > summary [data-product-copy]')).toHaveText(labels[language]);
+  await expect(page.locator('.composer details:has(textarea[name="description"]) > summary [data-product-copy]')).toHaveAttribute('lang',actual);
   // This status is created by the actual budget controller after the external
   // script loads, rather than being a server-rendered translation alone.
   await page.locator('[data-budget-launch] > summary').click();
@@ -122,7 +122,7 @@ test('an unavailable catalog keeps dynamic product fallback marked as English',a
   await chooseInterface(page,'fr');
   await page.route('**/static/lightwork-i18n-catalog/**',route=>route.abort('failed'));
   await page.reload();await page.locator('[data-budget-launch] > summary').click();
-  await expect(page.locator('.composer details > summary [data-product-copy]')).toHaveText(labels.fr);
+  await expect(page.locator('.composer details:has(textarea[name="description"]) > summary [data-product-copy]')).toHaveText(labels.fr);
   await expect(page.locator('[data-budget-summary] a')).toHaveAttribute('lang','en');
   expect(await page.evaluate(()=>window.LightworkI18n.text('Add details'))).toBe(labels.en);
 });

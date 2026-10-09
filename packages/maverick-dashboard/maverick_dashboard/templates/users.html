@@ -102,6 +102,29 @@
   </section>
   {% endif %}
   </div>
+  {% if passphrase_reset_link %}
+  {# The one-time reset link, shown once and given focus like an invite link. #}
+  <section class="panel users-saved" id="passphrase-reset-result" tabindex="-1" aria-labelledby="passphrase-reset-title">
+    {% if passphrase_reset_first %}
+    <strong id="passphrase-reset-title">Sign-in link for {{ passphrase_reset_email }}.</strong>
+    <p class="muted users-help">They have access but no passphrase yet. Send them this link so they can choose one.
+      It is shown only once, works once and expires {{ passphrase_reset_expires_at | datetime('absolute') }}.
+      Anyone who opens it can choose the passphrase, so send it only to them.</p>
+    {% else %}
+    <strong id="passphrase-reset-title">Passphrase reset for {{ passphrase_reset_email }}.</strong>
+    <p class="muted users-help">Their old passphrase no longer works and they are signed out everywhere. Send them
+      this link so they can choose a new passphrase. It is shown only once, works once and expires
+      {{ passphrase_reset_expires_at | datetime('absolute') }}. Anyone who opens it can choose the passphrase, so
+      send it only to them.</p>
+    {% endif %}
+    <div class="users-row-form">
+      <label class="users-field users-grow"><span>Reset link</span>
+        <input class="input" id="passphrase-reset-link" type="text" readonly value="{{ passphrase_reset_link }}" />
+      </label>
+      <button type="button" class="btn" data-copy-target="passphrase-reset-link">Copy link</button>
+    </div>
+  </section>
+  {% endif %}
 
   {% if not auth_on %}
   <div class="panel users-note">
@@ -435,6 +458,51 @@
       <button type="submit" class="btn btn--danger">Review cancellation</button>
     </form>
     {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% set pr = passphrase_resets | default(none) %}
+  {% if pr is not none %}
+  <div class="section-head"><h2 id="passphrases">Passphrases</h2></div>
+  <div class="panel">
+    <p class="muted settings-lead">Colleagues sign in with their email and a passphrase. If someone has forgotten
+      theirs, reset it here. Their old passphrase stops working and they are signed out everywhere. You get a
+      one-time link to send them so they can choose a new one. People who have access but no passphrase yet
+      are listed too: create a link for them to choose one. The installation owner's passphrase is not
+      reset here.</p>
+    {% if pr.unavailable %}
+    <p role="alert">Passphrase resets are unavailable right now. Ask your administrator to check Lightwork.</p>
+    {% elif pr.accounts %}
+    <ul class="users-list">
+      {% for account in pr.accounts %}
+      <li>
+        <span class="users-grow">{{ account.email }}{% if account.waiting %}<br><span class="muted users-help">Waiting
+          to choose a passphrase. Create another link if the last one was lost or has expired.</span>{% elif account.first %}<br><span class="muted users-help">Has
+          access but no passphrase yet.</span>{% endif %}</span>
+        {% if account.has_passphrase %}
+        <form method="post" action="/users/passphrase-reset" class="users-inline"
+              data-users-confirm="Reset the passphrase for {{ account.email }}? Their current passphrase stops working and they are signed out everywhere. You get a one-time link to send them." data-users-ok="Reset passphrase">
+          {{ workspace_binding() }}
+          <input type="hidden" name="email" value="{{ account.email }}" />
+          <input type="hidden" name="confirm" value="reset" />
+          <button type="submit" class="btn" aria-label="Reset passphrase for {{ account.email }}">Reset passphrase</button>
+        </form>
+        {% else %}
+        <form method="post" action="/users/passphrase-reset" class="users-inline"
+              data-users-confirm="Create a sign-in link for {{ account.email }}? They have no passphrase now. You get a one-time link to send them so they can choose one." data-users-ok="Create link">
+          {{ workspace_binding() }}
+          <input type="hidden" name="email" value="{{ account.email }}" />
+          <input type="hidden" name="confirm" value="reset" />
+          <button type="submit" class="btn" aria-label="Create a sign-in link for {{ account.email }}">Create sign-in link</button>
+        </form>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">No colleague signs in with a passphrase yet. Colleagues choose theirs when they accept an
+      invitation, so <a href="#invite-email">invite someone from the Invite section above</a>.</p>
     {% endif %}
   </div>
   {% endif %}
@@ -813,7 +881,7 @@
       });
     }
     // Land on the one-time link just created (rendered first on the page).
-    var inviteResult = document.getElementById('invite-result');
+    var inviteResult = document.getElementById('invite-result') || document.getElementById('passphrase-reset-result');
     if (inviteResult) inviteResult.focus();
   })();
   </script>

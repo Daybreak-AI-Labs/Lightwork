@@ -41,7 +41,8 @@ def _fresh_world(tmp_path, monkeypatch):
 def test_guarantees_hold_under_concurrent_clients(tmp_path):
     proof = load_harness.run_load(
         tmp_path / "world.db", workers=4, requests=6)
-    assert proof["ok"] is True, proof
+    # A string message: pytest shortens a long non-string one past the failing response.
+    assert proof["ok"] is True, f"{proof['checks']} {proof.get('unexpected')} {proof.get('statuses')}"
     assert proof["checks"]["no_5xx"] is True
     assert proof["checks"]["contended_name_is_one_record"] is True
     assert proof["checks"]["requests_all_metered"] is True
@@ -62,7 +63,8 @@ def test_guarantees_hold_over_a_real_loopback_socket(tmp_path):
     the app's CSRF check (correctly) refused."""
     proof = load_harness.run_load(
         tmp_path / "world.db", workers=2, requests=2, transport="http")
-    assert proof["ok"] is True, proof
+    # A string message: pytest shortens a long non-string one past the failing response.
+    assert proof["ok"] is True, f"{proof['checks']} {proof.get('unexpected')} {proof.get('statuses')}"
     assert proof["transport"] == "http"
     assert proof["requests_issued"] == 2 * 2 * 5
     assert set(proof["statuses"]) <= {"200", "201", "409"}

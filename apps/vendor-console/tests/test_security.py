@@ -24,6 +24,19 @@ def test_totp_matches_within_window_and_rejects_outside():
     assert security.totp_verify(secret, "notacode", at=t) is False
 
 
+def test_non_ascii_digits_are_a_wrong_code_not_a_crash():
+    secret = security.new_totp_secret()
+    t = 1_700_000_000
+    # str.isdigit() accepts other scripts' digits, e.g. Arabic-Indic ones.
+    code = "\u0661\u0662\u0663\u0664\u0665\u0666"
+    assert code.isdigit()
+    assert security.totp_match_step(secret, code, at=t) is None
+
+
+def test_non_ascii_stored_hash_is_a_rejection_not_a_crash():
+    assert security.verify_password("x", "pbkdf2_sha256$1000$00$" + "é" * 64) is False
+
+
 def test_session_sign_verify_tamper_and_expiry():
     key = b"k" * 32
     tok = security.sign_session({"sid": 7, "stage": "full"}, key, ttl=100)

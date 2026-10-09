@@ -201,3 +201,23 @@ def test_native_maintenance_reparse_files_and_ancestors_are_refused(tmp_path, mo
     report = diagnostics.collect(runner, tmp_path / "missing", output)
     assert report["files"] == []
     assert list(output.iterdir()) == [output / "manifest.json"]
+
+
+def test_native_dashboard_stacks_survive_file_cap_after_reports(tmp_path):
+    runner = tmp_path / "runner"
+    native = runner / "native-webview-fixture"
+    native.mkdir(parents=True)
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    (native / "acceptance.json").write_text('{"failed_phase":"first-launch-and-named-owner"}')
+    (native / "dashboard-stacks.txt").write_text("process 0\nthread MainThread (idle)\n  app.py:1350:_lifespan\n")
+    (native / "state").mkdir()
+    (native / "state/private.txt").write_text("PRIVATE STATE")
+    for index in range(40):
+        (runner / f"lightwork-msi-{index:02d}.log").write_text("Earlier installer output")
+    report = diagnostics.collect(runner, tmp_path / "artifacts", tmp_path / "output")
+    sources = [row["source"] for row in report["files"]]
+    assert len(sources) == 32
+    assert sources[:2] == ["native-webview-fixture/acceptance.json", "native-webview-fixture/dashboard-stacks.txt"]
+    combined = "\n".join(path.read_text() for path in (tmp_path / "output").iterdir())
+    assert "app.py:1350:_lifespan" in combined and "PRIVATE" not in combined

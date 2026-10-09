@@ -32,6 +32,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .constant_time import text_equals
+
 SEGMENT_HEADER_SCHEMA = "lightwork.ai-evidence-receipt-segment.v1"
 SEGMENT_HEADER_EVENT = "ai_evidence_receipt_segment_opened"
 INDEX_STATE_SCHEMA = "lightwork.ai-evidence-receipt-index-state.v1"
@@ -1518,7 +1520,7 @@ class SegmentedReceiptLedger:
             connection = None
         if connection is not None:
             try:
-                index_matches = hmac.compare_digest(
+                index_matches = text_equals(
                     _canonical_json(self._metadata(connection)),
                     _canonical_json(self._metadata_for_state(state)),
                 ) and self._index_shape_matches(connection, state)

@@ -419,6 +419,42 @@ class TestDsar:
         assert artifact["_lightwork_export"]["intent"]["request_id"] == second["id"]
         assert len(second_done["fulfillment"]["artifact_sha256"]) == 64
 
+    def test_planted_export_with_non_ascii_digest_is_regenerated(self, monkeypatch):
+        import maverick.audit as audit
+        from maverick import dsar
+        from maverick.file_lock import atomic_write_text, ensure_private_directory
+        from maverick.paths import data_dir
+
+        monkeypatch.setattr(audit, "record", lambda *a, **k: True)
+        calls = []
+
+        def fake_export(user_id, *, channel=None, tenant=None):
+            calls.append((user_id, channel, tenant))
+            return {
+                "subject": {"user_id": user_id, "channel": channel},
+                "tenant": tenant,
+                "counts": {"facts": 1},
+            }
+
+        monkeypatch.setattr(dsar, "export_subject_data", fake_export)
+        opened = privacy_ops.open_dsar("alice", "access", channel="email")
+        out_dir = ensure_private_directory(data_dir("dsar_requests") / "exports")
+        path = out_dir / f"{opened['id']}-export.json"
+        privacy_ops._write_dsar_export_artifact(
+            path,
+            privacy_ops._dsar_export_intent(opened),
+            {"subject": {"user_id": opened["subject_id"], "channel": "email"},
+             "tenant": None, "counts": {"facts": 1}},
+        )
+        artifact = json.loads(path.read_text(encoding="utf-8"))
+        artifact["_lightwork_export"]["sha256"] = "é" * 64
+        atomic_write_text(path, json.dumps(artifact), mode=0o600)
+
+        done = privacy_ops.fulfill_dsar(opened["id"])
+        assert done is not None and done["status"] == "fulfilled"
+        assert calls == [(opened["subject_id"], "email", None)]
+        assert len(done["fulfillment"]["artifact_sha256"]) == 64
+
     def test_crash_after_artifact_write_reuses_bound_export(self, monkeypatch):
         import maverick.audit as audit
         from maverick import dsar
@@ -1875,3 +1911,23 @@ class TestDsarOutcomes:
         assert dsar["answered"] == 2
         assert dsar["handled_on_time"] == 1
         assert dsar["answered_late"] == 1
+
+
+def test_every_webhook_event_the_privacy_records_emit_is_in_the_catalogue():
+    # webhook_events.emit drops an unlisted name with a warning, so a typo or an
+    # invented name means subscribers silently receive nothing.
+    import re
+
+    from maverick import webhook_events
+
+    source = (Path(privacy_ops.__file__)).read_text(encoding="utf-8")
+    emitted = set(re.findall(r'_emit_record_event\(\s*"([a-z_.]+)"', source))
+    assert "dsar.opened" in emitted and "incident.closed" in emitted
+    assert emitted <= set(webhook_events.EVENT_TYPES)
+
+
+def test_revising_the_affected_people_sends_no_event_the_catalogue_does_not_know(caplog):
+    incident = privacy_ops.open_incident("Misdirected batch", affected_people=120, reported_by="ops")
+    with caplog.at_level("WARNING", logger="maverick.webhook_events"):
+        privacy_ops.set_incident_affected_people(incident["id"], 80, updated_by="ops")
+    assert "unknown event type" not in caplog.text

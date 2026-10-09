@@ -15,7 +15,8 @@ test('the Chat composer submits a long, multiline message without flattening or 
   await message.fill(firstLine);
   await message.press('Shift+Enter');
   await message.type('Keep this second line and its meaning.');
-  await page.locator('form.composer details > summary').click();
+  // The composer also has specialist and AI choices; open the one that holds the details.
+  await page.locator('form.composer details:has(textarea[name="description"]) > summary').click();
   await page.locator('textarea[name="description"]').fill('Use the attached evidence.');
   await expect(message).toHaveValue(firstLine + '\nKeep this second line and its meaning.');
   await message.press('Enter');

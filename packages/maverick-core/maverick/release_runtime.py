@@ -131,7 +131,7 @@ def verify_release_checkpoint_storage_runtime() -> None:
     from .audit.checkpoint_custody import _client
 
     client = _client({"token": json.dumps({"access_key_id": "AKIA" + "0" * 16,
-        "secret_access_key": "fictional-release-key" * 2, "region": "us-east-1"})}, "us-east-1")
+        "secret_access_key": "fictional-release-key" * 2, "region": "us-east-1"})}, "us-east-1")  # pragma: allowlist secret -- fictional key; no request is sent
     try:
         models = client.meta.service_model
         required = {"PutObject": {"IfNoneMatch", "ObjectLockMode", "ObjectLockRetainUntilDate"},

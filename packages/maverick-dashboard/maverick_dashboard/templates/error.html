@@ -12,6 +12,12 @@
   {% endset %}
   {% if gate == 'retry' and ut is defined %}{% set title = ut(title) %}{% set message = ut(message) %}{% endif %}
   {{ hero('', title, lede=message, title_id='request-error-title', actions=error_actions) }}
+  {% if gate == 'roster_missing' %}
+  <form class="panel" method="post" action="/users/roster/reset">
+    <p><label><input type="checkbox" name="confirm" value="reset" required> I understand earlier role assignments are gone and people get group roles or the default role until I assign roles again.</label></p>
+    <button type="submit" class="btn btn--danger">Start a new, empty role list</button>
+  </form>
+  {% endif %}
   {% if gate == 'off' and feature %}
     {# The feature is off, not forbidden: whoever may turn it on can do so here. #}
     {% from "_module_gate.html" import module_gate %}

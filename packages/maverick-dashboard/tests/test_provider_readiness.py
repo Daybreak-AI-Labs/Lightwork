@@ -270,6 +270,47 @@ def test_receipt_survives_a_fresh_process(workspace, monkeypatch, tmp_path):
     assert _row(readiness, "openai")["last_test"]["tested_at"] == stored["tested_at"]
 
 
+def test_two_workers_saving_receipts_at_once_do_not_drop_each_other(workspace, tmp_path, monkeypatch):
+    """Each dashboard worker holds only its own in-process lock, so the file's
+    read-modify-write has to serialize across processes. Worker one reads, then
+    worker two saves a receipt in full before worker one writes."""
+    import json
+    import threading
+    import time
+
+    from maverick_dashboard import integration_readiness
+
+    one_has_read, two_is_done = threading.Event(), threading.Event()
+    plain = integration_readiness._load_persisted
+
+    def load():
+        rows = plain()
+        if threading.current_thread().name == "worker-one":
+            one_has_read.set()
+            two_is_done.wait(0.5)
+        return rows
+
+    monkeypatch.setattr(integration_readiness, "_load_persisted", load)
+    receipt = {"status": "verified", "verified": True, "detail": "ok", "tested_at": time.time(),
+               "evidence": {}, "fingerprint": "f" * 64}
+
+    def worker_two():
+        one_has_read.wait(5)
+        integration_readiness._persist("two", receipt)
+        two_is_done.set()
+
+    threads = [
+        threading.Thread(target=integration_readiness._persist, args=("one", receipt), name="worker-one"),
+        threading.Thread(target=worker_two, name="worker-two"),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+    stored = json.loads(_receipts_file(tmp_path).read_text(encoding="utf-8"))["providers"]
+    assert set(stored) == {"one", "two"}
+
+
 def test_failed_receipt_survives_a_fresh_process_with_its_plain_reason(workspace, monkeypatch, tmp_path):
     import json
 

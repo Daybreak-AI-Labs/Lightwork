@@ -153,3 +153,76 @@ def test_off_by_default(tmp_path, monkeypatch):
         assert _deny(_agent(goal_id=9), "send_email", {}) is None and asked == []
     finally:
         config.reset_config_cache()
+
+
+def test_agents_asking_at_once_raise_one_prompt_and_share_its_answer(plan_on, monkeypatch):
+    import threading
+    import time
+
+    from maverick.safety import consent
+
+    asked = []
+
+    def slow_consent(action, **kw):
+        asked.append(action)
+        time.sleep(0.4)  # the person is still reading the card
+        return SimpleNamespace(granted=True)
+    monkeypatch.setattr(consent, "require_consent", slow_consent)
+    results, start = [], threading.Barrier(4)
+
+    def first_action(index):
+        start.wait()
+        results.append(_deny(_agent(goal_id=21), "send_email", {"to": f"agent{index}@example.com"}))
+    threads = [threading.Thread(target=first_action, args=(i,)) for i in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert results == [None] * 4
+    assert len(asked) == 1  # one plan decision per task run, however many agents act first
+
+
+def test_a_refused_prompt_is_shared_by_the_agents_that_waited_for_it(plan_on, monkeypatch):
+    import threading
+    import time
+
+    from maverick.safety import consent
+
+    asked = []
+
+    def slow_refusal(action, **kw):
+        asked.append(action)
+        time.sleep(0.3)
+        return SimpleNamespace(granted=False)
+    monkeypatch.setattr(consent, "require_consent", slow_refusal)
+    results, start = [], threading.Barrier(3)
+
+    def first_action():
+        start.wait()
+        results.append(_deny(_agent(goal_id=22), "send_email", {}))
+    threads = [threading.Thread(target=first_action) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert len(asked) == 1 and len(results) == 3
+    assert all(r and "nothing ran" in r for r in results)
+
+
+def test_runs_without_a_goal_do_not_share_one_cached_decision(plan_on, monkeypatch):
+    from maverick.safety import consent
+
+    answers = iter([False, True])
+    asked = []
+    monkeypatch.setattr(consent, "require_consent", lambda action, **kw: asked.append(action)
+                        or SimpleNamespace(granted=next(answers)))
+    refused = _agent(goal_id=0, episode_id=0)
+    assert "nothing ran" in _deny(refused, "send_email", {})
+    # An unrelated goal-less run asks for itself instead of inheriting the refusal...
+    other = _agent(goal_id=0, episode_id=0)
+    assert _deny(other, "send_email", {}) is None
+    assert len(asked) == 2
+    # ...while the agents of one run still share their run's answer.
+    assert "nothing ran" in _deny(refused, "http_fetch", {})
+    assert _deny(other, "http_fetch", {}) is None
+    assert len(asked) == 2

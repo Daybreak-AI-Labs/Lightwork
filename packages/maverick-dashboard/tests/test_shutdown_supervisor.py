@@ -209,6 +209,41 @@ def test_actual_base_lifespan_cleans_partial_start_and_preserves_boundary_refusa
     asyncio.run(run())
 
 
+def test_managed_local_server_stops_only_after_admission_closes_and_goals_drain(monkeypatch):
+    from fastapi import FastAPI
+    from maverick import control_plane_lease, deployment, installation_recovery, residency
+    from maverick_dashboard import _lifecycle, local_runtime_service
+    from maverick_dashboard import app as app_module
+
+    calls = []
+    monkeypatch.setattr(installation_recovery, "assert_normal_start_allowed", lambda: None)
+    monkeypatch.setattr(deployment, "require_enterprise_or_die", lambda: None)
+    monkeypatch.setattr(residency, "require_residency_or_die", lambda: None)
+    monkeypatch.setattr(control_plane_lease, "current", lambda: None)
+    monkeypatch.setattr(control_plane_lease, "acquire", lambda **_kwargs: None)
+    monkeypatch.setattr(control_plane_lease, "release", lambda: None)
+    monkeypatch.setattr(runner, "drain_inflight", lambda timeout: calls.append("drain") or 0)
+    monkeypatch.setattr(_lifecycle, "register_main_components", lambda _app, _supervisor: None)
+    monkeypatch.setattr(local_runtime_service, "shutdown",
+                        lambda: calls.append(("local_ai", runner._accepting_goals)))
+
+    async def fail_start():
+        raise RuntimeError("partial startup refusal")
+
+    monkeypatch.setattr(app_module, "_assert_dashboard_auth_configured", lambda: None)
+    monkeypatch.setattr(app_module, "_reclaim_orphans", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(app_module, "_install_queue_dispatcher", fail_start)
+
+    async def run():
+        with pytest.raises(RuntimeError, match="refusal"):
+            async with app_module._lifespan(FastAPI()):
+                pytest.fail("failed startup yielded")
+        # Goals running against the managed server finish before it is stopped,
+        # and nothing new is admitted while it goes.
+        assert calls == ["drain", ("local_ai", False)]
+    asyncio.run(run())
+
+
 def test_shutdown_refuses_new_http_work_and_readiness_but_keeps_liveness(monkeypatch):
     from fastapi.testclient import TestClient
     from maverick_dashboard.app import app

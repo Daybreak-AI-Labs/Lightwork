@@ -202,7 +202,9 @@
       operation_id:Array.from(bytes).map(function (item) { return item.toString(16).padStart(2,'0'); }).join('')};
     if (specialistRevision !== undefined) envelope.specialist_revision = specialistRevision;
     try {
-      sessionStorage.setItem(recoveryKey, JSON.stringify(envelope)); original = envelope; originalNew.hidden = true;
+      // Keeping the reference across a reload is a courtesy; a browser that refuses storage must not turn a request that was never sent into an "unconfirmed save".
+      try { sessionStorage.setItem(recoveryKey, JSON.stringify(envelope)); } catch (_) { /* this page still holds the original */ }
+      original = envelope; originalNew.hidden = true;
       originalMessage('Saving the reviewed preferences. If the reply is interrupted, check this original request before another save.');
       var response = await fetch('/api/v1/preferences', {method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify(envelope)});
@@ -247,7 +249,7 @@
     } catch (error) { originalMessage(error.message || 'The original save could not be read. Nothing was repeated.'); }
     finally { busy = false; syncAI(aiEffort && aiEffort.value); }
   });
-  originalNew.addEventListener('click', async function () { if (busy || originalNew.hidden) return; if (!(await window.mvConfirm('Keep this original result as read and begin a separate review of your entered choices against the current saved preferences? An unconfirmed earlier save will not be repeated.', {productCopy:true,okText:'Start a fresh review'}))) return; original = null; sessionStorage.removeItem(recoveryKey); originalPanel.hidden = true; originalNew.hidden = true; copy(status,'Your entered choices are kept. Review them separately before another save.'); });
+  originalNew.addEventListener('click', async function () { if (busy || originalNew.hidden) return; if (!(await window.mvConfirm('Keep this original result as read and begin a separate review of your entered choices against the current saved preferences? An unconfirmed earlier save will not be repeated.', {productCopy:true,okText:'Start a fresh review'}))) return; original = null; try { sessionStorage.removeItem(recoveryKey); } catch (_) { /* nothing was kept */ } originalPanel.hidden = true; originalNew.hidden = true; copy(status,'Your entered choices are kept. Review them separately before another save.'); });
   var profileStatus = document.getElementById('personal-profile-status');
   var exportButton = document.getElementById('personal-profile-export'), importButton = document.getElementById('personal-profile-import');
   function profileBusy(value) { if (exportButton) exportButton.disabled = value; if (importButton) importButton.disabled = value; }

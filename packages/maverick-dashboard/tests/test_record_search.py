@@ -133,6 +133,15 @@ def test_api_binds_account_and_workspace_before_collection(monkeypatch):
     assert calls == ["vendor"]
 
 
+def test_non_ascii_search_context_header_is_refused_before_collection(monkeypatch):
+    monkeypatch.setattr(api, "context_for", lambda request: "a" * 64)
+    monkeypatch.setattr(api, "sources_for", lambda request, kind: pytest.fail("non-ASCII context reached the sources"))
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+    response = client.post("/api/v1/records/search", headers={"X-Lightwork-Search-Context": "contéxt".encode()},
+                           json={"query": "Acme"})
+    assert response.status_code == 409
+
+
 def test_actual_vendor_store_tenant_isolation(monkeypatch):
     from maverick import vendor_management
     monkeypatch.setattr(vendor_management, "_require_enabled", lambda: None)

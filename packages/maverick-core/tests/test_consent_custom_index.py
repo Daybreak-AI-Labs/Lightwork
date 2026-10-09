@@ -234,6 +234,41 @@ def test_integrity_and_tenant_boundaries_fail_closed(tmp_path: Path) -> None:
         store.verify_integrity(TENANT)
 
 
+def test_non_ascii_stored_digests_are_refused_not_type_errors(tmp_path: Path) -> None:
+    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # of the idempotency conflict and integrity refusals.
+    path = tmp_path / "profiles.sqlite3"
+    _prepare_source(path)
+    store = _store(path)
+    kwargs = {
+        "index_id": "loyalty-index",
+        "element_name": "loyalty-tier",
+        "key_version": 1,
+        "retention_seconds": 86_400,
+        "idempotency_key": "create-index-0001",
+    }
+    store.create_index(TENANT, **kwargs)
+    with sqlite3.connect(path) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute("SELECT * FROM consent_custom_index_operations").fetchone()
+        body = {
+            "tenant_id": row["tenant_id"],
+            "operation_sha256": row["operation_sha256"],
+            "request_sha256": "é" * 64,
+            "result_id": row["result_id"],
+        }
+        connection.execute(
+            "UPDATE consent_custom_index_operations SET request_sha256=?,integrity_sha256=?",
+            ("é" * 64, _digest(body)),
+        )
+    with pytest.raises(ConsentCustomIndexConflict, match="different request"):
+        store.create_index(TENANT, **kwargs)
+    with sqlite3.connect(path) as connection:
+        connection.execute("UPDATE consent_custom_indexes SET integrity_sha256=?", ("é" * 64,))
+    with pytest.raises(ConsentCustomIndexIntegrityError):
+        store.get_index(TENANT, "loyalty-index")
+
+
 def test_exact_config_gates() -> None:
     complete = {
         "consent_preferences": {

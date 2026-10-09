@@ -25,7 +25,7 @@ DIGEST_B = hashlib.sha256(b"actor").hexdigest()
 
 @pytest.fixture(autouse=True)
 def _enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config, "config_source_errors", lambda: ())
+    monkeypatch.setattr(config, "config_source_errors", lambda **kwargs: ())
     monkeypatch.setattr(
         config,
         "load_config",

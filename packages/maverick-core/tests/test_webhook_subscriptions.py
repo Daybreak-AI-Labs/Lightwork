@@ -76,6 +76,19 @@ def test_url_validation_reuses_the_ssrf_guard(world, monkeypatch):
     assert subs.list_subscriptions(world=world) == []
 
 
+@pytest.mark.parametrize("address", [
+    "https://hooks.example.com:99999/x", "https://hooks.example.com:abc/x",
+    "https://hooks.example.com:0/x", "http://[::1", "https://[::1]:xyz/x",
+    "https://hooks .example.com/x",
+])
+def test_url_validation_rejects_malformed_hosts_and_ports_with_its_own_error(address):
+    # A plain ValueError from urllib would escape the API's SubscriptionError
+    # handling as a 500.
+    with pytest.raises(subs.SubscriptionError):
+        subs.validate_url(address)
+    assert subs.validate_url("https://hooks.example.com:8443/x") == "https://hooks.example.com:8443/x"
+
+
 def test_event_filter_normalisation_and_matching():
     assert subs.normalize_events("*") == ["*"] and subs.normalize_events(None) == ["*"]
     assert subs.normalize_events("dsar.*, incident.opened, dsar.*") == ["dsar.*", "incident.opened"]
@@ -175,6 +188,61 @@ def test_failed_delivery_retries_then_dead_letters(world, monkeypatch):
     assert row["status"] == "delivered" and row["delivered_at"] == pytest.approx(NOW + 60_000)
 
 
+class _FailingClient:
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def post(self, *args, **kwargs):
+        raise self.exc
+
+
+def _failing_send(world, monkeypatch, exc):
+    def client(url, timeout=None):
+        if isinstance(exc, _ssrf.BlockedHost):  # refused while resolving, before any client exists
+            raise exc
+        return _FailingClient(exc)
+    monkeypatch.setattr(_ssrf, "safe_client", client)
+    sub = subs.create_subscription("https://a.example.com/h", world=world)
+    ids = subs.enqueue("dsar.opened", "evt_1", b'{"x":1}',
+                       targets=[{"subscription_id": sub["id"], "url": sub["url"]}], world=world, now=NOW)
+    return ids[0]
+
+
+@pytest.mark.parametrize("make_exc", [
+    lambda httpx: httpx.ConnectError("connection refused"),
+    lambda httpx: httpx.ConnectTimeout("no route"),
+    lambda httpx: _ssrf.BlockedHost("cannot resolve 'a.example.com'"),
+])
+def test_a_send_that_never_reached_the_server_is_retried_on_the_backoff(world, monkeypatch, make_exc):
+    httpx = pytest.importorskip("httpx")
+    delivery_id = _failing_send(world, monkeypatch, make_exc(httpx))
+    row = subs.attempt_delivery(delivery_id, world=world, now=NOW, rng=lambda: 0.5)
+    assert row["status"] == "pending" and row["attempts"] == 1
+    assert row["next_attempt_at"] == pytest.approx(NOW + 60)
+    for step in range(1, 5):  # the documented five attempts, then dead-letter
+        subs.process_due(world=world, now=NOW + step * 10_000)
+    row = subs.get_delivery(delivery_id, world=world)
+    assert row["status"] == "dead" and row["attempts"] == subs.MAX_ATTEMPTS
+
+
+@pytest.mark.parametrize("make_exc", [
+    lambda httpx: httpx.ReadTimeout("no reply after the request was written"),
+    lambda httpx: httpx.RemoteProtocolError("connection reset mid-response"),
+])
+def test_a_send_that_may_have_reached_the_server_stays_unknown(world, monkeypatch, make_exc):
+    httpx = pytest.importorskip("httpx")
+    delivery_id = _failing_send(world, monkeypatch, make_exc(httpx))
+    row = subs.attempt_delivery(delivery_id, world=world, now=NOW)
+    assert row["status"] == "unknown" and row["next_attempt_at"] is None
+    assert subs.process_due(world=world, now=NOW + 100_000) == 0  # never replayed on its own
+
+
 def test_delivery_log_records_success(world):
     transport = _Transport(OK)
     sub = subs.create_subscription("https://a.example.com/h", secret="k", world=world)
@@ -213,6 +281,31 @@ def test_fire_records_a_delivery_for_the_legacy_config_list(world, monkeypatch):
                                      timestamp=headers["X-Maverick-Timestamp"])
     logged = subs.list_deliveries(world=world)
     assert logged[0]["subscription_id"] == subs.LEGACY_SUBSCRIPTION_ID and logged[0]["status"] == "delivered"
+
+
+def test_one_unverifiable_secret_does_not_stop_the_other_subscriptions(world, monkeypatch):
+    from maverick import crypto_at_rest
+    if not crypto_at_rest._have_crypto():
+        pytest.skip("cryptography not installed")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    healthy = subs.create_subscription("https://good.example.com/h", secret="good-secret", world=world)  # pragma: allowlist secret
+    legacy = subs.create_subscription("https://old.example.com/h", secret="old-secret", world=world)  # pragma: allowlist secret
+    # A pre-migration plaintext secret is withheld once strict mode is on.
+    subs._write(world, "UPDATE webhook_subscriptions SET secret = ? WHERE id = ?", ("old-secret", legacy["id"]))  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_ENCRYPT_STRICT", "1")
+    with pytest.raises(subs.SubscriptionError, match="could not be verified"):
+        subs.list_subscriptions(world=world)  # the admin listing still names the problem
+    transport = _Transport(OK)
+    monkeypatch.setattr(webhooks, "_post_result", transport)
+    monkeypatch.setattr(webhooks, "_submit", lambda executor, fn, *a: fn(*a) or True)
+
+    assert webhooks.fire("goal_created", {"goal_id": 1}, world=world) == 2
+    by_sub = {d["subscription_id"]: d for d in subs.list_deliveries(world=world)}
+    assert by_sub[healthy["id"]]["status"] == "delivered"
+    assert [call[0] for call in transport.calls] == ["https://good.example.com/h"]
+    # The bad one is recorded as a refused send in the delivery log, not silently dropped.
+    assert by_sub[legacy["id"]]["status"] == "dead"
+    assert "could not be verified" in by_sub[legacy["id"]]["last_error"]
 
 
 def test_fire_with_nothing_configured_is_a_no_op(world):

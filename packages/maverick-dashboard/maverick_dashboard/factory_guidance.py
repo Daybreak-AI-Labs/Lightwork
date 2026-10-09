@@ -459,16 +459,20 @@ def _run_restore(request, prepared, operation, expires, budget):
 def _proposal(client, prepared, case, system, budget, guard):
     errors = []
     spec = intake.IntakeSpec(case["name"], case["description"], goals=case["goals"])
+    def dispatch():
+        # The fence covers only this authority check, never the provider call.
+        with authority_effect_fence():
+            guard()
+
     def propose(_spec):
         try:
-            with authority_effect_fence():
-                guard()
-                answer = client.complete(system=system, messages=[{"role": "user", "content": intake._intake_prompt(spec)}],
-                                         budget=budget, max_tokens=1500)
-                parsed = intake._parse_proposal(answer.text)
-                if not parsed:
-                    raise ValueError("The AI service did not return a usable agent setup. The safe fallback is not comparison evidence.")
-                return parsed
+            dispatch()
+            answer = client.complete(system=system, messages=[{"role": "user", "content": intake._intake_prompt(spec)}],
+                                     budget=budget, max_tokens=1500, dispatch_guard=dispatch)
+            parsed = intake._parse_proposal(answer.text)
+            if not parsed:
+                raise ValueError("The AI service did not return a usable agent setup. The safe fallback is not comparison evidence.")
+            return parsed
         except Exception as exc:
             errors.append(exc)
             raise

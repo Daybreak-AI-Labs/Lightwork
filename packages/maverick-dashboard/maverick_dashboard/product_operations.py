@@ -21,7 +21,6 @@ from maverick import config, crypto_at_rest
 from maverick.governed_operations import digest
 from maverick.product_operation_families import FAMILIES
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from starlette.concurrency import run_in_threadpool
 
 from . import auth
 from .draft_api import context_for
@@ -678,7 +677,7 @@ def _model_proposal(message, choices):
 
 
 @router.post("/propose")
-async def propose(request: Request, body: ProposeInput):
+def propose(request: Request, body: ProposeInput):
     _same_origin(request)
     _read_gate(request)
     writes = _writes_enabled(request)
@@ -707,7 +706,7 @@ async def propose(request: Request, body: ProposeInput):
         if _any_provider_key_set():
             try:
                 require_provider_or_400(role="orchestrator")
-                operation = await run_in_threadpool(_model_proposal, body.message, available)
+                operation = _model_proposal(body.message, available)
                 source = "model"
             except Exception:
                 operation, source = None, "built_in_fallback"

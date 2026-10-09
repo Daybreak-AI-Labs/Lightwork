@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import secrets
 import time
 
@@ -79,8 +78,22 @@ def _guard(request, material, *, write=False):
         raise HTTPException(409, "The installation changed. Reopen Workspaces.")
     if write and time.time() >= material["expires_at"]:
         raise HTTPException(409, "This erasure review expired. Nothing further was erased. Check its original result and review the remaining records separately.")
-    if write and os.environ.get("MAVERICK_TENANT", "").strip() == material["workspace"]:
+    if write and _is_pinned_workspace(material["workspace"]):
         raise HTTPException(409, "This installation is fixed to that workspace. It cannot erase its own workspace here.")
+
+
+def _is_pinned_workspace(workspace):
+    """Whether ``workspace`` is the one this installation is bound to, by the
+    same identity the registry uses (NFC, surrounding space ignored), whether
+    the binding is ``MAVERICK_TENANT`` or ``[client] id``."""
+    from maverick.paths import canonical_tenant_id, implicit_tenant_id
+    pinned = implicit_tenant_id()
+    if not pinned:
+        return False
+    try:
+        return canonical_tenant_id(pinned.strip()) == canonical_tenant_id(str(workspace).strip())
+    except ValueError:
+        return pinned.strip() == str(workspace).strip()
 
 
 def changes(value):
@@ -116,12 +129,18 @@ def prepare(request, workspace, acknowledge_previous=False):
                          "changes": changes(value)})
         _guard(request, material, write=True)
         token = crypto_at_rest.seal_to_str(json.dumps(material, separators=(",", ":")))
+        if not crypto_at_rest.is_sealed_str(token):
+            raise HTTPException(503, "This complete review could not be retained securely. Nothing was erased.")
     return {"token": token, "operation": material["operation"], "context": context,
             "expires_at": material["expires_at"], "changes": material["changes"]}
 
 
 def _open(token):
     try:
+        # unseal_from_str hands back any text that is not sealed, so a typed-in
+        # JSON object would otherwise pass for a review this server prepared.
+        if not crypto_at_rest.is_sealed_str(token):
+            raise ValueError
         value = json.loads(crypto_at_rest.unseal_from_str(token))
         keys = {"purpose", "workspace", "context", "actor", "home", "operation", "expires_at",
                 "revision", "previous_attempt", "changes"}

@@ -58,6 +58,32 @@ test("typed parser rejects malformed or missing args before handler and keeps va
   assert.ok(!JSON.stringify(output).includes("secret-value"));
 });
 
+test("an asynchronous parser is refused, not handed to the handler as its arguments", async () => {
+  const unhandled: unknown[] = [];
+  const watch = (reason: unknown): void => { unhandled.push(reason); };
+  process.on("unhandledRejection", watch);
+  try {
+    let calls = 0;
+    // parseArgs is documented as synchronous; a Promise is an object, so it must not pass as args.
+    const asyncParser = (async (value: unknown) => {
+      if (!value || typeof value !== "object" || typeof (value as {who?: unknown}).who !== "string") throw new Error("secret-value-must-not-be-returned");
+      return {who: (value as {who: string}).who};
+    }) as unknown as ToolDef["parseArgs"];
+    const tool = defineTool({name: "fixture", description: "async parser", inputSchema: {type: "object"},
+      parseArgs: asyncParser, handler: () => { calls++; return "ran"; }});
+    const output = await run(tool, request({args: {}}) + request({args: {who: "Ada"}}));
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 0);
+    assert.ok(output.every(value => value.effect === "not_started" && typeof value.error === "string"));
+    assert.match(String(output[0].error), /synchronous/);
+    assert.ok(!JSON.stringify(output).includes("secret-value"));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off("unhandledRejection", watch);
+  }
+});
+
 test("deadline requests cancellation but retains handler ownership until cleanup", async () => {
   let cleanup = false;
   let calls = 0;

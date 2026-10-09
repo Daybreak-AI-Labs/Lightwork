@@ -115,3 +115,20 @@ def test_signing_in_again_returns_to_the_same_page_and_never_off_site():
                                data={"email": "owner@example.com", "password": PASSPHRASE})
             assert away.status_code == 303 and away.headers["location"] in {"/", "/start"}, unsafe
             client.cookies.clear()
+
+
+def test_a_renewal_that_cannot_be_used_leaves_the_current_sign_in_alone(monkeypatch):
+    from maverick_dashboard import session_expiry
+    with _client() as client:
+        _owner(client)
+        real = session_expiry._ends
+        calls = []
+
+        def ends(payload, **kwargs):
+            calls.append(payload)
+            return None if len(calls) == 2 else real(payload, **kwargs)     # the replacement is not usable
+
+        monkeypatch.setattr(session_expiry, "_ends", ends)
+        assert client.post("/auth/session/renew").status_code == 401
+        monkeypatch.setattr(session_expiry, "_ends", real)
+        assert client.get("/auth/session/status").status_code == 200       # still signed in

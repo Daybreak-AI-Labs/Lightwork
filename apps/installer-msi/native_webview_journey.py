@@ -14,7 +14,10 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 import time
+import urllib.error
+import urllib.request
 import uuid
 from itertools import islice
 from pathlib import Path
@@ -38,6 +41,86 @@ from native_webview_fixture import (
     update_server,
     webview_runtime,
 )
+
+# The desktop shell's fixed loopback dashboard port (apps/desktop-runtime probe_address).
+LOOPBACK_PORT = 8765
+# Fixed lines the desktop shell (apps/desktop-runtime) and the dashboard server
+# write while the owned dashboard starts; only these names leave the page.
+STARTUP_MARKERS = (
+    ("startup_begun", "Starting Lightwork on this computer."),
+    ("spawn_failed", "Lightwork could not start:"),
+    ("no_output", "No startup output was recorded."),
+    ("server_process", "Started server process"),
+    ("waiting_for_startup", "Waiting for application startup."),
+    ("startup_failed", "Application startup failed."),
+    ("startup_complete", "Application startup complete."),
+    ("listening", "Uvicorn running on"),
+    ("bind_failed", "error while attempting to bind"),
+    ("control_unavailable", "owned desktop control pipe is unavailable"),
+    ("control_closed", "owned desktop control channel closed"),
+    ("traceback", "Traceback (most recent call last)"),
+    ("exited", "Lightwork exited:"),
+    ("drain_requested", "Saving active work before closing Lightwork"),
+    ("drain_completed", "Lightwork completed graceful shutdown."),
+    ("drain_forced", "Graceful shutdown did not complete; stopping the owned process tree."),
+)
+STARTUP_ERROR_TYPES = (
+    "AssertionError", "AttributeError", "ClientBindingError", "ConfigError", "ConnectionError", "DatabaseError",
+    "EncryptionUnavailable", "FileExistsError", "FileNotFoundError", "ImportError", "IntegrityError",
+    "InvalidTenantError", "IsADirectoryError", "KeyError", "MemoryError", "ModuleNotFoundError", "NameError",
+    "NotADirectoryError", "OSError", "OperationalError", "PermissionError", "RecursionError", "RuntimeError",
+    "SystemExit", "TimeoutError", "TypeError", "UnicodeDecodeError", "UnicodeEncodeError", "ValidationError",
+    "ValueError",
+)
+STARTUP_PROCESS_STATES = ("running", "exited", "not_started", "unavailable", "unreported", "bridge_unavailable",
+                          "not_offered_on_recovery_page")
+_STARTUP_FRAME = re.compile(r"(?:[A-Za-z0-9_.-]{1,64}\.py|other):[0-9]{1,7}:[A-Za-z_<>][A-Za-z0-9_<>]{0,63}")
+_STARTUP_EXIT = re.compile(r"none|0x[0-9a-f]{1,8}|-?[0-9]{1,10}")
+# Pinned profiler, installed only into the disposable journey directory when
+# the app's own dashboard runs but never serves, to see where startup waits.
+PY_SPY = "py-spy==0.4.0"
+_SPY_THREAD = re.compile(r'Thread (?:0x)?[0-9A-Fa-f]{1,16} \(([a-z+ ]{1,32})\): "([^"\r\n]{0,128})"')
+_SPY_FRAME = re.compile(r"\s+([A-Za-z_<>][A-Za-z0-9_<>.]{0,63}) \((.+):([0-9]{1,7})\)")
+
+
+def reduced_stacks(dump: str, *, threads: int = 40, frames: int = 30) -> list[str]:
+    """Thread names and ``file.py:line:function`` frames from a py-spy dump.
+
+    The process line, paths, arguments and anything else are dropped."""
+    kept, seen, depth = [], 0, 0
+    for line in dump.splitlines():
+        if line.strip().startswith("Thread "):
+            seen += 1
+            if seen > threads:
+                break
+            thread = _SPY_THREAD.fullmatch(line.strip())
+            name = thread.group(2) if thread and re.fullmatch(r"[A-Za-z0-9_ .:-]{1,64}", thread.group(2)) else "other"
+            kept.append(f"thread {name} ({thread.group(1) if thread else 'unknown'})")
+            depth = 0
+            continue
+        frame = _SPY_FRAME.fullmatch(line)
+        if frame and seen and depth < frames:
+            base = re.split(r"[\\/]", frame.group(2))[-1]
+            base = base if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}\.py", base) else "other"
+            kept.append(f"  {base}:{frame.group(3)}:{frame.group(1)}")
+            depth += 1
+    return kept
+
+
+def dashboard_processes(listing, root: int) -> list[int]:
+    """``maverick.exe`` processes started by ``root``, including the frozen bootloader's child."""
+    children: dict[int, list[dict]] = {}
+    for row in listing if isinstance(listing, list) else [listing]:
+        if (isinstance(row, dict) and type(row.get("ProcessId")) is int
+                and type(row.get("ParentProcessId")) is int):
+            children.setdefault(row["ParentProcessId"], []).append(row)
+    found, queue = [], [root]
+    while queue and len(found) < 8:
+        for row in sorted(children.get(queue.pop(0), []), key=lambda item: item["ProcessId"]):
+            if str(row.get("Name", "")).lower() == "maverick.exe" and row["ProcessId"] not in found:
+                found.append(row["ProcessId"])
+                queue.append(row["ProcessId"])
+    return found
 
 
 def verified_driver_version(directory: Path, runtime_version: str, output: str) -> str:
@@ -182,6 +265,9 @@ class Journey:
         self.attach()
 
     def start(self, binary: Path | None = None, *arguments: str):
+        if "port_before_first_launch" not in self.report:
+            # The shell spawns no dashboard if one already answers at launch.
+            self.report["port_before_first_launch"] = self.loopback_probe()["listener"]
         self.active_binary = binary or self.binary
         self.app = subprocess.Popen([str(self.active_binary), *arguments], env=self.env, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -232,6 +318,7 @@ class Journey:
                 raise RuntimeError("Recovery mode reported a refusal.")
         except (OSError, RuntimeError, KeyError):
             self.report["recovery_entry"] = self.recovery_diagnostic()
+            self.report["recovery_startup"] = self.startup_process()
             self.record(self.report["phase"])
             raise RuntimeError("Native recovery mode did not open; bounded recovery_entry diagnostics were retained.") from None
         self.report["recovery_entry"] = observed
@@ -256,11 +343,15 @@ const detail = node ? (node.textContent || '').slice(0, 4096) : '';
 const reasons = [
   ['The previous workspace is still responding.', 'previous_workspace_running'],
   ['This workspace is managed outside the desktop app.', 'external_workspace'],
-  ['The selected workspace mode did not start.', 'startup_deadline'],
+  ['The selected workspace mode did not respond', 'startup_deadline'],
   ['Lightwork could not start:', 'launch_failed'],
   ['Open these controls from Lightwork Desktop.', 'native_bridge_unavailable'],
   ["Review and confirm this action in the app's recovery controls.", 'origin_refused'],
-  ['Startup state is unavailable.', 'state_unavailable']
+  ['Startup state is unavailable.', 'state_unavailable'],
+  ['The owned Lightwork process is still stopping.', 'previous_process_stopping'],
+  ['Dashboard shutdown timeout must be', 'shutdown_timeout_invalid'],
+  ['Port 8765', 'port_conflict'],
+  ['not allowed', 'command_refused']
 ];
 let reason = 'none';
 if (native && detail && detail !== 'No errors recorded.') {
@@ -276,7 +367,9 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
             if (not isinstance(value, dict) or set(value) != set(fallback)
                     or value["page"] not in {"bundled_recovery", "/workspace/recovery", "/auth/local-login", "/auth/login", "/start", "other"}
                     or value["reason"] not in {"none", "previous_workspace_running", "external_workspace", "startup_deadline",
-                                               "launch_failed", "native_bridge_unavailable", "origin_refused", "state_unavailable", "unclassified_refusal"}
+                                               "launch_failed", "native_bridge_unavailable", "origin_refused", "state_unavailable",
+                                               "previous_process_stopping", "shutdown_timeout_invalid", "port_conflict",
+                                               "command_refused", "unclassified_refusal"}
                     or type(value["controls_present"]) is not bool or type(value["ready"]) is not bool):
                 return fallback
             return value
@@ -285,12 +378,24 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
 
     def authorization(self, *, rollback=False) -> str:
         self.recovery()
-        self.view.click("#wrec-installation-confirm")
+        # The page defaults to the protected desktop handoff, which shows no
+        # code. This journey carries the manual code fallback the page offers.
+        if self.view.property("#wrec-installation-handoff", "checked") is not False:
+            self.view.click("#wrec-installation-handoff")
+            if self.view.property("#wrec-installation-handoff", "checked") is not False:
+                raise RuntimeError("Workspace recovery did not offer its manual approval code.")
         if rollback:
             # Select the real option with WebDriver key input, not JS mutation.
+            # Choosing a point clears the confirmation, so confirm after it.
             self.view.keyboard("#wrec-installation-point", "\ue015")
+        self.view.click("#wrec-installation-confirm")
+        if rollback:
             self.view.click("#wrec-installation-rollback")
         else:
+            try:
+                self.view.wait(lambda: self.view.property("#wrec-installation-authorize", "disabled") is False, timeout=30)
+            except RuntimeError:
+                raise RuntimeError("Workspace recovery offered no upgrade authorization; the native release review is missing or expired.") from None
             self.view.click("#wrec-installation-authorize")
         return self.view.wait(lambda: self.view.property("#wrec-installation-code", "value"))
 
@@ -301,7 +406,18 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
 
     def first_owner(self):
         self.record("first-launch-and-named-owner")
-        self.view.wait(lambda: self.view.call("GET", self.view.session + "/url").startswith("http://127.0.0.1:8765/"), timeout=120)
+        try:
+            self.view.wait(lambda: self.view.call("GET", self.view.session + "/url").startswith("http://127.0.0.1:8765/"), timeout=120)
+        except (OSError, RuntimeError, KeyError):
+            window = {**self.startup_diagnostic(), **self.loopback_probe(), "startup_process": self.startup_process()}
+            # Skip only when the shell reported no live dashboard; an unknown
+            # state may be the hung process the stacks exist to explain.
+            window["dashboard_stacks"] = ("not_running"
+                                          if window["startup_process"]["process_state"] in {"exited", "not_started"}
+                                          else self.dashboard_stacks())
+            self.report["window_at_deadline"] = window
+            self.record("first-launch-and-named-owner")
+            raise RuntimeError("The native window never reached the local dashboard; bounded window_at_deadline diagnostics were retained.") from None
         self.view.navigate("http://127.0.0.1:8765/start")
         # Fresh installations now open owner setup directly; older first-run
         # pages still offer the explicit link.
@@ -312,6 +428,8 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
             raise RuntimeError("Native first-owner setup did not open its expected page.")
         self.view.fill('input[name="email"]', "native-owner@example.test")
         self.view.fill('input[name="password"]', self.password)
+        # Owner setup asks for the passphrase twice and will not submit otherwise.
+        self.view.fill('input[name="password2"]', self.password)
         self.view.click('input[name="confirm"]')
         # Enter activates the real submit button and verifies keyboard use.
         self.view.keyboard('button[type="submit"]', "\ue007")
@@ -329,6 +447,162 @@ return {page, reason, controls_present: controls, ready: document.readyState ===
             raise RuntimeError("Native first-owner setup did not create its protected claim.")
         self.view.screenshot(self.directory / "first-owner.png")
         self.record("first-launch-and-named-owner", passed=True)
+
+    def startup_diagnostic(self):
+        # Classify in the browser with fixed vocabulary: startup messages, URLs,
+        # paths and cookies must never leave the page or enter CI artifacts.
+        script = """
+const origin = location.origin;
+const bundled = {'/': 'bundled_splash', '/index.html': 'bundled_splash',
+  '/recovery.html': 'bundled_recovery', '/maintenance.html': 'bundled_maintenance'};
+const page = origin === 'http://tauri.localhost' ? (bundled[location.pathname] || 'bundled_other')
+  : origin === 'http://127.0.0.1:8765' ? 'dashboard' : 'other';
+const splash = page === 'bundled_splash';
+const node = splash ? document.querySelector('#status-text') : null;
+const text = node ? (node.textContent || '').trim().slice(0, 256) : '';
+const states = [['Starting Lightwork', 'starting'], ['Opening your workspace', 'opening_workspace'],
+  ['Still starting', 'still_starting'], ['Trying again', 'retrying'],
+  ['Port 8765 is occupied by an unrecognized service', 'port_occupied']];
+const trouble = splash ? document.querySelector('#trouble') : null;
+return {page, splash_status: node ? (states.find(([prefix]) => text.startsWith(prefix)) || ['', 'unclassified'])[1] : 'none',
+  trouble_visible: !!trouble && trouble.getClientRects().length > 0, ready: document.readyState === 'complete'};
+"""
+        fallback = {"page": "unavailable", "splash_status": "none", "trouble_visible": False, "ready": False}
+        try:
+            result = self.view.call("POST", self.view.session + "/execute/sync", {"script": script, "args": []})
+            if (not isinstance(result, dict) or set(result) != set(fallback)
+                    or result["page"] not in {"bundled_splash", "bundled_recovery", "bundled_maintenance", "bundled_other", "dashboard", "other"}
+                    or result["splash_status"] not in {"none", "starting", "opening_workspace", "still_starting", "retrying",
+                                                       "port_occupied", "unclassified"}
+                    or type(result["trouble_visible"]) is not bool or type(result["ready"]) is not bool):
+                result = fallback
+        except (OSError, RuntimeError, KeyError):
+            result = fallback
+        return result
+
+    def startup_process(self):
+        # The shell's own startup report and startup messages, classified in the
+        # page: only fixed names, an allowlisted exception type, the exit code
+        # and traceback frames as file.py:line:function leave it, never text,
+        # paths or the report's correlation id.
+        script = "const markers = " + json.dumps(STARTUP_MARKERS) + ", known = " + json.dumps(STARTUP_ERROR_TYPES) + ";" + """
+const core = window.__TAURI__ && window.__TAURI__.core;
+const empty = (state) => ({process_state: state, packaged_runtime: 'unknown', exit_code: 'none', markers: [],
+  error_type: 'none', frames: [], output_kb: 0});
+if (!core || typeof core.invoke !== 'function') return empty('bridge_unavailable');
+const ask = (name) => core.invoke(name).then((value) => value, () => null);
+// The shell offers its startup report on the splash only and refuses it on
+// the bundled recovery page; say so there instead of "unreported".
+const onRecovery = typeof location !== 'undefined' && location.pathname === '/recovery.html';
+// The report first: reading the messages reaps an exited process.
+return (onRecovery ? Promise.resolve(null) : ask('startup_support_report')).then((report) => ask('dashboard_diagnostics').then((log) => {
+  const states = ['running', 'exited', 'not_started', 'unavailable'];
+  const available = report ? report.packaged_runtime_available : undefined;
+  const text = typeof log === 'string' ? log.slice(-262144) : '';
+  const exit = /Lightwork exited: exit (?:code|status): (0x[0-9a-fA-F]{1,8}|-?[0-9]{1,10})/.exec(text);
+  let error_type = 'none', frames = [], current = null;
+  for (const line of text.split(/\\r?\\n/).map((value) => value.trim())) {
+    if (line.startsWith('Traceback (most recent call last)')) { current = []; continue; }
+    const frame = /^File "([^"]*)", line ([0-9]{1,7}), in ([A-Za-z_<>][A-Za-z0-9_<>]{0,63})$/.exec(line);
+    if (frame && current) {
+      const name = frame[1].split(/[\\\\/]/).pop();
+      current.push((/^[A-Za-z0-9_.-]{1,64}\\.py$/.test(name) ? name : 'other') + ':' + frame[2] + ':' + frame[3]);
+      continue;
+    }
+    const error = /^(?:[A-Za-z_][A-Za-z0-9_]*\\.)*([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Unavailable|Exit))(?::|$)/.exec(line);
+    if (error) {
+      error_type = known.includes(error[1]) ? error[1] : 'other';
+      if (current) { frames = current.slice(-8); current = null; }
+    }
+  }
+  return {process_state: onRecovery ? 'not_offered_on_recovery_page'
+      : report && states.includes(report.process_state) ? report.process_state : 'unreported',
+    packaged_runtime: available === true ? 'present' : available === false ? 'missing'
+      : available === null ? 'not_pinned' : 'unknown',
+    exit_code: exit ? exit[1].toLowerCase() : 'none',
+    markers: markers.filter(([, needle]) => text.includes(needle)).map(([name]) => name),
+    error_type, frames, output_kb: Math.min(256, Math.ceil(text.length / 1024))};
+}));
+"""
+        fallback = {"process_state": "unavailable_to_driver", "packaged_runtime": "unknown", "exit_code": "none",
+                    "markers": [], "error_type": "none", "frames": [], "output_kb": 0}
+        names = [name for name, _needle in STARTUP_MARKERS]
+        try:
+            value = self.view.call("POST", self.view.session + "/execute/sync", {"script": script, "args": []})
+        except (OSError, RuntimeError, KeyError):
+            return fallback
+        if (not isinstance(value, dict) or set(value) != set(fallback)
+                or value["process_state"] not in STARTUP_PROCESS_STATES
+                or value["packaged_runtime"] not in {"present", "missing", "not_pinned", "unknown"}
+                or not isinstance(value["exit_code"], str) or not _STARTUP_EXIT.fullmatch(value["exit_code"])
+                or not isinstance(value["markers"], list) or len(set(map(str, value["markers"]))) != len(value["markers"])
+                or not all(isinstance(item, str) and item in names for item in value["markers"])
+                or value["error_type"] not in {"none", "other", *STARTUP_ERROR_TYPES}
+                or not isinstance(value["frames"], list) or len(value["frames"]) > 8
+                or not all(isinstance(item, str) and _STARTUP_FRAME.fullmatch(item) for item in value["frames"])
+                or type(value["output_kb"]) is not int or not 0 <= value["output_kb"] <= 256):
+            return fallback
+        return value
+
+    def dashboard_stacks(self) -> str:
+        # Only this app's dashboard process tree, only after it ran without
+        # serving; every failure is a fixed reason, never the original error.
+        try:
+            listing = json.loads(command([shutil.which("pwsh") or "pwsh", "-NoLogo", "-NoProfile", "-NonInteractive",
+                "-Command", "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name"
+                " | ConvertTo-Json -Compress"], timeout=60))
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            return "listing_unavailable"
+        pids = dashboard_processes(listing, self.app.pid)
+        if not pids:
+            return "no_dashboard_process"
+        tools = self.directory / "py-spy"
+        try:
+            command([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
+                     "--only-binary=:all:", "--target", str(tools), PY_SPY], timeout=240)
+            spy = next(iter(sorted(tools.rglob("py-spy.exe"))))
+        except (OSError, RuntimeError, ValueError, StopIteration, subprocess.SubprocessError):
+            return "tool_unavailable"
+        lines, dumped = [], False
+        for index, pid in enumerate(pids):
+            try:
+                lines += [f"process {index}", *reduced_stacks(command([str(spy), "dump", "--pid", str(pid)], timeout=60))]
+                dumped = True
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+                lines.append(f"process {index}: unavailable")
+        if not dumped:
+            return "dump_failed"
+        try:
+            (self.directory / "dashboard-stacks.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError:
+            return "write_failed"
+        return "captured"
+
+    def loopback_probe(self, port: int = LOOPBACK_PORT, timeout: float = 5.0):
+        # The desktop shell's own identity handshake (apps/desktop-runtime
+        # readiness_headers): exactly one X-Lightwork-Service: dashboard-v1.
+        # Loopback only, never through a proxy. Windows takes about two seconds
+        # to report a refused loopback connection, hence the five-second bound.
+        started = time.monotonic()
+        request = urllib.request.Request(f"http://127.0.0.1:{port}/healthz", headers={"Cache-Control": "no-cache"})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                status, identity = response.status, response.headers.get_all("X-Lightwork-Service") or []
+        except urllib.error.HTTPError as error:
+            status, identity = error.code, error.headers.get_all("X-Lightwork-Service") or []
+            error.close()
+        except urllib.error.URLError as error:
+            status, identity = None, "not_listening" if isinstance(error.reason, ConnectionRefusedError) else "no_answer"
+        except (OSError, ValueError):
+            status, identity = None, "no_answer"
+        if status is None:
+            listener = identity
+        elif identity != ["dashboard-v1"]:
+            listener = "answered_without_identity"
+        else:
+            listener = {200: "answered_ready", 503: "answered_setup_required"}.get(status, "answered_other_status")
+        return {"listener": listener, "latency_ms": min(5000, max(0, int((time.monotonic() - started) * 1000)))}
 
     def owner_diagnostic(self):
         # Classify in the browser: raw alert text, URLs, inputs and cookies must
@@ -421,11 +695,18 @@ return {ready: document.readyState === 'complete', path, form_rejected: !!alert,
     def transition(self, *, rollback=False):
         name = "signed-native-rollback" if rollback else "signed-native-upgrade"
         self.record(name)
-        authorization = self.authorization(rollback=rollback)
-        self.menu("Install & updates")
         version = self.metadata["version"]
         pieces = version.split(".")
         newer = ".".join(pieces[:2] + [str(int(pieces[2]) + 1)])
+        if not rollback:
+            # Check for updates records the exact release review that Workspace
+            # recovery requires before it authorizes a protected upgrade.
+            self.menu("Install & updates")
+            self.assert_version(version)
+            self.view.click("#check-update")
+            self.view.wait(lambda: newer in self.view.text("#update-version"))
+        authorization = self.authorization(rollback=rollback)
+        self.menu("Install & updates")
         self.assert_version(newer if rollback else version)
         if not rollback:
             self.view.click("#check-update")
@@ -490,6 +771,61 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
             pass
         return "unavailable"
 
+    # Fixed codes for the reasons the native maintenance commands refuse; the
+    # page's own text never leaves the window.
+    TRANSITION_REFUSALS = (
+        ("Review and confirm the completed-upgrade rollback first", "rollback_unconfirmed"),
+        ("Load the protected administrator handoff", "authorization_missing"),
+        ("Use the rollback authorization from Workspace recovery", "not_a_rollback_grant"),
+        ("Copy the current maintenance authorization", "grant_unreadable"),
+        ("expired or was retired", "grant_retired"),
+        ("expired or was already used", "grant_expired_or_used"),
+        ("no longer matches this completed upgrade", "upgrade_not_recorded_as_completed"),
+        ("pre-upgrade snapshot changed", "snapshot_changed"),
+        ("still responding", "dashboard_still_responding"),
+        ("managed outside the desktop app", "dashboard_not_owned"),
+        ("still stopping", "owned_process_still_stopping"),
+        ("operation is unsupported", "operation_unsupported"),
+        ("Automatic restore is unavailable because spending", "accounting_changed"),
+        ("Pause Lightwork from the desktop maintenance controls", "not_paused"),
+        ("requires the single control plane lock", "control_plane_locked"),
+        ("Installation recovery is unfinished", "recovery_unfinished"),
+        ("does not match the verified release", "runtime_not_verified_release"),
+    )
+
+    @staticmethod
+    def refusal_fingerprint(detail: str) -> str:
+        """The page script's fingerprint, for matching a retained code to its product text."""
+        sentence = re.sub(r"^Error:\s*", "", detail).split(". ")[0][:200]
+        value = 0x811C9DC5
+        units = sentence.encode("utf-16-le")  # JavaScript hashes UTF-16 code units
+        for index in range(0, len(units), 2):
+            value = ((value ^ int.from_bytes(units[index:index + 2], "little")) * 0x01000193) & 0xFFFFFFFF
+        return f"other:{value:08x}"
+
+    def transition_refusal(self):
+        script = """
+const node = document.querySelector('#maintenance-details');
+const detail = node ? (node.textContent || '') : '';
+for (const [phrase, code] of arguments[0]) if (detail.includes(phrase)) return code;
+if (!detail) return 'none';
+// An unlisted refusal leaves only an FNV-1a fingerprint of its first sentence,
+// which is fixed product text that support matches against the source.
+const sentence = detail.replace(/^Error:\\s*/, '').split('. ')[0].slice(0, 200);
+let hash = 0x811c9dc5;
+for (let i = 0; i < sentence.length; i++) hash = Math.imul(hash ^ sentence.charCodeAt(i), 0x01000193) >>> 0;
+return 'other:' + hash.toString(16).padStart(8, '0');
+"""
+        try:
+            value = self.view.call("POST", self.view.session + "/execute/sync",
+                                   {"script": script, "args": [list(map(list, self.TRANSITION_REFUSALS))]})
+            codes = {code for _phrase, code in self.TRANSITION_REFUSALS} | {"other", "none"}
+            if isinstance(value, str) and (value in codes or re.fullmatch(r"other:[0-9a-f]{8}", value)):
+                return value
+        except (OSError, RuntimeError, KeyError):
+            pass
+        return "unavailable"
+
     def transition_progress(self, old_pids, expected_result=None):
         if expected_result is None:
             windows = app_windows(self.binary)
@@ -499,7 +835,9 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
         return state if state in {"visible_refusal", "incomplete", "completed"} else None
 
     def transition_diagnostic(self, old_pids):
-        result = {"page_state": self.transition_page_state(), "process_state_available": False,
+        page_state = self.transition_page_state()
+        result = {"page_state": page_state, "process_state_available": False,
+                  "refusal": self.transition_refusal() if page_state == "visible_refusal" else "none",
                   "installed_old_process": False, "installed_new_process": False, "retained_result_windows": 0}
         try:
             windows = app_windows(self.binary)

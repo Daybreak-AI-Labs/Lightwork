@@ -1266,6 +1266,25 @@ def test_receipt_lookup_is_exact_tenant_scoped_and_integrity_checked(
         store.get_receipt("tenant-a", created["receipt_id"])
 
 
+def test_non_ascii_stored_digests_are_refused_not_type_errors(
+    store: ConsentPreferenceStore,
+) -> None:
+    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # of the idempotency conflict and integrity refusals.
+    _policy(store)
+    _profile(store)
+    created = _record(store, idem="non-ascii-operation")
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DROP TRIGGER consent_idempotency_no_update")
+        connection.execute("DROP TRIGGER consent_receipts_no_update")
+        connection.execute("UPDATE consent_idempotency SET request_sha256 = ?", ("é" * 64,))
+        connection.execute("UPDATE consent_receipts SET receipt_sha256 = ?", ("é" * 64,))
+    with pytest.raises(ConsentIdempotencyConflict):
+        _record(store, idem="non-ascii-operation")
+    with pytest.raises(ConsentPreferencesError, match="integrity"):
+        store.get_receipt("tenant-a", created["receipt_id"])
+
+
 def test_retention_due_never_deletes_receipts_but_operational_data_is_bounded(
     store: ConsentPreferenceStore,
     clock: MutableClock,

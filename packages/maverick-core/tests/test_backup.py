@@ -830,6 +830,26 @@ def test_manifest_tamper_is_rejected_even_with_force(tmp_path):
         backup.restore_backup(tampered, force=True)
 
 
+def test_non_ascii_manifest_signature_is_rejected_not_a_crash(tmp_path):
+    # The archive is supplied input: a 64-character non-ASCII signature used to
+    # raise TypeError from hmac.compare_digest instead of BackupError.
+    from maverick.paths import data_dir
+
+    _seed(data_dir())
+    archive = backup.create_backup()
+    tampered = tmp_path / "non-ascii-signature.tgz"
+    _repack(
+        archive,
+        tampered,
+        mutate_manifest=lambda manifest: manifest["authentication"].update(
+            signature="é" * 64
+        ),
+    )
+
+    with pytest.raises(backup.BackupError, match="signature verification failed"):
+        backup.verify_backup(tampered)
+
+
 def test_wrong_operator_key_cannot_verify_archive(monkeypatch):
     from maverick.paths import data_dir
 

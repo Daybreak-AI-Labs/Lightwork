@@ -150,8 +150,31 @@ def test_correlation_native_workers_keep_the_latest_link_and_ignore_torn_rows(tm
     with path.open("ab") as stream:
         stream.write(b'{"key":"invoice:42","goal_id":3,"episode_id":9,"ts":30}')
     assert second.resolve("invoice:42") == (2, 8)
-    assert not first.link("invoice:42", 4, 10, ts=40)
+    # The unconfirmed torn row is discarded, not revived, and linking resumes.
+    assert first.link("invoice:42", 4, 10, ts=25)
+    assert first.resolve("invoice:42") == second.resolve("invoice:42") == (4, 10)
     assert first.count() == second.count() == 1
+
+
+def test_an_interrupted_append_does_not_stop_later_reports(tmp_path):
+    path = tmp_path / "torn.ndjson"
+    store = cq.ConsequenceStore(path=path)
+    assert store.record(1, 7, 1.0, kind="paid", ts=10)
+    complete = path.read_bytes()
+    with path.open("ab") as stream:
+        stream.write(b'{"episode_id":8,"goal_id":1,"kind":"pa')
+    assert store.resolve(1, 7) == 1.0
+    assert store.record(1, 8, 0.0, kind="payment_reversed", ts=20)
+    assert store.record(1, 9, 1.0, kind="paid", ts=30)
+    raw = path.read_bytes()
+    assert raw.startswith(complete) and raw.endswith(b"\n")
+    assert [json.loads(line)["episode_id"] for line in raw.splitlines()] == [7, 8, 9]
+    reloaded = cq.ConsequenceStore(path=path)
+    assert (reloaded.resolve(1, 7), reloaded.resolve(1, 8), reloaded.resolve(1, 9)) == (1.0, 0.0, 1.0)
+    only_fragment = tmp_path / "fragment.ndjson"
+    only_fragment.write_bytes(b'{"episode_id":1,"go')
+    assert cq.ConsequenceStore(path=only_fragment).record(2, 3, 1.0, kind="paid", ts=5)
+    assert [json.loads(line)["goal_id"] for line in only_fragment.read_bytes().splitlines()] == [2]
 
 
 def test_correlation_late_write_failure_preserves_prior_binding(tmp_path, monkeypatch):

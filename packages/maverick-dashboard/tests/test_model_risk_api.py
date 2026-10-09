@@ -1985,7 +1985,7 @@ def test_grc_outbound_http_preview_state_and_events(monkeypatch):
     service = Service()
     transport = SimpleNamespace(
         _base_url="https://irm.example.test",
-        _credential_secret_ref="secret:grc",
+        _credential_secret_ref="secret:grc",  # pragma: allowlist secret -- reference name, not a value
         _limits=Limits(),
         _http=object(),
     )

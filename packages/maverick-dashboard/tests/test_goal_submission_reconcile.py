@@ -141,3 +141,65 @@ def test_receipt_read_rechecks_current_goal_owner(isolated):
         connection.execute("UPDATE goals SET owner=? WHERE id=?", ("user:bob", goal["goal_id"]))
     response = client.get("/api/v1/goal-submissions/receipt?kind=chat", headers={"Idempotency-Key": "changed-owner"})
     assert response.status_code == 404
+
+
+def test_non_ascii_task_model_context_is_refused_as_changed_without_a_start(isolated):
+    client, world, runs = isolated
+    response = client.post("/api/v1/goals", headers={"Idempotency-Key": "non-ascii-model-context"},
+                           json={"title": "Review", "task_model": "any-model", "task_model_context": "contéxt"})
+    assert response.status_code == 409, response.text
+    assert not runs and world.list_goals() == []
+
+
+def _revoke_when_dispatch_begins(monkeypatch):
+    """Authority is lost after the route finished and before the run is admitted."""
+    from maverick_dashboard import task_model_selection_api
+
+    real_intent = SubmissionStore.record_dispatch_intent
+
+    def revoke_then_record(self, key, intent, **guard):
+        def revoked(_request):
+            raise HTTPException(401, "Sign in again before choosing how this task should run.")
+        monkeypatch.setattr(task_model_selection_api, "current_authority", revoked)
+        return real_intent(self, key, intent, **guard)
+
+    monkeypatch.setattr(SubmissionStore, "record_dispatch_intent", revoke_then_record)
+
+
+def test_chat_start_without_a_specialist_is_refused_when_authority_is_lost_before_dispatch(isolated, monkeypatch):
+    client, world, runs = isolated
+    _revoke_when_dispatch_begins(monkeypatch)
+    response = client.post("/chat/send", data={"title": "My chat", "submission_key": "revoked-start"},
+                           follow_redirects=False)
+    assert response.status_code == 303
+    assert not runs
+    assert [goal.status for goal in world.list_goals()] == ["draft"]
+
+
+def test_chat_reply_is_refused_when_authority_is_lost_before_dispatch(isolated, monkeypatch):
+    client, world, runs = isolated
+    first = client.post("/chat/send", data={"title": "My chat", "submission_key": "first"}, follow_redirects=False)
+    root = int(first.headers["location"].rsplit("/", 1)[1])
+    world.set_goal_status(root, "done", result="ok")
+    assert len(runs) == 1
+    _revoke_when_dispatch_begins(monkeypatch)
+    reply = client.post(f"/chat/goal/{root}/reply", data={"message": "And then?", "submission_key": "second"},
+                        follow_redirects=False)
+    assert reply.status_code == 303
+    assert len(runs) == 1
+    assert [goal.status for goal in world.list_goals() if goal.id != root] == ["draft"]
+
+
+def test_chat_start_with_a_specialist_still_starts_and_is_still_guarded(isolated, monkeypatch):
+    client, world, runs = isolated
+    found = client.get("/api/v1/chat/specialists", params={"q": "invoice", "limit": 1}).json()
+    item = found["items"][0]
+    form = {"title": "Chase it", "domain": item["value"], "specialist_context": found["context"],
+            "specialist_revision": item["revision"]}
+    response = client.post("/chat/send", data={**form, "submission_key": "with-specialist"}, follow_redirects=False)
+    assert response.status_code == 303 and len(runs) == 1
+    assert runs[0][2]["allowed_suites"] is None
+    _revoke_when_dispatch_begins(monkeypatch)
+    response = client.post("/chat/send", data={**form, "submission_key": "revoked-specialist"},
+                           follow_redirects=False)
+    assert response.status_code == 303 and len(runs) == 1

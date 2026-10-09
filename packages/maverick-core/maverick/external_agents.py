@@ -43,6 +43,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from .constant_time import text_equals
+
 log = logging.getLogger("maverick.external_agents")
 
 #: Platform semantics for enrollment — where the agent actually runs. This is
@@ -1594,7 +1596,7 @@ def approval_status(
         ) from exc
     binding = str(card["binding_sha256"])
     remembered = str(expected_binding_sha256 or "").strip().lower()
-    if remembered and not secrets.compare_digest(remembered, binding):
+    if remembered and not text_equals(remembered, binding):
         raise ApprovalBindingMismatch(
             "approval binding changed; submit the screened action again"
         )

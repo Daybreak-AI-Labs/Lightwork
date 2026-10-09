@@ -968,6 +968,8 @@ class MCPServer:
         if not isinstance(name, str):
             raise _ProtocolError(-32602, "name must be a string")
         args = params.get("arguments", {})
+        if args is None:  # a client that sends an omitted optional as null (as tools/call allows)
+            args = {}
         if not isinstance(args, dict):
             raise _ProtocolError(-32602, "arguments must be an object")
         if not all(isinstance(key, str) and isinstance(value, str) for key, value in args.items()):

@@ -16,7 +16,6 @@ requires a distinct authorized human before a record can be released.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import inspect
 import json
 import math
@@ -33,6 +32,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+from .constant_time import text_equals
 from .file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -531,7 +531,7 @@ def _distribution_version(name: str) -> str:
 
 
 def _same(left: object, right: object) -> bool:
-    return isinstance(left, str) and isinstance(right, str) and hmac.compare_digest(left, right)
+    return isinstance(left, str) and isinstance(right, str) and text_equals(left, right)
 
 
 def _without_digest(value: object, field: str, schema: str) -> dict[str, Any]:
@@ -2002,7 +2002,7 @@ class EvidenceAnalysisStore:
 
     def _require_tenant(self, tenant_id: object) -> str:
         tenant = _tenant(tenant_id)
-        if not hmac.compare_digest(tenant, self._tenant_id):
+        if not text_equals(tenant, self._tenant_id):
             raise EvidenceAnalysisNotFound("tenant-bound evidence analysis is unavailable")
         return tenant
 

@@ -47,11 +47,13 @@ test('fresh owner setup and login submit real browser origin without header inje
     await expect(page).toHaveURL(/\/auth\/local-login/);
     await page.locator('input[name="email"]').fill('native-owner@example.test');
     await page.locator('input[name="password"]').fill(password);
-    const login=page.waitForResponse(response=>response.request().method()==='POST'&&response.url()===origin+'/auth/local-login');
+    // Signing in returns to the page that asked for it (here Tasks).
+    const login=page.waitForResponse(response=>response.request().method()==='POST'&&new URL(response.url()).pathname==='/auth/local-login');
     await page.locator('button[type="submit"]').press('Enter');
     const signedIn=await login;expect(signedIn.status()).toBe(303);
+    expect(new URL(signedIn.url()).searchParams.get('return_to')).toBe('/goals');
     expect(await signedIn.request().headerValue('origin')).toBe(origin);
-    await expect(page).toHaveURL(origin+'/start');expect(errors).toEqual([]);
+    await expect(page).toHaveURL(origin+'/goals');expect(errors).toEqual([]);
   }finally{
     try{
       await test.step('Close isolated browser context',async()=>{if(context)await context.close();});

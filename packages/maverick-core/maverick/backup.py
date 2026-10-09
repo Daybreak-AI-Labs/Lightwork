@@ -46,6 +46,7 @@ from typing import Any, BinaryIO
 from urllib.parse import quote
 
 from . import file_lock
+from .constant_time import text_equals
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +60,16 @@ _RESTORE_LOCK_TARGET = ".restore-transaction"
 _JOURNAL = "journal.json"
 _DB_SIDECARS = ("-wal", "-shm", "-journal")
 _DERIVED_REBUILD_MARKER_BYTES = b"rebuild from canonical rows\n"
+# The dashboard's compiled-template cache (maverick_dashboard.app) is rebuilt
+# from template source checksums. Snapshotting it would make every newly
+# rendered page look like a changed goal template and block recovery.
+_TEMPLATE_CACHE = ("cache", "templates")
+# Browser sign-in sessions (maverick_dashboard.session_registry) are never
+# snapshotted or rewound: restoring an older copy would revive revoked
+# sessions, and every signed-in page view updates them, so comparing them
+# would block every recovery. A restore leaves the live store in place; on a
+# new machine its absence signs everyone out (session ids fail closed).
+_SESSION_REGISTRY = "dashboard-sessions.sqlite3"
 
 # A live WorldModel touches its WAL/SHM sidecars on every write and only holds
 # its own cross_process_lock briefly during __init__ (world_model.py), so
@@ -284,7 +295,7 @@ def _verify_authentication(
     if not isinstance(signature, str) or len(signature) != 64:
         raise BackupError(f"{label} signature is malformed")
     expected = hmac.new(key, _canonical_body(document), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, signature.lower()):
+    if not text_equals(expected, signature.lower()):
         raise BackupError(f"{label} signature verification failed")
     return key
 
@@ -877,6 +888,8 @@ def _excluded_from_snapshot(relative: Path, *, include_keys: bool | frozenset) -
     return (
         not relative.parts
         or relative.parts[0] in {"backups", _RESTORE_TX_ROOT}
+        or tuple(part.casefold() for part in relative.parts[:2]) == _TEMPLATE_CACHE
+        or (len(relative.parts) == 1 and relative.name.casefold().startswith(_SESSION_REGISTRY))
         or relative.name == f"{_RESTORE_LOCK_TARGET}.lock"
         or relative.name.endswith(_SKIP_SUFFIXES)
         or (_is_key_material(relative) and not _keys_included(relative, include_keys))

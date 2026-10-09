@@ -15,6 +15,8 @@ NATIVE_MAINTENANCE_LOGS = (
     "native-webview-*/state/backups/installation-recovery/*/i-*.log",
     "native-webview-*/state/backups/installation-recovery/*/x-*.log",
 )
+# Thread names and file.py:line:function frames only (native_webview_journey.reduced_stacks).
+NATIVE_DASHBOARD_STACKS = "native-webview-*/dashboard-stacks.txt"
 PATTERNS = (
     "lightwork-msi-*.log",
     "rollback-signed-*/stages.json",
@@ -32,6 +34,7 @@ PATTERNS = (
     "native-webview-*/msi-*.log",
     *NATIVE_MAINTENANCE_LOGS,
     "native-webview-*/downloads/Lightwork-startup-support.json",
+    NATIVE_DASHBOARD_STACKS,
     "lightwork-customer-state-*/dashboard-*.log",
     "lightwork-customer-state-*/recovery-*.log",
     "lw-rollback-*/recovery-*.log",
@@ -77,7 +80,8 @@ def collect(runner: Path, artifacts: Path, output: Path) -> dict:
     # before earlier fixture install/uninstall logs consume the file limit.
     for path, root in sorted(set(candidates), key=lambda item: (
             item[1] != artifacts, item[0].suffix != ".json",
-            not any(item[0].match(pattern) for pattern in NATIVE_MAINTENANCE_LOGS), str(item[0]))):
+            not any(item[0].match(pattern) for pattern in (*NATIVE_MAINTENANCE_LOGS, NATIVE_DASHBOARD_STACKS)),
+            str(item[0]))):
         if len(entries) >= MAX_FILES:
             break
         if not ordinary_file(path, root):

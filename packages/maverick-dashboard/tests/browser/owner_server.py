@@ -5,10 +5,11 @@ import secrets
 import tempfile
 from pathlib import Path
 
-from server import block_outbound
+from server import KEEP_ALIVE_SECONDS, block_outbound, exit_cleanly_on_sigterm
 
 
 def main():
+    exit_cleanly_on_sigterm()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, required=True)
     args = parser.parse_args()
@@ -26,7 +27,7 @@ def main():
         import uvicorn
         from maverick_dashboard.app import app
 
-        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning", timeout_keep_alive=KEEP_ALIVE_SECONDS)
 
 
 if __name__ == "__main__":

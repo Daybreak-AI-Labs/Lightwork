@@ -461,3 +461,35 @@ def test_committed_write_with_lost_response_stays_unconfirmed_until_receipt(web,
     recovered = web.post(f"/api/v1/commitment-reviews/{row['id']}/confirm", json=body)
     assert recovered.status_code == 200
     assert recovered.json()["revision"] == pending.json()["revision"]
+
+
+def test_a_non_ascii_context_header_is_refused_like_any_other_wrong_one(web):
+    # Header text arrives decoded as latin-1, so e-acute is a non-ASCII str.
+    for value in ("b" * 64, b"caf\xe9"):
+        refused = web.get("/api/v1/commitment-reviews", headers={"X-Lightwork-Commitment-Context": value})
+        assert refused.status_code == 409, (value, refused.status_code, refused.text)
+
+
+def test_owner_checks_compare_non_ascii_account_names_instead_of_failing():
+    """A signed-in subject may be any printable text. The owner is admitted and
+    another account refused, whatever characters either name holds."""
+    context = "n" * 64
+    owner, other = "user:josé", "user:zoë"
+    body = api.NewReviewIn(**_body()).service_body()
+    created = reviews.create(context, owner, body)
+    assert reviews.create(context, owner, body)["id"] == created["id"]
+    with pytest.raises(PermissionError):
+        reviews.create(context, other, body)
+    decision = {"expected_revision": created["revision"], "operation_id": "confirm-choice-non-ascii",
+                "kind": "option", "proposal_id": "", "option_id": "conditional-option"}
+    with pytest.raises(PermissionError):
+        reviews.confirm(created["id"], context, other, decision)
+    confirmed = reviews.confirm(created["id"], context, owner, decision)
+    assert confirmed["revision"] > created["revision"]
+    archive = {"expected_revision": confirmed["revision"], "operation_id": "archive-non-ascii-0001",
+               "confirm_finished": True}
+    with pytest.raises(PermissionError):
+        reviews.retire(created["id"], context, other, archive)
+    assert reviews.retire(created["id"], context, owner, archive)["retired_by"] == owner
+    with pytest.raises(RecordConflict):
+        reviews.retire(created["id"], context, other, archive)

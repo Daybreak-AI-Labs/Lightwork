@@ -62,8 +62,9 @@ data "aws_iam_policy_document" "deployer" {
     resources = [aws_ecr_repository.app.arn]
   }
 
-  # Runtime writes are confined to this cluster, service, task family and its
-  # tasks. Read-only ECS discovery remains in Describe above.
+  # Runtime writes are confined to this cluster, service, the stack's task
+  # families (the app and its database and file-system maintenance tasks) and
+  # their tasks. Read-only ECS discovery remains in Describe above.
   statement {
     sid     = "Ecs"
     actions = ["ecs:*"]
@@ -71,8 +72,18 @@ data "aws_iam_policy_document" "deployer" {
       "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/${local.name}",
       "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:service/${local.name}/${local.name}",
       "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name}:*",
+      "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name}-*:*",
       "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task/${local.name}/*",
     ]
+  }
+  # AWS documents no resource-level permission for registering a task
+  # definition, so no ARN above can allow it. Without this statement every apply
+  # that publishes a new revision is denied. The task and execution roles a
+  # revision may name stay limited to the fixed roles in PassEcsRoles below.
+  statement {
+    sid       = "EcsRegisterTaskDefinition"
+    actions   = ["ecs:RegisterTaskDefinition"]
+    resources = ["*"]
   }
   statement {
     sid     = "Logs"

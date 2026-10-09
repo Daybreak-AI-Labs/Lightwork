@@ -29,3 +29,27 @@ test("a typed query asks for settings after a short pause, and only the latest o
   assert.equal(shown.at(-1), 1);
   dom.window.close();
 });
+
+test("an answer replaced by a newer query or refused is still read, so its request completes", async () => {
+  const dom = new JSDOM('<dialog id="navfinder-dialog"></dialog>', { url: "https://lightwork.test/help", runScripts: "outside-only" });
+  const { window } = dom;
+  const timers = [], read = [], shown = [];
+  window.setTimeout = (fn) => { timers.push(fn); return timers.length; };
+  window.clearTimeout = () => {};
+  window.fetch = async (url) => {
+    const query = new URL(String(url), "https://lightwork.test").searchParams.get("q");
+    return { ok: query !== "refused", json: async () => { read.push(query); return { items: [{ href: "/settings", title: "Theme" }] }; } };
+  };
+  const dialog = window.document.getElementById("navfinder-dialog");
+  dialog.lightworkFinder = { setSettings: (rows) => shown.push(rows.length) };
+  window.eval(SCRIPT);
+  const ask = (query) => dialog.dispatchEvent(new window.CustomEvent("lightwork:finder-query", { detail: { reason: "input", query } }));
+  ask("the");
+  const stale = timers[0]();
+  ask("refused");
+  await stale;
+  await timers[1]();
+  assert.deepEqual(read, ["the", "refused"]);
+  assert.deepEqual(shown, [0, 0]);
+  dom.window.close();
+});

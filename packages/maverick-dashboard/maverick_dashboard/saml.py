@@ -401,6 +401,10 @@ class SamlIdentity:
     # authenticated); "" when the response does not expose one. The
     # second-factor policy compares it with [auth.mfa] saml_authn_contexts.
     authn_context: str = ""
+    # The assertion's AuthnInstant as an epoch (when the IdP says the person
+    # authenticated); 0.0 when absent or unreadable. The session dates its
+    # second factor by it, not by the ACS's own clock.
+    authn_instant: float = 0.0
 
     @property
     def principal(self) -> str:
@@ -472,24 +476,42 @@ def extract_identity(authn_response) -> SamlIdentity:
     assertion_id, expires_at = _assertion_replay_fields(authn_response)
     return SamlIdentity(name_id=name_id, attributes=dict(attrs),
                         assertion_id=assertion_id, expires_at=expires_at,
-                        authn_context=_authn_context(authn_response))
+                        authn_context=_authn_context(authn_response),
+                        authn_instant=_authn_instant(authn_response))
 
 
-def _authn_context(authn_response) -> str:
-    """The first AuthnContextClassRef pysaml2 reports (``authn_info()`` yields
-    ``(class_ref, authenticating_authorities, instant)`` tuples), else ""."""
+def _authn_entry(authn_response):
+    """The first ``authn_info()`` entry that names a context, else ``None``.
+    pysaml2 yields ``(class_ref, authenticating_authorities, instant)``."""
     info = getattr(authn_response, "authn_info", None)
     if not callable(info):
-        return ""
+        return None
     try:
         entries = info() or []
     except Exception:  # pragma: no cover -- response shape varies
-        return ""
+        return None
     for entry in entries:
         ref = entry[0] if isinstance(entry, (list, tuple)) and entry else entry
         if isinstance(ref, str) and ref.strip():
-            return ref.strip()
-    return ""
+            return entry
+    return None
+
+
+def _authn_context(authn_response) -> str:
+    """The first AuthnContextClassRef pysaml2 reports, else ""."""
+    entry = _authn_entry(authn_response)
+    if entry is None:
+        return ""
+    ref = entry[0] if isinstance(entry, (list, tuple)) else entry
+    return ref.strip()
+
+
+def _authn_instant(authn_response) -> float:
+    """The AuthnInstant of that same entry as an epoch, else 0.0 (unknown)."""
+    entry = _authn_entry(authn_response)
+    if isinstance(entry, (list, tuple)) and len(entry) > 2:
+        return _iso_to_epoch(entry[2])
+    return 0.0
 
 
 def mint_session_cookie(name_id: str, *, secret: str | None = None) -> str:
@@ -675,6 +697,7 @@ async def saml_acs(request: Request):
         return JSONResponse(
             {"detail": "SAML needs the browser-login session secret"}, status_code=503
         )
+    from maverick.constant_time import text_equals
     from maverick.web_session import verify_session
 
     raw_tx = request.cookies.get(TX_COOKIE)
@@ -707,7 +730,7 @@ async def saml_acs(request: Request):
     relay_state = str(form.get("RelayState") or "")
     if not saml_response:
         return _tx_error("missing SAMLResponse", status_code=400)
-    if not relay_state or not secrets.compare_digest(relay_state, tx_state):
+    if not relay_state or not text_equals(relay_state, tx_state):
         log.warning("SAML ACS: RelayState mismatch (possible login CSRF)")
         return _tx_error("invalid SAML login transaction", status_code=401)
     relay = _safe_relay_state(return_to, cfg.default_relay_state)
@@ -760,13 +783,17 @@ async def saml_acs(request: Request):
             status_code=403,
         ))
     try:
-        from .oidc_login import mint_browser_session
+        from .oidc_login import credible_auth_time, mint_browser_session
         from .session_policy import company_ttl
 
         ttl = company_ttl(_SESSION_TTL)
+        # Date the second factor by the assertion's AuthnInstant: an IdP that
+        # reuses its own SSO session asserts an old authentication, which must
+        # not pass step-up as if it had just happened.
         cookie = mint_browser_session(
             request, sub=identity.name_id, secret=secret, via="session", mfa=mfa,
             ttl=ttl,
+            mfa_at=credible_auth_time(identity.authn_instant, now=time.time()),
             extra={"idp_email": _saml_invite_email(identity)},
         )
     except SamlUnavailable as e:

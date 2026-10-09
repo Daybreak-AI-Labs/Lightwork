@@ -77,13 +77,17 @@ def approval_created(approval_id: int, *, provenance: str | None = None, world=N
     def run() -> None:
         try:
             from .channel_approvals import announce_new_approval
+            from .world_model import close_world_if_owned, open_world
 
-            wm = world
-            if wm is None:
-                from .world_model import open_world
-
-                wm = open_world()
-            context.run(announce_new_approval, wm, int(approval_id))
+            # The thread starts with an empty context; the world is the
+            # caller's tenant's, so it is opened (and, if opened here, closed)
+            # under the context copied from the caller.
+            wm = world if world is not None else context.run(open_world)
+            try:
+                context.run(announce_new_approval, wm, int(approval_id))
+            finally:
+                if world is None:
+                    close_world_if_owned(wm)
         except Exception:  # noqa: BLE001 -- a failed post never blocks the queue
             log.warning("could not announce approval #%s", approval_id, exc_info=True)
 

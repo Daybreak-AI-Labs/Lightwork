@@ -15,6 +15,7 @@ class SyntheticProcessInterruption(BaseException):
 
 
 def main():
+    server.exit_cleanly_on_sigterm()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, required=True)
     args = parser.parse_args()
@@ -74,7 +75,7 @@ def main():
             elif body.get("mode") == "receipt":
                 mode["receipt"] = True
             elif body.get("mode") == "external":
-                os.environ["MAVERICK_WEBHOOK_SECRET"] = "synthetic-fixture-external-key"
+                os.environ["MAVERICK_WEBHOOK_SECRET"] = "synthetic-fixture-external-key"  # pragma: allowlist secret -- synthetic test value
                 config.reset_config_cache()
             else:
                 raise HTTPException(422, "Choose a synthetic fixture mode.")
@@ -91,7 +92,7 @@ def main():
                 "pending": sum(row["state"] != "completed" for row in journals)}
 
         import uvicorn
-        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="critical")
+        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="critical", timeout_keep_alive=server.KEEP_ALIVE_SECONDS)
 
 
 if __name__ == "__main__":

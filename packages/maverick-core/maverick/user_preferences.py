@@ -160,11 +160,31 @@ def set_preferences(principal: str, **changes: Any) -> dict[str, Any]:
 
 
 def mark_digest_sent(principal: str, local_date: str) -> None:
-    """Remember the local date a summary went out so it is sent once a day."""
+    """Remember the local date a summary went out so it is sent once a day
+    (this also ends any back-off for that day)."""
     with _locked(store_path()):
         data = _load()
         row = dict(data.get(principal, {}))
         row["last_digest_date"] = str(local_date)
+        row.pop("digest_retry", None)
+        data[principal] = row
+        _write(data)
+
+
+def digest_retry(principal: str) -> dict[str, Any]:
+    """The back-off after a summary definitely could not be sent: ``date``,
+    ``failures``, ``next_at`` and the channel ``setup`` it failed with ({}
+    when there is none)."""
+    state = _load().get(str(principal or ""), {}).get("digest_retry")
+    return dict(state) if isinstance(state, dict) else {}
+
+
+def set_digest_retry(principal: str, state: dict[str, Any]) -> None:
+    """Save the summary back-off next to ``last_digest_date``."""
+    with _locked(store_path()):
+        data = _load()
+        row = dict(data.get(principal, {}))
+        row["digest_retry"] = dict(state)
         data[principal] = row
         _write(data)
 
@@ -177,9 +197,11 @@ __all__ = [
     "FIELDS",
     "UserPreferenceError",
     "defaults",
+    "digest_retry",
     "get_preferences",
     "mark_digest_sent",
     "principals_with_preferences",
+    "set_digest_retry",
     "set_preferences",
     "store_path",
     "time_zone_choices",

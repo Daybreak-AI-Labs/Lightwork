@@ -530,3 +530,45 @@ test("refused sections release their responses and leave no table or list at Loa
     .map(node => (node.closest("[id]") || {}).id + ": " + node.textContent.trim());
   assert.deepEqual(stuck, []);
 });
+
+test("a failed first read of the exception choices leaves no rules or safeguards at Loading", async t => {
+  const h = await fixture(t, {"/pickers/policy-exceptions": () => new Response(JSON.stringify({detail: "Service unavailable"}), {status: 503, headers: {"Content-Type": "application/json"}})});
+  await h.settle();
+  assert.doesNotMatch(h.byId("policy-exception-controls").textContent, /Loading/);
+  assert.match(h.byId("policy-exception-controls").textContent, /Safeguards could not be read\. Use Refresh to try again\./);
+  assert.doesNotMatch(h.byId("policy-exception-policy").textContent, /Loading/);
+  assert.equal(h.byId("policy-exception-policy").value, "");
+});
+
+// A read that worked and found nothing is an answer, not a failure.
+const noControls = {...choices, controls: []};
+const NO_SAFEGUARDS = /No applicable safeguards are recorded\. Add a control in Security before requesting an exception\./;
+
+test("a request with no recorded safeguards keeps saying so after the form is refused", async t => {
+  const h = await fixture(t, {"/ai-policy-management/policies": policies, "/pickers/policy-exceptions": noControls});
+  await h.settle();
+  assert.match(h.byId("policy-exception-controls").textContent, NO_SAFEGUARDS);
+  h.change(h.byId("policy-exception-policy"), "customer-data");
+  const form = h.byId("ai-policy-exception-request");
+  form.elements.exception_key.value = "Holiday support pilot";
+  form.elements.expires_at.value = "2026-12-31T17:00";
+  form.elements.reason.value = "Seasonal demand";
+  h.submit(form); await h.settle();
+  assert.match(h.statuses(), /Choose between one and 128 recorded safeguards\./);
+  assert.match(h.byId("policy-exception-controls").textContent, NO_SAFEGUARDS);
+  assert.doesNotMatch(h.byId("policy-exception-controls").textContent, /could not be read/);
+  assert.equal(h.$("dialog.policy-exception-dialog"), null);
+});
+
+test("a refresh that fails after a good read keeps the lists as they were read", async t => {
+  let failing = false;
+  const h = await fixture(t, {"/ai-policy-management/policies": policies, "/pickers/policy-exceptions": () => failing
+    ? new Response(JSON.stringify({detail: "Service unavailable"}), {status: 503, headers: {"Content-Type": "application/json"}})
+    : noControls});
+  await h.settle();
+  failing = true;
+  h.byId("policy-exception-refresh").click(); await h.settle();
+  assert.match(h.byId("policy-exception-controls").textContent, NO_SAFEGUARDS);
+  assert.doesNotMatch(h.byId("policy-exception-controls").textContent, /could not be read/);
+  assert.match(h.byId("policy-exception-policy").textContent, /Customer data rules/);
+});

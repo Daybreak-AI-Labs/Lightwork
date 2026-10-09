@@ -11,6 +11,7 @@ from fastapi import HTTPException, Request
 
 
 def main():
+    server.exit_cleanly_on_sigterm()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, required=True)
     args = parser.parse_args()
@@ -96,7 +97,7 @@ def main():
                 return {"calls": copy.deepcopy(calls), "saved": flow.nodes["dispatch"].params}
 
         import uvicorn
-        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning", timeout_keep_alive=server.KEEP_ALIVE_SECONDS)
 
 
 if __name__ == "__main__":

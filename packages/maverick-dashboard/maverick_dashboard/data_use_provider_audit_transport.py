@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import quote, urlsplit
 
+from maverick.constant_time import text_equals
 from maverick.data_use_provider_adapters import (
     DataUseProviderError,
     DataUseProviderProtocolError,
@@ -445,7 +446,7 @@ class NativeProviderAuditTransport:
             raise DataUseProviderAuditPermanent("provider_binding_changed")
         configured_origin = _origin(request.provider_id, section.get("origin"))
         enrolled_origin = _origin(request.provider_id, binding.get("origin"))
-        if not hmac.compare_digest(configured_origin, enrolled_origin):
+        if not text_equals(configured_origin, enrolled_origin):
             raise DataUseProviderAuditPermanent("provider_binding_changed")
         for key in (
             "account_or_workspace_id",

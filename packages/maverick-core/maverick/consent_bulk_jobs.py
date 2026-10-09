@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import hmac
 import json
 import math
 import os
@@ -31,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from . import consent_storage
+from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -465,7 +465,7 @@ class ConsentBulkJobStore:
         ).fetchone()
         if row is None:
             return None
-        if not hmac.compare_digest(str(row["request_sha256"]), request_sha256):
+        if not text_equals(str(row["request_sha256"]), request_sha256):
             raise ConsentBulkJobConflict(
                 "idempotency key was already used for different content"
             )
@@ -647,7 +647,7 @@ class ConsentBulkJobStore:
             result = _loads(row["result_json"], "idempotency result")
             if not isinstance(result, dict):
                 raise ConsentBulkJobError("stored allowance result is invalid")
-            if not hmac.compare_digest(str(result.get("actor_sha256", "")), actor):
+            if not text_equals(str(result.get("actor_sha256", "")), actor):
                 return None
             return {key: value for key, value in result.items() if key != "actor_sha256"}
 
@@ -883,7 +883,7 @@ class ConsentBulkJobStore:
                 "WHERE tenant = ? AND job_id = ? AND item_id = ?",
                 (tenant, job, _text(selected.get("item_id"), "item_id")),
             ).fetchone()
-            if current is None or not hmac.compare_digest(
+            if current is None or not text_equals(
                 _sha256(selected, maximum=_MAX_ITEM_BYTES), str(current["input_sha256"]),
             ):
                 raise ConsentBulkJobError("stored bulk-job item integrity failed")
@@ -895,7 +895,7 @@ class ConsentBulkJobStore:
         revision = selected["expected_revision"]
         for row in rows:
             previous = _loads(row["input_json"], "bulk-job item", maximum=_MAX_ITEM_BYTES)
-            if not isinstance(previous, dict) or not hmac.compare_digest(
+            if not isinstance(previous, dict) or not text_equals(
                 _sha256(previous, maximum=_MAX_ITEM_BYTES), str(row["input_sha256"]),
             ):
                 raise ConsentBulkJobError("stored predecessor integrity failed")
@@ -905,7 +905,7 @@ class ConsentBulkJobStore:
             if row["state"] != "succeeded":
                 raise ConsentBulkJobConflict("an earlier selected record was not confirmed")
             result = _loads(row["result_json"], "bulk-job result", maximum=_MAX_RESULT_BYTES)
-            if (not isinstance(result, dict) or not hmac.compare_digest(
+            if (not isinstance(result, dict) or not text_equals(
                     _sha256(result, maximum=_MAX_RESULT_BYTES), str(row["result_sha256"])) or
                     result.get("profile_id") != selected["profile_id"] or
                     result.get("receipt_id") != previous.get("receipt_id") or
@@ -934,7 +934,7 @@ class ConsentBulkJobStore:
             original = _loads(row["result_json"], "idempotency result")
             if not isinstance(original, dict):
                 raise ConsentBulkJobError("stored idempotency result is invalid")
-            if not hmac.compare_digest(str(original.get("actor_sha256", "")), actor):
+            if not text_equals(str(original.get("actor_sha256", "")), actor):
                 return None
             try:
                 return self._job_row(connection, tenant, _text(original.get("job_id"), "job_id"))
@@ -1093,7 +1093,7 @@ class ConsentBulkJobStore:
         )
         owner = str(row["lease_owner_sha256"]) if row["lease_owner_sha256"] else None
         if owner is not None and lease_expires is not None and lease_expires > now:
-            if not hmac.compare_digest(owner, worker_sha256):
+            if not text_equals(owner, worker_sha256):
                 raise ConsentBulkJobConflict("bulk job is leased by another worker")
         started = float(row["started_at"]) if row["started_at"] is not None else now
         connection.execute(
@@ -1190,7 +1190,7 @@ class ConsentBulkJobStore:
                         )
                     owner = str(job_row["lease_owner_sha256"] or "")
                     expires = float(job_row["lease_expires_at"] or 0)
-                    if not hmac.compare_digest(owner, worker) or expires <= current:
+                    if not text_equals(owner, worker) or expires <= current:
                         raise ConsentBulkJobLeaseLost("bulk-job lease was lost")
                     if bool(job_row["cancel_requested"]):
                         self._finish_cancelled(connection, tenant, job, current)
@@ -1210,7 +1210,7 @@ class ConsentBulkJobStore:
                     item = _loads(
                         item_row["input_json"], "bulk-job item", maximum=_MAX_ITEM_BYTES
                     )
-                    if not isinstance(item, dict) or not hmac.compare_digest(
+                    if not isinstance(item, dict) or not text_equals(
                         _sha256(item, maximum=_MAX_ITEM_BYTES),
                         str(item_row["input_sha256"]),
                     ):
@@ -1246,7 +1246,7 @@ class ConsentBulkJobStore:
                         "WHERE tenant = ? AND job_id = ? AND state = 'running'",
                         (tenant, job),
                     ).fetchone()
-                    if lease is None or not hmac.compare_digest(
+                    if lease is None or not text_equals(
                         str(lease["lease_owner_sha256"] or ""), worker
                     ):
                         raise ConsentBulkJobLeaseLost("bulk-job lease was lost")
@@ -1402,7 +1402,7 @@ class ConsentBulkJobStore:
                 result = _loads(
                     item["result_json"], "bulk export result", maximum=_MAX_RESULT_BYTES
                 )
-                if not isinstance(result, dict) or not hmac.compare_digest(
+                if not isinstance(result, dict) or not text_equals(
                     _sha256(result, maximum=_MAX_RESULT_BYTES),
                     str(item["result_sha256"]),
                 ):
@@ -1473,7 +1473,7 @@ class ConsentBulkJobStore:
             maximum=self.limits.max_artifact_bytes,
         )
         encoded = _canonical(artifact, maximum=self.limits.max_artifact_bytes)
-        if not hmac.compare_digest(
+        if not text_equals(
             hashlib.sha256(encoded).hexdigest(), str(row["artifact_sha256"])
         ):
             raise ConsentBulkJobError("bulk export artifact integrity failed")
@@ -1539,7 +1539,7 @@ class ConsentBulkJobStore:
         events: list[dict[str, Any]] = []
         for row in rows[:page_size]:
             payload = _loads(row["payload_json"], "bulk-job event payload")
-            if not isinstance(payload, dict) or not hmac.compare_digest(
+            if not isinstance(payload, dict) or not text_equals(
                 _sha256(payload), str(row["payload_sha256"])
             ):
                 raise ConsentBulkJobError("stored bulk-job event integrity failed")
@@ -1583,9 +1583,9 @@ class ConsentBulkJobStore:
                 "created_at": float(row["created_at"]),
             }
             valid = (
-                hmac.compare_digest(_sha256(payload), str(row["payload_sha256"]))
+                text_equals(_sha256(payload), str(row["payload_sha256"]))
                 and row["previous_event_sha256"] == previous
-                and hmac.compare_digest(_sha256(body), str(row["event_sha256"]))
+                and text_equals(_sha256(body), str(row["event_sha256"]))
             )
             if not valid:
                 raise ConsentBulkJobError("stored bulk-job event integrity failed")

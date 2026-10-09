@@ -40,6 +40,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from . import rights_deadlines, rights_templates
+from .constant_time import text_equals
 from .governed_records import GovernedRecordStore
 
 log = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ _DEFAULTS = {
     "max_message_chars": 4000,
 }
 
-_PROPERTIES = GovernedRecordStore("rights_form_properties", "RFP", "rights_form_property")
+_PROPERTIES = GovernedRecordStore("rights_form_properties", "RFP", "rights_form_property", archive_when_full=False)
 
 
 class PublicRightsFormError(ValueError):
@@ -317,7 +318,7 @@ def check_challenge(token: str, answer: object, *, now: float | None = None) -> 
         return False
     if expires < moment or len(nonce) != 16:
         return False
-    if not hmac.compare_digest(_sign(value, expires, nonce), signature):
+    if not text_equals(_sign(value, expires, nonce), signature):
         return False
     with _secret_lock:
         if nonce in _burned_set:
@@ -803,15 +804,21 @@ def verify(token: str, *, now: float | None = None) -> dict[str, Any] | None:
         value["public_form"] = inner
         return True
 
-    burned = privacy_ops.annotate_dsar(str(row["id"]), burn, action="verify_link", actor=ACTOR)
-    if burned is None or (burned.get("public_form") or {}).get("verify_used_at") != moment:
-        return None  # a racing use won; the link is single-use
+    # Verify first (a no-op when already verified), then burn: a failure while
+    # recording the verification leaves the link usable instead of stranding an
+    # unverified request behind a "link not valid" page.
     reference = f"opened the verification link sent to the address given ({_date(moment)})"
     saved = privacy_ops.verify_dsar(
         str(row["id"]), method="email_challenge", reference=reference, verified_by=ACTOR,
     )
+    burned = privacy_ops.annotate_dsar(str(row["id"]), burn, action="verify_link", actor=ACTOR)
+    if burned is None or (burned.get("public_form") or {}).get("verify_used_at") != moment:
+        return None  # a racing use won; the link is single-use
     _record_fulfillment_identity(str(row["id"]), reference)
-    send_notice(str(row["id"]), "acknowledgement")
+    try:
+        send_notice(str(row["id"]), "acknowledgement")
+    except Exception:  # noqa: BLE001 - the person is verified; the notice outcome is logged on the request
+        log.warning("could not send the acknowledgement for %s", row["id"], exc_info=True)
     return public_view(saved or row, now=moment)
 
 

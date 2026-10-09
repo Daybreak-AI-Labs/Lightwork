@@ -37,6 +37,7 @@ from fastapi import (
     Request,
     UploadFile,
     WebSocket,
+    WebSocketException,
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import (
@@ -90,6 +91,7 @@ from .auth import (
     caller_suites,
     can_access_goal,
     can_access_goal_principal,
+    constant_time_equals,
     execution_user_id_from_request,
     goal_owner_filter,
     has_global_permission,
@@ -1000,7 +1002,7 @@ _WARM_TEMPLATES = ("base.html", "_navfinder.html", "index.html", "goals.html",
                    "chat.html", "approvals.html")
 
 
-def _warm_dashboard_caches() -> dict[str, float]:
+def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, float]:
     """Pay the dashboard's once-per-process first-hit costs now.
 
     Measured cold on a 4 vCPU box: first ``GET /`` 1.25 s (Jinja compile),
@@ -1014,6 +1016,8 @@ def _warm_dashboard_caches() -> dict[str, float]:
     timings: dict[str, float] = {}
 
     def _step(name: str, fn) -> None:
+        if stop is not None and stop.is_set():
+            return
         started = time.perf_counter()
         try:
             fn()
@@ -1076,21 +1080,25 @@ def _warm_pack_catalogue() -> None:
         log.debug("pack catalogue warm-up skipped", exc_info=True)
 
 
-def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float = 1800.0) -> bool:
+def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float = 1800.0,
+                             stop: threading.Event | None = None) -> bool:
     """Build the OpenAPI schema once the dashboard has been quiet for
     ``quiet`` seconds, so its seconds of CPU do not land on someone's first
     searches. Ten seconds, not one or two: a person opening the dashboard
     pauses that long only rarely while working, but often while a browser
     starts. A request for /openapi.json before then builds it on demand, as
-    FastAPI always did. Gives up after ``limit`` seconds of steady traffic."""
+    FastAPI always did. Gives up after ``limit`` seconds of steady traffic,
+    or as soon as ``stop`` is set (the dashboard is shutting down)."""
     from . import request_activity
 
     waited = 0.0
     while not request_activity.quiet_for(quiet):
-        if waited >= limit:
+        if waited >= limit or (stop is not None and stop.is_set()):
             return False
         sleep(0.5)
         waited += 0.5
+    if stop is not None and stop.is_set():
+        return False
     try:
         app.openapi()
     except Exception:  # pragma: no cover - the schema still builds on demand
@@ -1099,15 +1107,19 @@ def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float
     return True
 
 
-def _warm_goal_runtime() -> None:
+def _warm_goal_runtime() -> threading.Event:
     """Pay the kernel's once-per-process start-up cost (hook discovery across
     installed distributions, about 1.5 s cold) and the dashboard's first-hit
     costs (:func:`_warm_dashboard_caches`) now, in the background, instead of
     on the first request or chat turn after start. Fail-open: never blocks
-    startup."""
+    startup. Returns the event the lifespan sets on shutdown, so a stopped
+    dashboard does not keep warming (or build its schema) in the background."""
+    stop = threading.Event()
 
     def _warm() -> None:
         _warm_pack_catalogue()
+        if stop.is_set():
+            return
         try:
             import asyncio as _asyncio
 
@@ -1116,12 +1128,15 @@ def _warm_goal_runtime() -> None:
             _asyncio.run(hooks.ensure_loaded())
         except Exception:  # pragma: no cover - warm-up is best-effort
             log.debug("goal runtime warm-up skipped", exc_info=True)
-        timings = _warm_dashboard_caches()
+        if stop.is_set():
+            return
+        timings = _warm_dashboard_caches(stop)
         log.info("dashboard warm-up done: %s",
                  ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
-        _build_openapi_when_idle()
+        _build_openapi_when_idle(stop=stop)
 
     threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
+    return stop
 
 
 def repair_default_workspace() -> None:
@@ -1191,6 +1206,7 @@ async def _lifespan(app: FastAPI):
     from ._lifecycle import ShutdownSupervisor, register_main_components, shutdown_seconds
 
     runtime_receipt = None
+    warm_stop: threading.Event | None = None
     previous = getattr(app.state, "lifecycle_supervisor", None)
     if previous is not None:
         previous.assert_restart_allowed()
@@ -1227,7 +1243,7 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_knowledge_sources_scheduler)
         from .consent_delivery_scheduler import start_consent_delivery_scheduler
         await run_in_threadpool(start_consent_delivery_scheduler)
-        _warm_goal_runtime()
+        warm_stop = _warm_goal_runtime()
         try:
             from maverick_dashboard.security_api import start_hunter_scheduler
 
@@ -1335,14 +1351,19 @@ async def _lifespan(app: FastAPI):
         runtime_receipt = start_runtime_receipt("dashboard")
         yield
     finally:
+        if warm_stop is not None:
+            warm_stop.set()
         if runtime_receipt is not None:
             runtime_receipt.close()
         from .local_runtime_service import shutdown as stop_local_ai
 
         try:
-            await run_in_threadpool(stop_local_ai)
-        finally:
+            # Close goal admission and drain in-flight goals first: a goal still
+            # running against the managed local server would otherwise lose it
+            # mid-call, and new goals could still be admitted while it stops.
             await supervisor.stop()
+        finally:
+            await run_in_threadpool(stop_local_ai)
 
 
 def enforce_page_visibility(
@@ -1416,7 +1437,7 @@ async def enforce_expected_workspace_tenant(
     ):
         form = await request.form()
         supplied = str(form.get("_expected_tenant") or "").strip()
-    if not hmac.compare_digest(supplied, expected):
+    if not constant_time_equals(supplied, expected):
         raise HTTPException(
             status_code=409,
             detail=(
@@ -2318,6 +2339,12 @@ app.include_router(session_expiry_router)
 templates.env.globals["page_session"] = _page_session
 
 app.include_router(invite_router)
+# One-time passphrase reset links (/auth/invite/reset/{token}) that the owner
+# makes on /users. Same token-is-the-credential shape as invite links; inert
+# unless colleagues sign in with passphrases. See passphrase_resets.
+from .passphrase_resets import router as passphrase_reset_router  # noqa: E402
+
+app.include_router(passphrase_reset_router)
 # SCIM 2.0 user provisioning (/scim/v2). Self-gates on MAVERICK_SCIM_TOKEN and
 # 404s when unset, so including it is inert off by default. It carries its own
 # static IdP bearer, so the /scim/ prefix is exempted from the dashboard-token
@@ -3541,7 +3568,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         for error in errors:
             if isinstance(error, dict) and "input" in error:
                 error["input"] = "[redacted]"
-    return JSONResponse({"detail": errors}, status_code=422)
+    try:
+        return JSONResponse({"detail": errors}, status_code=422)
+    except UnicodeEncodeError:
+        # The error echoes the rejected input, and a lone surrogate in a JSON
+        # string cannot be written as UTF-8: escape it instead of answering 500.
+        return Response(json.dumps({"detail": errors}), status_code=422, media_type="application/json")
 
 
 @app.exception_handler(TaskLimitConfigError)
@@ -3567,6 +3599,33 @@ async def overflow_exception_handler(request: Request, exc: OverflowError):
             status_code=404,
         )
     return JSONResponse({"detail": "not found"}, status_code=404)
+
+
+from .rbac import RbacStoreError as _RbacStoreError  # noqa: E402
+
+
+@app.exception_handler(_RbacStoreError)
+async def rbac_store_exception_handler(request: Request, exc: _RbacStoreError):
+    """Unreadable or missing role policy is a plain refusal, never a grant or 500."""
+    from .rbac import ROSTER_RECOVERY, RosterMissingError, RosterRollbackError
+
+    log.error("dashboard role policy is unavailable on %s: %s", request.url.path, exc)
+    if isinstance(exc, RosterRollbackError):
+        # The change was refused but could not be taken back: do not claim
+        # that nothing changed.
+        detail = ("The role change was refused by the activity log, but the role list could not be put back "
+                  "and may now include it. Ask an administrator to check the role list.")
+    else:
+        detail = ("Access roles cannot be read, so nothing was changed and no access was granted. "
+                  + (f"The role list is missing. {ROSTER_RECOVERY}"
+                     if isinstance(exc, RosterMissingError)
+                     else "Ask an administrator to restore or repair the role list."))
+    if _wants_html(request):
+        return templates.TemplateResponse(request, "error.html", {
+            "status": 503, "title": "Access roles unavailable", "message": detail,
+            "path": request.url.path, "gate": "", "reauthenticate": "", "feature": {},
+        }, status_code=503)
+    return JSONResponse({"detail": detail, "code": "access_roles_unavailable"}, status_code=503)
 
 
 @app.exception_handler(RuntimeOverridesSecurityError)
@@ -7999,7 +8058,7 @@ def chat_specialist_choices(
 
 
 @app.get("/agents/picker")
-async def agents_picker(request: Request, q: str = "", setup: bool = False, limit: int = 20) -> dict:
+def agents_picker(request: Request, q: str = "", setup: bool = False, limit: int = 20) -> dict:
     """Search-as-you-type for the Agent Factory picker.
 
     The page used to ship all 2,000+ specialists as one picker list. This
@@ -10533,10 +10592,24 @@ async def providers_api(request: Request) -> JSONResponse:
     )
 
 
+async def _websocket_ip_allowlist_gate(websocket: WebSocket) -> None:
+    """The installation list for a WebSocket handshake. Starlette never runs
+    ``@app.middleware("http")`` for one, so the route applies it itself:
+    listed first among its dependencies, it refuses a blocked address before
+    sign-in runs and before the connection is accepted."""
+    from . import ip_allowlist
+
+    if await run_in_threadpool(ip_allowlist.installation_allows, websocket):
+        return
+    _auth_metrics.record_auth_failure("ip_allowlist")
+    raise WebSocketException(code=1008, reason=ip_allowlist.BLOCKED_MESSAGE)
+
+
 @app.websocket("/ws/v1/runs/{goal_id}/events")
 async def run_events_firehose(
     websocket: WebSocket,
     goal_id: int,
+    _address: None = Depends(_websocket_ip_allowlist_gate),
     principal: VerifiedPrincipal | None = Depends(require_websocket_principal_in_context),
 ) -> None:
     """Run-events firehose: stream a goal's events over WebSocket as they land.
@@ -11365,14 +11438,15 @@ def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conve
     and error handling as the REST API and MCP server)."""
     from maverick.runner import run_goal_in_background_async
 
+    from ._request_memo import fresh_configuration
     from .attachment_submission import dispatch
+    from .task_model_selection_api import effect_guard as task_ai_guard
 
     kwargs: dict = {"allowed_suites": caller_suites(request)}
     selection = receipt.get("detail", {}).get("specialist_selection")
+    context, check_specialist = _conversation_context(request), None
     if selection is not None:
-        from ._request_memo import fresh_configuration
         from .product_operations_task_launch import published_guard
-        from .task_model_selection_api import effect_guard as task_ai_guard
 
         if (not isinstance(selection, dict) or set(selection) != {"name", "context", "revision"}
                 or any(not isinstance(value, str) for value in selection.values())):
@@ -11380,16 +11454,20 @@ def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conve
         goal = _world().get_goal(goal_id)
         if goal is None or goal.domain != selection["name"]:
             raise HTTPException(409, "The original specialist selection no longer matches this task.")
-        check_model = task_ai_guard(request, receipt["detail"].get("task_model_selection"), selection["context"])
-        check_specialist = published_guard(request, **selection)
-        def current_start_guard():
-            with fresh_configuration():
-                check_model()
+        context, check_specialist = selection["context"], published_guard(request, **selection)
+    # Every start re-reads the current session, SCIM and workspace authority
+    # when the run is admitted, not only one that chose a specialist: a person
+    # deactivated or signed out during an upload or writer wait must not start it.
+    check_model = task_ai_guard(request, receipt["detail"].get("task_model_selection"), context)
+    def current_start_guard():
+        with fresh_configuration():
+            check_model()
+            if check_specialist is not None:
                 check_specialist()
-                if caller_suites(request) != kwargs["allowed_suites"]:
-                    raise HTTPException(409, "Your specialist access changed. Reopen Chat and review the current choices before starting.")
-        current_start_guard()
-        kwargs["effect_guard"] = current_start_guard
+            if caller_suites(request) != kwargs["allowed_suites"]:
+                raise HTTPException(409, "Your specialist access changed. Reopen Chat and review the current choices before starting.")
+    current_start_guard()
+    kwargs["effect_guard"] = current_start_guard
     if max_dollars is not None:
         kwargs["max_dollars"] = max_dollars
     if conversation_id is not None:
@@ -12502,9 +12580,10 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
 
     from .form_inputs import FormInputError
 
-    # Unknown tokens must never allocate a per-token file. Check the shared
-    # admission limit before parsing even a multipart request.
-    check_goal_rate_limit(request)
+    # Unknown tokens must never allocate a per-token file, and an anonymous
+    # guess must not spend the goal ceiling real task starts share: resolve the
+    # token first, then check the shared admission limit before parsing even a
+    # multipart request.
     trigger = None
     if automation_events.enabled():
         trigger = await run_in_threadpool(_registered_form_trigger, token)
@@ -12512,6 +12591,7 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
         questionnaire = await run_in_threadpool(_vendor_questionnaire_for, token)
         if questionnaire is None:
             raise HTTPException(status_code=404, detail="no such form")
+    check_goal_rate_limit(request)
     fields: dict = {}
     ctype = request.headers.get("content-type", "")
     if "application/json" in ctype:

@@ -3,12 +3,15 @@ import Foundation
 
 private final class BoundedRequest: NSObject, URLSessionDataDelegate {
   static let limit = 4 * 1024 * 1024
+  // Only the task list's continuation headers cross into JavaScript.
+  static let responseHeaders = ["pagination-has-more", "pagination-next-before-id"]
   private let promise: Promise
   private let finished: () -> Void
   private let lock = NSLock()
   private var closed = false
   private var bytes = Data()
   private var status = 0
+  private var headers: [String: String] = [:]
   private var session: URLSession?
   private var task: URLSessionDataTask?
 
@@ -29,12 +32,12 @@ private final class BoundedRequest: NSObject, URLSessionDataDelegate {
     guard !closed else { lock.unlock(); return }
     closed = true
     let body = String(data: bytes, encoding: .utf8)
-    let status = status
+    let status = status, headers = headers
     bytes.removeAll(); let session = session; self.session = nil; task = nil
     lock.unlock()
     session?.invalidateAndCancel(); finished()
     if let code { promise.reject(code, "Request did not complete") }
-    else if let body { promise.resolve(["status": status, "body": body]) }
+    else if let body { promise.resolve(["status": status, "body": body, "headers": headers]) }
     else { promise.reject("E_RESPONSE", "Response was not UTF-8") }
   }
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -48,6 +51,11 @@ private final class BoundedRequest: NSObject, URLSessionDataDelegate {
     if (300..<400).contains(response.statusCode) { completionHandler(.cancel); finish("E_REDIRECT"); return }
     if !(200..<300).contains(response.statusCode) { completionHandler(.cancel); finish(); return }
     if response.expectedContentLength > Int64(Self.limit) { completionHandler(.cancel); finish("E_TOO_LARGE"); return }
+    var exposed: [String: String] = [:]
+    for name in Self.responseHeaders {
+      if let value = response.value(forHTTPHeaderField: name), value.utf8.count <= 32 { exposed[name] = value }
+    }
+    lock.lock(); headers = exposed; lock.unlock()
     completionHandler(.allow)
   }
   func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
@@ -76,7 +84,7 @@ public final class LightworkTransportModule: Module {
       var request = URLRequest(url: target)
       request.httpMethod = method; request.httpBody = method == "POST" ? (body ?? "").data(using: .utf8) : nil
       for (key, value) in headers {
-        guard ["accept", "authorization", "content-type", "origin", "x-lightwork-offline-policy"].contains(key.lowercased()),
+        guard ["accept", "authorization", "content-type", "origin", "x-lightwork-expected-tenant", "x-lightwork-offline-policy"].contains(key.lowercased()),
           value.utf8.count <= 16384, !value.contains("\r"), !value.contains("\n") else {
           promise.reject("E_REQUEST", "Request unavailable"); return
         }

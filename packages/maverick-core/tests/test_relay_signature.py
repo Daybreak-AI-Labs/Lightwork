@@ -4,7 +4,9 @@ This loads the standalone relay module by path and checks the round-trip.
 """
 from __future__ import annotations
 
+import http.client
 import importlib.util
+import threading
 import time
 from pathlib import Path
 
@@ -61,3 +63,29 @@ def test_relay_defaults_to_loopback(monkeypatch):
     relay = _load_relay()
 
     assert relay.HOST == "127.0.0.1"
+
+
+@pytest.mark.skipif(not _RELAY.exists(), reason="relay reference not present")
+def test_relay_refuses_a_non_ascii_bearer_with_401(monkeypatch):
+    # http.server decodes headers as latin-1, so a caller can send accented
+    # text: that is a wrong token (401), not a dropped connection.
+    monkeypatch.setenv("MAVERICK_RELAY_TOKEN", "caller-token")  # pragma: allowlist secret
+    relay = _load_relay()
+    server = relay.ThreadingHTTPServer(("127.0.0.1", 0), relay.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", server.server_address[1], timeout=10,
+        )
+        connection.request(
+            "POST", "/relay", body=b"{}",
+            headers={"Authorization": "Bearer jeton-\u00e9", "Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        assert response.status == 401
+        connection.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=10)

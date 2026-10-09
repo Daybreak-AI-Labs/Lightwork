@@ -12,7 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from . import settings_store
-from .auth import caller_principal, require_global_permission, require_permission, require_suite
+from .auth import (
+    caller_principal,
+    constant_time_equals,
+    require_global_permission,
+    require_permission,
+    require_suite,
+)
 from .draft_api import context_for
 
 router = APIRouter(tags=["task-file-recovery"])
@@ -38,7 +44,7 @@ def _authority(request, goal_id=None, payload=None):
         raise HTTPException(403, "Sign in with a named account and select a workspace to recover task files.")
     context = context_for(request)
     supplied = request.headers.get("X-Lightwork-File-Context")
-    if supplied is not None and not hmac.compare_digest(supplied, context):
+    if supplied is not None and not constant_time_equals(supplied, context):
         raise HTTPException(409, "Your account or workspace changed. Reload file recovery.")
     if payload is not None:
         _require_same_origin(request)

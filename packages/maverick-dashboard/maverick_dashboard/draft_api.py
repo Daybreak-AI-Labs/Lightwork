@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -11,7 +10,7 @@ from maverick.paths import current_tenant_id_strict
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import _authorization_principal, has_permission, require_permission
+from .auth import _authorization_principal, constant_time_equals, has_permission, require_permission
 from .draft_store import DraftConflict, DraftStore
 
 router = APIRouter(prefix="/api/v1/drafts", tags=["draft-recovery"])
@@ -66,7 +65,7 @@ def _store(request: Request) -> DraftStore:
     if disabled:
         raise HTTPException(status_code=403, detail="Draft recovery is disabled in Settings or its configuration is unavailable.")
     context = context_for(request)
-    if not hmac.compare_digest(request.headers.get("X-Lightwork-Draft-Context", ""), context):
+    if not constant_time_equals(request.headers.get("X-Lightwork-Draft-Context", ""), context):
         raise HTTPException(status_code=409, detail="The workspace or signed-in account changed. Reload the page before saving or restoring drafts.")
     return DraftStore(context)
 

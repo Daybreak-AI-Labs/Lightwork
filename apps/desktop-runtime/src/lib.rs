@@ -13,6 +13,10 @@ pub const DASHBOARD_URL: &str = "http://127.0.0.1:8765/";
 const MAX_LOG_BYTES: usize = 32 * 1024;
 const OWNED_STOP_DEADLINE: Duration = Duration::from_secs(5);
 const DESKTOP_DRAIN: &[u8] = b"LIGHTWORK_DESKTOP_DRAIN_V1\n";
+/// Windows reports a refused loopback connection only after about two seconds
+/// (2.1 to 2.2 s on hosted runners). A shorter connect budget read a free port
+/// as `Unavailable`, so the shell refused to start its own dashboard.
+const READINESS_CONNECT_TIMEOUT: Duration = Duration::from_millis(3000);
 
 type Logs = Arc<Mutex<String>>;
 
@@ -24,6 +28,8 @@ struct Control {
     child_environment: Vec<(OsString, OsString)>,
     recovery: bool,
     drain_timeout: Option<Duration>,
+    // Counts stop requests so a start that probed before one never launches after it.
+    stops: u64,
 }
 
 #[derive(Default)]
@@ -77,14 +83,20 @@ fn readiness_headers(headers: &[u8]) -> Readiness {
 }
 
 fn probe_address(address: SocketAddr) -> Readiness {
-    let started = Instant::now();
-    let mut stream = match TcpStream::connect_timeout(&address, Duration::from_millis(400)) {
+    probe_with(|| TcpStream::connect_timeout(&address, READINESS_CONNECT_TIMEOUT))
+}
+
+fn probe_with(connect: impl FnOnce() -> std::io::Result<TcpStream>) -> Readiness {
+    let mut stream = match connect() {
         Ok(stream) => stream,
         Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
             return Readiness::NotRunning
         }
         Err(_) => return Readiness::Unavailable,
     };
+    // The headers get their own budget from the moment the connection exists:
+    // a connect Windows completes late must not leave none for them.
+    let started = Instant::now();
     let timeout = Some(Duration::from_millis(200));
     if stream.set_read_timeout(timeout).is_err() || stream.set_write_timeout(timeout).is_err() {
         return Readiness::Unavailable;
@@ -349,12 +361,33 @@ impl Dashboard {
     }
 
     pub fn start(&self) -> Result<String, String> {
+        self.start_with(dashboard_readiness)
+    }
+
+    fn start_with(&self, probe: impl FnOnce() -> Readiness) -> Result<String, String> {
+        let stops = self
+            .0
+            .lock()
+            .map_err(|_| "Startup state is unavailable.")?
+            .stops;
+        // Windows takes about two seconds to refuse a free port. Probe without
+        // the state lock so support reports and diagnostics stay answerable;
+        // ensure_started still refuses a second owned child.
+        let readiness = probe();
         let mut control = self.0.lock().map_err(|_| "Startup state is unavailable.")?;
+        if control.stops != stops {
+            // Quit, the updater's exit hook or maintenance stopped Lightwork
+            // while this check ran; launching now would outlive that stop.
+            return Err(
+                "Lightwork was stopped during the startup check. Select Retry to start it again."
+                    .into(),
+            );
+        }
         let binary = control.binary.clone();
         let child_environment = control.child_environment.clone();
         control.drain_timeout = Some(configured_drain_timeout(&child_environment)?);
         let recovery = control.recovery;
-        let verified = match dashboard_readiness() {
+        let verified = match readiness {
             Readiness::Ready | Readiness::SetupRequired => true,
             Readiness::NotRunning => false,
             Readiness::Conflict => return Err("Port 8765 is occupied by an unrecognized service. No process was stopped. Close or reconfigure that service, then select Retry; use the support report if the conflict is unclear.".into()),
@@ -474,6 +507,7 @@ fn stop_control_with_budget(
     grace: Duration,
     force: Duration,
 ) -> Result<Instant, String> {
+    control.stops = control.stops.wrapping_add(1);
     let start = Instant::now();
     let mut deadline = start + grace + force;
     if let Some(child) = control.child.as_mut() {
@@ -579,6 +613,61 @@ mod tests {
     }
 
     #[test]
+    fn a_free_port_reads_as_not_running_even_where_refusal_is_slow() {
+        use std::net::TcpListener;
+        // Hosted Windows runners took 2.1 to 2.2 s to refuse a free loopback
+        // port; anything shorter made the shell refuse to start its dashboard.
+        assert!(READINESS_CONNECT_TIMEOUT >= Duration::from_millis(3000));
+        for _ in 0..5 {
+            let address = TcpListener::bind(("127.0.0.1", 0))
+                .unwrap()
+                .local_addr()
+                .unwrap();
+            let readiness = probe_address(address);
+            if readiness == Readiness::NotRunning {
+                return;
+            }
+            // A parallel test may have taken the released port. Only a port
+            // that is still free and was not read as free is a failure.
+            if TcpListener::bind(address).is_ok() {
+                panic!("a free port read as {readiness:?}");
+            }
+        }
+        panic!("no released loopback port stayed free long enough to probe");
+    }
+
+    #[test]
+    fn a_connection_that_opens_late_still_gets_its_whole_header_budget() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 256];
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                let count = stream.read(&mut chunk).unwrap();
+                if count == 0 {
+                    return;
+                }
+                request.extend_from_slice(&chunk[..count]);
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nX-Lightwork-Service: dashboard-v1\r\n\r\n")
+                .unwrap();
+        });
+        // Windows can complete a loopback connect after about two seconds of
+        // SYN retries when the dashboard binds during them.
+        let readiness = probe_with(|| {
+            let stream = TcpStream::connect(address)?;
+            std::thread::sleep(Duration::from_millis(2100));
+            Ok(stream)
+        });
+        assert_eq!(readiness, Readiness::Ready);
+        worker.join().unwrap();
+    }
+
+    #[test]
     fn stuck_native_identity_probe_has_an_overall_deadline() {
         use std::net::TcpListener;
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -664,6 +753,57 @@ mod tests {
             Duration::ZERO,
         ));
         assert_eq!(probes, 1);
+    }
+
+    #[test]
+    fn startup_state_stays_answerable_while_the_readiness_probe_runs() {
+        // On Windows the probe waits about two seconds for a refused connect.
+        // Support reports and diagnostics must not wait behind it.
+        let dashboard = std::sync::Arc::new(Dashboard::with_binary(
+            std::env::temp_dir().join("lightwork-missing-probe-test-runtime.exe"),
+        ));
+        let (probing, probe_started) = std::sync::mpsc::channel();
+        let starter = {
+            let dashboard = dashboard.clone();
+            std::thread::spawn(move || {
+                dashboard.start_with(|| {
+                    probing.send(()).unwrap();
+                    std::thread::sleep(Duration::from_millis(1500));
+                    Readiness::Conflict
+                })
+            })
+        };
+        probe_started.recv().unwrap();
+        let began = Instant::now();
+        assert_eq!(
+            dashboard.startup_support().unwrap().process_state,
+            "not_started"
+        );
+        dashboard.diagnostics().unwrap();
+        assert!(began.elapsed() < Duration::from_millis(500));
+        // A conflicting listener still refuses to start a second dashboard.
+        assert!(starter.join().unwrap().is_err());
+    }
+
+    #[test]
+    fn a_start_whose_readiness_check_outlived_a_stop_launches_nothing() {
+        // Quitting, or the updater's exit hook, during the probe must not
+        // leave a newly launched dashboard behind the closing app.
+        let dashboard = Dashboard::with_binary(
+            std::env::temp_dir().join("lightwork-missing-stop-race-test-runtime.exe"),
+        );
+        let result = dashboard.start_with(|| {
+            dashboard.stop_owned();
+            Readiness::NotRunning
+        });
+        assert_eq!(
+            result.unwrap_err(),
+            "Lightwork was stopped during the startup check. Select Retry to start it again."
+        );
+        assert!(!dashboard
+            .diagnostics()
+            .unwrap()
+            .contains("Starting Lightwork"));
     }
 
     #[test]

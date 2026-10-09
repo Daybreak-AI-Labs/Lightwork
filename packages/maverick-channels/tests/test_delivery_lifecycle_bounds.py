@@ -141,3 +141,20 @@ def test_a_claim_abandoned_by_a_dead_process_is_surfaced_not_rerun(journal, monk
     surfaced = journal.get(row["id"])
     assert surfaced["execution"] == "execution_unknown" and surfaced["delivery"] == "ready"
     assert [r["id"] for r in rows] == [row["id"]]   # its reply is now delivered
+
+
+def test_a_send_abandoned_by_a_dead_process_is_surfaced_as_unknown_not_replayed(journal, monkeypatch):
+    row = journal.admit(_msg(4), external_id="e4", account="acct")
+    sending = journal.change(row, execution="completed", delivery="sending", chunks={
+        "reply": {"state": "sending", "payload_sha256": "x", "attempt_id": "a"},
+        "text-0": {"state": "delivered", "payload_sha256": "y", "attempt_id": "b"}})
+    journal.recovery_window(channel="fixture", account="acct")
+    assert journal.get(row["id"])["delivery"] == "sending"                # a live send is left alone
+    later = sending["updated_at"] + delivery.STALE_CLAIM_SECONDS + 10
+    monkeypatch.setattr(delivery, "time", SimpleNamespace(time=lambda: later))
+    rows, _ = journal.recovery_window(channel="fixture", account="acct")
+    surfaced = journal.get(row["id"])
+    assert surfaced["delivery"] == "delivery_unknown"
+    assert surfaced["chunks"]["reply"]["state"] == "delivery_unknown"
+    assert surfaced["chunks"]["text-0"]["state"] == "delivered"           # a finished chunk keeps its outcome
+    assert [r["id"] for r in rows if r["id"] == row["id"]] == []           # never offered for sending again

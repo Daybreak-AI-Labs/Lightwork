@@ -24,10 +24,23 @@
     doc.getElementById('policy-exception-original').hidden = true;
     doc.getElementById('policy-exception-new').hidden = true;
   }
+  // Nothing has been read yet (or private details were cleared): a failed read
+  // must not leave "Loading…" placeholders behind. Once a read has succeeded,
+  // the lists stay as read, including a correct "no safeguards recorded" note,
+  // whatever later error (a refresh, or a form that was not complete) follows.
+  function settleUnread() {
+    if (state) return;
+    var holder = doc.getElementById('policy-exception-controls'), select = doc.getElementById('policy-exception-policy');
+    if (holder) holder.replaceChildren(make('p', 'Safeguards could not be read. Use Refresh to try again.'));
+    if (select) select.replaceChildren(new Option('Refresh to read current rules', ''));
+  }
   function problem(error) {
     if (error && [401,403,409].includes(error.status)) {
       clearPrivate(); status('Your account, workspace or access changed. Private exception details have been cleared. Refresh to continue.');
-    } else status(error && error instanceof Error && !error.status ? error.message : root.mvErrorText ? root.mvErrorText(error, 'read these exception controls') : 'These controls could not be read. Your entered work is kept.');
+    } else {
+      settleUnread();
+      status(error && error instanceof Error && !error.status ? error.message : root.mvErrorText ? root.mvErrorText(error, 'read these exception controls') : 'These controls could not be read. Your entered work is kept.');
+    }
   }
   function retain(value) {
     held = value;

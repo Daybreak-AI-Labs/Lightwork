@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import sqlite3
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
@@ -220,3 +222,103 @@ def test_hot_status_reads_only_live_holds_after_large_settled_history(tmp_path, 
     # SQLite calls this handler every 1,000 VM instructions. A scan of all
     # settled receipts in the hot path needs far more than this bound.
     assert steps < 10
+
+
+def _indexed_ledger(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    config = tmp_path / "config.toml"
+    config.write_text("[budget.provider_caps]\nopenai = 20.0\n")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(config))
+    monkeypatch.setattr(cap, "_INDEXED_MIGRATION_BYTES", 1)
+    path = cap._ledger_path()
+    cap._save_json(path, {cap.period_key(): {"openai": 1.0}})
+    assert cap.check("openai").spent == 1.0  # migrate first: the failure below hits a later write
+    assert indexed.is_active(path)
+    return path
+
+
+def _seal_fails_once(monkeypatch):
+    original = indexed._publish_seal
+    calls = []
+
+    def flaky(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise OSError("no space left on device")
+        return original(*args)
+
+    monkeypatch.setattr(indexed, "_publish_seal", flaky)
+
+
+def test_commit_without_its_seal_is_recovered_not_a_permanent_lockout(tmp_path, monkeypatch):
+    path = _indexed_ledger(tmp_path, monkeypatch)
+    _seal_fails_once(monkeypatch)
+    with pytest.raises(cap.ProviderAccountingUnavailable):  # the seal write failed after the commit
+        cap.reserve("openai", 1.0, request_id="first")
+    # The change committed but its seal did not: the healthy ledger must still serve.
+    status = cap.check("openai")
+    assert (status.spent, status.reserved) == (pytest.approx(1.0), pytest.approx(1.0))
+    hold = cap.reserve("openai", 1.0, request_id="second")
+    cap.settle(hold, 0.5)
+    assert cap.check("openai").spent == pytest.approx(1.5)
+    assert indexed._digest_file(indexed.database_path(path)) == indexed.seal_path(path).read_text().strip()
+
+
+def test_tampering_after_a_recovered_commit_still_fails_closed(tmp_path, monkeypatch):
+    path = _indexed_ledger(tmp_path, monkeypatch)
+    _seal_fails_once(monkeypatch)
+    with pytest.raises(cap.ProviderAccountingUnavailable):  # the seal write failed after the commit
+        cap.reserve("openai", 1.0, request_id="first")
+    assert cap.check("openai").reserved == pytest.approx(1.0)
+    with sqlite3.connect(indexed.database_path(path)) as connection:
+        connection.execute("UPDATE totals SET dollars=0")
+    with pytest.raises(cap.ProviderAccountingUnavailable):
+        cap.check("openai")
+    with pytest.raises(cap.ProviderAccountingUnavailable):
+        cap.reserve("openai", 0.1, request_id="different")
+
+
+def test_an_unsealed_commit_that_breaks_the_ledger_still_fails_closed(tmp_path, monkeypatch):
+    path = _indexed_ledger(tmp_path, monkeypatch)
+    cap.reserve("openai", 1.0, request_id="original")
+    _seal_fails_once(monkeypatch)
+    with pytest.raises(cap.ProviderAccountingUnavailable):
+        cap.reserve("openai", 0.25, request_id="next")
+    # Recovery re-seals only a ledger that still passes every invariant: a total
+    # smaller than the holds it must cover is damage, not an interrupted commit.
+    with sqlite3.connect(indexed.database_path(path)) as connection:
+        connection.execute("UPDATE totals SET dollars=0")
+    with pytest.raises(cap.ProviderAccountingUnavailable):
+        cap.check("openai")
+    with pytest.raises(cap.ProviderAccountingUnavailable):
+        cap.reserve("openai", 0.1, request_id="different")
+
+
+_STOP_MID_TRANSACTION = """
+import os, sqlite3, sys
+connection = sqlite3.connect(sys.argv[1], isolation_level=None)
+connection.execute("PRAGMA cache_size=2")  # a tiny page cache spills dirty pages into the file early
+connection.execute("BEGIN IMMEDIATE")
+for number in range(3000):
+    connection.execute("INSERT INTO attempts VALUES(?, ?, 'openai', '2026-10', ?)",
+                       ("k%d" % number, "x" * 200, "r%d" % number))
+os._exit(0)  # the writer dies with its journal still hot
+"""
+
+
+def test_a_hot_journal_from_a_stopped_writer_is_rolled_back_before_the_seal_is_judged(tmp_path, monkeypatch):
+    path = _indexed_ledger(tmp_path, monkeypatch)
+    cap.reserve("openai", 1.0, request_id="original")
+    database = indexed.database_path(path)
+    sealed = indexed.seal_path(path).read_text().strip()
+    indexed._mark_seal_pending(path)  # what a writer does before it touches a row
+    subprocess.run([sys.executable, "-c", _STOP_MID_TRANSACTION, str(database)], check=True)
+    journal = database.with_name(database.name + "-journal")
+    assert journal.exists() and indexed._digest_file(database) != sealed  # hashing now would read half-written pages
+
+    status = cap.check("openai")  # sqlite rolls the journal back; the original ledger is intact
+    assert (status.spent, status.reserved) == (pytest.approx(1.0), pytest.approx(1.0))
+    assert not journal.exists()
+    assert indexed.seal_path(path).read_text().strip() == indexed._digest_file(database) == sealed
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM attempts WHERE attempt_key LIKE 'k%'").fetchone() == (0,)

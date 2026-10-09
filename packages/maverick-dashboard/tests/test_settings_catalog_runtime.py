@@ -281,7 +281,14 @@ def test_row_saves_reads_back_and_resets(setting, audit_rows):
     row = _row(setting.id)
     if row["source"] == "here":
         from maverick.config_resets import is_reset
-        assert is_reset(page._sources()["here"], setting), "Only the explicit product-default mask may remain after reset"
+        here = page._sources()["here"]
+        if page._has_partial_default(setting):
+            # Removing the value could let an older or legacy choice apply again,
+            # so reset writes the product default itself and nothing else.
+            assert catalog.lookup(here, setting.path) == (True, page._default_of(setting))
+            assert row["value"] == page._default_of(setting)
+        else:
+            assert is_reset(here, setting), "Only the explicit product-default mask may remain after reset"
     else:
         assert row["source"] == "default"
 
@@ -469,6 +476,24 @@ def test_deferred_connectors_switch_reaches_the_agent(audit_rows):
     assert config.get_capabilities()["deferred_tools"] is True
     assert _save([{"id": "capabilities.deferred_tools", "value": False}]).status_code == 200
     assert config.get_capabilities()["deferred_tools"] is False
+
+
+def test_unreadable_deferred_tools_environment_does_not_lock_the_switch(monkeypatch, audit_rows):
+    """The kernel ignores a MAVERICK_DEFERRED_TOOLS value it cannot read, so
+    the page must not present that value as a deployment lock."""
+    from maverick import config
+
+    monkeypatch.setenv("MAVERICK_DEFERRED_TOOLS", "sometimes")
+    row = _row("capabilities.deferred_tools")
+    assert row["locked"] is False and row["value"] is True, row
+    assert _save([{"id": "capabilities.deferred_tools", "value": False}]).status_code == 200
+    assert config.get_capabilities()["deferred_tools"] is False
+    assert _row("capabilities.deferred_tools")["value"] is False
+    # A value the kernel honours still locks the switch to that value.
+    monkeypatch.setenv("MAVERICK_DEFERRED_TOOLS", "on")
+    row = _row("capabilities.deferred_tools")
+    assert row["locked"] is True and row["value"] is True, row
+    assert config.get_capabilities()["deferred_tools"] is True
 
 
 def test_plugin_settings_survive_other_plugin_writes(audit_rows):

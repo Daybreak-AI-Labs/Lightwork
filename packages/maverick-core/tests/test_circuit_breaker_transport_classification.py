@@ -158,7 +158,7 @@ def test_native_dispatch_isolates_connection_outage_after_rotation(monkeypatch, 
     from maverick.budget import Budget
     from maverick.llm import LLM
 
-    route = {"base_url": "https://unavailable.fixture.invalid", "api_key": "fixture-key"}
+    route = {"base_url": "https://unavailable.fixture.invalid", "api_key": "fixture-key"}  # pragma: allowlist secret -- test fixture key
     calls = {}
 
     class Client:

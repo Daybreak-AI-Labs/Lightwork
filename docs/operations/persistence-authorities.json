@@ -176,21 +176,21 @@
     }
   },
   "counts": {
-    "governed": 136,
+    "governed": 137,
     "artifact": 55,
     "a2a": 4,
     "preferences": 8,
     "learning": 61,
     "sqlite_domain": 82,
-    "configuration": 74,
+    "configuration": 75,
     "read_projection": 24,
     "coordinator": 1,
     "audit": 26,
-    "transient": 26,
+    "transient": 25,
     "business_records": 22,
     "execution": 45,
     "recovery": 12,
-    "derived": 16,
+    "derived": 17,
     "composition": 62,
     "external": 18,
     "key_custody": 4,
@@ -4914,6 +4914,33 @@
           "function": "purge_expired",
           "kind": "commit",
           "expression": "connection.commit()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/deadline_alerts.py",
+      "contract": "derived",
+      "owner": "packages/maverick-core/maverick/deadline_alerts.py",
+      "purpose": "Deadline alerts: the sent-alert ledger lives in the world model; this module also keeps a small rebuildable per-alert retry wait for alerts no channel accepted.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; the retry wait only delays a retry and authorizes nothing; it is keyed by a hash of the alert and ignored once the notification setup changes, so a lost or restored copy is harmless",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "deadline-alert-retries.json"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 516,
+          "function": "__init__",
+          "kind": "data_dir",
+          "expression": "data_dir('deadline-alert-retries.json')"
+        },
+        {
+          "line": 574,
+          "function": "save",
+          "kind": "atomic_write_text",
+          "expression": "atomic_write_text(self.path, json.dumps({k: keep[k] for k in newest}, separators=(',', ':')))"
         }
       ]
     },
@@ -20458,7 +20485,9 @@
       "literal_path_hints": [
         "dashboard-custom-roles.json",
         "dashboard-tenant-roles.json",
-        "dashboard-users.json"
+        "dashboard-tenant-roles.json.present",
+        "dashboard-users.json",
+        "dashboard-users.json.present"
       ],
       "observed_mechanism_markers": {
         "cross_process_lock": 1,
@@ -20530,6 +20559,18 @@
           "function": "_locked",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(path)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "dashboard-users.json.present",
+          "recovery_policy": "dashboard_user_roles",
+          "disposition": "Records that the global role roster existed. Retained with the roster; while it exists a missing roster denies access instead of returning everyone to the default role."
+        },
+        {
+          "sample_path": "dashboard-tenant-roles.json.present",
+          "recovery_policy": "dashboard_tenant_roles",
+          "disposition": "Records that workspace memberships existed. Retained with them; a missing membership roster denies instead of falling back to the global role."
         }
       ]
     },
@@ -24386,18 +24427,32 @@
     },
     {
       "path": "packages/maverick-dashboard/maverick_dashboard/learning_ops_api.py",
-      "contract": "transient",
+      "contract": "governed",
       "owner": "packages/maverick-dashboard/maverick_dashboard/learning_ops_api.py",
-      "purpose": "Learning operations; an uploaded factory evidence file is written to a private temporary folder for one review pass and removed with it.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
+      "purpose": "Learning operations; reviewed test-case import requests are governed records, and an uploaded factory evidence file is written to a private temporary folder for one review pass and removed with it.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); test-case import request store classified in the October 7 Python 3.10 sweep",
+      "governed_namespaces": [
+        {
+          "namespace": "learning-case-import-requests",
+          "line": 763,
+          "recovery_policy": "learning_case_import_authority"
+        }
+      ],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
       "source_sites": [
         {
-          "line": 582,
-          "function": "_do",
+          "line": 763,
+          "function": "_import_store",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('learning-case-import-requests', 'LCI', 'learning_case_import_request')"
+        },
+        {
+          "line": 1111,
+          "function": "inspect",
           "kind": "write_bytes",
           "expression": "path.write_bytes(raw)"
         }
@@ -25542,7 +25597,7 @@
           "expression": "cross_process_lock(self.path)"
         },
         {
-          "line": 73,
+          "line": 89,
           "function": "update",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(self.path)"
@@ -28864,47 +28919,83 @@
       ],
       "observed_mechanism_markers": {
         "atomic_replace": 1,
-        "cross_process_lock": 3
+        "cross_process_lock": 6
       },
       "source_sites": [
         {
-          "line": 53,
+          "line": 64,
           "function": "path",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 126,
+          "line": 137,
           "function": "_write",
           "kind": "atomic_write_text",
           "expression": "file_lock.atomic_write_text(path(), json.dumps({'schema': _SCHEMA, 'accounts': accounts}, sort_keys=True), mode=384)"
         },
         {
-          "line": 145,
+          "line": 153,
+          "function": "has_account",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 154,
+          "function": "has_account",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(path(), strict=True)"
+        },
+        {
+          "line": 160,
+          "function": "emails",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 161,
+          "function": "emails",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(path(), strict=True)"
+        },
+        {
+          "line": 171,
+          "function": "revoke",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 172,
+          "function": "revoke",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(path(), strict=True)"
+        },
+        {
+          "line": 188,
           "function": "store",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 146,
+          "line": 189,
           "function": "store",
           "kind": "cross_process_lock",
           "expression": "file_lock.cross_process_lock(path(), strict=True)"
         },
         {
-          "line": 180,
+          "line": 225,
           "function": "login",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         },
         {
-          "line": 181,
+          "line": 226,
           "function": "login",
           "kind": "cross_process_lock",
           "expression": "file_lock.cross_process_lock(path(), strict=True)"
         },
         {
-          "line": 196,
+          "line": 241,
           "function": "login",
           "kind": "cross_process_lock",
           "expression": "file_lock.cross_process_lock(path(), strict=True)"
@@ -28915,6 +29006,55 @@
           "sample_path": "dashboard-passphrases.json",
           "recovery_policy": "dashboard_local_passphrases",
           "disposition": "Installation-level colleague sign-in credentials. A restored copy is retained and blocks startup pending current identity reconciliation; it is never silently adopted or discarded."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/passphrase_resets.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/passphrase_resets.py",
+      "purpose": "Resetting a colleague's forgotten passphrase, and the one-time link it gives.",
+      "referenced_store_owners": [],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added with the owner-only passphrase reset",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "dashboard-passphrase-resets.json"
+      ],
+      "observed_mechanism_markers": {
+        "atomic_replace": 1,
+        "cross_process_lock": 1
+      },
+      "source_sites": [
+        {
+          "line": 74,
+          "function": "path",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 122,
+          "function": "_write",
+          "kind": "atomic_write_text",
+          "expression": "file_lock.atomic_write_text(path(), json.dumps({'schema': _SCHEMA, 'resets': resets}, sort_keys=True), mode=384)"
+        },
+        {
+          "line": 131,
+          "function": "_locked",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        },
+        {
+          "line": 138,
+          "function": "_locked",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(path(), strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "dashboard-passphrase-resets.json",
+          "recovery_policy": "dashboard_passphrase_resets",
+          "disposition": "Installation-level one-time passphrase reset links (token hashes bound to an account's access). A restored copy is retained and blocks startup pending current identity reconciliation; it is never silently adopted or discarded."
         }
       ]
     },

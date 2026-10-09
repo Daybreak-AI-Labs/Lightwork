@@ -1,4 +1,5 @@
 """Copilot can hand a reviewed release to the native learned run form only."""
+import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from maverick_dashboard import product_operations as ops
@@ -237,6 +238,42 @@ def test_copilot_hardening_binds_input_and_saves_only_after_fresh_confirmation(m
         assert done.status_code == 200, done.text
         assert done.json()["status"] == "confirmed" and state["version"] == 4
         assert state["calls"].count("apply") == 1
+
+
+def _hardening_input(monkeypatch, kind, entered):
+    """Prepare a fixed action with one numeric input; returns the saved params."""
+    from maverick.governed_operations import digest
+    from maverick_dashboard.product_operations import Snapshot
+
+    review = {"flow_id": "owned", "flow_name": "Customer lookup", "version": 2, "revision": "draft-2",
+              "node_id": "step", "node_label": "Look up customer", "from_kind": "agent",
+              "to_kind": "action", "published": True, "tool": "web_search",
+              "fields": [{"name": "limit", "label": "Limit", "type": kind, "required": True}],
+              "sources": []}
+    draft = {"id": "owned", "name": "Customer lookup", "start": "step", "version": 2,
+             "revision": "draft-2", "nodes": [{"id": "step", "kind": "agent", "brief": "Look up"}]}
+    monkeypatch.setattr(workflows, "harden_snapshot",
+                        lambda _request, _selection: Snapshot(digest(review), "source", "summary"))
+    monkeypatch.setattr(workflows.native, "flow_apply_review_endpoint", lambda *_args: review)
+    monkeypatch.setattr(workflows.native, "get_flow_endpoint", lambda *_args: draft)
+    selection = {"kind": "flow", "id": "owned", "node_id": "step"}
+    return workflows.harden_prepare(None, selection, {"limit": entered}).native["params"]
+
+
+def test_hardening_keeps_whole_numbers_exact_beyond_two_to_the_53(monkeypatch):
+    # A float cannot hold 2**53 + 1; it used to be saved as 9007199254740992.
+    assert _hardening_input(monkeypatch, "integer", "9007199254740993") == {"limit": 9007199254740993}
+    assert _hardening_input(monkeypatch, "integer", 9007199254740993) == {"limit": 9007199254740993}
+    assert _hardening_input(monkeypatch, "integer", " 25 ") == {"limit": 25}
+    assert _hardening_input(monkeypatch, "integer", 25.0) == {"limit": 25}
+    assert _hardening_input(monkeypatch, "number", "2.5") == {"limit": 2.5}
+
+
+def test_hardening_refuses_integer_input_that_is_not_a_whole_number(monkeypatch):
+    for entered in ("2.5", "1e400", "nan", "inf", "twelve", 2.5, True, "9" * 400):
+        with pytest.raises(HTTPException) as exc:
+            _hardening_input(monkeypatch, "integer", entered)
+        assert exc.value.status_code == 422, entered
 
 
 def test_copilot_teaching_reviews_exact_examples_then_hands_back_an_unapproved_recipe(monkeypatch):

@@ -144,6 +144,15 @@ def _isolate_dynamic_maverick_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_workspace_invite_limit():
+    """Each test starts with a fresh per-administrator invitation window."""
+    module = sys.modules.get("maverick_dashboard.invites")
+    if module is not None:
+        module.reset_issue_limit()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_runner_shutdown_admission(monkeypatch):
     """A prior TestClient shutdown must not close admission in another test."""
     import sys
@@ -241,6 +250,47 @@ def _fail_the_test_that_forks_a_module():
         )
 
 
+_REAL_PATH_HELPERS: dict = {}
+
+
+@pytest.fixture(autouse=True)
+def _rebind_path_helpers_imported_under_a_test_replacement():
+    """Give back the real ``maverick.paths`` helpers to modules a test imported.
+
+    A test that replaces ``maverick.paths.data_dir`` (about forty do) and, while
+    it is replaced, imports a module for the first time leaves that module's
+    ``from .paths import data_dir`` bound to the test's stand-in after
+    ``monkeypatch`` restores ``maverick.paths``. Every later test in the worker
+    then reads and writes that module's files in the first test's directory:
+    ``personal_notification_recipients`` kept one ``recipients.enc`` there, each
+    later test sealed it under its own new key, and the personal alert tests
+    failed with a wrong at-rest key whenever ``test_earned_autonomy`` ran
+    first on the same worker.
+    """
+    if not _REAL_PATH_HELPERS:
+        # Captured before any test can have replaced them.
+        try:
+            from maverick import paths
+        except ImportError:
+            yield
+            return
+        _REAL_PATH_HELPERS.update({
+            name: value for name, value in vars(paths).items()
+            if not name.startswith("_") and isinstance(value, types.FunctionType)
+            and value.__module__ == "maverick.paths"})
+    yield
+    for name, module in list(sys.modules.items()):
+        if module is None or not name.startswith("maverick"):
+            continue
+        namespace = vars(module)
+        for helper, real in _REAL_PATH_HELPERS.items():
+            bound = namespace.get(helper)
+            if (bound is None or bound is real or not callable(bound)
+                    or str(getattr(bound, "__module__", "")).startswith("maverick")):
+                continue
+            setattr(module, helper, real)
+
+
 @pytest.fixture(autouse=True)
 def _reset_governed_process_authority_pin():
     """Keep process-lifetime production admission state isolated per test."""
@@ -311,6 +361,29 @@ def _isolate_default_audit_writers():
         yield
     finally:
         _reset()
+
+
+@pytest.fixture(autouse=True)
+def _reset_process_client_binding():
+    """Forget the process-wide client binding before and after every test.
+
+    ``client.client_id()`` resolves once per process, and the dashboard reads
+    ``tenants/<client>/world.db`` whenever a client is bound. A test that bound
+    a client without resetting left every later test on the same worker
+    reading another tenant's world: the load harness seeded goal 1 in its
+    pinned database and read 404 from the tenant one. Each test already gets
+    a fresh home, so a binding cached by an earlier test is always stale.
+    The core package's ``_reset_client_binding_cache`` does more; this name
+    differs so that fixture keeps its place after its own home isolation.
+    """
+    try:
+        from maverick import client
+    except Exception:  # pragma: no cover -- core not installed in this env
+        yield
+        return
+    client.reset_client_cache()
+    yield
+    client.reset_client_cache()
 
 
 @pytest.fixture(autouse=True)

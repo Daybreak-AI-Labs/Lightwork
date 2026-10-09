@@ -481,6 +481,8 @@ def test_shared_root_local_envelope_cannot_drift_into_tenant(monkeypatch):
         ("concurrency_principal", "attacker-principal"),
         ("allowed_suites", ["finance"]),
         ("sig", "0" * 64),
+        # A forged non-ASCII signature is the same refusal, not a TypeError.
+        ("sig", "é" * 64),
     ],
 )
 def test_every_dispatch_field_is_authenticated_before_execution(

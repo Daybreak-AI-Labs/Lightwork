@@ -255,6 +255,29 @@ def test_reviewed_submission_is_idempotent_and_survives_restart(tmp_path: Path) 
         )
 
 
+def test_non_ascii_stored_request_digest_conflicts_not_a_type_error(tmp_path: Path) -> None:
+    # State validation strips whitespace before checking the digest, so an
+    # edited receipt digest can keep a non-ASCII space; comparing it used to
+    # raise TypeError from hmac.compare_digest instead of the conflict.
+    state_path = tmp_path / "coordinator-state.json"
+    private = _private(1)
+    service = _service(private, path=state_path)
+    package = _export(4)
+    service.admit_review(package, _review(package, 4))
+    _client(service).submit(package, explicit_consent=True, idempotency_key="submit-reviewed-4")
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    receipt = state["receipts"]["submit-reviewed-4"]
+    receipt["request_sha256"] = " " + receipt["request_sha256"]
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(BenchmarkCoordinatorIdempotencyConflict):
+        _client(_service(private, path=state_path)).submit(
+            package,
+            explicit_consent=True,
+            idempotency_key="submit-reviewed-4",
+        )
+
+
 def test_state_byte_limit_is_exact_and_independent_of_request_limit(
     tmp_path: Path,
 ) -> None:

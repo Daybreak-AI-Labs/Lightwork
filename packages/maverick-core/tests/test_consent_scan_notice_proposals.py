@@ -355,7 +355,8 @@ def test_default_gate_is_enforced_at_operation_time(tmp_path, monkeypatch) -> No
     import maverick.config as config
 
     context = Context()
-    monkeypatch.setattr(config, "config_source_errors", list)
+    # Accept the keyword form load_global_config uses (include_tenant=False).
+    monkeypatch.setattr(config, "config_source_errors", lambda **kwargs: [])
     monkeypatch.setattr(config, "load_config", dict)
     store = ConsentScanNoticeProposalStore(
         tmp_path / "disabled.sqlite3",

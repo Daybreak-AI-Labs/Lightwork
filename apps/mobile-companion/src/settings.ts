@@ -143,8 +143,11 @@ export function saveProfile(name: string, settings: Settings, existingId?: strin
     if (!title || title.length > 80) throw new Error('Enter a connection name of up to 80 characters.');
     const error = connectionValidationError(settings.baseUrl, settings.token);
     if (error) throw new Error(error);
-    const store = parseProfiles(await SecureStore.getItemAsync(PROFILES_KEY));
-    if (!store.profiles.length) {
+    const profilesRaw = await SecureStore.getItemAsync(PROFILES_KEY);
+    const store = parseProfiles(profilesRaw);
+    // Only the first profile of an older install imports the older record. Once the
+    // list exists, removing a connection must stay final.
+    if (profilesRaw === null) {
       const raw = await SecureStore.getItemAsync(CONNECTION_KEY);
       if (raw) {
         let legacy: Settings;
@@ -193,6 +196,13 @@ export function removeProfile(id: string): Promise<void> {
     const profiles = store.profiles.filter(profile => profile.id !== id);
     const active = store.active === id ? '' : store.active;
     await purgeBundle(removed?.cacheScope);
+    if (removed) {
+      // The imported copy of an older single-connection record goes with its profile, or its token would stay on the device.
+      const raw = await SecureStore.getItemAsync(CONNECTION_KEY);
+      let older: Partial<Settings> | null = null;
+      try { older = raw ? JSON.parse(raw) : null; } catch { /* an unreadable record is left for an explicit reset */ }
+      if (older && older.baseUrl === removed.baseUrl && older.token === removed.token) await SecureStore.deleteItemAsync(CONNECTION_KEY);
+    }
     await SecureStore.setItemAsync(PROFILES_KEY, JSON.stringify({active, profiles}));
   });
 }

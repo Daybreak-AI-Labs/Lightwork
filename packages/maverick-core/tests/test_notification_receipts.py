@@ -81,3 +81,75 @@ def test_async_queue_is_not_delivery_and_failed_backend_visible(tmp_path, monkey
     assert DeliveryReceipts(path).recent()[0]['state'] == 'failed'
     assert notifications.notify('PRIVATE', batch=False, delivery_key='event-once') == 0
     assert 'PRIVATE' not in path.read_text()
+
+
+def test_sync_outcomes_report_each_backends_final_state(tmp_path, monkeypatch):
+    from maverick import notifications
+    path = tmp_path / 'receipts.json'
+    monkeypatch.setattr('maverick.paths.data_dir', lambda *parts: path)
+    monkeypatch.setattr(notifications, '_load_config', lambda: {'backend': 'ntfy'})
+
+    def dispatch(backend, **kwargs):
+        if backend == 'slack':
+            raise TimeoutError('the service may have accepted it')
+        return backend == 'ntfy'
+    monkeypatch.setattr(notifications, '_dispatch', dispatch)
+    outcomes = []
+    assert notifications.notify('synthetic', backends=['ntfy', 'discord', 'slack'], batch=False,
+                                async_dispatch=False, outcomes=outcomes) == 1
+    assert outcomes == ['delivered', 'failed', 'unknown']
+
+    def refuse():
+        raise PermissionError('revoked')
+    refused = []
+    assert notifications.notify('synthetic', batch=False, async_dispatch=False, authorize=refuse,
+                                outcomes=refused) == 0
+    assert refused == ['failed']
+
+
+def _failed_row(index, *, safe_to_retry=True, kind='event', state='failed', updated_at=None):
+    import time
+    now = time.time() if updated_at is None else updated_at
+    return {'id': f'row-{index}', 'backend': 'ntfy', 'kind': kind, 'state': state, 'request_id': None,
+            'updated_at': now, 'created_at': now, 'attempts': 1, 'safe_to_retry': safe_to_retry,
+            'message': 'Not sent.'}
+
+
+def test_a_flood_of_definite_failures_never_pauses_other_notifications(tmp_path):
+    import time
+    receipts = DeliveryReceipts(tmp_path / 'receipts.json')
+    now = time.time()
+    receipts._save([_failed_row(i, updated_at=now - 1000 + i) for i in range(1000)])
+    ident, acquired = receipts.claim('a different event', 'ntfy')
+    assert acquired
+    rows = receipts._load()
+    assert len(rows) == 1000 and {r['id'] for r in rows} >= {ident, 'row-999'}
+    assert 'row-0' not in {r['id'] for r in rows}  # the oldest definite failure made room
+    # An accepted send is still protected from replay while the history is otherwise full of failures.
+    receipts.update(ident, 'delivered', 'Accepted')
+    receipts.claim('another event', 'ntfy')
+    assert receipts.claim('a different event', 'ntfy') == (ident, False)
+
+
+@pytest.mark.parametrize('row', [
+    {'state': 'delivered'}, {'state': 'queued'}, {'state': 'sending'}, {'state': 'unknown'},
+    {'state': 'failed', 'safe_to_retry': False}, {'kind': 'test'},
+])
+def test_only_definite_failures_that_are_safe_to_retry_are_ever_dropped(tmp_path, row):
+    receipts = DeliveryReceipts(tmp_path / 'receipts.json')
+    receipts._save([_failed_row(i, **row) for i in range(1000)])
+    with pytest.raises(ValueError, match='full'):
+        receipts.claim('another event', 'ntfy')
+    assert len(receipts._load()) == 1000
+
+
+def test_notify_goes_out_when_the_history_is_full_of_definite_failures(tmp_path, monkeypatch):
+    from maverick import notifications
+    path = tmp_path / 'receipts.json'
+    monkeypatch.setattr('maverick.paths.data_dir', lambda *parts: path)
+    monkeypatch.setattr(notifications, '_load_config', lambda: {'backend': 'ntfy', 'ntfy_topic': 'synthetic'})
+    DeliveryReceipts(path)._save([_failed_row(i) for i in range(1000)])
+    monkeypatch.setattr(notifications, '_send_ntfy', lambda *args: True)
+    assert notifications.notify('synthetic', batch=False, async_dispatch=False) == 1
+    assert len(DeliveryReceipts(path)._load()) == 1000
+

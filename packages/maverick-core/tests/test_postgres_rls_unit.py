@@ -183,6 +183,25 @@ def test_fact_upsert_advances_write_order_sequence(monkeypatch):
     assert "ORDER BY write_seq DESC" in recall_source
 
 
+def test_fact_upsert_refuses_the_withheld_placeholder_before_any_write(monkeypatch):
+    """Strict at-rest mode reads a legacy plaintext fact back as a placeholder; sealing
+    that placeholder over the stored value (a tag edit does) would destroy it."""
+    from maverick.world_model import _UNSEALED_WITHHELD
+
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = FactWriteCursor()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+    with pytest.raises(ValueError, match="encryption migrate"):
+        world.upsert_fact("hours", _UNSEALED_WITHHELD, tags=["finance"], expected_revision=3)
+    assert cur.calls == []
+
+
 def test_fact_revision_conflict_does_not_write_or_touch_history(monkeypatch):
     from maverick.fact_revision import FactConflict
 
@@ -859,3 +878,97 @@ def test_create_approval_notifies_with_the_committing_world(monkeypatch):
     insert_sql, insert_params = cur.calls[-1]
     assert insert_sql.startswith("INSERT INTO approvals(")
     assert insert_params[4] == "slack"
+
+
+# ---- approval webhook events (the SQLite world announces these; so must this one) ----
+
+
+class _ScriptedCursor(RecordingCursor):
+    """Answers fetchone() from a script and reports one affected row."""
+
+    rowcount = 1
+
+    def __init__(self, answers) -> None:
+        super().__init__()
+        self.answers = list(answers)
+
+    def fetchone(self):
+        return self.answers.pop(0) if self.answers else None
+
+
+def _approval_world(monkeypatch, cur):
+    """A world whose transactions record whether one is open, and an event spy."""
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: None)
+    monkeypatch.setattr(postgres, "_strict_tenant_isolation", lambda: False)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    state = {"open": False}
+    told: list[tuple[str, int, dict, bool]] = []
+
+    @contextmanager
+    def tx():
+        state["open"] = True
+        try:
+            yield cur
+        finally:
+            state["open"] = False
+
+    def emit(event, **kwargs):
+        told.append((event, int(kwargs["record_id"]), kwargs["payload"], state["open"]))
+        return 0
+
+    import maverick.webhook_events as webhook_events
+
+    monkeypatch.setattr(world, "_tx", tx)
+    monkeypatch.setattr(webhook_events, "emit", emit)
+    return world, told
+
+
+def test_create_approval_announces_it_to_webhook_subscribers_after_commit(monkeypatch):
+    import maverick.approval_notify as approval_notify
+
+    monkeypatch.setattr(approval_notify, "approval_created", lambda *args, **kwargs: None)
+    world, told = _approval_world(monkeypatch, _ScriptedCursor([None, (42,)]))
+    assert world.create_approval("payment", risk="high", detail="support") == 42
+    assert told == [("approval.created", 42, {"risk": "high", "action": "payment"}, False)]
+
+
+def test_a_single_approver_decision_is_announced_after_commit_and_a_refusal_is_not(monkeypatch):
+    from maverick.world_model import Approval
+
+    appr = Approval(id=5, action="payment", risk="high", scope=None, detail=None, provenance=None,
+                    status="pending", requested_at=1.0, decided_at=None, approvals_required=1)
+    world, told = _approval_world(monkeypatch, _ScriptedCursor([]))
+    monkeypatch.setattr(world, "get_approval", lambda approval_id: appr)
+    assert world.decide_approval(5, "approved", decided_by="user:dana") is True
+    assert told == [("approval.decided", 5,
+                     {"status": "approved", "decided_by": "user:dana", "action": "payment"}, False)]
+
+    refused = _ScriptedCursor([])
+    refused.rowcount = 0  # the audit outbox already owns this approval
+    world, told = _approval_world(monkeypatch, refused)
+    monkeypatch.setattr(world, "get_approval", lambda approval_id: appr)
+    assert world.decide_approval(5, "approved", decided_by="user:dana") is False
+    assert told == []
+
+
+def _delivery_answers():
+    event = ("evt", 7, "approved", "user:dana", "approved", 10.0, None)
+    return [event, None, ("approved", "user:dana", 10.0)]  # event, nothing else pending, the final vote
+
+
+def test_a_delivered_final_vote_is_announced_only_after_the_guard_and_the_commit(monkeypatch):
+    world, told = _approval_world(monkeypatch, _ScriptedCursor(_delivery_answers()))
+    calls = []
+
+    def guard():
+        calls.append(1)
+        if len(calls) == 2:  # the guard that runs just before the commit
+            raise PermissionError("authority changed")
+
+    with pytest.raises(PermissionError):
+        world.mark_approval_audit_delivered("evt", effect_guard=guard)
+    assert told == []
+
+    world, told = _approval_world(monkeypatch, _ScriptedCursor(_delivery_answers()))
+    assert world.mark_approval_audit_delivered("evt") is True
+    assert told == [("approval.decided", 7, {"status": "approved", "decided_by": "user:dana"}, False)]

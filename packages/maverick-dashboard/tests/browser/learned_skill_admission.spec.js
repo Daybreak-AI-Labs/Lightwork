@@ -42,6 +42,12 @@ test('administrator reviews a local suggestion, admits its exact version and wit
   await expect(page.locator('#to-learned-added')).toContainText(/customer renewal timing/i);
   await expect(page.locator('#installed-skills [data-skill="customer-renewal-timing"]')).toBeVisible();
 
+  // Hold the page's second load request so the removal button exists while
+  // the panel is still loading; a click then must wait, not be dropped.
+  await page.route('**/api/v1/skills/learned-requests', async route => {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    await route.continue();
+  });
   await page.reload();
   await expect(page.locator('#to-learned-added')).toContainText(/customer renewal timing/i);
   await expect(page.locator('#to-learned-list')).toBeEmpty();

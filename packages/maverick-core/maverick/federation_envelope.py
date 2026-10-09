@@ -46,10 +46,11 @@ protocol here — operators swap pubkeys out of band
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import logging
 import re
+
+from .constant_time import text_equals
 
 log = logging.getLogger(__name__)
 
@@ -246,7 +247,7 @@ def verify_envelope(
     pinned = str(peer.get("pubkey") or "")
     if not pinned:
         return False, f"no pinned pubkey for origin {origin!r}"
-    if not hmac.compare_digest(pubkey.lower().encode(), pinned.lower().encode()):
+    if not text_equals(pubkey.lower(), pinned.lower()):
         return False, "envelope pubkey does not match the pinned key for this origin"
     from .audit import signing as audit_signing
     if not audit_signing._have_crypto():

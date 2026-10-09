@@ -68,8 +68,13 @@ runs:
         # lock waits into "database is locked" findings. A slice with no
         # heavy files exits 5 (nothing collected) from the second phase,
         # which is a pass here.
+        #
+        # The parallel phase gets 45 minutes: the suite is now ~45,000 tests
+        # and a two-core hosted slice did not finish inside the former 20.
+        # A stuck test is still caught by --timeout=180; this bound is the
+        # backstop for a hang that pytest-timeout cannot see.
         status=0
-        timeout --verbose --signal=ABRT --kill-after=30s 20m \
+        timeout --verbose --signal=ABRT --kill-after=30s 45m \
           python -m pytest -q -n auto --dist loadfile --shard "${{ inputs.shard }}/4" \
             -m "not heavy_concurrency" --tb=short --durations=50 \
             --timeout=180 --timeout-method=signal \

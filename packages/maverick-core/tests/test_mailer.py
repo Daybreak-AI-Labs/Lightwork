@@ -87,3 +87,44 @@ def test_message_content(monkeypatch):
     assert msg["From"] == "sender@daybreak.example"
     assert msg["Subject"] == "Subject line"
     assert "the body" in msg.get_content()
+
+
+@pytest.mark.parametrize("port", ["465", "587"])
+def test_smtp_verifies_the_server_certificate_before_login(monkeypatch, port):
+    # smtplib's own default context (no `context=`) skips certificate and host
+    # checks, so the app password would go to any server on the path.
+    import smtplib
+    import ssl
+    _creds(monkeypatch, EMAIL_SMTP_HOST="mail.example", EMAIL_SMTP_PORT=port)
+    contexts = []
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=None):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def starttls(self, context=None):
+            contexts.append(context)
+
+        def login(self, user, password):
+            assert len(contexts) == 1, "logged in before TLS was set up"
+
+        def send_message(self, message):
+            return {}
+
+    class FakeSMTPSSL(FakeSMTP):
+        def __init__(self, host, port, timeout=None, context=None):
+            contexts.append(context)
+
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", FakeSMTPSSL)
+    mailer.send("to@x.co", "hi", "body")
+    (context,) = contexts
+    assert isinstance(context, ssl.SSLContext)
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True

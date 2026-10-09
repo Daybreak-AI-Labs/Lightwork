@@ -86,3 +86,25 @@ def test_generated_config_persists_strict_default(
 
     generated = tomllib.loads((tmp_path / "config.toml").read_text())
     assert generated["budget"]["strict_pricing"] is True
+
+
+def test_budget_warning_thresholds_are_written_as_numbers_the_kernel_accepts(monkeypatch):
+    from maverick import budget_guidance, config
+
+    monkeypatch.setattr(wizard, "_q_text", lambda _message, *, default="": default)
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *_args, **_kwargs: True)
+    budget = wizard.pick_budget()
+
+    written = tomllib.loads("\n".join(wizard._cfg_core(budget, {}, {})))
+
+    assert written["budget"]["warning_thresholds"] == [0.8, 0.95, 1.0]
+    monkeypatch.setattr(config, "config_source_errors", lambda **_kwargs: [])
+    monkeypatch.setattr(config, "load_config", lambda *_args, **_kwargs: written)
+    assert budget_guidance.policy()["warning_thresholds"] == [0.8, 0.95, 1.0]
+
+
+def test_list_values_keep_their_type_in_the_config_file():
+    lines: list[str] = []
+    wizard._emit_kv(lines, "mixed", [0.5, 2, True, "text", "12345"])
+
+    assert tomllib.loads("\n".join(lines))["mixed"] == [0.5, 2, True, "text", "12345"]

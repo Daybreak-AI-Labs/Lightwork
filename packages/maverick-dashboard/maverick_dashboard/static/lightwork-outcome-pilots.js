@@ -72,14 +72,28 @@
     }
     return data;
   }
+  // Opening the plan while another request runs checks release readiness
+  // once that request finishes, instead of keeping the opening message.
+  let candidatesWanted = false;
+  // The cohort value report inside this page keeps its own field states
+  // (for example, a reason that applies only when a cost is unknown).
+  const fieldsOf = own => [...root.querySelectorAll('button,input,select,textarea')].filter(field => !!field.closest('[data-own-controls]') === own);
+  const pilotFields = () => fieldsOf(false);
   function controls(disabled) {
+    if (!disabled && candidatesWanted && !busy) { candidatesWanted = false; setTimeout(() => { if ($('op-plan-details').open) refreshReleaseCandidates(); }, 0); }
     root.setAttribute('aria-busy', String(disabled));
-    root.querySelectorAll('button,input,select,textarea').forEach(b => { b.disabled = disabled || lostAuthority; });
+    pilotFields().forEach(b => { b.disabled = disabled || lostAuthority; });
     $('op-export').disabled = disabled || lostAuthority || !current;
     $('op-candidate').disabled = disabled || lostAuthority || !releaseReady;
     const confirm = $('op-guided-review').querySelector('[data-save-review]');
     if (confirm) confirm.disabled = disabled || lostAuthority || !review || !$('op-guided-review').querySelector('[data-review-confirm]').checked;
-    if(root.dataset.enabled!=='true'){root.querySelectorAll('button,input,select,textarea').forEach(button=>button.disabled=true);$('op-original-check').disabled=busy||lostAuthority;}
+    if(root.dataset.enabled!=='true'){pilotFields().forEach(button=>button.disabled=true);$('op-original-check').disabled=busy||lostAuthority;}
+    // Saving pilot work leaves the cohort value report to its own states, but it
+    // closes with this page when access is lost or pilots are off. The report
+    // reads data-value-locked so a request finishing later cannot reopen it.
+    const closed = lostAuthority || root.dataset.enabled !== 'true';
+    root.dataset.valueLocked = String(closed);
+    if (closed) fieldsOf(true).forEach(field => { field.disabled = true; });
   }
   async function mutation(task) {
     if (busy) return;
@@ -348,7 +362,8 @@
     delete $('op-plan').dataset.operation;
   });
   async function refreshReleaseCandidates() {
-    if (busy || lostAuthority) return;
+    if (lostAuthority) return;
+    if (busy) { candidatesWanted = true; return; }
     busy = true; controls(true); const note = $('op-candidate-status'); note.textContent = 'Checking release readiness…';
     try {
       const data = await request('/release-candidates');
@@ -507,8 +522,12 @@
   window.LightworkOutcomePilots={open,renderReview};
   document.addEventListener('lightwork:copilot-selection',event=>{const selection=event.detail&&event.detail.selection;if(!selection||selection.kind!=='outcome_pilot'||selection.id!==publishedSelection)ownsSelection=false;});
   $('op-original-check').addEventListener('click',()=>void readOriginal());
-  root.addEventListener('input',event=>{if(!$('op-guided-review').contains(event.target)){dirty=true;invalidateReview();}});
-  root.addEventListener('change',event=>{if(!$('op-guided-review').contains(event.target)&&event.target!==chosen&&event.target.id!=='op-review-reference'){dirty=true;invalidateReview();}});
+  // Provider cost allocations save directly and redraw the report, and the
+  // cohort value report keeps its own fields and saves, so neither is unsaved
+  // pilot work that would block opening another pilot or leaving the page.
+  const pilotWork=target=>!$('op-guided-review').contains(target)&&!target.closest('#op-provider-costs, [data-own-controls]');
+  root.addEventListener('input',event=>{if(pilotWork(event.target)){dirty=true;invalidateReview();}});
+  root.addEventListener('change',event=>{if(pilotWork(event.target)&&event.target!==chosen&&event.target.id!=='op-review-reference'){dirty=true;invalidateReview();}});
   function contextChanged(event){if(event.detail&&event.detail.reason==='selection')return;clearAuthority();status.textContent='Your account, workspace or access changed. Private pilot details were cleared. Reload this page.';}
   document.addEventListener('lightwork:workspace-changed',contextChanged);document.addEventListener('lightwork:account-context-changed',contextChanged);document.addEventListener('lightwork:copilot-context-changed',contextChanged);window.addEventListener('lightwork:context-changed',contextChanged);
   window.addEventListener('beforeunload',event=>{if(dirty||review){event.preventDefault();event.returnValue='';}});

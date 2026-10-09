@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from . import rbac, scim_groups, suite_grants
-from .auth import caller_principal, require_permission, role_for_principal
+from .auth import caller_principal, constant_time_equals, require_permission, role_for_principal
 from .draft_api import context_for
 
 router = APIRouter(tags=["project-reviews"])
@@ -104,7 +104,7 @@ async def _call(request, response, operation, *, write=False):
     require_enabled(request)
     response.headers["Cache-Control"] = "private, no-store"
     supplied_context = request.headers.get("X-Lightwork-Review-Context")
-    if supplied_context is not None and not hmac.compare_digest(supplied_context, context_for(request)):
+    if supplied_context is not None and not constant_time_equals(supplied_context, context_for(request)):
         raise HTTPException(409, "Your account or workspace changed. Reload project reviews before reading or saving.")
     if write:
         require_permission(request, "operate")

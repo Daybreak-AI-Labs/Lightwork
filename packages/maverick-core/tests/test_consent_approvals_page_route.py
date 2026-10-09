@@ -219,3 +219,45 @@ def test_dashboard_mode_also_stops_waiting_once_the_task_is_stopped(db, monkeypa
 
     assert decision.granted is False
     assert decision.source == "task-stopped"
+
+
+def _withdraw(path, approval_id):
+    from maverick.safety.consent import _withdraw_approval
+
+    world = WorldModel(path=path)
+    try:
+        _withdraw_approval(world, approval_id, "system:task-stopped")
+        return world.get_approval(approval_id)
+    finally:
+        world.close()
+
+
+def test_withdrawing_an_approval_whose_decision_was_undone_still_denies_it(db):
+    world = WorldModel(path=db)
+    approval_id = world.create_approval("shell", risk="high")
+    event = world.decide_approval_audited(approval_id, "approved", decided_by="user:dana.admin@northwind.example")
+    assert world.mark_approval_audit_delivered(event.event_id)
+    assert world.undo_approval_decision(approval_id, undone_by="user:dana.admin@northwind.example",
+                                        within_seconds=60) == "undone"
+    assert world.get_approval(approval_id).status == "pending"
+    world.close()
+
+    row = _withdraw(db, approval_id)
+
+    assert row.status == "denied"
+    assert row.decided_by == "system:task-stopped"
+
+
+def test_withdrawing_a_two_person_approval_with_one_audited_vote_denies_it(db):
+    world = WorldModel(path=db)
+    approval_id = world.create_approval("shell", risk="high", approvals_required=2,
+                                        requested_by="user:sam.lee@northwind.example")
+    event = world.decide_approval_audited(approval_id, "approved", decided_by="user:dana.admin@northwind.example")
+    assert world.mark_approval_audit_delivered(event.event_id)
+    assert world.get_approval(approval_id).status == "pending"
+    world.close()
+
+    row = _withdraw(db, approval_id)
+
+    assert row.status == "denied"
+    assert row.decided_by == "system:task-stopped"

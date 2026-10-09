@@ -173,19 +173,28 @@ def _credentials(email, password):
 
 
 def _finish(row, request=None):
-    from . import invites, rbac
+    from . import auth, invites, rbac
+    principal = "user:" + row["email"]
     if row["status"] == "pending":
-        principal = "user:" + row["email"]
-        existing = rbac.list_users()
-        if existing and existing != {principal: "admin"}:
-            raise HTTPException(409, "Owner setup conflicts with existing role assignments. No roles were changed.")
-        rbac.set_role(principal, "admin", actor=principal)
+        try:
+            existing = rbac.list_users()
+            if existing and existing != {principal: "admin"}:
+                raise HTTPException(409, "Owner setup conflicts with existing role assignments. No roles were changed.")
+            rbac.set_role(principal, "admin", actor=principal)
+        except rbac.RosterMissingError:
+            # A configured administrator is an administrator without a stored
+            # role, and can start a new role list from the Users page.
+            if not auth.is_dashboard_admin(principal):
+                raise
         # Generate the session key before the claim is completed; any failure
         # retains pending ownership rather than silently reopening bootstrap.
         invites.local_session_secret()
         row["status"] = "ready"
         _write(row)
-    elif rbac.get_stored_role("user:" + row["email"]) is None:
+    elif not auth.is_dashboard_admin(principal) and rbac.get_stored_role(principal) is None:
+        # A configured administrator is checked first: they keep access when
+        # the role list is lost, and it is how they reach the page that
+        # starts a new one.
         raise HTTPException(403, "This local account no longer has an assigned role. Contact a current administrator.")
     return invites.mint_local_session(row["email"], request=request)
 

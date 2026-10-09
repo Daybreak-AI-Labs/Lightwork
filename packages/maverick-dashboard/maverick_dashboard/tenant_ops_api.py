@@ -89,6 +89,10 @@ async def onboard(body: OnboardIn, request: Request) -> dict:
     try:
         invite, token = await run_in_threadpool(lambda: invites.create_invite(
             email, body.role, created_by=invited_by, tenant=created.id))
+    except invites.ExistingAccountError as exc:
+        raise HTTPException(409, f"The workspace {created.display_name or created.id} was created, but "
+                                 f"{email} already has a sign-in here, so no invitation was made. Add them "
+                                 "to the workspace on the People page instead.") from exc
     except ValueError as exc:
         raise HTTPException(409, f"The workspace {created.display_name or created.id} was created, but the "
                                  "invitation could not be made. Invite the administrator from the People "

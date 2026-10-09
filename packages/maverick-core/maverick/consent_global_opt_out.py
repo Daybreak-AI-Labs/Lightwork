@@ -17,7 +17,6 @@ tokens are outside this persistence contract.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import math
 import re
@@ -26,6 +25,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Literal
 
+from .constant_time import text_equals
 from .governed_records import (
     GovernedRecordBackendError,
     GovernedRecordCapacityError,
@@ -414,7 +414,7 @@ def _text_sha256(value: str) -> str:
 
 
 def _same(left: object, right: object) -> bool:
-    return isinstance(left, str) and isinstance(right, str) and hmac.compare_digest(left, right)
+    return isinstance(left, str) and isinstance(right, str) and text_equals(left, right)
 
 
 def _tenant(value: object) -> str:

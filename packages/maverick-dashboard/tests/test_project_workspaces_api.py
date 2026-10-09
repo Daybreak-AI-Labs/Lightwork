@@ -91,6 +91,13 @@ def test_review_is_readonly_and_context_confirmation_cas_are_required(setup):
     assert save(client, project, headers, operation_id="different-save-operation").status_code == 409
 
 
+def test_non_ascii_project_context_header_is_refused_as_changed_not_a_server_error(setup):
+    client, project, _, _, _ = setup
+    headers = {"X-Lightwork-Project-Context": "contéxt".encode()}
+    assert client.get(api.BASE + f"/{project}", headers=headers).status_code == 409
+    assert save(client, project, headers).status_code == 409
+
+
 def test_explicit_planning_share_does_not_expose_source_and_revocation_is_immediate(setup):
     client, project, goal, active, _ = setup
     headers, _ = context(client, project)

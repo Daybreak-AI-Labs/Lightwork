@@ -41,6 +41,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import math
 import os
 import secrets
 import time
@@ -410,28 +411,51 @@ def _oidc_invite_email(claims: dict) -> str:
     return ""
 
 
+_AUTH_TIME_SKEW = 120  # seconds the provider's clock may run ahead of ours
+
+
+def credible_auth_time(value: object, *, now: float) -> float | None:
+    """When the provider says the person authenticated (OIDC ``auth_time`` /
+    SAML ``AuthnInstant`` as an epoch), or ``None`` when it is absent, not a
+    number, or from the future beyond clock skew. Never later than ``now``."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        when = float(value)
+    except ValueError:
+        return None
+    if not math.isfinite(when) or when <= 0 or when > now + _AUTH_TIME_SKEW:
+        return None
+    return min(when, float(now))
+
+
 def mint_browser_session(request: Request, *, sub: str, secret: str, via: str, mfa: bool,
-                         ttl: int, extra: dict | None = None) -> str:
+                         ttl: int, extra: dict | None = None,
+                         mfa_at: float | None = None) -> str:
     """Sign a session cookie and record it in :mod:`session_registry`.
 
     One place for every sign-in flow (OIDC, SAML, invitation, owner), so each
     session carries the same ``sid``/``mfa``/``mfa_at`` fields and appears on
-    the Sessions page. A record that cannot be written refuses the sign-in
+    the Sessions page. ``mfa_at`` is when the provider says the second factor
+    happened (``auth_time``); without it the second factor is dated now. A
+    record that cannot be written refuses the sign-in
     (:class:`session_registry.SessionStoreError`): a session nobody can list
     or end is not one Lightwork should issue."""
     from . import session_registry
 
     now = _now()
     sid = session_registry.new_sid()
+    if mfa_at is None:
+        mfa_at = now
     payload = {"sub": sub, "iat": now, "exp": now + ttl, "sid": sid, "mfa": bool(mfa)}
     if mfa:
-        payload["mfa_at"] = now
+        payload["mfa_at"] = mfa_at
     if extra:
         payload.update(extra)
     client = getattr(request, "client", None)
     session_registry.register(
         sid=sid, principal=f"user:{sub}", via=via, mfa=bool(mfa),
-        mfa_at=float(now) if mfa else None, issued_at=now, expires_at=now + ttl,
+        mfa_at=float(mfa_at) if mfa else None, issued_at=now, expires_at=now + ttl,
         ip=str(getattr(client, "host", "") or ""),
         user_agent=request.headers.get("user-agent", ""),
     )
@@ -471,6 +495,9 @@ async def auth_login(request: Request):
         "jti": secrets.token_urlsafe(16),
         "exp": _now() + _TX_TTL,
     }
+    fresh = bool(request.query_params.get("fresh"))
+    if fresh:
+        tx_payload["fresh"] = True  # the callback checks the provider really re-prompted
     tx_cookie = sign_session(tx_payload, cfg.session_secret)
 
     params = {
@@ -497,7 +524,7 @@ async def auth_login(request: Request):
     # ``?fresh=1`` (the step-up link): the provider must ask the person to
     # sign in again rather than reuse its own session, so ``auth_time`` and
     # the session's second factor are new.
-    if request.query_params.get("fresh"):
+    if fresh:
         params["prompt"] = "login"
         params["max_age"] = "0"
     auth_url = endpoints["authorization_endpoint"] + "?" + urlencode(params)
@@ -640,9 +667,20 @@ async def auth_callback(request: Request):
     # (4c) second factor: with "Require a second factor" on, the ID token must
     # prove one (RFC 8176 ``amr`` or a configured ``acr``). Refused sign-ins
     # get a page with one plain sentence, not a session.
-    from .mfa_policy import claims_prove_mfa, require_mfa
+    from .mfa_policy import claims_prove_mfa, fresh_enough, require_mfa
 
     mfa = claims_prove_mfa(principal.claims)
+    # Date the second factor by the provider's ``auth_time``, not by this
+    # callback: a provider that reuses its own SSO session (or ignores
+    # prompt=login / max_age=0) returns amr=mfa for a sign-in from hours ago.
+    # On a step-up (``?fresh=1``) an ID token that cannot show a recent
+    # authentication is no proof of a fresh second factor.
+    now = _now()
+    auth_time = credible_auth_time((principal.claims or {}).get("auth_time"), now=now)
+    if mfa and tx.get("fresh") and (auth_time is None or not fresh_enough(auth_time, now=now)):
+        log.warning("OIDC callback: step-up sign-in without a recent auth_time; "
+                    "second factor not counted")
+        mfa = False
     if require_mfa() and not mfa:
         log.warning("OIDC callback: sign-in refused, no second factor in the ID token")
         await asyncio.get_running_loop().run_in_executor(
@@ -658,7 +696,7 @@ async def auth_callback(request: Request):
         ttl = company_ttl(_SESSION_TTL)
         session_cookie = mint_browser_session(
             request, sub=principal.sub, secret=cfg.session_secret, via="session",
-            mfa=mfa, ttl=ttl,
+            mfa=mfa, ttl=ttl, mfa_at=auth_time,
             extra={"oidc_issuer": principal.issuer,
                    "oidc_audience": principal.audience,
                    "idp_email": _oidc_invite_email(principal.claims or {})},

@@ -181,6 +181,30 @@ def test_config_public_submit_is_exact_digest_only_and_idempotent(tmp_path, monk
     assert admin.verify_integrity()["ok"] is True
 
 
+def test_non_ascii_submission_digest_is_stale_not_a_type_error(tmp_path, monkeypatch):
+    # Public submission digests are caller-supplied; a non-ASCII value used to
+    # raise TypeError from hmac.compare_digest instead of the stale refusal.
+    _admin, public_store, _clock, _application, public, _intake, submitted, _active = _fixture(
+        tmp_path, monkeypatch
+    )
+    configuration = public_store.get_public_configuration(public[0])
+    for field in ("configuration_sha256", "authority_sha256"):
+        values = {
+            "configuration_sha256": configuration["configuration_sha256"],
+            "authority_sha256": configuration["authority_sha256"],
+            field: "é" * 64,
+        }
+        with pytest.raises(goo.GlobalOptOutAuthorityStale):
+            public_store.submit(
+                public[0],
+                configuration_version=configuration["configuration_version"],
+                authority_revision=configuration["authority_revision"],
+                idempotency_key="public-opt-out-one",
+                **values,
+            )
+    assert submitted == []
+
+
 def test_authority_drift_revocation_and_cross_tenant_fail_closed(tmp_path, monkeypatch):
     admin, public_store, _clock, application, public, _intake, _submitted, active = _fixture(
         tmp_path, monkeypatch

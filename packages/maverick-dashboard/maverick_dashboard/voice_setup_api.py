@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextvars
 import hashlib
-import hmac
 import importlib.util
 import json
 import os
@@ -16,7 +15,7 @@ from maverick import config, voice_models
 from maverick.paths import current_tenant_id
 from pydantic import BaseModel, ConfigDict, Field
 
-from .auth import _authorization_principal, require_global_permission
+from .auth import _authorization_principal, constant_time_equals, require_global_permission
 
 router = APIRouter(prefix="/api/v1/voice/setup", tags=["v1"])
 _ACTIVE = frozenset({"checking", "downloading", "cancelling"})
@@ -69,7 +68,7 @@ def _admit(request: Request, *, mutation: bool = False) -> tuple[dict, str, str]
     context = hashlib.sha256(json.dumps([key, current_tenant_id(),
         _authorization_principal(request) or "local"]).encode()).hexdigest()
     supplied = request.headers.get("X-Lightwork-Voice-Context", "")
-    if (mutation or supplied) and not hmac.compare_digest(supplied, context):
+    if (mutation or supplied) and not constant_time_equals(supplied, context):
         raise HTTPException(409, "The account, workspace, or speech settings changed. Reload speech setup and review it again.")
     return target, key, context
 

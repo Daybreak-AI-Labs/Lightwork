@@ -32,6 +32,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
+from .constant_time import text_equals
 from .file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -1115,7 +1116,7 @@ class ThirdPartyContractStore:
         ensure_private_file(self.path)
 
     def _require_tenant(self, tenant_id: object) -> None:
-        if not hmac.compare_digest(_tenant(tenant_id), self.tenant_id):
+        if not text_equals(_tenant(tenant_id), self.tenant_id):
             raise ThirdPartyContractNotFound("Contract or Engagement was not found")
 
     def _resolve_vendor(self, vendor_id: str, vendor_revision: int) -> VendorAuthority:

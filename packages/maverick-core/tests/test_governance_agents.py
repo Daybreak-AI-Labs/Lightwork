@@ -453,6 +453,38 @@ def test_tenant_snapshot_blocks_disabled_agent_before_approval_resolution(tmp_pa
     assert resolver_calls == []
 
 
+def test_tenant_snapshot_binding_compares_non_ascii_tenant_ids(tmp_path):
+    # Tenant ids may be any Unicode text: a snapshot for another tenant is
+    # misbound and a matching one proceeds, rather than either raising TypeError.
+    snapshot = GovernanceAgentTenantSnapshot(
+        tenant_id="tenant-é",
+        enabled_agents=("breach_response",),
+        limits=GovernanceAgentLimits(retention_seconds=3_600),
+    )
+    store = GovernanceAgentStore(
+        tmp_path / "unicode-tenant.sqlite3",
+        config_gate=lambda: None,
+        principal_resolver=lambda: "publisher",
+        policy_approver_resolver=lambda *_args: ("reviewer-a", "reviewer-b"),
+        tenant_snapshot_resolver=lambda _tenant: snapshot,
+    )
+    policy = {
+        "policy_id": "vendor",
+        "revision": 1,
+        "agent_kind": "third_party_risk",
+        "allowed_capabilities": tuple(sorted(CAPABILITY_REGISTRY["third_party_risk"])),
+        "required_approvals": 1,
+        "execution_enabled": False,
+        "approver_principals": ("reviewer-a", "reviewer-b"),
+        "valid_until": 2_000.0,
+        "idempotency_key": "publish:vendor",
+    }
+    with pytest.raises(GovernanceAgentConfigError, match="misbound"):
+        store.publish_policy("tenant-a", **policy)
+    with pytest.raises(GovernanceAgentConfigError, match="kind is disabled"):
+        store.publish_policy("tenant-é", **policy)
+
+
 def test_tenant_snapshot_lower_context_limit_prevents_adapter_execution(tmp_path):
     snapshot = load_governance_agent_tenant_snapshot(
         "tenant-a",

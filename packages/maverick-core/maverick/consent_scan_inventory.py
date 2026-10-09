@@ -36,6 +36,7 @@ from .consent_scanner import (
     require_enabled,
     scan_limit_settings,
 )
+from .constant_time import text_equals
 from .file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -638,7 +639,7 @@ class ConsentScanInventory:
             "updated_at": float(row["updated_at"]),
         }
         expected = _sha256(body)
-        if not hmac.compare_digest(expected, str(row["record_sha256"])):
+        if not text_equals(expected, str(row["record_sha256"])):
             raise ConsentScanIntegrityError("stored scan property failed integrity")
         return {**body, "record_sha256": expected}
 
@@ -676,7 +677,7 @@ class ConsentScanInventory:
             "updated_at": float(row["updated_at"]),
         }
         expected = _sha256(config)
-        if not hmac.compare_digest(expected, str(row["configuration_sha256"])):
+        if not text_equals(expected, str(row["configuration_sha256"])):
             raise ConsentScanIntegrityError("stored scan schedule failed integrity")
         return {
             **config,
@@ -715,7 +716,7 @@ class ConsentScanInventory:
         ).fetchone()
         if row is None:
             return None
-        if not hmac.compare_digest(str(row["request_sha256"]), request_sha256):
+        if not text_equals(str(row["request_sha256"]), request_sha256):
             raise ConsentScanConflict("idempotency key was rebound to different content")
         result = _loads(row["result_json"], "idempotency result")
         if not isinstance(result, dict):
@@ -1220,7 +1221,7 @@ class ConsentScanInventory:
     def _job_result(cls, row: sqlite3.Row) -> dict[str, Any]:
         body = cls._job_body(row)
         expected = _sha256(body)
-        if not hmac.compare_digest(expected, str(row["record_sha256"])):
+        if not text_equals(expected, str(row["record_sha256"])):
             raise ConsentScanIntegrityError("stored scan job failed integrity")
         return {**body, "record_sha256": expected}
 
@@ -1571,7 +1572,7 @@ class ConsentScanInventory:
             row["status"] != "leased"
             or row["lease_owner"] != worker
             or row["lease_token_sha256"] is None
-            or not hmac.compare_digest(str(row["lease_token_sha256"]), token_sha256)
+            or not text_equals(str(row["lease_token_sha256"]), token_sha256)
             or row["lease_expires_at"] is None
             or float(row["lease_expires_at"]) <= now
         ):
@@ -1794,7 +1795,7 @@ class ConsentScanInventory:
             "revision": int(row["revision"]),
         }
         expected = _sha256(body)
-        if body["initial_classification"] != "unknown" or not hmac.compare_digest(
+        if body["initial_classification"] != "unknown" or not text_equals(
             expected, str(row["record_sha256"])
         ):
             raise ConsentScanIntegrityError("stored discovery failed integrity")
@@ -1810,8 +1811,8 @@ class ConsentScanInventory:
         expected_scanner_sha = _sha256(scanner_body)
         if (
             not isinstance(supplied_scanner_sha, str)
-            or not hmac.compare_digest(supplied_scanner_sha, expected_scanner_sha)
-            or not hmac.compare_digest(
+            or not text_equals(supplied_scanner_sha, expected_scanner_sha)
+            or not text_equals(
                 expected_scanner_sha,
                 str(row["scanner_report_sha256"]),
             )
@@ -1838,7 +1839,7 @@ class ConsentScanInventory:
             or scanner_report.get("completed_at") != body["completed_at"]
             or scanner_report.get("complete") is not body["complete"]
             or scanner_report.get("truncated") is not body["truncated"]
-            or not hmac.compare_digest(expected_record_sha, str(row["record_sha256"]))
+            or not text_equals(expected_record_sha, str(row["record_sha256"]))
         ):
             raise ConsentScanIntegrityError("stored inventory report failed integrity")
         return {
@@ -2071,12 +2072,12 @@ class ConsentScanInventory:
             schedule = self._schedule_result(schedule_row)
         authority_current = (
             property_result["revision"] == current["property_revision"]
-            and hmac.compare_digest(
+            and text_equals(
                 property_result["record_sha256"],
                 current["property_sha256"],
             )
             and schedule["revision"] == current["schedule_revision"]
-            and hmac.compare_digest(
+            and text_equals(
                 schedule["configuration_sha256"],
                 current["schedule_sha256"],
             )
@@ -2447,7 +2448,7 @@ class ConsentScanInventory:
         if (
             body["classification"] not in _REVIEW_CLASSES
             or body["registry_action"] not in _REVIEW_ACTIONS
-            or not hmac.compare_digest(expected, str(row["record_sha256"]))
+            or not text_equals(expected, str(row["record_sha256"]))
         ):
             raise ConsentScanIntegrityError("stored tracker review failed integrity")
         return {**body, "record_sha256": expected}
@@ -2973,7 +2974,7 @@ class ConsentScanInventory:
                     "AND report_id = ? AND page_sha256 = ?",
                     (tenant, report_ref, page_sha),
                 ).fetchone()
-                if bridge is not None and not hmac.compare_digest(
+                if bridge is not None and not text_equals(
                     str(bridge["result_sha256"]),
                     result_sha,
                 ):
@@ -3021,7 +3022,7 @@ class ConsentScanInventory:
             "created_at": float(row["created_at"]),
         }
         expected = _sha256(body)
-        if not hmac.compare_digest(expected, str(row["event_sha256"])):
+        if not text_equals(expected, str(row["event_sha256"])):
             raise ConsentScanIntegrityError("stored scan audit event failed integrity")
         return {**body, "event_sha256": expected}
 
