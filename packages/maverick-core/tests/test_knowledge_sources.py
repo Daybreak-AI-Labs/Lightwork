@@ -239,3 +239,22 @@ def test_a_receipt_is_not_removed_until_its_removal_is_on_the_activity_record(se
     assert _refresh(service, before["id"], "f" * 32)["state"] == "queued"
     assert native.JOB_STORE.get(_job_id(0)) is None and native.JOB_STORE.get(_job_id(1)) is not None
     assert _pruned(activity) == [_job_id(0)]
+
+
+def test_a_scheduled_failure_still_backs_off_when_its_receipt_cannot_be_kept(service, monkeypatch):
+    """A refresh that fails before it starts (for example its review) records a
+    withheld receipt and backs the source off. With a full ledger and nothing
+    removable the receipt is refused, but the source must still back off rather
+    than be retried on the scheduler's next 2-second cycle."""
+    from maverick.governed_records import GovernedRecordCapacityError
+
+    _, before = _prepared(service, 3600, due=True)
+    _seed(0, OTHER)  # another source's newest history: nothing can be removed
+    monkeypatch.setattr(native, "MAX_JOBS", 1)
+
+    with pytest.raises(GovernedRecordCapacityError):
+        native.KnowledgeSources.record_scheduled_error(service.sources.get(before["id"]), RuntimeError("review failed"))
+
+    row = service.sources.get(before["id"])
+    assert row["state"] == "withheld" and row["projection_allowed"] is False
+    assert row["next_refresh"] >= time.time() + 3600 - 60 and before["next_refresh"] < time.time()

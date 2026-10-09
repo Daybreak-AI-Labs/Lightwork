@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 from . import connections
 from . import knowledge_source_readers as readers
 from .authority_effects import authority_effect_fence
-from .governed_records import GovernedRecordStore
+from .governed_records import GovernedRecordCapacityError, GovernedRecordStore
 from .paths import canonical_tenant_id, tenant_scope
 from .privacy_ops import RecordConflict
 
@@ -239,15 +239,20 @@ class KnowledgeSources:
                 raise RecordConflict("The scheduled source changed before its withheld receipt.")
         with KnowledgeSources.publication_scope():
             same_source()
-            job_id = "KNJ-" + digest([source["id"], source.get("next_refresh")])[:32]
+            job_id, full = "KNJ-" + digest([source["id"], source.get("next_refresh")])[:32], None
             if JOB_STORE.get(job_id) is None:
-                _make_room(source["tenant"], JOB_STORE, SOURCE_STORE)
-                JOB_STORE.create({"id": job_id, "source": source["id"], "tenant": source["tenant"], "owner": source["owner"],
-                                  "state": "withheld", "message": _safe_error(exc), "items": [], "observed_dollars": 0.0, "unresolved_dollars": 0.0},
-                                 action="knowledge_source.scheduled_refresh_withheld", actor="knowledge-source worker", max_records=MAX_JOBS, effect_guard=same_source)
+                try:
+                    _make_room(source["tenant"], JOB_STORE, SOURCE_STORE)
+                    JOB_STORE.create({"id": job_id, "source": source["id"], "tenant": source["tenant"], "owner": source["owner"],
+                                      "state": "withheld", "message": _safe_error(exc), "items": [], "observed_dollars": 0.0, "unresolved_dollars": 0.0},
+                                     action="knowledge_source.scheduled_refresh_withheld", actor="knowledge-source worker", max_records=MAX_JOBS, effect_guard=same_source)
+                except GovernedRecordCapacityError as refused:
+                    full = refused  # still back off: a full ledger must not mean a retry every scheduler cycle
             current = SOURCE_STORE.get(source["id"])
             SOURCE_STORE.update(source["id"], lambda row: row.update(state="withheld", projection_allowed=False, next_refresh=time.time() + max(3600, source["plan"]["interval_seconds"])),
                                 expected_revision=current["revision"], action="knowledge_source.refresh_backed_off", actor="knowledge-source worker", effect_guard=same_source)
+            if full is not None:
+                raise full
 
     def original_save(self, operation):
         self._authority()
