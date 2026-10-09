@@ -631,3 +631,26 @@ def test_a_handoff_that_cannot_be_published_retires_the_grant_the_browser_never_
 
 def grant_id(token):
     return token.split(":", 1)[0]
+
+
+def test_recovery_mode_still_identifies_itself_to_the_desktop_readiness_check(monkeypatch):
+    # The desktop's recovery page waits for /healthz to answer 200 or 503 with
+    # exactly one dashboard identity; the blanket 503 carried none, so entering
+    # recovery from the desktop app always ended in "did not respond".
+    async def forbidden(*_):
+        raise AssertionError("A normal background lifespan must never start in recovery mode")
+
+    async def no_deep_checks(**_kwargs):
+        raise AssertionError("Recovery mode must not open the workspace for a health probe")
+
+    monkeypatch.setattr("maverick_dashboard.app._health_response", no_deep_checks)
+    app.router.lifespan_context = forbidden
+    recovery_mode.configure(app, host="127.0.0.1")
+    with api_client() as client:
+        response = client.get("/healthz")
+        assert response.status_code == 503
+        assert response.headers.get_list("X-Lightwork-Service") == ["dashboard-v1"]
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json()["status"] == "recovery"
+        assert client.get("/readyz").status_code == 503
+        assert "x-lightwork-service" not in client.get("/get-started").headers

@@ -342,7 +342,7 @@ const detail = node ? (node.textContent || '').slice(0, 4096) : '';
 const reasons = [
   ['The previous workspace is still responding.', 'previous_workspace_running'],
   ['This workspace is managed outside the desktop app.', 'external_workspace'],
-  ['The selected workspace mode did not start.', 'startup_deadline'],
+  ['The selected workspace mode did not respond', 'startup_deadline'],
   ['Lightwork could not start:', 'launch_failed'],
   ['Open these controls from Lightwork Desktop.', 'native_bridge_unavailable'],
   ["Review and confirm this action in the app's recovery controls.", 'origin_refused'],

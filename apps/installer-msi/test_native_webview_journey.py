@@ -336,6 +336,8 @@ detail = 'Port 8765 belongs to an unrecognized service; no process was stopped.'
 assert.equal(inspect().reason,'port_conflict');
 detail = 'switch_recovery_mode not allowed. Permissions associated with this command: private';
 assert.equal(inspect().reason,'command_refused');
+detail = 'Error: ' + DEADLINE;
+assert.equal(inspect().reason,'startup_deadline');
 detail = 'Error: private arbitrary error';
 assert.equal(inspect().reason,'unclassified_refusal');
 assert.equal(JSON.stringify(inspect()).includes('private'),false);
@@ -345,6 +347,11 @@ controls=false; assert.equal(inspect().controls_present,false);
 location.origin='https://example.test'; assert.equal(inspect().controls_present,false);
 location.pathname='/private'; assert.equal(inspect().page,'other');
 """.replace("SCRIPT", json.dumps(scripts[0]))
+    # The shell's own deadline message, read from the page that throws it.
+    recovery_page = (Path(__file__).parents[1] / "desktop" / "ui" / "recovery.js").read_text(encoding="utf-8")
+    deadline = re.search(r'throw new Error\("(The selected workspace mode did not [^"]+)"\)', recovery_page)
+    assert deadline is not None
+    source = source.replace("DEADLINE", json.dumps(deadline.group(1)))
     result = subprocess.run([node, "-e", source], capture_output=True, text=True, check=False, timeout=10)
     assert result.returncode == 0, result.stderr
 

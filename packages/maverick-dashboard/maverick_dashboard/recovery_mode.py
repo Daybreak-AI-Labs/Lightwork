@@ -67,6 +67,13 @@ class RecoveryOnlyMiddleware:
             if scope["type"] == "websocket":
                 await send({"type": "websocket.close", "code": 1008})
                 return
+            if path == "/healthz":
+                # The desktop's readiness handshake needs the fixed identity;
+                # answer it without the deep checks, which open the workspace.
+                response = JSONResponse({"status": "recovery", "detail": "Local recovery mode is active."}, status_code=503,
+                                        headers={"Cache-Control": "no-store", "X-Lightwork-Service": "dashboard-v1"})
+                await response(scope, receive, send)
+                return
             if not allowed:
                 response = JSONResponse({"detail": "Local recovery mode is active. Return to normal work from the desktop app after recovery."}, status_code=503,
                                         headers={"Cache-Control": "no-store"})
