@@ -925,14 +925,14 @@ def test_loopback_probe_uses_the_desktop_shell_identity_handshake(modules, behav
         port = server.server_address[1]
         threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        observed = journey.loopback_probe(port=port, timeout=.4)
+        observed = journey.loopback_probe(port=port, timeout=.4 if behavior == "hang" else 5.0)
     finally:
         if server is not None:
             server.shutdown()
             server.server_close()
     assert set(observed) == {"listener", "latency_ms"}
     assert observed["listener"] == expected
-    assert type(observed["latency_ms"]) is int and 0 <= observed["latency_ms"] <= 3000
+    assert type(observed["latency_ms"]) is int and 0 <= observed["latency_ms"] <= 5000
     if behavior != "refused":
         assert requests == [("/healthz", "no-cache")]
 

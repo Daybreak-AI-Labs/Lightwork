@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import http.client
 import json
 import os
 import re
@@ -16,6 +15,8 @@ import secrets
 import shutil
 import subprocess
 import time
+import urllib.error
+import urllib.request
 import uuid
 from itertools import islice
 from pathlib import Path
@@ -371,28 +372,31 @@ return {page, splash_status: node ? (states.find(([prefix]) => text.startsWith(p
             result = fallback
         return result
 
-    def loopback_probe(self, port: int = LOOPBACK_PORT, timeout: float = 3.0):
+    def loopback_probe(self, port: int = LOOPBACK_PORT, timeout: float = 5.0):
         # The desktop shell's own identity handshake (apps/desktop-runtime
         # readiness_headers): exactly one X-Lightwork-Service: dashboard-v1.
+        # Loopback only, never through a proxy. Windows takes about two seconds
+        # to report a refused loopback connection, hence the five-second bound.
         started = time.monotonic()
-        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+        request = urllib.request.Request(f"http://127.0.0.1:{port}/healthz", headers={"Cache-Control": "no-cache"})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         try:
-            connection.request("GET", "/healthz", headers={"Cache-Control": "no-cache"})
-            response = connection.getresponse()
-            status, identity = response.status, response.getheader("X-Lightwork-Service")
-            response.read(0)
-        except ConnectionRefusedError:
-            listener = "not_listening"
-        except (OSError, http.client.HTTPException):
-            listener = "no_answer"
+            with opener.open(request, timeout=timeout) as response:
+                status, identity = response.status, response.headers.get_all("X-Lightwork-Service") or []
+        except urllib.error.HTTPError as error:
+            status, identity = error.code, error.headers.get_all("X-Lightwork-Service") or []
+            error.close()
+        except urllib.error.URLError as error:
+            status, identity = None, "not_listening" if isinstance(error.reason, ConnectionRefusedError) else "no_answer"
+        except (OSError, ValueError):
+            status, identity = None, "no_answer"
+        if status is None:
+            listener = identity
+        elif identity != ["dashboard-v1"]:
+            listener = "answered_without_identity"
         else:
-            if identity != "dashboard-v1":
-                listener = "answered_without_identity"
-            else:
-                listener = {200: "answered_ready", 503: "answered_setup_required"}.get(status, "answered_other_status")
-        finally:
-            connection.close()
-        return {"listener": listener, "latency_ms": min(3000, max(0, int((time.monotonic() - started) * 1000)))}
+            listener = {200: "answered_ready", 503: "answered_setup_required"}.get(status, "answered_other_status")
+        return {"listener": listener, "latency_ms": min(5000, max(0, int((time.monotonic() - started) * 1000)))}
 
     def owner_diagnostic(self):
         # Classify in the browser: raw alert text, URLs, inputs and cookies must
