@@ -133,3 +133,17 @@ def test_device_bootstrap_exemption_does_not_exempt_approval_or_management():
     assert not auth._self_authenticated_path('/api/v1/devices/confirm')
     assert not auth._self_authenticated_path('/api/v1/devices/remove')
     assert not auth._self_authenticated_path('/devices')
+
+
+def test_pairing_review_refuses_a_non_ascii_context_like_any_other_wrong_one(monkeypatch):
+    from maverick_dashboard import app as app_module
+    from maverick_dashboard import device_pairing_api as api
+
+    monkeypatch.setattr(app_module, '_require_same_origin', lambda _request: None)
+    monkeypatch.setattr(api, 'context_for', lambda _request: 'a' * 64)
+    request = Request({'type': 'http', 'method': 'POST', 'path': '/api/v1/devices/confirm', 'headers': []})
+    for wrong in ('0' * 64, 'café'):
+        with pytest.raises(HTTPException) as refused:
+            api._binding(request, wrong)
+        assert refused.value.status_code == 409
+    api._binding(request, 'a' * 64)

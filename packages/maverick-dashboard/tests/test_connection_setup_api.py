@@ -91,6 +91,13 @@ def test_cross_site_context_role_and_unknown_payload_are_denied_before_exchange(
     assert client.get("/api/v1/connection-setup", headers={"X-Test-Tenant": "tenant-b", "X-Lightwork-Connection-Context": current["context"]}).status_code == 409
 
 
+def test_a_non_ascii_context_header_is_refused_like_any_other_wrong_one(client):
+    # Header text arrives decoded as latin-1, so e-acute is a non-ASCII str.
+    for value in ("0" * 64, b"caf\xe9"):
+        refused = client.get("/api/v1/connection-setup", headers={"X-Lightwork-Connection-Context": value})
+        assert refused.status_code == 409, (value, refused.status_code, refused.text)
+
+
 def test_provider_failure_is_redacted_and_cannot_replay_consent(client, monkeypatch):
     current = app(client)
     authorized = client.post("/api/v1/connection-setup/authorize", json={"confirm": True, "context": current["context"], "profile": "google-drive", "name": "customer-drive"}).json()

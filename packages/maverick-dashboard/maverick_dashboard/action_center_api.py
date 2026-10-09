@@ -16,6 +16,7 @@ from . import action_center
 from .auth import (
     caller_principal,
     caller_suites,
+    constant_time_equals,
     domain_suites_allowed,
     goal_owner_filter,
     has_permission,
@@ -191,7 +192,7 @@ async def _snapshot(request):
     require_enabled(request)
     context = context_for(request)
     requested_context = request.headers.get("X-Lightwork-Action-Context")
-    if requested_context is not None and not hmac.compare_digest(requested_context, context):
+    if requested_context is not None and not constant_time_equals(requested_context, context):
         raise HTTPException(status_code=409, detail="The account or workspace changed. Reload Action Center.")
     model = await run_in_threadpool(_model, request)
     try:

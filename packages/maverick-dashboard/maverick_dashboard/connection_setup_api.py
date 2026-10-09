@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import hmac
 import json
 from typing import Literal
 from urllib.parse import urlsplit
@@ -16,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import settings_store
 from .auth import (
     caller_principal,
+    constant_time_equals,
     has_global_permission,
     has_permission,
     require_global_permission,
@@ -103,7 +103,7 @@ def _authority(request, response, payload=None, *, operator=False):
     response.headers["Cache-Control"] = "private, no-store"
     context = _context(request)
     supplied = payload.context if payload else request.headers.get("X-Lightwork-Connection-Context")
-    if supplied is not None and not hmac.compare_digest(supplied, context):
+    if supplied is not None and not constant_time_equals(supplied, context):
         raise HTTPException(409, "Account, workspace or deployment settings changed. Reload Connections.")
     if payload is not None:
         from .app import _require_same_origin

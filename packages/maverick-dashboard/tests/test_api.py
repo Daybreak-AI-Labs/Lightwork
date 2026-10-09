@@ -788,3 +788,27 @@ class TestMetrics:
             f'principal="{dash_app._USER_SPEND_OVERFLOW_LABEL}"' in line
             for line in series
         )
+
+
+def test_request_identity_refuses_a_non_ascii_bearer_like_any_wrong_token(monkeypatch):
+    """A static-token deployment answers a crafted bearer with 401, not a 500."""
+    from fastapi import HTTPException
+    from maverick_dashboard import api
+    from starlette.requests import Request
+
+    token = "static-token-for-tests"  # pragma: allowlist secret
+    monkeypatch.setattr(api, "caller_principal", lambda _request: None)
+    monkeypatch.setattr(api, "_dashboard_token", lambda: token)
+
+    def identity(authorization: bytes):
+        return api._request_identity(Request({
+            "type": "http", "method": "GET", "path": "/api/v1/connections",
+            "headers": [(b"authorization", authorization)],
+        }))
+
+    # Header text arrives decoded as latin-1, so e-acute is a non-ASCII str.
+    for wrong in (b"Bearer wrong", b"Bearer caf\xe9"):
+        with pytest.raises(HTTPException) as refused:
+            identity(wrong)
+        assert refused.value.status_code == 401
+    assert identity(b"Bearer " + token.encode()) == "auth:dashboard-token"

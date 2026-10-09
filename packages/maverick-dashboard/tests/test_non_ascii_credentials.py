@@ -103,6 +103,23 @@ def test_copilot_context_header(client):
     assert ask(b"caf\xe9").status_code == 409
 
 
+@pytest.mark.parametrize("wrong", WRONG)
+def test_budget_accounting_case_context(client, wrong):
+    refused = _post(client, "/api/v1/budget/cases",
+                    {"context": wrong, "provider": "anthropic", "period": "2026-10"})
+    assert refused.status_code == 409, (wrong, refused.status_code, refused.text)
+
+
+def test_deliverable_bundle_context_header(client, monkeypatch):
+    from maverick_dashboard import deliverable_bundles_api as bundles
+
+    monkeypatch.setattr(bundles.config, "get_features", lambda: {"deliverable_bundles": True})
+    monkeypatch.setattr(bundles.config, "config_source_errors", lambda **kwargs: [])
+    for value in ("0" * 64, b"caf\xe9"):
+        refused = client.get("/api/v1/deliverable-bundles", headers={"X-Lightwork-Bundle-Context": value})
+        assert refused.status_code == 409, (value, refused.status_code, refused.text)
+
+
 def test_a_lone_surrogate_in_a_rejected_body_is_a_422_not_a_500(client):
     """The 422 echoes the rejected input; UTF-8 cannot encode a lone surrogate."""
     refused = _post(client, "/api/v1/navigation/pins", {"op": ["\ud800"], "href": "/overview", "context": "x"})

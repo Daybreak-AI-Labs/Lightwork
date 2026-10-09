@@ -225,3 +225,14 @@ def test_storage_api_requires_context_and_exact_reviewed_inventory(isolated, mon
     assert response.status_code == 200 and response.json()["retired"] == 1
     monkeypatch.setattr(draft_api, "current_tenant_id_strict", lambda: "workspace-b")
     assert client.get("/api/v1/drafts/storage", headers=headers).status_code == 409
+
+
+def test_api_refuses_a_non_ascii_context_header_like_any_other_wrong_one(isolated, monkeypatch):
+    monkeypatch.setattr(draft_api, "_authorization_principal", lambda request: "user:alice")
+    monkeypatch.setattr(draft_api, "current_tenant_id_strict", lambda: "workspace-a")
+    monkeypatch.setattr(draft_api, "require_permission", lambda *args: None)
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+    # Header text arrives decoded as latin-1, so e-acute is a non-ASCII str.
+    for value in ("0" * 64, b"caf\xe9"):
+        refused = client.get("/api/v1/drafts/storage", headers={"X-Lightwork-Draft-Context": value})
+        assert refused.status_code == 409, (value, refused.status_code, refused.text)

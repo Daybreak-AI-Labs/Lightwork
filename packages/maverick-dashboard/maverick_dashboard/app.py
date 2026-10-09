@@ -91,6 +91,7 @@ from .auth import (
     caller_suites,
     can_access_goal,
     can_access_goal_principal,
+    constant_time_equals,
     execution_user_id_from_request,
     goal_owner_filter,
     has_global_permission,
@@ -1436,7 +1437,7 @@ async def enforce_expected_workspace_tenant(
     ):
         form = await request.form()
         supplied = str(form.get("_expected_tenant") or "").strip()
-    if not hmac.compare_digest(supplied, expected):
+    if not constant_time_equals(supplied, expected):
         raise HTTPException(
             status_code=409,
             detail=(

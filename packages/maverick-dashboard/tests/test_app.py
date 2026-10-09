@@ -230,3 +230,31 @@ def test_responses_are_gzipped_when_the_client_accepts_it(tmp_path, monkeypatch)
     assert app_module._compress_enabled() is False
     monkeypatch.setattr(cfg, "load_config", lambda: {"dashboard": {}})
     assert app_module._compress_enabled() is True
+
+
+def test_expected_workspace_tenant_refuses_non_ascii_text_with_a_409(monkeypatch):
+    """A crafted expected-tenant header or form field is a stale-tab 409, not a 500."""
+    import asyncio
+
+    from fastapi import HTTPException
+    from maverick_dashboard import app as app_module
+    from starlette.requests import Request
+
+    monkeypatch.setattr(app_module, "_is_same_origin", lambda _request: True)
+
+    def check(headers, body=b""):
+        async def receive():
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        request = Request({"type": "http", "method": "POST", "path": "/api/v1/goals", "headers": headers,
+                           "state": {"workspace_expected_tenant": "acme"}}, receive)
+        asyncio.run(app_module.enforce_expected_workspace_tenant(request))
+
+    check([(b"x-lightwork-expected-tenant", b"acme")])
+    form = [(b"content-type", b"application/x-www-form-urlencoded")]
+    # Header text arrives decoded as latin-1; the form field is percent-encoded UTF-8.
+    for headers, body in (([(b"x-lightwork-expected-tenant", b"caf\xe9")], b""),
+                          (form, b"_expected_tenant=caf%C3%A9")):
+        with pytest.raises(HTTPException) as refused:
+            check(headers, body)
+        assert refused.value.status_code == 409

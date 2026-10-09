@@ -217,6 +217,7 @@ from .auth import (
     caller_principal,
     caller_suites,
     can_access_goal,
+    constant_time_equals,
     durable_automation_owner,
     execution_user_id_from_request,
     goal_owner_filter,
@@ -2378,7 +2379,7 @@ def _request_identity(request: Request) -> str | None:
     if expected:
         authorization = request.headers.get("authorization", "")
         supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
-        if supplied and hmac.compare_digest(supplied, expected):
+        if supplied and constant_time_equals(supplied, expected):
             return "auth:dashboard-token"
         raise HTTPException(
             status_code=401,

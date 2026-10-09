@@ -179,3 +179,15 @@ def test_department_boards_show_practice_cost_apart_from_the_real_totals(monkeyp
     assert spend["totals"]["dollars"] == 2.0 and spend["all_time"]["dollars"] == 2.0  # real totals unchanged
     for board in ("overview", "oversight"):
         assert "practice" not in client.get(f"/api/v1/dashboards/{board}").json(), board
+
+
+def test_board_refuses_a_non_ascii_context_header_like_any_other_wrong_one(monkeypatch, tmp_path):
+    from maverick import world_model
+
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    client = _client()
+    # Header text arrives decoded as latin-1, so e-acute is a non-ASCII str.
+    for value in ("0" * 64, b"caf\xe9"):
+        refused = client.get("/api/v1/dashboards/overview?days=30", headers={"X-Lightwork-Board-Context": value})
+        assert refused.status_code == 409, (value, refused.status_code, refused.text)

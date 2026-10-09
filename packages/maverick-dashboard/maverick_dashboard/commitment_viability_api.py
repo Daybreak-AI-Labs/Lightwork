@@ -1,7 +1,6 @@
 """Native, account-bound controls for the bounded commitment review pilot."""
 from __future__ import annotations
 
-import hmac
 from datetime import datetime
 from typing import Literal
 
@@ -14,7 +13,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 
 from . import commitment_viability_store as reviews
-from .auth import caller_principal, has_global_permission, require_permission
+from .auth import caller_principal, constant_time_equals, has_global_permission, require_permission
 from .draft_api import context_for
 
 router = APIRouter(tags=["commitment-reviews"])
@@ -134,7 +133,7 @@ def _context(request: Request, *, mutation: bool = False) -> str:
         raise HTTPException(403, "Promise reviews are off. An administrator can enable them in Settings.")
     context = context_for(request)
     supplied = request.headers.get("X-Lightwork-Commitment-Context")
-    if (mutation or supplied is not None) and not hmac.compare_digest(supplied or "", context):
+    if (mutation or supplied is not None) and not constant_time_equals(supplied or "", context):
         raise HTTPException(409, "The account or workspace changed. Reload this review before continuing.")
     return context
 
