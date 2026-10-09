@@ -108,9 +108,38 @@ def test_channel_tests_stop_before_network_when_no_people_are_permitted(client, 
         assert f"saved={result}" in response.headers["location"]
 
 
+def test_email_server_named_in_the_environment_passes_the_page_and_connection_checks(monkeypatch):
+    # The email channel accepts EMAIL_TRUSTED_AUTHSERV_ID when the setting is
+    # not saved; the Channels page and Test connection must agree with it.
+    from maverick_dashboard import channel_check_api, integration_readiness
+
+    cfg = {"imap_host": "imap.example.test", "imap_user": "bot@example.test",
+           "imap_password": "fixture", "smtp_host": "smtp.example.test",  # pragma: allowlist secret
+           "smtp_user": "bot@example.test", "smtp_password": "fixture",
+           "allowed_user_ids": ["alice@example.test"]}
+    monkeypatch.setenv("EMAIL_TRUSTED_AUTHSERV_ID", "mx.example.test")
+    assert integration_readiness._email_configuration_problem(cfg) == ""
+    reached = []
+
+    def imap(host, **_kwargs):
+        reached.append(host)
+        raise ConnectionRefusedError("fixture")
+
+    monkeypatch.setattr(channel_check_api.imaplib, "IMAP4_SSL", imap)
+    channel_check_api.check_credentials("email", cfg)
+    assert reached == ["imap.example.test"]          # past the setup check, to sign-in
+    assert integration_readiness._email_configuration_problem(
+        {**cfg, "trusted_authserv_id": "not a server"})  # the saved setting wins
+    monkeypatch.setenv("EMAIL_TRUSTED_AUTHSERV_ID", "mx..example.test")
+    assert integration_readiness._email_configuration_problem(
+        {**cfg, "trusted_authserv_id": "mx.example.test"}) == ""
+    assert "server that checks incoming mail" in integration_readiness._email_configuration_problem(cfg)
+
+
 def test_email_check_requires_sender_setup_and_tests_both_mail_signins(monkeypatch):
     from maverick_dashboard import channel_check_api
 
+    monkeypatch.delenv("EMAIL_TRUSTED_AUTHSERV_ID", raising=False)
     cfg = {"imap_host": "imap.example.test", "imap_user": "bot@example.test",
            "imap_password": "fixture", "smtp_host": "smtp.example.test",  # pragma: allowlist secret
            "smtp_user": "bot@example.test", "smtp_password": "fixture",

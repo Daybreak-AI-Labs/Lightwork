@@ -886,7 +886,9 @@ def _email_configuration_problem(channel_config: dict[str, Any]) -> str:
     problem = configuration_problem(channel_config)
     if problem:
         return problem
-    if not valid_trusted_mail_server(channel_config.get("trusted_authserv_id")):
+    # Same fallback as the email channel: an unsaved setting uses the variable.
+    if not valid_trusted_mail_server(channel_config.get("trusted_authserv_id")
+                                     or os.environ.get("EMAIL_TRUSTED_AUTHSERV_ID")):
         return ("Set the server that checks incoming mail on the Channels page. "
                 "Until then, email cannot start work.")
     senders = normalize_allowlist(channel_config.get("allowed_user_ids"),
