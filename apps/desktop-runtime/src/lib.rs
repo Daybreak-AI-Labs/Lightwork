@@ -81,14 +81,20 @@ fn readiness_headers(headers: &[u8]) -> Readiness {
 }
 
 fn probe_address(address: SocketAddr) -> Readiness {
-    let started = Instant::now();
-    let mut stream = match TcpStream::connect_timeout(&address, READINESS_CONNECT_TIMEOUT) {
+    probe_with(|| TcpStream::connect_timeout(&address, READINESS_CONNECT_TIMEOUT))
+}
+
+fn probe_with(connect: impl FnOnce() -> std::io::Result<TcpStream>) -> Readiness {
+    let mut stream = match connect() {
         Ok(stream) => stream,
         Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
             return Readiness::NotRunning
         }
         Err(_) => return Readiness::Unavailable,
     };
+    // The headers get their own budget from the moment the connection exists:
+    // a connect Windows completes late must not leave none for them.
+    let started = Instant::now();
     let timeout = Some(Duration::from_millis(200));
     if stream.set_read_timeout(timeout).is_err() || stream.set_write_timeout(timeout).is_err() {
         return Readiness::Unavailable;
@@ -588,11 +594,53 @@ mod tests {
         // Hosted Windows runners took 2.1 to 2.2 s to refuse a free loopback
         // port; anything shorter made the shell refuse to start its dashboard.
         assert!(READINESS_CONNECT_TIMEOUT >= Duration::from_millis(3000));
-        let address = TcpListener::bind(("127.0.0.1", 0))
-            .unwrap()
-            .local_addr()
-            .unwrap();
-        assert_eq!(probe_address(address), Readiness::NotRunning);
+        for _ in 0..5 {
+            let address = TcpListener::bind(("127.0.0.1", 0))
+                .unwrap()
+                .local_addr()
+                .unwrap();
+            let readiness = probe_address(address);
+            if readiness == Readiness::NotRunning {
+                return;
+            }
+            // A parallel test may have taken the released port. Only a port
+            // that is still free and was not read as free is a failure.
+            if TcpListener::bind(address).is_ok() {
+                panic!("a free port read as {readiness:?}");
+            }
+        }
+        panic!("no released loopback port stayed free long enough to probe");
+    }
+
+    #[test]
+    fn a_connection_that_opens_late_still_gets_its_whole_header_budget() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 256];
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                let count = stream.read(&mut chunk).unwrap();
+                if count == 0 {
+                    return;
+                }
+                request.extend_from_slice(&chunk[..count]);
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nX-Lightwork-Service: dashboard-v1\r\n\r\n")
+                .unwrap();
+        });
+        // Windows can complete a loopback connect after about two seconds of
+        // SYN retries when the dashboard binds during them.
+        let readiness = probe_with(|| {
+            let stream = TcpStream::connect(address)?;
+            std::thread::sleep(Duration::from_millis(2100));
+            Ok(stream)
+        });
+        assert_eq!(readiness, Readiness::Ready);
+        worker.join().unwrap();
     }
 
     #[test]

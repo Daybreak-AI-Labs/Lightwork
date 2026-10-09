@@ -50,13 +50,16 @@ class DashboardServer(uvicorn.Server):
                 # interpreter's buffered stdin lock during unrelated SIGTERM.
                 stream = os.fdopen(os.dup(sys.stdin.fileno()), "rb", buffering=0)
                 # Helpers this server starts (PowerShell, tool workers) inherit
-                # standard input. Give them the null device: one reading the
-                # owned pipe waited until the desktop exited, or took its drain.
-                null = os.open(os.devnull, os.O_RDONLY)
+                # standard input: one reading the owned pipe waited until the
+                # desktop exited, or took its drain. Give them an empty pipe,
+                # not the null device, which Windows reports as a terminal and
+                # would send consent prompts to a console nobody sees.
+                empty, writer = os.pipe()
+                os.close(writer)
                 try:
-                    os.dup2(null, sys.stdin.fileno())
+                    os.dup2(empty, sys.stdin.fileno())
                 finally:
-                    os.close(null)
+                    os.close(empty)
             except (AttributeError, OSError, ValueError) as exc:
                 raise RuntimeError("owned desktop control pipe is unavailable") from exc
             threading.Thread(target=_read_desktop_control,

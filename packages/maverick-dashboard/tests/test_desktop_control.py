@@ -119,9 +119,11 @@ observed, ready = map(Path, sys.argv[1:3])
 @asynccontextmanager
 async def lifespan(app):
     # A helper started with the default stdin, as PowerShell and tool workers are.
+    # Windows reports every character device (the null device included) as a
+    # terminal, so standard input must not be one.
+    probe = "import os, stat, sys; sys.stdout.write(repr((sys.stdin.buffer.read(64), stat.S_ISCHR(os.fstat(0).st_mode), os.isatty(0))))"
     try:
-        helper = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.stdout.write(repr(sys.stdin.buffer.read(64)))"],
-                                capture_output=True, text=True, timeout=3)
+        helper = subprocess.run([sys.executable, "-I", "-c", probe], capture_output=True, text=True, timeout=3)
         observed.write_text(helper.stdout, encoding="utf-8")
     except subprocess.TimeoutExpired:
         observed.write_text("blocked on the owned pipe", encoding="utf-8")
@@ -144,9 +146,9 @@ DashboardServer(app, log_config=None).run(sockets=[listener])
         while not ready.exists() and child.poll() is None and time.monotonic() < deadline:
             time.sleep(.02)
         assert ready.exists(), "synthetic child did not start"
-        # The helper saw end of input, not the desktop's open control pipe,
-        # and the drain command still reached the server.
-        assert observed.read_text(encoding="utf-8") == "b''"
+        # The helper saw end of input, not the desktop's open control pipe, on
+        # a stream that is no terminal, and the drain still reached the server.
+        assert observed.read_text(encoding="utf-8") == "(b'', False, False)"
         stdout, stderr = child.communicate(DESKTOP_DRAIN, timeout=8)
         assert child.returncode == 0, (stdout, stderr)
     finally:
