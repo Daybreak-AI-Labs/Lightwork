@@ -72,7 +72,8 @@ STARTUP_ERROR_TYPES = (
     "SystemExit", "TimeoutError", "TypeError", "UnicodeDecodeError", "UnicodeEncodeError", "ValidationError",
     "ValueError",
 )
-STARTUP_PROCESS_STATES = ("running", "exited", "not_started", "unavailable", "unreported", "bridge_unavailable")
+STARTUP_PROCESS_STATES = ("running", "exited", "not_started", "unavailable", "unreported", "bridge_unavailable",
+                          "not_offered_on_recovery_page")
 _STARTUP_FRAME = re.compile(r"(?:[A-Za-z0-9_.-]{1,64}\.py|other):[0-9]{1,7}:[A-Za-z_<>][A-Za-z0-9_<>]{0,63}")
 _STARTUP_EXIT = re.compile(r"none|0x[0-9a-f]{1,8}|-?[0-9]{1,10}")
 # Pinned profiler, installed only into the disposable journey directory when
@@ -490,8 +491,11 @@ const empty = (state) => ({process_state: state, packaged_runtime: 'unknown', ex
   error_type: 'none', frames: [], output_kb: 0});
 if (!core || typeof core.invoke !== 'function') return empty('bridge_unavailable');
 const ask = (name) => core.invoke(name).then((value) => value, () => null);
+// The shell offers its startup report on the splash only and refuses it on
+// the bundled recovery page; say so there instead of "unreported".
+const onRecovery = typeof location !== 'undefined' && location.pathname === '/recovery.html';
 // The report first: reading the messages reaps an exited process.
-return ask('startup_support_report').then((report) => ask('dashboard_diagnostics').then((log) => {
+return (onRecovery ? Promise.resolve(null) : ask('startup_support_report')).then((report) => ask('dashboard_diagnostics').then((log) => {
   const states = ['running', 'exited', 'not_started', 'unavailable'];
   const available = report ? report.packaged_runtime_available : undefined;
   const text = typeof log === 'string' ? log.slice(-262144) : '';
@@ -511,7 +515,8 @@ return ask('startup_support_report').then((report) => ask('dashboard_diagnostics
       if (current) { frames = current.slice(-8); current = null; }
     }
   }
-  return {process_state: report && states.includes(report.process_state) ? report.process_state : 'unreported',
+  return {process_state: onRecovery ? 'not_offered_on_recovery_page'
+      : report && states.includes(report.process_state) ? report.process_state : 'unreported',
     packaged_runtime: available === true ? 'present' : available === false ? 'missing'
       : available === null ? 'not_pinned' : 'unknown',
     exit_code: exit ? exit[1].toLowerCase() : 'none',

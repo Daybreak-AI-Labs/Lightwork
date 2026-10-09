@@ -1200,6 +1200,15 @@ global.window = {__TAURI__: {core: {invoke(name) {
   log = 'No startup output was recorded. Lightwork may already be running independently.';
   observed = await inspect();
   assert.equal(observed.process_state, 'not_started'); assert.deepEqual(observed.markers, ['no_output']);
+  // The shell refuses its startup report on the recovery page: say so.
+  global.location = {origin: 'http://tauri.localhost', pathname: '/recovery.html'};
+  calls = []; report = {process_state: 'running', packaged_runtime_available: true};
+  log = 'Starting Lightwork on this computer.';
+  observed = await inspect();
+  assert.deepEqual(calls, ['dashboard_diagnostics']);
+  assert.equal(observed.process_state, 'not_offered_on_recovery_page');
+  assert.deepEqual(observed.markers, ['startup_begun']);
+  delete global.location;
   delete global.window.__TAURI__;
   assert.deepEqual(await inspect(), {process_state: 'bridge_unavailable', packaged_runtime: 'unknown', exit_code: 'none',
     markers: [], error_type: 'none', frames: [], output_kb: 0});
