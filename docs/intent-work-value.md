@@ -15,8 +15,9 @@ correct intent, evaluate opportunities or create a workflow draft.
 3. **Use existing** records the choice and opens the existing capability.
    Chat receives a prefilled, editable task and an opportunity reference. The
    normal task submission binds the exact goal before dispatch. Nothing starts
-   on selection. Existing workflow reuse binds the owned definition generation
-   and selection time; later matching runs are associated, not causal proof.
+   on selection. Existing workflow reuse binds the exact owned definition,
+   child-workflow bundle, publication and selection time; later matching runs
+   are associated, not causal proof.
 4. If repeatability, supported completed examples and provisional net benefit
    support a draft, choose **Build reviewable workflow draft**. Input selection
    and final review remain manual; preparation can also stay manual. The native
@@ -33,6 +34,29 @@ correct intent, evaluate opportunities or create a workflow draft.
 Defer and keep-current decisions persist. Unchanged declined/deferred proposals
 are hidden unless **Include deferred and declined suggestions** is selected.
 Reopening is explicit. None of these decisions deletes an existing process.
+
+Turning off **Suggest reusable work** stops recommendation discovery and blocks
+previously opened use, build, decision and linked Chat actions. The page and
+Copilot explain that recommendations are off. Work-value metrics remain
+available and stored recommendation history is retained; turning suggestions
+back on restores the normal review journey.
+
+Workflow outcomes require the selected definition and its actual publication.
+An older active release cannot adopt newer saved edits or contribute their
+outcomes. Mixed-release retry groups and earlier selections without exact
+workflow evidence remain outside recommendation comparisons; their underlying
+work and costs remain in platform totals. Review and select the current workflow
+again to bind future outcomes. A newly built draft remains editable: its first
+observed explicit publication in the same owned creation generation binds the
+customer's final definition and child-workflow bundle. Later publications do
+not replace that outcome binding; select the workflow again to adopt new work.
+Selecting an existing unpublished workflow binds its current saved content.
+If the designer saves another version before publishing, return to the
+opportunity and select the published workflow again to bind future outcomes.
+Pending publication is bound when it is observed. If a matching release was
+published and replaced before the first refresh, the comparison stays unbound
+rather than inferring that historical activation. Once observed, the stored
+publication evidence survives later publication changes.
 
 ## Integration map
 
