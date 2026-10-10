@@ -265,7 +265,7 @@ def test_k8s_pod_overrides_non_root_and_limits(monkeypatch, tmp_path):
     assert container["resources"]["limits"] == {"memory": "2Gi", "cpu": "1"}
     assert overrides["spec"]["automountServiceAccountToken"] is False
     assert container["volumeMounts"] == [{"name": "workspace", "mountPath": "/workspace"}]
-    assert container["env"] == [{"name": "TMPDIR", "value": "/workspace"}]
+    assert not container.get("env"), "TMPDIR is private to each command after workspace copy-in"
     assert overrides["spec"]["volumes"] == [{"name": "workspace", "emptyDir": {"sizeLimit": str(512 * 1024 * 1024)}}]
     assert overrides["spec"]["activeDeadlineSeconds"] >= 3600
 
