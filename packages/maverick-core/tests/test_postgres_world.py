@@ -686,6 +686,39 @@ def test_approval_webhook_events_reach_subscribers_only_after_commit(world, monk
     ]
 
 
+def test_only_a_held_decision_is_undone_and_settling_it_makes_it_final(world, monkeypatch):
+    from maverick import webhook_events
+
+    sent = []
+    monkeypatch.setattr(webhook_events, "emit", lambda event, **kw: sent.append((event, kw)))
+
+    def decide(aid, status, who):
+        event = world.decide_approval_audited(aid, status, decided_by=who)
+        assert event is not None and world.mark_approval_audit_delivered(event.event_id)
+
+    acts_at_once = world.create_approval("codebase_merge", risk="high", provenance="codebase")
+    decide(acts_at_once, "approved", "ana")
+    assert world.undo_approval_decision(acts_at_once, undone_by="ana", within_seconds=30) == "final"
+    assert world.get_approval(acts_at_once).undo_hold is None
+
+    held = world.create_approval("rm -rf /tmp/x", risk="high", undoable=True)
+    assert world.get_approval(held).undo_hold == "open"
+    assert world.settle_approval_decision(held).status == "pending"   # nothing to settle yet
+    decide(held, "approved", "ana")
+    assert world.undo_approval_decision(held, undone_by="ana", within_seconds=30) == "undone"
+    assert world.get_approval(held).status == "pending"
+    assert [kw["payload"]["previous_status"] for event, kw in sent if event == "approval.undone"] == ["approved"]
+
+    decide(held, "denied", "ben")
+    settled = world.settle_approval_decision(held)
+    assert settled.status == "denied" and settled.undo_hold == "settled"
+    assert world.undo_approval_decision(held, undone_by="ben", within_seconds=300) == "too_late"
+
+    stopped = world.create_approval("send", risk="high", undoable=True)
+    assert world.decide_approval(stopped, "denied", decided_by="system:task-stopped") is True
+    assert world.undo_approval_decision(stopped, undone_by="ana", within_seconds=30) == "final"
+
+
 def test_decide_approval_rejects_bad_status(world):
     aid = world.create_approval("do thing")
     with pytest.raises(ValueError, match="approved.*denied"):

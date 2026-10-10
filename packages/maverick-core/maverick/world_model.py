@@ -61,7 +61,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 50
+SCHEMA_VERSION = 51
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -447,6 +447,9 @@ def _bootstrap_schema(conn: sqlite3.Connection) -> str:
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    # v51: which decisions can still be undone. Only a request a waiting task
+    # holds ("open") can be; the task marks it "settled" when it acts on it.
+    51: ["ALTER TABLE approvals ADD COLUMN undo_hold TEXT"],
     # v50: ordered per-task question reads avoid scanning unrelated history.
     50: ["CREATE INDEX IF NOT EXISTS idx_questions_goal_id ON questions(goal_id, id)"],
     # v49: retire only unused derived message-search storage. Authoritative
@@ -759,6 +762,9 @@ class Approval:
     requested_by: str | None = None
     goal_id: int | None = None
     department: str = ""
+    # "open" while a waiting task holds the decision for undo, "settled" once
+    # it acted; None for every request whose consumer acts at once.
+    undo_hold: str | None = None
 
 
 @dataclass(frozen=True)
@@ -814,6 +820,27 @@ def _approval_audit_event_id(
 
 
 APPROVAL_UNDO_STATUS = "undone"
+# ``approvals.undo_hold``: a waiting task holds the decision for undo, or has acted on it.
+APPROVAL_UNDO_OPEN = "open"
+APPROVAL_UNDO_SETTLED = "settled"
+
+
+def approval_undo_refusal(status: str, decided_by: str | None, undo_hold: str | None) -> str | None:
+    """Why a decided approval cannot be undone, or None when it still can be.
+
+    ``"final"``: no waiting task holds it (its consumer acts on the decision
+    at once) or the system decided it (a stopped task, a timed-out wait, a
+    recovery); ``"too_late"``: the waiting task has already acted on it.
+    """
+    if status == "pending":
+        return None
+    if str(decided_by or "").startswith("system:"):
+        return "final"
+    if undo_hold == APPROVAL_UNDO_SETTLED:
+        return "too_late"
+    if undo_hold != APPROVAL_UNDO_OPEN:
+        return "final"
+    return None
 
 
 def _approval_undo_marker_id(tenant_id: str | None, approval_id: int, undo_round: int) -> str:
@@ -3443,6 +3470,7 @@ class WorldModel:
         provenance: str | None = None,
         approvals_required: int = 1,
         requested_by: str | None = None,
+        undoable: bool = False,
     ) -> int:
         """Park a high-risk action for out-of-band (dashboard) approval.
 
@@ -3454,6 +3482,9 @@ class WorldModel:
         before the action is granted (segregation of duties; 1 = legacy single
         approver). ``requested_by`` is the requesting principal, so a multi-party
         approval can bar the requester from approving their own request.
+        ``undoable`` is only for a requester that waits out the undo window
+        before acting on a decision (the consent wait, which then calls
+        :meth:`settle_approval_decision`); every other decision is final.
         """
         from .logging_config import current_goal_id
 
@@ -3462,12 +3493,13 @@ class WorldModel:
             goal = conn.execute("SELECT id, domain FROM goals WHERE id = ?", (context_goal,)).fetchone()
             cur = conn.execute(
                 "INSERT INTO approvals(action, risk, scope, detail, provenance, "
-                "status, requested_at, approvals_required, requested_by, goal_id, department) "
-                "VALUES(?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
+                "status, requested_at, approvals_required, requested_by, goal_id, department, "
+                "undo_hold) VALUES(?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
                 (_enc_field(action), risk, _enc_field(scope), _enc_field(detail),
                  provenance, time.time(), max(1, int(approvals_required)),
                  (requested_by or None), goal["id"] if goal else None,
-                 goal["domain"] if goal else ""),
+                 goal["domain"] if goal else "",
+                 APPROVAL_UNDO_OPEN if undoable else None),
             )
             approval_id = cur.lastrowid
         _notify_approval_created(self, approval_id, provenance)
@@ -3533,6 +3565,23 @@ class WorldModel:
         row = conn.execute(sql, params).fetchone() if conn is not None else self._read_one(sql, params)
         return int(row[0]) if row else 0
 
+    def settle_approval_decision(self, approval_id: int) -> Approval | None:
+        """The waiting task is about to act on this decision: make it final.
+
+        Returns the approval as it stands. When it is still decided, an undo
+        from now on is refused (``"too_late"``), whatever window the page that
+        offers it reads; when an undo got there first it is pending again and
+        the task keeps waiting.
+        """
+        with self._writing() as conn:
+            conn.execute(
+                "UPDATE approvals SET undo_hold = ? WHERE id = ? AND status <> 'pending' "
+                "AND undo_hold = ?",
+                (APPROVAL_UNDO_SETTLED, int(approval_id), APPROVAL_UNDO_OPEN),
+            )
+            row = conn.execute("SELECT * FROM approvals WHERE id = ?", (int(approval_id),)).fetchone()
+        return _approval_from_row(row) if row else None
+
     def undo_approval_decision(
         self,
         approval_id: int,
@@ -3544,28 +3593,33 @@ class WorldModel:
 
         Outcomes: ``"undone"``, ``"not_found"``, ``"not_decided"`` (still
         pending, or its final vote is awaiting audit delivery), ``"too_late"``
-        (the window of ``within_seconds`` after ``decided_at`` has passed, so
-        the consumer may already have acted). On success the sign-offs are
+        (the window of ``within_seconds`` after ``decided_at`` has passed, or
+        the waiting task already acted on it), ``"final"`` (no waiting task
+        holds this request, or the system decided it; see
+        :func:`approval_undo_refusal`). On success the sign-offs are
         cleared, the delivered vote rows keep their place in the outbox but no
         longer carry a final status, and an undo marker row bumps the vote
         identity round so the next decision is a new signed audit event.
         """
         with self._writing() as conn:
             row = conn.execute(
-                "SELECT status, decided_at FROM approvals WHERE id = ?",
+                "SELECT status, decided_at, decided_by, undo_hold, action FROM approvals WHERE id = ?",
                 (int(approval_id),),
             ).fetchone()
             if row is None:
                 return "not_found"
             if row["status"] == "pending":
                 return "not_decided"
+            refusal = approval_undo_refusal(row["status"], row["decided_by"], row["undo_hold"])
+            if refusal is not None:
+                return refusal
             decided_at = row["decided_at"]
             if decided_at is None or time.time() - float(decided_at) > float(within_seconds):
                 return "too_late"
             conn.execute(
                 "UPDATE approvals SET status = 'pending', decided_at = NULL, "
-                "decided_by = NULL WHERE id = ? AND status = ?",
-                (int(approval_id), row["status"]),
+                "decided_by = NULL WHERE id = ? AND status = ? AND undo_hold = ?",
+                (int(approval_id), row["status"], APPROVAL_UNDO_OPEN),
             )
             conn.execute(
                 "DELETE FROM approval_signoffs WHERE approval_id = ?",
@@ -3591,7 +3645,11 @@ class WorldModel:
                     now,
                 ),
             )
-            return "undone"
+        # approval.decided already went out; subscribers learn it was retracted.
+        self._emit_approval_event("approval.undone", int(approval_id), {
+            "previous_status": row["status"], "undone_by": (undone_by or "").strip(),
+            "action": _dec_field(row["action"])})
+        return "undone"
 
     def get_approval_audit_event(
         self,

@@ -83,6 +83,7 @@ _STATUS_CODES: dict[str, int] = {
     "pending_finalization": 409,
     "not_decided": 409,
     "too_late": 409,
+    "final": 409,
     "outcome_uncertain": 503,
     "outbox_integrity_error": 500,
     "audit_failed": 503,
@@ -281,9 +282,23 @@ def card_content(approval: Any, *, now: float | None = None) -> dict[str, Any]:
     return content
 
 
+def held_for_undo(approval: Any) -> bool:
+    """Whether a person's decision on ``approval`` can be undone at all: only
+    a request the consent wait holds for the undo window. Every other
+    requester acts on a decision at once (``WorldModel.undo_approval_decision``)."""
+    from .world_model import APPROVAL_UNDO_OPEN
+
+    return getattr(approval, "undo_hold", None) == APPROVAL_UNDO_OPEN
+
+
 def undo_seconds_left(approval: Any, *, now: float | None = None) -> float:
     """Seconds the decision on ``approval`` can still be undone (0 when it cannot)."""
+    from .world_model import approval_undo_refusal
+
     if approval is None or getattr(approval, "status", "pending") == "pending":
+        return 0.0
+    if approval_undo_refusal(approval.status, getattr(approval, "decided_by", None),
+                             getattr(approval, "undo_hold", None)) is not None:
         return 0.0
     decided_at = getattr(approval, "decided_at", None)
     if not isinstance(decided_at, (int, float)) or isinstance(decided_at, bool):
@@ -728,8 +743,8 @@ def decide_from_channel(
         "approved_count": int(state.get("approved_count") or 0),
         "decision_id": event.event_id,
         # The card offers Undo for this long; the agent-side consumer waits
-        # the same window before acting.
-        "undo_seconds": approval_undo_grace_seconds() if effective else 0.0,
+        # the same window before acting. Nothing waits on other requests.
+        "undo_seconds": approval_undo_grace_seconds() if effective and held_for_undo(approval) else 0.0,
         "decided_at": time.time(),
     }
 
@@ -764,6 +779,12 @@ def undo_decision(world: Any, approval_id: int, *, undone_by: str, channel: str,
         raise ChannelApprovalRefused("not_found", "This request no longer exists.")
     if outcome == "not_decided":
         raise ChannelApprovalRefused("not_decided", "There is no decision to undo yet.")
+    if outcome == "final":
+        raise ChannelApprovalRefused(
+            "final",
+            "This decision can't be undone: it took effect when it was made. "
+            "Ask for a new request if it should not go ahead.",
+        )
     if outcome != "undone":
         raise ChannelApprovalRefused(
             "too_late",
@@ -906,5 +927,6 @@ __all__ = [
     "slack_announcements_configured",
     "spending_text",
     "undo_decision",
+    "held_for_undo",
     "undo_seconds_left",
 ]

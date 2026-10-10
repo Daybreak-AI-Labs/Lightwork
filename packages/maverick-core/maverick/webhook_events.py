@@ -40,6 +40,7 @@ EVENT_CATALOG: dict[str, tuple[str, str]] = {
     "vendor.review_due": ("vendor", "A vendor review is due."),
     "approval.created": ("approval", "An action was parked for human approval."),
     "approval.decided": ("approval", "An approval was approved or denied."),
+    "approval.undone": ("approval", "A decision was undone within its undo window; the approval is waiting again."),
     "approval.expired": ("approval", "An approval card expired before anyone decided."),
     "policy.published": ("policy", "A policy version was published."),
     "webhook.test": ("webhook_subscription", "A test event sent from the Webhooks settings page."),

@@ -77,3 +77,15 @@ def test_legacy_request_detail_redacts_token_and_does_not_claim_execution(histor
     row = api.requested_approval_history(SimpleNamespace())['items'][0]
     assert secret not in json.dumps(row)
     assert row['execution'] == 'No task execution outcome is attached to this decision.'
+
+
+@pytest.mark.parametrize('before_id', [10**20, 2**63, 0, -1])
+def test_an_out_of_range_cursor_is_a_plain_refusal_not_a_server_error(history, before_id):
+    from fastapi import HTTPException
+
+    world, _allowed, _permissions = history
+    create(world, 'user:alice')
+    with pytest.raises(HTTPException) as refused:
+        api.requested_approval_history(SimpleNamespace(), before_id=before_id)
+    assert refused.value.status_code == 422
+    assert api.requested_approval_history(SimpleNamespace(), before_id=2**63 - 1)['items']

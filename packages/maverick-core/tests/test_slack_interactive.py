@@ -283,7 +283,7 @@ def test_decided_card_offers_undo_inside_the_window(tmp_path):
     )
 
     world = _world(tmp_path)
-    aid = _park(world, card=_card())
+    aid = _park(world, card=_card(), undoable=True)
     content = card_content(world.get_approval(aid))
     blocks = decided_blocks(content, decision="denied", decided_by="user:a", effective=True,
                             status="denied", undo_seconds=30)
@@ -339,7 +339,7 @@ def test_slash_commands_end_to_end(tmp_path):
 
     world = _world(tmp_path)
     card = _card()
-    aid = _park(world, risk="high", card=card)
+    aid = _park(world, risk="high", card=card, undoable=True)
     resolver = lambda uid: channel_identities.principal_for("slack", uid)  # noqa: E731
 
     def run(text, user="U1", **extra):

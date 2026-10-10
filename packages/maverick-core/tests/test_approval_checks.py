@@ -145,3 +145,23 @@ def test_the_mode_for_an_unsaved_choice_matches_the_gate_once_saved(world, monke
     (tmp_path / "config.toml").write_text(f'[safety]\nconsent_mode = "{configured}"\n' if configured else "")
     config.reset_config_cache()
     assert gate.installation_mode_for(configured, risk) == gate._installation_mode(risk)
+
+
+def test_checks_are_recorded_counted_and_pruned_on_postgres(postgres_test_dsn, tmp_path, monkeypatch):
+    # PostgresWorldModel has no _read_all: every read must go through a cursor.
+    from maverick.world_model_backends.postgres import PostgresWorldModel
+
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    (tmp_path / "config.toml").write_text("")
+    config.reset_config_cache()
+    with PostgresWorldModel(dsn=postgres_test_dsn) as world:
+        approval_checks.record_check(world, risk="high", action="shell", outcome="asked", now=10 * DAY)
+        approval_checks.record_check(world, risk="low", action="email.send", outcome="allowed", now=200 * DAY)
+        assert approval_checks.first_check_at(world) == 10 * DAY
+        assert [row["action_kind"] for row in approval_checks.checks_since(world, 0)] == ["shell", "email.send"]
+        assert {(row["risk"], row["checks"]) for row in approval_checks.tally_since(world, 0)} == {
+            ("high", 1), ("low", 1)}
+        assert approval_checks.prune(world, now=200 * DAY, days=90) == 1
+        assert approval_checks.first_check_at(world) == 200 * DAY
+    config.reset_config_cache()

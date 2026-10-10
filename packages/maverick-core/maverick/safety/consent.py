@@ -1503,9 +1503,11 @@ def _park_approval(
             action, risk, scope, detail, provenance, requester,
         )
     stored = encode_approval_detail(approval_card)
+    # This wait holds each decision for the undo window before acting on it,
+    # so its requests are the ones a person can undo.
     approval_id = wm.create_approval(
         action, risk=risk, scope=scope, detail=stored, provenance=provenance,
-        approvals_required=required, requested_by=requester,
+        approvals_required=required, requested_by=requester, undoable=True,
     )
     # Chat channels get the same card with decision buttons: the world model
     # announces it (maverick.approval_notify) right after the row commits.
@@ -1577,6 +1579,15 @@ def _await_dashboard_decision(
             remaining = approval_decision_settles_at(row, grace=grace) - time.time()
             if remaining > 0:
                 time.sleep(min(1.0, remaining))
+                continue
+            # Make the decision final before acting on it: an undo that reads
+            # a longer window (another process, a changed setting) is refused
+            # from here on, and one that got in first leaves it pending.
+            try:
+                row = wm.settle_approval_decision(approval_id)
+            except Exception:
+                return None
+            if row is None or row.status == "pending":
                 continue
             return _settled_decision(row, approval_card, risk)
         if time.monotonic() >= deadline:

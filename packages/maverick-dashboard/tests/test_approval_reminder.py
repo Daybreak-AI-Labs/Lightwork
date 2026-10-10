@@ -134,6 +134,24 @@ def test_no_reminder_once_decided(env):
     assert reminder_due_at(world.get_approval(approval_id)) is None
 
 
+def test_no_reminder_once_the_wait_has_ended(env, monkeypatch):
+    # A dashboard-mode wait that times out leaves the request pending; the
+    # task is no longer waiting, so nobody signing in later is reminded and
+    # the card does not say a reminder went out about a waiting step.
+    from maverick_dashboard import approval_reminders
+
+    _client, world = env
+    approval_id = _approval(world)
+    _grant(monkeypatch, world, approval_id, DANA)
+    approval = world.get_approval(approval_id)
+    monkeypatch.setattr(approval_reminders, "_now", lambda: approval.requested_at + 1799)
+    assert len(_reminders(world, DANA)) == 1
+    assert approval_reminders.reminder_sent(world, approval) is True
+    monkeypatch.setattr(approval_reminders, "_now", lambda: approval.requested_at + 1800)
+    assert _reminders(world, DANA) == []
+    assert approval_reminders.reminder_sent(world, approval) is False
+
+
 # --------------------------------------------------------- who is reminded
 
 def test_the_people_who_can_decide_are_reminded_once_after_ten_minutes(env, monkeypatch):

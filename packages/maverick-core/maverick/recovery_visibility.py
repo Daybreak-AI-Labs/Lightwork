@@ -98,7 +98,9 @@ def _replay(schedule, quorum, home, ordinal, budget):
                 credential_versions={}, budget={"currency": "USD", "maximum": 0}, expires_at=4102444800,
                 known_effects=["Fictional votes and local activity only"], unresolved_assumptions=[],
                 before="Pending fictional request", after="Fictional local decision", irreversible=False)
-            identity = world.create_approval(card["action"], detail=encode_approval_detail(card), approvals_required=quorum, requested_by="user:fictional-requester")
+            # A request the consent wait holds, so the practice's undo steps apply.
+            identity = world.create_approval(card["action"], detail=encode_approval_detail(card), approvals_required=quorum,
+                                             requested_by="user:fictional-requester", undoable=True)
             original = world.approval_audit_event_id(identity, "approved", "user:fictional-first")
             for action in schedule:
                 charge()

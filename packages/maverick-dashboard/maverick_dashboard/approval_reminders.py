@@ -43,8 +43,12 @@ def reminder_due_at(approval) -> float | None:
 
 
 def _due(approval, now: float) -> bool:
+    """Ten minutes in, and the task's wait has not ended yet. A wait that
+    timed out leaves the request pending, but nothing is waiting on it."""
+    from maverick.safety.consent import dashboard_wait_seconds
+
     due = reminder_due_at(approval)
-    return due is not None and now >= due
+    return due is not None and due <= now < float(approval.requested_at) + dashboard_wait_seconds()
 
 
 def reminded(world, approval, principal: str) -> bool:

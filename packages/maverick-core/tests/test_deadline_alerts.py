@@ -722,3 +722,19 @@ def test_a_world_opened_for_a_read_is_closed_again(monkeypatch, tmp_path):
     assert da.recent_alerts() == []
     assert da.alerts_for("dsar", "R1") == []
     assert opened == ["closed", "closed"]
+
+
+def test_the_ledger_reads_back_on_postgres(postgres_test_dsn):
+    # PostgresWorldModel has no _read_all: the "already sent" check and the
+    # record page's alert list must read through a cursor there.
+    from maverick.world_model_backends.postgres import PostgresWorldModel
+
+    with PostgresWorldModel(dsn=postgres_test_dsn) as world:
+        d = _deadline(record_id="PG1", due_in=2 * DAY - 60)
+        summary, sent = _run(world, [d])
+        assert summary["sent"] == 1 and len(sent) == 1
+        summary, sent = _run(world, [d], sent=sent)
+        assert summary["sent"] == 0 and summary["already_sent"] == 1 and len(sent) == 1
+        rows = da.alerts_for("dsar", "PG1", world=world)
+        assert len(rows) == 1 and rows[0]["state"] == "due_soon_2d" and rows[0]["backends"] == 1
+        assert da.recent_alerts(world=world)[0]["record_id"] == "PG1"

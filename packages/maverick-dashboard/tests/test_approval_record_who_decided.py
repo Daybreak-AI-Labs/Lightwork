@@ -34,7 +34,7 @@ def env(monkeypatch, tmp_path):
     world.close()
 
 
-def _approval(world, *, requested_by=None):
+def _approval(world, *, requested_by=None, undoable=False):
     from maverick.approval_cards import build_approval_card, encode_approval_detail
 
     card = build_approval_card(
@@ -46,7 +46,8 @@ def _approval(world, *, requested_by=None):
         unresolved_assumptions=[], before="Not run.", after="Run once.", irreversible=True,
     )
     approval_id = world.create_approval("shell", risk="high", scope="sandbox:/work",
-                                        detail=encode_approval_detail(card), requested_by=requested_by)
+                                        detail=encode_approval_detail(card), requested_by=requested_by,
+                                        undoable=undoable)
     return approval_id, {"X-Lightwork-Approval-Binding": card["binding_sha256"]}
 
 
@@ -98,7 +99,7 @@ def test_activity_log_and_download_name_the_person_who_decided(env, monkeypatch)
 def test_an_undo_is_on_the_record_with_who_undid_it(env, monkeypatch):
     client, world = env
     monkeypatch.setenv("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "30")
-    approval_id, headers = _approval(world)
+    approval_id, headers = _approval(world, undoable=True)
     _as(monkeypatch, APPROVER)
     _approve(client, approval_id, headers)
     undo = client.post(f"/api/v1/approvals/{approval_id}/undo")
