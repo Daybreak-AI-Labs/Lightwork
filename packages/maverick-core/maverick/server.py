@@ -1244,7 +1244,9 @@ def build_from_config(db: Path | None = None) -> Server:
         detail = _format_route_missing(missing_routes)
         raise RuntimeError(
             "No LLM provider route is complete "
-            f"({detail}). Run 'maverick init' or `maverick preflight`."
+            f"({detail}). Add the missing key in Lightwork > Settings (or run "
+            "'maverick init' on a computer with no Lightwork setup yet), then "
+            "run 'maverick preflight'."
         )
 
     world = open_world(db) if db is not None else open_world()

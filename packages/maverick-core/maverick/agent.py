@@ -3720,8 +3720,12 @@ class Agent:
         from .autonomy import confirm_plan_enabled
         if practice.tool_allowed(name) or not confirm_plan_enabled():
             return None
+        from .paths import current_tenant_id
         goal_id = int(getattr(self.ctx, "goal_id", 0) or 0)
-        key: tuple = (goal_id, int(getattr(self.ctx, "episode_id", 0) or 0))
+        # Goal and episode ids count up per database, and every workspace and
+        # its practice workspace has its own: the key names which one.
+        key: tuple = (current_tenant_id() or "", practice.active(), goal_id,
+                      int(getattr(self.ctx, "episode_id", 0) or 0))
         if not goal_id:
             # No task to key on: scope the decision to this run's own context,
             # never one entry shared by every unrelated run without a goal.

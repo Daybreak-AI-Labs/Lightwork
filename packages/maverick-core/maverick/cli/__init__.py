@@ -125,8 +125,9 @@ def _require_llm_key(model_spec: str | None = None) -> str:
         "Lightwork can't reach an LLM through every selected model route. "
         f"Missing: {detail}.\n"
         "\n"
-        "Configure that route with:  maverick init\n"
-        "Then verify it with:       maverick preflight",
+        "Add its key in Lightwork > Settings (on a computer with no Lightwork\n"
+        "setup yet, run:  maverick init)\n"
+        "Then verify it with:  maverick preflight",
         err=True,
     )
     sys.exit(2)
@@ -1217,9 +1218,10 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
             click.echo(
                 f"WARNING: knowledge is disabled, so the {len(doc_paths)} "
                 "document(s) you attached were NOT loaded; this domain agent "
-                "will have no document memory. Enable it with `maverick init` "
-                "(turn on knowledge) or set [knowledge] enable = true in "
-                "~/.maverick/config.toml, then re-run onboard.",
+                "will have no document memory. Turn on \"Document search for "
+                "agents\" in Lightwork > Settings > All settings, or set "
+                "[knowledge] enable = true in ~/.maverick/config.toml, then "
+                "re-run onboard.",
                 err=True,
             )
         elif kb_problem is not None:
@@ -6465,7 +6467,8 @@ def watch(ctx, path: str, run: bool, max_dollars: float | None) -> None:
                 detail = _format_route_missing(missing_routes)
                 click.echo(
                     f"Skipping --run: selected routes are incomplete ({detail}). "
-                    "Run 'maverick init' to configure.",
+                    "Add the missing key in Lightwork > Settings, then run "
+                    "'maverick preflight'.",
                     err=True,
                 )
                 continue

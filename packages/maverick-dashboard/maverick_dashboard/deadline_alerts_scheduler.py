@@ -3,7 +3,7 @@
 One daemon thread, started with the dashboard, does two jobs:
 
 * every ``[deadline_alerts] poll_seconds`` (default 15 minutes) it runs
-  :func:`maverick.deadline_alerts.run_cycle` for the active workspace, which
+  :func:`maverick.deadline_alerts.run_cycle` for each active workspace, which
   alerts people about requests, incidents, assessments, vendor contracts and
   approvals that are due -- once per record and state, recorded in the ledger;
 * every ``_RETRY_PUMP_SECONDS`` it runs
@@ -31,7 +31,7 @@ _scheduler_lock = threading.Lock()
 _scheduler_stop: threading.Event | None = None
 _scheduler_thread: threading.Thread | None = None
 _RETRY_PUMP_SECONDS = 30.0
-_last_cycle: dict = {}
+_last_cycle: dict[str, dict] = {}  # per workspace; one workspace never sees another's
 
 
 def _world():
@@ -39,47 +39,68 @@ def _world():
     return shared_world()
 
 
+def _workspace() -> str:
+    from maverick.webhook_subscriptions import workspace_id
+    return workspace_id()
+
+
 def run_once(*, now: float | None = None) -> dict:
-    """One evaluation cycle plus one retry pump (the API's "run now")."""
+    """One evaluation cycle plus one retry pump for the active workspace (the
+    API's "run now")."""
     from maverick import deadline_alerts, webhook_subscriptions
 
     world = _world()
     summary = deadline_alerts.run_cycle(now=now, world=world)
     summary["webhook_retries"] = webhook_subscriptions.process_due(world=world, now=now)
     summary["ran_at"] = time.time() if now is None else float(now)
-    _last_cycle.clear()
-    _last_cycle.update({k: v for k, v in summary.items() if k != "alerts"})
+    _last_cycle[_workspace()] = {k: v for k, v in summary.items() if k != "alerts"}
     return summary
 
 
 def last_cycle() -> dict:
-    return dict(_last_cycle)
+    """The active workspace's last cycle."""
+    return dict(_last_cycle.get(_workspace(), {}))
+
+
+def _tick(now: float, next_eval: dict[str, float]) -> None:
+    """One pass of the thread. The retry pump and the deadline evaluation run
+    once per active workspace, each pinned to it like the other background
+    schedulers: a thread has no request workspace, so unpinned they would only
+    ever see the base one. One workspace's failure does not stop the others."""
+    from maverick import deadline_alerts, webhook_subscriptions
+
+    from .automation_queue import _run_for_active_tenants
+
+    _run_for_active_tenants("webhook retry pump",
+                            lambda: webhook_subscriptions.process_due(world=_world(), now=now))
+    try:
+        from maverick.compliance_history import recheck_if_due
+
+        recheck_if_due(now=now)
+    except Exception:  # noqa: BLE001 - a failed check is retried next pass
+        log.warning("compliance re-check failed", exc_info=True)
+
+    def evaluate() -> None:
+        key = _workspace()
+        if now < next_eval.get(key, 0.0):
+            return
+        try:
+            cfg = deadline_alerts.settings()
+            if not cfg["enabled"]:
+                return
+            run_once(now=now)
+        except Exception:
+            next_eval[key] = now + 300.0
+            raise
+        next_eval[key] = now + cfg["poll_seconds"]
+
+    _run_for_active_tenants("deadline alert cycle", evaluate)
 
 
 def _scheduler_loop(stop: threading.Event) -> None:
-    from maverick import deadline_alerts, webhook_subscriptions
-
-    next_eval = 0.0
+    next_eval: dict[str, float] = {}
     while not stop.is_set():
-        now = time.time()
-        try:
-            webhook_subscriptions.process_due(world=_world(), now=now)
-        except Exception:  # noqa: BLE001 - one bad pump must not end the thread
-            log.warning("webhook retry pump failed", exc_info=True)
-        try:
-            from maverick.compliance_history import recheck_if_due
-
-            recheck_if_due(now=now)
-        except Exception:  # noqa: BLE001 - a failed check is retried next pass
-            log.warning("compliance re-check failed", exc_info=True)
-        try:
-            cfg = deadline_alerts.settings()
-            if cfg["enabled"] and now >= next_eval:
-                run_once(now=now)
-                next_eval = now + cfg["poll_seconds"]
-        except Exception:  # noqa: BLE001
-            log.warning("deadline alert cycle failed", exc_info=True)
-            next_eval = now + 300.0
+        _tick(time.time(), next_eval)
         stop.wait(_RETRY_PUMP_SECONDS)
 
 

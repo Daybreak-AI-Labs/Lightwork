@@ -212,7 +212,7 @@ def test_a_refused_prompt_is_shared_by_the_agents_that_waited_for_it(plan_on, mo
 def test_an_agent_waiting_on_another_agents_prompt_checks_less_and_less_often(plan_on, monkeypatch):
     from maverick import agent
 
-    key, waits = (23, 1), []
+    key, waits = ("", False, 23, 1), []
 
     async def sleep(seconds):
         waits.append(seconds)
@@ -225,6 +225,24 @@ def test_an_agent_waiting_on_another_agents_prompt_checks_less_and_less_often(pl
     finally:
         agent._PLAN_ASKING.discard(key)
     assert waits == [0.05, 0.1, 0.2, 0.4, 0.8, 1.0, 1.0, 1.0]
+
+
+def test_a_decision_never_carries_over_to_another_workspace_or_practice(plan_on, monkeypatch):
+    # Goal and episode ids count up per database: goal 31 in one workspace is
+    # an unrelated task from goal 31 in another, or in the practice workspace.
+    from maverick import practice
+    from maverick.paths import tenant_scope
+
+    asked = _decide(monkeypatch, True)
+    with tenant_scope(tenant="acme"):
+        assert _deny(_agent(goal_id=31), "send_email", {}) is None
+        assert _deny(_agent(goal_id=31), "send_email", {}) is None
+    assert len(asked) == 1  # the same run in the same workspace is asked once
+    with tenant_scope(tenant="globex"):
+        _deny(_agent(goal_id=31), "send_email", {})
+    with tenant_scope(tenant="acme"), practice.scope():
+        _deny(_agent(goal_id=31), "send_email", {})
+    assert len(asked) == 3
 
 
 def test_runs_without_a_goal_do_not_share_one_cached_decision(plan_on, monkeypatch):
