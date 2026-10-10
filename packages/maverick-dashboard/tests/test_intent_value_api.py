@@ -218,16 +218,16 @@ def test_interrupted_native_save_resumes_same_reserved_draft(context, monkeypatc
     client, world = context
     seed(world, count=3)
     proposal = get(client, "/opportunities")["opportunities"][0]
-    real = api.save_flow_endpoint
+    real = api._save_flow_definition
     calls = []
     def interrupted(*args, **kwargs):
         saved = real(*args, **kwargs)
         calls.append(saved)
         raise OSError("simulated interruption after native save")
-    monkeypatch.setattr(api, "save_flow_endpoint", interrupted)
+    monkeypatch.setattr(api, "_save_flow_definition", interrupted)
     path = BASE + "/opportunities/" + proposal["id"] + "/build"
     assert client.post(path, headers=headers(), json={"revision": proposal["revision"]}).status_code == 503
-    monkeypatch.setattr(api, "save_flow_endpoint", real)
+    monkeypatch.setattr(api, "_save_flow_definition", real)
     retry = client.post(path, headers=headers(), json={"revision": proposal["revision"]})
     assert retry.status_code == 200, retry.text
     assert len(calls) == len(store.list_flows()) == 1
@@ -271,12 +271,14 @@ def test_native_outcome_requires_work_receipt_and_preserves_forecast(context):
     assert publish.status_code == 200, publish.text
     assert opportunities.outcome(current, service.refresh(world))["state"] == "adopted"
     from maverick.flow.store import FlowRun
+    release = store.load_published_bundle(flow.id)[1]
     run = FlowRun(run_id="value-outcome", flow_id=flow.id, owner=flow.owner,
-        status="completed", created=time.time(), updated=time.time(), definition_revision=flow.revision)
+        status="completed", created=time.time(), updated=time.time(), definition_revision=flow.revision,
+        definition_digest=release["definition_digest"], release_id=release["release_id"], subflow_digests=release["subflow_digests"])
     store.save_run(run)
     assert opportunities.outcome(current, service.refresh(world))["observed_runs"] == 0
     audit.audit_event("control_plane_action", agent="flow", action="intent_value.flow_state", run_id=run.run_id,
-        status="completed", definition_revision=flow.revision, release_id="", performed_work_nodes=1)
+        status="completed", definition_revision=flow.revision, release_id=run.release_id, performed_work_nodes=1)
     outcome = opportunities.outcome(current, service.refresh(world))
     assert outcome["observed_runs"] == 1
     assert opportunities.RECOMMENDATIONS.get(proposal["id"])["forecast"] == proposal["forecast"]
@@ -353,19 +355,314 @@ def save_existing_process(client):
     return store.load_flow("proposal-process")
 
 
-def test_existing_process_adoption_outcomes_remain_readable(context):
+def disable_recommendations(monkeypatch):
+    from maverick.intent_value import settings
+    monkeypatch.setattr(settings, "policy", lambda: {
+        "enabled": True, "recommendations": False, "completion_confirmation": False})
+    monkeypatch.setattr(opportunities, "policy", settings.policy)
+
+
+def test_disabled_recommendations_neither_offer_nor_persist_reuse(context, monkeypatch):
+    from maverick_dashboard import intent_value_api
+    client, world = context
+    seed(world, count=3)
+    save_existing_process(client)
+    disable_recommendations(monkeypatch)
+    monkeypatch.setattr(intent_value_api, "capabilities", lambda request: pytest.fail("Disabled suggestions must not enumerate capabilities"))
+    assert get(client, "/opportunities")["opportunities"] == []
+    assert opportunities.RECOMMENDATIONS.list(limit=10) == []
+    assert get(client)["totals"]["performed_work"] == 3
+
+
+def test_disabled_recommendations_skip_external_discovery_and_recover(context, monkeypatch):
+    from maverick_dashboard import intent_value_discovery
+
+    client, world = context
+    seed(world)
+    calls = []
+    external = {"state": "available", "patterns": [{"id": "external-pattern", "href": "/ekko?device_id=desk"}],
+                "notice": "Consented external observations"}
+
+    def discover(request, device_id):
+        calls.append(device_id)
+        return external
+
+    monkeypatch.setattr(intent_value_discovery, "read", discover)
+    assert get(client, "/opportunities?device_id=desk")["external_observations"] == external
+    before = get(client)["totals"]
+    with monkeypatch.context() as disabled:
+        disable_recommendations(disabled)
+        suggestions = get(client, "/opportunities?device_id=desk")
+        assert not suggestions["recommendations_enabled"]
+        assert suggestions["external_observations"]["patterns"] == []
+        assert "turned off" in suggestions["external_observations"]["notice"]
+        assert calls == ["desk"]
+        answer = client.post("/api/v1/copilot", headers=headers(), json={
+            "message": "How can I save more?", "page": "/work-value"})
+        assert answer.status_code == 200, answer.text
+        assert "turned off" in answer.json()["reply"]
+        assert answer.json()["metrics"]["totals"] == before
+        assert calls == ["desk"]
+    assert get(client, "/opportunities?device_id=desk")["external_observations"] == external
+    assert calls == ["desk", "desk"]
+
+
+def test_external_discovery_cannot_release_patterns_after_policy_revocation(context, monkeypatch):
+    from maverick_dashboard import intent_value_discovery
+
+    client, _world = context
+
+    def revoke_during_discovery(request, device_id):
+        disable_recommendations(monkeypatch)
+        return {"state": "available", "patterns": [{"id": "stale-pattern", "href": "/ekko"}], "notice": "External work"}
+
+    monkeypatch.setattr(intent_value_discovery, "read", revoke_during_discovery)
+    suggestions = get(client, "/opportunities")
+    assert not suggestions["recommendations_enabled"]
+    assert suggestions["opportunities"] == []
+    assert suggestions["external_observations"]["patterns"] == []
+
+
+def test_disabled_recommendations_block_stale_actions_and_chat_handoff(context, monkeypatch):
+    from fastapi import HTTPException
+    from maverick_dashboard import intent_value_handoff
+    from starlette.requests import Request
+
+    client, world = context
+    seed(world, count=3)
+    proposal = get(client, "/opportunities")["opportunities"][0]
+    path = BASE + "/opportunities/" + proposal["id"]
+    built = client.post(path + "/build", headers=headers(), json={"revision": proposal["revision"]})
+    assert built.status_code == 200, built.text
+    prior = opportunities.RECOMMENDATIONS.get(proposal["id"])
+    disable_recommendations(monkeypatch)
+    for suffix, body in (("/use", {}), ("/build", {}), ("/decision", {"decision": "reopen"})):
+        response = client.post(path + suffix, headers=headers(), json={"revision": prior["revision"], **body})
+        assert response.status_code == 403, response.text
+    request = Request({"type": "http", "method": "POST", "headers": [], "path": "/chat/send", "query_string": b""})
+    request.state.principal = VerifiedPrincipal(sub="alice", issuer="https://issuer.test", audience="maverick", claims={"sub": "alice"})
+    with pytest.raises(HTTPException) as error:
+        intent_value_handoff.bind(request, proposal["id"], world, seed(world)[0])
+    assert error.value.status_code == 403
+    assert opportunities.RECOMMENDATIONS.get(proposal["id"]) == prior
+    assert len(store.list_flows()) == 1
+
+
+def publish_process(client, flow):
+    response = client.post("/api/v1/flows/" + flow.id + "/publish", headers=headers(),
+        json={"version": flow.version, "revision": flow.revision})
+    assert response.status_code == 200, response.text
+    return store.load_published_bundle(flow.id)[1]
+
+
+def completed_process_run(flow, release, *, run_id="bound-run", origin=""):
+    run = store.FlowRun(run_id=run_id, flow_id=flow.id, owner=flow.owner,
+        status="completed", created=time.time(), updated=time.time(), cost_dollars=1,
+        definition_revision=flow.revision, definition_digest=release["definition_digest"],
+        release_id=release["release_id"], subflow_digests=release["subflow_digests"], origin=origin)
+    store.save_run(run)
+    audit.audit_event("control_plane_action", agent="flow", action="intent_value.flow_state", run_id=run.run_id,
+        status="completed", definition_revision=flow.revision, release_id=run.release_id, performed_work_nodes=1)
+    return run
+
+
+def test_reused_workflow_cannot_adopt_or_credit_an_older_published_definition(context):
+    client, world = context
+    seed(world, count=3)
+    old = save_existing_process(client)
+    old_release = publish_process(client, old)
+    payload = old.to_dict()
+    payload["name"] = "Updated bid preparation"
+    response = client.post("/api/v1/flows", headers=headers(), json={"flow": payload})
+    assert response.status_code == 201, response.text
+    current_flow = store.load_flow(old.id)
+    assert current_flow.revision == old.revision and current_flow.version > old.version
+    proposal = get(client, "/opportunities")["opportunities"][0]
+    response = client.post(BASE + "/opportunities/" + proposal["id"] + "/use", headers=headers(), json={"revision": proposal["revision"]})
+    assert response.status_code == 200, response.text
+    completed_process_run(old, old_release, run_id="old-release-run")
+    current = get(client, "/opportunities")["opportunities"][0]
+    assert current["outcome"]["state"] == "draft"
+    assert current["outcome"]["observed_runs"] == 0
+    release = publish_process(client, current_flow)
+    completed_process_run(current_flow, release, run_id="selected-release-run")
+    current = get(client, "/opportunities")["opportunities"][0]
+    assert current["outcome"]["observed_runs"] == 1
+    assert current["outcome"]["attempt_count"] == 1
+    assert get(client)["totals"]["performed_work"] == 5
+
+
+def test_policy_revocation_at_selection_effect_leaves_recommendation_unchanged(context, monkeypatch):
+    client, world = context
+    seed(world, count=3)
+    save_existing_process(client)
+    proposal = get(client, "/opportunities")["opportunities"][0]
+    prior = opportunities.RECOMMENDATIONS.get(proposal["id"])
+    original = opportunities.RECOMMENDATIONS.update
+
+    def revoke_before_effect(*args, **kwargs):
+        if kwargs["action"] == "intent_value.capability_selected":
+            disable_recommendations(monkeypatch)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(opportunities.RECOMMENDATIONS, "update", revoke_before_effect)
+    response = client.post(BASE + "/opportunities/" + proposal["id"] + "/use", headers=headers(), json={"revision": proposal["revision"]})
+    assert response.status_code == 403, response.text
+    assert opportunities.RECOMMENDATIONS.get(proposal["id"]) == prior
+
+
+def test_policy_revocation_at_native_draft_save_does_not_create_workflow(context, monkeypatch):
+    client, world = context
+    seed(world, count=3)
+    proposal = get(client, "/opportunities")["opportunities"][0]
+    original = store.save_flow
+
+    def revoke_before_effect(*args, **kwargs):
+        disable_recommendations(monkeypatch)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(store, "save_flow", revoke_before_effect)
+    response = client.post(BASE + "/opportunities/" + proposal["id"] + "/build", headers=headers(), json={"revision": proposal["revision"]})
+    assert response.status_code == 403, response.text
+    assert store.list_flows() == []
+    assert opportunities.RECOMMENDATIONS.get(proposal["id"])["status"] == "building"
+
+
+def test_workflow_edit_at_selection_effect_requires_fresh_review(context, monkeypatch):
     client, world = context
     seed(world, count=3)
     flow = save_existing_process(client)
     proposal = get(client, "/opportunities")["opportunities"][0]
+    prior = opportunities.RECOMMENDATIONS.get(proposal["id"])
+    original = opportunities.RECOMMENDATIONS.update
+
+    def edit_before_effect(*args, **kwargs):
+        if kwargs["action"] == "intent_value.capability_selected":
+            flow.name = "Changed after selection"
+            store.save_flow(flow, expected_version=flow.version, expected_revision=flow.revision)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(opportunities.RECOMMENDATIONS, "update", edit_before_effect)
+    response = client.post(BASE + "/opportunities/" + proposal["id"] + "/use", headers=headers(), json={"revision": proposal["revision"]})
+    assert response.status_code == 409, response.text
+    assert opportunities.RECOMMENDATIONS.get(proposal["id"]) == prior
+
+
+def test_exact_publication_survives_republish_and_rejects_mixed_retry_credit(context):
+    client, world = context
+    seed(world, count=3)
+    flow = save_existing_process(client)
+    selected_release = publish_process(client, flow)
+    proposal = get(client, "/opportunities")["opportunities"][0]
+    response = client.post(BASE + "/opportunities/" + proposal["id"] + "/use", headers=headers(), json={"revision": proposal["revision"]})
+    assert response.status_code == 200, response.text
+    later_release = publish_process(client, flow)
+    assert later_release["release_digest"] == selected_release["release_digest"]
+    assert later_release["release_id"] != selected_release["release_id"]
+    completed_process_run(flow, later_release, run_id="other-publication")
+    completed_process_run(flow, selected_release, run_id="selected-publication")
+    old = completed_process_run(flow, later_release, run_id="mixed-root")
+    completed_process_run(flow, selected_release, run_id="mixed-retry", origin="retry:" + old.run_id)
+    current = get(client, "/opportunities")["opportunities"][0]
+    assert current["outcome"]["observed_runs"] == 1
+    assert current["outcome"]["attempt_count"] == 1
+    assert get(client)["totals"]["performed_work"] == 6  # Three originals and three deduplicated flow work items.
+
+
+def test_edited_draft_adopts_explicit_publication_and_retains_that_binding(context):
+    client, world = context
+    seed(world, count=3)
+    proposal = get(client, "/opportunities")["opportunities"][0]
+    response = client.post(BASE + "/opportunities/" + proposal["id"] + "/build", headers=headers(), json={"revision": proposal["revision"]})
+    assert response.status_code == 200, response.text
+    flow = store.load_flow(response.json()["draft_id"])
+    flow.nodes["prepare"].brief += " Make the result concise."
+    store.save_flow(flow, expected_version=flow.version, expected_revision=flow.revision)
+    adopted = publish_process(client, flow)
+    completed_process_run(flow, adopted, run_id="edited-draft-run")
+    # The first read is only metrics, not the recommendation page. It must
+    # retain its publication before a later publish can replace the pointer.
+    assert get(client)["totals"]["performed_work"] == 4
+    assert opportunities.RECOMMENDATIONS.get(proposal["id"])["workflow_release"]["release_id"] == adopted["release_id"]
+    later = publish_process(client, flow)
+    completed_process_run(flow, later, run_id="later-draft-run")
+    current = get(client, "/opportunities")["opportunities"][0]
+    assert current["outcome"]["observed_runs"] == 1
+    assert current["outcome"]["release_binding"]["release_id"] == adopted["release_id"]
+
+
+def test_exact_partial_failed_attempt_retains_cost_without_completed_work_credit(context):
+    client, world = context
+    seed(world, count=3)
+    flow = save_existing_process(client)
+    release = publish_process(client, flow)
+    proposal = get(client, "/opportunities")["opportunities"][0]
+    response = client.post(BASE + "/opportunities/" + proposal["id"] + "/use", headers=headers(), json={"revision": proposal["revision"]})
+    assert response.status_code == 200, response.text
+    failed = store.FlowRun(run_id="partial-failed", flow_id=flow.id, owner=flow.owner,
+        status="failed", created=time.time(), cost_dollars=3,
+        definition_revision=flow.revision, definition_digest=release["definition_digest"],
+        release_id=release["release_id"], subflow_digests=release["subflow_digests"])
+    store.save_run(failed)
+    audit.audit_event("control_plane_action", agent="flow", action="intent_value.flow_state", run_id=failed.run_id,
+        status="failed", definition_revision=flow.revision, release_id=failed.release_id, performed_work_nodes=1)
+    incomplete = get(client, "/opportunities")["opportunities"][0]
+    assert incomplete["outcome"]["observed_runs"] == 0
+    assert incomplete["outcome"]["attempt_count"] == 1
+    assert incomplete["outcome"]["runs"][0]["performed"] is False
+    completed_process_run(flow, release, run_id="completed-after-failure")
+    current = get(client, "/opportunities")["opportunities"][0]
+    assert current["outcome"]["observed_runs"] == 1
+    assert current["outcome"]["attempt_count"] == 2
+    assert current["outcome"]["after_known_cost_per_run"] == 4
+
+
+def test_legacy_generation_only_selection_preserves_work_without_invented_attribution(context):
+    client, world = context
+    seed(world, count=3)
+    flow = save_existing_process(client)
+    release = publish_process(client, flow)
+    proposal = get(client, "/opportunities")["opportunities"][0]
+    opportunities.RECOMMENDATIONS.update(proposal["id"], lambda row: row.update(
+        adopted_capability={"kind": "process", "id": flow.id, "revision": flow.revision}, adopted_at=time.time()),
+        expected_revision=proposal["revision"], action="test.legacy_selection", actor="test")
+    completed_process_run(flow, release)
+    current = get(client, "/opportunities")["opportunities"][0]
+    assert current["outcome"]["state"] == "source_unavailable"
+    assert current["outcome"]["runs"] == []
+    assert "select the workflow again" in current["outcome"]["message"]
+    assert get(client)["totals"]["performed_work"] == 4
+
+
+def test_prepared_copilot_use_cannot_outlive_recommendation_policy(context, monkeypatch):
+    from maverick_dashboard import product_operations as operations
+    client, world = context
+    seed(world, count=3)
+    proposal = get(client, "/opportunities")["opportunities"][0]
+    prior = opportunities.RECOMMENDATIONS.get(proposal["id"])
+    monkeypatch.setattr(operations, "_gate", lambda request: auth.require_permission(request, "operate"))
+    base, scope = "/api/v1/copilot/product-operations", {"page": "/work-value", "selection": {}}
+    catalog = client.post(base + "/catalog", headers=headers(), json=scope).json()
+    action = next(row for row in catalog["operations"] if row["id"] == "learning.work_value_use")
+    response = client.post(base + "/prepare", headers=headers(), json={**scope, "context": catalog["context"],
+        "operation": action["id"], "revision": action["revision"], "arguments": {"identifier": proposal["id"]}})
+    assert response.status_code == 200, response.text
+    disable_recommendations(monkeypatch)
+    execution = client.post(base + "/execute", headers=headers(), json={"token": response.json()["token"], "confirmed": True})
+    assert execution.status_code in {403, 409}, execution.text
+    assert opportunities.RECOMMENDATIONS.get(proposal["id"]) == prior
+
+
+def test_existing_process_adoption_outcomes_remain_readable(context):
+    client, world = context
+    seed(world, count=3)
+    flow = save_existing_process(client)
+    release = publish_process(client, flow)
+    proposal = get(client, "/opportunities")["opportunities"][0]
     assert proposal["current_evidence"]["capability"]["id"] == flow.id
     response = client.post(BASE + "/opportunities/" + proposal["id"] + "/use", headers=headers(), json={"revision": proposal["revision"]})
     assert response.status_code == 200, response.text
-    run = store.FlowRun(run_id="reused-value-run", flow_id=flow.id, owner=flow.owner,
-        status="completed", created=time.time(), updated=time.time(), cost_dollars=1, definition_revision=flow.revision)
-    store.save_run(run)
-    audit.audit_event("control_plane_action", agent="flow", action="intent_value.flow_state", run_id=run.run_id,
-        status="completed", definition_revision=flow.revision, release_id="", performed_work_nodes=1)
+    completed_process_run(flow, release, run_id="reused-value-run")
     current = get(client, "/opportunities")["opportunities"][0]
     assert current["outcome"]["observed_runs"] == 1
     assert get(client)["totals"]["performed_work"] == 4

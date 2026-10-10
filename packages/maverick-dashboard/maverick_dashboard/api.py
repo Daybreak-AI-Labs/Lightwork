@@ -6978,6 +6978,11 @@ def list_flows_endpoint(request: Request) -> dict:
 @router.post("/flows", status_code=201)
 def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
     """Create or replace a flow definition (validated before it is stored)."""
+    return _save_flow_definition(request, payload)
+
+
+def _save_flow_definition(request, payload, *, effect_guard=None):
+    """Shared native save with an optional caller's current-state effect check."""
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import Flow, store
@@ -7014,6 +7019,7 @@ def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
                 flow,
                 expected_version=(payload.flow.get("version") if prior is not None else 0),
                 expected_revision=(payload.flow.get("revision") if prior is not None else ""),
+                effect_guard=effect_guard,
             )
         if payload.acquisition is not None:
             from .operator_acquisition import save_acquired

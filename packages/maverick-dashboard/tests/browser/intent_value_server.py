@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import tempfile
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
 import server
@@ -44,12 +45,43 @@ def install_execution_fixture(app):
     def execution_state():
         return {"synthetic": True, "provider_calls": len(calls)}
 
+    @app.post("/__browser_fixture/intent-value-ekko", include_in_schema=False)
+    def seed_ekko():
+        """Use the real consented store and discovery path with synthetic events."""
+        from maverick.config import get_ekko_policy
+        from maverick.work_discovery import SessionState, WorkEvent
+        from maverick.work_discovery_store import WorkDiscoveryStore
+
+        store = WorkDiscoveryStore("user:browser-reviewer", "local-device")
+        first_day = datetime.now(timezone.utc).date() - timedelta(days=2)
+        base = datetime.combine(first_day, time(hour=12), tzinfo=timezone.utc).timestamp()
+        policy = get_ekko_policy()
+        store.enroll(policy, at=base - 1)
+        for day in range(2):
+            started = base + day * 86_400
+            session = store.create_session(
+                policy=policy, session_id=f"browser-repeat-{day}", started_at=started,
+            )
+            collector = f"browser-collector-{day}"
+            store.claim_collector(session.session_id, collector, policy=policy, ttl_seconds=30)
+            for sequence, app_name, offset, duration in (
+                (1, "excel", 10, 120), (2, "powerpoint", 140, 480),
+            ):
+                store.append_event(WorkEvent(
+                    event_id=f"browser-event-{day}-{sequence}", session_id=session.session_id,
+                    sequence=sequence, occurred_at=started + offset, app=app_name,
+                    action="switch", object_type="none", duration_seconds=duration,
+                ), policy=policy, collector_id=collector)
+            store.transition_session(session.session_id, SessionState.STOPPED, at=started + 700)
+        return {"synthetic": True, "candidates": len(store.governed_candidate_projection()["candidates"])}
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, required=True)
     args = parser.parse_args()
     server.CONFIG += '\n[value]\nhourly_rate=60.0\n[audit]\nsign=true\n'
+    server.CONFIG += '\n[ekko]\nenable=true\nallowed_apps=["excel", "powerpoint"]\nmin_occurrences=2\nmin_distinct_days=2\n'
     with tempfile.TemporaryDirectory(prefix="lightwork-intent-value-") as temporary:
         directory = Path(temporary)
         server.environment(directory)

@@ -5,8 +5,7 @@ import time
 from urllib.parse import urlencode
 
 from fastapi import HTTPException
-from maverick.flow import store
-from maverick.intent_value import opportunities
+from maverick.intent_value import opportunities, workflow_evidence
 
 from . import auth
 
@@ -23,13 +22,22 @@ def select(request, identifier, revision):
         raise HTTPException(409, "The supporting source is no longer available.")
     capability = candidate["current_evidence"]["capability"]
     if capability and capability["kind"] == "process":
-        capability = {**capability, "revision": store.load_flow(capability["id"]).revision}
+        capability = {**capability, "workflow_binding": workflow_evidence.bind(capability["id"],
+            version=capability["version"], revision=capability["revision"])}
+    def guard():
+        validate(request, identifier)
+        if capability and capability["kind"] == "process":
+            workflow_evidence.current(capability["workflow_binding"])
     def update(current):
-        current.update(adopted_capability=capability, adopted_at=current.get("adopted_at", time.time()))
+        if current.get("adopted_capability"):
+            current.setdefault("adoption_history", []).append({"capability": current["adopted_capability"],
+                "at": current.get("adopted_at"), "outcome": current.get("outcome_feedback")})
+        current.update(adopted_capability=capability, adopted_at=time.time())
         current["decision_history"].append({"at": time.time(), "decision": "use_existing", "actor": auth.caller_principal(request) or "local"})
-    row = opportunities.RECOMMENDATIONS.update(identifier, update, expected_revision=revision,
-        action="intent_value.capability_selected", actor=auth.caller_principal(request) or "local",
-        effect_guard=lambda: recommendation(request, identifier, write=True))
+    with workflow_evidence.selection_guard(capability.get("workflow_binding") if capability else None):
+        row = opportunities.RECOMMENDATIONS.update(identifier, update, expected_revision=revision,
+            action="intent_value.capability_selected", actor=auth.caller_principal(request) or "local",
+            effect_guard=guard)
     href = capability["href"] if capability else "/chat"
     if not capability or capability["kind"] == "specialist":
         href = "/chat?" + urlencode({"title": row["label"], "value_opportunity": row["id"],

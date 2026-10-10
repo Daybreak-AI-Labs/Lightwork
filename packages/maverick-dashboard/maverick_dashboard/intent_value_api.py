@@ -267,6 +267,7 @@ def capabilities(request):
 
             classified = taxonomy.classify(" and ".join(node.brief for node in flow.nodes.values() if node.kind == "agent") or flow.name)
             out.append({"id": flow.id, "kind": "process", "label": flow.name,
+                        "version": flow.version, "revision": flow.revision,
                         "intents": classified["intents"], "href": "/flows/designer/" + quote(flow.id, safe=""),
                         "learning_evidence": [{"node_id": item.node_id, "reason": item.reason,
                             "support": item.n, "applicable": item.applicable,
@@ -284,8 +285,10 @@ def capabilities(request):
 @router.get("/opportunities")
 def opportunities_endpoint(request: Request, include_decided: bool = False, device_id: str = "local-device"):
     def read():
-        rows = records(request)
-        proposals = opportunities.evaluate(rows, owner=auth.goal_owner_filter(request), capabilities=capabilities(request))
+        authority(request)
+        enabled = settings.policy()["recommendations"]
+        rows = records(request) if enabled else []
+        proposals = opportunities.evaluate(rows, owner=auth.goal_owner_filter(request), capabilities=capabilities(request)) if enabled else []
         visible = []
         for proposal in proposals:
             if proposal.get("_audit_pending") or (not include_decided and proposal["status"] in {"declined", "deferred"}):
@@ -295,13 +298,24 @@ def opportunities_endpoint(request: Request, include_decided: bool = False, devi
             proposal["outcome"] = outcome
             visible.append(proposal)
         from .intent_value_discovery import read as discovery
-        return {"opportunities": visible, "external_observations": discovery(request, device_id),
-                "notice": "Potential value and forecasts are separate from executed work. You choose whether to use, draft, defer or keep your current process."}
+        external = discovery(request, device_id) if settings.policy()["recommendations"] else None
+        # Discovery can overlap an administrator changing the policy. Release
+        # neither native nor external suggestions after that revocation.
+        enabled = settings.policy()["recommendations"]
+        if not enabled or external is None:
+            external = {"state": "off", "patterns": [],
+                        "notice": "Reusable-work recommendations are turned off. An administrator can review this setting."}
+        return {"opportunities": visible if enabled else [], "external_observations": external,
+                "recommendations_enabled": enabled,
+                "notice": "Potential value and forecasts are separate from executed work. You choose whether to use, draft, defer or keep your current process." if enabled else
+                    "Reusable-work recommendations are turned off. An administrator can review this setting."}
     return _call(read)
 
 
 def recommendation(request, identifier, *, write=False):
     authority(request, write=write)
+    if write and not settings.policy()["recommendations"]:
+        raise HTTPException(403, "Reusable-work recommendations are turned off. An administrator can review this setting.")
     row = opportunities.RECOMMENDATIONS.get(identifier)
     if row is None or row["owner"] != auth.goal_owner_filter(request):
         raise HTTPException(404, "This recommendation is unavailable.")
