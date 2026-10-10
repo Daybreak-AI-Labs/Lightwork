@@ -221,4 +221,7 @@ def authenticate_smtp(smtp, cfg):
         return smtp.login(str(cfg.get("smtp_user") or ""), str(cfg.get("smtp_password") or ""))
     with credential(cfg) as token:
         payload = "user=" + cfg["smtp_user"] + "\x01auth=Bearer " + token + "\x01\x01"
+        # STARTTLS discards the server's EHLO answer; login() greets again on
+        # its own, auth() does not.
+        smtp.ehlo_or_helo_if_needed()
         return smtp.auth("XOAUTH2", lambda challenge=None: payload if challenge is None else "")

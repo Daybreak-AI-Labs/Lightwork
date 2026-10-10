@@ -325,6 +325,26 @@ def test_preparation_persists_attachments_before_handler_and_keeps_routing_ident
     assert row["delivery"] == "delivered"
 
 
+def test_a_receipt_saved_by_an_earlier_build_still_runs_after_preparation(isolated):
+    # Receipts saved before question_reply_only existed lack the key. Rebuilt
+    # for preparation the message has its default (False); compared with the
+    # missing key (None) it looked changed, so the message never ran.
+    receipt = isolated.admit(_message(), external_id="event1", account="account1")
+    older = {key: value for key, value in receipt["message"].items() if key != "question_reply_only"}
+    receipt = isolated.change(receipt, message=older)
+    ran = []
+    async def prepare(msg):
+        return msg
+    async def handler(msg):
+        ran.append(msg.text)
+        return "answer"
+    async def send(reply):
+        return None
+    row = asyncio.run(Adapter(handler).process_message(_message(), external_id="event1", account="account1",
+                      authorize=lambda: True, send=send, prepare=prepare, receipt=receipt, journal=isolated))
+    assert ran == ["Question"] and row["delivery"] == "delivered"
+
+
 def test_retention_clears_only_confirmed_terminal_payloads_and_preserves_claim(isolated, monkeypatch):
     first = isolated.admit(_message(), external_id="event1", account="account1")
     first = isolated.change(first, execution="completed", delivery="delivered", reply={"text": "secret reply"})
@@ -610,3 +630,27 @@ def test_one_failing_row_does_not_starve_the_rest_of_the_window(isolated):
         journal=delivery.DeliveryJournal()))
     assert any(isinstance(o, RuntimeError) for o in outcomes)
     assert handled == ["fine"] and sent == ["fine"]
+
+
+class _RotatingIds:
+    """A store scan that wraps like the real backends, two ids per page; the
+    first id is deleted after the first page (compaction during the scan)."""
+
+    def __init__(self, ids):
+        self.ids, self.calls = sorted(ids), 0
+
+    def iter_record_ids(self, *, start_after="", limit=100):
+        self.calls += 1
+        if self.calls == 2:
+            self.ids.pop(0)
+        later = [i for i in self.ids if i > start_after]
+        ordered = later + [i for i in self.ids if i <= start_after]
+        return [(i, i) for i in ordered[:min(limit, 2)]]
+
+
+def test_capacity_count_stops_at_the_wrap_even_when_the_first_record_is_gone(isolated, monkeypatch):
+    # Wrap was detected only by meeting the first record again; compaction
+    # removing it mid-scan made the count run past the limit and report full.
+    monkeypatch.setattr(isolated, "store", _RotatingIds(["a", "b", "c", "d", "e"]))
+    status = isolated.capacity_status()
+    assert status["used"] == 5 and status["count_exact"] is True and status["full"] is False

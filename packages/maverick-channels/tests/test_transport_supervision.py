@@ -390,6 +390,36 @@ def test_definite_delivery_retry_preserves_conversation_order(monkeypatch):
     asyncio.run(run())
 
 
+def test_a_reply_the_source_check_holds_back_does_not_block_the_next_message(monkeypatch):
+    # A reply whose task or sources the person can no longer use is refused
+    # before sending and stays retryable (the check may pass again). It used to
+    # block the conversation too, so none of the person's later messages ran.
+    from maverick_channels import delivery
+
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)
+    def source_check(row):
+        if row["message"]["text"] == "0":
+            raise PermissionError("The saved reply's task ownership changed")
+    monkeypatch.setattr(delivery, "_require_reply_source", source_check)
+    async def run():
+        order, sends = [], []
+        async def handler(message):
+            order.append(message.text)
+            return message.text
+        async def send(message, reply, route):
+            sends.append(reply.text)
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True, send=send).start()
+        for index in range(2):
+            await worker.submit(IncomingMessage(user_id="person", sender_id="person", text=str(index),
+                                channel=Adapter.name, message_id=str(index)), external_id=str(index))
+        await until(lambda: sends == ["1"])
+        await worker.close()
+        assert order == ["0", "1"]
+    asyncio.run(run())
+    held = [row for row in DeliveryJournal().store.list(limit=5) if row["message"]["text"] == "0"]
+    assert held[0]["delivery"] == "retryable" and held[0]["chunks"]["reply"]["withheld"] is True
+
+
 def test_shutdown_joins_cooperative_read_only_scan(monkeypatch):
     import threading
 
@@ -407,3 +437,28 @@ def test_shutdown_joins_cooperative_read_only_scan(monkeypatch):
         await worker.close()
         assert worker.task.done() and worker._scan_task.done()
     asyncio.run(run())
+
+
+def test_the_oldest_window_scan_stops_at_the_wrap_when_the_first_record_is_gone(monkeypatch):
+    # Same wrap rule as the capacity count: one pass, no duplicates, even when
+    # compaction deletes the first record while the scan is running.
+    from types import SimpleNamespace
+
+    from maverick_channels.delivery import _digest
+
+    ids = ["a", "b", "c", "d", "e"]
+    rows = {i: {"id": i, "channel": Adapter.name, "account_sha256": _digest("account"),
+                "execution": "received", "delivery": "not_ready", "created_at": n} for n, i in enumerate(ids)}
+    class Store:
+        calls = 0
+        def iter_record_ids(self, *, start_after="", limit=100):
+            Store.calls += 1
+            if Store.calls == 2:
+                ids.pop(0)
+            later = [i for i in ids if i > start_after]
+            ordered = later + [i for i in ids if i <= start_after]
+            return [(i, i) for i in ordered[:min(limit, 2)]]
+    worker = TransportWorker(Adapter(AsyncMock()), account="account", authorize=lambda msg: True, send=AsyncMock())
+    worker.journal = SimpleNamespace(store=Store(), get=lambda record_id: rows.get(record_id))
+    selected, more = worker._oldest_window()
+    assert selected == ["a", "b", "c", "d", "e"] and more is False

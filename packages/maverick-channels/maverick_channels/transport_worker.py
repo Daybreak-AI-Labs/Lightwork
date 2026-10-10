@@ -8,7 +8,7 @@ import time
 from collections import deque
 
 from .base import IncomingMessage
-from .delivery import MAX_CONFIGURED_RECORDS, DeliveryJournal, _digest
+from .delivery import MAX_CONFIGURED_RECORDS, DeliveryJournal, _digest, reply_withheld
 
 MAX_PENDING = 32
 RETRY_DELAY = 30.0
@@ -75,7 +75,7 @@ class TransportWorker:
         selected = []
         count = 0
         now = time.monotonic()
-        first, cursor, scanned = None, "", 0
+        cursor, scanned = "", 0
         while scanned <= MAX_CONFIGURED_RECORDS:
             # Shared storage returns at most 10,000 ids per scan. Keep walking
             # so raising the intake cap cannot hide older pending messages.
@@ -83,10 +83,10 @@ class TransportWorker:
             if not page:
                 break
             for position, record_id in page:
-                if position == first:
+                # The scan wraps back to the start: a position at or before the
+                # cursor ends the pass, even if compaction removed the first one.
+                if cursor and position <= cursor:
                     return [record_id for _, record_id in selected], count > MAX_PENDING
-                if first is None:
-                    first = position
                 cursor = position
                 scanned += 1
                 if self._stop_scan.is_set():
@@ -153,9 +153,15 @@ class TransportWorker:
             return await self.send(message, reply, row["route"])
         result = await self.channel.process_message(message, external_id=row["external_id"], account=self.account,
             authorize=lambda: self.authorize(message), send=send_saved, receipt=row, journal=self.journal)
-        if result["delivery"] == "retryable":
+        if result["delivery"] == "retryable" and not reply_withheld(result):
             self._retry_after[record_id] = time.monotonic() + RETRY_DELAY
             self._blocked_conversations[conversation] = record_id
+        elif result["delivery"] == "retryable":
+            # Held back by the source check (task or access changed): retried,
+            # but the person's newer messages do not wait behind it.
+            self._retry_after[record_id] = time.monotonic() + RETRY_DELAY
+            if self._blocked_conversations.get(conversation) == record_id:
+                self._blocked_conversations.pop(conversation)
         else:
             self._retry_after.pop(record_id, None)
             if self._blocked_conversations.get(conversation) == record_id:
