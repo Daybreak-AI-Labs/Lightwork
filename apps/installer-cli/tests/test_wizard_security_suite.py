@@ -1147,6 +1147,7 @@ def test_vendor_resume_preserves_saved_owner_decision(tmp_path, monkeypatch, own
         "workspace",
         "finance",
         "value",
+        "intent_value",
         "assessments",
         "advanced",
     )

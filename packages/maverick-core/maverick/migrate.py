@@ -81,7 +81,7 @@ KNOWN_SECTIONS = frozenset({
     "email", "embedded", "encryption", "energy", "enterprise", "entity_graph",
     "erp", "event_triggers",
     "experience", "features", "federation", "finance", "finance_operations", "flows", "github",
-    "governance", "governed_connectors", "governed_records", "grpc", "grpc_dispatch", "image_edit", "intake",
+    "governance", "governed_connectors", "governed_records", "grpc", "grpc_dispatch", "image_edit", "intake", "intent_value",
     "kms", "knowledge",
     "langchain", "latency", "license", "limits", "local_first", "local_runtime",
     "logging", "lsp", "mcp_registries", "mcp_servers", "mcp_sidecar", "memory",
