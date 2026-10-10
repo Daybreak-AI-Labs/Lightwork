@@ -180,8 +180,16 @@ test('retaining all work manually never turns approval into executed labor value
 test('turning off recommendations blocks a stale action and preserves readable work value',async({page,request,context,baseURL},testInfo)=>{
   await context.route('**/*',route=>new URL(route.request().url()).origin===new URL(baseURL).origin?route.continue():route.abort('blockedbyclient'));
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  const seeded=await request.post('/__browser_fixture/intent-value-ekko');
+  expect(seeded.ok(),await seeded.text()).toBeTruthy();
+  expect((await seeded.json()).candidates).toBeGreaterThan(0);
   await page.goto('/work-value');
   await expect(page.locator('#iv-report')).toBeVisible();
+  const external=page.locator('#iv-external');
+  const nativeDraft=external.getByRole('link',{name:'Inspect evidence and native draft options in Ekko'});
+  await expect(nativeDraft).toBeVisible();
+  await expect(nativeDraft).toHaveAttribute('href','/ekko?device_id=local-device');
+  await expect(external).toContainText('2 observations across 2 days');
   await page.locator('.iv-opportunity').first().getByRole('button',{name:'Review opportunity'}).click();
   const dialog=page.locator('#iv-detail');
   const staleAction=dialog.getByRole('button',{name:/^(Use existing|Start this work in Chat)/});
@@ -211,9 +219,12 @@ test('turning off recommendations blocks a stale action and preserves readable w
     await expect(page.locator('#iv-report')).toBeVisible();
     await expect(page.locator('#iv-opportunities')).toContainText('recommendations are turned off');
     await expect(page.locator('.iv-opportunity')).toHaveCount(0);
+    await expect(external).toContainText('recommendations are turned off');
+    await expect(nativeDraft).toHaveCount(0);
     const disabled=await (await request.get(api+'/opportunities?include_decided=true')).json();
     expect(disabled.recommendations_enabled).toBe(false);
     expect(disabled.opportunities).toEqual([]);
+    expect(disabled.external_observations.patterns).toEqual([]);
     expect((await (await request.get(api)).json()).totals).toEqual(before.totals);
     const answer=await request.post('/api/v1/copilot',{data:{message:'How can I save more?',page:'/work-value'}});
     expect(answer.ok(),await answer.text()).toBeTruthy();
@@ -233,5 +244,7 @@ test('turning off recommendations blocks a stale action and preserves readable w
   }
   await page.getByRole('button',{name:'Update report'}).click();
   await expect(page.locator('.iv-opportunity').first()).toBeVisible();
+  await expect(nativeDraft).toBeVisible();
+  await expect(external).toContainText('2 observations across 2 days');
   expect(errors).toEqual([]);
 });

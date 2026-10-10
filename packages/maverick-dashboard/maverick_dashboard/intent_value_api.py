@@ -298,8 +298,14 @@ def opportunities_endpoint(request: Request, include_decided: bool = False, devi
             proposal["outcome"] = outcome
             visible.append(proposal)
         from .intent_value_discovery import read as discovery
+        external = discovery(request, device_id) if settings.policy()["recommendations"] else None
+        # Discovery can overlap an administrator changing the policy. Release
+        # neither native nor external suggestions after that revocation.
         enabled = settings.policy()["recommendations"]
-        return {"opportunities": visible if enabled else [], "external_observations": discovery(request, device_id),
+        if not enabled or external is None:
+            external = {"state": "off", "patterns": [],
+                        "notice": "Reusable-work recommendations are turned off. An administrator can review this setting."}
+        return {"opportunities": visible if enabled else [], "external_observations": external,
                 "recommendations_enabled": enabled,
                 "notice": "Potential value and forecasts are separate from executed work. You choose whether to use, draft, defer or keep your current process." if enabled else
                     "Reusable-work recommendations are turned off. An administrator can review this setting."}

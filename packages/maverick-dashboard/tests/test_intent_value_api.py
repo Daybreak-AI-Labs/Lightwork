@@ -374,6 +374,55 @@ def test_disabled_recommendations_neither_offer_nor_persist_reuse(context, monke
     assert get(client)["totals"]["performed_work"] == 3
 
 
+def test_disabled_recommendations_skip_external_discovery_and_recover(context, monkeypatch):
+    from maverick_dashboard import intent_value_discovery
+
+    client, world = context
+    seed(world)
+    calls = []
+    external = {"state": "available", "patterns": [{"id": "external-pattern", "href": "/ekko?device_id=desk"}],
+                "notice": "Consented external observations"}
+
+    def discover(request, device_id):
+        calls.append(device_id)
+        return external
+
+    monkeypatch.setattr(intent_value_discovery, "read", discover)
+    assert get(client, "/opportunities?device_id=desk")["external_observations"] == external
+    before = get(client)["totals"]
+    with monkeypatch.context() as disabled:
+        disable_recommendations(disabled)
+        suggestions = get(client, "/opportunities?device_id=desk")
+        assert not suggestions["recommendations_enabled"]
+        assert suggestions["external_observations"]["patterns"] == []
+        assert "turned off" in suggestions["external_observations"]["notice"]
+        assert calls == ["desk"]
+        answer = client.post("/api/v1/copilot", headers=headers(), json={
+            "message": "How can I save more?", "page": "/work-value"})
+        assert answer.status_code == 200, answer.text
+        assert "turned off" in answer.json()["reply"]
+        assert answer.json()["metrics"]["totals"] == before
+        assert calls == ["desk"]
+    assert get(client, "/opportunities?device_id=desk")["external_observations"] == external
+    assert calls == ["desk", "desk"]
+
+
+def test_external_discovery_cannot_release_patterns_after_policy_revocation(context, monkeypatch):
+    from maverick_dashboard import intent_value_discovery
+
+    client, _world = context
+
+    def revoke_during_discovery(request, device_id):
+        disable_recommendations(monkeypatch)
+        return {"state": "available", "patterns": [{"id": "stale-pattern", "href": "/ekko"}], "notice": "External work"}
+
+    monkeypatch.setattr(intent_value_discovery, "read", revoke_during_discovery)
+    suggestions = get(client, "/opportunities")
+    assert not suggestions["recommendations_enabled"]
+    assert suggestions["opportunities"] == []
+    assert suggestions["external_observations"]["patterns"] == []
+
+
 def test_disabled_recommendations_block_stale_actions_and_chat_handoff(context, monkeypatch):
     from fastapi import HTTPException
     from maverick_dashboard import intent_value_handoff
