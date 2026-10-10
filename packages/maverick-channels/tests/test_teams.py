@@ -645,6 +645,22 @@ def test_a_multiline_reply_keeps_its_lines_and_paragraphs_on_the_card():
     assert blocks[3].get("spacing") is None
 
 
+def test_a_reply_of_many_short_lines_is_sent_as_text_when_its_card_would_be_too_large(rsa_key):
+    import asyncio
+    import json
+
+    from maverick_channels.teams_cards import MAX_MESSAGE_BYTES
+    ch = _channel(rsa_key)
+    asyncio.run(ch.send("a:conv1", "Summary\n- a\n- b"))
+    short = "\n".join("x" for _ in range(2000))           # within the 4000-character reply limit
+    asyncio.run(ch.send("a:conv1", short))
+    sent = [c["json"] for c in ch.transport.calls if c["url"].endswith("/activities")]
+    assert sent[0]["attachments"][0]["content"]["body"][1]["text"] == "Summary"
+    assert "attachments" not in sent[1] and sent[1]["text"] == short
+    assert sent[1]["textFormat"] == "markdown"
+    assert all(len(json.dumps(body).encode("utf-16-le")) <= MAX_MESSAGE_BYTES for body in sent)
+
+
 def test_only_a_link_code_is_a_link_attempt_and_never_under_company_sign_in(rsa_key, monkeypatch):
     import asyncio
 

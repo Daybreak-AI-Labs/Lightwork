@@ -640,7 +640,25 @@ def test_an_alert_that_cannot_be_recorded_does_not_stop_the_others(world, monkey
     assert summary["unconfirmed"] == 1
     monkeypatch.setattr(da, "_record_sent", real)
     again, sent = _run(world, [first, second], sent=sent)
-    assert again["backing_off"] == 1 and len(sent) == 2        # waits before the unrecorded one is repeated
+    # The unrecorded alert went out: the next cycle writes its ledger row and
+    # never sends it again (an uncertain send is never replayed).
+    assert len(sent) == 2
+    assert [a["record_id"] for a in again["alerts"]] == ["R1"] and again["already_sent"] == 2
+    third, sent = _run(world, [first, second], sent=sent)
+    assert len(sent) == 2 and third["already_sent"] == 2
+
+
+def test_an_alert_whose_ledger_stays_unwritable_is_never_resent(world, monkeypatch):
+    def locked(*_args, **_kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(da, "_record_sent", locked)
+    alert = _deadline(record_id="L1", due_in=DAY)
+    summary, sent = _run(world, [alert])
+    assert len(sent) == 1 and summary["unconfirmed"] == 1
+    for hours in (1, 2, 6, 12):  # past every retry back-off, still the same "due soon" alert
+        later, sent = _run(world, [alert], sent=sent, now=NOW + hours * 3600)
+        assert len(sent) == 1 and later["unconfirmed"] == 1
 
 
 def test_a_lock_that_cannot_be_taken_does_not_stop_alerts(world, monkeypatch):

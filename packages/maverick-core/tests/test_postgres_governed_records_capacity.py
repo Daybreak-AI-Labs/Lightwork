@@ -315,3 +315,46 @@ def test_archiving_moves_a_record_out_of_the_capped_namespace_unchanged(
     finally:
         for name in (namespace, _archive_namespace(namespace)):
             _delete_test_rows(governed_record_dsn, tenant=tenant, namespace=name)
+
+
+def test_a_full_namespace_archives_only_settled_work_and_erasure_still_reaches_it(
+    governed_record_dsn,
+    shared_encryption_authority,
+    monkeypatch,
+):
+    """Through the store on Postgres: open work is never archived, a settled
+    record is, the archive is listable, and deleting by id still reaches it."""
+    del shared_encryption_authority
+    import maverick.audit as audit
+    from maverick.governed_records import GovernedRecordStore, _archive_namespace
+
+    monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "postgres")
+    monkeypatch.setenv("MAVERICK_PG_DSN", governed_record_dsn)
+    monkeypatch.setattr(audit, "record", lambda *_args, **_row: True)
+    suffix = uuid.uuid4().hex
+    tenant = f"live-pg-settled-{suffix}"
+    namespace = f"live_pg_settled_{suffix}"
+    store = GovernedRecordStore(namespace, "LPS", "test_record")
+    try:
+        with tenant_scope(tenant=tenant):
+            assert store._backend().kind == "postgres"
+            first = store.create({"id": "LPS-first", "status": "requested"}, action="create",
+                                 actor="operator", max_records=1)
+            with pytest.raises(GovernedRecordCapacityError):
+                store.create({"id": "LPS-second", "status": "done"}, action="create",
+                             actor="operator", max_records=1)
+            assert store.list_archived() == []
+            done = store.update("LPS-first", lambda row: row.update(status="done"),
+                                expected_revision=first["revision"], action="close", actor="operator")
+            store.create({"id": "LPS-second", "status": "done"}, action="create",
+                         actor="operator", max_records=1)
+            assert [row["id"] for row in store.list()] == ["LPS-second"]
+            archived = store.list_archived(limit=10)
+            assert [row["id"] for row in archived] == ["LPS-first"]
+            assert archived[0]["revision"] == done["revision"] + 1
+            assert store.delete("LPS-first", expected_revision=archived[0]["revision"]) is True
+            assert store.get("LPS-first") is None and store.list_archived() == []
+            assert [row["id"] for row in store.list()] == ["LPS-second"]
+    finally:
+        for name in (namespace, _archive_namespace(namespace)):
+            _delete_test_rows(governed_record_dsn, tenant=tenant, namespace=name)

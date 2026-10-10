@@ -455,6 +455,19 @@ def test_an_action_label_with_a_non_ascii_character_can_still_be_approved(tmp_pa
     assert result["status"] == "approved"
 
 
+def test_a_queued_action_holding_a_lone_surrogate_is_a_stale_card_not_a_crash():
+    from types import SimpleNamespace
+
+    from maverick.approval_cards import encode_approval_detail
+    from maverick.channel_approvals import ChannelApprovalRefused, require_current_card
+
+    card = _card()
+    approval = SimpleNamespace(detail=encode_approval_detail(card), action="browser.\ud800")
+    with pytest.raises(ChannelApprovalRefused) as exc:
+        require_current_card(approval, binding=card["binding_sha256"])
+    assert exc.value.reason == "stale_card"
+
+
 def test_an_undo_the_audit_log_refuses_is_a_refusal_not_a_server_error(tmp_path, recorded, monkeypatch):
     import maverick.audit as audit
     from maverick.channel_approvals import (

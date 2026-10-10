@@ -700,15 +700,18 @@ class TeamsChannel(Channel):
         Native saved replies carry explicit file-availability wording when this
         connector cannot upload files. Text uses Teams' markdown rendering.
         """
-        from .teams_cards import attachment, result_card
+        from .teams_cards import attachment, fits_message, result_card
 
         base = self._service_url(user_id, service_url)
         receipt = None
         for index, chunk in enumerate(split_for_discord(text, limit=TEXT_LIMIT)):
+            payload = {"text": chunk, "textFormat": "markdown"}
             if index == 0 and len(text) <= TEXT_LIMIT and "\n" in text.strip():
-                payload = {"attachments": [attachment(result_card(chunk))], "text": ""}
-            else:
-                payload = {"text": chunk, "textFormat": "markdown"}
+                # The card keeps every line, one block each; many short lines
+                # can outgrow what Teams accepts, so such a reply goes as text.
+                card = {"attachments": [attachment(result_card(chunk))], "text": ""}
+                if fits_message(card):
+                    payload = card
 
             async def post(payload=payload):
                 return await self.connector.send_activity(base, user_id, payload, reply_to=reply_to)

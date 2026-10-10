@@ -582,6 +582,24 @@ class _RetryBook:
         if self.entries.pop(self.key(alert), None) is not None:
             self.dirty = True
 
+    def sent_unrecorded(self, alert: Alert, *, sent_at: float, backends: int, mode: str,
+                        unconfirmed: bool) -> None:
+        """The alert went out (or may have) but its ledger row could not be
+        written: remember that, so a later cycle records it instead of sending
+        it again."""
+        self.entries[self.key(alert)] = {
+            "unrecorded": {"sent_at": float(sent_at), "backends": int(backends),
+                           "mode": str(mode), "unconfirmed": bool(unconfirmed)},
+            "setup": self.setup, "at": float(sent_at)}
+        self.dirty = True
+
+    def unrecorded(self, alert: Alert) -> dict[str, Any] | None:
+        value = (self.entries.get(self.key(alert)) or {}).get("unrecorded")
+        if (not isinstance(value, dict) or not isinstance(value.get("sent_at"), (int, float))
+                or not isinstance(value.get("backends"), int) or value.get("mode") not in {"immediate", "digest"}):
+            return None
+        return value
+
     def save(self, now: float) -> None:
         if not self.dirty or self.path is None:
             return
@@ -800,7 +818,10 @@ def _run_cycle(
     try:
         due = []
         for alert in pending:
-            if retries.waiting(alert, current):
+            held = retries.unrecorded(alert)
+            if held is not None:
+                _record_unrecorded(world, alert, held, current, localtime, summary, retries)
+            elif retries.waiting(alert, current):
                 summary["backing_off"] += 1
             else:
                 due.append(alert)
@@ -839,8 +860,15 @@ def _settle(world, alert: Alert, message: str, outcome: Delivery | int, current:
                     alert.deadline.record_type, alert.state)
         return
     retries.clear(alert)
-    summary["alerts"].append(_record_sent(world, alert, message, sent_at=current, backends=outcome.accepted,
-                                          mode=mode, unconfirmed=outcome.status == "unconfirmed"))
+    unconfirmed = outcome.status == "unconfirmed"
+    try:
+        row = _record_sent(world, alert, message, sent_at=current, backends=outcome.accepted,
+                           mode=mode, unconfirmed=unconfirmed)
+    except Exception:
+        retries.sent_unrecorded(alert, sent_at=current, backends=outcome.accepted, mode=mode,
+                                unconfirmed=unconfirmed)
+        raise
+    summary["alerts"].append(row)
     summary["sent" if outcome.status == "accepted" else "unconfirmed"] += 1
 
 
@@ -848,15 +876,35 @@ def _settle_safely(world, alert: Alert, message: str, outcome: Delivery | int, c
                    summary: dict[str, Any], retries: _RetryBook) -> None:
     """Record one sent alert without letting a failure to do so stop the cycle.
 
-    The alert may already have gone out, so it is counted as unconfirmed and
-    waits before it is tried again; the rest of the cycle carries on."""
+    The alert may already have gone out, so it is counted as unconfirmed and a
+    later cycle writes its ledger row without sending it again (an uncertain
+    send is never replayed); the rest of the cycle carries on."""
     try:
         _settle(world, alert, message, outcome, current, mode, summary, retries)
     except Exception as exc:  # noqa: BLE001 -- e.g. the ledger database is locked
         log.warning("deadline_alerts: could not record the %s %s alert: %s",
                     alert.deadline.record_type, alert.state, type(exc).__name__)
-        retries.failed(alert, current)
+        if retries.unrecorded(alert) is None:
+            retries.failed(alert, current)
         summary["unconfirmed"] += 1
+
+
+def _record_unrecorded(world, alert: Alert, held: dict[str, Any], current: float,
+                       localtime: Callable[[float], time.struct_time], summary: dict[str, Any],
+                       retries: _RetryBook) -> None:
+    """Write the ledger row of an alert sent in an earlier cycle; never resend it."""
+    try:
+        row = _record_sent(world, alert, message_for(alert, current, localtime=localtime)[1],
+                           sent_at=float(held["sent_at"]), backends=int(held["backends"]),
+                           mode=str(held["mode"]), unconfirmed=bool(held.get("unconfirmed")))
+    except Exception as exc:  # noqa: BLE001 -- still unrecorded; try again next cycle
+        log.warning("deadline_alerts: could not record the earlier %s %s alert: %s",
+                    alert.deadline.record_type, alert.state, type(exc).__name__)
+        summary["unconfirmed"] += 1
+        return
+    retries.clear(alert)
+    summary["alerts"].append(row)
+    summary["already_sent"] += 1
 
 
 # Backends refuse an over-long message (Pushover 1024 characters, Discord 2000),

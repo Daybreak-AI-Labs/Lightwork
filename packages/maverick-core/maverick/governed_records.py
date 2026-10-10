@@ -155,6 +155,31 @@ def _archive_namespace(namespace: str) -> str:
     return namespace[:95] + "-" + hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:24] + "-archive"
 
 
+# Statuses that end a record's workflow in every store that uses them. Only
+# such records, and records with no status or state at all (receipts, logs),
+# are archived when a namespace is full: an archived record leaves the store's
+# lists, so archiving open work would hide it. A record in any other status,
+# including an unknown one, stays; a namespace full of open work refuses new
+# records instead. Deliberately absent because a store uses them for open work:
+# "sent" (a questionnaire awaiting its answer), "approved", "accepted", and
+# "failed" / "dead_letter" (may still need someone's attention).
+_SETTLED_STATUSES = frozenset({
+    "archived", "canceled", "cancelled", "closed", "complete", "completed",
+    "confirmed", "declined", "delivered", "denied", "done", "erased", "expired",
+    "finished", "invalidated", "passed", "purged", "refused", "rejected",
+    "replaced", "replayed", "request_denied", "resolved", "retired", "revoked",
+    "rolled_back", "settled", "succeeded", "superseded", "waived", "withdrawn",
+})
+
+
+def _settled(record: dict[str, Any]) -> bool:
+    for key in ("status", "state"):
+        value = record.get(key)
+        if isinstance(value, str) and value.strip().lower() not in _SETTLED_STATUSES:
+            return False
+    return True
+
+
 class GovernedRecordBackendError(RuntimeError):
     """A governed-record backend cannot preserve its persistence contract."""
 
@@ -389,6 +414,11 @@ class LocalGovernedRecordBackend:
 
     def load_archived(self, record_id: str) -> dict[str, Any] | None:
         return self._archive.load(record_id)
+
+    def list_archived(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        if limit is None:
+            return self._archive.list()
+        return self._archive.list_bounded(limit=_list_limit(limit))
 
     def archive(self, record_id: str, *, expected_revision: int) -> bool:
         """Move one delivered record, unchanged, out of the capped namespace."""
@@ -1383,6 +1413,12 @@ class PostgresGovernedRecordBackend:
                 )
 
     def list(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        return self._list_namespace(self.namespace, limit)
+
+    def list_archived(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        return self._list_namespace(_archive_namespace(self.namespace), limit)
+
+    def _list_namespace(self, namespace: str, limit: int | None) -> list[dict[str, Any]]:
         tenant = self._tenant_key()
         bounded = None if limit is None else _list_limit(limit)
         with self._operation("list"):
@@ -1392,7 +1428,7 @@ class PostgresGovernedRecordBackend:
                     "FROM governed_records WHERE tenant_id=%s AND namespace=%s "
                     "ORDER BY created_at DESC, record_id"
                 )
-                parameters: tuple[object, ...] = (tenant, self.namespace)
+                parameters: tuple[object, ...] = (tenant, namespace)
                 if bounded is not None:
                     statement += " LIMIT %s"
                     parameters += (bounded,)
@@ -2257,11 +2293,13 @@ class GovernedRecordStore:
     def _archive_oldest(self, backend, maximum: int) -> int:
         """Make room in a full namespace by archiving its oldest delivered records.
 
-        Archived records are kept unchanged and stay readable and updatable by
-        id; they only stop counting against the cap. Each move is first an
+        Only settled records move (see ``_SETTLED_STATUSES``). Archived records
+        are kept unchanged and stay readable, updatable and deletable by id;
+        they only stop counting against the cap. Each move is first an
         audited update, so a record whose activity record is not delivered
         stays where it is. Returns how many records moved."""
-        rows = [row for row in backend.list(limit=maximum) if not row.get("_audit_pending")]
+        rows = [row for row in backend.list(limit=maximum)
+                if not row.get("_audit_pending") and _settled(row)]
         rows.sort(key=lambda row: (float(row.get("updated_at") or 0), str(row.get("id"))))
         moved = 0
         for row in rows[:max(1, maximum // 100)]:
@@ -2353,6 +2391,17 @@ class GovernedRecordStore:
         backend = self._backend()
         return backend.list() if limit is None else backend.list(limit=limit)
 
+    def list_archived(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        """Records this namespace archived when it was full (not in :meth:`list`).
+
+        Callers that must see every record (personal-data erasure) read these
+        too; ordinary views list only the active namespace."""
+        backend = self._backend()
+        listed = getattr(backend, "list_archived", None)
+        if self.lookup_spec is not None or not callable(listed):
+            return []
+        return listed() if limit is None else listed(limit=limit)
+
     def delete(self, record_id: str, *, expected_revision: int) -> bool:
         """Delete a retention-expired record only after its audit outbox cleared.
 
@@ -2373,7 +2422,13 @@ class GovernedRecordStore:
             raise GovernedRecordBackendError(
                 "governed-record backend does not support retained deletion"
             )
-        return bool(delete(str(record_id or ""), expected_revision=expected_revision))
+        record_id = str(record_id or "")
+        if (self.lookup_spec is None and callable(getattr(backend, "restore", None))
+                and backend.load(record_id) is None and backend.load_archived(record_id) is not None):
+            # An archived record is still deletable by id (personal-data
+            # erasure): move it back unchanged, then delete it as usual.
+            backend.restore(record_id)
+        return bool(delete(record_id, expected_revision=expected_revision))
 
     def count(self, *, maximum: int = 100_000) -> int:
         """Records in the namespace, WITHOUT reading any record bodies.

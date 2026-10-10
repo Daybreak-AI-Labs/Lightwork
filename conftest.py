@@ -144,6 +144,15 @@ def _isolate_dynamic_maverick_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_public_form_lookup_limit():
+    """Each test starts with a fresh per-address public form lookup window."""
+    module = sys.modules.get("maverick_dashboard.app")
+    if module is not None:
+        module._FORM_LOOKUP_LIMIT = None
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_workspace_invite_limit():
     """Each test starts with a fresh per-administrator invitation window."""
     module = sys.modules.get("maverick_dashboard.invites")

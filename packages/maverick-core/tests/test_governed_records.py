@@ -439,7 +439,7 @@ def test_local_full_namespace_archives_its_oldest_record_instead_of_refusing(mon
     events: list[dict] = []
     monkeypatch.setattr(audit, "record", lambda *_args, **row: events.append(row) or True)
     store = GovernedRecordStore("test_capacity", "TCP", "test_record")
-    first = store.create({"id": "TCP-first", "status": "open"}, action="create",
+    first = store.create({"id": "TCP-first", "status": "closed"}, action="create",
                          actor="operator", max_records=1)
 
     second = store.create({"id": "TCP-second", "status": "open"}, action="create",
@@ -447,18 +447,57 @@ def test_local_full_namespace_archives_its_oldest_record_instead_of_refusing(mon
 
     # The namespace stays at its cap; the oldest record is kept, not deleted.
     assert [row["id"] for row in store.list()] == [second["id"]]
+    assert [row["id"] for row in store.list_archived()] == [first["id"]]
     assert store.count() == 1
     kept = store.get(first["id"])
-    assert kept["status"] == "open" and kept["revision"] == first["revision"] + 1
+    assert kept["status"] == "closed" and kept["revision"] == first["revision"] + 1
     assert any(row.get("action") == "governed_record_archived" for row in events)
     # Archived records stay updatable by id with ordinary compare-and-swap.
-    changed = store.update(first["id"], lambda row: row.update(status="closed"),
-                           expected_revision=kept["revision"], action="close", actor="operator")
-    assert changed["status"] == "closed" and changed["revision"] == kept["revision"] + 1
+    changed = store.update(first["id"], lambda row: row.update(note="reopened"),
+                           expected_revision=kept["revision"], action="note", actor="operator")
+    assert changed["note"] == "reopened" and changed["revision"] == kept["revision"] + 1
     # Its id is still taken: creating it again conflicts exactly as before.
     with pytest.raises(RecordConflict):
         store.create({"id": "TCP-first", "status": "open"}, action="create",
                       actor="operator", max_records=10)
+
+
+def test_full_namespace_never_archives_open_work(monkeypatch):
+    # An archived record leaves the store's lists. A request still being worked
+    # on (or in a status the store does not declare final) must stay visible,
+    # so a namespace full of open work refuses rather than hiding the oldest.
+    import maverick.audit as audit
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(audit, "record", lambda *_args, **_row: True)
+    for n, record in enumerate(({"status": "requested"}, {"state": "processing"},
+                                {"status": "sent"}, {"status": "some-new-status"})):
+        store = GovernedRecordStore(f"test_open_{n}", "TOW", "test_record")
+        store.create({"id": "TOW-first", **record}, action="create", actor="operator", max_records=1)
+        with pytest.raises(GovernedRecordCapacityError, match="capacity has been reached"):
+            store.create({"id": "TOW-second", "status": "closed"}, action="create",
+                         actor="operator", max_records=1)
+        assert [row["id"] for row in store.list()] == ["TOW-first"]
+        assert store.list_archived() == []
+
+
+def test_an_archived_record_can_still_be_deleted_by_id(monkeypatch):
+    # Personal-data erasure must reach archived records: delete() by id finds it.
+    import maverick.audit as audit
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(audit, "record", lambda *_args, **_row: True)
+    store = GovernedRecordStore("test_archived_delete", "TAD", "test_record")
+    store.create({"id": "TAD-first", "status": "done", "owner": "ada"}, action="create",
+                 actor="operator", max_records=1)
+    store.create({"id": "TAD-second", "status": "done"}, action="create", actor="operator", max_records=1)
+    archived = store.list_archived()
+    assert [row["id"] for row in archived] == ["TAD-first"]
+
+    assert store.delete("TAD-first", expected_revision=archived[0]["revision"]) is True
+    assert store.get("TAD-first") is None
+    assert store.list_archived() == []
+    assert [row["id"] for row in store.list()] == ["TAD-second"]
 
 
 def test_local_full_namespace_never_archives_a_record_with_undelivered_activity(monkeypatch):

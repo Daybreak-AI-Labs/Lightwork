@@ -359,9 +359,18 @@ class KnowledgeSources:
                                         "message": "Refresh queued. No document delivery or registry approval is yet confirmed."},
                                        action="knowledge_source.refresh_queued", actor=self.actor, max_records=MAX_JOBS, effect_guard=guard)
             except BaseException:
-                # No job record exists (for example the job ledger is full), so
+                # If no job record exists (for example the job ledger is full),
                 # nothing can read or run this claim: give it back instead of
                 # leaving the source claimed by a refresh that does not exist.
+                # A create can also fail after saving its record; then the job
+                # and its claim must stay together, so the claim is kept (and
+                # kept too when the ledger cannot say which happened).
+                try:
+                    saved = self.jobs.get(job_id) is not None
+                except Exception:  # noqa: BLE001 -- unknown: never orphan a saved job
+                    saved = True
+                if saved:
+                    raise
                 # A scheduled source backs off as a withheld refresh does, so
                 # the scheduler does not retry it on every cycle.
                 def release(current):

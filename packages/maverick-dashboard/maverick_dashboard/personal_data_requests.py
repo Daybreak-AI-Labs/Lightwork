@@ -85,9 +85,12 @@ def _memory_files(owner):
 
 
 def _diagnostic_records(actor):
-    rows = DIAGNOSTICS.list(limit=10001)
-    if len(rows) > 10000:
-        raise ValueError("Diagnostic reports exceed the supported inventory window.")
+    # Archived reports are still this person's data: erasure reads both.
+    rows = []
+    for listed in (DIAGNOSTICS.list(limit=10001), DIAGNOSTICS.list_archived(limit=10001)):
+        if len(listed) > 10000:
+            raise ValueError("Diagnostic reports exceed the supported inventory window.")
+        rows.extend(listed)
     return [{"id": row["id"], "revision": row["revision"], "goal_id": row["goal_id"]}
             for row in rows if row.get("owner") == actor]
 

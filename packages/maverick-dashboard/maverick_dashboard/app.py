@@ -12379,6 +12379,30 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
     )
 
 
+_FORM_LOOKUPS_PER_MINUTE = 30
+_FORM_LOOKUP_LIMIT = None
+
+
+def _limit_form_lookups(request: Request) -> None:
+    """Throttle public form-token lookups per address, before any lookup runs.
+
+    Each lookup scans the registered form triggers and the vendor
+    questionnaires, so unknown-token guesses get their own per-address limit
+    instead of spending the goal ceiling that real task starts share."""
+    global _FORM_LOOKUP_LIMIT
+    if _FORM_LOOKUP_LIMIT is None:
+        from maverick.public_rights_form import SlidingWindowLimit
+
+        _FORM_LOOKUP_LIMIT = SlidingWindowLimit(60.0)
+    from .ip_allowlist import client_ip
+
+    address = client_ip(request)
+    if not _FORM_LOOKUP_LIMIT.hit(f"ip:{address if address is not None else 'unknown'}",
+                                  _FORM_LOOKUPS_PER_MINUTE, time.time()):
+        raise HTTPException(status_code=429, detail="too many attempts; try again shortly",
+                            headers={"Retry-After": "60"})
+
+
 def _vendor_questionnaire_for(token: str) -> dict | None:
     """Resolve one form; unavailable authority must not masquerade as a 404."""
     try:
@@ -12398,6 +12422,7 @@ async def form_page(request: Request, token: str) -> HTMLResponse:
     """
     from maverick import automation_events
 
+    _limit_form_lookups(request)
     if automation_events.enabled():
         try:
             trigger = await run_in_threadpool(_registered_form_trigger, token)
@@ -12581,9 +12606,10 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
     from .form_inputs import FormInputError
 
     # Unknown tokens must never allocate a per-token file, and an anonymous
-    # guess must not spend the goal ceiling real task starts share: resolve the
-    # token first, then check the shared admission limit before parsing even a
-    # multipart request.
+    # guess must not spend the goal ceiling real task starts share: throttle
+    # lookups per address, resolve the token, then check the shared admission
+    # limit before parsing even a multipart request.
+    _limit_form_lookups(request)
     trigger = None
     if automation_events.enabled():
         trigger = await run_in_threadpool(_registered_form_trigger, token)

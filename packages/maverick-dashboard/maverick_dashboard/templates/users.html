@@ -186,8 +186,9 @@
   {% set n_changed = br.rows | selectattr('outcome', 'equalto', 'changed') | list | length %}
   {% set n_same = br.rows | selectattr('outcome', 'equalto', 'unchanged') | list | length %}
   {% set n_refused = br.rows | selectattr('outcome', 'equalto', 'refused') | list | length %}
+  {% set n_uncertain = br.rows | selectattr('outcome', 'equalto', 'uncertain') | list | length %}
   <section class="panel" id="bulk-result" tabindex="-1" role="status" aria-labelledby="bulk-report-title">
-    <h3 id="bulk-report-title" class="users-subhead">{{ 'Undone' if br.undone else 'Changed' }}: {{ n_changed }} {{ 'person' if n_changed == 1 else 'people' }}{% if n_same %}, {{ n_same }} already had that role{% endif %}{% if n_refused %}, {{ n_refused }} not changed{% endif %}</h3>
+    <h3 id="bulk-report-title" class="users-subhead">{{ 'Undone' if br.undone else 'Changed' }}: {{ n_changed }} {{ 'person' if n_changed == 1 else 'people' }}{% if n_same %}, {{ n_same }} already had that role{% endif %}{% if n_refused %}, {{ n_refused }} not changed{% endif %}{% if n_uncertain %}, {{ n_uncertain }} to check{% endif %}</h3>
     <table>
       <caption class="sr-only">What changed for each person</caption>
       <thead><tr><th scope="col">Person</th><th scope="col">Before</th><th scope="col">Now</th><th scope="col">Result</th></tr></thead>
@@ -196,7 +197,7 @@
         <tr><td>{{ who(row.principal) }}</td>
             <td>{{ row.before | role_label if row.before else 'Standard role' }}</td>
             <td>{{ row.after | role_label if row.after else 'Standard role' }}</td>
-            <td>{% if row.outcome == 'changed' %}Changed{% elif row.outcome == 'unchanged' %}Already had it{% else %}Not changed: {{ row.reason }}{% endif %}</td></tr>
+            <td>{% if row.outcome == 'changed' %}Changed{% elif row.outcome == 'unchanged' %}Already had it{% elif row.outcome == 'uncertain' %}Check: {{ row.reason }}{% else %}Not changed: {{ row.reason }}{% endif %}</td></tr>
       {% endfor %}
       </tbody>
     </table>

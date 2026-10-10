@@ -53,7 +53,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from maverick import file_lock
-from maverick.paths import maverick_home
+from maverick.paths import MAX_TENANT_SEGMENT_LENGTH, maverick_home
 from starlette.concurrency import run_in_threadpool
 
 from . import local_passphrases
@@ -98,7 +98,7 @@ def _valid(key: object, row: object) -> bool:
         return False
     return (isinstance(row["email"], str) and "@" in row["email"] and len(row["email"]) <= 320
             and row["email"] == row["email"].strip().lower()
-            and isinstance(row["tenant"], str) and len(row["tenant"]) <= 128
+            and isinstance(row["tenant"], str) and len(row["tenant"]) <= MAX_TENANT_SEGMENT_LENGTH
             and isinstance(row["binding"], str) and len(row["binding"]) == 64
             and isinstance(row["created_by"], str) and row["created_by"].startswith("user:")
             and len(row["created_by"]) <= 1024

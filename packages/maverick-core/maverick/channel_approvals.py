@@ -42,12 +42,13 @@ Lightwork principal) lives in :mod:`maverick.channel_identities`.
 """
 from __future__ import annotations
 
-import hmac
 import logging
 import os
 import time
 from collections.abc import Callable
 from typing import Any
+
+from .constant_time import text_equals
 
 log = logging.getLogger(__name__)
 
@@ -543,8 +544,8 @@ def require_current_card(approval: Any, *, binding: str | None, now: float | Non
                 "this approval predates exact-operation review; reject it and "
                 "ask the requester to prepare a fresh review"
             )
-        # Bytes: a label with a non-ASCII character is not a TypeError.
-        if not hmac.compare_digest(str(card["action"]).encode(), str(approval.action).encode()):
+        # Any character, even a lone surrogate from a JSON escape, is a mismatch, not an error.
+        if not text_equals(str(card["action"]), str(approval.action)):
             raise ApprovalCardError(
                 "the approval card does not match the queued action; request a fresh review"
             )

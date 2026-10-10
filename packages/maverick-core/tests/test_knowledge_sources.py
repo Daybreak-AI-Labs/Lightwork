@@ -86,6 +86,25 @@ def test_a_refresh_that_cannot_be_recorded_does_not_leave_the_source_claimed(ser
     assert service.start(again, "2" * 32)["state"] == "queued"
 
 
+def test_a_job_saved_before_its_create_failed_keeps_the_source_claim(service, monkeypatch):
+    # The job ledger saved the record and then failed (e.g. its flush raised):
+    # the queued job exists, so its source claim must stay with it.
+    prepared, before = _prepared(service, 3600)
+    real = service.jobs.create
+
+    def saved_then_failed(*args, **kwargs):
+        real(*args, **kwargs)
+        raise OSError("flush failed after the record was saved")
+
+    monkeypatch.setattr(service.jobs, "create", saved_then_failed)
+    with pytest.raises(OSError):
+        service.start(prepared, "5" * 32)
+    job_id = "KNJ-" + "5" * 32
+    assert service.jobs.get(job_id) is not None
+    row = service.sources.get(before["id"])
+    assert row["active_job"] == job_id and row["state"] == "queued"
+
+
 def test_a_started_refresh_still_claims_the_source(service):
     prepared, before = _prepared(service, 3600)
     job = service.start(prepared, "3" * 32)
