@@ -273,9 +273,13 @@ def sp_metadata_xml(client=None, cfg: SamlConfig | None = None) -> str:  # pragm
 
 
 def prepare_login_redirect(
-    client=None, cfg: SamlConfig | None = None, *, relay_state: str = "/"
+    client=None, cfg: SamlConfig | None = None, *, relay_state: str = "/",
+    force_authn: bool = False,
 ) -> tuple[str, str]:  # pragma: no cover
-    """Build an AuthnRequest and return its request ID plus redirect URL."""
+    """Build an AuthnRequest and return its request ID plus redirect URL.
+
+    ``force_authn`` sets ``ForceAuthn="true"``: the IdP must authenticate the
+    person again instead of reusing its own session (the step-up link)."""
     try:
         from saml2 import BINDING_HTTP_REDIRECT  # type: ignore
     except ImportError as e:
@@ -285,11 +289,14 @@ def prepare_login_redirect(
 
     if client is None:
         with client_scope(cfg) as scoped:
-            return prepare_login_redirect(scoped, cfg, relay_state=relay_state)
+            return prepare_login_redirect(scoped, cfg, relay_state=relay_state,
+                                          force_authn=force_authn)
     extra: dict = {}
     requested = _requested_authn_context()
     if requested is not None:
         extra["requested_authn_context"] = requested
+    if force_authn:
+        extra["force_authn"] = "true"
     reqid, info = client.prepare_for_authenticate(
         relay_state=relay_state, binding=BINDING_HTTP_REDIRECT, **extra
     )
@@ -650,24 +657,27 @@ async def saml_login(request: Request):
             {"detail": "SAML needs the browser-login session secret"}, status_code=503
         )
     state = secrets.token_urlsafe(32)
+    # ``?fresh=1`` (the step-up link): ask for ForceAuthn, and remember it so
+    # the ACS checks the IdP really authenticated the person again.
+    fresh = bool(request.query_params.get("fresh"))
     try:
-        request_id, url = prepare_login_redirect(cfg=cfg, relay_state=state)
+        request_id, url = prepare_login_redirect(cfg=cfg, relay_state=state, force_authn=fresh)
     except SamlUnavailable as e:
         return JSONResponse({"detail": str(e)}, status_code=503)
     if not request_id or not url:
         return JSONResponse({"detail": "could not build SAML AuthnRequest"}, status_code=502)
     from maverick.web_session import sign_session
 
-    tx_cookie = sign_session(
-        {
-            "request_id": request_id,
-            "state": state,
-            "return_to": relay,
-            "jti": secrets.token_urlsafe(16),
-            "exp": int(time.time()) + _TX_TTL,
-        },
-        secret,
-    )
+    tx_payload = {
+        "request_id": request_id,
+        "state": state,
+        "return_to": relay,
+        "jti": secrets.token_urlsafe(16),
+        "exp": int(time.time()) + _TX_TTL,
+    }
+    if fresh:
+        tx_payload["fresh"] = True
+    tx_cookie = sign_session(tx_payload, secret)
     response = RedirectResponse(url, status_code=303)
     # SAML HTTP-POST is cross-site, so Lax would suppress this cookie at the
     # ACS. SameSite=None therefore requires Secure; SAML browser SSO must use
@@ -767,11 +777,23 @@ async def saml_acs(request: Request):
     # authentication context must name one. One plain sentence, no session.
     from .mfa_policy import (
         MFA_MISSING_MESSAGE,
+        fresh_enough,
         require_mfa,
         saml_context_proves_mfa,
     )
+    from .oidc_login import credible_auth_time
 
     mfa = saml_context_proves_mfa(identity.authn_context)
+    now = time.time()
+    authn_at = credible_auth_time(identity.authn_instant, now=now)
+    # On a step-up (``fresh``, sent with ForceAuthn) an assertion that cannot
+    # show a recent authentication is no proof of a fresh second factor, as in
+    # the OIDC callback. Without this check an IdP that reused its session
+    # would send the person round the step-up link indefinitely.
+    if mfa and tx.get("fresh") is True and (authn_at is None or not fresh_enough(authn_at, now=now)):
+        log.warning("SAML ACS: step-up sign-in without a recent AuthnInstant; "
+                    "second factor not counted")
+        mfa = False
     if require_mfa() and not mfa:
         log.warning("SAML ACS: sign-in refused, assertion carried no second factor")
         from .app import templates
@@ -783,7 +805,7 @@ async def saml_acs(request: Request):
             status_code=403,
         ))
     try:
-        from .oidc_login import credible_auth_time, mint_browser_session
+        from .oidc_login import mint_browser_session
         from .session_policy import company_ttl
 
         ttl = company_ttl(_SESSION_TTL)
@@ -793,7 +815,7 @@ async def saml_acs(request: Request):
         cookie = mint_browser_session(
             request, sub=identity.name_id, secret=secret, via="session", mfa=mfa,
             ttl=ttl,
-            mfa_at=credible_auth_time(identity.authn_instant, now=time.time()),
+            mfa_at=authn_at,
             extra={"idp_email": _saml_invite_email(identity)},
         )
     except SamlUnavailable as e:
