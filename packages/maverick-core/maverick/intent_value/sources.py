@@ -53,7 +53,9 @@ def audit_population():
                 and event.get("performed_work_nodes", 0) > 0):
             flows[event.get("run_id")].append({"id": digest(event), "at": event["ts"],
                 "kind": "flow_state", "status": event.get("status"),
-                "release_id": event.get("release_id", ""), "revision": event.get("definition_revision", "")})
+                "release_id": event.get("release_id", ""), "revision": event.get("definition_revision", ""),
+                "work_node_count": event["performed_work_nodes"],
+                "work_node_ids": event.get("performed_work_node_ids")})
     return goals, flows, actions, agents
 
 
@@ -148,6 +150,26 @@ def _observation(key, owner, at, classification):
             "cost_limitations": ["Provider invoices, external-tool fees, subscriptions and taxes are not completely covered."]}
 
 
+def _executed_flow_intent(definition, run, receipt, item):
+    """A completed route cannot borrow the effort of branches that never ran."""
+    candidates = {node.id: node for node in definition.nodes.values()
+                  if node.kind in {"agent", "action"}} if definition is not None else {}
+    identifiers = receipt.get("work_node_ids")
+    if identifiers is None and len(candidates) == 1 and receipt["work_node_count"] == 1:
+        identifiers = list(candidates)  # The old count identifies the sole work step.
+    valid = (definition is not None and definition.revision == run.definition_revision
+             and isinstance(identifiers, list) and all(isinstance(value, str) for value in identifiers)
+             and len(set(identifiers)) == len(identifiers) == receipt["work_node_count"]
+             and all(value in candidates for value in identifiers))
+    if not valid:
+        item["grouping"] += " Executed workflow steps cannot be resolved from the receipt and definition; performed work remains unvalued until reviewed."
+        return classify("")
+    briefs = " and ".join(candidates[value].brief for value in identifiers if candidates[value].kind == "agent")
+    if any(candidates[value].kind == "action" for value in identifiers):
+        item["grouping"] += " Direct tool actions are execution facts; the workflow name alone does not establish their business effort. Only identifiable executed agent components are valued."
+    return classify(briefs)
+
+
 def _flow_rows(output, anchors, goals, flow_audit):
     from ..flow import store
 
@@ -186,7 +208,7 @@ def _flow_rows(output, anchors, goals, flow_audit):
                     and row["revision"] == run.definition_revision and row["release_id"] == run.release_id]
         if receipts:
             item["evidence"].extend({**row, "full_task": True} for row in receipts)
-            item["executed_classification"] = detected
+            item["executed_classification"] = _executed_flow_intent(definition, run, receipts[-1], item)
         else:
             item["evidence"].extend({**row, "full_task": False} for row in flow_audit.get(run.run_id, [])
                 if row["revision"] == run.definition_revision and row["release_id"] == run.release_id)
@@ -217,8 +239,9 @@ def collect(world) -> list[dict]:
             continue
         # Child goals inside a flow are contribution evidence. Only the flow
         # completion receipt can award its full business-component estimate.
+        item["evidence"].extend({**row, "full_task": not item["flow_runs"] and item["key"] == f"goal:{goal.id}"}
+                                for row in audit_goals.get(goal.id, []))
         if not item["flow_runs"]:
-            item["evidence"].extend({**row, "full_task": item["key"] == f"goal:{goal.id}"} for row in audit_goals.get(goal.id, []))
             if audit_goals.get(goal.id) and (item["key"] == f"goal:{goal.id}" or _intent_revision(goal)):
                 item["executed_classification"] = _executed_intent(goal, audit_goals[goal.id][-1], item)
         item["actions"].extend(actions.get(goal.id, set()))

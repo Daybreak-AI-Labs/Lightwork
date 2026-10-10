@@ -41,7 +41,7 @@ def _snapshot(row, *, reason, actor, refresh_assumptions=False):
 
 def _retain_executed_intent(source, current):
     """Metadata edits cannot retrospectively change unchanged execution credit."""
-    if current is None or current["source"]["performed_at"] is None:
+    if current is None or current["source"]["performed_at"] is None or source["flow_runs"]:
         return
     previous = current["source"]
     if {row["id"] for row in previous["evidence"]} != {row["id"] for row in source["evidence"]}:
@@ -85,7 +85,7 @@ def refresh(world):
                 if not row["corrected"] and _classification_changed(row, classified):
                     row.update(intents=classified["intents"], classification=classified)
                     row["label"] = _label(row["intents"])
-                    _snapshot(row, reason="Requested activity or scope changed", actor="system", refresh_assumptions=True)
+                    _snapshot(row, reason="Activity or scope reclassified from current evidence", actor="system", refresh_assumptions=True)
                 else:
                     _snapshot(row, reason="Execution or observation evidence updated; assumptions retained", actor="system")
             try:

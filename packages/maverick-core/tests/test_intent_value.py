@@ -245,6 +245,86 @@ def test_partial_child_work_is_performed_but_never_full_parent_value(world):
     assert result["totals"]["net_estimated_benefit"] is None
 
 
+@pytest.mark.parametrize("review_only, expected", [(True, "rfp.review"), (False, "rfp.draft")])
+@pytest.mark.parametrize("already_ingested", [False, True])
+def test_native_flow_values_only_the_branch_that_actually_ran(world, monkeypatch, review_only, expected, already_ingested):
+    from maverick.flow import Flow, FlowNode, execution, store
+    from maverick.intent_value import sources
+
+    flow = store.save_flow(Flow(id="value-branch", name="RFP work", start="choose", owner="alice", nodes={
+        "choose": FlowNode(id="choose", kind="branch", condition="review_only", if_true="review", if_false="draft"),
+        "review": FlowNode(id="review", kind="agent", brief="Review an RFP", output="result"),
+        "draft": FlowNode(id="draft", kind="agent", brief="Draft an RFP", output="result"),
+    }))
+    run = execution.execute(flow, agent_runner=lambda brief, data: ("Synthetic result", 1),
+        action_runner=lambda tool, params, data: ("", None), data={"review_only": review_only}, owner="alice")
+    assert run.status == "completed"
+    if already_ingested:
+        with monkeypatch.context() as patch:
+            # Reproduce the prior reader without changing any execution record.
+            patch.setattr(sources, "_executed_flow_intent", lambda *args: taxonomy.classify("Review an RFP and draft an RFP"))
+            prior = service.refresh(world)[0]
+    result = report(world)
+    assert result["totals"]["performed_work"] == 1
+    assert result["rows"][0]["intents"] == [expected]
+    benchmark = taxonomy.definition(expected)["benchmark"]
+    expected_minutes = benchmark["minutes"] * benchmark["attributable_share"] - benchmark["review_minutes"]
+    assert result["totals"]["gross_estimated_labor_value"] == expected_minutes
+    if already_ingested:
+        assert service.WORKS.get(prior["id"])["estimates"][0] == prior["estimates"][0]
+
+
+def test_older_ambiguous_flow_receipt_does_not_guess_the_executed_branch(world):
+    from maverick.flow import Flow, FlowNode, store
+
+    flow = store.save_flow(Flow(id="old-value-branch", name="RFP work", start="choose", owner="alice", nodes={
+        "choose": FlowNode(id="choose", kind="branch", condition="review_only", if_true="review", if_false="draft"),
+        "review": FlowNode(id="review", kind="agent", brief="Review an RFP"),
+        "draft": FlowNode(id="draft", kind="agent", brief="Draft an RFP"),
+    }))
+    run = store.FlowRun(run_id="old-branch-run", flow_id=flow.id, owner="alice", status="completed",
+        created=time.time(), updated=time.time(), cost_dollars=2, definition_revision=flow.revision)
+    store.save_run(run)
+    audit.audit_event("control_plane_action", agent="flow", action="intent_value.flow_state", run_id=run.run_id,
+        status="completed", definition_revision=flow.revision, release_id="", performed_work_nodes=1)
+    result = report(world)
+    assert result["totals"]["performed_work"] == result["totals"]["unvalued_work"] == 1
+    assert result["totals"]["gross_estimated_labor_value"] == 0
+    assert result["totals"]["known_execution_costs"] == {"USD": 2}
+    assert result["totals"]["net_estimated_benefit"] is None
+
+
+def test_action_only_execution_cannot_borrow_its_workflow_names_benchmark(world):
+    from maverick.flow import Flow, FlowNode, execution, store
+
+    flow = store.save_flow(Flow(id="value-action", name="Draft an RFP", start="lookup", owner="alice", nodes={
+        "lookup": FlowNode(id="lookup", kind="action", tool="web_search", output="sources"),
+    }))
+    run = execution.execute(flow, agent_runner=lambda brief, data: ("", 0),
+        action_runner=lambda tool, params, data: ("Synthetic search metadata", None), owner="alice")
+    assert run.status == "completed"
+    result = report(world)
+    assert result["totals"]["performed_work"] == result["totals"]["unvalued_work"] == 1
+    assert result["totals"]["gross_estimated_labor_value"] == 0
+
+
+def test_linked_agent_execution_survives_missing_flow_step_receipt(world):
+    from maverick.flow import Flow, FlowNode, store
+
+    flow = store.save_flow(Flow(id="value-partial-flow", name="Draft an RFP", start="prepare", owner="alice", nodes={
+        "prepare": FlowNode(id="prepare", kind="agent", brief="Draft an RFP"),
+    }))
+    run = store.FlowRun(run_id="partial-flow-run", flow_id=flow.id, owner="alice", status="paused",
+        created=time.time(), updated=time.time(), definition_revision=flow.revision)
+    store.save_run(run)
+    identifier = goal(world)
+    world.record_goal_origin(identifier, kind="flow_run", ref=run.run_id)
+    result = report(world)
+    assert result["totals"]["performed_work"] == result["totals"]["unvalued_work"] == 1
+    assert result["rows"][0]["state"] == "partial_execution"
+    assert result["totals"]["known_execution_costs"] == {"USD": 2}
+
+
 def test_untrusted_agent_completion_does_not_establish_native_execution(world):
     identifier = goal(world, performed=False)
     audit.audit_event("goal_end", goal_id=identifier, agent="external", status="succeeded")

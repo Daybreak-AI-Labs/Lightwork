@@ -145,3 +145,34 @@ test('revoked access closes an open explanation and permits an authorized retry'
   await page.getByRole('button',{name:'Retry loading'}).click();
   await expect(page.locator('#iv-report')).toBeVisible();
 });
+
+test('retaining all work manually never turns approval into executed labor value',async({page,request})=>{
+  const proposal=(await (await request.get(api+'/opportunities')).json()).opportunities.find(item=>item.intent==='rfp.draft');
+  expect(proposal.manual_steps).toContain('prepare');
+  expect(proposal.draft_id).toBeTruthy();
+  const before=await (await request.get(api)).json();
+  const calls=(await (await request.get('/__browser_fixture/intent-value-execution')).json()).provider_calls;
+  await page.goto('/flows/designer/'+proposal.draft_id);
+  await page.getByRole('button',{name:'Publish',exact:true}).click();
+  await expect(page.locator('#fd-msg')).toContainText('Published');
+  await page.getByRole('button',{name:'Run published',exact:true}).click();
+  const started=page.waitForResponse(response=>response.url().endsWith('/'+proposal.draft_id+'/run')&&response.request().method()==='POST');
+  await page.getByRole('dialog').getByRole('button',{name:'Run published',exact:true}).click();
+  const run=await (await started).json();
+  await page.goto('/flows/'+proposal.draft_id+'/runs/'+run.run_id);
+  await page.getByLabel('Source material',{exact:true}).fill('Synthetic RFP source');
+  await page.getByLabel('Requirements',{exact:true}).fill('Prepare this RFP manually.');
+  await page.getByRole('button',{name:'Approve',exact:true}).click();
+  await page.getByRole('button',{name:'Confirm approval',exact:true}).click();
+  await page.getByLabel('Your result',{exact:true}).fill('RFP prepared by the person, outside Lightwork execution.');
+  await page.getByRole('button',{name:'Approve',exact:true}).click();
+  await page.getByRole('button',{name:'Confirm approval',exact:true}).click();
+  await page.getByRole('button',{name:'Approve',exact:true}).click();
+  await expect(page.locator('#fr-status')).toHaveText('Finished');
+  const after=await (await request.get(api)).json();
+  expect(after.totals.performed_work).toBe(before.totals.performed_work);
+  expect(after.totals.gross_estimated_labor_value).toBe(before.totals.gross_estimated_labor_value);
+  const scoped=await (await request.get(api+'?entity_kind=processes&entity_id='+proposal.draft_id)).json();
+  expect(scoped.totals.performed_work).toBe(0);
+  expect((await (await request.get('/__browser_fixture/intent-value-execution')).json()).provider_calls).toBe(calls);
+});

@@ -818,7 +818,10 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                     release_id=run.release_id,
                     performed_work_nodes=sum(node.kind in {"agent", "action"}
                         and run.nodes.get(node.id, {}).get("status") == "done"
-                        for node in flow.nodes.values()))
+                        for node in flow.nodes.values()),
+                    performed_work_node_ids=[node.id for node in flow.nodes.values()
+                        if node.kind in {"agent", "action"}
+                        and run.nodes.get(node.id, {}).get("status") == "done"])
     finish_capture(episode_capture, run)
     # Learn the shape of this flow's output keys from a REAL run's data (never a
     # dry run -- mock executors produce placeholder shapes), so the designer's

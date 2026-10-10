@@ -40,7 +40,7 @@ Reopening is explicit. None of these decisions deletes an existing process.
 | --- | --- |
 | WorldModel goals, parent IDs, conversations/turns, goal origins | `intent_value.sources` reads native authorized tenant stores; related goals share a work identity; unexecuted channel requests are observations only |
 | Signed/strict audit reader and native `goal_start` / `goal_end` | Successful orchestrator/source-analysis receipts establish performed work; available run-start requests establish the executed intent despite later title edits; status fields or user assertions alone do not |
-| Flow execution, immutable snapshots and run generations | `flow.execution` records content-free terminal/progress receipts and binds agent goals to their native run; retries share a work identity |
+| Flow execution, immutable snapshots and run generations | `flow.execution` records content-free terminal/progress receipts with completed work-step identifiers and binds agent goals to their native run; retries share a work identity |
 | Episodes, `episode_reporting`, provider receipt catalogue | Failure/rework spend is retained; exact linked provider receipts replace overlapping runtime amounts, with separate measured/estimated coverage |
 | Existing Savings, `workforce_value`, `[value]` rates | Same source episodes and department rate configuration; numeric bridge explains alternative effort/count/cost assumptions |
 | `GovernedRecordStore` | Tenant-scoped work, settings, benchmark and recommendation namespaces reuse private local/shared Postgres storage, CAS, revision history and audit-outbox recovery |
@@ -78,6 +78,16 @@ unknown and may be corrected by an authorized owner. Audited explicit intent
 changes in continuing work append a new estimate;
 an unexecuted follow-up does not revalue already performed work. User corrections
 take precedence over subsequent inference.
+
+Workflow estimates use the agent components identified by the audited completed
+steps and matching definition revision. An unexecuted drafting branch cannot
+inflate the value of a reviewing branch. A receipt with only an older step count
+can identify a sole work step; ambiguous older routes remain performed but
+unvalued. Direct tool actions remain execution facts, but a workflow's name does
+not by itself establish their business effort. Linked agent receipts still show
+partial performed work when the parent flow lacks a sufficient completion receipt.
+An entirely manual workflow records its human approvals without creating executed
+Lightwork labor credit.
 
 Ten related prompts or retries are one work item, not ten task credits. Parent
 links and native flow retry/origin IDs take precedence over text similarity.
@@ -276,7 +286,7 @@ configuration, privacy and reporting regressions are also checked.
 | 5: optional confirmation | Default off, separate opinion receipt, revisions preserved; core/API/browser checks |
 | 6: tenant-specific benchmark | Governed override/version + deliberate recalculation; tenant override arithmetic test |
 | 7: unknown inputs | Abstention for guidance/quoted task names, uncertain later execution, size review, missing cost, mixed currency; guidance/unknown/receipt/currency tests |
-| 8: rework/failure | One business credit, all attempt costs, partial unvalued, native workflow residual above linked agent spend; duplicate/failure/partial/driver and completed-task rename tests |
+| 8: rework/failure | One business credit, all attempt costs, partial unvalued, only the actually executed branch, native workflow residual above linked agent spend; duplicate/failure/partial/driver, branch and completed-task rename tests |
 | 9: reconciled rollups | Unique work totals, overlapping attribution, native Savings numeric bridge; parent/agent and driver tests |
 | 10: dashboard explanation | Clickable population and source/assumption/history detail; browser desktop and narrow checks |
 | 11: Copilot parity | Shared `read_report`, current dashboard filters, sealed period/entity clarification, business-name resolution and ambiguity rejection; API and native execution browser checks |
@@ -284,7 +294,7 @@ configuration, privacy and reporting regressions are also checked.
 | 13: opportunity conversion | Explicit handoff, exact task link, separate remaining potential; handoff/conversion test |
 | 14: recommendation quality | Distinct-work and cost support, existing capability preference, versioned maturing proposal; recommendation tests |
 | 15: retained control | Manual preparation, required reviews, persistent defer/decline; core/API/browser checks |
-| 16: draft versus activation | Native save only, no run/schedule/publication; API/browser checks; explicit publish outcome test |
+| 16: draft versus activation | Native save only, no run/schedule/publication; API/browser checks; explicit publish outcome test and fully manual execution without labor credit |
 | 17: duplicate/interrupted flows | Deterministic reservation, native CAS, recover same saved draft; repeat/interruption API tests |
 | 18: post-adoption feedback | Native generation/selection linkage, separate before/after cost reference; outcome/driver/handoff tests |
 | 19: historical explainability | Original snapshots survive corrections, override and proposal maturation; history tests |
@@ -325,6 +335,12 @@ native retitle API/Copilot parity and omission of audited request content from
 explanations. A later audited request whose intent is unknown also clears the
 current inferred benchmark instead of borrowing the earlier task's value; prior
 estimates and incurred costs remain available.
+Conditional-workflow rechecking also reproduced credit from unexecuted branches.
+Native receipts now identify completed work steps, and estimates use only those
+agent components. Regressions cover both routes, earlier derived estimates,
+ambiguous legacy receipts, tool-only work and linked-agent partial evidence. A
+separate browser journey completes the fully manual draft through native approvals
+and confirms unchanged executed-work/labor totals and no agent invocation.
 
 Recorded local qualification on October 9–10:
 
@@ -334,7 +350,7 @@ Recorded local qualification on October 9–10:
   fixture now verifies that both agent nodes retain the same workflow-run
   correlation; invalid-source module tests retain a valid audit tenant.
 - Final Python 3.10 feature/API/installer suite with **secure defaults and live PostgreSQL**:
-  **59 passed, no skips**. The database fixture uses encryption and an isolated
+  **66 passed, no skips**. The database fixture uses encryption and an isolated
   non-superuser, non-BYPASSRLS role. It covers tenant isolation, repeated
   ingestion, correction history and recommendation persistence.
 - Rebased Python 3.12 feature/adjacent suite: **771 passed** across work value,
@@ -342,10 +358,13 @@ Recorded local qualification on October 9–10:
   correction passed **3 focused Python 3.12 tests**; another **3 focused Python
   3.12 checks** cover the rename/evidence correction. The final uncertainty and
   rename group passed **5 Python 3.12 checks**. These are included in the
-  final 59-test suite above. Additional pre-rebase qualification included **98 PostgreSQL backend
+  final 66-test suite above. The final workflow/feature Python 3.12 recheck passed
+  **136 tests**, with one Windows-only path test skipped and the live PostgreSQL
+  test deselected in that run (included in the separate 66-test database run).
+  Additional pre-rebase qualification included **98 PostgreSQL backend
   tests** and **783 adjacent/packaging tests**; these are not presented as final
   whole-product coverage.
-- Chromium feature journeys: **4 passed**, including native publication,
+- Chromium feature journeys: **5 passed**, including native publication,
   cancelled and confirmed starts, input approval, queued execution, result
   approval, opportunity conversion, outcome readback and identical
   Copilot/dashboard totals. The agent runner supplies synthetic output, cost and
@@ -353,7 +372,8 @@ Recorded local qualification on October 9–10:
   ingestion and reporting run normally, with outbound calls blocked. Separate
   checks cover manual preparation, repeated draft clicks, 390-pixel layout,
   keyboard focus, unavailable/retry states, access revocation while an explanation
-  is open, authorized recovery and scoped axe checks. Desktop and
+  is open, authorized recovery, a fully manual completion with no executed labor
+  credit, and scoped axe checks. Desktop and
   narrow screenshots were inspected.
 - Dashboard DOM tests: **2,334 passed**; desktop JavaScript tests: **40 passed**.
 - Setup browser CI repair: all **7 journeys passed twice**. The hosted trace
