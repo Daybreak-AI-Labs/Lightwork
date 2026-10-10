@@ -300,6 +300,7 @@ STEPS: list[tuple[str, str]] = [
     ("journal", "Workspace journal"),
     ("finance", "Finance suite"),
     ("value", "Savings assumptions"),
+    ("intent_value", "Intent, work value and opportunities"),
     ("assessments", "Assessment assists"),
     ("security_suite", "Security & GRC"),
     ("advanced", "Advanced reasoning"),
@@ -4250,6 +4251,14 @@ def pick_value() -> dict[str, Any]:
         _q_text("  Human hours one comparable task takes", default="2"), default=2.0
     )
     return {"hourly_rate": max(0.0, rate), "hours_per_task": max(0.0, hours)}
+
+
+def pick_intent_value() -> dict[str, Any]:
+    """Optional read-only inference and customer-controlled draft suggestions."""
+    console.print("[dim]Work value groups related work, requires execution receipts for benefit, and uses editable provisional benchmarks. Suggestions create drafts only.[/dim]")
+    enabled = _q_confirm("Enable intent-based work value and opportunities?", default=True)
+    return {"enabled": enabled, "recommendations": enabled,
+            "completion_confirmation": False}
 
 
 def pick_finance() -> dict[str, Any]:
@@ -8720,6 +8729,15 @@ def _cfg_value(value: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _cfg_intent_value(value: dict[str, Any] | None) -> list[str]:
+    if value is None:
+        return []
+    lines = ["", "[intent_value]"]
+    for key, setting in value.items():
+        _emit_kv(lines, key, setting)
+    return lines
+
+
 def _cfg_finance(finance: dict[str, Any] | None) -> list[str]:
     if not finance:
         return []
@@ -10347,6 +10365,7 @@ def write_config(
     workspace: dict[str, Any] | None = None,
     finance: dict[str, Any] | None = None,
     value: dict[str, Any] | None = None,
+    intent_value: dict[str, Any] | None = None,
     assessments: dict[str, Any] | None = None,
     security_suite: dict[str, Any] | None = None,
     deployment: str | None = None,
@@ -10466,6 +10485,7 @@ def write_config(
     lines += _cfg_workspace(workspace)
     lines += _cfg_finance(finance)
     lines += _cfg_value(value)
+    lines += _cfg_intent_value(intent_value)
     lines += _cfg_assessments(assessments)
     lines += _cfg_security_suite(
         security_suite, governed_pg_pool=bool(advanced.get("governed_pg_pool")),
@@ -11560,6 +11580,13 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         state["value"] = value
         _save_partial(state)
 
+    _announce()
+    intent_value = state.get("intent_value")
+    if intent_value is None:
+        intent_value = pick_intent_value()
+        state["intent_value"] = intent_value
+        _save_partial(state)
+
     # `is None` sentinel: keeping both defaults legitimately returns {}.
     _announce()
     assessments = state.get("assessments")
@@ -11610,6 +11637,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "workspace": workspace,
         "finance": finance,
         "value": value,
+        "intent_value": intent_value,
         "assessments": assessments,
         "security_suite": security_suite,
         "advanced": advanced,
@@ -11832,6 +11860,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     workspace = _simple["workspace"]
     finance = _simple["finance"]
     value = _simple["value"]
+    intent_value = _simple["intent_value"]
     assessments = _simple["assessments"]
     security_suite = _simple["security_suite"]
     advanced = _simple["advanced"]
@@ -11985,6 +12014,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         workspace=workspace if workspace.get("journal") else None,
         finance=finance if finance.get("enable") else None,
         value=value or None,
+        intent_value=intent_value,
         assessments=assessments or None,
         security_suite=security_suite,
         approval=approval,

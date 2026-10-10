@@ -81,7 +81,7 @@ def test_all_governed_store_declarations_have_semantic_owner_and_recovery_dispos
                     seen_preferences = True
                 elif namespace in NON_AUTHORIZING_GOVERNED_NAMESPACES:
                     assert policy is None
-                    assert entries[relative]["contract"] in {"preferences", "mixed_api"}
+                    assert entries[relative]["contract"] in {"preferences", "mixed_api", "derived_analytics"}
                 else:
                     assert policy is not None, f"Missing restore disposition: {namespace}"
                 assert declared[namespace]["recovery_policy"] == policy
