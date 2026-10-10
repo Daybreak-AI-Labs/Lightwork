@@ -63,6 +63,22 @@ data. Archive and diagnostic output are bounded while streaming. Use a dedicated
 workspace outside any directory containing Lightwork settings, keys or recovery
 storage. Linux pods need `sh`, `tar`, and a private PID namespace.
 
+The worker's image filesystem is read-only. Its single bounded `emptyDir` at
+`/workspace` remains writable, and `TMPDIR=/workspace` lets temporary-file-aware
+tools use it. The image's `HOME` is preserved; no additional home or `/tmp` mount
+is added. Tools that write to hard-coded `/tmp` paths or the image's home must be
+configured to write inside `/workspace`, or included in the image with the needed
+read-only assets. Installation into the image filesystem is not supported.
+
+Use managed temporary files and remove scratch data before a command finishes.
+There are no reserved scratch names or export exclusions: unremoved temporary
+files, including those left after interruption, are ordinary workspace data and
+count against transfer limits. This preserves customer files and recovery output
+instead of guessing which files are disposable. Root-filesystem enforcement and
+the actual image's shell, archive, Python, cache and temporary-file behavior must
+be qualified on the target Linux cluster; synthetic transport tests do not prove
+read-only mount enforcement.
+
 Use a dedicated namespace, least-privilege pod/exec permissions and an enforced
 deny-all NetworkPolicy when networking is disabled. The API checks cannot prove
 the CNI filters live traffic. Before customer use, qualify create/edit/rename/

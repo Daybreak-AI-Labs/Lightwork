@@ -172,6 +172,7 @@ class KubernetesBackend:
         default user (often root) with no resource limits and the namespace's
         default ServiceAccount token auto-mounted. We pin a non-root
         securityContext + drop all capabilities + block privilege escalation,
+        make the image filesystem read-only (the workspace stays writable),
         disable the ServiceAccount token automount (a prompt-injected agent in
         the pod has no cluster API credential to steal), and set
         requests/limits so a runaway can't starve the node.
@@ -197,7 +198,12 @@ class KubernetesBackend:
             "securityContext": {
                 "allowPrivilegeEscalation": False,
                 "capabilities": {"drop": ["ALL"]},
+                "readOnlyRootFilesystem": True,
             },
+            # Keep temp-aware tools usable without another writable mount or
+            # reserving customer workspace names. Tools must clean up their
+            # scratch files; leftovers remain ordinary recoverable workspace data.
+            "env": [{"name": "TMPDIR", "value": _POD_WORKDIR}],
             # The workspace volume (below) -- kubectl cp streams the host
             # workdir in here before the command runs, and back out after.
             "volumeMounts": [{"name": "workspace", "mountPath": _POD_WORKDIR}],
