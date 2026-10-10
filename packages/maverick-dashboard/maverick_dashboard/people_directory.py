@@ -76,13 +76,6 @@ def may(principal: str, permission: str) -> bool:
     return principal.startswith("user:") and principal in allowed({principal}, permission)
 
 
-def active_only(principals) -> set[str]:
-    """Those of ``principals`` the company directory has not turned off.
-    Raises when the directory cannot be read."""
-    active = _active_check()
-    return {principal for principal in principals if active(principal)}
-
-
 def candidates(permission: str, *, limit: int = 200) -> list[dict]:
     """``[{principal, label}]`` for everyone who holds ``permission`` now."""
     from . import rbac

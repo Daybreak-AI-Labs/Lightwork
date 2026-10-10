@@ -359,15 +359,12 @@ def reinstate(
             _save_retired(retired)
 
 
-def is_retired(subject: str, *, retired: dict | None = None, directory: dict | None = None) -> bool:
-    """Whether an authenticated subject has been durably deprovisioned.
-
-    ``retired`` and ``directory`` are the ledger and directory already read
-    (see :func:`load_retired` and :func:`load_index`), for many lookups."""
+def is_retired(subject: str) -> bool:
+    """Whether an authenticated subject has been durably deprovisioned."""
     value = str(subject or "").strip()
     if not value:
         return False
-    retired = _load_retired() if retired is None else retired
+    retired = _load_retired()
     if _subject_key(value) in retired:
         return True
     # A lagging/misconfigured IdP can mint a new pairwise sub after DELETE.
@@ -376,13 +373,21 @@ def is_retired(subject: str, *, retired: dict | None = None, directory: dict | N
     # when the DELETE was processed.
     return any(
         entry.get("sub") == value and identifier_key in retired
-        for identifier_key, entry in (_load() if directory is None else directory).items()
+        for identifier_key, entry in _load().items()
     )
 
 
-def load_retired() -> dict:
-    """The retired-subject ledger, read once. Pair with ``is_retired(retired=...)``."""
-    return _load_retired()
+def retired_check(directory: dict | None = None):
+    """``check(subject)``: :func:`is_retired`'s answer, with the retired ledger
+    (and ``directory``, see :func:`load_index`) read once for many subjects."""
+    retired = _load_retired()
+    entries = _load() if directory is None else directory
+    retired_subs = {entry.get("sub") for identifier_key, entry in entries.items() if identifier_key in retired}
+
+    def check(subject: str) -> bool:
+        value = str(subject or "").strip()
+        return bool(value) and (_subject_key(value) in retired or value in retired_subs)
+    return check
 
 
 def forget(identifiers: Iterable[str]) -> None:

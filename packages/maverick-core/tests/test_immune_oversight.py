@@ -202,9 +202,17 @@ def test_a_manually_seeded_real_card_loses_its_commitments(world):
     assert world.get_approval(cid).provenance is None
 
 
-def test_a_canary_is_parked_like_a_task_request(world):
-    # Held for undo and reminded on the same schedule as the consent wait's
-    # requests, so neither tells a reviewer which one is a canary.
-    from maverick.channel_approvals import held_for_undo
 
-    assert held_for_undo(world.get_approval(_canary(world)))
+@pytest.mark.parametrize("held", [True, False])
+def test_a_generated_canary_is_held_for_undo_exactly_when_its_model_was(world, monkeypatch, held):
+    # A canary modelled on a task's request (held by the consent wait) offers
+    # Undo and the same reminders; one modelled on an external agent's request
+    # (acted on at once) offers neither. Either way it matches its model.
+    import random
+
+    from maverick.channel_approvals import held_for_undo
+    monkeypatch.setattr(o, "canaries_enabled", lambda: True)
+    world.create_approval("deploy", undoable=held,
+                          detail=_card("deploy", "Deploy build 42 to production", after="Build 42 is live."))
+    out = o.generate_canary(world, rng=random.Random(1))
+    assert held_for_undo(world.get_approval(out["approval_id"])) is held

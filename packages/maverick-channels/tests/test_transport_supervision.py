@@ -566,3 +566,31 @@ def test_one_unreadable_saved_receipt_does_not_stop_recovery_or_new_messages(mon
         await worker.close()
         assert order[1] == "new"
     asyncio.run(run())
+
+
+def test_a_receipt_that_could_not_be_read_once_is_recovered_by_the_next_scan(monkeypatch):
+    # A passing read error (a key briefly unavailable, a dropped connection)
+    # must not leave the receipt unscanned until another message arrives.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
+    journal = DeliveryJournal()
+    journal.admit(IncomingMessage(user_id="person", sender_id="person", text="saved",
+                                  channel=Adapter.name, message_id="1"), external_id="1", account="account")
+    real_get, failures = journal.get, []
+
+    def get(record_id):
+        if not failures:
+            failures.append(record_id)
+            raise OSError("key briefly unavailable")
+        return real_get(record_id)
+
+    journal.get = get
+    async def run():
+        order = []
+        async def handler(message):
+            order.append(message.text)
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=AsyncMock(return_value="confirmed"), journal=journal).start()
+        await until(lambda: order == ["saved"])
+        await worker.close()
+    asyncio.run(run())

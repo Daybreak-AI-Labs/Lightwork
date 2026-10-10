@@ -95,7 +95,7 @@ class TransportWorker:
                 if cursor and position <= cursor:
                     self._scan_pending = frozenset(waiting)
                     self._report_unreadable(unreadable)
-                    return [record_id for _, record_id in selected], count > MAX_PENDING
+                    return [record_id for _, record_id in selected], count > MAX_PENDING or unreadable > 0
                 cursor = position
                 scanned += 1
                 if self._stop_scan.is_set():
@@ -103,8 +103,9 @@ class TransportWorker:
                 try:
                     row = self.journal.get(record_id)
                 except Exception:
-                    # One receipt that no longer opens cannot be processed; it
-                    # must not stop the recovery of every other one.
+                    # A receipt that cannot be read now must not stop the
+                    # recovery of every other one; the scan counts as
+                    # incomplete, so it is read again after the retry period.
                     unreadable += 1
                     continue
                 if (not row or row["channel"] != self.channel.name or row["account_sha256"] != _digest(self.account)
@@ -122,7 +123,8 @@ class TransportWorker:
             log.warning("Channel receipt scan exceeds configured safety ceiling")
         else:
             self._scan_pending = frozenset(waiting)
-        return [record_id for _, record_id in selected], count > MAX_PENDING or scanned > MAX_CONFIGURED_RECORDS
+        return ([record_id for _, record_id in selected],
+                count > MAX_PENDING or scanned > MAX_CONFIGURED_RECORDS or unreadable > 0)
 
     async def _run(self):
         while True:
