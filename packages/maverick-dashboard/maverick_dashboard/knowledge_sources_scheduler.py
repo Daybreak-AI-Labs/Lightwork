@@ -107,6 +107,9 @@ def start_knowledge_sources_scheduler():
         if _thread is not None and _thread.is_alive():
             return False
         _stop = threading.Event()
+        # A wake from while the worker was stopped (or from that stop) is
+        # covered by the first cycle, which runs at once.
+        _wake.clear()
         _thread = threading.Thread(target=_loop, args=(_stop,), name="knowledge-sources", daemon=True)
         _thread.start()
         return True

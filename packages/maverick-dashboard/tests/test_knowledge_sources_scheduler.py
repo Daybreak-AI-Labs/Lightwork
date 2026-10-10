@@ -57,6 +57,21 @@ def test_schedules_are_checked_every_30_seconds_and_a_queued_refresh_wakes_the_w
         assert time.monotonic() - started < 5
 
 
+def test_a_wake_left_from_before_a_start_does_not_run_a_second_cycle(monkeypatch):
+    # A refresh queued while the worker was stopped (or the stop itself) left
+    # the wake set, so the next start ran its first cycle and then, at once,
+    # another. The first cycle already covers whatever was queued.
+    cycles = []
+    monkeypatch.setattr(sched, "cycle", lambda: cycles.append(time.monotonic()))
+    sched.wake()
+    assert sched.start_knowledge_sources_scheduler() is True
+    deadline = time.monotonic() + 5
+    while not cycles and time.monotonic() < deadline:
+        time.sleep(0.01)
+    time.sleep(0.3)
+    assert len(cycles) == 1
+
+
 @pytest.fixture(autouse=True)
 def _stopped():
     yield
