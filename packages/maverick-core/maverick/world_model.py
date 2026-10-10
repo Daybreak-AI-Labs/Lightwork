@@ -3565,19 +3565,21 @@ class WorldModel:
         row = conn.execute(sql, params).fetchone() if conn is not None else self._read_one(sql, params)
         return int(row[0]) if row else 0
 
-    def settle_approval_decision(self, approval_id: int) -> Approval | None:
+    def settle_approval_decision(self, approval_id: int, *, decided_before: float) -> Approval | None:
         """The waiting task is about to act on this decision: make it final.
 
-        Returns the approval as it stands. When it is still decided, an undo
-        from now on is refused (``"too_late"``), whatever window the page that
-        offers it reads; when an undo got there first it is pending again and
-        the task keeps waiting.
+        Only a decision made at or before ``decided_before`` (the end of the
+        task's own undo window) is settled. Returns the approval as it stands:
+        when settled, an undo from now on is refused (``"too_late"``), whatever
+        window the page that offers it reads; when an undo got there first it
+        is pending again, and a decision made again since then is still
+        ``undo_hold == "open"``, so the task keeps waiting.
         """
         with self._writing() as conn:
             conn.execute(
                 "UPDATE approvals SET undo_hold = ? WHERE id = ? AND status <> 'pending' "
-                "AND undo_hold = ?",
-                (APPROVAL_UNDO_SETTLED, int(approval_id), APPROVAL_UNDO_OPEN),
+                "AND undo_hold = ? AND decided_at <= ?",
+                (APPROVAL_UNDO_SETTLED, int(approval_id), APPROVAL_UNDO_OPEN, float(decided_before)),
             )
             row = conn.execute("SELECT * FROM approvals WHERE id = ?", (int(approval_id),)).fetchone()
         return _approval_from_row(row) if row else None

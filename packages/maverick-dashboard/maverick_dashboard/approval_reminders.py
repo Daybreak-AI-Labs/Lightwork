@@ -3,10 +3,11 @@
 Ten minutes after a request is parked on the Approvals page with no decision,
 each person who could decide it in Lightwork gets one in-app alert (the bell,
 through the personal alerts that are on by default for approvals waiting).
-It goes out only while the step is still waiting (the task's wait,
-``[approval] dashboard_wait_seconds``, 30 minutes by default, has not ended)
-and only in the app: no email, Slack or Teams copy. The approval card then
-says "Reminder sent".
+It goes out only while the step is still waiting: for a task's risky step,
+until the task's wait (``[approval] dashboard_wait_seconds``, 30 minutes by
+default) ends; a request nothing waits on in that way (an external agent's,
+a data-use check) waits until someone decides it. Only in the app: no email,
+Slack or Teams copy. The approval card then says "Reminder sent".
 
 The reminder is derived from the request, not stored: each person's bell keeps
 an alert once per request and parking time, so it is sent exactly once.
@@ -24,6 +25,14 @@ def _now() -> float:
     return time.time()
 
 
+def _task_waits(approval) -> bool:
+    """A task's step waits on this request for ``dashboard_wait_seconds`` (the
+    consent wait parked it); other requesters wait until it is decided."""
+    from maverick.channel_approvals import held_for_undo
+
+    return held_for_undo(approval)
+
+
 def reminder_due_at(approval) -> float | None:
     """When this waiting request's reminder goes out, or ``None`` when it never
     does: already decided, a protected-settings change (no step is waiting), or
@@ -37,18 +46,20 @@ def reminder_due_at(approval) -> float | None:
     requested_at = getattr(approval, "requested_at", None)
     if not isinstance(requested_at, (int, float)) or isinstance(requested_at, bool):
         return None
-    if dashboard_wait_seconds() <= REMINDER_AFTER_SECONDS:
+    if _task_waits(approval) and dashboard_wait_seconds() <= REMINDER_AFTER_SECONDS:
         return None
     return float(requested_at) + REMINDER_AFTER_SECONDS
 
 
 def _due(approval, now: float) -> bool:
-    """Ten minutes in, and the task's wait has not ended yet. A wait that
-    timed out leaves the request pending, but nothing is waiting on it."""
+    """Ten minutes in, and the step is still waiting. A task's wait that timed
+    out leaves the request pending, but no task is waiting on it any more."""
     from maverick.safety.consent import dashboard_wait_seconds
 
     due = reminder_due_at(approval)
-    return due is not None and due <= now < float(approval.requested_at) + dashboard_wait_seconds()
+    if due is None or now < due:
+        return False
+    return not _task_waits(approval) or now < float(approval.requested_at) + dashboard_wait_seconds()
 
 
 def reminded(world, approval, principal: str) -> bool:

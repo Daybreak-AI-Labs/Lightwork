@@ -70,8 +70,10 @@ def _approval(world, *, minutes_ago=0.0, owner=SAM, risk="high"):
     real_time = world_model.time.time
     try:
         world_model.time.time = lambda: parked_at
+        # Parked by the consent wait, as a task's risky step is.
         approval_id = world.create_approval("shell", risk=risk, scope="sandbox:/work",
-                                            detail=encode_approval_detail(card), requested_by=owner)
+                                            detail=encode_approval_detail(card), requested_by=owner,
+                                            undoable=True)
     finally:
         world_model.time.time = real_time
         reset_goal_context(tokens)
@@ -219,3 +221,19 @@ def test_the_card_says_reminder_sent_after_ten_minutes(env, monkeypatch):
 
     assert "Reminder sent" in card(waiting)
     assert "Reminder sent" not in card(fresh)
+
+
+def test_a_request_no_task_waits_on_is_reminded_after_the_consent_wait(env, monkeypatch):
+    # An external agent's or data-use request waits until someone decides it;
+    # the consent wait's end says nothing about it.
+    from maverick_dashboard import approval_reminders
+
+    _client, world = env
+    approval_id = _approval(world)
+    with world._writing() as conn:   # parked by a requester that acts whenever it is decided
+        conn.execute("UPDATE approvals SET undo_hold = NULL WHERE id = ?", (approval_id,))
+    _grant(monkeypatch, world, approval_id, DANA)
+    approval = world.get_approval(approval_id)
+    monkeypatch.setattr(approval_reminders, "_now", lambda: approval.requested_at + 7200)
+    assert len(_reminders(world, DANA)) == 1
+    assert approval_reminders.reminder_sent(world, approval) is True

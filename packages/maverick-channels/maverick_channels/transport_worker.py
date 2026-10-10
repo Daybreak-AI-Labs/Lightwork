@@ -147,9 +147,10 @@ class TransportWorker:
             try:
                 await asyncio.wait_for(self._wake.wait(), timeout=RETRY_DELAY)
             except asyncio.TimeoutError:
-                # Rescan only for work waiting on a retry: an idle worker re-read
-                # and decrypted every saved receipt every 30 seconds.
-                self._overflow = bool(self._retry_after)
+                # Rescan only for work waiting on a retry or a scan that did not
+                # complete: an idle worker re-read and decrypted every saved
+                # receipt every 30 seconds.
+                self._overflow = self._overflow or bool(self._retry_after)
 
     async def _process(self, record_id):
         row = await asyncio.to_thread(self.journal.get, record_id)

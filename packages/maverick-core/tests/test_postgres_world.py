@@ -687,6 +687,8 @@ def test_approval_webhook_events_reach_subscribers_only_after_commit(world, monk
 
 
 def test_only_a_held_decision_is_undone_and_settling_it_makes_it_final(world, monkeypatch):
+    import time
+
     from maverick import webhook_events
 
     sent = []
@@ -703,14 +705,15 @@ def test_only_a_held_decision_is_undone_and_settling_it_makes_it_final(world, mo
 
     held = world.create_approval("rm -rf /tmp/x", risk="high", undoable=True)
     assert world.get_approval(held).undo_hold == "open"
-    assert world.settle_approval_decision(held).status == "pending"   # nothing to settle yet
+    assert world.settle_approval_decision(held, decided_before=time.time()).status == "pending"  # nothing yet
     decide(held, "approved", "ana")
     assert world.undo_approval_decision(held, undone_by="ana", within_seconds=30) == "undone"
     assert world.get_approval(held).status == "pending"
     assert [kw["payload"]["previous_status"] for event, kw in sent if event == "approval.undone"] == ["approved"]
 
     decide(held, "denied", "ben")
-    settled = world.settle_approval_decision(held)
+    assert world.settle_approval_decision(held, decided_before=time.time() - 60).undo_hold == "open"
+    settled = world.settle_approval_decision(held, decided_before=time.time())
     assert settled.status == "denied" and settled.undo_hold == "settled"
     assert world.undo_approval_decision(held, undone_by="ben", within_seconds=300) == "too_late"
 

@@ -1547,6 +1547,19 @@ def _settled_decision(row, approval_card: Mapping[str, object], risk: str) -> Co
     )
 
 
+# How long the wait keeps trying to settle a decision the database will not
+# take (a write lock held elsewhere) before it falls back as for any other
+# unreadable approval store.
+_SETTLE_RETRY_SECONDS = 60.0
+
+
+def _held_open(row) -> bool:
+    """A decision a waiting task still holds open for undo (not yet settled)."""
+    from ..world_model import APPROVAL_UNDO_OPEN
+
+    return getattr(row, "undo_hold", None) == APPROVAL_UNDO_OPEN
+
+
 def _await_dashboard_decision(
     wm,
     approval_id: int,
@@ -1562,6 +1575,7 @@ def _await_dashboard_decision(
     # extend it (stalling the agent). The decision record below keeps wall time.
     deadline = time.monotonic() + _dashboard_timeout()
     grace = approval_undo_grace_seconds()
+    settle_failing_since = None
     while True:
         try:
             row = wm.get_approval(approval_id)
@@ -1582,12 +1596,21 @@ def _await_dashboard_decision(
                 continue
             # Make the decision final before acting on it: an undo that reads
             # a longer window (another process, a changed setting) is refused
-            # from here on, and one that got in first leaves it pending.
+            # from here on, and one that got in first leaves it pending. Only a
+            # decision whose own window has passed is settled: one made again
+            # after an undo just now waits out its full window.
             try:
-                row = wm.settle_approval_decision(approval_id)
+                row = wm.settle_approval_decision(approval_id, decided_before=time.time() - grace)
             except Exception:
-                return None
-            if row is None or row.status == "pending":
+                # A busy database: the decision stands and stays undoable until
+                # it is settled, so try again rather than refuse what was approved.
+                settle_failing_since = settle_failing_since or time.monotonic()
+                if time.monotonic() - settle_failing_since >= _SETTLE_RETRY_SECONDS:
+                    return None
+                time.sleep(1.0)
+                continue
+            settle_failing_since = None
+            if row is None or row.status == "pending" or _held_open(row):
                 continue
             return _settled_decision(row, approval_card, risk)
         if time.monotonic() >= deadline:

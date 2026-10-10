@@ -505,3 +505,30 @@ def test_a_retry_time_for_a_receipt_no_longer_waiting_is_forgotten(monkeypatch):
         await worker.close()
         assert remembered == {} and idle_scans == 1
     asyncio.run(run())
+
+
+def test_a_recovery_scan_that_failed_is_retried_after_the_retry_period(monkeypatch):
+    # A transient store read error in the start-up scan must not leave the
+    # worker idle with saved messages it never recovers.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
+    journal = DeliveryJournal()
+    journal.admit(IncomingMessage(user_id="person", sender_id="person", text="saved",
+                                  channel=Adapter.name, message_id="1"), external_id="1", account="account")
+    async def run():
+        order = []
+        async def handler(message):
+            order.append(message.text)
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=AsyncMock(return_value="confirmed"))
+        original, scans = worker._oldest_window, []
+        def flaky():
+            scans.append(1)
+            if len(scans) == 1:
+                raise OSError("store read failed")
+            return original()
+        worker._oldest_window = flaky
+        worker.start()
+        await until(lambda: order == ["saved"])
+        await worker.close()
+    asyncio.run(run())

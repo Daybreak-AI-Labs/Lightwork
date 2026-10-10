@@ -1331,7 +1331,7 @@
       if (fresh.schema !== 1 || !Array.isArray(fresh.operations) || JSON.stringify(fresh.selection) !== JSON.stringify(context())) throw new Error('The current record could not be confirmed. Refresh the page and try again.');
       if (previous && previous.context !== fresh.context) {
         clear(formHost); selected = null;
-        document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {bubbles: true}));
+        document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed'));
       }
       catalog = fresh; host.hidden = fresh.operations.length === 0; clear(buttons);
       fresh.operations.forEach(function (item) {
@@ -1595,7 +1595,7 @@
           if (busy || controls.name() === initialSpecialist) return;
           overrideSelection = Object.assign({}, context(), {name: controls.name()});
           generation += 1; cancelRequests(); catalog = null; selected = null; clear(buttons);
-          document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {bubbles: true, detail: {reason: 'selection'}}));
+          document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {detail: {reason: 'selection'}}));
           await openOperation(item.id);
         });
         reloadSpecialist.hidden = true;
@@ -1791,7 +1791,7 @@
         if (!active(started)) return true;
         if (result.context !== catalog.context) {
           clear(formHost); catalog = null; status.textContent = 'Your context changed. Reopen Copilot.';
-          document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {bubbles: true}));
+          document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed'));
           return true;
         }
         if (!result.operation) return false;
@@ -1803,7 +1803,7 @@
   window.addEventListener('pagehide', function () { generation += 1; cancelRequests(); });
   document.addEventListener('lightwork:copilot-selection', function (event) {
     generation += 1; cancelRequests(); overrideSelection = event.detail && event.detail.selection || null; catalog = null; selected = null; clear(formHost); clear(buttons);
-    document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {bubbles: true, detail: {reason: 'selection'}}));
+    document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {detail: {reason: 'selection'}}));
     if (!panel.hidden) refresh();
   });
   if (['/approvals', '/oversight'].includes(window.location.pathname)) window.addEventListener('hashchange', function () {

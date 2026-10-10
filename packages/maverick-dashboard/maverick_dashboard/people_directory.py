@@ -33,6 +33,15 @@ def _known(tenant: str | None, roles: dict[str, str]) -> list[str]:
     return known
 
 
+def _active(principal: str) -> bool:
+    """Not turned off in the company directory (SCIM): such an account can no
+    longer sign in. Unknown to the directory counts as active, as at sign-in;
+    an unreadable directory raises, so nobody is offered."""
+    from .scim_groups import active_for_principal
+
+    return active_for_principal(principal) is not False
+
+
 def may(principal: str, permission: str) -> bool:
     """Whether ``principal`` currently holds ``permission`` in this workspace."""
     from maverick.paths import current_tenant_id_strict
@@ -45,7 +54,7 @@ def may(principal: str, permission: str) -> bool:
     try:
         tenant = current_tenant_id_strict()
         roles = rbac.list_tenant_roles(tenant) if tenant else rbac.list_users()
-        return permission in rbac.permissions_for(_role(principal, tenant, roles))
+        return permission in rbac.permissions_for(_role(principal, tenant, roles)) and _active(principal)
     except Exception:  # noqa: BLE001 -- an unreadable roster offers nobody
         log.warning("people directory unavailable", exc_info=True)
         return False
@@ -72,6 +81,12 @@ def candidates(permission: str, *, limit: int = 200) -> list[dict]:
             continue
         if permission not in rbac.permissions_for(_role(principal, tenant, roles)):
             continue
+        try:
+            if not _active(principal):
+                continue
+        except Exception:  # noqa: BLE001 -- an unreadable directory offers nobody
+            log.warning("people directory unavailable", exc_info=True)
+            return []
         ident = humanize_principal(principal)
         label = f"{ident.name} ({ident.detail})" if ident.detail and ident.detail != "Email" else ident.name
         out[principal] = {"principal": principal, "label": label}

@@ -236,3 +236,50 @@ def test_an_undo_tells_webhook_subscribers(wm, monkeypatch):
     assert undone["record_id"] == str(aid)
     assert undone["payload"]["previous_status"] == "approved" and undone["payload"]["undone_by"] == "u:bob"
     assert "approval.undone" in webhook_events.EVENT_TYPES
+
+
+def _held_and_approved(wm, *, decided_ago):
+    aid, card = __import__("maverick.safety.consent", fromlist=["_park_approval"])._park_approval(
+        wm, "rm-rf", "high", "/tmp/x", "d", "test", None)
+    _decide(wm, aid, "approved")
+    with wm._writing() as conn:
+        conn.execute("UPDATE approvals SET decided_at = ? WHERE id = ?", (time.time() - decided_ago, aid))
+    return aid, card
+
+
+def test_a_settle_the_database_refuses_once_is_retried_not_a_refusal(wm, monkeypatch):
+    from maverick.safety import consent
+
+    monkeypatch.setenv("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "0")
+    aid, card = _held_and_approved(wm, decided_ago=5)
+    real, attempts = wm.settle_approval_decision, []
+
+    def busy_once(approval_id, **kw):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("database is locked")
+        return real(approval_id, **kw)
+
+    monkeypatch.setattr(wm, "settle_approval_decision", busy_once)
+    decision = consent._await_dashboard_decision(wm, aid, card, "high", goal_id=None, withdraw_on_timeout=False)
+    assert decision is not None and decision.granted and len(attempts) == 2
+    assert wm.get_approval(aid).undo_hold == "settled"
+
+
+def test_a_decision_made_again_after_an_undo_waits_out_its_own_window(wm, monkeypatch):
+    # The task read the first decision (its window over), then the person
+    # undid it and decided again before the task settled: the new decision
+    # gets its full window, as its card said.
+    from maverick.safety import consent
+
+    monkeypatch.setenv("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "1.5")
+    aid, card = _held_and_approved(wm, decided_ago=100)
+    stale = wm.get_approval(aid)
+    assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=300) == "undone"
+    _decide(wm, aid, "approved")
+    redecided_at = time.time()
+    reads, real = iter([stale]), wm.get_approval
+    monkeypatch.setattr(wm, "get_approval", lambda approval_id: next(reads, None) or real(approval_id))
+    decision = consent._await_dashboard_decision(wm, aid, card, "high", goal_id=None, withdraw_on_timeout=False)
+    assert decision is not None and decision.granted
+    assert time.time() - redecided_at >= 1.4

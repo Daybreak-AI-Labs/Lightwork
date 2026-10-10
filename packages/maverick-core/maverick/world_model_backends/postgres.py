@@ -4145,14 +4145,14 @@ class PostgresWorldModel:
         row = cur.fetchone()
         return int(row[0]) if row else 0
 
-    def settle_approval_decision(self, approval_id: int):
+    def settle_approval_decision(self, approval_id: int, *, decided_before: float):
         """The waiting task is about to act on this decision (mirrors SQLite; see there)."""
         from ..world_model import APPROVAL_UNDO_OPEN, APPROVAL_UNDO_SETTLED
 
         approval_scope, approval_params = _tenant_scope()
         sql = ("UPDATE approvals SET undo_hold = %s WHERE id = %s AND status <> 'pending' "
-               "AND undo_hold = %s")
-        values: list = [APPROVAL_UNDO_SETTLED, int(approval_id), APPROVAL_UNDO_OPEN]
+               "AND undo_hold = %s AND decided_at <= %s")
+        values: list = [APPROVAL_UNDO_SETTLED, int(approval_id), APPROVAL_UNDO_OPEN, float(decided_before)]
         if approval_scope:
             sql += " AND " + approval_scope
             values += approval_params
