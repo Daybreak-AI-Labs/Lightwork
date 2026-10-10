@@ -52,6 +52,7 @@ def audit_population():
         if (event.get("kind") == "control_plane_action" and event.get("action") == "intent_value.flow_state"
                 and event.get("performed_work_nodes", 0) > 0):
             flows[event.get("run_id")].append({"id": digest(event), "at": event["ts"],
+                "run_id": event.get("run_id"),
                 "kind": "flow_state", "status": event.get("status"),
                 "release_id": event.get("release_id", ""), "revision": event.get("definition_revision", ""),
                 "work_node_count": event["performed_work_nodes"],
@@ -200,7 +201,9 @@ def _flow_rows(output, anchors, goals, flow_audit):
             detected = classify(briefs or definition.name)
         item = output.setdefault(key, _observation(key, run.owner, run.created, detected))
         item["sources"].append({"kind": "flow", "id": run.run_id, "flow_id": run.flow_id,
-                                "revision": run.definition_revision, "at": run.created})
+                                "revision": run.definition_revision, "at": run.created,
+                                "definition_digest": run.definition_digest,
+                                "release_digest": run.release_digest, "release_id": run.release_id})
         item["flow_runs"].append(run.run_id)
         item["processes"].append(run.flow_id)
         item["last_observed_at"] = max(item["last_observed_at"], run.created)

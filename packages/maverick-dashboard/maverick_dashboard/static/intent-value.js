@@ -4,7 +4,7 @@
   const $ = id => document.getElementById(id);
   if (!$('iv-app')) return;
   const api = '/api/v1/intent-value';
-  let report, settings, benchmarks = [], selectedBenchmark, detail, proposals = [], external, selectedMetric = '', generation = 0, detailGeneration = 0;
+  let report, settings, benchmarks = [], selectedBenchmark, detail, proposals = [], recommendationNotice = '', external, selectedMetric = '', generation = 0, detailGeneration = 0;
   const money = (value, currency) => value == null || !currency ? 'Unavailable' :
     new Intl.NumberFormat(undefined, {style: 'currency', currency, maximumFractionDigits: 2}).format(value);
   const costs = values => Object.entries(values || {}).map(([unit, value]) => money(value, unit)).join(', ') || 'No known cost records';
@@ -45,6 +45,7 @@
       ]);
       if (version !== generation) return;
       report = metrics; settings = config; benchmarks = defaults.benchmarks; proposals = suggestions.opportunities; external = suggestions.external_observations;
+      recommendationNotice = suggestions.recommendations_enabled === false ? suggestions.notice : '';
       render(); $('iv-report').hidden = false;
       $('iv-status').textContent = 'Current ' + (report.scope === 'company' ? 'company' : 'personal') + ' report, checked ' + new Date(report.checked_at * 1000).toLocaleString() + '.';
     } catch (err) { if (version === generation) { $('iv-status').textContent = 'Report unavailable; no zero-value claim was made.'; error(err); } }
@@ -96,7 +97,7 @@
         node('p', row.current_evidence.observed_count + ' distinct work items · ' + row.current_evidence.executed_count + ' with execution evidence · ' + row.status),
         button('Review opportunity', () => openOpportunity(row))); return card;
     }));
-    if (!proposals.length) $('iv-opportunities').append(node('p', 'No current suggestions. Recognizable observed work creates opportunities; repeatable audited results can support reusable drafts.'));
+    if (!proposals.length) $('iv-opportunities').append(node('p', recommendationNotice || 'No current suggestions. Recognizable observed work creates opportunities; repeatable audited results can support reusable drafts.'));
     $('iv-external').replaceChildren(node('p', external.notice));
     external.patterns.forEach(pattern => {
       const card = node('article', null, 'iv-opportunity');

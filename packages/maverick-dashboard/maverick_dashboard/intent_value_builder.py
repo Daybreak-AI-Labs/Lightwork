@@ -7,8 +7,7 @@ from urllib.parse import quote
 from fastapi import HTTPException
 from maverick.flow import Flow, store
 from maverick.governed_operations import digest
-from maverick.intent_value import opportunities
-from maverick.intent_value.settings import policy
+from maverick.intent_value import opportunities, workflow_evidence
 from maverick.privacy_ops import RecordConflict
 
 from . import auth
@@ -37,7 +36,7 @@ def plan(recommendation):
 
 
 def build(request, identifier, expected_revision):
-    from .api import _require_flows, save_flow_endpoint
+    from .api import _require_flows, _save_flow_definition
     from .api_schemas import FlowSaveIn
     from .intent_value_api import capabilities, recommendation, records
 
@@ -50,8 +49,6 @@ def build(request, identifier, expected_revision):
         if draft is None or draft.owner != current["owner"] or draft.revision != current["draft_revision"]:
             raise HTTPException(409, "The original draft was removed or replaced. Review its history before creating another.")
         return _result(current)
-    if not policy()["recommendations"]:
-        raise HTTPException(403, "Reusable-work recommendations are turned off. An administrator can review this setting.")
     if not current.get("draft_id"):
         if current["revision"] != expected_revision:
             raise RecordConflict("recommendation changed")
@@ -77,8 +74,11 @@ def build(request, identifier, expected_revision):
     payload = current["draft_plan"]
     existing = store.load_flow(current["draft_id"])
     if existing is None:
-        saved = save_flow_endpoint(request, FlowSaveIn(flow=payload))
+        recommendation(request, identifier, write=True)
+        saved = _save_flow_definition(request, FlowSaveIn(flow=payload),
+            effect_guard=lambda: recommendation(request, identifier, write=True))
         revision = saved["revision"]
+        version = saved["version"]
     else:
         # Crash recovery after native save but before the linkage receipt.
         expected = Flow.from_dict(payload)
@@ -87,11 +87,18 @@ def build(request, identifier, expected_revision):
         if existing.owner != current["owner"] or digest(existing.to_dict()) != digest(expected.to_dict()):
             raise HTTPException(409, "The reserved draft changed before linkage was recorded. Review the original draft in Workflows.")
         revision = existing.revision
+        version = existing.version
+    binding = workflow_evidence.bind(current["draft_id"], version=version, revision=revision)
+    binding["allow_draft_edits"] = True
+    def guard():
+        recommendation(request, identifier, write=True)
+        workflow_evidence.current(binding)
     def finish(row):
-        row.update(draft_revision=revision, status="draft")
-    current = opportunities.RECOMMENDATIONS.update(identifier, finish, expected_revision=current["revision"],
-        action="intent_value.draft_created", actor=auth.caller_principal(request) or "local",
-        effect_guard=lambda: recommendation(request, identifier, write=True))
+        row.update(draft_revision=revision, draft_binding=binding, status="draft")
+    with workflow_evidence.selection_guard(binding):
+        current = opportunities.RECOMMENDATIONS.update(identifier, finish, expected_revision=current["revision"],
+            action="intent_value.draft_created", actor=auth.caller_principal(request) or "local",
+            effect_guard=guard)
     return _result(current)
 
 

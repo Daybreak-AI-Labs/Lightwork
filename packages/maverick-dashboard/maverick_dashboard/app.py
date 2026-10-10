@@ -11574,6 +11574,7 @@ async def chat_send(
     task_model_guard = task_ai_guard(request, task_selection, task_model_context)
     specialist_guard = published_guard(request, chosen_specialist, specialist_context, specialist_revision) if chosen_specialist else None
     def start_guard():
+        validate_opportunity(request, value_opportunity)
         task_model_guard()
         if specialist_guard is not None:
             specialist_guard()

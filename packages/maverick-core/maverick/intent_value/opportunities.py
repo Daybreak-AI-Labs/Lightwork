@@ -19,6 +19,8 @@ RECOMMENDATIONS = GovernedRecordStore("intent_value_recommendations", "IVR", "in
 
 
 def evaluate(records, *, owner, capabilities):
+    if not policy()["enabled"] or not policy()["recommendations"]:
+        return []
     groups = defaultdict(list)
     for row in records:
         if row["owner"] == owner and not row.get("deleted") and not row.get("_audit_pending"):
@@ -36,7 +38,7 @@ def evaluate(records, *, owner, capabilities):
         supported = len(executed) >= 2 and all(row["estimates"][-1]["state"] == "estimated" for row in executed)
         estimate = _forecast(rows, executed)
         plausible = estimate["incremental_net_per_run"] is not None and estimate["incremental_net_per_run"] > 0
-        ready = repeatable and supported and plausible and policy()["recommendations"]
+        ready = repeatable and supported and plausible
         if not ready and candidate is None:
             # An observed opportunity remains actionable through Chat and
             # correction even before a reusable automation is justified.
@@ -72,14 +74,22 @@ def evaluate(records, *, owner, capabilities):
         current = RECOMMENDATIONS.get(identifier_rec)
         if current is None:
             try:
-                current = RECOMMENDATIONS.create(proposal, action="intent_value.recommended", actor="system")
+                current = RECOMMENDATIONS.create(proposal, action="intent_value.recommended", actor="system",
+                                                 effect_guard=require_recommendations)
             except RecordConflict:
                 current = RECOMMENDATIONS.get(identifier_rec)
         current = _advance(current, proposal, records)
         out.append({**current, "current_evidence": {"observed_count": len(rows), "executed_count": len(executed),
             "work_ids": proposal["work_ids"], "draft_supported": proposal["draft_supported"],
             "capability": candidate, "reason": reason, "potential": _potential(rows)}})
+    require_recommendations()
     return out
+
+
+def require_recommendations():
+    effective = policy()
+    if not effective["enabled"] or not effective["recommendations"]:
+        raise PermissionError("Reusable-work recommendations are turned off. An administrator can review this setting.")
 
 
 def _advance(current, proposal, records):
@@ -109,7 +119,8 @@ def _advance(current, proposal, records):
                 "qualification": "Latest linked outcomes inform future cost planning; labor forecast remains unvalidated."}
     try:
         return RECOMMENDATIONS.update(current["id"], update, expected_revision=current["revision"],
-                                       action="intent_value.recommendation_evidence", actor="system")
+                                       action="intent_value.recommendation_evidence", actor="system",
+                                       effect_guard=require_recommendations)
     except RecordConflict:
         return RECOMMENDATIONS.get(current["id"])
 
@@ -161,28 +172,63 @@ def decide(identifier, *, decision, expected_revision, actor, manual_steps, guar
 
 def outcome(recommendation, records):
     from ..flow import store
+    from . import workflow_evidence
 
     adopted = recommendation.get("adopted_capability") or {}
-    draft_id = recommendation.get("draft_id") or (adopted.get("id") if adopted.get("kind") == "process" else None)
+    draft_id = adopted.get("id") if adopted.get("kind") == "process" else recommendation.get("draft_id")
     if not draft_id:
         rows = [row for row in records if set(row["source"]["goal_ids"]) & set(recommendation.get("linked_goal_ids", []))]
         if not rows:
             return {"state": "not_adopted", "runs": [], "message": "No linked capability has been adopted and executed."}
         return _outcome_rows(recommendation, rows, published=True)
-    revision = recommendation.get("draft_revision") or adopted.get("revision")
-    draft = store.load_flow(draft_id)
-    if draft is None or draft.revision != revision:
-        return {"state": "source_unavailable", "runs": [], "message": "The original draft was removed or replaced."}
-    published = store.load_published_bundle(draft_id)
-    rows = [row for row in records if draft_id in row["source"]["processes"]
-            and any(source.get("revision") == revision for source in row["source"]["sources"])
-            and row["source"]["observed_at"] >= recommendation.get("adopted_at", 0)
-            and row["owner"] == recommendation["owner"] and not row.get("deleted")]
-    return _outcome_rows(recommendation, rows, published=published)
+    binding = adopted.get("workflow_binding") if adopted.get("kind") == "process" else recommendation.get("draft_binding")
+    if not binding:
+        return {"state": "source_unavailable", "runs": [],
+                "message": "This earlier selection has no exact workflow evidence. Review and select the workflow again to link future outcomes; prior work remains in platform totals."}
+    definition = store.load_flow_snapshot(binding["definition_digest"])
+    if definition.id != draft_id or definition.owner != recommendation["owner"]:
+        return {"state": "source_unavailable", "runs": [], "message": "The selected workflow evidence is unavailable."}
+    release = _release_evidence(recommendation, binding)
+    rows = [row for row in records if release and row["owner"] == recommendation["owner"]
+            and not row.get("deleted") and not row.get("_audit_pending") and workflow_evidence.matches(row, release)]
+    result = _outcome_rows(recommendation, rows, published=release)
+    result["release_binding"] = release
+    if not release:
+        result["message"] = "The selected workflow definition has not been observed as published. Publish that reviewed definition, or review and select the edited workflow again."
+    return result
+
+
+def _release_evidence(recommendation, binding):
+    """Pin the first observed publication before even a metric read converts work.
+
+    This retains evidence of an explicit native publication, including while
+    suggestions are disabled; it does not offer or activate a recommendation.
+    Capture flow evidence before the record CAS to preserve lock ordering.
+    """
+    from . import workflow_evidence
+
+    previous = recommendation.get("workflow_release") or recommendation.get("outcome_feedback", {}).get("release_binding")
+    release = workflow_evidence.release_for(binding, previous)
+    if not release or binding.get("release_id") or recommendation.get("workflow_release") == release:
+        return release
+    try:
+        current = RECOMMENDATIONS.update(recommendation["id"], lambda row: row.update(workflow_release=release),
+            expected_revision=recommendation["revision"], action="intent_value.workflow_publication_observed", actor="system")
+    except RecordConflict:
+        current = RECOMMENDATIONS.get(recommendation["id"])
+    if not current or current.get("_audit_pending"):
+        return None
+    # A racing selection must not receive the previous selection's credit.
+    adopted = current.get("adopted_capability") or {}
+    selected = adopted.get("workflow_binding") if adopted.get("kind") == "process" else current.get("draft_binding")
+    if selected != binding:
+        return None
+    pinned = current.get("workflow_release")
+    return pinned if pinned and pinned.get("selection") == binding else None
 
 
 def _outcome_rows(recommendation, rows, *, published):
-    performed = [row for row in rows if row["source"]["performed_at"] is not None]
+    performed = [row for row in rows if row["source"]["performed_at"] is not None and not row["source"].get("partial_execution")]
     baseline = recommendation["forecast"].get("execution_cost_per_run")
     currency = recommendation["forecast"]["currency"]
     observed_currencies = {cost["currency"] for row in rows for cost in row["source"]["costs"]}
@@ -192,6 +238,7 @@ def _outcome_rows(recommendation, rows, *, published):
     mean = comparison["after_known_cost_per_run"]
     return {"state": "executed" if performed else "adopted" if published else "draft",
             "runs": [{"work_id": row["id"], "evidence_count": len(row["source"]["evidence"]),
+                      "performed": row in performed,
                       "estimated_gross": row["estimates"][-1]["gross"], "costs": row["source"]["costs"]} for row in rows],
             "observed_runs": len(performed), "prior_known_cost_per_run": baseline,
             "currency": currency,
@@ -239,7 +286,7 @@ def conversions(records):
         if proposal.get("_audit_pending"):
             continue
         result = outcome(proposal, records)
-        targets = [run["work_id"] for run in result["runs"] if run["evidence_count"] and run["work_id"] not in assigned]
+        targets = [run["work_id"] for run in result["runs"] if run["performed"] and run["work_id"] not in assigned]
         original = [indexed[identifier] for identifier in proposal["work_ids"] if identifier in indexed
                     and proposal["intent"] in indexed[identifier]["intents"]
                     and indexed[identifier]["source"]["performed_at"] is None and not indexed[identifier].get("converted_to")]

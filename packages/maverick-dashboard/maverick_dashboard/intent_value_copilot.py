@@ -209,8 +209,10 @@ def _answer(request, message, page, token, permissions):
         reply += (" Agent contributions by estimated gross labor value: " + "; ".join(
             row.get("label", row["id"]) + " " + _money(row["gross_estimated_labor_value"], row["currency"]) for row in entries[:5]) + ". Contributions overlap and are not additive.") if entries else " No attributed agent contributions are available in this scope."
     if "save more" in normalized or "improve" in normalized:
-        proposals = opportunities_endpoint(request)["opportunities"]
-        reply += (f" There are {len(proposals)} suggestions for your accessible work. " +
+        suggestions = opportunities_endpoint(request)
+        proposals = suggestions["opportunities"]
+        reply += (" " + suggestions["notice"] if not suggestions["recommendations_enabled"] else
+                  f" There are {len(proposals)} suggestions for your accessible work. " +
                   (proposals[0]["label"] + ": " + proposals[0]["current_evidence"]["reason"] if proposals else "More identifiable work and completed examples are needed."))
     href = "/work-value?" + urlencode(query)
     return {"reply": reply, "mode": "live", "source": "Work value: shared metric service",
