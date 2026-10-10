@@ -82,10 +82,10 @@ def refresh(world):
         elif current["source"]["source_digest"] != source["source_digest"] or current.get("deleted"):
             def update(row, source=source, classified=classified):
                 row.update(source=source, deleted=False)
-                if not row["corrected"] and classified["intents"] and _classification_changed(row, classified):
+                if not row["corrected"] and _classification_changed(row, classified):
                     row.update(intents=classified["intents"], classification=classified)
                     row["label"] = _label(row["intents"])
-                    _snapshot(row, reason="Requested intent became identifiable or explicitly changed", actor="system", refresh_assumptions=True)
+                    _snapshot(row, reason="Requested activity or scope changed", actor="system", refresh_assumptions=True)
                 else:
                     _snapshot(row, reason="Execution or observation evidence updated; assumptions retained", actor="system")
             try:

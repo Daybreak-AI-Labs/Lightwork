@@ -366,6 +366,22 @@ def test_first_ingestion_uses_audited_request_before_later_task_rename(world):
     assert after["totals"]["gross_estimated_labor_value"] > first["totals"]["gross_estimated_labor_value"]
 
 
+@pytest.mark.parametrize("previously_performed", [False, True])
+def test_unknown_executed_request_cannot_inherit_an_earlier_intent(world, previously_performed):
+    identifier = goal(world, performed=previously_performed)
+    original = copy.deepcopy(service.refresh(world)[0]["estimates"][0])
+    world.set_goal_title(identifier, "Help with this")
+    audit.audit_event("goal_start", goal_id=identifier, agent="orchestrator", title="Help with this", description="")
+    audit.audit_event("goal_end", goal_id=identifier, agent="orchestrator", status="succeeded")
+    after = report(world)
+    assert after["rows"][0]["intents"] == []
+    assert after["totals"]["performed_work"] == after["totals"]["unvalued_work"] == 1
+    assert after["totals"]["gross_estimated_labor_value"] == 0
+    assert after["totals"]["known_execution_costs"] == {"USD": 2}
+    assert after["totals"]["net_estimated_benefit"] is None
+    assert service.WORKS.get(after["rows"][0]["id"])["estimates"][0] == original
+
+
 def test_multiple_explicit_deliverables_preserve_count_and_component_overlap(world):
     goal(world, "Draft two RFPs and review those two RFPs")
     result = report(world)
