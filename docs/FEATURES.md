@@ -3142,10 +3142,10 @@ behind an injected seam so the session logic is fully offline-tested; the
 heavy voice binding (discord.py voice + PyNaCl) plugs into the same seam.
 **KaTeX/Mermaid rich render** (`rich_render.py`, opt-in
 `[channels] rich_render`): replies carrying display math or ```mermaid fences
-are rendered into a standalone HTML artifact (KaTeX/Mermaid in-page, escaped
-`<pre>` source as the no-JS fallback) under `data_dir("rich_render/")`;
-`RichRenderChannel` wraps any adapter — an injectable `deliver` hook ships the
-file on platforms that can, otherwise the path is appended — and plain
+are rendered into a standalone HTML page (KaTeX/Mermaid in-page, escaped
+`<pre>` source as the no-JS fallback) that `channel_reply_results.prepare_reply`
+attaches to the saved reply on chats that can send files (Slack, Telegram);
+elsewhere the reply says a rendered copy cannot be attached, and plain
 messages pass through byte-identical. **Channel SDK v2** (RFC 0001 C2,
 `base.py`): handlers may return a structured `Reply` (text + attachments +
 thread_ref) instead of bare `str` — `as_reply` is the v1 shim (bare `str`

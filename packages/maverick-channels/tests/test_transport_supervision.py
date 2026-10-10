@@ -462,3 +462,46 @@ def test_the_oldest_window_scan_stops_at_the_wrap_when_the_first_record_is_gone(
     worker.journal = SimpleNamespace(store=Store(), get=lambda record_id: rows.get(record_id))
     selected, more = worker._oldest_window()
     assert selected == ["a", "b", "c", "d", "e"] and more is False
+
+
+def test_an_idle_worker_does_not_reread_every_receipt_each_retry_period(monkeypatch):
+    # Every idle timeout re-read and decrypted every saved receipt, about
+    # 20,000 reads every 30 seconds per worker at the default intake size.
+    # With nothing waiting on a retry, the worker now stays idle.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
+    async def run():
+        worker = TransportWorker(Adapter(AsyncMock(return_value="answer")), account="account",
+                                 authorize=lambda msg: True, send=AsyncMock(return_value="confirmed"))
+        scans = []
+        original = worker._oldest_window
+        def counted():
+            scans.append(1)
+            return original()
+        worker._oldest_window = counted
+        worker.start()
+        await asyncio.sleep(0.3)
+        idle_scans = len(scans)
+        await worker.close()
+        assert idle_scans == 1  # the start-up recovery scan only
+    asyncio.run(run())
+
+
+def test_a_retry_time_for_a_receipt_no_longer_waiting_is_forgotten(monkeypatch):
+    # Otherwise one finished or removed receipt would keep the idle worker
+    # rescanning every retry period forever.
+    import time as clock
+
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
+    async def run():
+        worker = TransportWorker(Adapter(AsyncMock(return_value="answer")), account="account",
+                                 authorize=lambda msg: True, send=AsyncMock(return_value="confirmed"))
+        worker._retry_after["chd-gone"] = clock.monotonic() + 3600
+        scans = []
+        original = worker._oldest_window
+        worker._oldest_window = lambda: scans.append(1) or original()
+        worker.start()
+        await asyncio.sleep(0.3)
+        idle_scans, remembered = len(scans), dict(worker._retry_after)
+        await worker.close()
+        assert remembered == {} and idle_scans == 1
+    asyncio.run(run())

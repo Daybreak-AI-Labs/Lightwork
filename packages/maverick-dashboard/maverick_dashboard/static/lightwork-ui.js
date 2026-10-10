@@ -32,6 +32,13 @@
         var content = document.querySelector('main') || document.body;
         content.insertBefore(notice, content.firstChild);
         window.dispatchEvent(new CustomEvent('lightwork:context-changed'));
+        // Pages clear what they showed for the previous workspace or account
+        // on these. Sent from document and bubbling, so listeners on document
+        // and on window both hear them.
+        ['lightwork:workspace-changed', 'lightwork:account-context-changed', 'lightwork:authority-changed',
+         'lightwork:draft-context-changed', 'lightwork:copilot-context-changed'].forEach(function (name) {
+          document.dispatchEvent(new CustomEvent(name, {bubbles: true}));
+        });
       }
       window.addEventListener('storage', function (event) {
         if (event.key === 'lightwork-workspace-changed') invalidateWorkspace();

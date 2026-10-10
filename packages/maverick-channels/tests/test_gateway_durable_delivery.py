@@ -519,3 +519,27 @@ def test_a_slack_thread_reply_is_admitted_only_where_the_bot_was_asked(monkeypat
     row = journal.get(_record_id("slack", "team:bot", "room:400.2"))
     assert row is not None and row["message"]["question_reply_only"] is True
     assert row["route"]["files"] == [] and row["message"]["text"] == "chatting"
+
+
+def test_a_live_telegram_reply_uploads_its_saved_files(monkeypatch):
+    # The live path sent only the text; the saved output files (and the
+    # rendered page the text says is attached) went out only on recovery,
+    # which never runs once the reply is marked delivered.
+    import hashlib
+
+    from maverick_channels.base import Reply
+
+    data = b"quarterly totals\n"
+    async def handler(msg):
+        msg._channel_reply_material = {"source": None, "files": [{
+            "filename": "report.txt", "mime": "text/plain", "data": data,
+            "sha256": hashlib.sha256(data).hexdigest(), "source": {"kind": "artifact"}}]}
+        return Reply("Your report is attached.", attachments=["report.txt"])
+
+    channel, update = _telegram(monkeypatch, handler)
+    channel._app = NS(bot=NS(send_document=AsyncMock(return_value=NS(message_id=10))))
+    row = asyncio.run(channel._on_message(update, None))
+    update.message.reply_text.assert_awaited()
+    sent = channel._app.bot.send_document.call_args.kwargs
+    assert sent["chat_id"] == -77 and sent["filename"] == "report.txt" and sent["reply_to_message_id"] == 5
+    assert row["delivery"] == "delivered" and row["chunks"]["file-0"]["state"] == "delivered"

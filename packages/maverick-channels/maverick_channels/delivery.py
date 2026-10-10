@@ -393,7 +393,7 @@ class DeliveryJournal:
                     ) from exc
                 except RecordConflict:
                     row = self.get(record_id)
-        if not row or row["fingerprint"] != fingerprint:
+        if not row or row["fingerprint"] not in (fingerprint, _earlier_fingerprint(payload, route)):
             raise ValueError("Channel message identity already belongs to different content or routing")
         if row.get("restore_hold"):
             return row
@@ -482,8 +482,7 @@ class DeliveryJournal:
         from maverick.privacy_ops import RecordConflict
 
         if (not row or row.get("restore_hold") or row.get("question_watch")
-                or row["execution"] != "completed"
-                or row["delivery"] != "delivered"):
+                or row["execution"] != "completed" or not _settled(row)):
             return False
         if row.get("compacted") and row.get("cleanup_pending") == []:
             if row["updated_at"] > now - TOMBSTONE_SECONDS:
@@ -519,6 +518,27 @@ async def admit_message(msg, *, external_id, account, authorize, route=None, jou
         raise PermissionError("Channel sender authorization changed")
     journal = journal or DeliveryJournal()
     return await asyncio.to_thread(journal.admit, msg, external_id=external_id, account=account, route=route)
+
+
+# Fields the saved message gained after its first release; at their defaults
+# the message is the one an earlier build saved without them.
+_LATER_FIELDS = {"provider_tenant_id": None, "provider_sender_id": None, "conversation_ref": None,
+                 "question_reply_only": False}
+
+
+def _earlier_fingerprint(payload, route):
+    """The fingerprint an earlier build gave this message, or None."""
+    if any(payload.get(key) != default for key, default in _LATER_FIELDS.items()):
+        return None
+    return _digest([{key: value for key, value in payload.items() if key not in _LATER_FIELDS}, route])
+
+
+def _settled(row):
+    """Delivered, or a phone call's answer. A voice answer goes back in the
+    call's own HTTP response, so its receipt always ends "delivery unknown" and
+    no later send can confirm or repeat it; kept as unresolved, every call's
+    receipt would stay forever and fill the intake all chat apps share."""
+    return row["delivery"] == "delivered" or (row["channel"] == "voice" and row["delivery"] == "delivery_unknown")
 
 
 def _require_reply_source(row):

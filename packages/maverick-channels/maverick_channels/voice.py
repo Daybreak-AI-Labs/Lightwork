@@ -89,6 +89,30 @@ def _retell_request(payload):
     return call_id, caller, source_assistant, requests
 
 
+def _vapi_call(item, nested):
+    """``(call id, spoken request)`` from one Vapi tool call: the nested
+    ``{id, function: {name, arguments}}`` shape of its custom-tools reference
+    or the flat ``{id, name, parameters}`` shape of its events page."""
+    if not isinstance(item, dict):
+        raise ValueError("This function is not supported.")
+    native = item.get("toolCall") if nested else item
+    if not isinstance(native, dict):
+        raise ValueError("The function details are missing.")
+    function = native.get("function")
+    if isinstance(function, dict):
+        name, arguments = function.get("name"), function.get("arguments")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except ValueError:
+                raise ValueError("Use the supported request field for this function.") from None
+    else:
+        name, arguments = item.get("name"), native.get("parameters")
+    if name != FUNCTION_NAME:
+        raise ValueError("This function is not supported.")
+    return _identity(native.get("id")), _arguments(arguments)
+
+
 def parse_request(payload, *, provider, assistant_id, callers):
     """Pure, bounded provider parsing; no caller-authored invocation fallback."""
     if not isinstance(payload, dict):
@@ -116,14 +140,7 @@ def parse_request(payload, *, provider, assistant_id, callers):
         def unpack(items, nested=False):
             if not isinstance(items, list) or not 1 <= len(items) <= 8:
                 raise ValueError("The call must contain one to eight supported requests.")
-            output = []
-            for item in items:
-                if not isinstance(item, dict) or item.get("name") != FUNCTION_NAME:
-                    raise ValueError("This function is not supported.")
-                native = item.get("toolCall") if nested else item
-                if not isinstance(native, dict):
-                    raise ValueError("The function details are missing.")
-                output.append((_identity(native.get("id")), _arguments(native.get("parameters"))))
+            output = [_vapi_call(item, nested) for item in items]
             if len({item[0] for item in output}) != len(output):
                 raise ValueError("The call repeats a function identity.")
             return output
@@ -311,6 +328,7 @@ class VoiceChannel(Channel):
             DeliveryJournal,
             DeliveryUnknown,
             _digest,
+            _earlier_fingerprint,
             _payload,
             _record_id,
             _require_reply_source,
@@ -336,7 +354,7 @@ class VoiceChannel(Channel):
                 # An original read never resumes a received, running or unknown
                 # execution. Changed input cannot borrow its retained identity.
                 material, _ = _payload(message, row["id"])
-                if row["fingerprint"] != _digest([material, route]):
+                if row["fingerprint"] not in (_digest([material, route]), _earlier_fingerprint(material, route)):
                     raise ValueError("The function identity belongs to a different request.")
             else:
                 row = await self.process_message(message, external_id=identity, account=account,

@@ -421,3 +421,26 @@ test("mvFetchJSON adds no second content type beside a lower-case one", async ()
   assert.equal(seen[0].body, JSON.stringify({ a: 1 }));
   w.close();
 });
+
+test("a workspace change in another tab reaches every page's clear-private-data listener", () => {
+  // About 80 pages clear what they showed on workspace, account, authority,
+  // draft or copilot context events, listening on document or window. Only
+  // lightwork:context-changed was ever sent, so none of them cleared anything.
+  const dom = new JSDOM(`<!doctype html><html><head><meta name="lightwork-workspace-tenant" content="owned"></head>
+    <body><div id="mv-toasts"></div><div id="mv-toasts-alert"></div><main id="content"></main></body></html>`,
+  { url: "https://lightwork.test/overview", runScripts: "outside-only" });
+  const w = dom.window;
+  w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  w.fetch = async () => ({ ok: true, status: 200 });
+  w.eval(source);
+  const names = ["lightwork:workspace-changed", "lightwork:account-context-changed", "lightwork:authority-changed",
+    "lightwork:draft-context-changed", "lightwork:copilot-context-changed"];
+  const heard = [];
+  for (const name of names) {
+    w.document.addEventListener(name, () => heard.push("document " + name));
+    w.addEventListener(name, () => heard.push("window " + name));
+  }
+  w.dispatchEvent(new w.StorageEvent("storage", { key: "lightwork-workspace-changed", newValue: "other" }));
+  assert.deepEqual(heard.sort(), names.flatMap(name => ["document " + name, "window " + name]).sort());
+  w.close();
+});
