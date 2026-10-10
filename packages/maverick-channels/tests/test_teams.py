@@ -341,6 +341,31 @@ def test_channel_message_strips_mention_and_ignores_unknown_sender(rsa_key, monk
     assert not ch.handler.await_count
 
 
+def test_without_company_sign_in_a_sender_with_no_entra_id_is_answered(rsa_key, monkeypatch):
+    # The allowlist admits the bot-scoped id when the activity carries no
+    # aadObjectId, but intake compared it with an empty sender id and refused
+    # (503), so Teams redelivered the message forever.
+    ch = _channel(rsa_key, allowed_user_ids=["29:user-scoped"])
+    _claim_ok(monkeypatch)
+    assert _post(ch, rsa_key, _message("plan the launch", aad="", activity_id="bot-scoped")).status_code == 200
+    assert ch.handler.await_args.args[0].text == "plan the launch"
+
+
+def test_a_signing_key_fetch_failure_is_a_refusal_not_a_server_error(rsa_key):
+    # Network errors, error statuses and malformed keys escaped as 500s.
+    def unreachable(url):
+        raise ConnectionError("login.botframework.com timed out")
+
+    with pytest.raises(TeamsAuthError, match="could not be fetched"):
+        verify_bot_token(_token(rsa_key), app_id=APP_ID, keys=SigningKeys(fetch_json=unreachable))
+    broken = SigningKeys(jwks={"keys": [{"kid": "k1", "kty": "RSA", "n": "not-a-modulus", "e": "AQAB"}]})
+    with pytest.raises(TeamsAuthError, match="unusable"):
+        verify_bot_token(_token(rsa_key, kid="k1"), app_id=APP_ID, keys=broken)
+    ch = _channel(rsa_key, keys=SigningKeys(fetch_json=unreachable))
+    assert _post(ch, rsa_key, _message("hello", activity_id="keys-down")).status_code == 403
+    ch.handler.assert_not_called()
+
+
 def test_handler_error_reply_is_redacted(rsa_key, monkeypatch):
     secret = "boom token=sk-SECRET"  # pragma: allowlist secret
     ch = _channel(rsa_key, handler=AsyncMock(side_effect=RuntimeError(secret)))

@@ -121,7 +121,11 @@ def queued_channel_question(watch: dict, msg, account_sha256: str) -> tuple[str 
             goal_id = watch.get("goal_id")
             goal = world.get_goal(goal_id)
             if goal is None or goal.owner != owner or goal.execution_principal != execution_principal:
-                return None, False
+                # The sender's identity matched above, so this is about the task
+                # itself: erased, or now someone else's. It can never ask this
+                # sender anything again; a kept watch would hold its intake
+                # record (never compacted) and every recovery pass forever.
+                return None, True
             questions = [
                 q for q in world.open_channel_questions(
                     watch["conversation_id"], owner, execution_principal,

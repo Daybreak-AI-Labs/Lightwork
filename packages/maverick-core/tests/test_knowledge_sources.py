@@ -157,3 +157,25 @@ def test_a_full_ledger_archives_its_oldest_receipt_and_admits_the_refresh(servic
     # The older receipt is kept and readable; it no longer counts against the cap.
     assert native.JOB_STORE.get("KNJ-" + "0" * 32)["state"] == "completed"
     assert native.JOB_STORE.count() == 1
+
+
+def test_a_queued_refresh_refused_before_it_starts_is_withheld_and_backs_off(service):
+    # Its permit expired (or changed, or the owner lost authority): run()
+    # refuses before queued -> running. It stayed queued and claimed the source
+    # forever, retried every worker cycle, with the schedule stuck behind it.
+    prepared, before = _prepared(service, 3600)
+    job = service.start(prepared, "6" * 32)
+    job = service.jobs.get(job["id"])
+    service.jobs.update(job["id"], lambda row: row.update(deadline=time.time() - 1),
+                        expected_revision=job["revision"], action="test.expire", actor=OWNER)
+    expired = service.jobs.get(job["id"])
+    with pytest.raises(PermissionError) as refused:
+        service.run(expired["id"])
+    native.KnowledgeSources.withhold_queued(expired, refused.value)
+    assert service.jobs.get(job["id"])["state"] == "withheld"
+    row = service.sources.get(before["id"])
+    assert row["active_job"] is None and row["state"] == "withheld"
+    assert row["next_refresh"] >= time.time() + 3600 - 60
+    # Only a job that is still queued is changed.
+    with pytest.raises(native.RecordConflict):
+        native.KnowledgeSources.withhold_queued(expired, refused.value)

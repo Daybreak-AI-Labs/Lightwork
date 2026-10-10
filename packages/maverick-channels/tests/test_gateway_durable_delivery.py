@@ -490,3 +490,32 @@ def test_imessage_poll_materializes_one_bounded_batch(monkeypatch, tmp_path):
     assert len(batch) == 256 and batch[-1][2] == 256
     channel._last_rowid = batch[-1][2]
     assert len(channel._fetch_new()) == 251
+
+
+def test_a_slack_thread_reply_is_admitted_only_where_the_bot_was_asked(monkeypatch):
+    # Every allowlisted thread reply in any room the bot is in was stored, with
+    # its files, filling the intake with conversations not meant for Lightwork.
+    from maverick_channels.delivery import _record_id
+
+    handled = []
+
+    async def handler(msg):
+        handled.append(msg.text)
+        return "noted"
+
+    channel, client, _request = _slack(monkeypatch, handler)
+    attachment = {"id": "F1", "name": "notes.pdf", "url_private": "https://files.slack.com/F1"}
+
+    def event(ts, **fields):
+        return NS(type="events_api", envelope_id="env-" + ts, payload={"team_id": "team", "event": {
+            "type": "message", "user": "human", "channel": "room", "channel_type": "channel",
+            "ts": ts, "text": "chatting", **fields}})
+
+    journal = DeliveryJournal()
+    asyncio.run(channel._on_request(client, event("300.2", thread_ts="300.1", files=[attachment])))
+    assert journal.get(_record_id("slack", "team:bot", "room:300.2")) is None and handled == []
+    asyncio.run(channel._on_request(client, event("400.1", type="app_mention", text="prepare the report")))
+    asyncio.run(channel._on_request(client, event("400.2", thread_ts="400.1", files=[attachment])))
+    row = journal.get(_record_id("slack", "team:bot", "room:400.2"))
+    assert row is not None and row["message"]["question_reply_only"] is True
+    assert row["route"]["files"] == [] and row["message"]["text"] == "chatting"

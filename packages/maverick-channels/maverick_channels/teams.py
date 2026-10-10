@@ -204,11 +204,19 @@ class SigningKeys:
         if now < self._last_attempt + KEYS_REFRESH_COOLDOWN:
             raise TeamsAuthError("signing key refresh is temporarily unavailable")
         self._last_attempt = now
-        metadata = self._fetch(self._metadata_url)
-        uri = str((metadata or {}).get("jwks_uri") or "")
-        if urlsplit(uri).scheme != "https":
-            raise TeamsAuthError("Bot Framework OpenID metadata has no https jwks_uri")
-        self._store(self._fetch(uri))
+        try:
+            metadata = self._fetch(self._metadata_url)
+            uri = str((metadata or {}).get("jwks_uri") or "")
+            if urlsplit(uri).scheme != "https":
+                raise TeamsAuthError("Bot Framework OpenID metadata has no https jwks_uri")
+            self._store(self._fetch(uri))
+        except TeamsAuthError:
+            raise
+        except Exception as exc:
+            # A network failure, an error status or a malformed document: the
+            # request cannot be verified now and is refused, as during the
+            # refresh cooldown, never left as an unhandled server error.
+            raise TeamsAuthError(f"signing keys could not be fetched ({type(exc).__name__})") from exc
 
     def key_for(self, kid: str, *, required_endorsement: str | None = None):
         import jwt
@@ -225,7 +233,10 @@ class SigningKeys:
                 if (not isinstance(endorsements, list)
                         or required_endorsement not in endorsements):
                     raise TeamsAuthError("signing key is not endorsed for this channel")
-            return jwt.PyJWK(jwk).key
+            try:
+                return jwt.PyJWK(jwk).key
+            except (jwt.PyJWTError, ValueError, TypeError, KeyError) as exc:
+                raise TeamsAuthError("signing key is unusable") from exc
 
 
 def verify_bot_token(token: str, *, app_id: str, keys: SigningKeys,
@@ -655,7 +666,10 @@ class TeamsChannel(Channel):
         msg = IncomingMessage(user_id=parsed.conversation_id, text=parsed.text, channel=self.name,
                               sender_id=parsed.principal_key, message_id=parsed.activity_id,
                               provider_tenant_id=parsed.tenant_id,
-                              provider_sender_id=parsed.sender_aad)
+                              # The identity _sender_allowed admitted: the
+                              # Entra id, or the bot-scoped id when company
+                              # sign-in is off and the activity has none.
+                              provider_sender_id=parsed.principal_key)
         account = self.app_id
         route = {"service_url": parsed.service_url, "reply_to": parsed.activity_id}
         if (parsed.conversation_type == "personal"

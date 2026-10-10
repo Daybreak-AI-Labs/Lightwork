@@ -1339,8 +1339,6 @@ async def delete_tenant(
     if existing is None:
         if not tenant_registry.tenant_retired(tenant_id):
             raise HTTPException(status_code=404, detail="workspace not found")
-        if purge:
-            raise HTTPException(status_code=409, detail="Removed workspaces cannot be erased by retrying Remove.")
     else:
         if os.environ.get("MAVERICK_TENANT", "").strip() == tenant_id:
             raise HTTPException(status_code=409, detail=(
@@ -1390,12 +1388,24 @@ async def restore_tenant(request: Request, tenant_id: str) -> TenantOut:
         workspace_tenants.clear_tenant_selections(tenant_id)
         rec = tenant_registry.restore_tenant(tenant_id)
     except ValueError as exc:
+        await _record_restore_failure(request, tenant_id, "refused")
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
+        await _record_restore_failure(request, tenant_id, "not_confirmed")
         raise HTTPException(status_code=503, detail=(
             "Workspace recovery could not be confirmed. The records remain closed; refresh and retry."
         )) from exc
     return _to_tenant_out(rec)
+
+
+async def _record_restore_failure(request: Request, tenant_id: str, outcome: str) -> None:
+    """A restore is recorded before it runs (it grants access); when it then
+    fails, the same log says so, so it never shows a restore that did not
+    happen. Best effort: an audit outage must not hide the failure itself."""
+    try:
+        await _audit_tenant_change(request, "tenant_restore_failed", tenant_id, outcome=outcome)
+    except Exception:  # noqa: BLE001
+        log.warning("workspace restore failure could not be recorded for %s", tenant_id)
 
 
 # Per-tenant RBAC: a principal can hold a different role in each tenant. These
