@@ -126,3 +126,22 @@ test('recommendation to explicit publish, native approved execution, outcomes an
   await expect(page.getByRole('button',{name:'Inspect adopted work and costs'})).toBeVisible();
   expect((await (await request.get('/__browser_fixture/intent-value-execution')).json()).provider_calls).toBe(1);
 });
+
+test('revoked access closes an open explanation and permits an authorized retry',async({page,context})=>{
+  await page.goto('/work-value');
+  await expect(page.locator('#iv-report')).toBeVisible();
+  await page.locator('#iv-work button').first().click();
+  const dialog=page.locator('#iv-detail');
+  await expect(dialog.getByRole('button',{name:'Recalculate with current benchmarks',exact:true})).toBeVisible();
+  await expect(page.locator('#iv-detail-body')).toContainText('Version 1:');
+  const route='**/api/v1/intent-value/work/*/recalculate';
+  await context.route(route,request=>request.fulfill({status:403,contentType:'application/json',body:JSON.stringify({detail:'Access to this workspace was revoked.'})}));
+  await dialog.getByRole('button',{name:'Recalculate with current benchmarks',exact:true}).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('#iv-detail-body')).toBeEmpty();
+  await expect(page.locator('#iv-report')).toBeHidden();
+  await expect(page.locator('#iv-error')).toContainText('revoked');
+  await context.unroute(route);
+  await page.getByRole('button',{name:'Retry loading'}).click();
+  await expect(page.locator('#iv-report')).toBeVisible();
+});

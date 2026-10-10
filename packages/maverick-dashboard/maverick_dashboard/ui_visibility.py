@@ -1734,7 +1734,7 @@ AREAS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
                                           "AI risk", "Vendors")),
     ("Evidence & audit", "/audit", ("Activity log", "Task replay", "Trust receipts", "Learning history",
                                     "Document vault", "Content access")),
-    ("Costs & value", "/spend", ("Spend", "Savings", "Billing", "Budget", "Provider spending",
+    ("Costs & value", "/spend", ("Spend", "Work value & opportunities", "Savings", "Billing", "Budget", "Provider spending",
                                  "Compare cost records", "Spending limits")),
     ("Settings", "/settings", ("General", "Setup", "AI providers", "Connections", "Chat apps", "People & roles",
                                "Workspaces", "Backup & recovery", "Partner fleet", "Advanced")),

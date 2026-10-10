@@ -64,11 +64,26 @@ def test_value_declined_writes_no_section(tmp_path, monkeypatch):
 
 
 def test_intent_value_pick_and_writer_default_confirmation_off(monkeypatch):
+    from maverick.config_install import (
+        blocking_config_findings,
+        config_findings,
+        parse_config_bytes,
+    )
     from maverick_installer import wizard
     monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: kw["default"])
     picked = wizard.pick_intent_value()
     assert picked == {"enabled": True, "recommendations": True, "completion_confirmation": False}
     text = "\n".join(wizard._cfg_intent_value(picked))
     assert "[intent_value]" in text and "completion_confirmation = false" in text
+    assert not blocking_config_findings(config_findings(parse_config_bytes(text.encode())))
     monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: False)
     assert wizard.pick_intent_value()["enabled"] is False
+
+
+def test_intent_value_configuration_rejects_invalid_flags_and_unknown_controls():
+    from maverick.config_install import blocking_config_findings, config_findings
+    invalid = {"intent_value": {"enabled": "yes", "recommendations": "false",
+                                "completion_confirmation": 1, "activate_automatically": True}}
+    findings = blocking_config_findings(config_findings(invalid))
+    assert {finding.key for finding in findings} == {
+        "enabled", "recommendations", "completion_confirmation", "activate_automatically"}

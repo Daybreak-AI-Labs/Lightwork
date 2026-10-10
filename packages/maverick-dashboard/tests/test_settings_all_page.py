@@ -68,6 +68,24 @@ def _row(setting_id):
     raise AssertionError(setting_id)
 
 
+def test_work_value_controls_round_trip_into_live_report_authority():
+    from maverick.intent_value.settings import policy
+
+    report = "/api/v1/intent-value"
+    assert policy()["enabled"] is True
+    saved = _save([{"id": "intent_value.enabled", "value": False}])
+    assert saved.status_code == 200, saved.text
+    assert _loaded()["intent_value"]["enabled"] is False
+    assert client.get(report).status_code == 403
+    saved = _save([{"id": "intent_value.enabled", "value": True},
+                   {"id": "intent_value.recommendations", "value": False}])
+    assert saved.status_code == 200, saved.text
+    assert policy() == {"enabled": True, "recommendations": False, "completion_confirmation": False}
+    assert client.get(report).status_code == 200
+    assert client.get(report + "/settings").json()["completion_confirmation"] is False
+    assert client.get(report + "/opportunities").json()["opportunities"] == []
+
+
 # ------------------------------------------------------------------ page
 def test_page_lists_groups_controls_and_speaks_plain_language():
     from test_support.plain_language import developer_terms

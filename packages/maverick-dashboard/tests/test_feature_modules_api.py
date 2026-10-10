@@ -276,6 +276,9 @@ def test_module_state_and_mutation_fail_closed_on_unreadable_sources(
     from maverick import config
 
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "module-state-test-token")
+    # Keep the authenticated audit tenant valid while corrupting the module's
+    # configuration source; otherwise token admission fails before this API.
+    monkeypatch.setenv("MAVERICK_CLIENT_ID", "module-state-test")
     monkeypatch.setenv(
         "MAVERICK_AUDIT_SIGNING_KEY",
         hashlib.sha256(request.node.nodeid.encode()).hexdigest(),

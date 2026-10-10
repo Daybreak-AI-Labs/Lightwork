@@ -51,6 +51,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "settings": {"runtime_status"},
     "mobile_offline": {"enabled", "max_age_seconds", "max_bytes"},
     "workflows": {"versioning", "typed_inputs"},
+    "intent_value": {"enabled", "recommendations", "completion_confirmation"},
     "_dashboard_resets": None,  # Internal global-overlay reset metadata; removed before runtime config.
     "budget": {
         "task_limits_enabled",
@@ -704,6 +705,7 @@ _INTEGER_KEYS: dict[str, set[str]] = {
 # Keys that, when present, must be a bool. Section -> key. Plus the universal
 # ``enabled``/``enable`` toggle, handled separately for every known section.
 _BOOL_KEYS: dict[str, set[str]] = {
+    "intent_value": {"recommendations", "completion_confirmation"},
     "first_outcome": {"sample_workspace_created"},
     "safety": {"scan_input", "scan_tool_calls", "scan_output", "compartments"},
     "features": {"skills", "world_model", "streaming"},

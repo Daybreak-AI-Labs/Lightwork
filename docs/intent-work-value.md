@@ -44,6 +44,7 @@ Reopening is explicit. None of these decisions deletes an existing process.
 | Episodes, `episode_reporting`, provider receipt catalogue | Failure/rework spend is retained; exact linked provider receipts replace overlapping runtime amounts, with separate measured/estimated coverage |
 | Existing Savings, `workforce_value`, `[value]` rates | Same source episodes and department rate configuration; numeric bridge explains alternative effort/count/cost assumptions |
 | `GovernedRecordStore` | Tenant-scoped work, settings, benchmark and recommendation namespaces reuse private local/shared Postgres storage, CAS, revision history and audit-outbox recovery |
+| Recovery authority and persistence inventories | Derived analytics/assumptions restore as data and are rechecked against current sources; recommendation draft/adoption receipts retain the native restore hold until reconciled |
 | Domain profiles and owned native flows | Accessible capability matching prefers an existing process; reuse does not create a duplicate builder |
 | `flow.evolve`, node outcomes/tool traces | Existing supported evolution signals are shown in reuse explanations; linked execution costs update the next-review reference without overwriting forecasts |
 | Ekko `governed_candidate_projection` | Live owner/device/consent-bound patterns appear with native evidence/draft links; no raw event content is copied, no business intent or executed benefit is fabricated |
@@ -237,6 +238,12 @@ connection and learning controls remain the existing ones.
 - Source deletion retires derived current value and clears source/evidence
   references. Non-content assumption/history receipts remain for explainability.
   Policy/access changes are rechecked on detail and effect boundaries.
+  The shared request helper closes open explanations and hides stale reporting
+  when access or account/workspace context changes; an authorized retry reloads
+  the current report. Restored recommendation decisions and draft reservations
+  use the existing recovery hold, preserving their bytes without replaying a
+  build or adoption. Analytics snapshots and benchmark/preferences cannot admit
+  execution and restore as data; fresh source checks still determine totals.
 - Work recorded before this change may lack a workflow completion receipt or
   agent/run correlation. Such evidence is not fabricated or inferred solely from
   `completed` status. Legacy gaps are unvalued/missing, with the alternative
@@ -308,6 +315,11 @@ workflow spend above linked agent episodes.
 
 Recorded local qualification on October 9–10:
 
+- Native configuration, setup guide, localized navigation, recovery inventory,
+  shared UI helpers, installer resume and live settings-control checks after the
+  CI repair: **2,091 passed** with Python 3.10 secure defaults. The native usage
+  fixture now verifies that both agent nodes retain the same workflow-run
+  correlation; invalid-source module tests retain a valid audit tenant.
 - Final Python 3.10 feature suite with **secure defaults and live PostgreSQL**:
   **48 passed, no skips**. The database fixture uses encryption and an isolated
   non-superuser, non-BYPASSRLS role. It covers tenant isolation, repeated

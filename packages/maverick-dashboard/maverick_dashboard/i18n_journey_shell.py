@@ -135,6 +135,7 @@ ROWS = [
     ("Branches", "Branches", "Verzweigungen", "分岐", "分支"),
     ("Spend", "Dépenses", "Ausgaben", "支出", "支出"),
     ("Savings", "Économies", "Einsparungen", "削減額", "节省金额"),
+    ("Work value & opportunities", "Valeur du travail et opportunités", "Arbeitswert und Möglichkeiten", "業務の価値と改善の機会", "工作价值与改进机会"),
     ("Autonomous shoring", "Renforcement autonome", "Autonome Absicherung", "自律的な補強", "自主加固"),
     ("Billing", "Facturation", "Abrechnung", "請求", "账单"),
     ("Providers", "Fournisseurs", "Anbieter", "プロバイダー", "服务提供商"),

@@ -12,13 +12,23 @@
   const button = (label, fn) => { const el = node('button', label, 'btn'); el.type = 'button'; el.addEventListener('click', fn); return el; };
   const link = (label, href) => { const el = node('a', label, 'btn btn--ghost'); el.href = href; return el; };
   async function request(path, method = 'GET', body) {
-    const response = await fetch(api + path, {method, credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined});
-    const value = await response.json();
-    if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : 'This request could not be completed. Refresh and review the current record.');
+    const value = await window.mvFetchJSON(api + path, {method, body,
+      onAccess: clearAccess, onContextChange: clearAccess,
+      serverDetail: 'This request could not be completed. Refresh and review the current record.'}, 'read or update work value');
     if (value.state === 'audit_pending') throw new Error('The change is waiting for its audit record. Refresh status before trying another action.');
     return value;
   }
   function error(err) { $('iv-error').textContent = err.message; $('iv-error').hidden = false; $('iv-retry').hidden = false; }
+  function clearAccess(err) {
+    ++generation; ++detailGeneration;
+    report = settings = detail = external = selectedBenchmark = undefined;
+    benchmarks = []; proposals = []; selectedMetric = '';
+    $('iv-report').hidden = true;
+    $('iv-detail').close(); $('iv-detail-body').replaceChildren();
+    $('iv-detail-title').textContent = 'Work explanation';
+    $('iv-status').textContent = 'Access changed. Refresh to check your current account and workspace.';
+    error(err);
+  }
   function filters() {
     const entity = $('iv-entity').value.split('|');
     return new URLSearchParams({start: $('iv-start').value, end: $('iv-end').value, scope: $('iv-scope').value,
