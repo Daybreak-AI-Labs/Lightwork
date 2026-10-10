@@ -331,6 +331,41 @@ def test_observed_intent_change_cannot_revalue_already_executed_work(world):
     assert "financial_analysis.analyze" in stored["source"]["observed_intents"]
 
 
+def test_completed_task_rename_does_not_revalue_unchanged_execution(world):
+    identifier = goal(world, "Review an invoice")
+    before = report(world)
+    world.set_goal_title(identifier, "Draft 10 RFPs")
+    after = report(world)
+    assert after["totals"] == before["totals"]
+    assert after["rows"][0]["intents"] == ["invoice.review"]
+    stored = service.WORKS.get(after["rows"][0]["id"])
+    assert "rfp.draft" in stored["source"]["observed_intents"]
+    repeated = service.refresh(world)[0]
+    assert repeated["revision"] == stored["revision"]
+    corrected = service.correct(stored["id"], intents=["rfp.draft"], size="standard",
+        units={"rfp": 1}, expected_revision=stored["revision"], reason="Explicit economic correction",
+        actor="alice", guard=lambda: None)
+    assert corrected["intents"] == ["rfp.draft"]
+    assert report(world)["totals"]["performed_work"] == 1
+
+
+def test_first_ingestion_uses_audited_request_before_later_task_rename(world):
+    identifier = goal(world, "Review an invoice", performed=False)
+    audit.audit_event("goal_start", goal_id=identifier, agent="orchestrator", title="Review an invoice", description="")
+    audit.audit_event("goal_end", goal_id=identifier, agent="orchestrator", status="succeeded")
+    world.set_goal_title(identifier, "Draft 10 RFPs")
+    first = report(world)
+    assert first["rows"][0]["intents"] == ["invoice.review"]
+    assert first["totals"]["performed_work"] == 1
+    # A subsequent real execution can establish changed requested work.
+    audit.audit_event("goal_start", goal_id=identifier, agent="orchestrator", title="Draft 10 RFPs", description="")
+    audit.audit_event("goal_end", goal_id=identifier, agent="orchestrator", status="succeeded")
+    after = report(world)
+    assert after["rows"][0]["intents"] == ["rfp.draft"]
+    assert after["totals"]["performed_work"] == 1
+    assert after["totals"]["gross_estimated_labor_value"] > first["totals"]["gross_estimated_labor_value"]
+
+
 def test_multiple_explicit_deliverables_preserve_count_and_component_overlap(world):
     goal(world, "Draft two RFPs and review those two RFPs")
     result = report(world)

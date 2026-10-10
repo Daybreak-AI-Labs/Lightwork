@@ -48,6 +48,8 @@ def seed(world, *, owner="user:alice", count=1, performed=True):
         world.end_episode(eid, "PRIVATE-RESULT", "success" if performed else "failed", cost_dollars=2)
         if performed:
             world.set_goal_status(gid, "done")
+            audit.audit_event("goal_start", goal_id=gid, agent="orchestrator",
+                              title=world.get_goal(gid).title, description="PRIVATE-REQUEST-CONTEXT")
             audit.audit_event("goal_end", goal_id=gid, agent="orchestrator", status="succeeded")
         ids.append(gid)
     return ids
@@ -57,6 +59,26 @@ def get(client, path="", user="alice"):
     response = client.get(BASE + path, headers=headers(user))
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def test_native_completed_task_rename_preserves_report_and_copilot_value(context):
+    client, world = context
+    identifier = seed(world)[0]
+    before = get(client)
+    response = client.post(f"/api/v1/goals/{identifier}/retitle", headers=headers(),
+        json={"title": "Review an invoice", "expected_updated_at": world.get_goal(identifier).updated_at,
+              "operation_id": "intent-value-retitle-check"})
+    assert response.status_code == 204, response.text
+    after = get(client)
+    assert after["totals"] == before["totals"]
+    assert after["rows"][0]["intents"] == ["rfp.draft"]
+    response = client.post("/api/v1/copilot", headers=headers(),
+        json={"message": "What value delivered this month?", "page": "/work-value"})
+    assert response.status_code == 200, response.text
+    assert response.json()["metrics"]["totals"] == after["totals"]
+    detail = get(client, "/work/" + after["rows"][0]["id"])
+    assert "PRIVATE-REQUEST-CONTEXT" not in str(detail)
+    assert "CONFIDENTIAL-EMPLOYEE-MATERIAL" not in str(detail)
 
 
 def test_company_metadata_has_no_employee_content_or_mutation_authority(context):

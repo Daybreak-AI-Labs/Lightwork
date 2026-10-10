@@ -39,7 +39,7 @@ Reopening is explicit. None of these decisions deletes an existing process.
 | Existing mechanism | Integration |
 | --- | --- |
 | WorldModel goals, parent IDs, conversations/turns, goal origins | `intent_value.sources` reads native authorized tenant stores; related goals share a work identity; unexecuted channel requests are observations only |
-| Signed/strict audit reader and native `goal_end` | Successful orchestrator/source-analysis receipts establish performed work; status fields or user assertions alone do not |
+| Signed/strict audit reader and native `goal_start` / `goal_end` | Successful orchestrator/source-analysis receipts establish performed work; available run-start requests establish the executed intent despite later title edits; status fields or user assertions alone do not |
 | Flow execution, immutable snapshots and run generations | `flow.execution` records content-free terminal/progress receipts and binds agent goals to their native run; retries share a work identity |
 | Episodes, `episode_reporting`, provider receipt catalogue | Failure/rework spend is retained; exact linked provider receipts replace overlapping runtime amounts, with separate measured/estimated coverage |
 | Existing Savings, `workforce_value`, `[value]` rates | Same source episodes and department rate configuration; numeric bridge explains alternative effort/count/cost assumptions |
@@ -106,6 +106,12 @@ Known large/complex scope is left unvalued until reviewed. Only completed root
 work or a completed native workflow qualifies for the full component. Audited
 partial child/flow work is visible as performed but unvalued; costs remain.
 A later revision does not award a second full benefit.
+Renaming completed work in the task map does not change the credited activity or
+deliverable count. Available audited run-start requests supply the original
+classification, without copying prompt text into the ledger. For older successes
+without that snapshot, the explanation identifies the initial classification's
+reliance on current task fields; subsequent metadata edits preserve credited
+intent until new execution evidence or an explicit authorized correction.
 
 For the specification's synthetic fixture, 30 avoided minutes at USD 60/hour
 with USD 2 known cost gives USD 30 gross and USD 28 estimated net. Coverage still
@@ -270,7 +276,7 @@ configuration, privacy and reporting regressions are also checked.
 | 5: optional confirmation | Default off, separate opinion receipt, revisions preserved; core/API/browser checks |
 | 6: tenant-specific benchmark | Governed override/version + deliberate recalculation; tenant override arithmetic test |
 | 7: unknown inputs | Abstention for guidance/quoted task names, size review, missing cost, mixed currency; guidance/unknown/receipt/currency tests |
-| 8: rework/failure | One business credit, all attempt costs, partial unvalued, native workflow residual above linked agent spend; duplicate/failure/partial/driver tests |
+| 8: rework/failure | One business credit, all attempt costs, partial unvalued, native workflow residual above linked agent spend; duplicate/failure/partial/driver and completed-task rename tests |
 | 9: reconciled rollups | Unique work totals, overlapping attribution, native Savings numeric bridge; parent/agent and driver tests |
 | 10: dashboard explanation | Clickable population and source/assumption/history detail; browser desktop and narrow checks |
 | 11: Copilot parity | Shared `read_report`, current dashboard filters, sealed period/entity clarification, business-name resolution and ambiguity rejection; API and native execution browser checks |
@@ -312,6 +318,11 @@ Copilot business-name clarification and ambiguity, numeric period/cost/activity
 comparisons, guidance versus deliverable intent, dashboard scope parity,
 pending audit access, reviewed settings/benchmark changes, and additional native
 workflow spend above linked agent episodes.
+October 10 also reproduced and fixed retrospective revaluation caused by task-map
+renaming. Tests cover renamed work before first ingestion, immutable completed
+request intent after ingestion, subsequent real execution, explicit correction,
+native retitle API/Copilot parity and omission of audited request content from
+explanations.
 
 Recorded local qualification on October 9–10:
 
@@ -321,13 +332,14 @@ Recorded local qualification on October 9–10:
   fixture now verifies that both agent nodes retain the same workflow-run
   correlation; invalid-source module tests retain a valid audit tenant.
 - Final Python 3.10 feature suite with **secure defaults and live PostgreSQL**:
-  **48 passed, no skips**. The database fixture uses encryption and an isolated
+  **51 passed, no skips**. The database fixture uses encryption and an isolated
   non-superuser, non-BYPASSRLS role. It covers tenant isolation, repeated
   ingestion, correction history and recommendation persistence.
 - Rebased Python 3.12 feature/adjacent suite: **771 passed** across work value,
   Copilot, flow execution and installer settings. The subsequent guidance-intent
-  correction passed **3 focused Python 3.12 tests** and the final 48-test suite
-  above. Additional pre-rebase qualification included **98 PostgreSQL backend
+  correction passed **3 focused Python 3.12 tests**; another **3 focused Python
+  3.12 checks** cover the rename/evidence correction. These are included in the
+  final 51-test suite above. Additional pre-rebase qualification included **98 PostgreSQL backend
   tests** and **783 adjacent/packaging tests**; these are not presented as final
   whole-product coverage.
 - Chromium feature journeys: **4 passed**, including native publication,

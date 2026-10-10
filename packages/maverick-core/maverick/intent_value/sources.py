@@ -29,16 +29,22 @@ def audit_population():
     from ..audit import default_audit_log, iter_events
 
     goals, flows, actions, agents = defaultdict(list), defaultdict(list), defaultdict(set), defaultdict(set)
+    requests = {}
     for event in iter_events(all_days=True, strict=True, verify=default_audit_log().signing_enabled):
         gid = event.get("goal_id")
         named = event.get("agent")
+        if type(gid) is int and event.get("kind") == "goal_start" and named == "orchestrator":
+            # Keep only the classification, never copied request content. The
+            # run-start snapshot survives later task-map title edits.
+            requests[gid] = _classify_request(event.get("title", ""), event.get("description"))
         if (type(gid) is int and event.get("kind") in {"llm_response", "tool_result", "goal_end"}
                 and isinstance(named, str) and re.fullmatch(r"[A-Za-z0-9_:./-]{1,120}", named)):
             agents[gid].add(named)
         if (type(gid) is int and event.get("kind") == "goal_end" and event.get("status") in SUCCESS
                 and (event.get("agent") == "orchestrator" or event.get("mode") == "source_analysis")):
             goals[gid].append({"id": digest(event), "at": event["ts"], "kind": "goal_end",
-                               "status": event["status"], "signed": bool(event.get("sig") or event.get("signature"))})
+                               "status": event["status"], "signed": bool(event.get("sig") or event.get("signature")),
+                               "request_intent": requests.get(gid)})
         if event.get("kind") == "tool_result" and event.get("status") == "ok" and type(gid) is int:
             tool = event.get("tool") or event.get("name")
             if isinstance(tool, str) and len(tool) <= 120:
@@ -64,9 +70,22 @@ def _goal_rows(world):
     return goals, origins, turns, memberships
 
 
+def _classify_request(title, description):
+    detected = classify(title)
+    return detected if detected["intents"] else classify(str(title or "") + "\n" + str(description or ""))
+
+
 def _classify_goal(goal):
-    detected = classify(goal.title)
-    return detected if detected["intents"] else classify(goal.title + "\n" + (goal.description or ""))
+    return _classify_request(goal.title, goal.description)
+
+
+def _executed_intent(goal, receipt, item):
+    if receipt.get("request_intent") is not None:
+        return receipt["request_intent"]
+    note = " Execution-start request snapshot unavailable: initial intent uses current task fields. Correct the activity if this task was renamed or its purpose differs."
+    if note not in item["grouping"]:
+        item["grouping"] += note
+    return _classify_goal(goal)
 
 
 def _intent_revision(goal):
@@ -201,7 +220,7 @@ def collect(world) -> list[dict]:
         if not item["flow_runs"]:
             item["evidence"].extend({**row, "full_task": item["key"] == f"goal:{goal.id}"} for row in audit_goals.get(goal.id, []))
             if audit_goals.get(goal.id) and (item["key"] == f"goal:{goal.id}" or _intent_revision(goal)):
-                item["executed_classification"] = _classify_goal(goal)
+                item["executed_classification"] = _executed_intent(goal, audit_goals[goal.id][-1], item)
         item["actions"].extend(actions.get(goal.id, set()))
         item["agents"].extend(agents.get(goal.id, set()))
     for item in output.values():

@@ -39,16 +39,35 @@ def _snapshot(row, *, reason, actor, refresh_assumptions=False):
     row["estimates"].append(value)
 
 
+def _retain_executed_intent(source, current):
+    """Metadata edits cannot retrospectively change unchanged execution credit."""
+    if current is None or current["source"]["performed_at"] is None:
+        return
+    previous = current["source"]
+    if {row["id"] for row in previous["evidence"]} != {row["id"] for row in source["evidence"]}:
+        return
+    if source.get("executed_classification") is None and previous.get("executed_classification") is None:
+        return
+    classified = previous.get("executed_classification") or current["classification"]
+    if source.get("executed_classification") == classified:
+        return
+    source["executed_classification"] = copy.deepcopy(classified)
+    source["grouping"] += " Changed task metadata is an observation; unchanged execution retains its credited intent. Use an explicit correction to revise the estimate."
+    source.pop("source_digest", None)
+    source["source_digest"] = digest(source)
+
+
 def refresh(world):
     if not policy()["enabled"]:
         raise PermissionError("Work value intelligence is turned off in this workspace.")
     observations = sources.collect(world)
     live = set()
     for source in observations:
-        classified = source.get("executed_classification") or source["classification"]
         identifier = "IVW-" + digest([source["key"], source["owner"]])[:32]
         live.add(identifier)
         current = WORKS.get(identifier)
+        _retain_executed_intent(source, current)
+        classified = source.get("executed_classification") or source["classification"]
         if current is None:
             row = {"id": identifier, "owner": source["owner"], "source": source,
                    "intents": list(classified["intents"]),
