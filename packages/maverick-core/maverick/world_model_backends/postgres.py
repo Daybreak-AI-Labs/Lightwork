@@ -2747,6 +2747,25 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         return [_dec_goal_row(r) for r in rows]
 
+    def list_goal_results(self, *, owner: str, limit: int = 26,
+                          offset: int = 0) -> list[PGGoal]:
+        """Completed root tasks with saved output for the owner's Results page
+        (mirrors SQLite); subtasks stay in their parent conversation."""
+        sql = ("SELECT id, parent_id, title, description, status, created_at, updated_at, "
+               "deadline, result, owner, execution_principal, domain, project_id FROM goals "
+               "WHERE owner = %s AND parent_id IS NULL AND status = 'done' AND result IS NOT NULL")
+        params: list = [str(owner)]
+        frag, fparams = _tenant_scope()
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        sql += " ORDER BY id DESC LIMIT %s OFFSET %s"
+        params += [max(1, min(int(limit), 100)), max(0, int(offset))]
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [_dec_goal_row(r) for r in rows]
+
     def personal_alert_goals(self, owner: str, *, since: float, after_id: int = 0,
                              limit: int = 250) -> list[tuple]:
         """Tenant and owner predicates precede the bounded keyset page."""
@@ -3219,10 +3238,12 @@ class PostgresWorldModel:
             )
             return cur.fetchone() is not None
 
-    def total_spend(self, owner: str | None = None) -> dict[str, float]:
+    def total_spend(self, owner: str | None = None, *,
+                    since: float | None = None) -> dict[str, float]:
         """Aggregate spend. ``owner`` scopes to one principal's runs (join to
         the owning goal), matching the SQLite backend's signature; ``None``
-        is the deployment-wide admin / auth-off view. (Sept 2026 fix,
+        is the deployment-wide admin / auth-off view; ``since`` keeps only runs
+        that started at or after that time, as on SQLite. (Sept 2026 fix,
         PLATFORM_IMPROVEMENT_AUDIT.md W1-48: this backend previously took no
         ``owner`` argument at all, so any owner-scoped caller -- ``/api/v1/spend``,
         external-agent spend records -- raised TypeError on Postgres.)
@@ -3241,6 +3262,9 @@ class PostgresWorldModel:
         if owner is not None:
             sql += " AND g.owner = %s"
             params = (*params, owner)
+        if since is not None:
+            sql += " AND e.started_at >= %s"
+            params = (*params, float(since))
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
             row = cur.fetchone()

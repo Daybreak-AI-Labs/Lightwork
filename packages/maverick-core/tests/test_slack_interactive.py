@@ -351,8 +351,14 @@ def test_slash_commands_end_to_end(tmp_path):
     code = channel_identities.issue_link_code("user:alice", "slack")["code"]
     assert "wrong, used or expired" in run("link NOPE")["text"]
     assert "now linked" in run(f"link {code}")["text"]
-    status = run("status")["text"]
+    # Without the host's role check, status shows only the person's own
+    # requests: a viewer must not see everyone else's waiting requests.
+    hidden = run("status")["text"]
+    assert "0 waiting for your decision" in hidden and f"#{aid}" not in hidden
+    status = run("status", status_scope=lambda principal: (True, None))["text"]
     assert "1 waiting for your decision" in status and f"#{aid}" in status
+    outside = run("status", status_scope=lambda principal: (True, frozenset({"legal"})))["text"]
+    assert f"#{aid}" in outside  # a request with no department is not departmental
     assert "Say which request" in run("approve")["text"]
     needs = run(f"approve {aid}")["text"]
     assert "confirm" in needs.lower() and world.get_approval(aid).status == "pending"

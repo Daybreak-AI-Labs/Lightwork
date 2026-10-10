@@ -135,6 +135,16 @@ class SlackChannel(Channel):
             return refuse
         return _authority_for("slack")
 
+    @staticmethod
+    def _status_scope():
+        """The dashboard's role and department rule for ``/lightwork status``;
+        without the dashboard, status shows only the person's own requests."""
+        try:
+            from maverick_dashboard.daily_digest_scheduler import status_scope
+        except Exception:  # noqa: BLE001 -- the kernel runs without the dashboard
+            return None
+        return status_scope
+
     def _authorized(self, msg, account):
         from maverick.oidc import oidc_enabled
 
@@ -347,7 +357,7 @@ class SlackChannel(Channel):
             result = await asyncio.to_thread(
                 handle_slash_command, form, world=self._approval_world(),
                 principal_for=self._principal_for, ask=None,
-                authorize=self._vote_authority(),
+                authorize=self._vote_authority(), status_scope=self._status_scope(),
             )
         await asyncio.to_thread(respond, str(form.get("response_url") or ""), result)
         return result

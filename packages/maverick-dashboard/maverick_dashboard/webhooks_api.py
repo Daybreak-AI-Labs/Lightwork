@@ -112,9 +112,13 @@ def _recovery_authority(request: Request, expected: str | None = None) -> tuple[
         if principal is not None:
             claims = principal.claims or {}
             via = claims.get("via")
+            # An API key is re-verified too: a key revoked during the review
+            # must not carry it through, as in the other governed flows.
             fresh = (auth._session_principal(request) if via == "session" else
                      auth._invite_session_principal(request) if via == "invite" else
-                     auth._proxy_principal(request) if via == "proxy" else principal)
+                     auth._proxy_principal(request) if via == "proxy" else
+                     auth._authenticate_api_key(request, auth._api_key_bearer(request)) if via == "api_key"
+                     else principal)
             expiry = claims.get("exp")
             if (fresh is None or fresh.principal != principal.principal or
                     (expiry is not None and (type(expiry) not in (int, float) or

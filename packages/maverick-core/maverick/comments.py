@@ -111,13 +111,15 @@ def add(kind: str, object_id: str, *, author: str, body: str, mentions: list[str
 
 
 def list_for(kind: str, object_id: str, *, limit: int = 200) -> list[dict]:
-    """The thread on one object, oldest first, without deleted comments."""
+    """The thread on one object: its newest ``limit`` comments, oldest first,
+    without deleted ones (a long thread keeps showing what was just said)."""
     object_id = _check_object(kind, object_id)
     if not _exists():
         return []
     with closing(_connect()) as db:
         rows = db.execute(
-            "SELECT * FROM comments WHERE kind = ? AND object_id = ? AND deleted_at IS NULL ORDER BY id LIMIT ?",
+            "SELECT * FROM (SELECT * FROM comments WHERE kind = ? AND object_id = ? AND deleted_at IS NULL"
+            " ORDER BY id DESC LIMIT ?) ORDER BY id",
             (kind, object_id, int(limit))).fetchall()
     return [_row(row) for row in rows]
 

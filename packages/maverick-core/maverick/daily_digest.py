@@ -62,7 +62,8 @@ def month_start(now: float, time_zone: str) -> float:
     return local.replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp()
 
 
-def _approvals(world, principal: str, *, can_decide: bool, now: float) -> list[dict[str, Any]]:
+def _approvals(world, principal: str, *, can_decide: bool, now: float,
+               suites: frozenset[str] | None = None) -> list[dict[str, Any]]:
     from .channel_approvals import card_content
 
     rows = []
@@ -70,8 +71,12 @@ def _approvals(world, principal: str, *, can_decide: bool, now: float) -> list[d
         mine = row.requested_by == principal
         if can_decide and not mine:
             # The queue the person may decide: not claimed by somebody else,
-            # not already voted on by them (mirrors the Action Center).
+            # not already voted on by them, and within their departments
+            # (``suites``; None is unrestricted), as the bell and reminders do.
             if row.claimed_by and row.claimed_by != principal:
+                continue
+            department = getattr(row, "department", None)
+            if department and suites is not None and department not in suites:
                 continue
             state = world.approval_state(row.id) or {}
             if state.get("status") != "pending" or principal in (state.get("approvers") or []):
@@ -171,6 +176,7 @@ def _expiring_keys(principal: str, *, owner_filter: str | None, now: float) -> l
 
 
 def compose_digest(world, principal: str, *, can_decide: bool, sees_everything: bool = False,
+                   suites: frozenset[str] | None = None,
                    now: float | None = None, time_zone: str = "UTC",
                    spend_limit: float | None = None,
                    seen_goal_ids: set[int] | frozenset[int] | None = None,
@@ -208,7 +214,7 @@ def compose_digest(world, principal: str, *, can_decide: bool, sees_everything: 
         "date_label": local.strftime("%A %d %B %Y"),
         "local_date": local.strftime("%Y-%m-%d"),
         "time_zone": time_zone or "UTC",
-        "approvals": _approvals(world, principal, can_decide=can_decide, now=current),
+        "approvals": _approvals(world, principal, can_decide=can_decide, now=current, suites=suites),
         "results": results,
         "left_out_seen": left_out,
         "questions": _questions(world, principal, owner_filter=owner_filter),
@@ -262,11 +268,12 @@ def _muted_in_app(principal: str, now: float | None = None) -> frozenset[int]:
 
 
 def prepare_digest(world, principal: str, *, can_decide: bool, prefs: dict[str, Any],
-                   sees_everything: bool = False, now: float | None = None) -> dict[str, Any]:
+                   sees_everything: bool = False, suites: frozenset[str] | None = None,
+                   now: float | None = None) -> dict[str, Any]:
     """The summary exactly as it is sent: the scheduler, "Send my summary
     now" and "Preview today's summary" all build it here."""
     return compose_digest(world, principal, can_decide=can_decide, sees_everything=sees_everything,
-                          now=now, time_zone=str(prefs.get("time_zone") or "UTC"),
+                          suites=suites, now=now, time_zone=str(prefs.get("time_zone") or "UTC"),
                           seen_goal_ids=_seen_in_app(principal), muted_goal_ids=_muted_in_app(principal, now))
 
 
@@ -619,6 +626,7 @@ def due_now(prefs: dict[str, Any], *, now: float | None = None) -> tuple[bool, s
 
 def run_digest_cycle(world, *, principals: list[str], can_decide: Callable[[str], bool],
                      sees_everything: Callable[[str], bool] | None = None,
+                     suites_for: Callable[[str], frozenset[str] | None] | None = None,
                      now: float | None = None) -> dict[str, Any]:
     """Send every due summary once. Returns counts for the scheduler's log."""
     from . import channel_identities, user_preferences
@@ -644,7 +652,8 @@ def run_digest_cycle(world, *, principals: list[str], can_decide: Callable[[str]
             continue
         digest = prepare_digest(
             world, principal, can_decide=can_decide(principal), prefs=prefs,
-            sees_everything=bool(sees_everything and sees_everything(principal)), now=current,
+            sees_everything=bool(sees_everything and sees_everything(principal)),
+            suites=suites_for(principal) if suites_for is not None else None, now=current,
         )
         if digest["empty"] and not prefs.get("send_when_empty"):
             summary["skipped_empty"] += 1

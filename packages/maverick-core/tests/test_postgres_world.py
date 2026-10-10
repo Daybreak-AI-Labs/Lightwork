@@ -2120,3 +2120,28 @@ def test_query_rewrites_sqlite_paramstyle_and_buckets_days(world):
     with pytest.raises(psycopg.Error):
         world.query("SELECT * FROM no_such_table_here WHERE id = ?", (1,))
     assert world.query("SELECT COUNT(*) FROM goals WHERE id = ?", (gid,))[0][0] == 1
+
+
+def test_results_page_and_monthly_spend_match_the_sqlite_backend(world):
+    # list_goal_results and total_spend(since=) existed only on SQLite: on this
+    # backend /deliverables raised AttributeError and the month's spend read $0.
+    import time
+
+    token = uuid.uuid4().hex
+    owner = f"user:results:{token}"
+    finished = world.create_goal("finished report", owner=owner)
+    world.set_goal_status(finished, "done", result="the report")
+    world.create_goal("still running", owner=owner)
+    subtask = world.create_goal("subtask", owner=owner, parent_id=finished)
+    world.set_goal_status(subtask, "done", result="part of it")
+    other = world.create_goal("someone else's", owner=f"user:other:{token}")
+    world.set_goal_status(other, "done", result="theirs")
+    results = world.list_goal_results(owner=owner)
+    assert [goal.id for goal in results] == [finished]
+    assert results[0].result == "the report"
+
+    before = time.time()
+    world.end_episode(world.start_episode(finished), "done", "success",
+                      cost_dollars=3.0, input_tokens=1, output_tokens=1)
+    assert world.total_spend(owner=owner, since=before - 1)["dollars"] == 3.0
+    assert world.total_spend(owner=owner, since=time.time() + 60)["dollars"] == 0
