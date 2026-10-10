@@ -48,6 +48,11 @@ def _people(caller: str | None) -> list[dict[str, str]]:
         principals.update(rbac.list_tenant_roles(workspace))
     if caller:
         principals.add(caller)
+    # Never offer an account the company directory (SCIM) turned off; an
+    # unreadable directory raises, and the route says the list is unavailable.
+    from .people_directory import active_only
+
+    principals = active_only(p for p in principals if isinstance(p, str))
     people = []
     for principal in principals:
         if not isinstance(principal, str) or not principal.strip():

@@ -135,3 +135,23 @@ def test_turning_comments_off_says_so(env, monkeypatch, tmp_path):
     refused = client.get("/api/v1/comments", params={"kind": "policy", "id": "tools"})
     assert refused.status_code == 403
     assert refused.headers["X-Lightwork-Reason"] == "feature-off"
+
+
+def test_a_reader_the_company_directory_turned_off_is_not_offered_or_mentioned(env, monkeypatch):
+    # Lee holds a reviewed read grant for Ana's task, but company sign-in
+    # (SCIM) turned Lee off: Lee can no longer sign in to read a mention.
+    from maverick_dashboard import content_access, scim_groups
+
+    client, world = env
+    goal_id = world.create_goal("Reconcile vendor spend", owner=ANA)
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list", lambda: [{"requester": LEE}])
+    monkeypatch.setattr(content_access, "_grant_current", lambda grant, **kw: True)
+    _as(monkeypatch, ANA)
+    thread = client.get("/api/v1/comments", params={"kind": "task", "id": str(goal_id)})
+    assert [p["principal"] for p in thread.json()["people"]] == [LEE]
+    monkeypatch.setattr(scim_groups, "active_check", lambda: lambda principal: False if principal == LEE else None)
+    thread = client.get("/api/v1/comments", params={"kind": "task", "id": str(goal_id)})
+    assert thread.json()["people"] == []
+    assert client.post("/api/v1/comments", json={"kind": "task", "id": str(goal_id), "body": "@Lee",
+                                                 "mentions": [LEE]}).status_code == 422

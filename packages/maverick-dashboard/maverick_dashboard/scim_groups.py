@@ -150,7 +150,16 @@ def _active(rec: dict) -> bool:
     return rec.get("active") is True
 
 
-def _matching_users(principal: str) -> dict[str, dict]:
+def _snapshot() -> dict:
+    """The SCIM users, subject directory and retired ledger, read once."""
+    from . import subject_directory
+    from .scim import _load
+
+    return {"users": _load(), "directory": subject_directory.load_index(),
+            "retired": subject_directory.load_retired()}
+
+
+def _matching_users(principal: str, snapshot: dict | None = None) -> dict[str, dict]:
     """Validated SCIM users authoritatively bound to ``principal``."""
     sub = _sub_of(principal)
     if not sub:
@@ -158,12 +167,13 @@ def _matching_users(principal: str) -> dict[str, dict]:
     from . import subject_directory
     from .scim import _load
 
-    if subject_directory.is_retired(sub):
+    snap = snapshot or {}
+    if subject_directory.is_retired(sub, retired=snap.get("retired"), directory=snap.get("directory")):
         return {}
-    users = _load()
+    users = _load() if snapshot is None else snapshot["users"]
     if not users:
         return {}
-    directory = subject_directory.load_index()
+    directory = subject_directory.load_index() if snapshot is None else snapshot["directory"]
     matched: dict[str, dict] = {}
     for uid, rec in users.items():
         ext_id = str(rec.get("externalId") or "")
@@ -183,17 +193,30 @@ def active_for_principal(principal: str) -> bool | None:
     deprovisioned. Store/directory corruption raises so authentication can deny
     rather than grant the deployment default role.
     """
+    return _active_for(principal, None)
+
+
+def active_check():
+    """``check(principal)``: :func:`active_for_principal`'s answer, with the SCIM
+    users, subject directory and retired ledger read once for every principal
+    checked (a list of people, not one sign-in). Corruption raises here."""
+    snapshot = _snapshot()
+    return lambda principal: _active_for(principal, snapshot)
+
+
+def _active_for(principal: str, snapshot: dict | None) -> bool | None:
     sub = _sub_of(principal)
     if not sub:
         return None
     from .subject_directory import is_retired
 
+    snap = snapshot or {}
     # A hard DELETE removes the SCIM resource, but never its denial decision.
     # Check the hashed retirement ledger before interpreting an absent roster
     # match as "no opinion" and falling through to the deployment default role.
-    if is_retired(sub):
+    if is_retired(sub, retired=snap.get("retired"), directory=snap.get("directory")):
         return False
-    matched = _matching_users(principal)
+    matched = _matching_users(principal, snapshot)
     if not matched:
         return None
     return all(_active(rec) for rec in matched.values())
@@ -277,6 +300,6 @@ def suites_for_principal(principal: str) -> frozenset[str] | None:
 register_grant_resolver(suites_for_principal)
 
 __all__ = [
-    "GroupAccessPolicyError", "active_for_principal", "group_names_for_principal",
+    "GroupAccessPolicyError", "active_check", "active_for_principal", "group_names_for_principal",
     "role_for_principal", "suites_for_principal",
 ]

@@ -72,10 +72,15 @@ class TransportWorker:
         self._wake.set()
         return receipt
 
+    def _report_unreadable(self, count):
+        if count:
+            log.warning("Channel %s: %d saved receipt(s) could not be read and were skipped",
+                        self.channel.name, count)
+
     def _oldest_window(self):
         selected, waiting = [], set()
         self._scan_pending = None
-        count = 0
+        count = unreadable = 0
         now = time.monotonic()
         cursor, scanned = "", 0
         while scanned <= MAX_CONFIGURED_RECORDS:
@@ -89,12 +94,19 @@ class TransportWorker:
                 # cursor ends the pass, even if compaction removed the first one.
                 if cursor and position <= cursor:
                     self._scan_pending = frozenset(waiting)
+                    self._report_unreadable(unreadable)
                     return [record_id for _, record_id in selected], count > MAX_PENDING
                 cursor = position
                 scanned += 1
                 if self._stop_scan.is_set():
                     return [], False
-                row = self.journal.get(record_id)
+                try:
+                    row = self.journal.get(record_id)
+                except Exception:
+                    # One receipt that no longer opens cannot be processed; it
+                    # must not stop the recovery of every other one.
+                    unreadable += 1
+                    continue
                 if (not row or row["channel"] != self.channel.name or row["account_sha256"] != _digest(self.account)
                         or not (row["execution"] == "received" or row["delivery"] in {"ready", "retryable"})):
                     continue
@@ -105,6 +117,7 @@ class TransportWorker:
                 selected.append((row["created_at"], row["id"]))
                 selected.sort()
                 del selected[MAX_PENDING:]
+        self._report_unreadable(unreadable)
         if scanned > MAX_CONFIGURED_RECORDS:
             log.warning("Channel receipt scan exceeds configured safety ceiling")
         else:

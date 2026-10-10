@@ -9,6 +9,7 @@ if the person can no longer open the object.
 """
 from __future__ import annotations
 
+import logging
 import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -18,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from . import auth
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 #: The policy pages that carry a thread: (title, page, permission to read).
 POLICIES = {
@@ -63,6 +65,18 @@ def _goal_readers(goal) -> set[str]:
     return readers
 
 
+def _signed_in_readers(readers: set[str]) -> set[str]:
+    """Readers who can still sign in: the company directory (SCIM) has not
+    turned them off. An unreadable directory offers nobody."""
+    from . import people_directory
+
+    try:
+        return people_directory.active_only(readers)
+    except Exception:  # noqa: BLE001 -- an unreadable directory offers nobody
+        log.warning("comment readers unavailable: the company directory could not be read")
+        return set()
+
+
 def _object(request: Request | None, kind: str, object_id: str, *, principal: str = "") -> dict:
     """The object a thread is about, after checking the reader may open it.
 
@@ -80,7 +94,7 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
         if request is not None:
             auth.require_permission(request, _TASK_PERMISSION)
             auth.assert_goal_access(request, goal)
-        readers = _goal_readers(goal)
+        readers = _signed_in_readers(_goal_readers(goal))
         return {"label": f"Task: {str(goal.title)[:120]}", "href": f"/chat/goal/{goal.id}", "readers": readers}
     if kind == "run":
         from maverick.flow import store
@@ -97,7 +111,7 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
         owner = getattr(run, "owner", "") or ""
         flow_id = getattr(run, "flow_id", "") or "flow"
         return {"label": "Workflow run", "href": f"/flows/{flow_id}/runs/{object_id}",
-                "readers": {owner} if owner else set()}
+                "readers": _signed_in_readers({owner} if owner else set())}
     if kind == "approval":
         from . import content_access
 
@@ -110,8 +124,7 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
             approval = world.get_approval(int(object_id))
             if approval is None:
                 raise HTTPException(404, "No such approval.")
-        readers = {p for p in content_access.approval_readers(approval, world)
-                   if people_directory.may(p, "operate")}
+        readers = people_directory.allowed(content_access.approval_readers(approval, world), "operate")
         return {"label": f"Request #{approval.id}", "href": f"/approvals#approval-{approval.id}",
                 "readers": readers}
     if kind == "policy":

@@ -283,3 +283,33 @@ def test_a_decision_made_again_after_an_undo_waits_out_its_own_window(wm, monkey
     decision = consent._await_dashboard_decision(wm, aid, card, "high", goal_id=None, withdraw_on_timeout=False)
     assert decision is not None and decision.granted
     assert time.time() - redecided_at >= 1.4
+
+
+def test_the_settle_retry_time_starts_again_for_a_decision_made_after_an_undo(wm, monkeypatch):
+    from maverick.safety import consent
+
+    monkeypatch.setenv("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "0")
+    monkeypatch.setattr(consent, "_SETTLE_RETRY_SECONDS", 0.5)
+    aid, card = _held_and_approved(wm, decided_ago=5)
+    real, calls = wm.settle_approval_decision, []
+
+    def settle(approval_id, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            # The database is busy, and meanwhile the person undoes.
+            assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=300) == "undone"
+            raise RuntimeError("database is locked")
+        if len(calls) == 2:
+            raise RuntimeError("database is locked")   # busy again for the new decision
+        return real(approval_id, **kw)
+
+    def approve_again():
+        time.sleep(1.2)
+        _decide(wm, aid, "approved")
+
+    monkeypatch.setattr(wm, "settle_approval_decision", settle)
+    t = threading.Thread(target=approve_again, daemon=True)
+    t.start()
+    decision = consent._await_dashboard_decision(wm, aid, card, "high", goal_id=None, withdraw_on_timeout=False)
+    t.join()
+    assert decision is not None and decision.granted and len(calls) == 3

@@ -532,3 +532,37 @@ def test_a_recovery_scan_that_failed_is_retried_after_the_retry_period(monkeypat
         await until(lambda: order == ["saved"])
         await worker.close()
     asyncio.run(run())
+
+
+def test_one_unreadable_saved_receipt_does_not_stop_recovery_or_new_messages(monkeypatch):
+    # A receipt whose sealed form no longer opens made every recovery scan
+    # fail, so the worker held every message behind a scan that never ended.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
+    journal = DeliveryJournal()
+    for index in range(2):
+        journal.admit(IncomingMessage(user_id="person", sender_id="person", text=f"saved-{index}",
+                                      channel=Adapter.name, message_id=str(index)),
+                      external_id=str(index), account="account")
+    poisoned = next(record_id for _, record_id in journal.store.iter_record_ids(start_after="", limit=10))
+    real_get = journal.get
+
+    def get(record_id):
+        if record_id == poisoned:
+            raise ValueError("sealed receipt does not authenticate")
+        return real_get(record_id)
+
+    journal.get = get
+    async def run():
+        order = []
+        async def handler(message):
+            order.append(message.text)
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=AsyncMock(return_value="confirmed"), journal=journal).start()
+        await until(lambda: len(order) == 1)
+        await worker.submit(IncomingMessage(user_id="other", sender_id="other", text="new", channel=Adapter.name,
+                                            message_id="9"), external_id="9")
+        await until(lambda: len(order) == 2)
+        await worker.close()
+        assert order[1] == "new"
+    asyncio.run(run())

@@ -825,6 +825,11 @@ APPROVAL_UNDO_OPEN = "open"
 APPROVAL_UNDO_SETTLED = "settled"
 
 
+def approval_held_open(approval: Any) -> bool:
+    """A request a waiting task holds open for undo (not yet settled)."""
+    return getattr(approval, "undo_hold", None) == APPROVAL_UNDO_OPEN
+
+
 def approval_undo_refusal(status: str, decided_by: str | None, undo_hold: str | None) -> str | None:
     """Why a decided approval cannot be undone, or None when it still can be.
 

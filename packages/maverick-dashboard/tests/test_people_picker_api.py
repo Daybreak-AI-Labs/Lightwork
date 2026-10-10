@@ -62,3 +62,12 @@ def test_an_unreadable_role_store_fails_closed(client, monkeypatch) -> None:
 
     monkeypatch.setattr(rbac, "list_users", broken)
     assert test_client.get("/api/v1/people/assignable").status_code == 503
+
+
+def test_an_account_the_company_directory_turned_off_is_not_offered(client, monkeypatch) -> None:
+    from maverick_dashboard import scim_groups
+
+    test_client, _state = client
+    monkeypatch.setattr(scim_groups, "active_check", lambda: lambda principal: False if principal == "user:bob" else None)
+    labels = [item["label"] for item in test_client.get("/api/v1/people/assignable").json()["items"]]
+    assert "bob" not in labels and "alice@example.com" in labels

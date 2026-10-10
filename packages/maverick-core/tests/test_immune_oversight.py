@@ -200,3 +200,11 @@ def test_a_manually_seeded_real_card_loses_its_commitments(world):
     assert seeded["target"]["sha256"] != orig["target"]["sha256"]
     assert seeded["parameters"]["sha256"] != orig["parameters"]["sha256"]
     assert world.get_approval(cid).provenance is None
+
+
+def test_a_canary_is_parked_like_a_task_request(world):
+    # Held for undo and reminded on the same schedule as the consent wait's
+    # requests, so neither tells a reviewer which one is a canary.
+    from maverick.channel_approvals import held_for_undo
+
+    assert held_for_undo(world.get_approval(_canary(world)))

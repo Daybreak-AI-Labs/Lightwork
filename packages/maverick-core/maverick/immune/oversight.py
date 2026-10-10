@@ -82,9 +82,11 @@ def seed_canary(world, *, action: str, detail: str, decision_class: str, flaw: s
         decoy = _decoy(card)
         decoy["binding_sha256"] = digest(decoy)
         detail = encode_approval_detail(decoy)
+    # Parked as the consent wait parks a task's request (held for undo, the
+    # same reminders), so nothing tells a reviewer it is a canary.
     approval_id = world.create_approval(action, risk=risk, detail=detail, scope=scope,
                                         approvals_required=approvals_required,
-                                        requested_by=requested_by)
+                                        requested_by=requested_by, undoable=True)
     _ledger.append(ledger_path(), {"type": "canary", "approval_id": approval_id,
                                    "class": decision_class, "flaw": flaw, "at": time.time()})
     return approval_id

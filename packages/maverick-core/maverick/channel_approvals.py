@@ -286,9 +286,9 @@ def held_for_undo(approval: Any) -> bool:
     """Whether a person's decision on ``approval`` can be undone at all: only
     a request the consent wait holds for the undo window. Every other
     requester acts on a decision at once (``WorldModel.undo_approval_decision``)."""
-    from .world_model import APPROVAL_UNDO_OPEN
+    from .world_model import approval_held_open
 
-    return getattr(approval, "undo_hold", None) == APPROVAL_UNDO_OPEN
+    return approval_held_open(approval)
 
 
 def undo_seconds_left(approval: Any, *, now: float | None = None) -> float:

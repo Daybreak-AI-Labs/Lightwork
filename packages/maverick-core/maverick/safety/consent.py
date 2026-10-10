@@ -1553,13 +1553,6 @@ def _settled_decision(row, approval_card: Mapping[str, object], risk: str) -> Co
 _SETTLE_RETRY_SECONDS = 60.0
 
 
-def _held_open(row) -> bool:
-    """A decision a waiting task still holds open for undo (not yet settled)."""
-    from ..world_model import APPROVAL_UNDO_OPEN
-
-    return getattr(row, "undo_hold", None) == APPROVAL_UNDO_OPEN
-
-
 def _await_dashboard_decision(
     wm,
     approval_id: int,
@@ -1574,6 +1567,8 @@ def _await_dashboard_decision(
     # the human-approval window (timing out a risky-action prompt early) or
     # extend it (stalling the agent). The decision record below keeps wall time.
     deadline = time.monotonic() + _dashboard_timeout()
+    from ..world_model import approval_held_open
+
     grace = approval_undo_grace_seconds()
     settle_failing_since = None
     while True:
@@ -1592,6 +1587,7 @@ def _await_dashboard_decision(
             # an undo flips the row back to pending and the wait resumes).
             remaining = approval_decision_settles_at(row, grace=grace) - time.time()
             if remaining > 0:
+                settle_failing_since = None   # a new decision gets its own retry time
                 time.sleep(min(1.0, remaining))
                 continue
             # Make the decision final before acting on it: an undo that reads
@@ -1610,9 +1606,10 @@ def _await_dashboard_decision(
                 time.sleep(1.0)
                 continue
             settle_failing_since = None
-            if row is None or row.status == "pending" or _held_open(row):
+            if row is None or row.status == "pending" or approval_held_open(row):
                 continue
             return _settled_decision(row, approval_card, risk)
+        settle_failing_since = None   # undone: the next decision gets its own retry time
         if time.monotonic() >= deadline:
             break
         time.sleep(1.0)
