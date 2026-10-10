@@ -45,18 +45,19 @@ def _arm_saml_tx(
     state: str = "relay-unit-1",
     return_to: str = "/",
     jti: str = "tx-unit-1",
+    fresh: bool = False,
 ) -> str:
     """Install the signed, browser-bound transaction an IdP POST must answer."""
-    raw = sign_session(
-        {
-            "request_id": request_id,
-            "state": state,
-            "return_to": return_to,
-            "jti": jti,
-            "exp": int(time.time()) + saml_mod._TX_TTL,
-        },
-        SECRET,
-    )
+    payload = {
+        "request_id": request_id,
+        "state": state,
+        "return_to": return_to,
+        "jti": jti,
+        "exp": int(time.time()) + saml_mod._TX_TTL,
+    }
+    if fresh:
+        payload["fresh"] = True  # started from the step-up link
+    raw = sign_session(payload, SECRET)
     client.cookies.set(saml_mod.TX_COOKIE, raw, path="/saml")
     return state
 
@@ -349,7 +350,7 @@ def test_acs_verifies_sets_session_and_redirects(_enabled, monkeypatch):
 _MFA_CONTEXT = "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken"
 
 
-def _acs_with(monkeypatch, *, n=1, **identity_fields):
+def _acs_with(monkeypatch, *, n=1, fresh=False, **identity_fields):
     monkeypatch.setattr(
         saml_mod,
         "verify_acs_response",
@@ -359,7 +360,7 @@ def _acs_with(monkeypatch, *, n=1, **identity_fields):
     )
     client = _client()
     state = _arm_saml_tx(client, request_id="req-mfa-1", return_to="/goals",
-                         jti=f"tx-mfa-{n}")
+                         jti=f"tx-mfa-{n}", fresh=fresh)
     res = client.post("/saml/acs", data={"SAMLResponse": "signed", "RelayState": state},
                       follow_redirects=False)
     assert res.status_code == 303
@@ -378,6 +379,37 @@ def test_acs_without_a_usable_authn_instant_dates_the_second_factor_now(_enabled
     for n, instant in enumerate((0.0, time.time() + 3600)):  # unknown, or past any skew
         payload = _acs_with(monkeypatch, n=n, authn_instant=instant)
         assert payload["mfa"] is True and payload["mfa_at"] == payload["iat"]
+
+
+def test_step_up_acs_counts_the_second_factor_only_for_a_recent_authn_instant(_enabled, monkeypatch):
+    # The step-up link asked for ForceAuthn. An IdP that ignored it and reused
+    # its session asserts an old (or no) AuthnInstant: that is no fresh second
+    # factor, so step-up must not pass on it. A real re-authentication does.
+    now = int(time.time())
+    assert _acs_with(monkeypatch, n=11, fresh=True, authn_instant=float(now - 6 * 3600))["mfa"] is False
+    assert _acs_with(monkeypatch, n=12, fresh=True, authn_instant=0.0)["mfa"] is False
+    recent = float(now - 30)
+    payload = _acs_with(monkeypatch, n=13, fresh=True, authn_instant=recent)
+    assert payload["mfa"] is True and payload["mfa_at"] == recent
+
+
+def test_step_up_acs_refuses_a_reused_idp_session_when_a_second_factor_is_required(_enabled, monkeypatch):
+    from maverick_dashboard import mfa_policy
+
+    monkeypatch.setattr(mfa_policy, "require_mfa", lambda: True)
+    monkeypatch.setattr(
+        saml_mod,
+        "verify_acs_response",
+        lambda r, *, request_id: saml_mod.SamlIdentity(
+            name_id="opaque-name-id", assertion_id="assertion-stale-step-up",
+            authn_context=_MFA_CONTEXT, authn_instant=float(int(time.time()) - 6 * 3600)),
+    )
+    client = _client()
+    state = _arm_saml_tx(client, jti="tx-stale-step-up", fresh=True)
+    res = client.post("/saml/acs", data={"SAMLResponse": "signed", "RelayState": state},
+                      follow_redirects=False)
+    assert res.status_code == 403
+    assert res.cookies.get("mvk_session") is None
 
 
 def test_acs_rejects_replayed_assertion(_enabled, monkeypatch, tmp_path):
@@ -671,8 +703,9 @@ def test_acs_rejects_assertion_without_replay_id(_enabled, monkeypatch):
 def test_login_redirects_to_idp(_enabled, monkeypatch):
     seen = {}
 
-    def _prepare(cfg=None, relay_state="/"):
+    def _prepare(cfg=None, relay_state="/", force_authn=False):
         seen["relay_state"] = relay_state
+        seen["force_authn"] = force_authn
         return "req-login-42", "https://idp.example.com/sso?x=1"
 
     monkeypatch.setattr(
@@ -689,10 +722,56 @@ def test_login_redirects_to_idp(_enabled, monkeypatch):
     assert tx["request_id"] == "req-login-42"
     assert tx["return_to"] == "/goals"
     assert tx["state"] == seen["relay_state"]
+    assert seen["force_authn"] is False and "fresh" not in tx
     set_cookie = res.headers["set-cookie"].lower()
     assert "httponly" in set_cookie
     assert "samesite=none" in set_cookie
     assert "secure" in set_cookie
+
+
+def test_step_up_login_asks_the_idp_for_a_fresh_authentication(_enabled, monkeypatch):
+    seen = {}
+
+    def _prepare(cfg=None, relay_state="/", force_authn=False):
+        seen["force_authn"] = force_authn
+        return "req-fresh-1", "https://idp.example.com/sso?x=1"
+
+    monkeypatch.setattr(saml_mod, "prepare_login_redirect", _prepare)
+    res = _client().get("/saml/login?fresh=1&return_to=/users", follow_redirects=False)
+    assert res.status_code == 303
+    assert seen["force_authn"] is True
+    tx = verify_session(res.cookies.get(saml_mod.TX_COOKIE), SECRET)
+    assert tx["fresh"] is True and tx["return_to"] == "/users"
+
+
+def test_force_authn_reaches_the_real_authn_request(tmp_path):
+    pytest.importorskip("saml2")
+    if not saml_mod.runtime_readiness()["ready"]:
+        pytest.skip("no SAML XML security backend installed")
+    import base64
+    import zlib
+    from urllib.parse import parse_qs, urlsplit
+
+    metadata = tmp_path / "idp.xml"
+    metadata.write_text(
+        '<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" '
+        'entityID="https://idp.example.com/metadata"><md:IDPSSODescriptor '
+        'protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">'
+        '<md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" '
+        'Location="https://idp.example.com/sso"/></md:IDPSSODescriptor></md:EntityDescriptor>',
+        encoding="utf-8")
+    cfg = saml_mod.SamlConfig(enabled=True, sp_entity_id=ENABLED_CFG["sp_entity_id"],
+                              acs_url=ENABLED_CFG["acs_url"], idp_metadata_file=str(metadata))
+    client = saml_mod._client(cfg)
+
+    def request_xml(force_authn):
+        _request_id, url = saml_mod.prepare_login_redirect(client, cfg, relay_state="s",
+                                                           force_authn=force_authn)
+        raw = parse_qs(urlsplit(url).query)["SAMLRequest"][0]
+        return zlib.decompress(base64.b64decode(raw), -15).decode("utf-8")
+
+    assert 'ForceAuthn="true"' in request_xml(True)
+    assert "ForceAuthn" not in request_xml(False)
 
 
 def test_metadata_503_without_pysaml2(_enabled, monkeypatch):
