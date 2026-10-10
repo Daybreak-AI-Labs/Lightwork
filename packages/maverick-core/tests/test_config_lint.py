@@ -245,3 +245,24 @@ def test_inline_secret_suffix_keys_warn():
 def test_non_secret_key_not_flagged():
     cfg = {"sandbox": {"backend": "local"}, "models": {"orchestrator": "anthropic:x"}}
     assert [f for f in lint_config(cfg) if "inline secret" in f.message] == []
+
+
+def test_every_feature_switch_the_runtime_reads_is_known(tmp_path, monkeypatch):
+    # [features] listed three switches, so every other one the All settings page
+    # or the wizard writes (human_conversation_handoffs, scheduling, ...) was
+    # reported as an unknown key: a working setting that looked like a typo.
+    from maverick import config
+    from maverick.config_lint import KNOWN_SCHEMA
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    config.reset_config_cache()
+    try:
+        assert set(config.get_features()) <= KNOWN_SCHEMA["features"]
+    finally:
+        config.reset_config_cache()
+    assert lint_config({
+        "features": {"human_conversation_handoffs": True},
+        "dashboard": {"employee_activation_jobs": [], "extension_form_values": False,
+                      "extension_page_structure": True, "local_owner_setup": True},
+    }) == []

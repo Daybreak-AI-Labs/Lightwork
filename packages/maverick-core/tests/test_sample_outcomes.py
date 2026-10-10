@@ -107,7 +107,8 @@ def test_goal_text_points_at_the_workspace_files_and_repeats_the_rule():
             assert rel in text and rel.startswith("sample-outcomes/")
         assert outcome.title.startswith(so.SAMPLE_TITLE_PREFIX)
         command = so.cli_command(department)
-        assert command.startswith('maverick start "Sample: ') and command.endswith(f"--domain {outcome.pack}")
+        # --sample gives the CLI run the brief above, not just the title.
+        assert command == f"maverick start --sample {department}"
         assert "--model" not in command and "claude" not in command
 
 
@@ -195,3 +196,57 @@ def test_every_offered_sample_specialist_can_start_on_a_fresh_install(fresh_inst
     # The sample files are workspace files: the specialist reads them itself.
     assert agent.capability.permits("read_file")
     assert "read_file" in {tool.name for tool in agent.tools.all()}
+
+
+def _start_sample(monkeypatch, tmp_path, *args):
+    """Run ``maverick start`` with a stand-in kernel that records what the run got."""
+    import types
+
+    import maverick.cli as cli_mod
+    from click.testing import CliRunner
+    from maverick import killswitch
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-dummy")  # pragma: allowlist secret
+    killswitch._last_file_check_ts = 0.0
+    killswitch.clear()
+    seen = {}
+
+    def run_goal_sync(llm, world, bud, goal_id, **kw):
+        goal = world.get_goal(goal_id)
+        seen.update(title=goal.title, description=goal.description, domain=kw.get("domain"),
+                    sample=so.is_sample_goal(world, types.SimpleNamespace(id=goal_id, title="")))
+        world.set_goal_status(goal_id, "done", result="FINAL: ok")
+        return "FINAL: ok"
+
+    kernel = types.SimpleNamespace(DEFAULT_MODEL="claude-opus-4-8", LLM=lambda model=None: object(),
+                                   build_sandbox=lambda **kw: object(), run_goal_sync=run_goal_sync)
+    monkeypatch.setattr(cli_mod, "_kernel", lambda: kernel)
+    result = CliRunner().invoke(cli_mod.main, ["start", *args, "--sandbox", "local",
+                                               "--workdir", str(tmp_path / "work")])
+    return result, seen
+
+
+def test_the_printed_sample_command_runs_the_dashboard_brief(monkeypatch, tmp_path):
+    # The command setup prints used to pass only the title and pack, so the run
+    # never learned which sample files to read or that its output was sample data.
+    result, seen = _start_sample(monkeypatch, tmp_path, *so.cli_command("finance").split()[2:])
+    assert result.exit_code == 0, result.output
+    outcome = so.get("finance")
+    assert seen == {"title": outcome.title, "description": so.goal_description("finance"),
+                    "domain": outcome.pack, "sample": True}
+    workspace = so.sample_workspace_path("finance", tmp_path / "work")
+    assert so.is_sample_workspace(workspace)
+    assert all((workspace / name).is_file() for name in outcome.files)
+
+
+@pytest.mark.parametrize("args", [["--sample", "marketing"], ["Other task", "--sample", "finance"],
+                                  ["--sample", "finance", "--domain", "legal_nda_desk"]])
+def test_sample_start_refuses_unknown_or_mixed_input_before_any_goal(monkeypatch, tmp_path, args):
+    result, seen = _start_sample(monkeypatch, tmp_path, *args)
+    assert result.exit_code == 2, result.output
+    assert seen == {} and "goal #" not in result.output
+    assert not (tmp_path / "work" / so.SAMPLE_WORKSPACE_DIRNAME).exists()

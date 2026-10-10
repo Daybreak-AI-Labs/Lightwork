@@ -127,3 +127,21 @@ def test_the_page_saves_a_complete_combination_in_one_go():
                                             "value": 1500}], "confirm": True})
     assert r.status_code == 400
     assert "can't be more than" in r.json()["message"]
+
+
+def test_config_lint_knows_every_key_the_page_writes():
+    # The page saves these keys, and the runtime reads them; config-lint and
+    # `maverick doctor` called 91 of them unknown keys (likely typos).
+    from maverick.config_lint import lint_config
+
+    unknown = []
+    for setting in catalog.SETTINGS:
+        if setting.key_kind != "key":
+            continue  # tables whose rows are user-named keys
+        cfg: dict = {}
+        node = cfg
+        for part in setting.path[:-1]:
+            node = node.setdefault(part, {})
+        node[setting.path[-1]] = setting.default if setting.default is not None else ""
+        unknown += [f.message for f in lint_config(cfg) if "unknown" in f.message]
+    assert unknown == []

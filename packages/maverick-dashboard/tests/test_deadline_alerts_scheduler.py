@@ -97,3 +97,20 @@ def test_a_workspace_sees_only_its_own_last_cycle(monkeypatch):
         assert sched.last_cycle()["sent"] == 4
     with tenant_scope(tenant="globex"):
         assert sched.last_cycle() == {}
+
+
+def test_each_workspace_gets_its_hourly_compliance_recheck(monkeypatch):
+    # The history is kept per workspace; unpinned, only the base workspace's
+    # was re-checked, so another workspace's broken protection never showed.
+    from maverick import compliance, compliance_history, deadline_alerts, webhook_subscriptions
+    from maverick.paths import tenant_scope
+    from maverick.tenant import registry
+
+    registry.create_tenant("acme")
+    monkeypatch.setattr(compliance, "compliance_report", list)
+    monkeypatch.setattr(webhook_subscriptions, "process_due", lambda **kw: 0)
+    monkeypatch.setattr(deadline_alerts, "settings", lambda: {"enabled": False, "poll_seconds": 900})
+    sched._tick(1_800_000_000.0, {})
+    assert compliance_history.state()["checked_at"] == 1_800_000_000.0
+    with tenant_scope(tenant="acme"):
+        assert compliance_history.state()["checked_at"] == 1_800_000_000.0

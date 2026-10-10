@@ -3811,6 +3811,48 @@ def _apply_director(profile: str, outcome: str, description: str,
     return run.goal_title, run.goal_description + extra, capped
 
 
+def _sample_task(value, template_name, title, description, domain):
+    """``start --sample``: the dashboard's first-outcome title, brief and
+    specialist, so the run knows which sample files to read and the sample rule
+    (a title alone did not). Returns the inputs unchanged without ``--sample``."""
+    if not value:
+        return title, description, domain, None
+    from .. import sample_outcomes
+
+    department = sample_outcomes.resolve_department(value, default=None)
+    if department is None:
+        names = ", ".join(row["department"] for row in sample_outcomes.departments())
+        click.echo(f"ERROR: unknown sample department {value!r}; choose one of: {names}", err=True)
+        sys.exit(2)
+    if template_name or title or description or domain:
+        click.echo("ERROR: --sample sets the task, its brief and its specialist; "
+                   "drop TITLE, --template, --description and --domain", err=True)
+        sys.exit(2)
+    outcome = sample_outcomes.get(department)
+    return outcome.title, sample_outcomes.goal_description(department), outcome.pack, department
+
+
+def _place_sample(department, workdir) -> None:
+    """Copy the sample files into the work folder the run reads (no-op without ``--sample``)."""
+    if department is None:
+        return
+    from .. import sample_outcomes
+
+    try:
+        sample_outcomes.create_sample_workspace(department, workdir)
+    except OSError as exc:
+        click.echo(f"ERROR: the sample files could not be placed in the work folder ({exc}).", err=True)
+        sys.exit(2)
+
+
+def _mark_sample(world, goal_id, department) -> None:
+    """Record the sample-data event on the goal (no-op without ``--sample``)."""
+    if department is not None:
+        from .. import sample_outcomes
+
+        sample_outcomes.mark_goal_as_sample(world, goal_id, department)
+
+
 def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
     """Export the coding-mode / best-of-N env flags that ``coding_mode.from_env()``
     reads everywhere. ``--best-of-n`` only takes effect under ``--coding-mode``,
@@ -3831,6 +3873,9 @@ def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
 @click.argument("title", required=False)
 @click.option("--description", default="")
 @click.option("--template", "template_name", default=None)
+@click.option("--sample", "sample_department", default=None,
+              help="Run a department's first task on sample data: the same brief, files "
+                   "and sample record as the dashboard's first outcome (e.g. finance).")
 @click.option("--param", "-p", "params", multiple=True)
 @click.option("--max-dollars", default=None, type=float)
 @click.option("--max-wall-seconds", default=None, type=float)
@@ -3876,7 +3921,7 @@ def start(
     ctx, title, description, template_name, params,
     max_dollars, max_wall_seconds, max_depth, workdir, sandbox_backend,
     domain, coding_mode, best_of_n, fail_to_pass, pass_to_pass, dry_cost,
-    repeat, director_profile, result_file=None, result_key_file=None,
+    repeat, director_profile, result_file=None, result_key_file=None, sample_department=None,
 ) -> None:
     """Start a new goal and run the swarm."""
     from .run_result import prepare_result_target, read_result_key, write_if_requested
@@ -3894,6 +3939,8 @@ def start(
     # gate it on a provider key.
     if not dry_cost:
         _require_llm_key()
+    title, description, domain, sample = _sample_task(
+        sample_department, template_name, title, description, domain)
     if template_name:
         from ..templates import load_template
         try:
@@ -3979,6 +4026,7 @@ def start(
     # cannot write files or run programs. Say so before creating a paid task.
     _warn_file_work_before_start(_start_config, sandbox_backend)
 
+    _place_sample(sample, workdir)
     k = _kernel()
     llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     sandbox = k.build_sandbox(workdir=workdir, backend=sandbox_backend)
@@ -3995,6 +4043,7 @@ def start(
     for _run_i in range(n_runs):
         world = open_world(ctx.obj["db"])
         goal_id = world.create_goal(title, description)
+        _mark_sample(world, goal_id, sample)
         _label = f" [{_run_i + 1}/{n_runs}]" if n_runs > 1 else ""
         click.echo(f"goal #{goal_id} created{_label}: {title}")
         # Honor [budget] in config.toml (start used to build Budget() directly,

@@ -10,7 +10,7 @@ One daemon thread, started with the dashboard, does two jobs:
   :func:`maverick.webhook_subscriptions.process_due`, so a webhook delivery
   whose receiver was down is retried on its backoff schedule even when no new
   event arrives;
-* every hour it re-checks the compliance protections
+* every hour it re-checks each active workspace's compliance protections
   (:func:`maverick.compliance_history.recheck_if_due`), so a protection that
   breaks shows as failing within the hour, with when it changed.
 
@@ -21,11 +21,8 @@ next one still happens. Stopped through the dashboard's shutdown supervisor
 """
 from __future__ import annotations
 
-import logging
 import threading
 import time
-
-log = logging.getLogger(__name__)
 
 _scheduler_lock = threading.Lock()
 _scheduler_stop: threading.Event | None = None
@@ -67,18 +64,14 @@ def _tick(now: float, next_eval: dict[str, float]) -> None:
     once per active workspace, each pinned to it like the other background
     schedulers: a thread has no request workspace, so unpinned they would only
     ever see the base one. One workspace's failure does not stop the others."""
-    from maverick import deadline_alerts, webhook_subscriptions
+    from maverick import compliance_history, deadline_alerts, webhook_subscriptions
 
     from .automation_queue import _run_for_active_tenants
 
     _run_for_active_tenants("webhook retry pump",
                             lambda: webhook_subscriptions.process_due(world=_world(), now=now))
-    try:
-        from maverick.compliance_history import recheck_if_due
-
-        recheck_if_due(now=now)
-    except Exception:  # noqa: BLE001 - a failed check is retried next pass
-        log.warning("compliance re-check failed", exc_info=True)
+    # Each workspace keeps its own history; a failed check is retried next pass.
+    _run_for_active_tenants("compliance re-check", lambda: compliance_history.recheck_if_due(now=now))
 
     def evaluate() -> None:
         key = _workspace()

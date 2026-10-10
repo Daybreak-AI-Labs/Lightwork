@@ -394,3 +394,30 @@ test("messages.unreadable names a reply whose body cannot be read", async () => 
   await assert.rejects(w.mvFetchJSON("/a", { messages: { unreadable }, serverDetail: "x" }, "save"), { message: unreadable, status: 502 });
   w.close();
 });
+
+test("mvFetchJSON keeps headers given as a Headers object or name/value pairs", async () => {
+  // Copied as a plain object, a Headers instance or a pair list lost every
+  // header it carried (a page's context or idempotency key never arrived).
+  const w = load();
+  const seen = [];
+  w.fetch = async (url, options) => { seen.push(options); return respond(200, {}); };
+  await w.mvFetchJSON("/a", { method: "POST", body: { a: 1 }, headers: new w.Headers({ "X-Context": "abc" }) });
+  await w.mvFetchJSON("/b", { method: "POST", body: { a: 1 }, headers: [["X-Context", "def"]] });
+  assert.equal(seen[0].headers["x-context"], "abc");
+  assert.equal(seen[1].headers["X-Context"], "def");
+  for (const options of seen) {
+    assert.equal(options.headers["Content-Type"], "application/json");
+    assert.equal(options.headers.Accept, "application/json");
+  }
+  w.close();
+});
+
+test("mvFetchJSON adds no second content type beside a lower-case one", async () => {
+  const w = load();
+  const seen = [];
+  w.fetch = async (url, options) => { seen.push(options); return respond(200, {}); };
+  await w.mvFetchJSON("/a", { method: "POST", body: { a: 1 }, headers: { "content-type": "application/json", accept: "text/plain" } });
+  assert.deepEqual(Object.keys(seen[0].headers).sort(), ["accept", "content-type"]);
+  assert.equal(seen[0].body, JSON.stringify({ a: 1 }));
+  w.close();
+});
