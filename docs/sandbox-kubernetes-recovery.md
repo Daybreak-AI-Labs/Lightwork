@@ -61,7 +61,29 @@ There is no automatic deletion of failed-transfer local recovery directories.
 Transfers accept at most 20,000 entries, 64 MiB per file and 512 MiB total file
 data. Archive and diagnostic output are bounded while streaming. Use a dedicated
 workspace outside any directory containing Lightwork settings, keys or recovery
-storage. Linux pods need `sh`, `tar`, and a private PID namespace.
+storage. Linux pods need `sh`, `tar`, `mkdir`, `rmdir`, and a private PID namespace.
+
+The worker's image filesystem is read-only. Its single bounded `emptyDir` at
+`/workspace` remains writable. After copying the inputs, each command receives a
+fresh private temporary directory inside that volume through `TMPDIR`. Creating
+it fails closed if the randomly chosen path already exists. Tools can clear that
+directory without treating customer inputs as disposable temporary data. The
+image's `HOME` is preserved; no additional home or `/tmp` mount is added. Tools
+that write to hard-coded `/tmp` paths or the image's home must be
+configured to write inside `/workspace`, or included in the image with the needed
+read-only assets. Installation into the image filesystem is not supported.
+
+Use managed temporary files and remove scratch data before a command finishes.
+Only the empty, newly allocated directory is removed after a command returns.
+There are no reserved customer names, recursive cleanup or export exclusions:
+nonempty scratch directories, including those left after interruption, remain
+ordinary workspace data and count against transfer limits. This preserves
+customer files and recovery output instead of guessing which files are disposable.
+The read-only image filesystem is a required security floor for this backend,
+not an optional execution capability. Root-filesystem enforcement and
+the actual image's shell, archive, Python, cache and temporary-file behavior must
+be qualified on the target Linux cluster; synthetic transport tests do not prove
+read-only mount enforcement.
 
 Use a dedicated namespace, least-privilege pod/exec permissions and an enforced
 deny-all NetworkPolicy when networking is disabled. The API checks cannot prove
