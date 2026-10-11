@@ -204,3 +204,12 @@ def test_the_catalog_carries_the_access_digest(registry, monkeypatch):
     client, state = registry
     monkeypatch.setattr(ops, "_access", lambda request: "c" * 64)
     assert client.post(BASE + "/catalog", json={"page": "/preferences"}).json()["access"] == "c" * 64
+
+
+def test_a_catalog_read_while_the_account_changes_is_refused_not_mixed(registry, monkeypatch):
+    # The person's role changes while the controls are read: the response
+    # must not pair the earlier context with the later access digest.
+    client, state = registry
+    reads = iter(["a" * 64, "b" * 64])
+    monkeypatch.setattr(ops, "_access", lambda request: next(reads, "b" * 64))
+    assert client.post(BASE + "/catalog", json={"page": "/preferences"}).status_code == 409

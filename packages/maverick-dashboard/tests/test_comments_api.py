@@ -179,3 +179,33 @@ def test_an_unreadable_company_directory_offers_nobody_and_holds_mentions(env, m
     assert thread.status_code == 200 and thread.json()["people"] == []
     assert client.post("/api/v1/comments", json={**params, "body": "@Lee", "mentions": [LEE]}).status_code == 503
     assert client.post("/api/v1/comments", json={**params, "body": "Note", "mentions": []}).status_code == 201
+
+
+def test_an_unreadable_company_directory_holds_a_mention_on_any_thread_with_the_same_answer(env, monkeypatch):
+    # On an approval or policy thread the readers themselves come from the
+    # directory, so the mention check runs first: a 503, not "not allowed".
+    from maverick_dashboard import scim_groups
+
+    client, world = env
+    _as(monkeypatch, DANA)
+
+    def unreadable():
+        raise OSError("directory unreadable")
+
+    monkeypatch.setattr(scim_groups, "active_check", unreadable)
+    posted = client.post("/api/v1/comments", json={"kind": "policy", "id": "tools", "body": "@Ana",
+                                                   "mentions": [ANA]})
+    assert posted.status_code == 503
+
+
+def test_a_thread_with_nobody_else_to_offer_does_not_read_the_directory(env, monkeypatch):
+    from maverick_dashboard import scim_groups
+
+    client, world = env
+    goal_id = world.create_goal("Reconcile vendor spend", owner=ANA)
+    _as(monkeypatch, ANA)
+    reads = []
+    real = scim_groups.active_check
+    monkeypatch.setattr(scim_groups, "active_check", lambda: reads.append(1) or real())
+    assert client.get("/api/v1/comments", params={"kind": "task", "id": str(goal_id)}).json()["people"] == []
+    assert reads == []

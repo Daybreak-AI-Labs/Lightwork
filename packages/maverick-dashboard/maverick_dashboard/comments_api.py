@@ -9,6 +9,7 @@ if the person can no longer open the object.
 """
 from __future__ import annotations
 
+import logging
 import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -18,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from . import auth
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 #: The policy pages that carry a thread: (title, page, permission to read).
 POLICIES = {
@@ -111,8 +113,9 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
             if approval is None:
                 raise HTTPException(404, "No such approval.")
         readers = people_directory.allowed(content_access.approval_readers(approval, world), "operate")
+        # ``checked``: these readers already passed the company directory check.
         return {"label": f"Request #{approval.id}", "href": f"/approvals#approval-{approval.id}",
-                "readers": readers}
+                "readers": readers, "checked": True}
     if kind == "policy":
         if object_id not in POLICIES:
             raise HTTPException(404, "That policy has no comments.")
@@ -122,7 +125,7 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
         readers = {p["principal"] for p in people_directory.candidates(permission)}
         if principal and not people_directory.may(principal, permission):
             readers.discard(principal)
-        return {"label": f"Policy: {title}", "href": href, "readers": readers}
+        return {"label": f"Policy: {title}", "href": href, "readers": readers, "checked": True}
     raise HTTPException(404, "Comments work on tasks, runs, approvals and policies.")
 
 
@@ -130,19 +133,27 @@ def _signed_in(principals) -> set[str]:
     """Those the company directory (SCIM) has not turned off: an account it
     turned off can no longer sign in to read a mention. Who may read the item
     is unchanged. Raises when the directory cannot be read."""
+    principals = set(principals)
+    if not principals:
+        return set()
     from .scim_groups import active_check
 
     check = active_check()
     return {principal for principal in principals if check(principal) is not False}
 
 
-def _people(readers: set[str], viewer: str) -> list[dict]:
+def _people(readers: set[str], viewer: str, *, checked: bool = False) -> list[dict]:
+    """The people a mention can name. ``checked``: the readers already
+    passed the directory check (approvals and policies)."""
     from .identity_format import humanize_principal
 
-    try:
-        offered = _signed_in(readers - {viewer})
-    except Exception:  # noqa: BLE001 -- an unreadable directory offers nobody to mention
-        offered = set()
+    offered = readers - {viewer}
+    if not checked:
+        try:
+            offered = _signed_in(offered)
+        except Exception:  # noqa: BLE001 -- an unreadable directory offers nobody to mention
+            log.warning("comment mentions unavailable: the company directory could not be read")
+            offered = set()
     out = []
     for principal in sorted(offered):
         ident = humanize_principal(principal)
@@ -165,7 +176,7 @@ def _thread(request: Request, kind: str, object_id: str) -> dict:
     target = _object(request, kind, object_id)
     rows = store.list_for(kind, object_id)
     return {"comments": [_view(row, viewer) for row in rows],
-            "people": _people(target["readers"], viewer) if viewer else [],
+            "people": _people(target["readers"], viewer, checked=target.get("checked", False)) if viewer else [],
             "can_comment": viewer.startswith("user:"),
             "label": target["label"]}
 
@@ -190,13 +201,16 @@ def _post(request: Request, body: CommentIn) -> dict:
     if not author.startswith("user:"):
         raise HTTPException(403, "Sign in with your own account to comment.")
     target = _object(request, body.kind, body.id)
-    outside = [m for m in body.mentions if m not in target["readers"] or m == author]
-    if not outside and body.mentions:
+    signed_in = set()
+    if body.mentions:
+        # Checked first, for every kind: an unreadable directory also empties
+        # an approval's or policy's readers, which would read as "not allowed".
         try:
-            outside = sorted(set(body.mentions) - _signed_in(body.mentions))
+            signed_in = _signed_in(body.mentions)
         except Exception as exc:  # noqa: BLE001 -- never mention someone unchecked
             raise HTTPException(503, "Mentions can't be checked right now: the company directory could not "
                                      "be read. Post without the mention or try again.") from exc
+    outside = [m for m in body.mentions if m not in target["readers"] or m == author or m not in signed_in]
     if outside:
         raise HTTPException(422, "You can mention only people who can open this item. Choose someone from the list.")
     try:

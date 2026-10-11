@@ -519,6 +519,9 @@ def catalog(request: Request, body: ContextInput):
     writes = _writes_enabled(request)
     page, selection = _page(body.page), _selection(body.selection)
     request.state.product_operations_page = page
+    # Both digests are read before the work and checked again after it, so
+    # one response never pairs an earlier context with a later access.
+    original_access = _access(request)
     original_context = _context(request)
     families = enabled_families()
     items = []
@@ -545,10 +548,11 @@ def catalog(request: Request, body: ContextInput):
                       "summary": state.summary, "details": state.details, "fields": state.fields,
                       "confirmation_required": adapter.execute is not None})
     _read_gate(request)
-    if original_context != _context(request) or writes != _writes_enabled(request):
+    if (original_context != _context(request) or original_access != _access(request)
+            or writes != _writes_enabled(request)):
         raise HTTPException(409, "Your account, workspace or access changed while these controls were read. Reopen Copilot to check current controls.")
     return _response({"schema": 1, "page": page, "selection": selection, "context": original_context,
-                      "access": _access(request), "checked_at": time.time(), "operations": items})
+                      "access": original_access, "checked_at": time.time(), "operations": items})
 
 
 def _arguments(adapter, raw):
@@ -735,5 +739,9 @@ def propose(request: Request, body: ProposeInput):
             operation = None
     # Only labels/IDs and the user's question leave the server. Current records,
     # preference values, receipt bodies and execution arguments never go to this model.
-    return _response({"operation": operation, "context": _context(request), "access": _access(request),
+    access = _access(request)
+    context = _context(request)
+    if _access(request) != access:   # never pair an earlier context with a later access
+        raise HTTPException(409, "Your context changed. Refresh the available controls.")
+    return _response({"operation": operation, "context": context, "access": access,
                       "source": source, "execution": False})
