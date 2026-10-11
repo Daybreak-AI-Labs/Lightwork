@@ -1061,6 +1061,8 @@ def goal_readable_by(principal: str, goal, *, grants=None) -> bool:
     unreadable = []
 
     def authorize(source):
+        if source.id == goal.id:
+            return  # the task's own rules are checked below, with the grants already read
         try:
             readable = _goal_readable_by(principal, source)
         except Exception as exc:  # noqa: BLE001 -- a later source may still refuse
@@ -1079,7 +1081,7 @@ def goal_readable_by(principal: str, goal, *, grants=None) -> bool:
     except Exception as exc:  # noqa: BLE001 -- a copied source may still refuse
         unreadable.append(exc)
     try:
-        require_copy_sources(_world(), goal.id, authorize=authorize)
+        require_copy_sources(_world(), goal.id, authorize=authorize, defer_errors=True)
     except PermissionError:
         return False
     except (SourceContextUnavailable, AttachmentRejected) as exc:

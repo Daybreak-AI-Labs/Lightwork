@@ -590,25 +590,28 @@ def test_who_is_told_about_a_task_matches_who_the_task_page_lets_in(env, monkeyp
     assert auth.goal_readable_by(reader, goal) is page
 
 
-def test_a_copied_source_that_refuses_decides_while_the_grant_store_is_unreadable(env, monkeypatch):
-    # Ana's task is a copy of a conversation from the legal department. Lee
-    # works in finance only, so the copied source refuses him outright; that
-    # decides even though his grant for the task itself cannot be read.
-    from types import SimpleNamespace
-
+def _copy_of(world, monkeypatch, sources):
+    """Ana's task, a copied conversation of ``sources`` (Ana's tasks), checked
+    by the real copied-source walk."""
     from maverick import chat_message_actions
+
+    goal_id = world.create_goal("Copy of the vendor review", owner=ANA)
+    source_ids = [world.create_goal(title, owner=ANA, domain=domain) for title, domain in sources]
+    monkeypatch.setattr(chat_message_actions, "_alternative",
+                        lambda world, goal: {"source_goal_ids": source_ids} if goal == goal_id else None)
+    return goal_id, source_ids
+
+
+def test_a_copied_source_that_refuses_decides_while_the_grant_store_is_unreadable(env, monkeypatch):
+    # Ana's task copies a conversation from the legal department. Lee works
+    # in finance only, so that source refuses him outright; that decides even
+    # though his grant for the task itself cannot be read.
     from maverick import domain as domain_mod
     from maverick_dashboard import suite_grants
 
     client, world = env
-    goal_id = world.create_goal("Reconcile vendor spend", owner=ANA)
-    source = SimpleNamespace(id=goal_id + 1000, owner=ANA, domain="legal-pack")
-
-    def copy_sources(world, goal_id, *, alternative=None, authorize=None):
-        authorize(source)
-
-    monkeypatch.setattr(chat_message_actions, "require_copy_sources", copy_sources)
-    monkeypatch.setattr(domain_mod, "suites_for_domain", lambda d: ["legal"])
+    goal_id, _ = _copy_of(world, monkeypatch, [("Legal review", "legal-pack")])
+    monkeypatch.setattr(domain_mod, "suites_for_domain", lambda d: ["legal"] if d == "legal-pack" else [])
     monkeypatch.setattr(suite_grants, "granted_suites",
                         lambda p: frozenset({"finance", "legal"} if p == ANA else {"finance"}))
     _as(monkeypatch, ANA)
@@ -618,24 +621,60 @@ def test_a_copied_source_that_refuses_decides_while_the_grant_store_is_unreadabl
     assert posted.status_code == 422, posted.text
 
 
+def test_a_copied_source_that_cannot_be_read_does_not_hide_a_later_one_that_refuses(env, monkeypatch):
+    # Two copied sources: one cannot be checked (its knowledge connector is
+    # down), the other is from the legal department, which refuses Lee. The
+    # refusal decides, in whichever order the walk visits them.
+    from maverick import domain as domain_mod
+    from maverick import knowledge_task_context
+    from maverick_dashboard import auth, strict_reads, suite_grants
+
+    client, world = env
+    goal_id, (legal, finance) = _copy_of(world, monkeypatch, [("Legal review", "legal-pack"),
+                                                               ("Finance review", "finance-pack")])
+    monkeypatch.setattr(domain_mod, "suites_for_domain",
+                        lambda d: {"legal-pack": ["legal"], "finance-pack": ["finance"]}.get(d, []))
+    monkeypatch.setattr(suite_grants, "granted_suites", lambda p: frozenset({"finance"}))
+
+    def require_read(goal, actor, **kw):
+        if goal.id == finance:
+            raise RuntimeError("knowledge connector unreachable")
+
+    monkeypatch.setattr(knowledge_task_context, "require_read", require_read)
+    # Lee holds grants for the task and both sources: only the department
+    # and the outage decide.
+    from maverick_dashboard import content_access
+
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list",
+                        lambda: [_current_grant(ANA, LEE, "goal", goal) for goal in (goal_id, legal, finance)])
+    _as(monkeypatch, ANA)
+    roles = dict(ROLES)
+    monkeypatch.setattr(auth, "role_for_principal", lambda p, **kw: roles.get(p))
+    with strict_reads.strict():
+        assert auth.goal_readable_by(LEE, world.get_goal(goal_id), grants={LEE}) is False
+
+
 def test_a_copied_source_that_cannot_be_read_does_not_turn_an_unreadable_grant_into_a_refusal(env, monkeypatch):
     # Lee's grant for the task cannot be read, and the copied source's
     # connector is down (which the copy check reports as an unavailable
-    # source). Neither is a refusal, so the mention is held, not refused.
-    from maverick import chat_message_actions
+    # source). Neither is a refusal, so a strict check raises.
+    from maverick import knowledge_task_context
     from maverick.knowledge_task_context import SourceContextUnavailable
+    from maverick_dashboard import auth, content_access, strict_reads
 
     client, world = env
-    goal_id = world.create_goal("Reconcile vendor spend", owner=ANA)
+    goal_id, (source_id,) = _copy_of(world, monkeypatch, [("Finance review", "")])
 
-    def copy_sources(world, goal_id, *, alternative=None, authorize=None):
+    def require_read(goal, actor, **kw):
         raise SourceContextUnavailable("The knowledge connector could not be reached.")
 
-    from maverick_dashboard import auth, strict_reads
-
+    monkeypatch.setattr(knowledge_task_context, "require_read", require_read)
+    # Lee may read the source itself; only the task's grant read fails.
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list", lambda: [_current_grant(ANA, LEE, "goal", source_id)])
     _as(monkeypatch, ANA)
-    monkeypatch.setattr(chat_message_actions, "require_copy_sources", copy_sources)
-
+    goal = world.get_goal(goal_id)
     with strict_reads.strict(), pytest.raises(OSError):
-        auth.goal_readable_by(LEE, world.get_goal(goal_id), grants=OSError("grant store unreadable"))
-    assert auth.goal_readable_by(LEE, world.get_goal(goal_id), grants=OSError("grant store unreadable")) is False
+        auth.goal_readable_by(LEE, goal, grants=OSError("grant store unreadable"))
+    assert auth.goal_readable_by(LEE, goal, grants=OSError("grant store unreadable")) is False
