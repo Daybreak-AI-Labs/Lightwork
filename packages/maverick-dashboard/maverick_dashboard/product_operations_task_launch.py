@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from fastapi import BackgroundTasks, HTTPException, Response
-from maverick.governed_operations import digest
+from maverick.governed_operations import dataclass_digest, digest
 from maverick.runner import (
     configured_goal_ceiling_dollars,
     configured_goal_ceiling_wall_seconds,
@@ -60,7 +60,7 @@ def _published_specialists(request):
     current = context_for(request)
     allowed = auth.caller_suites(request)
     choices = [{"value": name, "label": pack_display_name(name, profile.persona, profile.description),
-                "revision": digest(asdict(profile))}
+                "revision": dataclass_digest(profile)}
                for name, profile in sorted(enabled_domains().items())
                if len(name) <= 120 and (allowed is None or suites_for_domain(name, profile) <= allowed)]
     personal_default = personal_specialist_default(request)
