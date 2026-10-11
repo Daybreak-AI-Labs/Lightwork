@@ -58,9 +58,14 @@ def _goal_readers(goal, *, among=None) -> set[str]:
 
     owner = getattr(goal, "owner", "") or ""
     if among is not None:
-        # Each person on their own: the grant store is read only for someone
-        # the other rules leave in, never for the owner.
-        return {principal for principal in among if auth.goal_readable_by(principal, goal)}
+        # The grant store is read once, never for the owner alone; an error
+        # reading it is weighed per person by goal_readable_by.
+        try:
+            grants = content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id),
+                                                  among=set(among) - {owner})
+        except Exception as exc:  # noqa: BLE001 -- raised again per person, see above
+            grants = exc
+        return {principal for principal in among if auth.goal_readable_by(principal, goal, grants=grants)}
     grants = content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id))
     candidates = ({owner} if owner else set()) | grants
     return {principal for principal in candidates if auth.goal_readable_by(principal, goal, grants=grants)}
@@ -147,11 +152,25 @@ def _mentionable(kind: str, target: dict, mentions: set[str]) -> set[str]:
     if kind == "run":
         return people_directory.signed_in(mentions & target["readers"])
     if kind == "approval":
-        # The role first: the grant store is read only for someone who may operate.
-        operators = people_directory.allowed(mentions, "operate")
-        return operators & content_access.approval_readers(target["subject"], _world(), among=operators)
+        return _every(mentions, lambda: people_directory.allowed(mentions, "operate"),
+                      lambda: content_access.approval_readers(target["subject"], _world(), among=mentions))
     # A policy: whoever holds its permission now, among the people it could list.
     return people_directory.allowed(mentions, target["permission"], known_only=True)
+
+
+def _every(mentions: set[str], *checks) -> set[str]:
+    """Those of ``mentions`` every check allows. A check that refuses someone
+    decides for them even when another check cannot be read; the error is
+    raised only if anyone is left whom every readable check allows."""
+    left, unreadable = set(mentions), None
+    for check in checks:
+        try:
+            left &= check()
+        except Exception as exc:  # noqa: BLE001 -- only decides for people the others allow
+            unreadable = unreadable or exc
+    if unreadable is not None and left:
+        raise unreadable
+    return left
 
 
 def _check_mentions(kind: str, target: dict, mentions: set[str]) -> None:

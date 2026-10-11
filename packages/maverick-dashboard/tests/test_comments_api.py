@@ -525,20 +525,27 @@ def test_an_owner_whose_role_no_longer_lets_them_view_is_not_offered_or_told(env
     assert mention_sources(VIC) == []
 
 
-def test_an_invalid_config_cannot_be_read_as_no_administrators_in_a_strict_check(env, monkeypatch):
-    # The configured administrators come from config, which reads as "no
-    # administrators" while a config source is invalid: a strict check raises.
-    from maverick import config
-    from maverick_dashboard import people_directory, strict_reads
+def test_a_refusal_from_a_readable_rule_decides_whatever_the_directory_says(env, monkeypatch):
+    # Dana is an administrator with no grant for Ana's task or request: the
+    # readable grant store already refuses her, so an unreadable directory
+    # does not turn that into "try again".
+    from maverick_dashboard import content_access
 
-    monkeypatch.delenv("MAVERICK_DASHBOARD_ADMINS", raising=False)
-    monkeypatch.setattr(config, "config_source_errors", lambda: ["config.toml: invalid"])
-    assert people_directory.allowed({LEE}, "operate") == set()
-    with strict_reads.strict(), pytest.raises(RuntimeError):
-        people_directory.allowed({LEE}, "operate")
+    client, world = env
+    goal_id = world.create_goal("Reconcile vendor spend", owner=ANA)
+    approval_id = world.create_approval("Pay invoice", requested_by=ANA)
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list", list)
+    _as(monkeypatch, ANA)
+    _directory_unreadable(monkeypatch)
+    for kind, object_id in (("task", goal_id), ("approval", approval_id)):
+        posted = client.post("/api/v1/comments", json={"kind": kind, "id": str(object_id), "body": "@Dana",
+                                                       "mentions": [DANA]})
+        assert posted.status_code == 422, (kind, posted.text)
 
 
 @pytest.mark.parametrize("reader,role,grant,domain_ok,expected", [
+    (ANA, "nothing", False, True, False),     # owner whose role grants nothing (the page needs view)
     (ANA, "operator", False, True, True),     # owner
     (ANA, "operator", False, False, False),   # owner outside the task's department
     (LEE, "admin", True, True, True),         # global administrator with a current grant
@@ -574,6 +581,7 @@ def test_who_is_told_about_a_task_matches_who_the_task_page_lets_in(env, monkeyp
     monkeypatch.setattr(content_access.STORE, "list",
                         lambda: [_current_grant(ANA, reader, "goal", goal_id)] if grant else [])
     request = Request({"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""})
-    page = auth.can_access_goal(request, goal)
+    # The page: the view permission, then the task's own rules.
+    page = auth.has_permission(request, "view") and auth.can_access_goal(request, goal)
     assert page is expected
     assert auth.goal_readable_by(reader, goal) is page

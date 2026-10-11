@@ -1001,32 +1001,49 @@ def _goal_readable_by(principal: str, goal, grants=None) -> bool:
     permission the page and its thread require, then
     :func:`_goal_read_policy`: department access, then ownership or a current
     reviewed read grant held by a global administrator), without a request
-    and without recording a read. The grant store is read last, only for
-    someone the other rules leave in; ``grants`` is the task's grant readers
-    when the caller already read them. Keep in step with
-    :func:`_goal_read_policy` (tests compare the two)."""
+    and without recording a read. ``grants`` is the task's grant readers
+    (or the error reading them) when the caller already read them. Keep in
+    step with :func:`_goal_read_policy` (tests compare the two).
+
+    Every rule is checked: one that refuses decides, whatever order the
+    sources are read in, and a source that cannot be read only matters when
+    no readable rule refuses (it then raises)."""
     from maverick.domain import suites_for_domain
 
     from . import content_access, rbac, suite_grants
 
-    if "view" not in rbac.permissions_for(role_for_principal(principal)):
-        return False
-    domain = getattr(goal, "domain", None)
-    if domain:
-        suites = None if is_dashboard_admin(principal) else suite_grants.granted_suites(principal)  # as caller_suites
-        if suites is not None and not all(suite is None or suite in suites for suite in suites_for_domain(domain)):
-            return False
     owner = getattr(goal, "owner", "") or ""
-    if owner == principal:
-        return True
-    if "admin" not in rbac.permissions_for(global_role_for_principal(principal)):
-        return False
-    if scim_groups.active_for_principal(principal) is False:
-        return False
-    if grants is None:
-        grants = content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id),
-                                              among={principal})
-    return principal in grants
+
+    def department():
+        domain = getattr(goal, "domain", None)
+        if not domain:
+            return True
+        suites = None if is_dashboard_admin(principal) else suite_grants.granted_suites(principal)  # as caller_suites
+        return suites is None or all(suite is None or suite in suites for suite in suites_for_domain(domain))
+
+    def granted():
+        found = grants
+        if found is None:
+            found = content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id),
+                                                 among={principal})
+        if isinstance(found, Exception):
+            raise found
+        return principal in found
+
+    rules = [lambda: "view" in rbac.permissions_for(role_for_principal(principal)), department]
+    if owner != principal:
+        rules += [lambda: "admin" in rbac.permissions_for(global_role_for_principal(principal)),
+                  lambda: scim_groups.active_for_principal(principal) is not False, granted]
+    unreadable = None
+    for rule in rules:
+        try:
+            if not rule():
+                return False
+        except Exception as exc:  # noqa: BLE001 -- only decides if no readable rule refuses
+            unreadable = unreadable or exc
+    if unreadable is not None:
+        raise unreadable
+    return True
 
 
 def goal_readable_by(principal: str, goal, *, grants=None) -> bool:
