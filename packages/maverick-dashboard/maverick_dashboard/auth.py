@@ -1058,21 +1058,37 @@ def goal_readable_by(principal: str, goal, *, grants=None) -> bool:
 
     from ._shared import _world
 
+    unreadable = []
+
     def authorize(source):
-        if not _goal_readable_by(principal, source):
+        try:
+            readable = _goal_readable_by(principal, source)
+        except Exception as exc:  # noqa: BLE001 -- a later source may still refuse
+            unreadable.append(exc)
+            return
+        if not readable:
             raise PermissionError("A copied source is unavailable to this account.")
 
+    if goal is None or not principal:
+        return False
+    # The task's own rules and every copied source are each checked, so a
+    # refusal from any of them decides even while another cannot be read.
     try:
-        if goal is None or not principal or not _goal_readable_by(principal, goal, grants):
+        if not _goal_readable_by(principal, goal, grants):
             return False
+    except Exception as exc:  # noqa: BLE001 -- a copied source may still refuse
+        unreadable.append(exc)
+    try:
         require_copy_sources(_world(), goal.id, authorize=authorize)
     except (PermissionError, SourceContextUnavailable, AttachmentRejected):
         return False
-    except Exception:  # noqa: BLE001 -- an unreadable access rule is not evidence of access
+    except Exception as exc:  # noqa: BLE001 -- an unreadable access rule is not evidence of access
+        unreadable.append(exc)
+    if unreadable:
         from . import strict_reads
 
         if strict_reads.active():
-            raise
+            raise unreadable[0]
         return False
     return True
 

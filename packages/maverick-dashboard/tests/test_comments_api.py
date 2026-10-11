@@ -523,6 +523,9 @@ def test_an_owner_whose_role_no_longer_lets_them_view_is_not_offered_or_told(env
     monkeypatch.setattr(rbac, "list_users", lambda: dict(roles))
     monkeypatch.setattr(auth, "role_for_principal", lambda p, **kw: roles.get(p))
     assert mention_sources(VIC) == []
+    from maverick_dashboard.comments_api import _goal_readers
+
+    assert VIC not in _goal_readers(world.get_goal(goal_id))
 
 
 def test_a_refusal_from_a_readable_rule_decides_whatever_the_directory_says(env, monkeypatch):
@@ -585,3 +588,31 @@ def test_who_is_told_about_a_task_matches_who_the_task_page_lets_in(env, monkeyp
     page = auth.has_permission(request, "view") and auth.can_access_goal(request, goal)
     assert page is expected
     assert auth.goal_readable_by(reader, goal) is page
+
+
+def test_a_copied_source_that_refuses_decides_while_the_grant_store_is_unreadable(env, monkeypatch):
+    # Ana's task is a copy of a conversation from the legal department. Lee
+    # works in finance only, so the copied source refuses him outright; that
+    # decides even though his grant for the task itself cannot be read.
+    from types import SimpleNamespace
+
+    from maverick import chat_message_actions
+    from maverick import domain as domain_mod
+    from maverick_dashboard import suite_grants
+
+    client, world = env
+    goal_id = world.create_goal("Reconcile vendor spend", owner=ANA)
+    source = SimpleNamespace(id=goal_id + 1000, owner=ANA, domain="legal-pack")
+
+    def copy_sources(world, goal_id, *, alternative=None, authorize=None):
+        authorize(source)
+
+    monkeypatch.setattr(chat_message_actions, "require_copy_sources", copy_sources)
+    monkeypatch.setattr(domain_mod, "suites_for_domain", lambda d: ["legal"])
+    monkeypatch.setattr(suite_grants, "granted_suites",
+                        lambda p: frozenset({"finance", "legal"} if p == ANA else {"finance"}))
+    _as(monkeypatch, ANA)
+    _grant_store_unreadable(monkeypatch)
+    posted = client.post("/api/v1/comments", json={"kind": "task", "id": str(goal_id), "body": "@Lee",
+                                                   "mentions": [LEE]})
+    assert posted.status_code == 422, posted.text
