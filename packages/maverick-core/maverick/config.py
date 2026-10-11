@@ -36,6 +36,7 @@ import math
 import os
 import re
 import time
+from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -541,6 +542,64 @@ def _strict_config_bool(
     return value if isinstance(value, bool) else bool(invalid)
 
 
+# One read of the deployment-global configuration per request. A dashboard page
+# asked for it about 350 times; with a sealed dashboard overlay every read also
+# resolved the at-rest key (re-checking, on Windows re-applying, its owner-only
+# ACL) and decrypted each secret. Inside a scope the merged result is built once
+# and every caller gets its own copy. Each read checks every source file's path,
+# identity, size and mtime (and the overlay variable): a policy saved while the
+# request waits starts a fresh read, so authorization checks still see it.
+# Outside a scope nothing is kept, so a later request still observes key
+# rotation and key-file permission changes.
+_SNAPSHOT: ContextVar[dict | None] = ContextVar("maverick_config_snapshot", default=None)
+
+
+@contextmanager
+def config_snapshot_scope():
+    """Read the deployment-global configuration once for this scope (a request)."""
+    token = _SNAPSHOT.set({})
+    try:
+        yield
+    finally:
+        _SNAPSHOT.reset(token)
+
+
+def discard_config_snapshot() -> None:
+    """Drop a snapshot copied into a background worker's context."""
+    _SNAPSHOT.set(None)
+
+
+def _snapshot_key() -> tuple:
+    paths = [config_path(), dashboard_overrides_path()]
+    overlay = os.environ.get(CONFIG_OVERLAY_ENV)
+    if overlay:
+        paths.append(Path(overlay).expanduser())
+    key = []
+    for path in paths:
+        try:
+            info = path.stat()
+        except OSError:
+            key.append((str(path), None))
+        else:
+            key.append((str(path), info.st_mtime_ns, info.st_size, info.st_ino))
+    return tuple(key)
+
+
+def _copy_tree(value):
+    """A detached copy of a parsed configuration tree (dicts, lists, scalars)."""
+    if isinstance(value, dict):
+        return {key: _copy_tree(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_copy_tree(child) for child in value]
+    if isinstance(value, tuple):
+        return tuple(_copy_tree(child) for child in value)
+    if isinstance(value, (str, int, float, bool, type(None))):
+        return value
+    import copy
+
+    return copy.deepcopy(value)
+
+
 def load_global_config() -> dict:
     """Load deployment-global config without a per-tenant overlay.
 
@@ -549,6 +608,19 @@ def load_global_config() -> dict:
     The dashboard overlay remains writable by the global admin; the optional
     operator-owned config overlay still has higher precedence.
     """
+    memo = _SNAPSHOT.get()
+    if memo is None or _UNSEALING.get():
+        return _read_global_config()
+    key = _snapshot_key()
+    cached = memo.get(key)
+    if cached is None:
+        cached = _read_global_config()
+        memo.clear()  # only the current sources' answer is kept
+        memo[key] = cached
+    return _copy_tree(cached)
+
+
+def _read_global_config() -> dict:
     # Wizard-persisted secrets must be in the environment BEFORE interpolation,
     # or every "${ANTHROPIC_API_KEY}" the wizard wrote resolves to "" on a bare
     # pip/CLI install. setdefault semantics: a real export always wins.

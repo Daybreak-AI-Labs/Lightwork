@@ -97,3 +97,46 @@ def test_anonymous_access_is_rechecked_at_every_gate(monkeypatch):
     with pytest.raises(HTTPException):
         auth._authorization_principal(denied)
     assert checks["n"] == 4
+
+
+def test_a_request_reads_the_sealed_configuration_once_and_still_sees_a_policy_saved_meanwhile(tmp_path, monkeypatch):
+    # One page asked for the configuration about 350 times, and every read
+    # decrypted the saved secrets again. Inside a request it is read once;
+    # an authorization check after a save (fresh_configuration) still sees it.
+    import os
+
+    from maverick import config, crypto_at_rest
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.delenv("MAVERICK_ENCRYPTION_KEY", raising=False)
+    config.reset_config_cache()
+    (tmp_path / "config.toml").write_text("[budget]\nmax_dollars = 5.0\n", encoding="utf-8")
+    with crypto_at_rest.deployment_key_scope():
+        token = crypto_at_rest.seal_to_str("sk-test-not-a-real-key")
+    config.dashboard_overrides_path().write_text(f'[providers.anthropic]\napi_key = "{token}"\n', encoding="utf-8")
+    opened = []
+    real = crypto_at_rest.unseal_many_from_str
+    monkeypatch.setattr(crypto_at_rest, "unseal_many_from_str", lambda values: opened.append(1) or real(values))
+
+    app = FastAPI()
+    app.add_middleware(_request_memo.RequestMemoMiddleware)
+
+    def read_many():
+        return [config.load_config()["providers"]["anthropic"]["api_key"] for _ in range(100)]
+
+    @app.get("/x")
+    async def x():
+        keys = await run_in_threadpool(read_many)
+        replacement = tmp_path / "config.toml.new"
+        replacement.write_text("[budget]\nmax_dollars = 7.0\n", encoding="utf-8")
+        os.replace(replacement, tmp_path / "config.toml")
+        with _request_memo.fresh_configuration():
+            budget = config.load_config()["budget"]["max_dollars"]
+        return {"keys": sorted(set(keys)), "budget": budget}
+
+    try:
+        assert TestClient(app).get("/x").json() == {"keys": ["sk-test-not-a-real-key"], "budget": 7.0}
+        assert len(opened) == 2  # once, then once more after the save
+    finally:
+        config.reset_config_cache()

@@ -568,3 +568,86 @@ def test_unseal_config_tree_does_not_reenter_itself():
         assert cfg_mod._unseal_config_tree(tree) is tree
     finally:
         cfg_mod._UNSEALING.reset(token)
+
+
+def _sealed_overlay(home):
+    """A config with one sealed dashboard secret, as Settings saves it."""
+    from maverick import config, crypto_at_rest
+
+    (home / "config.toml").write_text('[budget]\nmax_dollars = 5.0\n', encoding="utf-8")
+    with crypto_at_rest.deployment_key_scope():
+        token = crypto_at_rest.seal_to_str("sk-test-not-a-real-key")
+    config.dashboard_overrides_path().write_text(f'[providers.anthropic]\napi_key = "{token}"\n', encoding="utf-8")
+
+
+@pytest.fixture
+def sealed_home(tmp_path, monkeypatch):
+    from maverick import config
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.delenv("MAVERICK_ENCRYPTION_KEY", raising=False)
+    config.reset_config_cache()
+    _sealed_overlay(tmp_path)
+    yield tmp_path
+    config.reset_config_cache()
+
+
+def test_a_snapshot_scope_reads_and_decrypts_the_configuration_once(sealed_home, monkeypatch):
+    # A dashboard page asked for the configuration about 350 times, and each
+    # read decrypted every sealed secret again.
+    from maverick import config, crypto_at_rest
+
+    opened = []
+    real = crypto_at_rest.unseal_many_from_str
+    monkeypatch.setattr(crypto_at_rest, "unseal_many_from_str", lambda values: opened.append(1) or real(values))
+    with config.config_snapshot_scope():
+        for _ in range(50):
+            assert config.load_config()["providers"]["anthropic"]["api_key"] == "sk-test-not-a-real-key"
+    assert len(opened) == 1
+    load_config()
+    load_config()
+    assert len(opened) == 3  # outside a scope every read is fresh, as before
+
+
+def test_each_reader_in_a_snapshot_scope_gets_its_own_copy(sealed_home):
+    from maverick import config
+
+    with config.config_snapshot_scope():
+        first = config.load_config()
+        first["budget"]["max_dollars"] = 999
+        first["providers"].clear()
+        second = config.load_config()
+    assert second["budget"]["max_dollars"] == 5.0
+    assert second["providers"]["anthropic"]["api_key"] == "sk-test-not-a-real-key"
+
+
+def test_a_policy_saved_inside_a_snapshot_scope_is_read_at_once(sealed_home):
+    # Authorization checks keep seeing a policy written while a request waits.
+    import os
+
+    from maverick import config
+
+    with config.config_snapshot_scope():
+        assert config.load_config()["budget"]["max_dollars"] == 5.0
+        path = sealed_home / "config.toml"
+        replacement = sealed_home / "config.toml.new"
+        replacement.write_text('[budget]\nmax_dollars = 7.0\n', encoding="utf-8")
+        os.replace(replacement, path)  # the atomic save the settings writers use
+        assert config.load_config()["budget"]["max_dollars"] == 7.0
+        config.dashboard_overrides_path().unlink()
+        assert "providers" not in config.load_config()
+
+
+def test_a_discarded_snapshot_reads_from_the_sources_again(sealed_home, monkeypatch):
+    from maverick import config, crypto_at_rest
+
+    opened = []
+    real = crypto_at_rest.unseal_many_from_str
+    monkeypatch.setattr(crypto_at_rest, "unseal_many_from_str", lambda values: opened.append(1) or real(values))
+    with config.config_snapshot_scope():
+        config.load_config()
+        config.discard_config_snapshot()
+        config.load_config()
+        config.load_config()
+    assert len(opened) == 3

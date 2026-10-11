@@ -9,6 +9,12 @@ request and :func:`memoized` serves repeat display/configuration questions.
 An authorization boundary uses :func:`fresh_configuration` because policy may
 change while a request waits. Retained background workers explicitly discard
 their copied HTTP memo. Outside a request scope nothing is cached.
+
+The same scope holds the kernel's one read of the deployment-global
+configuration (``maverick.config.config_snapshot_scope``). It is checked
+against every source file's identity, size and modification time on each read,
+so a policy saved while a request waits is still read at the next
+authorization check; a retained background worker discards it with the memo.
 """
 from __future__ import annotations
 
@@ -47,7 +53,10 @@ def discard_request_memo() -> None:
     grants belong to the originating HTTP request, not the worker's lifetime.
     Call this in the copied context, leaving the live request's memo intact.
     """
+    from maverick.config import discard_config_snapshot
+
     _SCOPE.set(None)
+    discard_config_snapshot()
 
 
 @contextmanager
@@ -75,8 +84,11 @@ class RequestMemoMiddleware:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
+        from maverick.config import config_snapshot_scope
+
         token = _SCOPE.set({})
         try:
-            await self.app(scope, receive, send)
+            with config_snapshot_scope():
+                await self.app(scope, receive, send)
         finally:
             _SCOPE.reset(token)
