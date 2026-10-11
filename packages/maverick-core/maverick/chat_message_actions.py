@@ -190,8 +190,9 @@ def require_copy_sources(world, goal_id, *, alternative=None, authorize=None, de
 
     ``defer_errors``: a source that cannot be checked (an error other than a
     ``PermissionError`` refusal) is set aside and the walk goes on, so a later
-    source that refuses still decides; the first error set aside is raised at
-    the end. For a check that must tell "cannot be read" from "refused"."""
+    source that refuses still decides. At the end an error set aside is raised,
+    an outage ahead of a ``SourceContextUnavailable`` (which can also be a
+    refusal). For a check that must tell "cannot be read" from "refused"."""
     if alternative is None:
         alternative = _alternative(world, goal_id)
         if alternative is None:
@@ -220,13 +221,11 @@ def require_copy_sources(world, goal_id, *, alternative=None, authorize=None, de
                 raise
             deferred.append(exc)
     if deferred:
-        from .attachments import AttachmentRejected
         from .knowledge_task_context import SourceContextUnavailable
 
         # An outage outranks an "unavailable source", which can also be a
         # refusal: the answer does not depend on the order sources were walked.
-        raise next((exc for exc in deferred if not isinstance(exc, (SourceContextUnavailable, AttachmentRejected))),
-                   deferred[0])
+        raise next((exc for exc in deferred if not isinstance(exc, SourceContextUnavailable)), deferred[0])
     from .attachments import _verify_stored_attachment
     for item in world.list_attachments(goal_id):
         _verify_stored_attachment(Path(item.path), item.sha256)
@@ -237,12 +236,11 @@ def _check_copy_source(world, identity, goal, authorize, require_read, pending, 
     """Check one copied source and queue its own copied sources. With
     ``deferred`` (a list), a step that cannot be checked is set aside there
     while the others still run, and the nested sources are queued first, so
-    they are walked even when this source cannot be checked."""
-    source_goal = world.get_goal(identity)
-    if source_goal is None or source_goal.owner != goal.owner:
-        raise PermissionError("A copied source is no longer available to this account.")
-
+    they are walked even when this source cannot be checked (or read)."""
     def check():
+        source_goal = world.get_goal(identity)
+        if source_goal is None or source_goal.owner != goal.owner:
+            raise PermissionError("A copied source is no longer available to this account.")
         if authorize is not None:
             authorize(source_goal)
         require_read(source_goal, goal.owner)

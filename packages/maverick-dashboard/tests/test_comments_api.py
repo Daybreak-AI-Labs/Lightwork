@@ -755,3 +755,48 @@ def test_a_nested_copied_source_that_refuses_decides_past_a_parent_that_cannot_b
     _as(monkeypatch, ANA)
     with strict_reads.strict():
         assert auth.goal_readable_by(LEE, world.get_goal(goal_id), grants={LEE}) is False
+
+
+def test_a_nested_copied_source_that_refuses_decides_past_a_parent_that_cannot_be_loaded(env, monkeypatch):
+    # As above, but loading A itself fails: B is still walked and refuses.
+    from maverick import chat_message_actions, knowledge_task_context
+    from maverick import domain as domain_mod
+    from maverick_dashboard import auth, content_access, strict_reads, suite_grants
+
+    client, world = env
+    goal_id, (parent,) = _copy_of(world, monkeypatch, [("A", "finance-pack")])
+    nested = world.create_goal("B", owner=ANA, domain="legal-pack")
+
+    class Store:
+        def __init__(self, world):
+            pass
+
+        def for_goal(self, identity):
+            if identity == parent:
+                return {"detail": {"kind": chat_message_actions.KINDS[0],
+                                   "alternative": {"source_goal_ids": [nested]}}}
+            return None
+
+    real_get_goal = world.get_goal
+
+    def get_goal(identity):
+        if identity == parent:
+            raise OSError("world unreadable for A")
+        return real_get_goal(identity)
+
+    monkeypatch.setattr(chat_message_actions, "SubmissionStore", Store)
+    monkeypatch.setattr(knowledge_task_context, "require_read", lambda goal, actor, **kw: None)
+    monkeypatch.setattr(domain_mod, "suites_for_domain",
+                        lambda d: {"legal-pack": ["legal"], "finance-pack": ["finance"]}.get(d, []))
+    monkeypatch.setattr(suite_grants, "granted_suites", lambda p: frozenset({"finance"}))
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list",
+                        lambda: [_current_grant(ANA, LEE, "goal", goal) for goal in (goal_id, parent, nested)])
+    _as(monkeypatch, ANA)
+    goal = world.get_goal(goal_id)
+    monkeypatch.setattr(world, "get_goal", get_goal)
+    from maverick_dashboard import _shared
+
+    monkeypatch.setattr(_shared, "_world", lambda: world)
+    with strict_reads.strict():
+        assert auth.goal_readable_by(LEE, goal, grants={LEE}) is False
