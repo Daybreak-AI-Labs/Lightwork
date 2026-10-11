@@ -124,6 +124,7 @@
 {% call composer_recovery(can_create_goal and draft_recovery_context) %}
 {% from "_form_field.html" import error_summary %}
 <form method="post" action="/chat/send" data-product-validation data-mv-validate class="composer cs-anim" enctype="multipart/form-data">
+  {% if value_opportunity %}<input type="hidden" name="value_opportunity" value="{{ value_opportunity }}"><p class="muted">This task will be linked to your selected work opportunity. Review the request before starting.</p>{% endif %}
   {# CTL-3: the shared form-field pattern -- the problem next to its field and in a summary that takes focus. #}
   {{ error_summary('composer-errors') }}
   <input type="hidden" name="composer_mode" value="message">

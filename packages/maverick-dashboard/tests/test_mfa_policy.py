@@ -194,3 +194,16 @@ def test_reauthenticate_url_prefers_the_browser_login(monkeypatch):
     url = step_up.reauthenticate_url(
         SimpleNamespace(url=SimpleNamespace(path="/users", query="a=1"), method="GET"))
     assert url == "/auth/login?fresh=1&return_to=%2Fusers%3Fa%3D1"
+
+
+def test_reauthenticate_url_asks_saml_for_a_fresh_sign_in(monkeypatch):
+    # Without fresh=1 the SAML login reused the IdP session, the assertion kept
+    # its old AuthnInstant and step-up refused again: a loop.
+    import maverick.oidc as oidc
+    from maverick_dashboard import saml
+
+    monkeypatch.setattr(oidc, "login_enabled", lambda: False)
+    monkeypatch.setattr(saml, "saml_enabled", lambda: True)
+    url = step_up.reauthenticate_url(
+        SimpleNamespace(url=SimpleNamespace(path="/users", query=""), method="GET"))
+    assert url == "/saml/login?fresh=1&return_to=%2Fusers"

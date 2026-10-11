@@ -7028,6 +7028,13 @@ async def finance_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "finance.html", context)
 
 
+@app.get("/work-value", response_class=HTMLResponse)
+def work_value_page(request: Request) -> HTMLResponse:
+    from .intent_value_api import authority
+    authority(request)
+    return templates.TemplateResponse(request, "intent_value.html", {})
+
+
 @app.get("/savings", response_class=HTMLResponse)
 def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     """The value dashboard: money saved vs the typical human cost, computed
@@ -11260,6 +11267,7 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
             "threads": _chat_threads(request, w),
             "prefill_title": prefill_title,
             "prefill_description": prefill_description,
+            "value_opportunity": request.query_params.get("value_opportunity", "")[:100],
             "published_specialists": specialist_choices,
             "specialist_work_notice": SPECIALIST_NOTICE,
             "requested_specialist": requested_specialist,
@@ -11546,6 +11554,7 @@ async def chat_send(
     domain: str = Form(""),
     specialist_context: str = Form(""),
     specialist_revision: str = Form(""),
+    value_opportunity: str = Form(""),
 ) -> RedirectResponse:
     _require_same_origin(request)
     require_permission(request, "operate")
@@ -11555,13 +11564,17 @@ async def chat_send(
     from .task_model_selection_api import selection as select_task_ai
 
     task_selection = select_task_ai(request, task_model, task_effort, task_model_context)
+    from .intent_value_handoff import bind as bind_opportunity
+    from .intent_value_handoff import validate as validate_opportunity
     from .product_operations_task_launch import published_guard
+    validate_opportunity(request, value_opportunity)
     chosen_specialist = domain.strip()
     if len(chosen_specialist) > 120:
         raise HTTPException(422, "Choose a named published specialist from the list.")
     task_model_guard = task_ai_guard(request, task_selection, task_model_context)
     specialist_guard = published_guard(request, chosen_specialist, specialist_context, specialist_revision) if chosen_specialist else None
     def start_guard():
+        validate_opportunity(request, value_opportunity)
         task_model_guard()
         if specialist_guard is not None:
             specialist_guard()
@@ -11625,6 +11638,7 @@ async def chat_send(
                            effect_guard=start_guard)
     start_guard()
     goal_id = receipt["goal_id"]
+    bind_opportunity(request, value_opportunity, w, goal_id)
     if director is not None and receipt.get("created"):
         from maverick.director_mode import record
 
@@ -13933,6 +13947,18 @@ async def api_goal_events_stream(
 #       walkthroughs / 3D plan tree -----
 
 _STATIC_DIR = Path(__file__).parent / "static"
+
+
+@app.get("/static/intent-value.js")
+def intent_value_script(request: Request):
+    require_permission(request, "view")
+    return FileResponse(_STATIC_DIR / "intent-value.js", media_type="application/javascript")
+
+
+@app.get("/static/intent-value.css")
+def intent_value_styles(request: Request):
+    require_permission(request, "view")
+    return FileResponse(_STATIC_DIR / "intent-value.css", media_type="text/css")
 
 
 @app.get("/static/lightwork-analytics.js")

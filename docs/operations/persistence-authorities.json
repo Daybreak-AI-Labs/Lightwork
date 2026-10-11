@@ -173,10 +173,17 @@
       "migration": "Migration follows target owner; generated walkthrough/export files are output only",
       "recovery": "Current registry applies to HALT/config/state targets; export data does not authorize replay",
       "limits": "One file can have more than one semantic role"
+    },
+    "derived_analytics": {
+      "owner": "Intent-value domain owns economic assumptions and derived work snapshots; GovernedRecordStore owns persistence",
+      "transactions": "Tenant-scoped private revision CAS and audit outbox, or existing encrypted PostgreSQL row transaction and RLS; estimation never changes source audit evidence",
+      "migration": "Reuse existing governed-record backend and schema; retain original and recalculated estimates and assumption versions",
+      "recovery": "Preserve derived analytics as data; fresh complete source reads and current permissions decide visibility and execution eligibility; restored assumptions cannot authorize source work",
+      "limits": "No execution, budget or source-access authority; restoring older customer assumptions can alter subsequent estimates, so snapshots retain their inputs and provenance"
     }
   },
   "counts": {
-    "governed": 137,
+    "governed": 138,
     "artifact": 55,
     "a2a": 4,
     "preferences": 8,
@@ -199,7 +206,8 @@
     "mixed_api": 8,
     "knowledge": 4,
     "draft": 3,
-    "test_only": 16
+    "test_only": 16,
+    "derived_analytics": 2
   },
   "entries": [
     {
@@ -30172,6 +30180,104 @@
           "function": "check",
           "kind": "data_dir",
           "expression": "data_dir('audit')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/intent_value/opportunities.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/intent_value/opportunities.py",
+      "purpose": "Customer recommendation decisions, native draft reservations and adoption references; restored replay barriers require current recovery reconciliation.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Reviewed record fields and consumers: analytics never admit execution; recommendation draft and adoption receipts are retained restore blockers. Covered by recovery-authority and feature tests.",
+      "governed_namespaces": [
+        {
+          "namespace": "intent_value_recommendations",
+          "line": 18,
+          "recovery_policy": "intent_value_draft_decision_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 12
+      },
+      "source_sites": [
+        {
+          "line": 18,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('intent_value_recommendations', 'IVR', 'intent_value')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/intent_value/service.py",
+      "contract": "derived_analytics",
+      "owner": "packages/maverick-core/maverick/intent_value/service.py",
+      "purpose": "Derived work identities, economic estimate snapshots, intent corrections and optional completion acknowledgements; no execution or permission authority.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Reviewed record fields and consumers: analytics never admit execution; recommendation draft and adoption receipts are retained restore blockers. Covered by recovery-authority and feature tests.",
+      "governed_namespaces": [
+        {
+          "namespace": "intent_value_work",
+          "line": 14,
+          "recovery_policy": null
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 14
+      },
+      "source_sites": [
+        {
+          "line": 14,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('intent_value_work', 'IVW', 'intent_value')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/intent_value/settings.py",
+      "contract": "derived_analytics",
+      "owner": "packages/maverick-core/maverick/intent_value/settings.py",
+      "purpose": "Tenant benchmark and labor-rate assumptions and optional confirmation preferences; never budget caps or permission grants.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Reviewed record fields and consumers: analytics never admit execution; recommendation draft and adoption receipts are retained restore blockers. Covered by recovery-authority and feature tests.",
+      "governed_namespaces": [
+        {
+          "namespace": "intent_value_settings",
+          "line": 13,
+          "recovery_policy": null
+        },
+        {
+          "namespace": "intent_value_benchmarks",
+          "line": 14,
+          "recovery_policy": null
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 12
+      },
+      "source_sites": [
+        {
+          "line": 13,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('intent_value_settings', 'IVS', 'intent_value')"
+        },
+        {
+          "line": 14,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('intent_value_benchmarks', 'IVB', 'intent_value')"
         }
       ]
     }

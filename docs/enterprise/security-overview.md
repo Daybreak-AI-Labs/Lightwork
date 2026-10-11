@@ -183,8 +183,12 @@ to hold a second factor.
   workspace keys, changing sign-in/administrator/key-service settings,
   deleting a workspace, signing others out) need a second factor no older than
   that. Otherwise the API answers 403 with a plain sentence and a
-  `reauthenticate` link (`/auth/login?fresh=1`, which sends `prompt=login` so
-  the provider asks again), and the page shows a "Sign in again" button.
+  `reauthenticate` link (`/auth/login?fresh=1`, which sends `prompt=login`, or
+  `/saml/login?fresh=1`, which sends `ForceAuthn`, so the provider asks again),
+  and the page shows a "Sign in again" button. The second factor is dated by
+  the provider's `auth_time` or `AuthnInstant`; a step-up sign-in that cannot
+  show a recent one does not count, so a provider that ignores the request and
+  reuses its own session gets a refusal, not a new session.
 - **Sessions** (`/settings/sessions`, `/api/v1/sessions`). Every browser
   session is recorded server-side (`dashboard-sessions.sqlite3`: person,
   sign-in method, second factor, issued, last seen, address, device summary)

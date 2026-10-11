@@ -53,7 +53,6 @@ import hashlib
 import json
 import logging
 import re
-import shlex
 import subprocess
 import uuid
 from dataclasses import dataclass, field
@@ -172,6 +171,7 @@ class KubernetesBackend:
         default user (often root) with no resource limits and the namespace's
         default ServiceAccount token auto-mounted. We pin a non-root
         securityContext + drop all capabilities + block privilege escalation,
+        make the image filesystem read-only (the workspace stays writable),
         disable the ServiceAccount token automount (a prompt-injected agent in
         the pod has no cluster API credential to steal), and set
         requests/limits so a runaway can't starve the node.
@@ -197,6 +197,7 @@ class KubernetesBackend:
             "securityContext": {
                 "allowPrivilegeEscalation": False,
                 "capabilities": {"drop": ["ALL"]},
+                "readOnlyRootFilesystem": True,
             },
             # The workspace volume (below) -- kubectl cp streams the host
             # workdir in here before the command runs, and back out after.
@@ -370,8 +371,16 @@ class KubernetesBackend:
         return None
 
     def _run_command(self, pod_name: str, cmd: str, effective: float) -> ExecResult:
-        wrapped = f"cd {shlex.quote(_POD_WORKDIR)} && {cmd}"
-        args = [*self._kubectl_prefix(), "exec", pod_name, "--", "sh", "-c", wrapped]
+        # Copy-in is complete before we atomically claim a fresh private child.
+        # Never point a tool's disposable TMPDIR at the customer workspace root
+        # or reuse an existing path. Remove only an empty child; interrupted or
+        # unmanaged scratch remains ordinary recoverable workspace data.
+        scratch = f"{_POD_WORKDIR}/.maverick-tmp-{uuid.uuid4().hex}"
+        wrapped = ('(umask 077; mkdir "$1") || exit 74; cd "$2" || exit 74; '
+                   'TMPDIR="$1"; export TMPDIR; sh -c "$3"; status=$?; '
+                   'rmdir "$1" 2>/dev/null || :; exit "$status"')
+        args = [*self._kubectl_prefix(), "exec", pod_name, "--", "sh", "-c", wrapped,
+                "workspace-command", scratch, _POD_WORKDIR, cmd]
         try:
             result = subprocess.run(
                 args, capture_output=True, text=True, timeout=effective,

@@ -319,6 +319,14 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "view",
     },
+    {
+        "path": "/work-value",
+        "label": "Work value & opportunities",
+        "group": "Observe",
+        "icon": "spend",
+        "floor": "view",
+        "default": "view",
+    },
     # ROI: money saved vs the client's own human-cost assumptions.
     {
         "path": "/savings",
@@ -1497,6 +1505,7 @@ PAGE_AREAS: dict[str, tuple[str, str]] = {
     "/run-tree": ("Evidence & audit", "Task replay"),
     "/spend": ("Costs & value", "Spend"),
     "/savings": ("Costs & value", "Savings"),
+    "/work-value": ("Costs & value", "Work value & opportunities"),
     "/shoring": ("Work", "Hand over a team's work"),
     "/billing": ("Costs & value", "Billing"),
     "/providers": ("Settings", "AI providers"),
@@ -1725,7 +1734,7 @@ AREAS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
                                           "AI risk", "Vendors")),
     ("Evidence & audit", "/audit", ("Activity log", "Task replay", "Trust receipts", "Learning history",
                                     "Document vault", "Content access")),
-    ("Costs & value", "/spend", ("Spend", "Savings", "Billing", "Budget", "Provider spending",
+    ("Costs & value", "/spend", ("Spend", "Work value & opportunities", "Savings", "Billing", "Budget", "Provider spending",
                                  "Compare cost records", "Spending limits")),
     ("Settings", "/settings", ("General", "Setup", "AI providers", "Connections", "Chat apps", "People & roles",
                                "Workspaces", "Backup & recovery", "Partner fleet", "Advanced")),

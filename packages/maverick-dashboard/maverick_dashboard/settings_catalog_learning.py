@@ -48,7 +48,18 @@ _EVERY_HALF = (("30 * * * *", "Every hour"), ("30 */3 * * *", "Every 3 hours"),
 
 def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- rows only
     return (_systems(S) + _overnight(S) + _harness(S) + _adopting(S) + _flows(S)
-            + _research(S) + _promotion(S) + _benchmarks(S) + _elsewhere(S))
+            + _research(S) + _promotion(S) + _benchmarks(S) + _elsewhere(S) + _intent_value(S))
+
+
+def _intent_value(S) -> tuple:
+    return (
+        S("intent_value", "enabled", "Intent-based work value",
+          "Analyze permitted work metadata and requests, group related tasks, and show audit-backed work with editable estimated labor value. Does not activate automation.",
+          "toggle", "Memory & learning", True, "maverick.intent_value.settings", subgroup="Work value and opportunities"),
+        S("intent_value", "recommendations", "Suggest reusable work",
+          "Use repeated intent and audited actions to suggest existing capabilities or reviewable drafts. Customers choose whether to adopt them.",
+          "toggle", "Memory & learning", True, "maverick.intent_value.settings", subgroup="Work value and opportunities"),
+    )
 
 
 def _systems(S) -> tuple:

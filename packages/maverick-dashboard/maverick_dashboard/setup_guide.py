@@ -80,6 +80,8 @@ STEPS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ("finance", "Finance", "Finance tools and their limits.", ("finance", "finance_operations"), ""),
     ("value", "Savings assumptions", "Your cost of doing work by hand, for the savings figures.", ("value",),
      "/savings"),
+    ("intent_value", "Work value and opportunities", "Estimated labor value, execution costs and optional workflow suggestions.",
+     ("intent_value",), "/work-value"),
     ("assessments", "Assessments", "Help with assessments and reviews.", ("assessments",), ""),
     ("security_suite", "Security and compliance", "The security and compliance modules.",
      ("governance_agents", "threat_hunt", "env_hunt"), ""),
