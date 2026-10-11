@@ -43,8 +43,16 @@ def tenant() -> str:
     return current_tenant_id_strict() or ""
 
 
-def _reviewer_current(record: dict) -> bool:
+def _reviewer_current(record: dict, *, strict: bool = False) -> bool:
+    """``strict``: a role or permission source that cannot be read raises
+    instead of counting as "not current"."""
     from . import auth, rbac, scim_groups
+
+    def global_role(principal):
+        return auth.global_role_for_principal(principal, strict=True) if strict else auth.global_role_for_principal(principal)
+
+    def permissions(role):
+        return rbac.permissions_for(role, strict=True) if strict else rbac.permissions_for(role)
 
     reviewer = record.get("reviewed_by")
     if not reviewer or reviewer == record.get("requester"):
@@ -53,20 +61,45 @@ def _reviewer_current(record: dict) -> bool:
         return False
     if reviewer == record.get("owner"):
         scope = record.get("tenant")
-        role = rbac.get_tenant_role(scope, reviewer) if scope else auth.global_role_for_principal(reviewer)
-        return "view" in rbac.permissions_for(role) if role else False
-    return "admin" in rbac.permissions_for(auth.global_role_for_principal(reviewer))
+        role = rbac.get_tenant_role(scope, reviewer) if scope else global_role(reviewer)
+        return "view" in permissions(role) if role else False
+    return "admin" in permissions(global_role(reviewer))
 
 
 def _grant_current(grant: dict, *, owner: str, resource_kind: str, resource_id: str,
-                   resource_revision: str | None = None) -> bool:
+                   resource_revision: str | None = None, strict: bool = False) -> bool:
     """An approved, unexpired, independently reviewed read grant for exactly this resource."""
     return not (grant.get("tenant") != tenant() or grant.get("owner") != owner
                 or grant.get("resource_kind") != resource_kind
                 or grant.get("resource_id") != str(resource_id)
                 or (resource_revision is not None and grant.get("resource_revision") != resource_revision)
                 or grant.get("status") != "approved" or grant.get("_audit_pending")
-                or grant.get("expires_at", 0) <= time.time() or not _reviewer_current(grant))
+                or grant.get("expires_at", 0) <= time.time()
+                or not (_reviewer_current(grant, strict=True) if strict else _reviewer_current(grant)))
+
+
+def grant_readers(owner: str, *, resource_kind: str, resource_id: str, resource_revision: str | None = None,
+                  among=None, strict: bool = False) -> set[str]:
+    """The requesters holding a current, independently reviewed read grant for
+    exactly this resource (see :func:`_grant_current`). With ``among``, only
+    those people's grants are checked. An unreadable grant store or reviewer
+    check opens nothing; with ``strict`` it raises."""
+    if not enabled():
+        return set()
+    current = {"owner": owner, "resource_kind": resource_kind, "resource_id": resource_id,
+               "resource_revision": resource_revision, **({"strict": True} if strict else {})}
+    readers = set()
+    try:
+        for grant in STORE.list():
+            requester = grant.get("requester")
+            if (isinstance(requester, str) and requester and (among is None or requester in among)
+                    and _grant_current(grant, **current)):
+                readers.add(requester)
+    except Exception:  # noqa: BLE001 -- an unreadable grant store opens nothing
+        if strict:
+            raise
+        return set()
+    return readers
 
 
 def may_read_employee_content(request, owner: str, *, resource_kind: str, resource_id: str, resource_revision: str | None = None) -> bool:
@@ -138,31 +171,21 @@ def can_read_approval(request, approval, world=None) -> bool:
         resource_id=resource["resource_id"], resource_revision=resource["resource_revision"])
 
 
-def approval_readers(approval, world) -> set[str]:
+def approval_readers(approval, world, *, among=None, strict: bool = False) -> set[str]:
     """The people who can open this approval card on the Approvals page.
 
     Its owner, plus (while exceptional access is on) anyone holding a current,
     independently reviewed read grant for exactly this card -- the same rules
     :func:`can_read_approval` applies to a reader. An unreadable grant store
-    opens nothing, as it would for that reader."""
+    opens nothing, as it would for that reader. ``among`` and ``strict`` are
+    as for :func:`grant_readers`."""
     try:
         resource = approval_resource(approval, world)
     except HTTPException:
         return set()
     readers = {resource["owner"]} if resource["owner"] else set()
-    if not enabled():
-        return readers
-    try:
-        for grant in STORE.list():
-            requester = grant.get("requester")
-            if isinstance(requester, str) and requester and _grant_current(
-                    grant, owner=resource["owner"], resource_kind="approval",
-                    resource_id=resource["resource_id"],
-                    resource_revision=resource["resource_revision"]):
-                readers.add(requester)
-    except Exception:
-        return {resource["owner"]} if resource["owner"] else set()
-    return readers
+    return readers | grant_readers(resource["owner"], resource_kind="approval", resource_id=resource["resource_id"],
+                                   resource_revision=resource["resource_revision"], among=among, strict=strict)
 
 
 def require_approval_content(request, approval_id, world=None):

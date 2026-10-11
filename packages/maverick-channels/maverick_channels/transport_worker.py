@@ -37,7 +37,7 @@ class TransportWorker:
         self._closing = False
         self._retry_after = {}
         self._scan_pending = None  # ids still waiting, from the last complete scan
-        self._unreadable = frozenset()  # ids the last complete scan could not read
+        self._unreadable = frozenset()  # ids the last scans could not read (see _report_unreadable)
         self._blocked_conversations = {}
         self.task = None
         self._scan_task = None
@@ -64,7 +64,9 @@ class TransportWorker:
         receipt = await self.channel.admit_message(message, external_id=external_id, account=self.account,
             authorize=lambda: not self._closing and self.authorize(message), route=route, journal=self.journal)
         self._generation += 1
-        if not self._overflow and len(self.pending) < MAX_PENDING:
+        # While a saved receipt cannot be read, new messages go through the
+        # ordered scan: if it opens again, it was accepted first.
+        if not self._overflow and not self._unreadable and len(self.pending) < MAX_PENDING:
             if receipt["id"] not in self.pending:
                 self.pending.append(receipt["id"])
         else:
@@ -73,13 +75,15 @@ class TransportWorker:
         self._wake.set()
         return receipt
 
-    def _report_unreadable(self, unreadable):
-        # Logged when the set changes, not on every scan: while a receipt stays
-        # unreadable, every retry period and every new message scans again.
-        unreadable = frozenset(unreadable)
+    def _report_unreadable(self, unreadable, *, complete=True):
+        # A complete scan's set replaces the last one; a scan stopped at the
+        # safety ceiling only adds to it. Logged when the set changes, not on
+        # every scan: while a receipt stays unreadable, every retry period and
+        # every new message scans again.
+        unreadable = frozenset(unreadable) if complete else self._unreadable | unreadable
         if unreadable and unreadable != self._unreadable:
-            log.warning("Channel %s: %d saved receipt(s) could not be read and were skipped; "
-                        "they are read again on every scan", self.channel.name, len(unreadable))
+            log.warning("Channel %s: %d saved receipt(s) in the shared channel store could not be read and were "
+                        "skipped; they are read again on later scans", self.channel.name, len(unreadable))
         self._unreadable = unreadable
 
     def _oldest_window(self):
@@ -100,7 +104,7 @@ class TransportWorker:
                 if cursor and position <= cursor:
                     self._scan_pending = frozenset(waiting)
                     self._report_unreadable(unreadable)
-                    return [record_id for _, record_id in selected], count > MAX_PENDING or bool(unreadable)
+                    return [record_id for _, record_id in selected], count > MAX_PENDING
                 cursor = position
                 scanned += 1
                 if self._stop_scan.is_set():
@@ -109,11 +113,13 @@ class TransportWorker:
                     row = self.journal.get(record_id)
                 except Exception:
                     # A receipt that cannot be read now must not stop the
-                    # recovery of every other one; the scan counts as
-                    # incomplete, so it is read again after the retry period.
+                    # recovery of every other one; it is read again by the
+                    # scan after the retry period.
                     unreadable.add(record_id)
                     continue
-                if (not row or row["channel"] != self.channel.name or row["account_sha256"] != _digest(self.account)
+                # A receipt a restore holds is not run again (as recovery_window).
+                if (not row or row.get("restore_hold") or row["channel"] != self.channel.name
+                        or row["account_sha256"] != _digest(self.account)
                         or not (row["execution"] == "received" or row["delivery"] in {"ready", "retryable"})):
                     continue
                 waiting.add(record_id)
@@ -123,13 +129,13 @@ class TransportWorker:
                 selected.append((row["created_at"], row["id"]))
                 selected.sort()
                 del selected[MAX_PENDING:]
-        self._report_unreadable(unreadable)
-        if scanned > MAX_CONFIGURED_RECORDS:
+        complete = scanned <= MAX_CONFIGURED_RECORDS
+        self._report_unreadable(unreadable, complete=complete)
+        if not complete:
             log.warning("Channel receipt scan exceeds configured safety ceiling")
         else:
             self._scan_pending = frozenset(waiting)
-        return ([record_id for _, record_id in selected],
-                count > MAX_PENDING or scanned > MAX_CONFIGURED_RECORDS or bool(unreadable))
+        return [record_id for _, record_id in selected], count > MAX_PENDING or not complete
 
     async def _run(self):
         while True:
@@ -165,18 +171,21 @@ class TransportWorker:
             try:
                 await asyncio.wait_for(self._wake.wait(), timeout=RETRY_DELAY)
             except asyncio.TimeoutError:
-                # Rescan only for work waiting on a retry or a scan that did not
-                # complete: an idle worker re-read and decrypted every saved
+                # Rescan only for work waiting on a retry, a scan that did not
+                # complete, or a receipt that could not be read (it may open
+                # again): an idle worker re-read and decrypted every saved
                 # receipt every 30 seconds.
-                self._overflow = self._overflow or bool(self._retry_after)
+                self._overflow = self._overflow or bool(self._retry_after) or bool(self._unreadable)
 
     def _forget_settled(self, waiting):
         for record_id in [key for key in self._retry_after if key not in waiting]:
             self._retry_after.pop(record_id)  # finished or removed meanwhile
-        # A conversation waits behind a receipt that cannot be read now (it may
-        # open again), not behind one that is gone: nothing would retry it.
+        # A conversation waits only behind a receipt still waiting to be sent:
+        # one that is gone, held by a restore or cannot be read is not retried
+        # now, so it no longer holds the person's newer messages (an
+        # unreadable one is sent if it opens again).
         for conversation, blocker in list(self._blocked_conversations.items()):
-            if blocker not in waiting and blocker not in self._unreadable:
+            if blocker not in waiting:
                 self._blocked_conversations.pop(conversation)
 
     async def _process(self, record_id):
@@ -187,11 +196,7 @@ class TransportWorker:
         conversation = (message.user_id, message.sender_id)
         blocked = self._blocked_conversations.get(conversation)
         if blocked and blocked != record_id:
-            # Retried with the receipt it waits behind. One with no retry time
-            # due (it could not be read) is checked again after the retry
-            # period, not by the next scan: that one started at once, back to back.
-            now, until = time.monotonic(), self._retry_after.get(blocked, 0)
-            self._retry_after[record_id] = until if until > now else now + RETRY_DELAY
+            self._retry_after[record_id] = max(time.monotonic(), self._retry_after.get(blocked, 0))
             return
         if not self.authorize(message):
             self._retry_after[record_id] = time.monotonic() + RETRY_DELAY

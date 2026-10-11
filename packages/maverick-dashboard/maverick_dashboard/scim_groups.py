@@ -248,9 +248,10 @@ def group_names_for_principal(principal: str) -> frozenset[str]:
     ) - {""}
 
 
-def role_for_principal(principal: str) -> str | None:
+def role_for_principal(principal: str, *, strict: bool = False) -> str | None:
     """The most-privileged role mapped to any of the principal's groups, or
-    ``None`` when no group carries a role mapping."""
+    ``None`` when no group carries a role mapping. ``strict``: unreadable
+    groups or mapping raise instead of answering ``"viewer"``."""
     try:
         mapping = _ci_mapping("group_roles")
         if not mapping:
@@ -266,6 +267,8 @@ def role_for_principal(principal: str) -> str | None:
         # and falls through to the deployment default (historically operator).
         # Return the least-privileged valid role instead, so corrupt SCIM state
         # or policy cannot silently broaden access through that fallback.
+        if strict:
+            raise
         return "viewer"
 
 

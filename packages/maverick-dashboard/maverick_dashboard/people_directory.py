@@ -12,14 +12,20 @@ import logging
 log = logging.getLogger(__name__)
 
 
-def _role(principal: str, tenant: str | None, roles: dict[str, str]) -> str | None:
+def _role(principal: str, tenant: str | None, roles: dict[str, str], *, strict: bool = False) -> str | None:
     from .auth import global_role_for_principal, is_dashboard_admin
 
     if is_dashboard_admin(principal):
         return "admin"
     if tenant:
         return roles.get(principal)
-    return global_role_for_principal(principal)
+    return global_role_for_principal(principal, strict=True) if strict else global_role_for_principal(principal)
+
+
+def _holds(role: str | None, permission: str, *, strict: bool = False) -> bool:
+    from . import rbac
+
+    return permission in (rbac.permissions_for(role, strict=True) if strict else rbac.permissions_for(role))
 
 
 def _known(tenant: str | None, roles: dict[str, str]) -> list[str]:
@@ -66,17 +72,18 @@ def signed_in(principals) -> set[str]:
 
 def allowed(principals, permission: str, *, strict: bool = False) -> set[str]:
     """Those of ``principals`` who currently hold ``permission`` in this
-    workspace (see :func:`may`), reading the roster and directory once.
-    ``strict``: an unreadable roster or directory raises instead of
-    allowing nobody."""
-    from . import rbac
-
+    workspace (see :func:`may`), reading the roster and directory once (not
+    at all for nobody). ``strict``: a roster, role, permission or directory
+    source that cannot be read raises instead of allowing nobody."""
+    principals = {principal for principal in (str(p or "").strip() for p in principals)
+                  if principal.startswith("user:")}
+    if not principals:
+        return set()
     try:
         tenant, roles = _roster()
         active = _active_check()
-        return {principal for principal in (str(p or "").strip() for p in principals)
-                if principal.startswith("user:")
-                and permission in rbac.permissions_for(_role(principal, tenant, roles))
+        return {principal for principal in principals
+                if _holds(_role(principal, tenant, roles, strict=strict), permission, strict=strict)
                 and active(principal)}
     except Exception:  # noqa: BLE001 -- an unreadable roster offers nobody
         if strict:
@@ -91,10 +98,8 @@ def may(principal: str, permission: str) -> bool:
     return principal.startswith("user:") and principal in allowed({principal}, permission)
 
 
-def candidates(permission: str, *, limit: int = 200, strict: bool = False) -> list[dict]:
-    """``[{principal, label}]`` for everyone who holds ``permission`` now.
-    ``strict``: an unreadable roster or directory raises instead of
-    offering nobody."""
+def candidates(permission: str, *, limit: int = 200) -> list[dict]:
+    """``[{principal, label}]`` for everyone who holds ``permission`` now."""
     from . import rbac
     from .identity_format import humanize_principal
 
@@ -103,8 +108,6 @@ def candidates(permission: str, *, limit: int = 200, strict: bool = False) -> li
         known = _known(tenant, roles)
         active = _active_check()
     except Exception:  # noqa: BLE001 -- an unreadable roster offers nobody
-        if strict:
-            raise
         log.warning("people directory unavailable", exc_info=True)
         return []
     out: dict[str, dict] = {}

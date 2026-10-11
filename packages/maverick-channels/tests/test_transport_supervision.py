@@ -616,10 +616,10 @@ def _unreadable_journal(count, failing):
     return journal
 
 
-def test_a_receipt_that_never_opens_is_reported_once_and_new_messages_keep_their_order(monkeypatch, caplog):
+def test_a_receipt_that_never_opens_is_reported_once_and_does_not_hold_new_messages(monkeypatch, caplog):
     # While a receipt stays unreadable the worker keeps scanning (it may open
-    # again) and new messages go through that ordered scan; the warning is
-    # written when the set of unreadable receipts changes, not every scan.
+    # again) and answers new messages; the warning is written when the set of
+    # unreadable receipts changes, not every scan.
     import logging
 
     monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
@@ -691,8 +691,8 @@ def test_every_receipt_is_recovered_after_a_store_wide_read_outage(monkeypatch):
 
 def test_a_conversation_blocked_behind_a_briefly_unreadable_receipt_continues(monkeypatch):
     # X's send is refused, so the person's next message Y waits behind X. X
-    # then cannot be read three times in a row: once it opens again, X and
-    # then Y are delivered.
+    # then cannot be read three times in a row: it no longer holds Y, and it
+    # is sent once it opens again.
     monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)
     state = {"x": None, "fail_left": 0}
     journal = _unreadable_journal(0, lambda record_id: False)
@@ -727,16 +727,16 @@ def test_a_conversation_blocked_behind_a_briefly_unreadable_receipt_continues(mo
         state["fail_left"] = 3
         await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="Y", channel=Adapter.name,
                                             message_id="y"), external_id="y")
-        await until(lambda: "Y" in sends)
+        await until(lambda: "Y" in sends and sends.count("X") == 2)
         await worker.close()
-        assert sends == ["X", "X", "Y"] and worker._blocked_conversations == {}
+        assert sends[0] == "X" and sorted(sends[1:]) == ["X", "Y"] and worker._blocked_conversations == {}
     asyncio.run(run())
 
 
-def test_a_conversation_blocked_behind_a_receipt_that_stays_unreadable_waits_a_retry_period(monkeypatch):
+def test_a_conversation_blocked_behind_a_receipt_that_stays_unreadable_continues(monkeypatch):
     # X's send is refused, so Y waits behind X; then X cannot be read at all.
-    # Y keeps waiting (X may open again and was accepted first), checked once
-    # a retry period instead of in back-to-back full scans.
+    # X no longer holds the conversation, so Y is delivered, and the worker
+    # scans once or twice a retry period, not back to back.
     monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)
     state = {"x": None, "sealed": False}
     journal = _unreadable_journal(0, lambda record_id: state["sealed"] and record_id == state["x"])
@@ -771,10 +771,9 @@ def test_a_conversation_blocked_behind_a_receipt_that_stays_unreadable_waits_a_r
                                             message_id="y"), external_id="y")
         await asyncio.sleep(0.5)
         await worker.close()
-        assert sends == ["X"]
-        # Ten retry periods: one scan picks up Y, and one more follows its
-        # batch because the scan was incomplete. Back to back, it was over 1,000.
-        assert len(scans) <= 25, len(scans)
+        assert sends == ["X", "Y"] and worker._blocked_conversations == {}
+        # Ten retry periods; back to back, it was over 1,000 scans.
+        assert len(scans) <= 15, len(scans)
     asyncio.run(run())
 
 
@@ -807,3 +806,67 @@ def test_a_conversation_continues_once_its_blocking_receipt_is_gone(monkeypatch)
         await worker.close()
         assert sends == ["X", "Y"] and worker._blocked_conversations == {}
     asyncio.run(run())
+
+
+def test_a_receipt_held_by_a_restore_is_not_run_and_an_unreadable_one_does_not_spin_the_scan(monkeypatch):
+    # A restore holds one saved receipt; another cannot be read. The held one
+    # is never run, and the worker scans about once a retry period instead of
+    # picking the held receipt up again in back-to-back scans.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)
+    poisoned = []
+    journal = _unreadable_journal(2, lambda record_id: record_id in poisoned)
+    held, sealed = [record_id for _, record_id in journal.store.iter_record_ids(start_after="", limit=10)]
+    journal.change(journal.get(held), restore_hold=True)
+    poisoned.append(sealed)
+
+    async def run():
+        order = []
+        async def handler(message):
+            order.append(message.text)
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=AsyncMock(return_value="confirmed"), journal=journal)
+        scans = []
+        real_window = worker._oldest_window
+
+        def counted():
+            scans.append(1)
+            return real_window()
+
+        worker._oldest_window = counted
+        processed = []
+        real_process = worker._process
+
+        async def process(record_id):
+            processed.append(record_id)
+            return await real_process(record_id)
+
+        worker._process = process
+        worker.start()
+        await asyncio.sleep(0.5)
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        await worker.close()
+        assert loop.time() - started < 1
+        assert order == [] and held not in processed
+        assert len(scans) <= 15, len(scans)
+    asyncio.run(run())
+
+
+def test_a_scan_stopped_at_the_safety_ceiling_adds_to_the_unreadable_receipts(monkeypatch):
+    # A scan that stops at the ceiling did not reach every receipt, so the
+    # receipts it could not read are added to the last complete scan's, not
+    # put in their place; the next complete scan replaces them.
+    poisoned = []
+    journal = _unreadable_journal(4, lambda record_id: record_id in poisoned)
+    first = next(record_id for _, record_id in journal.store.iter_record_ids(start_after="", limit=10))
+    poisoned.append(first)
+    worker = TransportWorker(Adapter(AsyncMock()), account="account", authorize=lambda msg: True,
+                             send=AsyncMock(), journal=journal)
+    worker._unreadable = frozenset({"chd-read-earlier"})
+    monkeypatch.setattr(transport_worker, "MAX_CONFIGURED_RECORDS", 2)
+    _selected, more = worker._oldest_window()
+    assert more is True and worker._unreadable == {"chd-read-earlier", first}
+    monkeypatch.setattr(transport_worker, "MAX_CONFIGURED_RECORDS", 100)
+    _selected, more = worker._oldest_window()
+    assert more is False and worker._unreadable == {first}

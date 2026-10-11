@@ -577,13 +577,14 @@ def is_dashboard_admin(principal: str) -> bool:
     return is_admin_principal(principal)
 
 
-def global_role_for_principal(principal: str | None) -> str | None:
+def global_role_for_principal(principal: str | None, *, strict: bool = False) -> str | None:
     """The principal's dashboard-wide RBAC role, ignoring tenant memberships.
 
     Resolution: explicit stored assignment, then the role mapped to the user's
     SCIM groups (``[dashboard] group_roles`` — team membership in the IdP), then
     the configured default. Explicit always beats derived, so an admin can still
-    pin an individual without fighting the group mapping."""
+    pin an individual without fighting the group mapping. ``strict``: a source
+    that cannot be read raises instead of answering ``None``."""
     if principal is None:
         return None
     if is_dashboard_admin(principal):
@@ -594,7 +595,8 @@ def global_role_for_principal(principal: str | None) -> str | None:
         if stored:
             return stored
         from . import scim_groups
-        group_role = scim_groups.role_for_principal(principal)
+        group_role = (scim_groups.role_for_principal(principal, strict=True) if strict
+                      else scim_groups.role_for_principal(principal))
         if group_role:
             return group_role
         return rbac.default_role()
@@ -602,6 +604,8 @@ def global_role_for_principal(principal: str | None) -> str | None:
         # A damaged role roster, group-membership source, or config default is
         # deny-all. Falling through to the historical operator default would
         # turn a policy outage into a privilege escalation.
+        if strict:
+            raise
         return None
 
 

@@ -28,7 +28,7 @@ POLICIES = {
     "data-use": ("Data use rules", "/data-use", "operate"),
 }
 _TASK_PERMISSION = "view"
-_UNCHECKED = ("Mentions can't be checked right now: the company directory could not be read. "
+_UNCHECKED = ("Mentions can't be checked right now: who can open this item could not be read. "
               "Post without the mention or try again.")
 
 
@@ -48,23 +48,15 @@ def _world():
     return world()
 
 
-def _goal_readers(goal) -> set[str]:
-    """A task's owner plus anyone holding a current reviewed read grant for it."""
+def _goal_readers(goal, *, among=None, strict: bool = False) -> set[str]:
+    """A task's owner plus anyone holding a current reviewed read grant for it
+    (``among`` and ``strict`` as for ``content_access.grant_readers``)."""
     from . import content_access
 
     owner = getattr(goal, "owner", "") or ""
     readers = {owner} if owner else set()
-    if not content_access.enabled():
-        return readers
-    try:
-        for grant in content_access.STORE.list():
-            requester = grant.get("requester")
-            if isinstance(requester, str) and requester and content_access._grant_current(
-                    grant, owner=owner, resource_kind="goal", resource_id=str(goal.id)):
-                readers.add(requester)
-    except Exception:  # noqa: BLE001 -- an unreadable grant store opens nothing more
-        return {owner} if owner else set()
-    return readers
+    return readers | content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id),
+                                                  among=among, strict=strict)
 
 
 def _object(request: Request | None, kind: str, object_id: str, *, principal: str = "") -> dict:
@@ -86,7 +78,7 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
             auth.assert_goal_access(request, goal)
         readers = _goal_readers(goal)
         return {"label": f"Task: {str(goal.title)[:120]}", "href": f"/chat/goal/{goal.id}", "readers": readers,
-                "possible": readers}
+                "subject": goal}
     if kind == "run":
         from maverick.flow import store
 
@@ -101,9 +93,8 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
             raise HTTPException(404, "That run no longer exists.")
         owner = getattr(run, "owner", "") or ""
         flow_id = getattr(run, "flow_id", "") or "flow"
-        readers = {owner} if owner else set()
         return {"label": "Workflow run", "href": f"/flows/{flow_id}/runs/{object_id}",
-                "readers": readers, "possible": readers}
+                "readers": {owner} if owner else set()}
     if kind == "approval":
         from . import content_access
 
@@ -116,11 +107,10 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
             approval = world.get_approval(int(object_id))
             if approval is None:
                 raise HTTPException(404, "No such approval.")
-        possible = set(content_access.approval_readers(approval, world))
-        readers = people_directory.allowed(possible, "operate")
+        readers = people_directory.allowed(content_access.approval_readers(approval, world), "operate")
         # ``checked``: these readers already passed the company directory check.
         return {"label": f"Request #{approval.id}", "href": f"/approvals#approval-{approval.id}",
-                "readers": readers, "checked": True, "possible": possible}
+                "readers": readers, "checked": True, "subject": approval}
     if kind == "policy":
         if object_id not in POLICIES:
             raise HTTPException(404, "That policy has no comments.")
@@ -135,20 +125,25 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
     raise HTTPException(404, "Comments work on tasks, runs, approvals and policies.")
 
 
-def _mentionable(target: dict, mentions: set[str]) -> set[str]:
-    """Those of ``mentions`` who may be mentioned on ``target`` now, decided by
-    one fresh read of the roster and company directory: an account the
-    directory turned off can no longer sign in to read a mention. Raises when
-    either cannot be read (the readers ``_object`` lists would then be empty,
-    which must not read as "not allowed")."""
-    from . import people_directory
+def _mentionable(kind: str, target: dict, mentions: set[str]) -> set[str]:
+    """Those of ``mentions`` who can open ``target`` now, by the same rules as
+    its readers, checked only for the people mentioned: someone with no grant
+    or role for the item is refused without reading the company directory.
+    An account the directory turned off can no longer sign in to read a
+    mention. Raises when a grant, role or directory source cannot be read
+    (``_object`` would then list fewer readers, which must not read as "not
+    allowed")."""
+    from . import content_access, people_directory
 
-    if "permission" in target:  # a policy: whoever holds its permission now
-        holders = people_directory.candidates(target["permission"], strict=True)
-        return mentions & {person["principal"] for person in holders}
-    if target.get("checked"):  # an approval: of those who can open it, whoever may operate now
-        return people_directory.allowed(mentions & target["possible"], "operate", strict=True)
-    return people_directory.signed_in(mentions & target["readers"])
+    if kind == "task":
+        return people_directory.signed_in(mentions & _goal_readers(target["subject"], among=mentions, strict=True))
+    if kind == "run":
+        return people_directory.signed_in(mentions & target["readers"])
+    if kind == "approval":
+        readers = content_access.approval_readers(target["subject"], _world(), among=mentions, strict=True)
+        return people_directory.allowed(mentions & readers, "operate", strict=True)
+    # A policy: whoever holds its permission now.
+    return people_directory.allowed(mentions, target["permission"], strict=True)
 
 
 def _people(readers: set[str], viewer: str, *, checked: bool = False) -> list[dict]:
@@ -180,10 +175,11 @@ def _view(row: dict, viewer: str) -> dict:
             "mentions": [humanize_principal(p).name for p in row["mentions"]]}
 
 
-def _thread(request: Request, kind: str, object_id: str) -> dict:
+def _thread(request: Request, kind: str, object_id: str, *, target: dict | None = None) -> dict:
     store = _comments()
     viewer = auth.caller_principal(request) or ""
-    target = _object(request, kind, object_id)
+    if target is None:
+        target = _object(request, kind, object_id)
     rows = store.list_for(kind, object_id)
     return {"comments": [_view(row, viewer) for row in rows],
             "people": _people(target["readers"], viewer, checked=target.get("checked", False)) if viewer else [],
@@ -213,13 +209,11 @@ def _post(request: Request, body: CommentIn) -> dict:
     target = _object(request, body.kind, body.id)
     mentions = set(body.mentions)
     refused = HTTPException(422, "You can mention only people who can open this item. Choose someone from the list.")
-    # Yourself, or someone who cannot open the item whatever the directory
-    # says, is refused before the directory is read.
-    if author in mentions or not mentions <= target.get("possible", mentions):
+    if author in mentions:
         raise refused
     if mentions:
         try:
-            mentionable = _mentionable(target, mentions)
+            mentionable = _mentionable(body.kind, target, mentions)
         except Exception as exc:  # noqa: BLE001 -- never mention someone unchecked
             raise HTTPException(503, _UNCHECKED) from exc
         if mentions - mentionable:
@@ -228,7 +222,7 @@ def _post(request: Request, body: CommentIn) -> dict:
         row = store.add(body.kind, body.id, author=author, body=body.body, mentions=body.mentions)
     except store.CommentError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return {**_thread(request, body.kind, body.id), "posted": _view(row, author)}
+    return {**_thread(request, body.kind, body.id, target=target), "posted": _view(row, author)}
 
 
 @router.post("/api/v1/comments", status_code=201)
