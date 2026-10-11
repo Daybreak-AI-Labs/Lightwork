@@ -478,3 +478,102 @@ def test_a_policy_mention_of_someone_without_the_role_is_refused_while_the_direc
     posted = client.post("/api/v1/comments", json={"kind": "policy", "id": "tools", "body": "@Vic",
                                                    "mentions": [VIC]})
     assert posted.status_code == 422
+
+
+def _grant_store_unreadable(monkeypatch):
+    from maverick_dashboard import content_access
+
+    def unreadable():
+        raise OSError("grant store unreadable")
+
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list", unreadable)
+
+
+def test_someone_who_could_never_open_the_item_is_refused_while_the_grant_store_is_unreadable(env, monkeypatch):
+    # Vic is a viewer: a grant opens another person's task only to a global
+    # administrator, and an approval only to someone who may operate. That
+    # is decided without the grant store.
+    client, world = env
+    goal_id = world.create_goal("Reconcile vendor spend", owner=ANA)
+    approval_id = world.create_approval("Pay invoice", requested_by=ANA)
+    _as(monkeypatch, ANA)
+    _grant_store_unreadable(monkeypatch)
+    for kind, object_id in (("task", goal_id), ("approval", approval_id)):
+        posted = client.post("/api/v1/comments", json={"kind": kind, "id": str(object_id), "body": "@Vic",
+                                                       "mentions": [VIC]})
+        assert posted.status_code == 422, (kind, posted.text)
+    lee = client.post("/api/v1/comments", json={"kind": "task", "id": str(goal_id), "body": "@Lee",
+                                                "mentions": [LEE]})
+    assert lee.status_code == 503
+
+
+def test_an_owner_whose_role_no_longer_lets_them_view_is_not_offered_or_told(env, monkeypatch):
+    # The task page and its thread need the view permission; an owner whose
+    # role grants nothing is refused there, so is not told about the task.
+    from maverick import comments
+    from maverick_dashboard import auth, rbac
+    from maverick_dashboard.comments_api import mention_sources
+
+    client, world = env
+    goal_id = world.create_goal("Reconcile vendor spend", owner=VIC)
+    comments.add("task", str(goal_id), author=ANA, body="@Vic", mentions=[VIC])
+    assert len(mention_sources(VIC)) == 1
+    roles = {**ROLES, VIC: "retired-custom-role"}
+    monkeypatch.setattr(rbac, "list_users", lambda: dict(roles))
+    monkeypatch.setattr(auth, "role_for_principal", lambda p, **kw: roles.get(p))
+    assert mention_sources(VIC) == []
+
+
+def test_an_invalid_config_cannot_be_read_as_no_administrators_in_a_strict_check(env, monkeypatch):
+    # The configured administrators come from config, which reads as "no
+    # administrators" while a config source is invalid: a strict check raises.
+    from maverick import config
+    from maverick_dashboard import people_directory, strict_reads
+
+    monkeypatch.delenv("MAVERICK_DASHBOARD_ADMINS", raising=False)
+    monkeypatch.setattr(config, "config_source_errors", lambda: ["config.toml: invalid"])
+    assert people_directory.allowed({LEE}, "operate") == set()
+    with strict_reads.strict(), pytest.raises(RuntimeError):
+        people_directory.allowed({LEE}, "operate")
+
+
+@pytest.mark.parametrize("reader,role,grant,domain_ok,expected", [
+    (ANA, "operator", False, True, True),     # owner
+    (ANA, "operator", False, False, False),   # owner outside the task's department
+    (LEE, "admin", True, True, True),         # global administrator with a current grant
+    (LEE, "admin", False, True, False),       # global administrator without one
+    (VIC, "viewer", True, True, False),       # a grant without administrator rights
+    (LEE, "admin", True, False, False),       # grant, but outside the department
+])
+def test_who_is_told_about_a_task_matches_who_the_task_page_lets_in(env, monkeypatch, reader, role, grant,
+                                                                    domain_ok, expected):
+    # auth.goal_readable_by (mentions and notifications) and auth.can_access_goal
+    # (the page) must give the same answer.
+    from maverick import domain as domain_mod
+    from maverick_dashboard import auth, content_access, rbac, suite_grants
+    from starlette.requests import Request
+
+    client, world = env
+    goal_id = world.create_goal("Reconcile vendor spend", owner=ANA)
+    goal = world.get_goal(goal_id)
+    goal.domain = "finance-pack"
+    monkeypatch.setattr(domain_mod, "suites_for_domain", lambda d: ["finance"])
+    monkeypatch.setattr(suite_grants, "granted_suites", lambda p: None if domain_ok else frozenset({"legal"}))
+    monkeypatch.setattr(auth, "is_dashboard_admin", lambda p: False)
+    roles = {**ROLES, reader: role}
+    monkeypatch.setattr(rbac, "list_users", lambda: dict(roles))
+    monkeypatch.setattr(auth, "role_for_principal", lambda p, **kw: roles.get(p))
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda p, **kw: roles.get(p))
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: reader)
+    monkeypatch.setattr(auth, "has_global_permission",
+                        lambda request, perm, **kw: perm in rbac.permissions_for(roles.get(reader)))
+    monkeypatch.setattr(auth, "has_permission",
+                        lambda request, perm, **kw: perm in rbac.permissions_for(roles.get(reader)))
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list",
+                        lambda: [_current_grant(ANA, reader, "goal", goal_id)] if grant else [])
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""})
+    page = auth.can_access_goal(request, goal)
+    assert page is expected
+    assert auth.goal_readable_by(reader, goal) is page

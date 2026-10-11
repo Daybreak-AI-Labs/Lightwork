@@ -638,6 +638,10 @@ def role_for_principal(principal: str | None) -> str | None:
     except Exception:
         # Never replace an unreadable tenant-local demotion with the broader
         # global/default role.
+        from . import strict_reads
+
+        if strict_reads.active():
+            raise
         return None
     return global_role_for_principal(principal)
 
@@ -992,18 +996,24 @@ def can_access_goal(request: Request, goal) -> bool:
     return True
 
 
-def _goal_readable_by(principal: str, goal) -> bool:
-    """:func:`_goal_read_policy` for a read by ``principal``, without a request
-    and without recording a read: department access, then ownership or a
-    current reviewed read grant held by a global administrator."""
+def _goal_readable_by(principal: str, goal, grants=None) -> bool:
+    """The task page's rules for a read by ``principal`` (the ``view``
+    permission the page and its thread require, then
+    :func:`_goal_read_policy`: department access, then ownership or a current
+    reviewed read grant held by a global administrator), without a request
+    and without recording a read. The grant store is read last, only for
+    someone the other rules leave in; ``grants`` is the task's grant readers
+    when the caller already read them. Keep in step with
+    :func:`_goal_read_policy` (tests compare the two)."""
     from maverick.domain import suites_for_domain
-    from maverick.suite_grants import granted_suites
 
-    from . import content_access, rbac
+    from . import content_access, rbac, suite_grants
 
+    if "view" not in rbac.permissions_for(role_for_principal(principal)):
+        return False
     domain = getattr(goal, "domain", None)
     if domain:
-        suites = None if is_dashboard_admin(principal) else granted_suites(principal)
+        suites = None if is_dashboard_admin(principal) else suite_grants.granted_suites(principal)  # as caller_suites
         if suites is not None and not all(suite is None or suite in suites for suite in suites_for_domain(domain)):
             return False
     owner = getattr(goal, "owner", "") or ""
@@ -1013,15 +1023,18 @@ def _goal_readable_by(principal: str, goal) -> bool:
         return False
     if scim_groups.active_for_principal(principal) is False:
         return False
-    return principal in content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id),
-                                                     among={principal})
+    if grants is None:
+        grants = content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id),
+                                              among={principal})
+    return principal in grants
 
 
-def goal_readable_by(principal: str, goal) -> bool:
+def goal_readable_by(principal: str, goal, *, grants=None) -> bool:
     """Whether ``principal`` could open ``goal`` now, by the rules
     :func:`can_access_goal` applies to a read from them (copied
-    conversations included), for someone to be told about the task. A source
-    that cannot be read denies (it raises inside ``strict_reads.strict()``)."""
+    conversations included), for someone to be told about the task.
+    ``grants`` is as for :func:`_goal_readable_by`. A source that cannot be
+    read denies (it raises inside ``strict_reads.strict()``)."""
     from maverick.attachments import AttachmentRejected
     from maverick.chat_message_actions import require_copy_sources
     from maverick.knowledge_task_context import SourceContextUnavailable
@@ -1033,7 +1046,7 @@ def goal_readable_by(principal: str, goal) -> bool:
             raise PermissionError("A copied source is unavailable to this account.")
 
     try:
-        if goal is None or not principal or not _goal_readable_by(principal, goal):
+        if goal is None or not principal or not _goal_readable_by(principal, goal, grants):
             return False
         require_copy_sources(_world(), goal.id, authorize=authorize)
     except (PermissionError, SourceContextUnavailable, AttachmentRejected):

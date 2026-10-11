@@ -8,6 +8,7 @@ saved, so a stale page cannot assign or notify someone who lost access.
 from __future__ import annotations
 
 import logging
+import os
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +63,15 @@ def _active_check():
 def _roster():
     from maverick.paths import current_tenant_id_strict
 
-    from . import rbac
+    from . import rbac, strict_reads
+
+    if strict_reads.active() and not os.environ.get("MAVERICK_DASHBOARD_ADMINS", "").strip():
+        from maverick.config import config_source_errors
+
+        # The configured administrators come from config, which reads as
+        # "no administrators" when invalid.
+        if config_source_errors():
+            raise RuntimeError("An active config source is invalid")
 
     tenant = current_tenant_id_strict()
     return tenant, (rbac.list_tenant_roles(tenant) if tenant else rbac.list_users())

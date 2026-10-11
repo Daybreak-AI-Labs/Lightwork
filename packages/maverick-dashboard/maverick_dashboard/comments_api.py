@@ -57,13 +57,13 @@ def _goal_readers(goal, *, among=None) -> set[str]:
     from . import content_access
 
     owner = getattr(goal, "owner", "") or ""
-    candidates = {owner} if owner else set()
     if among is not None:
-        candidates &= set(among)
-    # The owner's access needs no grant, so it never waits on the grant store.
-    candidates |= content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id),
-                                               among=None if among is None else set(among) - {owner})
-    return {principal for principal in candidates if auth.goal_readable_by(principal, goal)}
+        # Each person on their own: the grant store is read only for someone
+        # the other rules leave in, never for the owner.
+        return {principal for principal in among if auth.goal_readable_by(principal, goal)}
+    grants = content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id))
+    candidates = ({owner} if owner else set()) | grants
+    return {principal for principal in candidates if auth.goal_readable_by(principal, goal, grants=grants)}
 
 
 def _object(request: Request | None, kind: str, object_id: str, *, principal: str = "") -> dict:
@@ -147,8 +147,9 @@ def _mentionable(kind: str, target: dict, mentions: set[str]) -> set[str]:
     if kind == "run":
         return people_directory.signed_in(mentions & target["readers"])
     if kind == "approval":
-        readers = content_access.approval_readers(target["subject"], _world(), among=mentions)
-        return people_directory.allowed(mentions & readers, "operate")
+        # The role first: the grant store is read only for someone who may operate.
+        operators = people_directory.allowed(mentions, "operate")
+        return operators & content_access.approval_readers(target["subject"], _world(), among=operators)
     # A policy: whoever holds its permission now, among the people it could list.
     return people_directory.allowed(mentions, target["permission"], known_only=True)
 
