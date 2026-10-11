@@ -13,12 +13,17 @@ from __future__ import annotations
 
 import datetime as _dt
 import html as _html
+import json
 import re
 
 SCHEMA = "http://adaptivecards.io/schemas/adaptive-card.json"
 VERSION = "1.4"
 CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive"
 MAX_TEXT = 4000
+# Teams refuses a bot message over 100 KB counted as UTF-16 (413
+# MessageSizeTooBig) and advises staying within 80 KB
+# (https://learn.microsoft.com/microsoftteams/platform/bots/how-to/format-your-bot-messages).
+MAX_MESSAGE_BYTES = 80 * 1024
 _MENTION = re.compile(r"<at>(.*?)</at>", re.DOTALL)
 
 
@@ -55,6 +60,13 @@ def _card(body: list[dict], actions: list[dict] | None = None) -> dict:
 
 def attachment(card: dict) -> dict:
     return {"contentType": CARD_CONTENT_TYPE, "content": card}
+
+
+def fits_message(payload: dict) -> bool:
+    """Whether ``payload`` stays within Teams' advised message size. It is
+    measured as spaced JSON with non-ASCII escaped, which is no smaller than the
+    body sent; sending adds only the activity type."""
+    return len(json.dumps(payload).encode("utf-16-le")) <= MAX_MESSAGE_BYTES
 
 
 def humanize(value: object) -> str:
@@ -276,5 +288,5 @@ def unescape(text: str) -> str:
 
 
 __all__ = ["CARD_CONTENT_TYPE", "approval_card", "attachment", "budget_text", "card_response",
-           "confirm_card", "decide_by", "message_response", "result_card",
+           "confirm_card", "decide_by", "fits_message", "message_response", "result_card",
            "strip_mentions_text", "text_card", "welcome_text"]

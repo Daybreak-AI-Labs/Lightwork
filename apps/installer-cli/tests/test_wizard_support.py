@@ -37,3 +37,12 @@ def test_answers_become_the_keys_the_kernel_reads(monkeypatch, tmp_path):
 def test_unsafe_answers_are_skipped(monkeypatch):
     wizard = _answers(monkeypatch, True, ["http://status.example.com", "not an email"])
     assert wizard.pick_support() == {}
+
+
+def test_answers_the_kernel_would_drop_are_skipped(monkeypatch):
+    # The step's own checks accepted these, the kernel's get_support() then
+    # dropped them unseen, so the Help menu silently showed nothing.
+    wizard = _answers(monkeypatch, True, ["https://", "help@vendor.c"])
+    assert wizard.pick_support() == {}
+    wizard = _answers(monkeypatch, True, ["https://status.example.com/\tpage", "a,b@vendor.example"])
+    assert wizard.pick_support() == {}

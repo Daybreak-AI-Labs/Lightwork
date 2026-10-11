@@ -841,3 +841,16 @@ def test_preflight_json_never_echoes_provider_secret(isolated_config):
     result = CliRunner().invoke(main, ["preflight", "--json"])
 
     assert secret not in result.output
+
+
+def test_an_invalid_saved_config_points_every_blocked_check_at_the_config_fix(isolated_config):
+    # The file exists, so `maverick init` refuses to run; every check blocked by
+    # the invalid file must send the operator to the fix that works.
+    from maverick import operator_preflight
+
+    isolated_config.write_text("this is not = valid = toml", encoding="utf-8")
+    checks = _by_id(operator_preflight.collect())
+    assert checks["config"].status == "blocked"
+    for check_id in ("provider", "model_routes", "storage"):
+        assert checks[check_id].status == "blocked"
+        assert checks[check_id].remediation == "maverick config-lint"

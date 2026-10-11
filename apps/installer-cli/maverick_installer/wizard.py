@@ -7054,6 +7054,17 @@ def pick_persona() -> dict[str, str]:
     return {"name": name, "style": style_pick.split()[0]}
 
 
+def _https_origin(value: str) -> str | None:
+    """The origin as private-channel delivery will accept it, else None (the
+    kernel refuses every other value at send time)."""
+    from maverick.personal_notification_delivery import _base_url
+
+    try:
+        return _base_url({"personal_dashboard_url": value})
+    except ValueError:
+        return None
+
+
 def pick_notifications() -> tuple[dict[str, Any], list[str]]:
     """Private task alerts and shared organization delivery setup."""
     personal_alerts = _q_confirm(
@@ -7075,8 +7086,13 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
     if personal_background and _q_confirm(
         "Allow people to opt into alerts in their verified Slack, Telegram or Teams private conversations? Requires My data identity verification and configured channel access.", default=False,
     ):
-        personal_config["personal_external"] = True
-        personal_config["personal_dashboard_url"] = _q_text("HTTPS dashboard origin for authenticated notification links (no path):", default="")
+        origin = _https_origin(_q_text("HTTPS dashboard origin for authenticated notification links (no path):", default=""))
+        if origin:
+            personal_config["personal_external"] = True
+            personal_config["personal_dashboard_url"] = origin
+        else:
+            console.print("[yellow]Private delivery needs the HTTPS address people sign in at, with no path "
+                          "(like https://lightwork.example.com), so it stays off. Set it later in Lightwork > Settings.[/yellow]")
     if not _q_confirm(
         "Send shared organization alerts to a channel? Personal task alerts use each person's own notification choices.",
         default=False,
@@ -7150,7 +7166,7 @@ def pick_deadline_alerts(notifications: dict[str, Any] | None = None) -> dict[st
     is on, so declining writes ``enabled = false`` explicitly. Lead times are
     stored under ``[deadline_alerts.lead_days]`` / ``[deadline_alerts.lead_hours]``.
     """
-    if not notifications:
+    if not (notifications or {}).get("backend"):
         console.print(
             "  [dim]Deadline alerts use the notification backend above; without one "
             "they are recorded on the record page but reach nobody.[/dim]"
@@ -7219,16 +7235,23 @@ def pick_daily_summary(
         my_work = {"digest_enable": True, "digest_hour": max(0, min(23, hour))}
         if _q_confirm("  Send summaries by email too? (needs a mail server)", default=False):
             host = _q_text("  Outgoing mail server (e.g. smtp.example.com)", default="").strip()
-            if host:
+            port = _safe_int(_q_text("  Mail server port", default="587"), default=587) if host else 587
+            sender = _q_text("  Send as (address)", default="").strip() if host else ""
+            if "@" in sender:
                 mail = {
                     "host": host,
-                    "port": _safe_int(_q_text("  Mail server port", default="587"), default=587),
+                    "port": port,
                     "user": "${MAVERICK_SMTP_USER}",
                     "password": "${MAVERICK_SMTP_PASSWORD}",
-                    "from_address": _q_text("  Send as (address)", default="").strip(),
-                    "tls": "starttls",
+                    "from_address": sender,
+                    # Port 465 is TLS from the first byte (RFC 8314); others upgrade with STARTTLS.
+                    "tls": "ssl" if port == 465 else "starttls",
                 }
                 envs += ["MAVERICK_SMTP_USER", "MAVERICK_SMTP_PASSWORD"]
+            elif host:
+                # Without a sender the server above is never used for summaries.
+                console.print("  [yellow]Email summaries need a sender address, so email stays off. "
+                              "Add it later in Lightwork > Settings > Email alerts.[/yellow]")
     if channels and "slack" in channels and _q_confirm(
         "Post new approval requests in a Slack channel with Approve / Reject buttons?",
         default=False,
@@ -7300,14 +7323,17 @@ def pick_support() -> dict[str, Any]:
         default=False,
     ):
         return {}
+    # The kernel's own patterns: get_support() drops any other value unseen.
+    from maverick.config import _SUPPORT_EMAIL_RE, _SUPPORT_URL_RE
+
     support: dict[str, Any] = {}
     url = _q_text("  Public service-status page (https://..., empty for none):", default="").strip()
-    if url.startswith("https://") and len(url) <= 308 and not any(c in url for c in " \"'<>"):
+    if _SUPPORT_URL_RE.fullmatch(url):
         support["status_page_url"] = url
     elif url:
         console.print("[yellow]Skipped: the status page must be a secure https:// address.[/yellow]")
     email = _q_text("  Support contact email (empty: people ask their administrator):", default="").strip()
-    if "@" in email and " " not in email and "." in email.rsplit("@", 1)[-1]:
+    if _SUPPORT_EMAIL_RE.fullmatch(email):
         support["contact_email"] = email
     elif email:
         console.print("[yellow]Skipped: that is not an email address.[/yellow]")
@@ -10892,6 +10918,11 @@ def write_consumer_config(
             DEFAULT_GOVERNANCE_PROFILE,
             GOVERNANCE_PROFILES[DEFAULT_GOVERNANCE_PROFILE],
         )
+    if protect_existing and _existing_setup():
+        # A setup saved while the questions were answered: refuse before the
+        # work folder and sample files are touched (publishing re-checks locked).
+        raise FileExistsError("Lightwork found saved setup files. Nothing was replaced; "
+                              "open Lightwork Settings to make changes.")
     Path(workdir).expanduser().mkdir(parents=True, exist_ok=True)
     first_outcome_table = (
         prepare_first_outcome(first_outcome, str(Path(workdir).expanduser()))
@@ -10954,7 +10985,7 @@ def run_consumer() -> int:
     console.print(
         Panel.fit(
             "[bold]Lightwork setup[/bold]\n\n"
-            "Five quick questions. About a minute. You can change supported\n"
+            "Six quick questions. About a minute. You can change supported\n"
             "options later in Lightwork Settings.",
             border_style="cyan",
         )

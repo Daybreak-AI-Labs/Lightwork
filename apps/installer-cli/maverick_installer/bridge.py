@@ -12,9 +12,10 @@ Protocol (line-delimited JSON):
 When the wizard is complete, sidecar emits ``{"id": "__done__", ...}``
 and exits.
 
-The five questions mirror the CLI's consumer mode exactly (name,
-governance level, sign-in key, working directory, budget) and the
-resulting config is written by the SAME ``write_consumer_config``
+The six questions mirror the CLI's consumer mode exactly (name,
+governance level, sign-in key, working directory, budget, the team that
+tries Lightwork first) and the resulting config is written by the SAME
+``write_consumer_config``
 helper the CLI uses -- and the governance menu is imported from the
 SAME ``GOVERNANCE_CHOICES`` list the CLI shows -- so the GUI and CLI
 can't drift.
@@ -34,6 +35,7 @@ from .wizard import (
     GOVERNANCE_CHOICES,
     GOVERNANCE_PROFILES,
     _existing_setup,
+    first_outcome_choices,
     recover_pending_setup,
     write_consumer_config,
 )
@@ -55,7 +57,7 @@ def _recv() -> str:
 
 
 def run() -> None:
-    """Sidecar entry point: the four-question consumer flow.
+    """Sidecar entry point: the six-question consumer flow.
 
     Matches ``maverick_installer.wizard.run_consumer`` question for
     question. No jargon, no provider picker, no DevTools paste.
@@ -159,9 +161,21 @@ def run() -> None:
         budget = {"max_dollars": (float(budget_ans[1:]) if budget_ans.startswith("$") else 2.0),
                   "max_wall_seconds": 1800.0}
 
+    # Q6: the team that tries Lightwork first (its sample task and files).
+    from maverick.sample_outcomes import DEFAULT_DEPARTMENT, resolve_department
+
+    _send(_step(
+        "first_outcome",
+        "Which team will try Lightwork first? Its first task runs on bundled sample data.",
+        first_outcome_choices(),
+    ))
+    team = _recv().strip()
+    department = resolve_department(team, default=None) if team else DEFAULT_DEPARTMENT
+    if department is None:
+        raise ValueError("Choose one of the listed teams")
     backend = write_consumer_config(
         user_name=user_name, keys=keys, workdir=workdir, budget=budget,
-        profile=profile,
+        profile=profile, first_outcome=department,
         protect_existing=True,
     )
 

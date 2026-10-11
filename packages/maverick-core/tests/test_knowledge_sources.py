@@ -86,6 +86,25 @@ def test_a_refresh_that_cannot_be_recorded_does_not_leave_the_source_claimed(ser
     assert service.start(again, "2" * 32)["state"] == "queued"
 
 
+def test_a_job_saved_before_its_create_failed_keeps_the_source_claim(service, monkeypatch):
+    # The job ledger saved the record and then failed (e.g. its flush raised):
+    # the queued job exists, so its source claim must stay with it.
+    prepared, before = _prepared(service, 3600)
+    real = service.jobs.create
+
+    def saved_then_failed(*args, **kwargs):
+        real(*args, **kwargs)
+        raise OSError("flush failed after the record was saved")
+
+    monkeypatch.setattr(service.jobs, "create", saved_then_failed)
+    with pytest.raises(OSError):
+        service.start(prepared, "5" * 32)
+    job_id = "KNJ-" + "5" * 32
+    assert service.jobs.get(job_id) is not None
+    row = service.sources.get(before["id"])
+    assert row["active_job"] == job_id and row["state"] == "queued"
+
+
 def test_a_started_refresh_still_claims_the_source(service):
     prepared, before = _prepared(service, 3600)
     job = service.start(prepared, "3" * 32)
@@ -138,3 +157,106 @@ def test_a_full_ledger_archives_its_oldest_receipt_and_admits_the_refresh(servic
     # The older receipt is kept and readable; it no longer counts against the cap.
     assert native.JOB_STORE.get("KNJ-" + "0" * 32)["state"] == "completed"
     assert native.JOB_STORE.count() == 1
+
+
+def test_a_queued_refresh_refused_before_it_starts_is_withheld_and_backs_off(service):
+    # Its permit expired (or changed, or the owner lost authority): run()
+    # refuses before queued -> running. It stayed queued and claimed the source
+    # forever, retried every worker cycle, with the schedule stuck behind it.
+    prepared, before = _prepared(service, 3600)
+    job = service.start(prepared, "6" * 32)
+    job = service.jobs.get(job["id"])
+    service.jobs.update(job["id"], lambda row: row.update(deadline=time.time() - 1),
+                        expected_revision=job["revision"], action="test.expire", actor=OWNER)
+    expired = service.jobs.get(job["id"])
+    with pytest.raises(PermissionError) as refused:
+        service.run(expired["id"])
+    native.KnowledgeSources.withhold_queued(expired, refused.value)
+    assert service.jobs.get(job["id"])["state"] == "withheld"
+    row = service.sources.get(before["id"])
+    assert row["active_job"] is None and row["state"] == "withheld"
+    assert row["next_refresh"] >= time.time() + 3600 - 60
+    # Only a job that is still queued is changed.
+    with pytest.raises(native.RecordConflict):
+        native.KnowledgeSources.withhold_queued(expired, refused.value)
+
+
+@pytest.mark.parametrize("interval", [0, 3600])
+@pytest.mark.parametrize("interruption", ["receipt_saved", "release_not_saved"])
+def test_withholding_recovers_its_source_release_without_rewriting_the_receipt(service, monkeypatch, interval, interruption):
+    prepared, before = _prepared(service, interval)
+    job = service.start(prepared, "7" * 32)
+    store = service.jobs if interruption == "receipt_saved" else service.sources
+    real_update = store.update
+
+    def interrupted(*args, **kwargs):
+        if interruption == "receipt_saved":
+            real_update(*args, **kwargs)
+        raise OSError("interrupted between the withheld receipt and source release")
+
+    with monkeypatch.context() as fault:
+        fault.setattr(store, "update", interrupted)
+        with pytest.raises(OSError):
+            native.KnowledgeSources.withhold_queued(job, PermissionError("expired"))
+
+    retained = service.jobs.get(job["id"])
+    assert retained["state"] == "withheld"
+    assert service.sources.get(before["id"])["active_job"] == job["id"]
+    native.KnowledgeSources.withhold_queued(retained)
+    assert service.jobs.get(job["id"]) == retained
+    released = service.sources.get(before["id"])
+    assert released["active_job"] is None
+    assert released["state"] == "withheld" and released["projection_allowed"] is False
+    if interval:
+        assert released["next_refresh"] >= time.time() + interval - 60
+    else:
+        assert released["next_refresh"] is None
+    # A separate reviewed intent can now claim the source again.
+    assert service.start(dict(prepared, revision=released["revision"]), "8" * 32)["state"] == "queued"
+
+
+@pytest.mark.parametrize("state", ["queued", "running", "publishing", "unconfirmed", "completed"])
+def test_withheld_recovery_never_takes_over_a_different_job_state(service, state):
+    prepared, before = _prepared(service, 3600)
+    job = service.start(prepared, "9" * 32)
+    current = service.jobs.get(job["id"])
+    current = service.jobs.update(job["id"], lambda row: row.update(state=state),
+                                  expected_revision=current["revision"], action="test.state", actor=OWNER)
+    with pytest.raises(native.RecordConflict):
+        native.KnowledgeSources.withhold_queued(current)
+    assert service.jobs.get(job["id"]) == current
+    assert service.sources.get(before["id"])["active_job"] == job["id"]
+
+
+def test_withheld_recovery_keeps_a_newer_source_claim(service):
+    prepared, before = _prepared(service, 3600)
+    job = service.start(prepared, "a" * 32)
+    current = service.jobs.get(job["id"])
+    retained = service.jobs.update(job["id"], lambda row: row.update(state="withheld"),
+                                   expected_revision=current["revision"], action="test.withheld", actor=OWNER)
+    source = service.sources.get(before["id"])
+    replacement = service.sources.update(source["id"], lambda row: row.update(active_job="KNJ-" + "b" * 32),
+                                          expected_revision=source["revision"], action="test.replaced", actor=OWNER)
+    with pytest.raises(native.RecordConflict):
+        native.KnowledgeSources.withhold_queued(retained)
+    assert service.sources.get(before["id"]) == replacement
+    assert service.jobs.get(job["id"]) == retained
+
+
+def test_withheld_recovery_waits_for_its_activity_receipt(service, monkeypatch):
+    from maverick import audit
+
+    prepared, before = _prepared(service, 3600)
+    job = service.start(prepared, "c" * 32)
+    with monkeypatch.context() as unavailable:
+        unavailable.setattr(audit, "record", lambda *args, **kwargs: False)
+        with pytest.raises(native.RecordConflict):
+            native.KnowledgeSources.withhold_queued(job, PermissionError("expired"))
+    retained = service.jobs.get(job["id"])
+    assert retained["state"] == "withheld" and retained.get("_audit_pending")
+    assert service.sources.get(before["id"])["active_job"] == job["id"]
+    with pytest.raises(native.RecordConflict):
+        native.KnowledgeSources.withhold_queued(retained)
+    assert service.jobs.retry_pending() == 1
+    native.KnowledgeSources.withhold_queued(retained)
+    assert service.sources.get(before["id"])["active_job"] is None

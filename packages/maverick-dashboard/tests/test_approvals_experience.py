@@ -80,9 +80,10 @@ def _queue(world, *, action="salesforce.update_records", risk="high"):
         after="The 12 accounts belong to Priya.",
         irreversible=True,
     )
+    # The consent wait's queue: it holds each decision for the undo window.
     aid = world.create_approval(
         action, risk=risk, scope="Salesforce accounts",
-        detail=encode_approval_detail(card), provenance="consent",
+        detail=encode_approval_detail(card), provenance="consent", undoable=True,
     )
     return aid, {"X-Lightwork-Approval-Binding": card["binding_sha256"]}
 
@@ -337,3 +338,55 @@ def test_the_queue_names_the_card_summary_on_its_buttons(tmp_path):
     text = _client().get("/approvals").text
     assert 'Approve &#34;Update 12 Salesforce account records&#34;</button>' in text
     assert 'data-label="Update 12 Salesforce account records"' in text
+
+
+def test_a_decision_nothing_waits_on_offers_no_undo_and_cannot_be_undone(tmp_path, recorded):
+    # Settings changes, codebase merges, data-use checks and agent credentials
+    # act on "approved" at once: undoing one would claim a retraction of an
+    # effect that already happened.
+    w = _world(tmp_path)
+    aid = w.create_approval("codebase_merge", risk="high", scope="repo", provenance="codebase")
+    c = _client()
+    denied = c.post(f"/api/v1/approvals/{aid}/deny")
+    assert denied.status_code == 204
+    assert "x-lightwork-undo-seconds" not in denied.headers
+    undo = c.post(f"/api/v1/approvals/{aid}/undo")
+    assert undo.status_code == 409
+    assert undo.json()["detail"].startswith("This decision can't be undone")
+    assert w.get_approval(aid).status == "denied"
+    assert not [p for _, p in recorded if p.get("action") == "approval_decision_undone"]
+
+
+def test_undo_needs_the_same_access_as_deciding(tmp_path, recorded, monkeypatch):
+    # A reviewer who may not open a private request's card may not reopen its
+    # decision either.
+    from maverick_dashboard import content_access
+
+    w = _world(tmp_path)
+    aid, binding = _queue(w)
+    c = _client()
+    assert c.post(f"/api/v1/approvals/{aid}/approve", headers=binding, json=ACK).status_code == 204
+    monkeypatch.setattr(content_access, "can_read_approval", lambda *a, **k: False)
+    undo = c.post(f"/api/v1/approvals/{aid}/undo")
+    assert undo.status_code == 403
+    assert w.get_approval(aid).status == "approved"
+
+
+def test_undo_of_a_settings_request_needs_a_global_administrator(tmp_path, recorded, monkeypatch):
+    from fastapi import HTTPException
+    from maverick_dashboard import settings_quorum
+
+    w = _world(tmp_path)
+    aid, binding = _queue(w)
+    c = _client()
+    assert c.post(f"/api/v1/approvals/{aid}/approve", headers=binding, json=ACK).status_code == 204
+    seen = []
+
+    def decider(request, approval, who, *, approving):
+        seen.append((approval.id, approving))
+        raise HTTPException(status_code=403, detail="global administrator required")
+
+    monkeypatch.setattr(settings_quorum, "require_decider", decider)
+    undo = c.post(f"/api/v1/approvals/{aid}/undo")
+    assert undo.status_code == 403 and seen == [(aid, False)]
+    assert w.get_approval(aid).status == "approved"

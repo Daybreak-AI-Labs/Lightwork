@@ -74,6 +74,23 @@ def test_renewal_rotates_secret_and_recovers_only_the_same_generation(store):
     assert pairing.authenticate(renewed['token'], 'GET', '/api/v1/goals').principal == 'user:alice'
 
 
+def test_a_device_removed_while_it_renews_is_refused_not_a_server_error(store, monkeypatch):
+    # renew() authenticates, releases the lock, then reads the row again; a
+    # removal in between drops the row from the store.
+    _, device, token = paired()
+    real_authenticate = pairing.authenticate
+
+    def authenticate_then_remove(*args):
+        principal = real_authenticate(*args)
+        pairing.revoke('user:alice', device['id'])
+        return principal
+
+    monkeypatch.setattr(pairing, 'authenticate', authenticate_then_remove)
+    with pytest.raises(HTTPException) as error:
+        pairing.renew(token, 1)
+    assert error.value.status_code == 401
+
+
 def test_pairing_expires_and_never_upgrades_actions_silently(store, monkeypatch):
     pending = pairing.begin('Phone', 'synthetic-peer')
     with pytest.raises(HTTPException):

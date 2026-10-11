@@ -125,8 +125,9 @@ def _require_llm_key(model_spec: str | None = None) -> str:
         "Lightwork can't reach an LLM through every selected model route. "
         f"Missing: {detail}.\n"
         "\n"
-        "Configure that route with:  maverick init\n"
-        "Then verify it with:       maverick preflight",
+        "Add its key in Lightwork > Settings (on a computer with no Lightwork\n"
+        "setup yet, run:  maverick init)\n"
+        "Then verify it with:  maverick preflight",
         err=True,
     )
     sys.exit(2)
@@ -1217,9 +1218,10 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
             click.echo(
                 f"WARNING: knowledge is disabled, so the {len(doc_paths)} "
                 "document(s) you attached were NOT loaded; this domain agent "
-                "will have no document memory. Enable it with `maverick init` "
-                "(turn on knowledge) or set [knowledge] enable = true in "
-                "~/.maverick/config.toml, then re-run onboard.",
+                "will have no document memory. Turn on \"Document search for "
+                "agents\" in Lightwork > Settings > All settings, or set "
+                "[knowledge] enable = true in ~/.maverick/config.toml, then "
+                "re-run onboard.",
                 err=True,
             )
         elif kb_problem is not None:
@@ -3809,6 +3811,69 @@ def _apply_director(profile: str, outcome: str, description: str,
     return run.goal_title, run.goal_description + extra, capped
 
 
+def _sample_task(value, template_name, title, description, domain):
+    """``start --sample``: the dashboard's first-outcome title, brief and
+    specialist, so the run knows which sample files to read and the sample rule
+    (a title alone did not). Returns the inputs unchanged without ``--sample``."""
+    if not value:
+        return title, description, domain, None
+    from .. import sample_outcomes
+
+    department = sample_outcomes.resolve_department(value, default=None)
+    if department is None:
+        names = ", ".join(row["department"] for row in sample_outcomes.departments())
+        click.echo(f"ERROR: unknown sample department {value!r}; choose one of: {names}", err=True)
+        sys.exit(2)
+    if template_name or title or description or domain:
+        click.echo("ERROR: --sample sets the task, its brief and its specialist; "
+                   "drop TITLE, --template, --description and --domain", err=True)
+        sys.exit(2)
+    outcome = sample_outcomes.get(department)
+    return outcome.title, sample_outcomes.goal_description(department), outcome.pack, department
+
+
+def _validate_sample_backend(department, backend) -> None:
+    """Refuse sample runs when the backend cannot read fixtures from the host."""
+    if department is None:
+        return
+    from ..config import get_sandbox
+
+    chosen = str(backend or get_sandbox().get("backend") or "local").strip().lower()
+    # These backends mount the host workdir or copy it into the execution
+    # environment. SSH, Modal, Firecracker and third-party backends do not
+    # guarantee that host files are visible to the run.
+    if chosen not in {"local", "docker", "podman", "gvisor", "devcontainer", "kubernetes"}:
+        click.echo(
+            f"ERROR: --sample is not supported with the {chosen!r} sandbox because "
+            "its work folder is not shared with this computer. "
+            "Choose --sandbox docker, podman, gvisor, devcontainer, kubernetes or local "
+            "to run the bundled sample. No task was started.",
+            err=True,
+        )
+        sys.exit(2)
+
+
+def _place_sample(department, sandbox) -> None:
+    """Copy the sample files into the work folder the run reads (no-op without ``--sample``)."""
+    if department is None:
+        return
+    from .. import sample_outcomes
+
+    try:
+        sample_outcomes.create_sample_workspace(department, sandbox.workdir)
+    except OSError as exc:
+        click.echo(f"ERROR: the sample files could not be placed in the work folder ({exc}).", err=True)
+        sys.exit(2)
+
+
+def _mark_sample(world, goal_id, department) -> None:
+    """Record the sample-data event on the goal (no-op without ``--sample``)."""
+    if department is not None:
+        from .. import sample_outcomes
+
+        sample_outcomes.mark_goal_as_sample(world, goal_id, department)
+
+
 def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
     """Export the coding-mode / best-of-N env flags that ``coding_mode.from_env()``
     reads everywhere. ``--best-of-n`` only takes effect under ``--coding-mode``,
@@ -3829,6 +3894,9 @@ def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
 @click.argument("title", required=False)
 @click.option("--description", default="")
 @click.option("--template", "template_name", default=None)
+@click.option("--sample", "sample_department", default=None,
+              help="Run a department's first task on sample data: the same brief, files "
+                   "and sample record as the dashboard's first outcome (e.g. finance).")
 @click.option("--param", "-p", "params", multiple=True)
 @click.option("--max-dollars", default=None, type=float)
 @click.option("--max-wall-seconds", default=None, type=float)
@@ -3874,7 +3942,7 @@ def start(
     ctx, title, description, template_name, params,
     max_dollars, max_wall_seconds, max_depth, workdir, sandbox_backend,
     domain, coding_mode, best_of_n, fail_to_pass, pass_to_pass, dry_cost,
-    repeat, director_profile, result_file=None, result_key_file=None,
+    repeat, director_profile, result_file=None, result_key_file=None, sample_department=None,
 ) -> None:
     """Start a new goal and run the swarm."""
     from .run_result import prepare_result_target, read_result_key, write_if_requested
@@ -3892,6 +3960,8 @@ def start(
     # gate it on a provider key.
     if not dry_cost:
         _require_llm_key()
+    title, description, domain, sample = _sample_task(
+        sample_department, template_name, title, description, domain)
     if template_name:
         from ..templates import load_template
         try:
@@ -3977,9 +4047,13 @@ def start(
     # cannot write files or run programs. Say so before creating a paid task.
     _warn_file_work_before_start(_start_config, sandbox_backend)
 
+    _validate_sample_backend(sample, sandbox_backend)
     k = _kernel()
-    llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     sandbox = k.build_sandbox(workdir=workdir, backend=sandbox_backend)
+    # Containment and devcontainer settings can change the actual work folder.
+    # Use the constructed backend's directory, not the CLI/config input.
+    _place_sample(sample, sandbox)
+    llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     import threading
     import types as _types
 
@@ -3993,6 +4067,7 @@ def start(
     for _run_i in range(n_runs):
         world = open_world(ctx.obj["db"])
         goal_id = world.create_goal(title, description)
+        _mark_sample(world, goal_id, sample)
         _label = f" [{_run_i + 1}/{n_runs}]" if n_runs > 1 else ""
         click.echo(f"goal #{goal_id} created{_label}: {title}")
         # Honor [budget] in config.toml (start used to build Budget() directly,
@@ -6465,7 +6540,8 @@ def watch(ctx, path: str, run: bool, max_dollars: float | None) -> None:
                 detail = _format_route_missing(missing_routes)
                 click.echo(
                     f"Skipping --run: selected routes are incomplete ({detail}). "
-                    "Run 'maverick init' to configure.",
+                    "Add the missing key in Lightwork > Settings, then run "
+                    "'maverick preflight'.",
                     err=True,
                 )
                 continue

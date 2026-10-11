@@ -107,7 +107,8 @@ def test_goal_text_points_at_the_workspace_files_and_repeats_the_rule():
             assert rel in text and rel.startswith("sample-outcomes/")
         assert outcome.title.startswith(so.SAMPLE_TITLE_PREFIX)
         command = so.cli_command(department)
-        assert command.startswith('maverick start "Sample: ') and command.endswith(f"--domain {outcome.pack}")
+        # --sample gives the CLI run the brief above, not just the title.
+        assert command == f"maverick start --sample {department}"
         assert "--model" not in command and "claude" not in command
 
 
@@ -195,3 +196,119 @@ def test_every_offered_sample_specialist_can_start_on_a_fresh_install(fresh_inst
     # The sample files are workspace files: the specialist reads them itself.
     assert agent.capability.permits("read_file")
     assert "read_file" in {tool.name for tool in agent.tools.all()}
+
+
+def _start_sample(monkeypatch, tmp_path, *args, backend="local", sandbox_workdir=None,
+                  configured_backend=None):
+    """Run ``maverick start`` with a stand-in kernel that records what the run got."""
+    import types
+
+    import maverick.cli as cli_mod
+    from click.testing import CliRunner
+    from maverick import config, killswitch
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-dummy")  # pragma: allowlist secret
+    if configured_backend is not None:
+        cfg = tmp_path / "sample-config.toml"
+        cfg.write_text(f"[sandbox]\nbackend = '{configured_backend}'\n", encoding="utf-8")
+        monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
+    config.reset_config_cache()
+    killswitch._last_file_check_ts = 0.0
+    killswitch.clear()
+    seen = {}
+
+    def run_goal_sync(llm, world, bud, goal_id, **kw):
+        goal = world.get_goal(goal_id)
+        seen.update(title=goal.title, description=goal.description, domain=kw.get("domain"),
+                    sample=so.is_sample_goal(world, types.SimpleNamespace(id=goal_id, title="")))
+        world.set_goal_status(goal_id, "done", result="FINAL: ok")
+        return "FINAL: ok"
+
+    kernel = types.SimpleNamespace(
+        LLM=lambda model=None: object(),
+        build_sandbox=lambda **kw: types.SimpleNamespace(workdir=sandbox_workdir or tmp_path / "work"),
+        run_goal_sync=run_goal_sync,
+    )
+    monkeypatch.setattr(cli_mod, "_kernel", lambda: kernel)
+    sandbox_args = ["--sandbox", backend] if backend is not None else []
+    result = CliRunner().invoke(cli_mod.main, ["start", *args, *sandbox_args,
+                                               "--workdir", str(tmp_path / "work")])
+    return result, seen
+
+
+def test_the_printed_sample_command_runs_the_dashboard_brief(monkeypatch, tmp_path):
+    # The command setup prints used to pass only the title and pack, so the run
+    # never learned which sample files to read or that its output was sample data.
+    result, seen = _start_sample(monkeypatch, tmp_path, *so.cli_command("finance").split()[2:])
+    assert result.exit_code == 0, result.output
+    outcome = so.get("finance")
+    assert seen == {"title": outcome.title, "description": so.goal_description("finance"),
+                    "domain": outcome.pack, "sample": True}
+    workspace = so.sample_workspace_path("finance", tmp_path / "work")
+    assert so.is_sample_workspace(workspace)
+    assert all((workspace / name).is_file() for name in outcome.files)
+
+
+@pytest.mark.parametrize("args", [["--sample", "marketing"], ["Other task", "--sample", "finance"],
+                                  ["--sample", "finance", "--domain", "legal_nda_desk"]])
+def test_sample_start_refuses_unknown_or_mixed_input_before_any_goal(monkeypatch, tmp_path, args):
+    result, seen = _start_sample(monkeypatch, tmp_path, *args)
+    assert result.exit_code == 2, result.output
+    assert seen == {} and "goal #" not in result.output
+    assert not (tmp_path / "work" / so.SAMPLE_WORKSPACE_DIRNAME).exists()
+
+
+@pytest.mark.parametrize("backend", ["ssh", "modal", "firecracker"])
+@pytest.mark.parametrize("from_config", [False, True])
+def test_sample_start_refuses_non_shared_backends_before_start(monkeypatch, tmp_path, backend, from_config):
+    import maverick.cli as cli_mod
+    from maverick import budget
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("unsupported samples must be rejected before setup or spending")
+
+    monkeypatch.setattr(cli_mod, "_place_sample", unexpected)
+    monkeypatch.setattr(budget, "budget_from_config", unexpected)
+    result, seen = _start_sample(
+        monkeypatch, tmp_path, "--sample", "finance",
+        backend=None if from_config else backend,
+        configured_backend=backend if from_config else None,
+    )
+    assert result.exit_code == 2, result.output
+    assert f"--sample is not supported with the '{backend}' sandbox" in result.output
+    assert "No task was started" in result.output
+    assert seen == {} and "goal #" not in result.output
+    assert not (tmp_path / "work" / so.SAMPLE_WORKSPACE_DIRNAME).exists()
+
+
+def test_sample_start_refuses_unknown_configured_backend(monkeypatch, tmp_path):
+    result, seen = _start_sample(
+        monkeypatch, tmp_path, "--sample", "finance", backend=None, configured_backend="ep:remote",
+    )
+    assert result.exit_code == 2, result.output
+    assert "--sample is not supported" in result.output
+    assert seen == {} and "goal #" not in result.output
+
+
+def test_sample_start_honors_explicit_backend_over_remote_config(monkeypatch, tmp_path):
+    result, seen = _start_sample(
+        monkeypatch, tmp_path, "--sample", "finance", backend="local", configured_backend="ssh",
+    )
+    assert result.exit_code == 0, result.output
+    assert seen["sample"] is True
+
+
+@pytest.mark.parametrize("backend", ["local", "docker", "podman", "gvisor", "devcontainer", "kubernetes"])
+def test_sample_start_places_fixtures_in_effective_sandbox_workdir(monkeypatch, tmp_path, backend):
+    effective = tmp_path / "effective-workspace"
+    result, seen = _start_sample(
+        monkeypatch, tmp_path, "--sample", "finance", backend=backend, sandbox_workdir=effective,
+    )
+    assert result.exit_code == 0, result.output
+    assert seen["sample"] is True
+    assert all((effective / rel).is_file() for rel in so.relative_paths("finance"))
+    assert not (tmp_path / "work" / so.SAMPLE_WORKSPACE_DIRNAME).exists()

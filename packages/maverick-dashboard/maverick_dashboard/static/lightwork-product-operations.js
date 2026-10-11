@@ -1331,7 +1331,10 @@
       if (fresh.schema !== 1 || !Array.isArray(fresh.operations) || JSON.stringify(fresh.selection) !== JSON.stringify(context())) throw new Error('The current record could not be confirmed. Refresh the page and try again.');
       if (previous && previous.context !== fresh.context) {
         clear(formHost); selected = null;
-        document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed'));
+        // The account, role, suites or permitted actions changed: bubble, so
+        // pages that clear private content on window hear it too. A selection
+        // change (below) stays on document.
+        document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {bubbles: true}));
       }
       catalog = fresh; host.hidden = fresh.operations.length === 0; clear(buttons);
       fresh.operations.forEach(function (item) {
@@ -1791,7 +1794,7 @@
         if (!active(started)) return true;
         if (result.context !== catalog.context) {
           clear(formHost); catalog = null; status.textContent = 'Your context changed. Reopen Copilot.';
-          document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed'));
+          document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {bubbles: true}));
           return true;
         }
         if (!result.operation) return false;

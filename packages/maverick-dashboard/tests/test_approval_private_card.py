@@ -185,3 +185,34 @@ def test_my_work_never_says_all_clear_beside_a_waiting_request(env, monkeypatch)
     page = client.get("/me").text
     hero = _visible(page[page.index("Right now"):][:600])
     assert "All clear" not in hero and "Waiting on others" in hero
+
+
+def test_the_badge_count_stays_linear_in_the_waiting_requests(env, monkeypatch):
+    # The badge is read on every page load; with thousands of waiting
+    # requests it must not compare each one with every other, nor re-read the
+    # chat links once per private request.
+    from maverick import world_model
+    from maverick_dashboard import approval_decisions
+
+    client, world = env
+    for _ in range(40):
+        _shell_approval(world)               # Sam's: private to Dana, decided in chat
+    for _ in range(40):
+        _shell_approval(world, owner=DANA)   # Dana's own: she opens these
+    _as(monkeypatch, DANA)
+    _linked_in_slack(monkeypatch, DANA)
+    compared, link_reads = [], []
+    real_eq, real_links = world_model.Approval.__eq__, approval_decisions._chat_approvers
+
+    def eq(self, other):
+        compared.append(1)
+        return real_eq(self, other)
+
+    def links(approval):
+        link_reads.append(approval.id)
+        return real_links(approval)
+
+    monkeypatch.setattr(world_model.Approval, "__eq__", eq)
+    monkeypatch.setattr(approval_decisions, "_chat_approvers", links)
+    assert client.get("/api/v1/approvals/waiting-count").json()["waiting"] == 80
+    assert compared == [] and len(link_reads) <= 1

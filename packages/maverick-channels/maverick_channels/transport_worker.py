@@ -8,7 +8,7 @@ import time
 from collections import deque
 
 from .base import IncomingMessage
-from .delivery import MAX_CONFIGURED_RECORDS, DeliveryJournal, _digest
+from .delivery import MAX_CONFIGURED_RECORDS, DeliveryJournal, _digest, reply_withheld
 
 MAX_PENDING = 32
 RETRY_DELAY = 30.0
@@ -36,6 +36,7 @@ class TransportWorker:
         self._overflow = True  # Recover previous accepted inputs before new ones.
         self._closing = False
         self._retry_after = {}
+        self._scan_pending = None  # ids still waiting, from the last complete scan
         self._blocked_conversations = {}
         self.task = None
         self._scan_task = None
@@ -71,11 +72,17 @@ class TransportWorker:
         self._wake.set()
         return receipt
 
+    def _report_unreadable(self, count):
+        if count:
+            log.warning("Channel %s: %d saved receipt(s) could not be read and were skipped",
+                        self.channel.name, count)
+
     def _oldest_window(self):
-        selected = []
-        count = 0
+        selected, waiting = [], set()
+        self._scan_pending = None
+        count = unreadable = 0
         now = time.monotonic()
-        first, cursor, scanned = None, "", 0
+        cursor, scanned = "", 0
         while scanned <= MAX_CONFIGURED_RECORDS:
             # Shared storage returns at most 10,000 ids per scan. Keep walking
             # so raising the intake cap cannot hide older pending messages.
@@ -83,26 +90,41 @@ class TransportWorker:
             if not page:
                 break
             for position, record_id in page:
-                if position == first:
-                    return [record_id for _, record_id in selected], count > MAX_PENDING
-                if first is None:
-                    first = position
+                # The scan wraps back to the start: a position at or before the
+                # cursor ends the pass, even if compaction removed the first one.
+                if cursor and position <= cursor:
+                    self._scan_pending = frozenset(waiting)
+                    self._report_unreadable(unreadable)
+                    return [record_id for _, record_id in selected], count > MAX_PENDING or unreadable > 0
                 cursor = position
                 scanned += 1
                 if self._stop_scan.is_set():
                     return [], False
-                row = self.journal.get(record_id)
+                try:
+                    row = self.journal.get(record_id)
+                except Exception:
+                    # A receipt that cannot be read now must not stop the
+                    # recovery of every other one; the scan counts as
+                    # incomplete, so it is read again after the retry period.
+                    unreadable += 1
+                    continue
                 if (not row or row["channel"] != self.channel.name or row["account_sha256"] != _digest(self.account)
-                        or not (row["execution"] == "received" or row["delivery"] in {"ready", "retryable"})
-                        or self._retry_after.get(record_id, 0) > now):
+                        or not (row["execution"] == "received" or row["delivery"] in {"ready", "retryable"})):
+                    continue
+                waiting.add(record_id)
+                if self._retry_after.get(record_id, 0) > now:
                     continue
                 count += 1
                 selected.append((row["created_at"], row["id"]))
                 selected.sort()
                 del selected[MAX_PENDING:]
+        self._report_unreadable(unreadable)
         if scanned > MAX_CONFIGURED_RECORDS:
             log.warning("Channel receipt scan exceeds configured safety ceiling")
-        return [record_id for _, record_id in selected], count > MAX_PENDING or scanned > MAX_CONFIGURED_RECORDS
+        else:
+            self._scan_pending = frozenset(waiting)
+        return ([record_id for _, record_id in selected],
+                count > MAX_PENDING or scanned > MAX_CONFIGURED_RECORDS or unreadable > 0)
 
     async def _run(self):
         while True:
@@ -111,6 +133,8 @@ class TransportWorker:
                 try:
                     await self._process(record_id)
                 except Exception:
+                    # Retried by the next scan after RETRY_DELAY, like a refused send.
+                    self._retry_after[record_id] = time.monotonic() + RETRY_DELAY
                     log.warning("Channel %s saved transport work requires review", self.channel.name)
                 continue
             if self._closing and not self._overflow and not self._wake.is_set():
@@ -126,6 +150,10 @@ class TransportWorker:
                     log.warning("Channel %s transport recovery scan remains incomplete", self.channel.name)
                     selected, more = [], True
                 self.pending.extend(selected)
+                waiting = self._scan_pending
+                if waiting is not None:
+                    for record_id in [key for key in self._retry_after if key not in waiting]:
+                        self._retry_after.pop(record_id)  # finished or removed meanwhile
                 self._overflow = more or generation != self._generation
                 if self.pending:
                     continue
@@ -134,7 +162,10 @@ class TransportWorker:
             try:
                 await asyncio.wait_for(self._wake.wait(), timeout=RETRY_DELAY)
             except asyncio.TimeoutError:
-                self._overflow = True
+                # Rescan only for work waiting on a retry or a scan that did not
+                # complete: an idle worker re-read and decrypted every saved
+                # receipt every 30 seconds.
+                self._overflow = self._overflow or bool(self._retry_after)
 
     async def _process(self, record_id):
         row = await asyncio.to_thread(self.journal.get, record_id)
@@ -153,9 +184,15 @@ class TransportWorker:
             return await self.send(message, reply, row["route"])
         result = await self.channel.process_message(message, external_id=row["external_id"], account=self.account,
             authorize=lambda: self.authorize(message), send=send_saved, receipt=row, journal=self.journal)
-        if result["delivery"] == "retryable":
+        if result["delivery"] == "retryable" and not reply_withheld(result):
             self._retry_after[record_id] = time.monotonic() + RETRY_DELAY
             self._blocked_conversations[conversation] = record_id
+        elif result["delivery"] == "retryable":
+            # Held back by the source check (task or access changed): retried,
+            # but the person's newer messages do not wait behind it.
+            self._retry_after[record_id] = time.monotonic() + RETRY_DELAY
+            if self._blocked_conversations.get(conversation) == record_id:
+                self._blocked_conversations.pop(conversation)
         else:
             self._retry_after.pop(record_id, None)
             if self._blocked_conversations.get(conversation) == record_id:

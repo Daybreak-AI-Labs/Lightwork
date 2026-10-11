@@ -33,35 +33,58 @@ def _known(tenant: str | None, roles: dict[str, str]) -> list[str]:
     return known
 
 
-def may(principal: str, permission: str) -> bool:
-    """Whether ``principal`` currently holds ``permission`` in this workspace."""
+def _active_check():
+    """``check(principal) -> bool``: not turned off in the company directory
+    (SCIM), where such an account can no longer sign in. Unknown to the
+    directory counts as active, as at sign-in. The directory is read once;
+    an unreadable one raises, so nobody is offered."""
+    from .scim_groups import active_check
+
+    check = active_check()
+    return lambda principal: check(principal) is not False
+
+
+def _roster():
     from maverick.paths import current_tenant_id_strict
 
     from . import rbac
 
-    principal = str(principal or "").strip()
-    if not principal.startswith("user:"):
-        return False
+    tenant = current_tenant_id_strict()
+    return tenant, (rbac.list_tenant_roles(tenant) if tenant else rbac.list_users())
+
+
+def allowed(principals, permission: str) -> set[str]:
+    """Those of ``principals`` who currently hold ``permission`` in this
+    workspace (see :func:`may`), reading the roster and directory once."""
+    from . import rbac
+
     try:
-        tenant = current_tenant_id_strict()
-        roles = rbac.list_tenant_roles(tenant) if tenant else rbac.list_users()
-        return permission in rbac.permissions_for(_role(principal, tenant, roles))
+        tenant, roles = _roster()
+        active = _active_check()
+        return {principal for principal in (str(p or "").strip() for p in principals)
+                if principal.startswith("user:")
+                and permission in rbac.permissions_for(_role(principal, tenant, roles))
+                and active(principal)}
     except Exception:  # noqa: BLE001 -- an unreadable roster offers nobody
         log.warning("people directory unavailable", exc_info=True)
-        return False
+        return set()
+
+
+def may(principal: str, permission: str) -> bool:
+    """Whether ``principal`` currently holds ``permission`` in this workspace."""
+    principal = str(principal or "").strip()
+    return principal.startswith("user:") and principal in allowed({principal}, permission)
 
 
 def candidates(permission: str, *, limit: int = 200) -> list[dict]:
     """``[{principal, label}]`` for everyone who holds ``permission`` now."""
-    from maverick.paths import current_tenant_id_strict
-
     from . import rbac
     from .identity_format import humanize_principal
 
     try:
-        tenant = current_tenant_id_strict()
-        roles = rbac.list_tenant_roles(tenant) if tenant else rbac.list_users()
+        tenant, roles = _roster()
         known = _known(tenant, roles)
+        active = _active_check()
     except Exception:  # noqa: BLE001 -- an unreadable roster offers nobody
         log.warning("people directory unavailable", exc_info=True)
         return []
@@ -70,7 +93,7 @@ def candidates(permission: str, *, limit: int = 200) -> list[dict]:
         principal = str(principal or "").strip()
         if not principal.startswith("user:") or principal in out:
             continue
-        if permission not in rbac.permissions_for(_role(principal, tenant, roles)):
+        if permission not in rbac.permissions_for(_role(principal, tenant, roles)) or not active(principal):
             continue
         ident = humanize_principal(principal)
         label = f"{ident.name} ({ident.detail})" if ident.detail and ident.detail != "Email" else ident.name

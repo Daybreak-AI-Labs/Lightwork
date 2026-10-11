@@ -176,3 +176,30 @@ def test_glasses_revoked_queued_caller_never_executes_or_reads_saved_result():
         with pytest.raises(PermissionError):
             await channel.get_result("owner", "one")
     asyncio.run(run())
+
+
+def test_vapi_tool_calls_in_the_documented_nested_shape_are_accepted():
+    # Vapi's custom-tools reference sends {id, type, function: {name, arguments}}
+    # (and toolWithToolCallList[].toolCall.function); only the flat
+    # {name, parameters} shape was read, so such calls were all refused.
+    from maverick_channels.voice import parse_request
+
+    call = {"id": "call1", "assistantId": "assistant-1", "customer": {"number": "+12025550111"}}
+    function = {"name": "lightwork_request", "arguments": {"request": "What is due today?"}}
+    for arguments in (function["arguments"], '{"request": "What is due today?"}'):
+        nested = {"id": "tool-1", "type": "function", "function": {**function, "arguments": arguments}}
+        message = {"type": "tool-calls", "call": call, "toolCallList": [nested],
+                   "toolWithToolCallList": [{"type": "function", "server": {"url": "https://x.example"},
+                                             "function": {"name": "lightwork_request", "parameters": {}},
+                                             "toolCall": nested}]}
+        parsed = parse_request({"message": message}, provider="vapi", assistant_id="assistant-1",
+                               callers={"+12025550111"})
+        assert parsed[2] == [("tool-1", "What is due today?")]
+    only_wrapped = {"type": "tool-calls", "call": call, "toolWithToolCallList": [
+        {"type": "function", "function": {"name": "lightwork_request"}, "toolCall": nested}]}
+    assert parse_request({"message": only_wrapped}, provider="vapi", assistant_id="assistant-1",
+                         callers={"+12025550111"})[2] == [("tool-1", "What is due today?")]
+    other = {"id": "tool-2", "type": "function", "function": {"name": "transfer_call", "arguments": {}}}
+    with pytest.raises(ValueError, match="not supported"):
+        parse_request({"message": {"type": "tool-calls", "call": call, "toolCallList": [other]}},
+                      provider="vapi", assistant_id="assistant-1", callers={"+12025550111"})

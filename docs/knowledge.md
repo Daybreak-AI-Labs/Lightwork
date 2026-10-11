@@ -68,7 +68,8 @@ Chroma is a separate core recall adapter, not a `KnowledgeBase` storage backend.
 
 ## Embedders
 
-`hosted` (Voyage, needs `VOYAGE_API_KEY`), `local` (on-box
+`hosted` (Voyage; its key is `[knowledge] api_key`, then
+`MAVERICK_EMBED_API_KEY`, then `VOYAGE_API_KEY` on Voyage's own endpoint), `local` (on-box
 sentence-transformers, no key), or `deterministic` (a hashing stub — offline and
 keyless, but low recall quality; for tests and smoke runs only). **Meaningful
 semantic recall needs `local` or `hosted`.** Changing an embedder or model can

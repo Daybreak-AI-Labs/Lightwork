@@ -26,6 +26,14 @@ def test_wrong_key_refused_before_inspection(tmp_path):
         offline.review(str(tmp_path), public_key="different")
 
 
+def test_a_key_holding_a_lone_surrogate_is_refused_not_a_crash(tmp_path):
+    release = dict(version="1.2.3", signature="signed", runtime_sha256="a" * 64, installer_sha256="b" * 64)
+    # json.dumps writes the escape "\\ud800"; reading it back yields an unencodable character.
+    (tmp_path / "downloads.json").write_text(json.dumps({"public_key": "\ud800", "new": release}))
+    with pytest.raises(offline.recovery.MaintenanceError, match="cannot change"):
+        offline.review(str(tmp_path), public_key="pinned")
+
+
 def test_changed_cached_package_cannot_authorize(tmp_path, monkeypatch):
     monkeypatch.setattr(offline.recovery, "_locked", contextlib.nullcontext)
     monkeypatch.setattr(offline, "_directory", lambda identifier: tmp_path)

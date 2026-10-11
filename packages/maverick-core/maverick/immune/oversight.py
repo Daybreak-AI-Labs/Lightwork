@@ -66,7 +66,8 @@ def _plain_card(action: str, detail: str, requested_by: str | None) -> str:
 
 def seed_canary(world, *, action: str, detail: str, decision_class: str, flaw: str,
                 risk: str = "medium", requested_by: str | None = None,
-                scope: str | None = None, approvals_required: int = 1) -> int:
+                scope: str | None = None, approvals_required: int = 1,
+                undoable: bool = False) -> int:
     """Park a known-flawed approval in the real queue and remember it privately.
 
     ``detail`` is either an encoded approval card or plain text, which is
@@ -82,9 +83,12 @@ def seed_canary(world, *, action: str, detail: str, decision_class: str, flaw: s
         decoy = _decoy(card)
         decoy["binding_sha256"] = digest(decoy)
         detail = encode_approval_detail(decoy)
+    # ``undoable`` matches the request a canary imitates (held for undo by the
+    # consent wait, or acted on at once), so its Undo and reminders do not
+    # tell a reviewer it is a canary.
     approval_id = world.create_approval(action, risk=risk, detail=detail, scope=scope,
                                         approvals_required=approvals_required,
-                                        requested_by=requested_by)
+                                        requested_by=requested_by, undoable=undoable)
     _ledger.append(ledger_path(), {"type": "canary", "approval_id": approval_id,
                                    "class": decision_class, "flaw": flaw, "at": time.time()})
     return approval_id
@@ -254,7 +258,8 @@ def generate_canary(world, *, decision_class: str | None = None, rng=None,
     approval_id = seed_canary(world, action=source.action, detail=detail,
                               decision_class=source.action, flaw=flaw, risk=source.risk,
                               requested_by=requested_by or source.requested_by,
-                              scope=source.scope, approvals_required=source.approvals_required)
+                              scope=source.scope, approvals_required=source.approvals_required,
+                              undoable=source.undo_hold is not None)
     return {"approval_id": approval_id, "modelled_on": source.id,
             "decision_class": source.action, "flaw": flaw}
 

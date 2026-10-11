@@ -173,8 +173,9 @@ def require_provider_or_400(*, role: str | None = None) -> None:
         status_code=400,
         detail=(
             "The selected AI model route is incomplete "
-            f"({missing_detail}). An administrator can run 'maverick init' and "
-            "'maverick preflight' before this operation."
+            f"({missing_detail}). An administrator can add the missing key in "
+            "Lightwork > Settings (or run 'maverick init' on a computer with no "
+            "Lightwork setup yet), then run 'maverick preflight'."
         ),
     )
 

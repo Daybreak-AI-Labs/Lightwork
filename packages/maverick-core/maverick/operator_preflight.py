@@ -122,7 +122,7 @@ def _provider_state(cfg: dict[str, Any] | None) -> tuple[Check, bool]:
                 "Model provider",
                 "blocked",
                 "Provider readiness cannot be established until config is valid.",
-                "maverick init --fast",
+                "maverick config-lint",
             ),
             False,
         )
@@ -328,7 +328,7 @@ def _route_state(cfg: dict[str, Any] | None) -> Check:
             "Model routes",
             "blocked",
             "Model routes cannot be checked until config is valid.",
-            "maverick init --fast",
+            "maverick config-lint",
         )
     try:
         routed = _routed_configuration_missing(cfg)
@@ -418,7 +418,7 @@ def _storage_state(cfg: dict[str, Any] | None) -> Check:
             "Runtime storage",
             "blocked",
             "Storage readiness cannot be established until config is valid.",
-            "maverick init --fast",
+            "maverick config-lint",
         )
     backend = str(
         os.environ.get("MAVERICK_WORLD_BACKEND")

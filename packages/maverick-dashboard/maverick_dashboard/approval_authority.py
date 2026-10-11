@@ -53,7 +53,7 @@ def require_approval_authority(
                if api_key_permissions(request) is not None
                else has_permission(request, "operate"))
     if allowed:
-        if action in {"approval.approve", "approval.deny", "approval.revise"}:
+        if action in {"approval.approve", "approval.deny", "approval.revise", "approval.undo"}:
             from .content_access import require_approval_content
             row = require_approval_content(request, resource)
             actor = caller_principal(request) or "operator"

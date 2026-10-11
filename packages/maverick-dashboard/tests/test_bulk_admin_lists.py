@@ -129,3 +129,43 @@ def test_inline_bulk_bars_wait_for_the_shared_helpers(template):
 def test_a_page_script_runs_before_the_shared_helpers():
     base = (PACKAGE / "templates/base.html").read_text(encoding="utf-8")
     assert base.index("{% block content %}") < base.index("<script src=\"{{ asset('lightwork-ui.js') }}\"></script>")
+
+
+def test_people_directory_never_offers_or_accepts_a_deprovisioned_account(client, monkeypatch):
+    # Company sign-in (SCIM) turned Priya off: her role is still on file, but
+    # she can no longer sign in, so a request is never assigned to her.
+    from maverick_dashboard import people_directory, scim_groups
+
+    monkeypatch.setattr(scim_groups, "active_check",
+                        lambda: lambda principal: False if principal == "user:priya@corp.com" else None)
+    operators = {p["principal"] for p in people_directory.candidates("operate")}
+    assert "user:priya@corp.com" not in operators
+    assert not people_directory.may("user:priya@corp.com", "operate")
+
+
+def test_an_unreadable_company_directory_offers_nobody(client, monkeypatch):
+    from maverick_dashboard import people_directory, scim_groups
+
+    def broken():
+        raise OSError("roster unreadable")
+
+    monkeypatch.setattr(scim_groups, "active_check", broken)
+    assert people_directory.candidates("operate") == []
+    assert not people_directory.may("user:priya@corp.com", "operate")
+
+
+def test_offering_people_reads_the_company_directory_once_not_per_person(client, monkeypatch):
+    # The DSAR page lists every operator; each person's check re-read the
+    # SCIM users and the retired ledger (twice), per person.
+    from maverick_dashboard import people_directory, rbac, subject_directory
+
+    for index in range(30):
+        rbac.set_role(f"user:op{index}@corp.com", "operator", actor="user:setup")
+    reads, real = [], subject_directory._load_retired
+    monkeypatch.setattr(subject_directory, "_load_retired", lambda: reads.append(1) or real())
+    operators = {p["principal"] for p in people_directory.candidates("operate")}
+    assert len(operators) == 31 and len(reads) == 1
+    reads.clear()
+    assert people_directory.allowed({f"user:op{index}@corp.com" for index in range(30)} | {"user:vic@corp.com"},
+                                    "operate") == {f"user:op{index}@corp.com" for index in range(30)}
+    assert len(reads) == 1

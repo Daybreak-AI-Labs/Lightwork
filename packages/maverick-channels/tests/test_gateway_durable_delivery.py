@@ -490,3 +490,56 @@ def test_imessage_poll_materializes_one_bounded_batch(monkeypatch, tmp_path):
     assert len(batch) == 256 and batch[-1][2] == 256
     channel._last_rowid = batch[-1][2]
     assert len(channel._fetch_new()) == 251
+
+
+def test_a_slack_thread_reply_is_admitted_only_where_the_bot_was_asked(monkeypatch):
+    # Every allowlisted thread reply in any room the bot is in was stored, with
+    # its files, filling the intake with conversations not meant for Lightwork.
+    from maverick_channels.delivery import _record_id
+
+    handled = []
+
+    async def handler(msg):
+        handled.append(msg.text)
+        return "noted"
+
+    channel, client, _request = _slack(monkeypatch, handler)
+    attachment = {"id": "F1", "name": "notes.pdf", "url_private": "https://files.slack.com/F1"}
+
+    def event(ts, **fields):
+        return NS(type="events_api", envelope_id="env-" + ts, payload={"team_id": "team", "event": {
+            "type": "message", "user": "human", "channel": "room", "channel_type": "channel",
+            "ts": ts, "text": "chatting", **fields}})
+
+    journal = DeliveryJournal()
+    asyncio.run(channel._on_request(client, event("300.2", thread_ts="300.1", files=[attachment])))
+    assert journal.get(_record_id("slack", "team:bot", "room:300.2")) is None and handled == []
+    asyncio.run(channel._on_request(client, event("400.1", type="app_mention", text="prepare the report")))
+    asyncio.run(channel._on_request(client, event("400.2", thread_ts="400.1", files=[attachment])))
+    row = journal.get(_record_id("slack", "team:bot", "room:400.2"))
+    assert row is not None and row["message"]["question_reply_only"] is True
+    assert row["route"]["files"] == [] and row["message"]["text"] == "chatting"
+
+
+def test_a_live_telegram_reply_uploads_its_saved_files(monkeypatch):
+    # The live path sent only the text; the saved output files (and the
+    # rendered page the text says is attached) went out only on recovery,
+    # which never runs once the reply is marked delivered.
+    import hashlib
+
+    from maverick_channels.base import Reply
+
+    data = b"quarterly totals\n"
+    async def handler(msg):
+        msg._channel_reply_material = {"source": None, "files": [{
+            "filename": "report.txt", "mime": "text/plain", "data": data,
+            "sha256": hashlib.sha256(data).hexdigest(), "source": {"kind": "artifact"}}]}
+        return Reply("Your report is attached.", attachments=["report.txt"])
+
+    channel, update = _telegram(monkeypatch, handler)
+    channel._app = NS(bot=NS(send_document=AsyncMock(return_value=NS(message_id=10))))
+    row = asyncio.run(channel._on_message(update, None))
+    update.message.reply_text.assert_awaited()
+    sent = channel._app.bot.send_document.call_args.kwargs
+    assert sent["chat_id"] == -77 and sent["filename"] == "report.txt" and sent["reply_to_message_id"] == 5
+    assert row["delivery"] == "delivered" and row["chunks"]["file-0"]["state"] == "delivered"

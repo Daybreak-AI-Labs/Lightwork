@@ -243,10 +243,11 @@ def build_embedder(cfg: dict | None = None) -> Embedder:
     if provider == "hosted":
         base_url = cfg.get("base_url") or "https://api.voyageai.com/v1"
         # VOYAGE_API_KEY is Voyage's credential: it is only offered to Voyage's
-        # own host, never as a Bearer token to another configured endpoint.
+        # own host, never as a Bearer token to another configured endpoint. The
+        # Lightwork-specific variable wins over that generic one.
         voyage = (urlsplit(base_url).hostname or "").lower() in ("voyageai.com", "api.voyageai.com")
-        key = (cfg.get("api_key") or (os.environ.get("VOYAGE_API_KEY") if voyage else "")
-               or os.environ.get("MAVERICK_EMBED_API_KEY", ""))
+        key = (cfg.get("api_key") or os.environ.get("MAVERICK_EMBED_API_KEY", "")
+               or (os.environ.get("VOYAGE_API_KEY") if voyage else ""))
         if not key:
             raise RuntimeError(
                 "knowledge: hosted embedder selected but no API key (set "

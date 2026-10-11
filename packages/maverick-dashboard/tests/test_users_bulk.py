@@ -157,15 +157,33 @@ def test_a_refusal_by_the_activity_log_for_one_person_does_not_stop_the_others(c
     assert len(users_bulk.undo_tokens(report)) == 1             # the change that happened can be undone
 
 
-def test_a_role_store_failure_for_one_person_is_reported_not_raised(client, monkeypatch):
+def test_a_change_the_role_list_could_not_roll_back_is_reported_as_it_now_stands(client, monkeypatch):
+    # Audit refused the change and putting the list back failed: the list may
+    # now hold it. It must never be reported as "not changed" with no Undo.
+    from maverick_dashboard import rbac, users_bulk
+    real = rbac.set_role
+
+    def stuck(principal, role, **kwargs):
+        real(principal, role, **kwargs)
+        raise rbac.RosterRollbackError("audit refused RBAC mutation and roster rollback failed")
+
+    monkeypatch.setattr(rbac, "set_role", stuck)
+    report = users_bulk.apply(["user:ana@corp.com"], "operator", actor="user:setup")
+    assert report[0]["outcome"] == "uncertain" and report[0]["after"] == "operator"
+    assert "may now hold the change" in report[0]["reason"]
+    assert len(users_bulk.undo_tokens(report)) == 1             # the change it may hold can be undone
+
+
+def test_a_rollback_failure_that_left_the_list_unchanged_offers_no_undo(client, monkeypatch):
     from maverick_dashboard import rbac, users_bulk
 
     def fail(principal, role, **kwargs):
-        raise rbac.RosterRollbackError("The role list could not be put back and may now include it.")
+        raise rbac.RosterRollbackError("audit refused RBAC mutation and roster rollback failed")
 
     monkeypatch.setattr(rbac, "set_role", fail)
     report = users_bulk.apply(["user:ana@corp.com"], "operator", actor="user:setup")
-    assert report[0]["outcome"] == "refused" and "role list" in report[0]["reason"]
+    assert report[0]["outcome"] == "uncertain" and report[0]["after"] == report[0]["before"]
+    assert users_bulk.undo_tokens(report) == []
 
 
 def test_undo_leaves_a_role_someone_changed_again_and_still_accepts_older_tokens(client):

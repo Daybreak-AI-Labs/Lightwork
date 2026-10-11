@@ -80,8 +80,7 @@ def test_run_consumer_prints_the_pack_command_without_a_hard_coded_model(monkeyp
     monkeypatch.setattr(wizard, "_q_select", _answer_team("Legal"))
     wizard.run_consumer()
     out = _flat(capsys.readouterr().out)
-    assert "--domain legal_nda_desk" in out
-    assert 'maverick start "Sample:' in out
+    assert "maverick start --sample legal" in out
     assert "Results" in out and "sample data" in out
     assert "--model" not in out and "haiku" not in out.lower()
     assert not hasattr(wizard, "CONSUMER_DEMO_MODEL") and not hasattr(wizard, "CONSUMER_DEMO_GOAL")

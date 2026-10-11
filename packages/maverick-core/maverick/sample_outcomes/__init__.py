@@ -177,10 +177,10 @@ def goal_description(department: str) -> str:
 
 
 def cli_command(department: str) -> str:
-    """The one-line command printed at the end of setup. No model flag: the
-    pack and the configured role models decide the model."""
-    outcome = get(department)
-    return f'maverick start "{outcome.title}" --domain {outcome.pack}'
+    """The one-line command printed at the end of setup: the same brief,
+    sample files and sample record as the dashboard's first outcome. No model
+    flag: the pack and the configured role models decide the model."""
+    return f"maverick start --sample {get(department).department}"
 
 
 def mark_goal_as_sample(world, goal_id: int, department: str) -> int:

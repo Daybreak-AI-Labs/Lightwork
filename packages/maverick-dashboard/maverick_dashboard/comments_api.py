@@ -110,8 +110,7 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
             approval = world.get_approval(int(object_id))
             if approval is None:
                 raise HTTPException(404, "No such approval.")
-        readers = {p for p in content_access.approval_readers(approval, world)
-                   if people_directory.may(p, "operate")}
+        readers = people_directory.allowed(content_access.approval_readers(approval, world), "operate")
         return {"label": f"Request #{approval.id}", "href": f"/approvals#approval-{approval.id}",
                 "readers": readers}
     if kind == "policy":

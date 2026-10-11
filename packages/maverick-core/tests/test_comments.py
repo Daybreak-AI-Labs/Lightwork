@@ -80,3 +80,13 @@ def test_a_mention_alert_follows_the_persons_own_mention_choice(monkeypatch, hom
     assert off["items"] == []
     on = PersonalInbox("user:lee", path=home / "inbox2.json").refresh([source], validate_preferences({}))
     assert [item["ref"] for item in on["items"]] == ["comment:1"]
+
+
+def test_a_long_thread_shows_its_newest_comments_oldest_first():
+    # Listing the oldest 200 hid comment 201 onwards, including one just posted.
+    for n in range(1, 206):
+        comments.add("task", "7", author="user:alice", body=f"comment {n}")
+    thread = comments.list_for("task", "7")
+    assert len(thread) == 200
+    assert thread[0]["body"] == "comment 6" and thread[-1]["body"] == "comment 205"
+    assert [row["id"] for row in thread] == sorted(row["id"] for row in thread)

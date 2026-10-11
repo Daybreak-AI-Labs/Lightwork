@@ -70,7 +70,7 @@ def page(request: Request):
                                       headers={"Cache-Control": "private, no-store"})
 
 
-@router.get("/api/v1/notifications/health")
+@router.get("/api/v1/notifications/delivery-status")
 def health(request: Request, response: Response):
     _guard(request)
     response.headers["Cache-Control"] = "private, no-store"

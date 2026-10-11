@@ -26,6 +26,7 @@ private address. Every mutation is written to the audit log first.
 """
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import random
@@ -91,6 +92,24 @@ def _world(world: Any = None) -> Any:
         return world
     from .world_model import open_world
     return open_world()
+
+
+def _with_world(fn):
+    """Call ``fn`` with the caller's ``world``, or with one opened for this call
+    and closed after it: an unscoped or Postgres ``open_world()`` is a new
+    connection every time, so one left open per call accumulates."""
+    @functools.wraps(fn)
+    def call(*args, world: Any = None, **kwargs):
+        if world is not None:
+            return fn(*args, world=world, **kwargs)
+        from .world_model import close_world_if_owned, open_world
+
+        opened = open_world()
+        try:
+            return fn(*args, world=opened, **kwargs)
+        finally:
+            close_world_if_owned(opened)
+    return call
 
 
 def workspace_id() -> str:
@@ -266,6 +285,7 @@ def _public(row: dict) -> dict:
 
 
 # ------------------------------------------------------------- subscriptions
+@_with_world
 def create_subscription(
     url: str,
     *,
@@ -300,12 +320,14 @@ def create_subscription(
     return get_subscription(sub_id, world=world)
 
 
+@_with_world
 def get_subscription(sub_id: str, *, world: Any = None) -> dict | None:
     row = _row(_world(world), "SELECT * FROM webhook_subscriptions WHERE id = ? AND workspace = ?",
                (str(sub_id or "")[:64], workspace_id()))
     return _public(row) if row else None
 
 
+@_with_world
 def list_subscriptions(*, world: Any = None, include_disabled: bool = True) -> list[dict]:
     sql = "SELECT * FROM webhook_subscriptions WHERE workspace = ?"
     if not include_disabled:
@@ -313,6 +335,7 @@ def list_subscriptions(*, world: Any = None, include_disabled: bool = True) -> l
     return [_public(r) for r in _rows(_world(world), sql + " ORDER BY created_at", (workspace_id(),))]
 
 
+@_with_world
 def update_subscription(
     sub_id: str,
     *,
@@ -410,6 +433,7 @@ def _send_source(delivery: dict, world: Any, *, read: Callable[[], dict | None] 
             source["secret"], source["updated_at"]), secret or None
 
 
+@_with_world
 def targets_for(event_type: str, *, world: Any = None) -> list[dict]:
     """Every place ``event_type`` goes: enabled matching subscriptions plus the
     legacy ``[webhooks] outbound`` list (one virtual subscription per address)."""
@@ -454,6 +478,7 @@ def _delivery_public(row: dict) -> dict:
     return out
 
 
+@_with_world
 def enqueue(
     event_type: str,
     event_id: str,
@@ -483,12 +508,14 @@ def enqueue(
     return ids
 
 
+@_with_world
 def get_delivery(delivery_id: str, *, world: Any = None) -> dict | None:
     row = _row(_world(world), "SELECT * FROM webhook_deliveries WHERE id = ? AND workspace = ?",
                (str(delivery_id or "")[:64], workspace_id()))
     return _delivery_public(row) if row else None
 
 
+@_with_world
 def list_deliveries(
     *, world: Any = None, subscription_id: str | None = None,
     status: str | None = None, limit: int = 100,
@@ -627,6 +654,7 @@ def _send_claimed(world: Any, row: dict, stamp: float, transport: Callable[..., 
     return _finish_delivery(world, row, stamp, result, exhausted, rng)
 
 
+@_with_world
 def recovery_material(delivery_id: str, *, world: Any = None) -> tuple[dict, str, bool]:
     """The exact unresolved original and current destination, for private review."""
     from .governed_operations import digest
@@ -651,6 +679,7 @@ def _recovery_decision(row: dict) -> dict | None:
     return next((item for item in _history(row) if isinstance(item, dict) and item.get("state") == "reviewed_recovery"), None)
 
 
+@_with_world
 def recovery_original(value: dict, *, world: Any = None) -> dict | None:
     """Pure exact-request read, independent of current destination or review expiry."""
     row = _row(_world(world), "SELECT * FROM webhook_deliveries WHERE id = ? AND workspace = ?",
@@ -723,6 +752,7 @@ def _recovery_insert(writer: Any, world: Any, value: dict, guard: Callable[[], N
     return result, True
 
 
+@_with_world
 def recover_delivery(value: dict, *, guard: Callable[[], None], world: Any = None,
                      transport: Callable[..., tuple] | None = None) -> dict:
     """One separately reviewed new send; the unresolved original is never reset."""
@@ -760,6 +790,7 @@ def _attempt_pending(delivery_id: str, world: Any, stamp: float,
     return _send_claimed(world, claimed, stamp, transport, rng), True
 
 
+@_with_world
 def attempt_delivery(
     delivery_id: str, *, world: Any = None, now: float | None = None,
     transport: Callable[..., tuple] | None = None, rng: Callable[[], float] = random.random,
@@ -773,6 +804,7 @@ def attempt_delivery(
     return _attempt_pending(delivery_id, _world(world), stamp, transport, rng)[0]
 
 
+@_with_world
 def process_due(
     *, world: Any = None, now: float | None = None, limit: int = 50,
     transport: Callable[..., tuple] | None = None,
@@ -794,6 +826,7 @@ def process_due(
     return count
 
 
+@_with_world
 def retry_now(
     delivery_id: str, *, actor: str = "", world: Any = None, now: float | None = None,
     transport: Callable[..., tuple] | None = None,
@@ -818,6 +851,7 @@ def retry_now(
     return _send_claimed(world, claimed, stamp, transport, random.random)
 
 
+@_with_world
 def dispatch(
     event_type: str, envelope: dict, body: bytes, *, world: Any = None,
     now: float | None = None, submit: Callable[[str], None] | None = None,
@@ -839,6 +873,7 @@ def dispatch(
     return len(ids)
 
 
+@_with_world
 def send_test_event(
     sub_id: str, *, actor: str = "", world: Any = None, now: float | None = None,
     transport: Callable[..., tuple] | None = None,

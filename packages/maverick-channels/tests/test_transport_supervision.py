@@ -390,6 +390,36 @@ def test_definite_delivery_retry_preserves_conversation_order(monkeypatch):
     asyncio.run(run())
 
 
+def test_a_reply_the_source_check_holds_back_does_not_block_the_next_message(monkeypatch):
+    # A reply whose task or sources the person can no longer use is refused
+    # before sending and stays retryable (the check may pass again). It used to
+    # block the conversation too, so none of the person's later messages ran.
+    from maverick_channels import delivery
+
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)
+    def source_check(row):
+        if row["message"]["text"] == "0":
+            raise PermissionError("The saved reply's task ownership changed")
+    monkeypatch.setattr(delivery, "_require_reply_source", source_check)
+    async def run():
+        order, sends = [], []
+        async def handler(message):
+            order.append(message.text)
+            return message.text
+        async def send(message, reply, route):
+            sends.append(reply.text)
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True, send=send).start()
+        for index in range(2):
+            await worker.submit(IncomingMessage(user_id="person", sender_id="person", text=str(index),
+                                channel=Adapter.name, message_id=str(index)), external_id=str(index))
+        await until(lambda: sends == ["1"])
+        await worker.close()
+        assert order == ["0", "1"]
+    asyncio.run(run())
+    held = [row for row in DeliveryJournal().store.list(limit=5) if row["message"]["text"] == "0"]
+    assert held[0]["delivery"] == "retryable" and held[0]["chunks"]["reply"]["withheld"] is True
+
+
 def test_shutdown_joins_cooperative_read_only_scan(monkeypatch):
     import threading
 
@@ -406,4 +436,161 @@ def test_shutdown_joins_cooperative_read_only_scan(monkeypatch):
         await until(entered.is_set)
         await worker.close()
         assert worker.task.done() and worker._scan_task.done()
+    asyncio.run(run())
+
+
+def test_the_oldest_window_scan_stops_at_the_wrap_when_the_first_record_is_gone(monkeypatch):
+    # Same wrap rule as the capacity count: one pass, no duplicates, even when
+    # compaction deletes the first record while the scan is running.
+    from types import SimpleNamespace
+
+    from maverick_channels.delivery import _digest
+
+    ids = ["a", "b", "c", "d", "e"]
+    rows = {i: {"id": i, "channel": Adapter.name, "account_sha256": _digest("account"),
+                "execution": "received", "delivery": "not_ready", "created_at": n} for n, i in enumerate(ids)}
+    class Store:
+        calls = 0
+        def iter_record_ids(self, *, start_after="", limit=100):
+            Store.calls += 1
+            if Store.calls == 2:
+                ids.pop(0)
+            later = [i for i in ids if i > start_after]
+            ordered = later + [i for i in ids if i <= start_after]
+            return [(i, i) for i in ordered[:min(limit, 2)]]
+    worker = TransportWorker(Adapter(AsyncMock()), account="account", authorize=lambda msg: True, send=AsyncMock())
+    worker.journal = SimpleNamespace(store=Store(), get=lambda record_id: rows.get(record_id))
+    selected, more = worker._oldest_window()
+    assert selected == ["a", "b", "c", "d", "e"] and more is False
+
+
+def test_an_idle_worker_does_not_reread_every_receipt_each_retry_period(monkeypatch):
+    # Every idle timeout re-read and decrypted every saved receipt, about
+    # 20,000 reads every 30 seconds per worker at the default intake size.
+    # With nothing waiting on a retry, the worker now stays idle.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
+    async def run():
+        worker = TransportWorker(Adapter(AsyncMock(return_value="answer")), account="account",
+                                 authorize=lambda msg: True, send=AsyncMock(return_value="confirmed"))
+        scans = []
+        original = worker._oldest_window
+        def counted():
+            scans.append(1)
+            return original()
+        worker._oldest_window = counted
+        worker.start()
+        await asyncio.sleep(0.3)
+        idle_scans = len(scans)
+        await worker.close()
+        assert idle_scans == 1  # the start-up recovery scan only
+    asyncio.run(run())
+
+
+def test_a_retry_time_for_a_receipt_no_longer_waiting_is_forgotten(monkeypatch):
+    # Otherwise one finished or removed receipt would keep the idle worker
+    # rescanning every retry period forever.
+    import time as clock
+
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
+    async def run():
+        worker = TransportWorker(Adapter(AsyncMock(return_value="answer")), account="account",
+                                 authorize=lambda msg: True, send=AsyncMock(return_value="confirmed"))
+        worker._retry_after["chd-gone"] = clock.monotonic() + 3600
+        scans = []
+        original = worker._oldest_window
+        worker._oldest_window = lambda: scans.append(1) or original()
+        worker.start()
+        await asyncio.sleep(0.3)
+        idle_scans, remembered = len(scans), dict(worker._retry_after)
+        await worker.close()
+        assert remembered == {} and idle_scans == 1
+    asyncio.run(run())
+
+
+def test_a_recovery_scan_that_failed_is_retried_after_the_retry_period(monkeypatch):
+    # A transient store read error in the start-up scan must not leave the
+    # worker idle with saved messages it never recovers.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
+    journal = DeliveryJournal()
+    journal.admit(IncomingMessage(user_id="person", sender_id="person", text="saved",
+                                  channel=Adapter.name, message_id="1"), external_id="1", account="account")
+    async def run():
+        order = []
+        async def handler(message):
+            order.append(message.text)
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=AsyncMock(return_value="confirmed"))
+        original, scans = worker._oldest_window, []
+        def flaky():
+            scans.append(1)
+            if len(scans) == 1:
+                raise OSError("store read failed")
+            return original()
+        worker._oldest_window = flaky
+        worker.start()
+        await until(lambda: order == ["saved"])
+        await worker.close()
+    asyncio.run(run())
+
+
+def test_one_unreadable_saved_receipt_does_not_stop_recovery_or_new_messages(monkeypatch):
+    # A receipt whose sealed form no longer opens made every recovery scan
+    # fail, so the worker held every message behind a scan that never ended.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
+    journal = DeliveryJournal()
+    for index in range(2):
+        journal.admit(IncomingMessage(user_id="person", sender_id="person", text=f"saved-{index}",
+                                      channel=Adapter.name, message_id=str(index)),
+                      external_id=str(index), account="account")
+    poisoned = next(record_id for _, record_id in journal.store.iter_record_ids(start_after="", limit=10))
+    real_get = journal.get
+
+    def get(record_id):
+        if record_id == poisoned:
+            raise ValueError("sealed receipt does not authenticate")
+        return real_get(record_id)
+
+    journal.get = get
+    async def run():
+        order = []
+        async def handler(message):
+            order.append(message.text)
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=AsyncMock(return_value="confirmed"), journal=journal).start()
+        await until(lambda: len(order) == 1)
+        await worker.submit(IncomingMessage(user_id="other", sender_id="other", text="new", channel=Adapter.name,
+                                            message_id="9"), external_id="9")
+        await until(lambda: len(order) == 2)
+        await worker.close()
+        assert order[1] == "new"
+    asyncio.run(run())
+
+
+def test_a_receipt_that_could_not_be_read_once_is_recovered_by_the_next_scan(monkeypatch):
+    # A passing read error (a key briefly unavailable, a dropped connection)
+    # must not leave the receipt unscanned until another message arrives.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
+    journal = DeliveryJournal()
+    journal.admit(IncomingMessage(user_id="person", sender_id="person", text="saved",
+                                  channel=Adapter.name, message_id="1"), external_id="1", account="account")
+    real_get, failures = journal.get, []
+
+    def get(record_id):
+        if not failures:
+            failures.append(record_id)
+            raise OSError("key briefly unavailable")
+        return real_get(record_id)
+
+    journal.get = get
+    async def run():
+        order = []
+        async def handler(message):
+            order.append(message.text)
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=AsyncMock(return_value="confirmed"), journal=journal).start()
+        await until(lambda: order == ["saved"])
+        await worker.close()
     asyncio.run(run())

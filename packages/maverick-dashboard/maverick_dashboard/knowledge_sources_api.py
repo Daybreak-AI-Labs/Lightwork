@@ -299,6 +299,9 @@ def apply(request: Request, body: ApplyIn):
             return response({"kind": kind, **result})
         if kind == "refresh":
             job = current.start(prepared, value["operation"], acknowledge_unknown=prepared["acknowledge_unknown"])
+            if job.get("state") == "queued":
+                from .knowledge_sources_scheduler import wake
+                wake()
             return response({"kind": kind, "job": job, "message": job["message"]}, 202)
         if kind == "attach":
             row = current.owned(prepared["source"])

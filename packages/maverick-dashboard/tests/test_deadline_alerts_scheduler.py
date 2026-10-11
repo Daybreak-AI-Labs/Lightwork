@@ -60,3 +60,57 @@ def test_shutdown_supervisor_registers_the_scheduler():
     assert sched.start_deadline_alerts_scheduler() is True
     assert alive() is True
     assert stop(timeout=5.0) is True and alive() is False
+
+
+def test_each_workspace_gets_its_own_retry_pump_and_alert_cycle(monkeypatch):
+    # The thread has no request workspace: unpinned, a workspace's failed
+    # webhook deliveries and due alerts were never handled.
+    from maverick import deadline_alerts, webhook_subscriptions
+    from maverick.tenant import registry
+
+    registry.create_tenant("acme")
+    pumped, evaluated = [], []
+    monkeypatch.setattr(webhook_subscriptions, "process_due",
+                        lambda **kw: pumped.append(webhook_subscriptions.workspace_id()) or 0)
+    monkeypatch.setattr(deadline_alerts, "settings", lambda: {"enabled": True, "poll_seconds": 900})
+    monkeypatch.setattr(deadline_alerts, "run_cycle",
+                        lambda **kw: evaluated.append(webhook_subscriptions.workspace_id()) or {"sent": 0})
+    next_eval: dict = {}
+    sched._tick(1_800_000_000.0, next_eval)
+    assert "acme" in pumped and "acme" in evaluated
+    assert len(evaluated) == len(set(evaluated)) == len(next_eval)
+    # Each workspace keeps its own schedule: nothing is due again until its poll interval.
+    evaluated.clear()
+    sched._tick(1_800_000_030.0, next_eval)
+    assert evaluated == []
+
+
+def test_a_workspace_sees_only_its_own_last_cycle(monkeypatch):
+    from maverick import deadline_alerts, webhook_subscriptions
+    from maverick.paths import tenant_scope
+
+    monkeypatch.setattr(deadline_alerts, "run_cycle", lambda **kw: {"sent": 4, "alerts": []})
+    monkeypatch.setattr(webhook_subscriptions, "process_due", lambda **kw: 0)
+    monkeypatch.setattr(sched, "_world", lambda: None)
+    with tenant_scope(tenant="acme"):
+        sched.run_once(now=1_800_000_000.0)
+        assert sched.last_cycle()["sent"] == 4
+    with tenant_scope(tenant="globex"):
+        assert sched.last_cycle() == {}
+
+
+def test_each_workspace_gets_its_hourly_compliance_recheck(monkeypatch):
+    # The history is kept per workspace; unpinned, only the base workspace's
+    # was re-checked, so another workspace's broken protection never showed.
+    from maverick import compliance, compliance_history, deadline_alerts, webhook_subscriptions
+    from maverick.paths import tenant_scope
+    from maverick.tenant import registry
+
+    registry.create_tenant("acme")
+    monkeypatch.setattr(compliance, "compliance_report", list)
+    monkeypatch.setattr(webhook_subscriptions, "process_due", lambda **kw: 0)
+    monkeypatch.setattr(deadline_alerts, "settings", lambda: {"enabled": False, "poll_seconds": 900})
+    sched._tick(1_800_000_000.0, {})
+    assert compliance_history.state()["checked_at"] == 1_800_000_000.0
+    with tenant_scope(tenant="acme"):
+        assert compliance_history.state()["checked_at"] == 1_800_000_000.0

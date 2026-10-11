@@ -120,10 +120,15 @@ class TelegramChannel(Channel):
         return msg
 
     async def _send_saved(self, msg, reply, route):
-        files = await saved_reply_files(reply)
         thread = reply.thread_ref or route["reply_to"]
         if reply.text:
             await self.send_threaded(msg.user_id, reply.text, reply_to=thread)
+        return await self._send_files(msg, reply, route)
+
+    async def _send_files(self, msg, reply, route):
+        """Upload the files saved with this reply (live and recovered sends alike)."""
+        files = await saved_reply_files(reply)
+        thread = reply.thread_ref or route["reply_to"]
         receipt = None
         for index, item in enumerate(files):
             async def upload(item=item):
@@ -271,9 +276,11 @@ class TelegramChannel(Channel):
             return incoming
 
         async def send(reply):
+            receipt = None
             if reply.text:
-                return await self._send_chunks(reply.text, update.message.reply_text,
+                receipt = await self._send_chunks(reply.text, update.message.reply_text,
                     {"chat_id": msg.user_id, "reply_to": msg.message_id})
+            return await self._send_files(msg, reply, route) or receipt
 
         return await self.process_message(msg, external_id=msg.user_id + ":" + msg.message_id,
             account=account, authorize=lambda: self._authorized(msg, account,

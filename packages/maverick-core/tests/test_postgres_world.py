@@ -686,6 +686,42 @@ def test_approval_webhook_events_reach_subscribers_only_after_commit(world, monk
     ]
 
 
+def test_only_a_held_decision_is_undone_and_settling_it_makes_it_final(world, monkeypatch):
+    import time
+
+    from maverick import webhook_events
+
+    sent = []
+    monkeypatch.setattr(webhook_events, "emit", lambda event, **kw: sent.append((event, kw)))
+
+    def decide(aid, status, who):
+        event = world.decide_approval_audited(aid, status, decided_by=who)
+        assert event is not None and world.mark_approval_audit_delivered(event.event_id)
+
+    acts_at_once = world.create_approval("codebase_merge", risk="high", provenance="codebase")
+    decide(acts_at_once, "approved", "ana")
+    assert world.undo_approval_decision(acts_at_once, undone_by="ana", within_seconds=30) == "final"
+    assert world.get_approval(acts_at_once).undo_hold is None
+
+    held = world.create_approval("rm -rf /tmp/x", risk="high", undoable=True)
+    assert world.get_approval(held).undo_hold == "open"
+    assert world.settle_approval_decision(held, decided_before=time.time()).status == "pending"  # nothing yet
+    decide(held, "approved", "ana")
+    assert world.undo_approval_decision(held, undone_by="ana", within_seconds=30) == "undone"
+    assert world.get_approval(held).status == "pending"
+    assert [kw["payload"]["previous_status"] for event, kw in sent if event == "approval.undone"] == ["approved"]
+
+    decide(held, "denied", "ben")
+    assert world.settle_approval_decision(held, decided_before=time.time() - 60).undo_hold == "open"
+    settled = world.settle_approval_decision(held, decided_before=time.time())
+    assert settled.status == "denied" and settled.undo_hold == "settled"
+    assert world.undo_approval_decision(held, undone_by="ben", within_seconds=300) == "too_late"
+
+    stopped = world.create_approval("send", risk="high", undoable=True)
+    assert world.decide_approval(stopped, "denied", decided_by="system:task-stopped") is True
+    assert world.undo_approval_decision(stopped, undone_by="ana", within_seconds=30) == "final"
+
+
 def test_decide_approval_rejects_bad_status(world):
     aid = world.create_approval("do thing")
     with pytest.raises(ValueError, match="approved.*denied"):
@@ -2120,3 +2156,28 @@ def test_query_rewrites_sqlite_paramstyle_and_buckets_days(world):
     with pytest.raises(psycopg.Error):
         world.query("SELECT * FROM no_such_table_here WHERE id = ?", (1,))
     assert world.query("SELECT COUNT(*) FROM goals WHERE id = ?", (gid,))[0][0] == 1
+
+
+def test_results_page_and_monthly_spend_match_the_sqlite_backend(world):
+    # list_goal_results and total_spend(since=) existed only on SQLite: on this
+    # backend /deliverables raised AttributeError and the month's spend read $0.
+    import time
+
+    token = uuid.uuid4().hex
+    owner = f"user:results:{token}"
+    finished = world.create_goal("finished report", owner=owner)
+    world.set_goal_status(finished, "done", result="the report")
+    world.create_goal("still running", owner=owner)
+    subtask = world.create_goal("subtask", owner=owner, parent_id=finished)
+    world.set_goal_status(subtask, "done", result="part of it")
+    other = world.create_goal("someone else's", owner=f"user:other:{token}")
+    world.set_goal_status(other, "done", result="theirs")
+    results = world.list_goal_results(owner=owner)
+    assert [goal.id for goal in results] == [finished]
+    assert results[0].result == "the report"
+
+    before = time.time()
+    world.end_episode(world.start_episode(finished), "done", "success",
+                      cost_dollars=3.0, input_tokens=1, output_tokens=1)
+    assert world.total_spend(owner=owner, since=before - 1)["dollars"] == 3.0
+    assert world.total_spend(owner=owner, since=time.time() + 60)["dollars"] == 0

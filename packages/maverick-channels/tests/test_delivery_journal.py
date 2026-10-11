@@ -325,6 +325,26 @@ def test_preparation_persists_attachments_before_handler_and_keeps_routing_ident
     assert row["delivery"] == "delivered"
 
 
+def test_a_receipt_saved_by_an_earlier_build_still_runs_after_preparation(isolated):
+    # Receipts saved before question_reply_only existed lack the key. Rebuilt
+    # for preparation the message has its default (False); compared with the
+    # missing key (None) it looked changed, so the message never ran.
+    receipt = isolated.admit(_message(), external_id="event1", account="account1")
+    older = {key: value for key, value in receipt["message"].items() if key != "question_reply_only"}
+    receipt = isolated.change(receipt, message=older)
+    ran = []
+    async def prepare(msg):
+        return msg
+    async def handler(msg):
+        ran.append(msg.text)
+        return "answer"
+    async def send(reply):
+        return None
+    row = asyncio.run(Adapter(handler).process_message(_message(), external_id="event1", account="account1",
+                      authorize=lambda: True, send=send, prepare=prepare, receipt=receipt, journal=isolated))
+    assert ran == ["Question"] and row["delivery"] == "delivered"
+
+
 def test_retention_clears_only_confirmed_terminal_payloads_and_preserves_claim(isolated, monkeypatch):
     first = isolated.admit(_message(), external_id="event1", account="account1")
     first = isolated.change(first, execution="completed", delivery="delivered", reply={"text": "secret reply"})
@@ -610,3 +630,66 @@ def test_one_failing_row_does_not_starve_the_rest_of_the_window(isolated):
         journal=delivery.DeliveryJournal()))
     assert any(isinstance(o, RuntimeError) for o in outcomes)
     assert handled == ["fine"] and sent == ["fine"]
+
+
+class _RotatingIds:
+    """A store scan that wraps like the real backends, two ids per page; the
+    first id is deleted after the first page (compaction during the scan)."""
+
+    def __init__(self, ids):
+        self.ids, self.calls = sorted(ids), 0
+
+    def iter_record_ids(self, *, start_after="", limit=100):
+        self.calls += 1
+        if self.calls == 2:
+            self.ids.pop(0)
+        later = [i for i in self.ids if i > start_after]
+        ordered = later + [i for i in self.ids if i <= start_after]
+        return [(i, i) for i in ordered[:min(limit, 2)]]
+
+
+def test_capacity_count_stops_at_the_wrap_even_when_the_first_record_is_gone(isolated, monkeypatch):
+    # Wrap was detected only by meeting the first record again; compaction
+    # removing it mid-scan made the count run past the limit and report full.
+    monkeypatch.setattr(isolated, "store", _RotatingIds(["a", "b", "c", "d", "e"]))
+    status = isolated.capacity_status()
+    assert status["used"] == 5 and status["count_exact"] is True and status["full"] is False
+
+
+def test_a_phone_call_answer_is_cleared_like_a_delivered_message(isolated, monkeypatch):
+    # A voice answer goes back in the call's own HTTP response, so its receipt
+    # always ends "delivery unknown" and nothing can resolve it. Kept forever,
+    # these receipts filled the intake every chat app shares.
+    from types import SimpleNamespace
+
+    call = IncomingMessage(user_id="+15550100", text="What is due today?", channel="voice", message_id="7:call-1:1")
+    row = isolated.admit(call, external_id="7:call-1:1", account="voice-account",
+                         route={"response_transport": "http", "function": "lightwork_request"})
+    row = isolated.change(row, execution="completed", delivery="delivery_unknown", reply={"text": "Two invoices."})
+    chat = isolated.admit(_message(), external_id="chat-1", account="account1")
+    chat = isolated.change(chat, execution="completed", delivery="delivery_unknown", reply={"text": "kept"})
+    later = max(row["updated_at"], chat["updated_at"]) + delivery.RETENTION_SECONDS + 1
+    monkeypatch.setattr(delivery, "time", SimpleNamespace(time=lambda: later))
+    assert isolated.compact_delivered() == 1
+    assert isolated.get(row["id"])["compacted"] and isolated.get(row["id"])["message"] == {}
+    assert isolated.get(chat["id"])["reply"] == {"text": "kept"}  # a chat app's unknown send stays for review
+    much_later = isolated.get(row["id"])["updated_at"] + delivery.TOMBSTONE_SECONDS + 1
+    monkeypatch.setattr(delivery, "time", SimpleNamespace(time=lambda: much_later))
+    assert isolated.compact_delivered(release_only=True) == 1
+    assert isolated.get(row["id"]) is None
+
+
+def test_a_message_saved_by_the_build_before_the_new_fields_is_still_the_same_message(isolated):
+    # Four fields were added to the saved message, which changed every
+    # message's identity hash. A polling channel (Mastodon, Bluesky, iMessage)
+    # re-reading a message the earlier build saved was refused as different
+    # content and retried it forever, so intake stopped.
+    row = isolated.admit(_message(), external_id="event1", account="account1", route={"reply_to": "1"})
+    new_fields = ("provider_tenant_id", "provider_sender_id", "conversation_ref", "question_reply_only")
+    earlier = {key: value for key, value in row["message"].items() if key not in new_fields}
+    row = isolated.change(row, message=earlier, fingerprint=delivery._digest([earlier, {"reply_to": "1"}]))
+    again = isolated.admit(_message(), external_id="event1", account="account1", route={"reply_to": "1"})
+    assert again["id"] == row["id"]
+    with pytest.raises(ValueError, match="different content"):
+        isolated.admit(_message("Something else"), external_id="event1", account="account1",
+                       route={"reply_to": "1"})

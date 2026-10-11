@@ -46,6 +46,6 @@
     if (!requestId) requestId = crypto.randomUUID();
     request('/api/v1/notifications/test', {request_id:requestId});
   });
-  refresh.addEventListener('click', function () { request('/api/v1/notifications/health'); });
-  request('/api/v1/notifications/health');
+  refresh.addEventListener('click', function () { request('/api/v1/notifications/delivery-status'); });
+  request('/api/v1/notifications/delivery-status');
 })();

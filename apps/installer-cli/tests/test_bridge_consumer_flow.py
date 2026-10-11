@@ -1,4 +1,4 @@
-"""Desktop installer sidecar (bridge.py) drives the 5-question consumer
+"""Desktop installer sidecar (bridge.py) drives the 6-question consumer
 flow and writes the SAME config the CLI's run_consumer produces.
 
 The bridge speaks a line-delimited JSON protocol over stdin/stdout.
@@ -31,7 +31,7 @@ def _drive(monkeypatch, tmp_path, answers, *, key="sk-ant-test"):
     return sent
 
 
-def test_bridge_asks_five_questions_in_order(monkeypatch, tmp_path):
+def test_bridge_asks_six_questions_in_order(monkeypatch, tmp_path):
     sent = _drive(monkeypatch, tmp_path, [
         "",            # initial invoke (no answer)
         "Alex",        # name
@@ -39,10 +39,11 @@ def test_bridge_asks_five_questions_in_order(monkeypatch, tmp_path):
         "sk-ant-xyz",  # api key
         str(tmp_path / "ws"),  # workdir
         "$5",          # budget
+        "Finance",     # first team
     ])
     ids = [s["id"] for s in sent]
-    # name → governance → api_key → workdir → budget → __done__
-    assert ids == ["name", "governance", "api_key", "workdir", "budget", "__done__"]
+    # name → governance → api_key → workdir → budget → first_outcome → __done__
+    assert ids == ["name", "governance", "api_key", "workdir", "budget", "first_outcome", "__done__"]
     # No jargon questions (no "deployment", "providers", "channels", "safety").
     for forbidden in ("deployment", "providers", "channels", "safety"):
         assert forbidden not in ids
@@ -119,6 +120,9 @@ def test_bridge_explicit_no_task_limit_is_saved(monkeypatch, tmp_path):
 
 
 def test_bridge_default_workdir_when_blank(monkeypatch, tmp_path):
+    # The default folder is under the home directory: keep it in tmp_path.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     _drive(monkeypatch, tmp_path, [
         "", "Sam", "essentials", "sk-ant-x", "", "$5",
     ])
@@ -138,6 +142,7 @@ def test_bridge_steps_carry_kind_for_ui(monkeypatch, tmp_path):
     assert by_id["workdir"]["kind"] == "text"
     assert by_id["budget"]["kind"] == "choice"
     assert by_id["governance"]["kind"] == "choice"
+    assert by_id["first_outcome"]["kind"] == "choice"
 
 
 def test_bridge_governance_level_applies(monkeypatch, tmp_path):
@@ -194,3 +199,33 @@ def test_bridge_governance_menu_is_the_wizard_menu(monkeypatch, tmp_path):
     ])
     gov = next(s for s in sent if s["id"] == "governance")
     assert gov["choices"] == list(wizard.GOVERNANCE_CHOICES)
+
+
+def test_bridge_records_the_first_team_like_the_cli(monkeypatch, tmp_path):
+    # The CLI's last question picks the team whose sample task comes first and
+    # places its sample files; the desktop flow skipped it while claiming to
+    # match the CLI question for question.
+    from maverick import sample_outcomes
+    from maverick_installer import wizard
+
+    sent = _drive(monkeypatch, tmp_path, [
+        "", "Sam", "essentials", "sk-ant-x", str(tmp_path / "ws"), "$5", "Legal",
+    ])
+    step = next(s for s in sent if s["id"] == "first_outcome")
+    assert step["choices"] == wizard.first_outcome_choices()
+    config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
+    assert config["first_outcome"] == {"department": "legal", "sample_workspace_created": True}
+    assert sample_outcomes.is_sample_workspace(sample_outcomes.sample_workspace_path("legal", tmp_path / "ws"))
+
+
+def test_bridge_first_team_blank_takes_the_default_and_garbage_fails(monkeypatch, tmp_path):
+    import pytest
+
+    _drive(monkeypatch, tmp_path, ["", "Sam", "essentials", "sk-ant-x", str(tmp_path / "ws"), "$5", ""])
+    config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
+    assert config["first_outcome"]["department"] == "finance"
+    other = tmp_path / "other"
+    other.mkdir()
+    with pytest.raises(ValueError, match="listed teams"):
+        _drive(monkeypatch, other, ["", "Sam", "essentials", "sk-ant-x", str(other / "ws"), "$5", "Marketing"])
+    assert not (other / ".maverick" / "config.toml").exists()

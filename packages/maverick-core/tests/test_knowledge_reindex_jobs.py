@@ -124,3 +124,17 @@ def test_source_edit_between_review_and_second_read_is_refused(setup, monkeypatc
         return original(collection, limit=limit)
     monkeypatch.setattr(kb.store, "read_collection", racing)
     assert jobs.run(kb, context=context, job_id=job["job_id"], authority=lambda: None)["state"] == "changed"
+
+
+def test_a_short_or_malformed_cohere_batch_fails_at_that_batch():
+    # The indexed providers check count and order; Cohere's list was trusted,
+    # so a short batch failed only after every later batch had been paid for.
+    import pytest
+    from maverick.knowledge_reindex_billing import _vectors
+
+    good = {"embeddings": {"float": [[0.1, 0.2], [0.3, 0.4]]}}
+    assert _vectors(good, "cohere", 2) == [[0.1, 0.2], [0.3, 0.4]]
+    for body in ({"embeddings": {"float": [[0.1, 0.2]]}}, {"embeddings": {"float": [[0.1], []]}},
+                 {"embeddings": {}}, {"embeddings": {"float": "nope"}}, []):
+        with pytest.raises(ValueError, match="incomplete embedding set"):
+            _vectors(body, "cohere", 2)
