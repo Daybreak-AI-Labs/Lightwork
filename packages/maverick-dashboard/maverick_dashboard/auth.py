@@ -1080,8 +1080,14 @@ def goal_readable_by(principal: str, goal, *, grants=None) -> bool:
         unreadable.append(exc)
     try:
         require_copy_sources(_world(), goal.id, authorize=authorize)
-    except (PermissionError, SourceContextUnavailable, AttachmentRejected):
+    except PermissionError:
         return False
+    except (SourceContextUnavailable, AttachmentRejected) as exc:
+        # These also wrap outages (an unreachable connector, an unreadable
+        # file): a refusal only when nothing else was unreadable.
+        if not unreadable:
+            return False
+        unreadable.append(exc)
     except Exception as exc:  # noqa: BLE001 -- an unreadable access rule is not evidence of access
         unreadable.append(exc)
     if unreadable:

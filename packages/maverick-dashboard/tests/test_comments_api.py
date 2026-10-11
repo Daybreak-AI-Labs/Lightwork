@@ -616,3 +616,26 @@ def test_a_copied_source_that_refuses_decides_while_the_grant_store_is_unreadabl
     posted = client.post("/api/v1/comments", json={"kind": "task", "id": str(goal_id), "body": "@Lee",
                                                    "mentions": [LEE]})
     assert posted.status_code == 422, posted.text
+
+
+def test_a_copied_source_that_cannot_be_read_does_not_turn_an_unreadable_grant_into_a_refusal(env, monkeypatch):
+    # Lee's grant for the task cannot be read, and the copied source's
+    # connector is down (which the copy check reports as an unavailable
+    # source). Neither is a refusal, so the mention is held, not refused.
+    from maverick import chat_message_actions
+    from maverick.knowledge_task_context import SourceContextUnavailable
+
+    client, world = env
+    goal_id = world.create_goal("Reconcile vendor spend", owner=ANA)
+
+    def copy_sources(world, goal_id, *, alternative=None, authorize=None):
+        raise SourceContextUnavailable("The knowledge connector could not be reached.")
+
+    from maverick_dashboard import auth, strict_reads
+
+    _as(monkeypatch, ANA)
+    monkeypatch.setattr(chat_message_actions, "require_copy_sources", copy_sources)
+
+    with strict_reads.strict(), pytest.raises(OSError):
+        auth.goal_readable_by(LEE, world.get_goal(goal_id), grants=OSError("grant store unreadable"))
+    assert auth.goal_readable_by(LEE, world.get_goal(goal_id), grants=OSError("grant store unreadable")) is False
