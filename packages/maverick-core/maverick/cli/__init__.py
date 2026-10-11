@@ -3832,14 +3832,35 @@ def _sample_task(value, template_name, title, description, domain):
     return outcome.title, sample_outcomes.goal_description(department), outcome.pack, department
 
 
-def _place_sample(department, workdir) -> None:
+def _validate_sample_backend(department, backend) -> None:
+    """Refuse sample runs when the backend cannot read fixtures from the host."""
+    if department is None:
+        return
+    from ..config import get_sandbox
+
+    chosen = str(backend or get_sandbox().get("backend") or "local").strip().lower()
+    # These backends mount the host workdir or copy it into the execution
+    # environment. SSH, Modal, Firecracker and third-party backends do not
+    # guarantee that host files are visible to the run.
+    if chosen not in {"local", "docker", "podman", "gvisor", "devcontainer", "kubernetes"}:
+        click.echo(
+            f"ERROR: --sample is not supported with the {chosen!r} sandbox because "
+            "its work folder is not shared with this computer. "
+            "Choose --sandbox docker, podman, gvisor, devcontainer, kubernetes or local "
+            "to run the bundled sample. No task was started.",
+            err=True,
+        )
+        sys.exit(2)
+
+
+def _place_sample(department, sandbox) -> None:
     """Copy the sample files into the work folder the run reads (no-op without ``--sample``)."""
     if department is None:
         return
     from .. import sample_outcomes
 
     try:
-        sample_outcomes.create_sample_workspace(department, workdir)
+        sample_outcomes.create_sample_workspace(department, sandbox.workdir)
     except OSError as exc:
         click.echo(f"ERROR: the sample files could not be placed in the work folder ({exc}).", err=True)
         sys.exit(2)
@@ -4026,10 +4047,13 @@ def start(
     # cannot write files or run programs. Say so before creating a paid task.
     _warn_file_work_before_start(_start_config, sandbox_backend)
 
-    _place_sample(sample, workdir)
+    _validate_sample_backend(sample, sandbox_backend)
     k = _kernel()
-    llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     sandbox = k.build_sandbox(workdir=workdir, backend=sandbox_backend)
+    # Containment and devcontainer settings can change the actual work folder.
+    # Use the constructed backend's directory, not the CLI/config input.
+    _place_sample(sample, sandbox)
+    llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     import threading
     import types as _types
 

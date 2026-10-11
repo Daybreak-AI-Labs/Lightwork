@@ -468,23 +468,30 @@ class LocalGovernedRecordBackend:
         expected = _expected_revision(expected_revision)
         if expected is None:
             raise ValueError("expected_revision is required for governed deletion")
-        path = self._store._path(record_id)  # noqa: SLF001 - backend-owned store
-        if path is None:
+        active_path = self._store._path(record_id)  # noqa: SLF001 - backend-owned store
+        if active_path is None:
             return False
-        try:
-            info = path.lstat()
-        except FileNotFoundError:
-            return False
-        if _unsafe_path_alias(path, info):
-            raise PermissionError("governed record path alias is not permitted")
-        with cross_process_lock(path, strict=True):
+        # Archive and restore use this same active-record lock. Choose the
+        # record's location and validate CAS before removing it, without ever
+        # moving an archived record into the capacity-limited active namespace.
+        with cross_process_lock(active_path, strict=True):
+            store, path = self._store, active_path
             try:
                 locked_info = path.lstat()
             except FileNotFoundError:
-                return False
+                if self._lookup is not None:
+                    return False
+                store = self._archive
+                path = store._path(record_id)  # noqa: SLF001 - backend-owned store
+                if path is None:
+                    return False
+                try:
+                    locked_info = path.lstat()
+                except FileNotFoundError:
+                    return False
             if _unsafe_path_alias(path, locked_info):
                 raise PermissionError("governed record path alias is not permitted")
-            current = self._store._read_path(path)  # noqa: SLF001 - backend-owned store
+            current = store._read_path(path)  # noqa: SLF001 - backend-owned store
             if current is None:
                 return False
             revision = _RecordStore._revision(current)
@@ -1558,7 +1565,26 @@ class PostgresGovernedRecordBackend:
         tenant = self._tenant_key()
         with self._operation("delete"):
             with self._transaction(tenant) as cur:
-                row = self._select_for_update(cur, tenant, validated)
+                namespace = self.namespace
+                if self._lookup is not None:
+                    row = self._select_for_update(cur, tenant, validated)
+                else:
+                    # Lock either location in one query: a concurrent restore
+                    # may move the row while we wait for its lock. Both its old
+                    # and new location must still match the locking predicate.
+                    cur.execute(
+                        "SELECT namespace, revision, record_json, created_at, updated_at "
+                        "FROM governed_records WHERE tenant_id=%s AND namespace IN (%s, %s) "
+                        "AND record_id=%s "
+                        "ORDER BY CASE WHEN namespace=%s THEN 0 ELSE 1 END LIMIT 1 FOR UPDATE",
+                        (tenant, namespace, _archive_namespace(namespace), validated, namespace),
+                    )
+                    located = self._row(cur)
+                    row = None
+                    if located is not None:
+                        if not isinstance(located, (tuple, list)) or len(located) != 5:
+                            raise PrivacyStateError("governed record row has an invalid shape")
+                        namespace, *row = located
                 if row is None:
                     return False
                 current = _row_record(
@@ -1580,7 +1606,7 @@ class PostgresGovernedRecordBackend:
                 cur.execute(
                     "DELETE FROM governed_records WHERE tenant_id=%s "
                     "AND namespace=%s AND record_id=%s AND revision=%s",
-                    (tenant, self.namespace, validated, revision),
+                    (tenant, namespace, validated, revision),
                 )
                 if cur.rowcount != 1:
                     raise RecordConflict("governed record changed during delete")
@@ -2423,11 +2449,6 @@ class GovernedRecordStore:
                 "governed-record backend does not support retained deletion"
             )
         record_id = str(record_id or "")
-        if (self.lookup_spec is None and callable(getattr(backend, "restore", None))
-                and backend.load(record_id) is None and backend.load_archived(record_id) is not None):
-            # An archived record is still deletable by id (personal-data
-            # erasure): move it back unchanged, then delete it as usual.
-            backend.restore(record_id)
         return bool(delete(record_id, expected_revision=expected_revision))
 
     def count(self, *, maximum: int = 100_000) -> int:

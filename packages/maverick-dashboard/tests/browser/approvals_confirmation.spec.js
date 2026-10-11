@@ -47,6 +47,7 @@ test('a high-risk approval is confirmed in the page on a phone, decided with a t
 
   // Undo while the agent is still waiting returns the request to the queue.
   const undo=decided.locator('button.approval-undo');
+  await expect(undo).toBeVisible();
   await expect(undo).toContainText('Undo');
   await undo.click();
   await expect(page.locator('#mv-toasts')).toContainText('undone');
@@ -54,4 +55,28 @@ test('a high-risk approval is confirmed in the page on a phone, decided with a t
   await expect(decided).toBeHidden();
   const listed=await request.get('/api/v1/approvals');expect((await listed.json()).approvals.map(a=>a.id)).toContain(id);
   expect(errors).toEqual([]);
+});
+
+test('an approval without a waiting consumer has no Undo and cannot be reopened',async({page,context,request,baseURL})=>{
+  await localOnly(context,baseURL);
+  const seeded=await request.post('/__browser_fixture/approvals/setup?kind=immediate');
+  expect(seeded.status()).toBe(200);
+  const {approval_id:id}=await seeded.json();
+  await page.goto('/approvals');
+  const card=page.locator(`article.approval-item[data-id="${id}"]`);
+  await card.locator('button[data-action="approve"]').click();
+  await expect(page.locator('#approval-confirm')).toBeVisible();
+  await page.locator('#approval-confirm-ack').check();
+  await page.locator('#approval-confirm-ok').click();
+
+  const decided=page.locator(`#approval-decided article.approval-item[data-id="${id}"]`);
+  await expect(decided).toBeVisible();
+  await expect(decided).toContainText('Approved just now');
+  await expect(decided.locator('button.approval-undo')).toBeHidden();
+  const undo=await request.post(`/api/v1/approvals/${id}/undo`);
+  expect(undo.status()).toBe(409);
+  expect((await undo.json()).detail).toContain('it took effect when it was made');
+  const listed=await request.get('/api/v1/approvals');
+  expect((await listed.json()).approvals.map(a=>a.id)).not.toContain(id);
+  await expect(decided).toContainText('Approved just now');
 });

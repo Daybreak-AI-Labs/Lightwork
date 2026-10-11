@@ -327,6 +327,7 @@ def test_a_full_namespace_archives_only_settled_work_and_erasure_still_reaches_i
     del shared_encryption_authority
     import maverick.audit as audit
     from maverick.governed_records import GovernedRecordStore, _archive_namespace
+    from maverick.privacy_ops import RecordConflict
 
     monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "postgres")
     monkeypatch.setenv("MAVERICK_PG_DSN", governed_record_dsn)
@@ -352,9 +353,83 @@ def test_a_full_namespace_archives_only_settled_work_and_erasure_still_reaches_i
             archived = store.list_archived(limit=10)
             assert [row["id"] for row in archived] == ["LPS-first"]
             assert archived[0]["revision"] == done["revision"] + 1
+            with pytest.raises(RecordConflict, match="expected revision"):
+                store.delete("LPS-first", expected_revision=done["revision"])
+            assert store._backend().load("LPS-first") is None
+            assert store.get("LPS-first") == archived[0]
+            assert store.list_archived() == archived
+            assert store.count() == 1
             assert store.delete("LPS-first", expected_revision=archived[0]["revision"]) is True
             assert store.get("LPS-first") is None and store.list_archived() == []
             assert [row["id"] for row in store.list()] == ["LPS-second"]
     finally:
         for name in (namespace, _archive_namespace(namespace)):
+            _delete_test_rows(governed_record_dsn, tenant=tenant, namespace=name)
+
+
+def test_archived_delete_follows_a_concurrent_restore(
+    governed_record_dsn,
+    shared_encryption_authority,
+):
+    """A restore committed while deletion waits must not make both locations miss."""
+    del shared_encryption_authority
+    import psycopg
+    from maverick.governed_records import _archive_namespace
+    from psycopg.conninfo import make_conninfo
+
+    suffix = uuid.uuid4().hex
+    tenant = f"live-pg-delete-restore-{suffix}"
+    namespace = f"live_pg_delete_restore_{suffix}"
+    archived_namespace = _archive_namespace(namespace)
+    application = f"delete_restore_{suffix}"
+    backend = PostgresGovernedRecordBackend(
+        namespace,
+        "LDR",
+        dsn=make_conninfo(governed_record_dsn, application_name=application),
+        require_bound_tenant=True,
+    )
+    try:
+        with tenant_scope(tenant=tenant):
+            created = backend.save({"id": "LDR-first"}, expected_revision=0)
+            assert backend.archive("LDR-first", expected_revision=created["revision"])
+
+        def delete():
+            with tenant_scope(tenant=tenant):
+                return backend.delete("LDR-first", expected_revision=created["revision"])
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with psycopg.connect(governed_record_dsn) as restoring:
+                restoring.execute("SELECT set_config('maverick.tenant', %s, true)", (tenant,))
+                # Hold the same row move that restore() performs uncommitted.
+                restoring.execute(
+                    "UPDATE governed_records SET namespace=%s "
+                    "WHERE tenant_id=%s AND namespace=%s AND record_id=%s",
+                    (namespace, tenant, archived_namespace, "LDR-first"),
+                )
+                pending = pool.submit(delete)
+                try:
+                    # Wait for PostgreSQL to confirm deletion is blocked on the
+                    # row lock, rather than relying on thread scheduling sleeps.
+                    with psycopg.connect(governed_record_dsn, autocommit=True) as observer:
+                        deadline = time.monotonic() + 10
+                        while time.monotonic() < deadline:
+                            waiting = observer.execute(
+                                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                                "WHERE application_name=%s AND wait_event_type='Lock')",
+                                (application,),
+                            ).fetchone()
+                            if waiting and waiting[0]:
+                                break
+                            time.sleep(0.01)
+                        else:
+                            pytest.fail("deletion did not wait for the restoring row lock")
+                finally:
+                    restoring.commit()
+            assert pending.result(timeout=10) is True
+
+        with tenant_scope(tenant=tenant):
+            assert backend.load("LDR-first") is None
+            assert backend.load_archived("LDR-first") is None
+    finally:
+        for name in (namespace, archived_namespace):
             _delete_test_rows(governed_record_dsn, tenant=tenant, namespace=name)

@@ -36,6 +36,38 @@ def test_a_queued_refresh_refused_before_it_starts_is_withheld(monkeypatch):
     assert withheld == [("KNJ-1", PermissionError)]
 
 
+@pytest.mark.parametrize("state", ["withheld", "running", "publishing", "unconfirmed", "completed"])
+@pytest.mark.parametrize("audit_pending", [False, True])
+def test_only_a_confirmed_withheld_receipt_resumes_source_release(monkeypatch, state, audit_pending):
+    from maverick import connections
+    from maverick import knowledge_sources as native
+
+    job = {"id": "KNJ-1", "state": state, "source": "KNS-1", "_audit_pending": audit_pending}
+    row = {"id": "KNS-1", "tenant": "acme", "owner": "user:owner", "active_job": "KNJ-1"}
+    recovered = []
+
+    class Recovering:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, identifier):
+            pytest.fail("A retained receipt must never run provider or document work again")
+
+        @staticmethod
+        def withhold_queued(retained):
+            recovered.append(retained["id"])
+
+    monkeypatch.setattr(sched, "current_tenant_id_strict", lambda: "acme")
+    monkeypatch.setattr(native, "enabled", lambda: True)
+    monkeypatch.setattr(native.SOURCE_STORE, "list", lambda limit: [row])
+    monkeypatch.setattr(native.JOB_STORE, "get", lambda identifier: dict(job))
+    monkeypatch.setattr(native, "KnowledgeSources", Recovering)
+    monkeypatch.setattr(sched.research_workspace_api, "_registry_service", lambda: None)
+    monkeypatch.setattr(connections, "bind_principal", lambda owner: nullcontext())
+    sched._workspace_cycle()
+    assert recovered == (["KNJ-1"] if state == "withheld" and not audit_pending else [])
+
+
 def test_schedules_are_checked_every_30_seconds_and_a_queued_refresh_wakes_the_worker(monkeypatch):
     cycles = []
     monkeypatch.setattr(sched, "cycle", lambda: cycles.append(time.monotonic()))

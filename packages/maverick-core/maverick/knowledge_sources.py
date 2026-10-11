@@ -213,36 +213,38 @@ class KnowledgeSources:
                 raise full
 
     @staticmethod
-    def withhold_queued(job, exc):
+    def withhold_queued(job, exc=None):
         """Worker bookkeeping only: a queued refresh refused before it started
         (its permit expired or changed, or its owner lost authority) is
         withheld and its source backs off, instead of being retried every
         worker cycle with the schedule stuck behind it. Only a job that is
-        still queued, so nothing ran, is changed."""
-        def still_queued():
+        still queued, so nothing ran, is changed. A retained withheld receipt
+        can finish releasing its source after an interrupted second write;
+        recovery preserves the original receipt and never runs the job."""
+        def still_claimed(state):
             current = JOB_STORE.get(job["id"])
             source = SOURCE_STORE.get(job["source"])
-            if (not current or current.get("state") != "queued" or current.get("_audit_pending")
-                    or not source or source.get("active_job") != job["id"]):
+            if (not current or current.get("source") != job["source"] or current.get("state") != state
+                    or current.get("_audit_pending") or not source or source.get("_audit_pending")
+                    or source.get("active_job") != job["id"]):
                 raise RecordConflict("The queued refresh changed before it was withheld.")
-
-        def still_claimed():
-            source = SOURCE_STORE.get(job["source"])
-            if not source or source.get("active_job") != job["id"]:
-                raise RecordConflict("The saved source changed before the withheld refresh released it.")
         with KnowledgeSources.publication_scope():
-            still_queued()
             current = JOB_STORE.get(job["id"])
-            JOB_STORE.update(job["id"], lambda row: row.update(state="withheld", message=_safe_error(exc)),
-                             expected_revision=current["revision"], action="knowledge_source.queued_refresh_withheld",
-                             actor="knowledge-source worker", effect_guard=still_queued)
+            if current and current.get("state") == "queued":
+                if exc is None:
+                    raise RecordConflict("Only a refused queued refresh can be withheld.")
+                still_claimed("queued")
+                JOB_STORE.update(job["id"], lambda row: row.update(state="withheld", message=_safe_error(exc)),
+                                 expected_revision=current["revision"], action="knowledge_source.queued_refresh_withheld",
+                                 actor="knowledge-source worker", effect_guard=lambda: still_claimed("queued"))
+            still_claimed("withheld")
             source = SOURCE_STORE.get(job["source"])
             interval = source["plan"]["interval_seconds"]
             SOURCE_STORE.update(source["id"], lambda row: row.update(
                 active_job=None, state="withheld", projection_allowed=False,
                 next_refresh=time.time() + max(3600, interval) if interval else None),
                 expected_revision=source["revision"], action="knowledge_source.refresh_backed_off",
-                actor="knowledge-source worker", effect_guard=still_claimed)
+                actor="knowledge-source worker", effect_guard=lambda: still_claimed("withheld"))
 
     def original_save(self, operation):
         self._authority()

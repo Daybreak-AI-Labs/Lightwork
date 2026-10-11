@@ -68,6 +68,10 @@ def _workspace_cycle():
                                 log.warning("Knowledge source withheld receipt unavailable (%s)",
                                             type(receipt_error).__name__)
                             raise
+                    elif job and job.get("state") == "withheld" and not job.get("_audit_pending"):
+                        # The job receipt may have committed before releasing
+                        # its source failed. Finish only that bookkeeping.
+                        native.KnowledgeSources.withhold_queued(job)
                     # Running/uncertain claims are never taken over.
                 elif (not row.get("paused") and row["plan"]["interval_seconds"]
                       and row.get("next_refresh") is not None and row["next_refresh"] <= time.time()):
