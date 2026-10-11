@@ -161,3 +161,46 @@ def test_leaving_the_lifespan_stops_its_warm_up_thread(monkeypatch, tmp_path):
         assert not thread.is_alive(), "the warm-up thread outlived its dashboard"
     assert built == [], "a stopped dashboard never builds its schema"
     dashboard._world_cache.clear()
+
+
+def test_warm_up_freezes_the_long_lived_objects_after_the_schema(monkeypatch):
+    """A full garbage collection walked every warmed object (about 700,000),
+    pausing whichever request triggered it for 350-450 ms."""
+    import threading
+
+    order = []
+    monkeypatch.setattr(dashboard, "_warm_pack_catalogue", lambda: None)
+    monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: {})
+    monkeypatch.setattr(dashboard, "_build_openapi_when_idle", lambda stop=None: order.append("schema") or True)
+    monkeypatch.setattr(dashboard.gc, "collect", lambda: order.append("collect") or 0)
+    monkeypatch.setattr(dashboard.gc, "freeze", lambda: order.append("freeze"))
+    done = threading.Event()
+    real = dashboard._freeze_long_lived_objects
+    monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: (real(), done.set()))
+    dashboard._warm_goal_runtime()
+    assert done.wait(30)
+    assert order == ["schema", "collect", "freeze"]
+
+
+def test_a_stopped_warm_up_does_not_freeze(monkeypatch):
+    import threading
+    import time
+
+    frozen = []
+    reached = threading.Event()
+    stops = []
+    monkeypatch.setattr(dashboard, "_warm_pack_catalogue", lambda: None)
+    monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: {})
+
+    def schema(stop=None):
+        stops.append(stop)
+        stop.set()  # shutdown arrives while waiting for a quiet moment
+        reached.set()
+        return False
+
+    monkeypatch.setattr(dashboard, "_build_openapi_when_idle", schema)
+    monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: frozen.append(1))
+    dashboard._warm_goal_runtime()
+    assert reached.wait(30)
+    time.sleep(0.2)
+    assert frozen == []

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gc
 import hashlib
 import hmac
 import ipaddress
@@ -1123,6 +1124,24 @@ def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float
     return True
 
 
+def _freeze_long_lived_objects() -> None:
+    """Keep full garbage collections off the warmed start-up objects.
+
+    After warm-up the process tracks about 700,000 long-lived objects (the
+    pack catalogue, templates, routes, modules, the OpenAPI schema). A full
+    collection walked all of them, 350-450 ms, on whichever request triggered
+    it. One collection, then ``gc.freeze()``, leaves them out of every later
+    collection; objects created afterwards are collected as before. It runs
+    after the quiet-time schema build, so its own collection lands on no
+    request either.
+    """
+    try:
+        gc.collect()
+        gc.freeze()
+    except Exception:  # pragma: no cover - a tuning step never breaks the dashboard
+        log.debug("garbage-collector freeze skipped", exc_info=True)
+
+
 def _warm_goal_runtime() -> threading.Event:
     """Pay the kernel's once-per-process start-up cost (hook discovery across
     installed distributions, about 1.5 s cold) and the dashboard's first-hit
@@ -1150,6 +1169,8 @@ def _warm_goal_runtime() -> threading.Event:
         log.info("dashboard warm-up done: %s",
                  ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
         _build_openapi_when_idle(stop=stop)
+        if not stop.is_set():
+            _freeze_long_lived_objects()
 
     threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
     return stop
