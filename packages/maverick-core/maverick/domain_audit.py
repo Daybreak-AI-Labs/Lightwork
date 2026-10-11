@@ -120,9 +120,17 @@ def audit_profile(profile: DomainProfile) -> PackAudit:
 
 
 def audit_roster(domains: dict[str, DomainProfile] | None = None) -> list[PackAudit]:
-    """Audit every discoverable pack (built-in + operator overrides)."""
-    domains = domains if domains is not None else available_domains()
-    return [audit_profile(domains[name]) for name in sorted(domains)]
+    """Audit every discoverable pack (built-in + operator overrides).
+
+    The whole roster is audited against one read of the configuration: each
+    pack's workforce settings used to read it again (about 6,400 reads, most
+    of the time of the workforce pages).
+    """
+    from .config import single_read
+
+    with single_read():
+        domains = domains if domains is not None else available_domains()
+        return [audit_profile(domains[name]) for name in sorted(domains)]
 
 
 def summarize(audits: list[PackAudit]) -> dict:

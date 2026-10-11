@@ -17,6 +17,7 @@ import os
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request, WebSocket
+from maverick.config import single_read
 from maverick.oidc import (
     OIDCError,
     VerifiedPrincipal,
@@ -280,14 +281,15 @@ def _non_static_auth_configured() -> bool:
         from .local_owner import claimed
         from .saml import saml_enabled
 
-        return any((
-            oidc_enabled(),
-            proxy_auth_enabled(),
-            invites_enabled(),
-            saml_enabled(),
-            _saml_policy_configured(),
-            claimed(),
-        ))
+        with single_read():
+            return any((
+                oidc_enabled(),
+                proxy_auth_enabled(),
+                invites_enabled(),
+                saml_enabled(),
+                _saml_policy_configured(),
+                claimed(),
+            ))
     except Exception:
         return True
 
@@ -434,9 +436,10 @@ def auth_genuinely_off() -> bool:
 def _auth_genuinely_off() -> bool:
     from ._shared import dashboard_token
 
-    if dashboard_token() or _dashboard_require_auth_enabled():
-        return False
-    return not non_static_auth_configured()
+    with single_read():
+        if dashboard_token() or _dashboard_require_auth_enabled():
+            return False
+        return not non_static_auth_configured()
 
 
 def anonymous_local_access_allowed() -> bool:
@@ -445,15 +448,17 @@ def anonymous_local_access_allowed() -> bool:
     Having no configured identity mechanism is necessary but not sufficient:
     client-bound/enterprise deployments explicitly disable ambient loopback
     trust. An unreadable binding policy denies the compatibility path.
+    The whole decision reads the configuration once (``single_read``).
     """
-    if not auth_genuinely_off():
-        return False
-    try:
-        from maverick.client import client_binding_enforced
+    with single_read():
+        if not auth_genuinely_off():
+            return False
+        try:
+            from maverick.client import client_binding_enforced
 
-        return not client_binding_enforced()
-    except Exception:
-        return False
+            return not client_binding_enforced()
+        except Exception:
+            return False
 
 
 def _authorization_principal(request: Request) -> str | None:
@@ -470,7 +475,7 @@ def _authorization_principal(request: Request) -> str | None:
     if principal is not None:
         return principal
     state = getattr(request, "state", None)
-    with fresh_configuration():
+    with fresh_configuration(), single_read():
         if anonymous_local_access_allowed() or _dashboard_token_authenticated(request):
             if state is not None:
                 state._anonymous_grant_verified = True

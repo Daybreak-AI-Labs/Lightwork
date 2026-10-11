@@ -568,3 +568,117 @@ def test_unseal_config_tree_does_not_reenter_itself():
         assert cfg_mod._unseal_config_tree(tree) is tree
     finally:
         cfg_mod._UNSEALING.reset(token)
+
+
+@pytest.fixture
+def config_home(tmp_path, monkeypatch):
+    """A deployment with a policy file and one secret saved from Settings."""
+    from maverick import config, crypto_at_rest
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.delenv("MAVERICK_ENCRYPTION_KEY", raising=False)
+    config.reset_config_cache()
+    (tmp_path / "config.toml").write_text("[budget]\nmax_dollars = 5.0\n", encoding="utf-8")
+    with crypto_at_rest.deployment_key_scope():
+        token = crypto_at_rest.seal_to_str("sk-test-not-a-real-key")  # pragma: allowlist secret
+    config.dashboard_overrides_path().write_text(f'[providers.anthropic]\napi_key = "{token}"\n', encoding="utf-8")
+    reads = []
+    real = config._read_global_config
+    monkeypatch.setattr(config, "_read_global_config", lambda: reads.append(1) or real())
+    yield tmp_path, reads
+    config.reset_config_cache()
+
+
+def test_one_decision_reads_the_configuration_once_and_each_caller_gets_its_own_copy(config_home):
+    # A sign-in decision asked about 15 questions, each reading (and
+    # decrypting) the configuration again.
+    from maverick import config
+
+    _, reads = config_home
+    with config.single_read():
+        first = config.load_config()
+        first["budget"]["max_dollars"] = 999
+        first["providers"].clear()
+        for _ in range(20):
+            assert config.load_config()["budget"]["max_dollars"] == 5.0
+        assert config.load_global_config()["providers"]["anthropic"]["api_key"] == "sk-test-not-a-real-key"  # pragma: allowlist secret
+    assert len(reads) == 1
+    config.load_config()
+    config.load_config()
+    assert len(reads) == 3  # outside a decision every read is fresh, as before
+
+
+def test_the_next_decision_reads_a_policy_saved_after_the_last_one(config_home):
+    import os
+
+    from maverick import config
+
+    home, reads = config_home
+    with config.single_read():
+        assert config.load_config()["budget"]["max_dollars"] == 5.0
+    replacement = home / "config.toml.new"
+    replacement.write_text("[budget]\nmax_dollars = 7.0\n", encoding="utf-8")
+    os.replace(replacement, home / "config.toml")
+    with config.single_read():
+        assert config.load_config()["budget"]["max_dollars"] == 7.0
+    assert len(reads) == 2
+
+
+def test_errors_a_decision_read_saw_stay_reported_after_another_thread_resets_the_cache(config_home):
+    # Several settings readers reset the cache first. Fail-closed checks must
+    # still see a corrupt policy for the rest of a decision that read it.
+    import threading
+
+    from maverick import config
+
+    home, reads = config_home
+    (home / "config.toml").write_text("[budget\n", encoding="utf-8")
+    path = str(home / "config.toml")
+    with config.single_read():
+        config.load_config()
+        assert path in config.config_source_errors()
+        resetter = threading.Thread(target=config.reset_config_cache)
+        resetter.start()
+        resetter.join()
+        assert config._toml_errors == {}
+        config.load_config()
+        assert path in config.config_source_errors()
+        assert path in config.config_source_errors(include_tenant=False)
+    assert len(reads) == 1
+
+
+def test_a_reset_inside_a_decision_reads_again(config_home):
+    from maverick import config
+
+    home, reads = config_home
+    with config.single_read():
+        config.load_config()
+        (home / "config.toml").write_text("[budget\n", encoding="utf-8")
+        config.reset_config_cache()
+        assert config.load_config().get("budget") is None
+        assert str(home / "config.toml") in config.config_source_errors()
+        config.load_config()
+    assert len(reads) == 2
+
+
+def test_a_finished_decision_is_not_shared_with_work_that_copied_it(config_home):
+    import contextvars
+
+    from maverick import config
+
+    _, reads = config_home
+    with config.single_read():
+        config.load_config()
+        copied = contextvars.copy_context()
+    copied.run(config.load_config)
+    copied.run(config.load_config)
+    assert len(reads) == 3
+
+    def nested_decision():
+        with config.single_read():
+            config.load_config()
+            config.load_config()
+
+    copied.run(nested_decision)
+    assert len(reads) == 4

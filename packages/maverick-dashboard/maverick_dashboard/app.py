@@ -231,7 +231,23 @@ def _template_bytecode_cache():
         return None
 
 
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+class _Templates(Jinja2Templates):
+    """Page templates whose shell reads the deployment configuration once.
+
+    The context processors (navigation, theme, help, drafts, search, ...) and
+    the template each asked the configuration again: about 60 reads per page.
+    One render is one ``config.single_read()``; the route's own gates ran
+    before it with their own reads, and the next page reads the files again.
+    """
+
+    def TemplateResponse(self, *args, **kwargs):  # noqa: N802 -- Starlette's name
+        from maverick.config import single_read
+
+        with single_read():
+            return super().TemplateResponse(*args, **kwargs)
+
+
+templates = _Templates(directory=str(TEMPLATES_DIR))
 # Starlette builds the Environment itself; both are plain Environment
 # attributes read at get_template time.
 templates.env.auto_reload = _templates_auto_reload()

@@ -36,6 +36,7 @@ import math
 import os
 import re
 import time
+from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -141,6 +142,10 @@ def reset_config_cache() -> None:
     _toml_errors.clear()
     _env_file_cache.clear()
     _env_last_check = None
+    shared = _SINGLE_READ.get()
+    if shared is not None:
+        shared.tree = None  # the next read in this decision starts again
+        shared.errors = {}
 
 
 # Wizard-persisted secrets: the installer writes every collected key to
@@ -420,11 +425,19 @@ def _source_errors(paths: list[Path]) -> dict[str, str]:
             _toml_errors.pop(key, None)
         except OSError:
             pass
-    return {
+    errors = {
         str(path): _toml_errors[str(path)]
         for path in paths
         if str(path) in _toml_errors
     }
+    shared = _SINGLE_READ.get()
+    if shared is not None and shared.open and shared.errors:
+        # What the shared read saw stays reported for the rest of the decision,
+        # even if another thread has reset the cache since.
+        for path in paths:
+            if str(path) in shared.errors:
+                errors.setdefault(str(path), shared.errors[str(path)])
+    return errors
 
 
 def config_source_errors(*, include_tenant: bool = True) -> dict[str, str]:
@@ -541,6 +554,57 @@ def _strict_config_bool(
     return value if isinstance(value, bool) else bool(invalid)
 
 
+class _SharedRead:
+    __slots__ = ("open", "tree", "errors")
+
+    def __init__(self) -> None:
+        self.open = True
+        self.tree: dict | None = None
+        self.errors: dict[str, str] = {}
+
+
+# One authorization decision asks a dozen questions of the deployment-global
+# configuration (the sign-in methods, the profile, the client binding, the
+# dashboard token). Each used to read the files again and, once a secret had
+# been saved from Settings, resolve the at-rest key and decrypt it: about 15
+# reads per decision and 350 per dashboard page. Inside ``single_read()`` the
+# decision reads once and every caller gets its own copy. Errors that read saw
+# stay reported by config_source_errors() until the scope ends, even if another
+# thread resets the cache meanwhile; reset_config_cache() inside the scope
+# starts a fresh read. The scope covers one decision, never a write: the next
+# decision reads the files again.
+_SINGLE_READ: ContextVar[_SharedRead | None] = ContextVar("maverick_config_single_read", default=None)
+
+
+@contextmanager
+def single_read():
+    """Read the deployment-global configuration once for one decision."""
+    current = _SINGLE_READ.get()
+    if current is not None and current.open:
+        yield  # already inside a decision: share its read
+        return
+    shared = _SharedRead()
+    token = _SINGLE_READ.set(shared)
+    try:
+        yield
+    finally:
+        shared.open = False
+        shared.tree = None
+        _SINGLE_READ.reset(token)
+
+
+def _copy_tree(value):
+    if isinstance(value, dict):
+        return {key: _copy_tree(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_copy_tree(child) for child in value]
+    if isinstance(value, (str, int, float, bool, type(None))):
+        return value
+    import copy
+
+    return copy.deepcopy(value)
+
+
 def load_global_config() -> dict:
     """Load deployment-global config without a per-tenant overlay.
 
@@ -549,6 +613,17 @@ def load_global_config() -> dict:
     The dashboard overlay remains writable by the global admin; the optional
     operator-owned config overlay still has higher precedence.
     """
+    shared = _SINGLE_READ.get()
+    if shared is None or not shared.open or _UNSEALING.get():
+        return _read_global_config()
+    if shared.tree is None:
+        tree = _read_global_config()
+        shared.errors = config_source_errors(include_tenant=False)
+        shared.tree = tree
+    return _copy_tree(shared.tree)
+
+
+def _read_global_config() -> dict:
     # Wizard-persisted secrets must be in the environment BEFORE interpolation,
     # or every "${ANTHROPIC_API_KEY}" the wizard wrote resolves to "" on a bare
     # pip/CLI install. setdefault semantics: a real export always wins.

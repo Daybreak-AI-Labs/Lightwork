@@ -161,3 +161,39 @@ def test_a_request_still_reads_policy_errors_variables_and_the_key_live(tmp_path
         }
     finally:
         config.reset_config_cache()
+
+
+def test_each_gate_reads_the_configuration_once_and_sees_a_policy_saved_before_it(tmp_path, monkeypatch):
+    # A gate's sign-in decision asked about 15 questions of the configuration,
+    # each reading and decrypting it again (about 350 reads per page).
+    import os
+
+    import pytest
+    from maverick import config, crypto_at_rest
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    for name in ("MAVERICK_ENCRYPTION_KEY", "MAVERICK_DASHBOARD_TOKEN", "MAVERICK_DASHBOARD_REQUIRE_AUTH"):
+        monkeypatch.delenv(name, raising=False)
+    config.reset_config_cache()
+    (tmp_path / "config.toml").write_text("[budget]\nmax_dollars = 5.0\n", encoding="utf-8")
+    with crypto_at_rest.deployment_key_scope():
+        token = crypto_at_rest.seal_to_str("sk-test-not-a-real-key")  # pragma: allowlist secret
+    config.dashboard_overrides_path().write_text(f'[providers.anthropic]\napi_key = "{token}"\n', encoding="utf-8")
+    reads = []
+    real = config._read_global_config
+    monkeypatch.setattr(config, "_read_global_config", lambda: reads.append(1) or real())
+    monkeypatch.setattr(auth, "caller_principal", lambda request: None)
+    scope = {"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""}
+    try:
+        assert auth._authorization_principal(Request(scope)) is None
+        assert auth._authorization_principal(Request(scope)) is None
+        assert len(reads) == 2
+        replacement = tmp_path / "config.toml.new"
+        replacement.write_text("[dashboard]\nrequire_auth = true\n", encoding="utf-8")
+        os.replace(replacement, tmp_path / "config.toml")
+        with pytest.raises(HTTPException):
+            auth._authorization_principal(Request(scope))
+        assert len(reads) == 3
+    finally:
+        config.reset_config_cache()
