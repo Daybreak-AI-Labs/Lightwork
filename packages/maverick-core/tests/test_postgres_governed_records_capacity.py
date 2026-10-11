@@ -390,7 +390,11 @@ def test_archived_delete_follows_a_concurrent_restore(
     )
     try:
         with tenant_scope(tenant=tenant):
-            created = backend.save({"id": "LDR-first"}, expected_revision=0)
+            now = time.time()
+            created = backend.save(
+                {"id": "LDR-first", "created_at": now, "updated_at": now},
+                expected_revision=0,
+            )
             assert backend.archive("LDR-first", expected_revision=created["revision"])
 
         def delete():
