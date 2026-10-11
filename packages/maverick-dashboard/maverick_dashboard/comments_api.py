@@ -126,11 +126,25 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
     raise HTTPException(404, "Comments work on tasks, runs, approvals and policies.")
 
 
+def _signed_in(principals) -> set[str]:
+    """Those the company directory (SCIM) has not turned off: an account it
+    turned off can no longer sign in to read a mention. Who may read the item
+    is unchanged. Raises when the directory cannot be read."""
+    from .scim_groups import active_check
+
+    check = active_check()
+    return {principal for principal in principals if check(principal) is not False}
+
+
 def _people(readers: set[str], viewer: str) -> list[dict]:
     from .identity_format import humanize_principal
 
+    try:
+        offered = _signed_in(readers - {viewer})
+    except Exception:  # noqa: BLE001 -- an unreadable directory offers nobody to mention
+        offered = set()
     out = []
-    for principal in sorted(readers - {viewer}):
+    for principal in sorted(offered):
         ident = humanize_principal(principal)
         out.append({"principal": principal,
                     "label": f"{ident.name} ({ident.detail})" if ident.detail and ident.detail != "Email" else ident.name})
@@ -177,6 +191,12 @@ def _post(request: Request, body: CommentIn) -> dict:
         raise HTTPException(403, "Sign in with your own account to comment.")
     target = _object(request, body.kind, body.id)
     outside = [m for m in body.mentions if m not in target["readers"] or m == author]
+    if not outside and body.mentions:
+        try:
+            outside = sorted(set(body.mentions) - _signed_in(body.mentions))
+        except Exception as exc:  # noqa: BLE001 -- never mention someone unchecked
+            raise HTTPException(503, "Mentions can't be checked right now: the company directory could not "
+                                     "be read. Post without the mention or try again.") from exc
     if outside:
         raise HTTPException(422, "You can mention only people who can open this item. Choose someone from the list.")
     try:

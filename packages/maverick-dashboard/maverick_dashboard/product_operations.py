@@ -151,12 +151,23 @@ def _writes_enabled(request) -> bool:
     return True
 
 
-def _context(request):
+def _account(request) -> dict:
     suites = auth.caller_suites(request)
-    return digest({"context": context_for(request), "role": auth.caller_role(request),
-                   "global_admin": auth.has_global_permission(request, "admin"),
-                   "suites": sorted(suites) if suites is not None else None,
-                   "families": sorted(enabled_families())})
+    return {"context": context_for(request), "role": auth.caller_role(request),
+            "global_admin": auth.has_global_permission(request, "admin"),
+            "suites": sorted(suites) if suites is not None else None}
+
+
+def _context(request):
+    return digest({**_account(request), "families": sorted(enabled_families())})
+
+
+def _access(request):
+    """The account part of the context (who, where, role, suites). It changes
+    when the person's account or access does, not when a Copilot action
+    family is turned on or off, so pages that drop private content on an
+    account change can tell the two apart."""
+    return digest(_account(request))
 
 
 def _adapter_modules():
@@ -536,8 +547,8 @@ def catalog(request: Request, body: ContextInput):
     _read_gate(request)
     if original_context != _context(request) or writes != _writes_enabled(request):
         raise HTTPException(409, "Your account, workspace or access changed while these controls were read. Reopen Copilot to check current controls.")
-    return _response({"schema": 1, "page": page, "selection": selection,
-                      "context": original_context, "checked_at": time.time(), "operations": items})
+    return _response({"schema": 1, "page": page, "selection": selection, "context": original_context,
+                      "access": _access(request), "checked_at": time.time(), "operations": items})
 
 
 def _arguments(adapter, raw):
@@ -724,4 +735,5 @@ def propose(request: Request, body: ProposeInput):
             operation = None
     # Only labels/IDs and the user's question leave the server. Current records,
     # preference values, receipt bodies and execution arguments never go to this model.
-    return _response({"operation": operation, "context": _context(request), "source": source, "execution": False})
+    return _response({"operation": operation, "context": _context(request), "access": _access(request),
+                      "source": source, "execution": False})

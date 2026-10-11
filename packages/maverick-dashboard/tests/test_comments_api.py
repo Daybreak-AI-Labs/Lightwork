@@ -135,3 +135,47 @@ def test_turning_comments_off_says_so(env, monkeypatch, tmp_path):
     refused = client.get("/api/v1/comments", params={"kind": "policy", "id": "tools"})
     assert refused.status_code == 403
     assert refused.headers["X-Lightwork-Reason"] == "feature-off"
+
+
+def _lee_reads_anas_task(world, monkeypatch):
+    from maverick_dashboard import content_access
+
+    goal_id = world.create_goal("Reconcile vendor spend", owner=ANA)
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list", lambda: [{"requester": LEE}])
+    monkeypatch.setattr(content_access, "_grant_current", lambda grant, **kw: True)
+    return goal_id
+
+
+def test_a_reader_the_company_directory_turned_off_is_not_offered_or_mentionable(env, monkeypatch):
+    # Lee holds a reviewed read grant for Ana's task, but company sign-in
+    # (SCIM) turned Lee off: Lee can no longer sign in to read a mention.
+    from maverick_dashboard import scim_groups
+
+    client, world = env
+    goal_id = _lee_reads_anas_task(world, monkeypatch)
+    _as(monkeypatch, ANA)
+    params = {"kind": "task", "id": str(goal_id)}
+    assert [p["principal"] for p in client.get("/api/v1/comments", params=params).json()["people"]] == [LEE]
+    monkeypatch.setattr(scim_groups, "active_check", lambda: lambda principal: False if principal == LEE else None)
+    assert client.get("/api/v1/comments", params=params).json()["people"] == []
+    assert client.post("/api/v1/comments", json={**params, "body": "@Lee", "mentions": [LEE]}).status_code == 422
+    assert client.post("/api/v1/comments", json={**params, "body": "Note", "mentions": []}).status_code == 201
+
+
+def test_an_unreadable_company_directory_offers_nobody_and_holds_mentions(env, monkeypatch):
+    from maverick_dashboard import scim_groups
+
+    client, world = env
+    goal_id = _lee_reads_anas_task(world, monkeypatch)
+    _as(monkeypatch, ANA)
+
+    def unreadable():
+        raise OSError("directory unreadable")
+
+    monkeypatch.setattr(scim_groups, "active_check", unreadable)
+    params = {"kind": "task", "id": str(goal_id)}
+    thread = client.get("/api/v1/comments", params=params)
+    assert thread.status_code == 200 and thread.json()["people"] == []
+    assert client.post("/api/v1/comments", json={**params, "body": "@Lee", "mentions": [LEE]}).status_code == 503
+    assert client.post("/api/v1/comments", json={**params, "body": "Note", "mentions": []}).status_code == 201

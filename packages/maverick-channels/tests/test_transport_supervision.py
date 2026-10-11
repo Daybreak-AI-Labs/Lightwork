@@ -594,3 +594,46 @@ def test_a_receipt_that_could_not_be_read_once_is_recovered_by_the_next_scan(mon
         await until(lambda: order == ["saved"])
         await worker.close()
     asyncio.run(run())
+
+
+def test_a_receipt_that_never_opens_is_set_aside_and_the_worker_goes_idle(monkeypatch, caplog):
+    # Retried for a few scans (a passing error recovers), then set aside and
+    # reported once, so it no longer makes every retry period re-read and
+    # decrypt every saved receipt.
+    import logging
+
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
+    journal = DeliveryJournal()
+    for index in range(2):
+        journal.admit(IncomingMessage(user_id="person", sender_id="person", text=f"saved-{index}",
+                                      channel=Adapter.name, message_id=str(index)),
+                      external_id=str(index), account="account")
+    poisoned = next(record_id for _, record_id in journal.store.iter_record_ids(start_after="", limit=10))
+    real_get = journal.get
+
+    def get(record_id):
+        if record_id == poisoned:
+            raise ValueError("sealed receipt does not authenticate")
+        return real_get(record_id)
+
+    journal.get = get
+    async def run():
+        order = []
+        async def handler(message):
+            order.append(message.text)
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=AsyncMock(return_value="confirmed"), journal=journal)
+        original, scans = worker._oldest_window, []
+        worker._oldest_window = lambda: scans.append(1) or original()
+        worker.start()
+        await until(lambda: len(order) == 1)
+        await asyncio.sleep(0.3)
+        settled = len(scans)
+        await asyncio.sleep(0.3)
+        idle = len(scans) - settled
+        await worker.close()
+        assert idle == 0 and settled <= transport_worker.UNREADABLE_SET_ASIDE + 2
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(run())
+    assert sum("set aside" in record.getMessage() for record in caplog.records) == 1

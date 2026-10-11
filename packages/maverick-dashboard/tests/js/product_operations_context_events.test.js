@@ -48,3 +48,38 @@ test("a change of the server's context reaches window listeners too", async () =
   assert.deepEqual(heard, {document: 1, window: 1});
   dom.window.close();
 });
+
+
+async function catalogChange(before, after) {
+  const dom = new JSDOM('<aside id="mv-copilot"><section id="mv-product-operations">' +
+    '<p id="mv-product-operation-status"></p><div id="mv-product-operation-buttons"></div>' +
+    '<div id="mv-product-operation-form"></div></section></aside>', {url: "http://testserver/flows/designer/owned"});
+  const w = dom.window, heard = {document: 0, window: 0};
+  let current = before;
+  const fetch = async () => ({ok: true, json: async () => ({schema: 1, selection: {kind: "flow", id: "owned"},
+    checked_at: 1, operations: [], ...current})});
+  vm.runInNewContext(source, {window: w, document: w.document, CustomEvent: w.CustomEvent, URL: w.URL,
+    URLSearchParams, AbortController, setTimeout, clearTimeout, fetch});
+  w.document.addEventListener("lightwork:copilot-context-changed", () => { heard.document += 1; });
+  w.addEventListener("lightwork:copilot-context-changed", () => { heard.window += 1; });
+  const turn = () => new Promise(resolve => setImmediate(resolve));
+  w.LightworkProductOperations.open(); await turn(); await turn();
+  current = after;
+  w.LightworkProductOperations.open(); await turn(); await turn();
+  dom.window.close();
+  return heard;
+}
+
+test("turning a Copilot action family on or off reaches document listeners only", async () => {
+  // The context digest covers the permitted actions; the access digest does
+  // not. Pages that drop private drafts on window keep them.
+  const heard = await catalogChange({context: "a".repeat(64), access: "x".repeat(64)},
+                                    {context: "b".repeat(64), access: "x".repeat(64)});
+  assert.deepEqual(heard, {document: 1, window: 0});
+});
+
+test("an account or access change reaches window listeners too", async () => {
+  const heard = await catalogChange({context: "a".repeat(64), access: "x".repeat(64)},
+                                    {context: "b".repeat(64), access: "y".repeat(64)});
+  assert.deepEqual(heard, {document: 1, window: 1});
+});

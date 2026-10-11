@@ -181,3 +181,26 @@ def test_no_department_access_and_unrestricted_access_have_distinct_contexts(mon
     unrestricted = ops._context(request)
     monkeypatch.setattr(ops.auth, "caller_suites", lambda request: set())
     assert ops._context(request) != unrestricted
+
+
+def test_the_access_digest_follows_the_account_not_the_permitted_action_families(monkeypatch):
+    # The context binds reviews to the permitted actions too; the access
+    # digest says whether the person's account or access changed.
+    from starlette.requests import Request
+    request = Request({"type": "http", "method": "POST", "path": "/", "headers": []})
+    monkeypatch.setattr(ops, "context_for", lambda request: "same-account-workspace")
+    monkeypatch.setattr(ops.auth, "caller_role", lambda request: "admin")
+    monkeypatch.setattr(ops.auth, "has_global_permission", lambda request, permission: True)
+    monkeypatch.setattr(ops.auth, "caller_suites", lambda request: None)
+    monkeypatch.setattr(ops, "enabled_families", lambda: {"preferences"})
+    context, access = ops._context(request), ops._access(request)
+    monkeypatch.setattr(ops, "enabled_families", lambda: {"preferences", "tasks"})
+    assert ops._context(request) != context and ops._access(request) == access
+    monkeypatch.setattr(ops.auth, "caller_role", lambda request: "operator")
+    assert ops._access(request) != access
+
+
+def test_the_catalog_carries_the_access_digest(registry, monkeypatch):
+    client, state = registry
+    monkeypatch.setattr(ops, "_access", lambda request: "c" * 64)
+    assert client.post(BASE + "/catalog", json={"page": "/preferences"}).json()["access"] == "c" * 64
