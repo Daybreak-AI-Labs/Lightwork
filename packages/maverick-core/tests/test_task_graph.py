@@ -264,8 +264,13 @@ def test_tool_op_survives_a_deep_chain(tmp_path, monkeypatch):
     monkeypatch.setattr(tg, "_STORE", tmp_path)
     t = tg.task_graph()
     n = 1500  # past the recursion limit
+    # Persist the deep chain once. Building it through 1,500 tool "add" calls
+    # rewrote and fsynced the whole growing file each time (about 3,000
+    # fsyncs), which passed in seconds alone but hit the 180 s limit on a
+    # loaded disk; the op under test is "order", not "add".
+    g = tg.TaskGraph()
     for i in range(n):
-        t.fn({"op": "add", "task": f"t{i}",
-              "deps": [f"t{i + 1}"] if i + 1 < n else []})
+        g.add_task(f"t{i}", "", [f"t{i + 1}"] if i + 1 < n else [])
+    g.save(tg._graph_path("default"))
     out = t.fn({"op": "order"})
     assert "t0" in out and "ERROR" not in out
