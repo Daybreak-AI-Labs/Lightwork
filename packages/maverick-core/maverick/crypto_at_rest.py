@@ -706,14 +706,61 @@ def backup_key_material(dest_dir: Path) -> list[Path]:
 # Rotation is therefore additive -- no existing data is rewritten or lost.
 
 
+def _path_identity(path: Path, *, directory: bool) -> tuple:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return (str(path), None)
+    except OSError:
+        return (str(path), object())  # never equal: resolve (and fail) again
+    shape = (
+        str(path), info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+        getattr(info, "st_file_attributes", None), getattr(info, "st_reparse_tag", None),
+    )
+    if directory:
+        # Resolving re-secures the key directory, which moves its ctime.
+        return shape
+    return (*shape, info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def key_material_identity() -> tuple:
+    """A stat fingerprint of everything a deployment-key unseal resolves.
+
+    The key variable, the key-scope flags, and the path, identity, owner, mode
+    and (for files) link count, size and times of the key directory, the key
+    file, the rotation keyring and each keyring key. Any rotation, replacement,
+    ownership or POSIX permission change gives a different value. A Windows
+    ACL edit that leaves these unchanged is re-applied by the next resolution.
+    """
+    raw = os.environ.get(_KEY_ENV)
+    path = _key_path()
+    ring = _keyring_dir(path)
+    ring_identity = _path_identity(ring, directory=True)
+    ring_keys: tuple = ()
+    if ring_identity[1] is not None:
+        try:
+            ring_keys = tuple(_path_identity(key, directory=False) for key in sorted(ring.glob("*.key")))
+        except OSError:
+            ring_keys = (object(),)  # an unreadable keyring is never equal: resolve again
+    return (
+        hashlib.sha256(raw.encode("utf-8")).hexdigest() if raw else None,
+        _FORCE_DEPLOYMENT_KEY.get(),
+        _FORCE_EXTERNAL_FLEET_KEY.get(),
+        _path_identity(path.parent, directory=True),
+        _path_identity(path, directory=False),
+        ring_identity,
+        ring_keys,
+    )
+
+
 def _key_fingerprint(key: bytes) -> bytes:
     return hashlib.sha256(key).digest()[:_KEYID_BYTES]
 
 
-def _keyring_dir() -> Path:
+def _keyring_dir(key_path: Path | None = None) -> Path:
     # Derived from _key_path().parent so tests that monkeypatch _KEY_PATH (or set
     # HOME) relocate the keyring with it.
-    return _key_path().parent / "at_rest.d"
+    return (key_path or _key_path()).parent / "at_rest.d"
 
 
 def _read_keyring_key(path: Path) -> bytes:
@@ -1209,15 +1256,21 @@ def unseal_from_str(s: str) -> str:
     return unseal(blob).decode("utf-8", errors="replace")
 
 
-def unseal_many_from_str(values: list[str]) -> list[str]:
+def unseal_many_from_str(
+    values: list[str],
+    *,
+    key_cache: dict[tuple[str, bytes], object] | None = None,
+) -> list[str]:
     """Decrypt TEXT-column tokens while resolving each key once per batch.
 
     Single-value integrity checks are preserved, but repeated config/key-file
     I/O is removed from encrypted result-set reads. The cache is discarded on
     return so rotations and tenant-context changes are observed by the next
-    query.
+    query. A caller that passes ``key_cache`` keeps it across batches and must
+    drop it whenever :func:`key_material_identity` changes.
     """
-    key_cache: dict[tuple[str, bytes], object] = {}
+    if key_cache is None:
+        key_cache = {}
     out: list[str] = []
     for value in values:
         if not is_sealed_str(value):

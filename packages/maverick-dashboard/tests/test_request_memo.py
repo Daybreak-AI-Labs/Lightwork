@@ -1,7 +1,7 @@
 """Per-request memo for configuration-derived authorization predicates."""
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from maverick_dashboard import _request_memo, auth
 from starlette.concurrency import run_in_threadpool
@@ -99,44 +99,105 @@ def test_anonymous_access_is_rechecked_at_every_gate(monkeypatch):
     assert checks["n"] == 4
 
 
-def test_a_request_reads_the_sealed_configuration_once_and_still_sees_a_policy_saved_meanwhile(tmp_path, monkeypatch):
-    # One page asked for the configuration about 350 times, and every read
-    # decrypted the saved secrets again. Inside a request it is read once;
-    # an authorization check after a save (fresh_configuration) still sees it.
-    import os
-
+def _sealed_home(tmp_path, monkeypatch):
+    """A deployment with one secret saved from Settings (sealed at rest)."""
     from maverick import config, crypto_at_rest
 
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     monkeypatch.delenv("MAVERICK_ENCRYPTION_KEY", raising=False)
     config.reset_config_cache()
-    (tmp_path / "config.toml").write_text("[budget]\nmax_dollars = 5.0\n", encoding="utf-8")
+    (tmp_path / "config.toml").write_text(
+        '[budget]\nmax_dollars = 5.0\n[probe]\nvalue = "${MAVERICK_PROBE_VALUE}"\n', encoding="utf-8",
+    )
     with crypto_at_rest.deployment_key_scope():
         token = crypto_at_rest.seal_to_str("sk-test-not-a-real-key")  # pragma: allowlist secret
     config.dashboard_overrides_path().write_text(f'[providers.anthropic]\napi_key = "{token}"\n', encoding="utf-8")
-    opened = []
-    real = crypto_at_rest.unseal_many_from_str
-    monkeypatch.setattr(crypto_at_rest, "unseal_many_from_str", lambda values: opened.append(1) or real(values))
 
+
+def _api_key():
+    from maverick import config
+
+    return config.load_config().get("providers", {}).get("anthropic", {}).get("api_key")
+
+
+def test_a_request_resolves_the_at_rest_key_once_and_again_at_each_authorization_boundary(tmp_path, monkeypatch):
+    # One page read the configuration about 350 times, and each read re-secured
+    # and re-read the at-rest key before opening the secrets saved in Settings.
+    from maverick import config, crypto_at_rest
+
+    _sealed_home(tmp_path, monkeypatch)
+    resolved = []
+    real = crypto_at_rest._load_or_create_key
+    monkeypatch.setattr(crypto_at_rest, "_load_or_create_key", lambda: resolved.append(1) or real())
+    later = []
     app = FastAPI()
     app.add_middleware(_request_memo.RequestMemoMiddleware)
 
-    def read_many():
-        return [config.load_config()["providers"]["anthropic"]["api_key"] for _ in range(100)]
+    def after_response():
+        later.extend([_api_key(), _api_key(), len(resolved)])
 
     @app.get("/x")
-    async def x():
-        keys = await run_in_threadpool(read_many)
+    async def x(tasks: BackgroundTasks):
+        keys = await run_in_threadpool(lambda: {_api_key() for _ in range(100)})
+        page = len(resolved)
+        with _request_memo.fresh_configuration():
+            boundary = {_api_key() for _ in range(3)}
+        tasks.add_task(after_response)
+        return {"keys": sorted(keys | boundary), "resolved": [page, len(resolved)]}
+
+    try:
+        body = TestClient(app).get("/x").json()
+        assert body == {"keys": ["sk-test-not-a-real-key"], "resolved": [1, 2]}  # pragma: allowlist secret
+        # After the response is sent, background work resolves on every read.
+        assert later == ["sk-test-not-a-real-key", "sk-test-not-a-real-key", 4]  # pragma: allowlist secret
+    finally:
+        config.reset_config_cache()
+
+
+def test_a_request_still_reads_policy_errors_and_variables_live(tmp_path, monkeypatch):
+    import os
+
+    from maverick import config, crypto_at_rest
+
+    _sealed_home(tmp_path, monkeypatch)
+    monkeypatch.setenv("MAVERICK_PROBE_VALUE", "one")
+    real = crypto_at_rest._load_or_create_key
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) == 1:
+            raise crypto_at_rest.EncryptionUnavailable("the key file is held by its writer")
+        return real()
+
+    monkeypatch.setattr(crypto_at_rest, "_load_or_create_key", flaky)
+    app = FastAPI()
+    app.add_middleware(_request_memo.RequestMemoMiddleware)
+
+    @app.get("/x")
+    def x():
+        seen = {"key": [_api_key(), _api_key()]}  # a failed key read is retried
+        seen["value"] = [config.load_config()["probe"]["value"]]
+        os.environ["MAVERICK_PROBE_VALUE"] = "two"
+        seen["value"].append(config.load_config()["probe"]["value"])
         replacement = tmp_path / "config.toml.new"
         replacement.write_text("[budget]\nmax_dollars = 7.0\n", encoding="utf-8")
         os.replace(replacement, tmp_path / "config.toml")
-        with _request_memo.fresh_configuration():
-            budget = config.load_config()["budget"]["max_dollars"]
-        return {"keys": sorted(set(keys)), "budget": budget}
+        seen["budget"] = config.load_config()["budget"]["max_dollars"]
+        (tmp_path / "config.toml").write_text("[budget\n", encoding="utf-8")  # corrupt policy
+        config.load_config()
+        config.reset_config_cache()  # what several settings readers do first
+        config.load_config()
+        seen["errors"] = sorted(config.config_source_errors())
+        return seen
 
     try:
-        assert TestClient(app).get("/x").json() == {"keys": ["sk-test-not-a-real-key"], "budget": 7.0}  # pragma: allowlist secret
-        assert len(opened) == 2  # once, then once more after the save
+        assert TestClient(app).get("/x").json() == {
+            "key": [None, "sk-test-not-a-real-key"],  # pragma: allowlist secret
+            "value": ["one", "two"],
+            "budget": 7.0,
+            "errors": [str(tmp_path / "config.toml")],
+        }
     finally:
         config.reset_config_cache()

@@ -1,6 +1,7 @@
 """Config loader tests."""
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -570,13 +571,13 @@ def test_unseal_config_tree_does_not_reenter_itself():
         cfg_mod._UNSEALING.reset(token)
 
 
-def _sealed_overlay(home):
+def _sealed_overlay(home, secret="sk-test-not-a-real-key"):  # pragma: allowlist secret
     """A config with one sealed dashboard secret, as Settings saves it."""
     from maverick import config, crypto_at_rest
 
     (home / "config.toml").write_text('[budget]\nmax_dollars = 5.0\n', encoding="utf-8")
     with crypto_at_rest.deployment_key_scope():
-        token = crypto_at_rest.seal_to_str("sk-test-not-a-real-key")  # pragma: allowlist secret
+        token = crypto_at_rest.seal_to_str(secret)
     config.dashboard_overrides_path().write_text(f'[providers.anthropic]\napi_key = "{token}"\n', encoding="utf-8")
 
 
@@ -593,61 +594,103 @@ def sealed_home(tmp_path, monkeypatch):
     config.reset_config_cache()
 
 
-def test_a_snapshot_scope_reads_and_decrypts_the_configuration_once(sealed_home, monkeypatch):
-    # A dashboard page asked for the configuration about 350 times, and each
-    # read decrypted every sealed secret again.
+def _key_resolutions(monkeypatch):
+    from maverick import crypto_at_rest
+
+    resolved = []
+    real = crypto_at_rest._load_or_create_key
+    monkeypatch.setattr(crypto_at_rest, "_load_or_create_key", lambda: resolved.append(1) or real())
+    return resolved
+
+
+def _api_key():
+    from maverick import config
+
+    return config.load_config().get("providers", {}).get("anthropic", {}).get("api_key")
+
+
+def test_a_key_scope_resolves_the_at_rest_key_once_and_still_decrypts_every_read(sealed_home, monkeypatch):
+    # A dashboard page reads the configuration about 350 times; each read
+    # re-secured and re-read the key file before opening the saved secrets.
     from maverick import config, crypto_at_rest
 
+    resolved = _key_resolutions(monkeypatch)
     opened = []
     real = crypto_at_rest.unseal_many_from_str
-    monkeypatch.setattr(crypto_at_rest, "unseal_many_from_str", lambda values: opened.append(1) or real(values))
-    with config.config_snapshot_scope():
+    monkeypatch.setattr(
+        crypto_at_rest, "unseal_many_from_str", lambda values, **kw: opened.append(1) or real(values, **kw),
+    )
+    with config.at_rest_key_scope():
         for _ in range(50):
-            assert config.load_config()["providers"]["anthropic"]["api_key"] == "sk-test-not-a-real-key"  # pragma: allowlist secret
-    assert len(opened) == 1
-    load_config()
-    load_config()
-    assert len(opened) == 3  # outside a scope every read is fresh, as before
+            assert _api_key() == "sk-test-not-a-real-key"  # pragma: allowlist secret
+    assert (len(resolved), len(opened)) == (1, 50)
+    _api_key()
+    _api_key()
+    assert len(resolved) == 3  # outside a scope every read resolves, as before
 
 
-def test_each_reader_in_a_snapshot_scope_gets_its_own_copy(sealed_home):
-    from maverick import config
+@pytest.mark.skipif(os.name == "nt", reason="POSIX modes")
+def test_a_key_scope_resolves_the_key_again_when_the_key_files_change(sealed_home, monkeypatch):
+    import secrets
+    import stat
 
-    with config.config_snapshot_scope():
-        first = config.load_config()
-        first["budget"]["max_dollars"] = 999
-        first["providers"].clear()
-        second = config.load_config()
-    assert second["budget"]["max_dollars"] == 5.0
-    assert second["providers"]["anthropic"]["api_key"] == "sk-test-not-a-real-key"  # pragma: allowlist secret
-
-
-def test_a_policy_saved_inside_a_snapshot_scope_is_read_at_once(sealed_home):
-    # Authorization checks keep seeing a policy written while a request waits.
-    import os
-
-    from maverick import config
-
-    with config.config_snapshot_scope():
-        assert config.load_config()["budget"]["max_dollars"] == 5.0
-        path = sealed_home / "config.toml"
-        replacement = sealed_home / "config.toml.new"
-        replacement.write_text('[budget]\nmax_dollars = 7.0\n', encoding="utf-8")
-        os.replace(replacement, path)  # the atomic save the settings writers use
-        assert config.load_config()["budget"]["max_dollars"] == 7.0
-        config.dashboard_overrides_path().unlink()
-        assert "providers" not in config.load_config()
-
-
-def test_a_discarded_snapshot_reads_from_the_sources_again(sealed_home, monkeypatch):
     from maverick import config, crypto_at_rest
 
-    opened = []
-    real = crypto_at_rest.unseal_many_from_str
-    monkeypatch.setattr(crypto_at_rest, "unseal_many_from_str", lambda values: opened.append(1) or real(values))
-    with config.config_snapshot_scope():
-        config.load_config()
-        config.discard_config_snapshot()
-        config.load_config()
-        config.load_config()
-    assert len(opened) == 3
+    resolved = _key_resolutions(monkeypatch)
+    key = crypto_at_rest._key_path()
+    with config.at_rest_key_scope():
+        _api_key()
+        os.chmod(key, 0o644)
+        assert _api_key() == "sk-test-not-a-real-key"  # pragma: allowlist secret
+        assert stat.S_IMODE(key.stat().st_mode) == 0o600  # re-secured at once
+        _api_key()
+        assert len(resolved) == 2
+        # A rotated key, with the saved secret sealed again under it.
+        replacement = key.with_name("at_rest.key.new")
+        replacement.write_text(secrets.token_bytes(32).hex(), encoding="utf-8")
+        os.chmod(replacement, 0o600)
+        os.replace(replacement, key)
+        _sealed_overlay(sealed_home, secret="sk-test-rotated")  # pragma: allowlist secret
+        assert _api_key() == "sk-test-rotated"  # pragma: allowlist secret
+        assert not config.config_source_errors()
+
+
+def test_a_failed_key_read_is_retried_in_the_same_scope(sealed_home, monkeypatch):
+    from maverick import config, crypto_at_rest
+
+    real = crypto_at_rest._load_or_create_key
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) == 1:
+            raise crypto_at_rest.EncryptionUnavailable("the key file is held by its writer")
+        return real()
+
+    monkeypatch.setattr(crypto_at_rest, "_load_or_create_key", flaky)
+    with config.at_rest_key_scope():
+        assert _api_key() is None
+        assert config.config_source_errors()
+        assert _api_key() == "sk-test-not-a-real-key"  # pragma: allowlist secret
+        assert not config.config_source_errors()
+
+
+def test_work_that_copied_a_closed_or_discarded_key_scope_resolves_every_read(sealed_home, monkeypatch):
+    import contextvars
+
+    from maverick import config
+
+    resolved = _key_resolutions(monkeypatch)
+    with config.at_rest_key_scope():
+        _api_key()
+        copied = contextvars.copy_context()
+        _api_key()
+    copied.run(_api_key)
+    copied.run(_api_key)
+    assert len(resolved) == 3
+    with config.at_rest_key_scope():
+        _api_key()
+        config.discard_at_rest_key_scope()
+        _api_key()
+        _api_key()
+    assert len(resolved) == 6
