@@ -621,7 +621,8 @@ def test_a_copied_source_that_refuses_decides_while_the_grant_store_is_unreadabl
     assert posted.status_code == 422, posted.text
 
 
-def test_a_copied_source_that_cannot_be_read_does_not_hide_a_later_one_that_refuses(env, monkeypatch):
+@pytest.mark.parametrize("order", ["legal first", "finance first"])
+def test_a_copied_source_that_cannot_be_read_does_not_hide_a_later_one_that_refuses(env, monkeypatch, order):
     # Two copied sources: one cannot be checked (its knowledge connector is
     # down), the other is from the legal department, which refuses Lee. The
     # refusal decides, in whichever order the walk visits them.
@@ -630,8 +631,11 @@ def test_a_copied_source_that_cannot_be_read_does_not_hide_a_later_one_that_refu
     from maverick_dashboard import auth, strict_reads, suite_grants
 
     client, world = env
-    goal_id, (legal, finance) = _copy_of(world, monkeypatch, [("Legal review", "legal-pack"),
-                                                               ("Finance review", "finance-pack")])
+    sources = [("Legal review", "legal-pack"), ("Finance review", "finance-pack")]
+    if order == "finance first":
+        sources.reverse()
+    goal_id, ids = _copy_of(world, monkeypatch, sources)
+    legal, finance = ids if order == "legal first" else ids[::-1]
     monkeypatch.setattr(domain_mod, "suites_for_domain",
                         lambda d: {"legal-pack": ["legal"], "finance-pack": ["finance"]}.get(d, []))
     monkeypatch.setattr(suite_grants, "granted_suites", lambda p: frozenset({"finance"}))
@@ -666,7 +670,10 @@ def test_a_copied_source_that_cannot_be_read_does_not_turn_an_unreadable_grant_i
     client, world = env
     goal_id, (source_id,) = _copy_of(world, monkeypatch, [("Finance review", "")])
 
+    reads = []
+
     def require_read(goal, actor, **kw):
+        reads.append(goal.id)
         raise SourceContextUnavailable("The knowledge connector could not be reached.")
 
     monkeypatch.setattr(knowledge_task_context, "require_read", require_read)
@@ -677,4 +684,74 @@ def test_a_copied_source_that_cannot_be_read_does_not_turn_an_unreadable_grant_i
     goal = world.get_goal(goal_id)
     with strict_reads.strict(), pytest.raises(OSError):
         auth.goal_readable_by(LEE, goal, grants=OSError("grant store unreadable"))
+    assert reads == [source_id]  # the source was walked and reported unavailable
     assert auth.goal_readable_by(LEE, goal, grants=OSError("grant store unreadable")) is False
+    # With the task's own grant readable, the unavailable source alone is a refusal.
+    with strict_reads.strict():
+        assert auth.goal_readable_by(LEE, goal, grants={LEE}) is False
+
+
+@pytest.mark.parametrize("order", ["unavailable first", "outage first"])
+def test_an_outage_in_one_copied_source_is_not_read_as_a_refusal_in_another(env, monkeypatch, order):
+    # One source reports itself unavailable (which may be a refusal), another
+    # cannot be read at all. The person cannot be confirmed either way, in
+    # whichever order the walk visits the two.
+    from maverick import knowledge_task_context
+    from maverick.knowledge_task_context import SourceContextUnavailable
+    from maverick_dashboard import auth, content_access, strict_reads
+
+    client, world = env
+    goal_id, ids = _copy_of(world, monkeypatch, [("A", ""), ("B", "")])
+    unavailable, down = ids if order == "outage first" else ids[::-1]
+
+    def require_read(goal, actor, **kw):
+        if goal.id == unavailable:
+            raise SourceContextUnavailable("This source is unavailable.")
+        if goal.id == down:
+            raise RuntimeError("store down")
+
+    monkeypatch.setattr(knowledge_task_context, "require_read", require_read)
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list",
+                        lambda: [_current_grant(ANA, LEE, "goal", goal) for goal in (goal_id, *ids)])
+    _as(monkeypatch, ANA)
+    with strict_reads.strict(), pytest.raises(RuntimeError):
+        auth.goal_readable_by(LEE, world.get_goal(goal_id), grants={LEE})
+
+
+def test_a_nested_copied_source_that_refuses_decides_past_a_parent_that_cannot_be_read(env, monkeypatch):
+    # The task copies A, and A is itself a copy of B. A cannot be read (its
+    # connector is down); B is from the legal department, which refuses Lee.
+    from maverick import chat_message_actions, knowledge_task_context
+    from maverick import domain as domain_mod
+    from maverick_dashboard import auth, content_access, strict_reads, suite_grants
+
+    client, world = env
+    goal_id, (parent,) = _copy_of(world, monkeypatch, [("A", "finance-pack")])
+    nested = world.create_goal("B", owner=ANA, domain="legal-pack")
+
+    class Store:
+        def __init__(self, world):
+            pass
+
+        def for_goal(self, identity):
+            if identity == parent:
+                return {"detail": {"kind": chat_message_actions.KINDS[0],
+                                   "alternative": {"source_goal_ids": [nested]}}}
+            return None
+
+    def require_read(goal, actor, **kw):
+        if goal.id == parent:
+            raise RuntimeError("connector unreachable")
+
+    monkeypatch.setattr(chat_message_actions, "SubmissionStore", Store)
+    monkeypatch.setattr(knowledge_task_context, "require_read", require_read)
+    monkeypatch.setattr(domain_mod, "suites_for_domain",
+                        lambda d: {"legal-pack": ["legal"], "finance-pack": ["finance"]}.get(d, []))
+    monkeypatch.setattr(suite_grants, "granted_suites", lambda p: frozenset({"finance"}))
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list",
+                        lambda: [_current_grant(ANA, LEE, "goal", goal) for goal in (goal_id, parent, nested)])
+    _as(monkeypatch, ANA)
+    with strict_reads.strict():
+        assert auth.goal_readable_by(LEE, world.get_goal(goal_id), grants={LEE}) is False

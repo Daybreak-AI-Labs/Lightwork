@@ -211,7 +211,8 @@ def require_copy_sources(world, goal_id, *, alternative=None, authorize=None, de
         if len(seen) > 1000:
             raise PermissionError("This copied conversation has too many source dependencies to verify completely. Start a new conversation with explicitly chosen context.")
         try:
-            _check_copy_source(world, identity, goal, authorize, require_read, pending)
+            _check_copy_source(world, identity, goal, authorize, require_read, pending,
+                               deferred if defer_errors else None)
         except PermissionError:
             raise
         except Exception as exc:
@@ -219,23 +220,49 @@ def require_copy_sources(world, goal_id, *, alternative=None, authorize=None, de
                 raise
             deferred.append(exc)
     if deferred:
-        raise deferred[0]
+        from .attachments import AttachmentRejected
+        from .knowledge_task_context import SourceContextUnavailable
+
+        # An outage outranks an "unavailable source", which can also be a
+        # refusal: the answer does not depend on the order sources were walked.
+        raise next((exc for exc in deferred if not isinstance(exc, (SourceContextUnavailable, AttachmentRejected))),
+                   deferred[0])
     from .attachments import _verify_stored_attachment
     for item in world.list_attachments(goal_id):
         _verify_stored_attachment(Path(item.path), item.sha256)
     return alternative
 
 
-def _check_copy_source(world, identity, goal, authorize, require_read, pending):
+def _check_copy_source(world, identity, goal, authorize, require_read, pending, deferred=None):
+    """Check one copied source and queue its own copied sources. With
+    ``deferred`` (a list), a step that cannot be checked is set aside there
+    while the others still run, and the nested sources are queued first, so
+    they are walked even when this source cannot be checked."""
     source_goal = world.get_goal(identity)
     if source_goal is None or source_goal.owner != goal.owner:
         raise PermissionError("A copied source is no longer available to this account.")
-    if authorize is not None:
-        authorize(source_goal)
-    require_read(source_goal, goal.owner)
-    nested = SubmissionStore(world).for_goal(identity)
-    if nested and nested["detail"].get("kind") in KINDS:
-        pending.extend(nested["detail"]["alternative"]["source_goal_ids"])
+
+    def check():
+        if authorize is not None:
+            authorize(source_goal)
+        require_read(source_goal, goal.owner)
+
+    def queue_nested():
+        nested = SubmissionStore(world).for_goal(identity)
+        if nested and nested["detail"].get("kind") in KINDS:
+            pending.extend(nested["detail"]["alternative"]["source_goal_ids"])
+
+    if deferred is None:
+        check()
+        queue_nested()
+        return
+    for step in (queue_nested, check):
+        try:
+            step()
+        except PermissionError:
+            raise
+        except Exception as exc:
+            deferred.append(exc)
 
 
 def _alternative(world, goal_id):
