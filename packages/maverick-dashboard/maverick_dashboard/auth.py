@@ -577,14 +577,13 @@ def is_dashboard_admin(principal: str) -> bool:
     return is_admin_principal(principal)
 
 
-def global_role_for_principal(principal: str | None, *, strict: bool = False) -> str | None:
+def global_role_for_principal(principal: str | None) -> str | None:
     """The principal's dashboard-wide RBAC role, ignoring tenant memberships.
 
     Resolution: explicit stored assignment, then the role mapped to the user's
     SCIM groups (``[dashboard] group_roles`` — team membership in the IdP), then
     the configured default. Explicit always beats derived, so an admin can still
-    pin an individual without fighting the group mapping. ``strict``: a source
-    that cannot be read raises instead of answering ``None``."""
+    pin an individual without fighting the group mapping."""
     if principal is None:
         return None
     if is_dashboard_admin(principal):
@@ -595,8 +594,7 @@ def global_role_for_principal(principal: str | None, *, strict: bool = False) ->
         if stored:
             return stored
         from . import scim_groups
-        group_role = (scim_groups.role_for_principal(principal, strict=True) if strict
-                      else scim_groups.role_for_principal(principal))
+        group_role = scim_groups.role_for_principal(principal)
         if group_role:
             return group_role
         return rbac.default_role()
@@ -604,7 +602,9 @@ def global_role_for_principal(principal: str | None, *, strict: bool = False) ->
         # A damaged role roster, group-membership source, or config default is
         # deny-all. Falling through to the historical operator default would
         # turn a policy outage into a privilege escalation.
-        if strict:
+        from . import strict_reads
+
+        if strict_reads.active():
             raise
         return None
 
@@ -988,6 +988,61 @@ def can_access_goal(request: Request, goal) -> bool:
     try:
         require_copy_sources(_world(), goal.id, authorize=authorize)
     except (PermissionError, SourceContextUnavailable, AttachmentRejected):
+        return False
+    return True
+
+
+def _goal_readable_by(principal: str, goal) -> bool:
+    """:func:`_goal_read_policy` for a read by ``principal``, without a request
+    and without recording a read: department access, then ownership or a
+    current reviewed read grant held by a global administrator."""
+    from maverick.domain import suites_for_domain
+    from maverick.suite_grants import granted_suites
+
+    from . import content_access, rbac
+
+    domain = getattr(goal, "domain", None)
+    if domain:
+        suites = None if is_dashboard_admin(principal) else granted_suites(principal)
+        if suites is not None and not all(suite is None or suite in suites for suite in suites_for_domain(domain)):
+            return False
+    owner = getattr(goal, "owner", "") or ""
+    if owner == principal:
+        return True
+    if "admin" not in rbac.permissions_for(global_role_for_principal(principal)):
+        return False
+    if scim_groups.active_for_principal(principal) is False:
+        return False
+    return principal in content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id),
+                                                     among={principal})
+
+
+def goal_readable_by(principal: str, goal) -> bool:
+    """Whether ``principal`` could open ``goal`` now, by the rules
+    :func:`can_access_goal` applies to a read from them (copied
+    conversations included), for someone to be told about the task. A source
+    that cannot be read denies (it raises inside ``strict_reads.strict()``)."""
+    from maverick.attachments import AttachmentRejected
+    from maverick.chat_message_actions import require_copy_sources
+    from maverick.knowledge_task_context import SourceContextUnavailable
+
+    from ._shared import _world
+
+    def authorize(source):
+        if not _goal_readable_by(principal, source):
+            raise PermissionError("A copied source is unavailable to this account.")
+
+    try:
+        if goal is None or not principal or not _goal_readable_by(principal, goal):
+            return False
+        require_copy_sources(_world(), goal.id, authorize=authorize)
+    except (PermissionError, SourceContextUnavailable, AttachmentRejected):
+        return False
+    except Exception:  # noqa: BLE001 -- an unreadable access rule is not evidence of access
+        from . import strict_reads
+
+        if strict_reads.active():
+            raise
         return False
     return True
 

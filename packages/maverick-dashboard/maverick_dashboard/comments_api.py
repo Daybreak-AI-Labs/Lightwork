@@ -28,6 +28,7 @@ POLICIES = {
     "data-use": ("Data use rules", "/data-use", "operate"),
 }
 _TASK_PERMISSION = "view"
+_OUTSIDE = "You can mention only people who can open this item. Choose someone from the list."
 _UNCHECKED = ("Mentions can't be checked right now: who can open this item could not be read. "
               "Post without the mention or try again.")
 
@@ -48,15 +49,21 @@ def _world():
     return world()
 
 
-def _goal_readers(goal, *, among=None, strict: bool = False) -> set[str]:
-    """A task's owner plus anyone holding a current reviewed read grant for it
-    (``among`` and ``strict`` as for ``content_access.grant_readers``)."""
+def _goal_readers(goal, *, among=None) -> set[str]:
+    """Those who can open a task now (``auth.goal_readable_by``): its owner,
+    or someone holding a current reviewed read grant for it who is still a
+    global administrator with access to its department. With ``among``, only
+    those people are checked."""
     from . import content_access
 
     owner = getattr(goal, "owner", "") or ""
-    readers = {owner} if owner else set()
-    return readers | content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id),
-                                                  among=among, strict=strict)
+    candidates = {owner} if owner else set()
+    if among is not None:
+        candidates &= set(among)
+    # The owner's access needs no grant, so it never waits on the grant store.
+    candidates |= content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id),
+                                               among=None if among is None else set(among) - {owner})
+    return {principal for principal in candidates if auth.goal_readable_by(principal, goal)}
 
 
 def _object(request: Request | None, kind: str, object_id: str, *, principal: str = "") -> dict:
@@ -76,7 +83,7 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
         if request is not None:
             auth.require_permission(request, _TASK_PERMISSION)
             auth.assert_goal_access(request, goal)
-        readers = _goal_readers(goal)
+        readers = _goal_readers(goal, among={principal} if principal else None)
         return {"label": f"Task: {str(goal.title)[:120]}", "href": f"/chat/goal/{goal.id}", "readers": readers,
                 "subject": goal}
     if kind == "run":
@@ -117,9 +124,11 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
         title, href, permission = POLICIES[object_id]
         if request is not None:
             auth.require_permission(request, permission)
-        readers = {p["principal"] for p in people_directory.candidates(permission)}
-        if principal and not people_directory.may(principal, permission):
-            readers.discard(principal)
+        if principal:
+            # Checked for the person directly: the list of people stops at 200.
+            readers = {principal} if people_directory.may(principal, permission) else set()
+        else:
+            readers = {p["principal"] for p in people_directory.candidates(permission)}
         return {"label": f"Policy: {title}", "href": href, "readers": readers, "checked": True,
                 "permission": permission}
     raise HTTPException(404, "Comments work on tasks, runs, approvals and policies.")
@@ -127,23 +136,46 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
 
 def _mentionable(kind: str, target: dict, mentions: set[str]) -> set[str]:
     """Those of ``mentions`` who can open ``target`` now, by the same rules as
-    its readers, checked only for the people mentioned: someone with no grant
-    or role for the item is refused without reading the company directory.
-    An account the directory turned off can no longer sign in to read a
-    mention. Raises when a grant, role or directory source cannot be read
-    (``_object`` would then list fewer readers, which must not read as "not
-    allowed")."""
+    its readers, checked only for the people mentioned. An account the
+    company directory turned off can no longer sign in to read a mention.
+    Run inside ``strict_reads.strict()``, so a source that cannot be read
+    raises instead of reading as "not allowed"."""
     from . import content_access, people_directory
 
     if kind == "task":
-        return people_directory.signed_in(mentions & _goal_readers(target["subject"], among=mentions, strict=True))
+        return people_directory.signed_in(_goal_readers(target["subject"], among=mentions))
     if kind == "run":
         return people_directory.signed_in(mentions & target["readers"])
     if kind == "approval":
-        readers = content_access.approval_readers(target["subject"], _world(), among=mentions, strict=True)
-        return people_directory.allowed(mentions & readers, "operate", strict=True)
-    # A policy: whoever holds its permission now.
-    return people_directory.allowed(mentions, target["permission"], strict=True)
+        readers = content_access.approval_readers(target["subject"], _world(), among=mentions)
+        return people_directory.allowed(mentions & readers, "operate")
+    # A policy: whoever holds its permission now, among the people it could list.
+    return people_directory.allowed(mentions, target["permission"], known_only=True)
+
+
+def _check_mentions(kind: str, target: dict, mentions: set[str]) -> None:
+    """A 422 when someone mentioned cannot open the item; a 503 when someone
+    cannot be confirmed now because a source could not be read."""
+    from . import strict_reads
+
+    unconfirmed = set()
+    with strict_reads.strict():
+        try:
+            outside = mentions - _mentionable(kind, target, mentions)
+        except Exception:  # noqa: BLE001 -- decided person by person below
+            # Each person on their own: someone who cannot open the item is
+            # refused even while someone else cannot be confirmed.
+            outside = set()
+            for mention in sorted(mentions):
+                try:
+                    if not _mentionable(kind, target, {mention}):
+                        outside.add(mention)
+                except Exception:  # noqa: BLE001 -- never mention someone unchecked
+                    unconfirmed.add(mention)
+    if outside:
+        raise HTTPException(422, _OUTSIDE)
+    if unconfirmed:
+        raise HTTPException(503, _UNCHECKED)
 
 
 def _people(readers: set[str], viewer: str, *, checked: bool = False) -> list[dict]:
@@ -208,16 +240,10 @@ def _post(request: Request, body: CommentIn) -> dict:
         raise HTTPException(403, "Sign in with your own account to comment.")
     target = _object(request, body.kind, body.id)
     mentions = set(body.mentions)
-    refused = HTTPException(422, "You can mention only people who can open this item. Choose someone from the list.")
     if author in mentions:
-        raise refused
+        raise HTTPException(422, _OUTSIDE)
     if mentions:
-        try:
-            mentionable = _mentionable(body.kind, target, mentions)
-        except Exception as exc:  # noqa: BLE001 -- never mention someone unchecked
-            raise HTTPException(503, _UNCHECKED) from exc
-        if mentions - mentionable:
-            raise refused
+        _check_mentions(body.kind, target, mentions)
     try:
         row = store.add(body.kind, body.id, author=author, body=body.body, mentions=body.mentions)
     except store.CommentError as exc:

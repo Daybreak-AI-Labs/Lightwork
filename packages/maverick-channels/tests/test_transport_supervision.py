@@ -729,7 +729,85 @@ def test_a_conversation_blocked_behind_a_briefly_unreadable_receipt_continues(mo
                                             message_id="y"), external_id="y")
         await until(lambda: "Y" in sends and sends.count("X") == 2)
         await worker.close()
-        assert sends[0] == "X" and sorted(sends[1:]) == ["X", "Y"] and worker._blocked_conversations == {}
+        # Only X could not be read, so Y's reply went first: a receipt that
+        # cannot be read holds nothing (when the whole store cannot be read,
+        # Y cannot be either, and the order holds; see the next test).
+        assert sends == ["X", "Y", "X"] and worker._blocked_conversations == {}
+    asyncio.run(run())
+
+
+def test_a_blocked_conversation_keeps_its_order_through_a_store_wide_read_outage(monkeypatch):
+    # X's send is refused and Y waits behind X; then no receipt can be read
+    # (the at-rest key is unavailable) for a few retry periods. Y cannot be
+    # read either, so once the key is back X is sent before Y.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)
+    outage = [False]
+    journal = _unreadable_journal(0, lambda record_id: outage[0])
+    sends = []
+
+    async def send(message, reply, route):
+        sends.append(message.text)
+        if len(sends) == 1:
+            raise DeliveryNotSent("X's first send is refused")
+        return "confirmed"
+
+    async def run():
+        async def handler(message):
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=send, journal=journal).start()
+        await asyncio.sleep(0.05)
+        await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="X", channel=Adapter.name,
+                                            message_id="x"), external_id="x")
+        await until(lambda: bool(worker._blocked_conversations))
+        await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="Y", channel=Adapter.name,
+                                            message_id="y"), external_id="y")
+        await asyncio.sleep(0.02)
+        outage[0] = True
+        await asyncio.sleep(0.25)
+        assert sends == ["X"]
+        outage[0] = False
+        await until(lambda: len(sends) == 3)
+        await worker.close()
+        assert sends == ["X", "X", "Y"]
+    asyncio.run(run())
+
+
+def test_a_redelivered_receipt_a_restore_holds_does_not_hold_the_conversation(monkeypatch):
+    # The provider redelivers a message whose receipt a restore holds with a
+    # refused reply: it reaches the worker through submit, is not run, and
+    # the person's next message is answered without waiting a retry period.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 60)
+    journal = _unreadable_journal(1, lambda record_id: False)
+    held = next(record_id for _, record_id in journal.store.iter_record_ids(start_after="", limit=10))
+    journal.change(journal.get(held), restore_hold=True, delivery="retryable")
+
+    async def run():
+        order = []
+        async def handler(message):
+            order.append(message.text)
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=AsyncMock(return_value="confirmed"), journal=journal)
+        handled = []
+        real_process = worker._process
+
+        async def process(record_id):
+            await real_process(record_id)
+            # The state right after, before a scan could tidy it up.
+            handled.append((record_id, dict(worker._blocked_conversations), set(worker._retry_after)))
+
+        worker._process = process
+        worker.start()
+        await asyncio.sleep(0.05)
+        await worker.submit(IncomingMessage(user_id="person", sender_id="person", text="saved-0",
+                                            channel=Adapter.name, message_id="0"), external_id="0")
+        await until(lambda: bool(handled))
+        assert handled[0] == (held, {}, set())
+        await worker.submit(IncomingMessage(user_id="person", sender_id="person", text="next",
+                                            channel=Adapter.name, message_id="n"), external_id="n")
+        await until(lambda: order == ["next"])
+        await worker.close()
     asyncio.run(run())
 
 

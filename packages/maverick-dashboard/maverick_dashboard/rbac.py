@@ -153,9 +153,7 @@ def default_role() -> str:
         raise
     except Exception as exc:
         raise RbacStoreError(f"RBAC defaults unavailable: {exc}") from exc
-def permissions_for(role: str | None, *, strict: bool = False) -> frozenset[str]:
-    """``strict``: an unreadable custom-role store raises instead of denying,
-    for a check that must tell "cannot be read" from "not allowed"."""
+def permissions_for(role: str | None) -> frozenset[str]:
     name = role or ""
     builtin = _PERMISSIONS.get(name)
     if builtin is not None:
@@ -167,7 +165,9 @@ def permissions_for(role: str | None, *, strict: bool = False) -> frozenset[str]
     except RbacStoreError:
         # A corrupt custom-role store must DENY, not crash every request or --
         # worse -- broaden access through some fallback.
-        if strict:
+        from . import strict_reads
+
+        if strict_reads.active():
             raise
         return frozenset()
     if rec is None:

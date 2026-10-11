@@ -190,7 +190,9 @@ class TransportWorker:
 
     async def _process(self, record_id):
         row = await asyncio.to_thread(self.journal.get, record_id)
-        if not row or not row.get("message"):
+        # A receipt a restore holds is not run (a redelivered message can
+        # bring one here through submit), and does not hold the conversation.
+        if not row or not row.get("message") or row.get("restore_hold"):
             return
         message = IncomingMessage(**{key: value for key, value in row["message"].items() if key != "attachments"})
         conversation = (message.user_id, message.sender_id)

@@ -276,7 +276,8 @@ def _current_grant(owner, requester, kind, resource_id, revision=None):
 
     from maverick_dashboard import content_access
 
-    grant = {"tenant": content_access.tenant(), "owner": owner, "requester": requester, "resource_kind": kind,
+    grant = {"id": f"car-{requester}-{kind}-{resource_id}", "purpose": "Payroll audit",
+             "tenant": content_access.tenant(), "owner": owner, "requester": requester, "resource_kind": kind,
              "resource_id": str(resource_id), "status": "approved", "expires_at": time.time() + 3600,
              "reviewed_by": DANA}
     if revision is not None:
@@ -356,13 +357,22 @@ def test_a_policy_mention_is_checked_for_the_person_named_not_against_a_capped_l
     posted = client.post("/api/v1/comments", json={"kind": "policy", "id": "tools", "body": "@op249",
                                                    "mentions": [last]})
     assert posted.status_code == 201, posted.text
+    # ...and it reaches them.
+    from maverick_dashboard.comments_api import mention_sources
+
+    assert [source["label"] for source in mention_sources(last)] == ["Mentioned you"]
+    # Someone the list could never show (not on the roster, never signed in)
+    # is refused, although the default role would cover them.
+    unknown = client.post("/api/v1/comments", json={"kind": "policy", "id": "tools", "body": "@x",
+                                                    "mentions": ["user:nobody-ever@evil.example"]})
+    assert unknown.status_code == 422
 
 
 def test_a_role_from_an_unreadable_group_mapping_holds_a_mention_instead_of_refusing_it(env, monkeypatch):
-    # Lee's operator role comes from a company-directory group. While the
-    # group mapping cannot be read, sign-in treats Lee as a viewer (the safe
-    # answer for access), but a mention is held, not refused.
-    from maverick_dashboard import auth, rbac, scim_groups
+    # Lee has signed in before and holds operator through a company-directory
+    # group. While the group mapping cannot be read, sign-in treats Lee as a
+    # viewer (the safe answer for access), but a mention is held, not refused.
+    from maverick_dashboard import auth, rbac, scim_groups, subject_directory
 
     client, _world = env
     roles = {key: value for key, value in ROLES.items() if key != LEE}
@@ -371,6 +381,7 @@ def test_a_role_from_an_unreadable_group_mapping_holds_a_mention_instead_of_refu
     _as(monkeypatch, DANA)
     monkeypatch.setattr(auth, "global_role_for_principal", real_role)
     monkeypatch.setattr(rbac, "get_stored_role", lambda p: roles.get(p))
+    subject_directory.record_login(LEE.removeprefix("user:"), [LEE.removeprefix("user:")])
     monkeypatch.setattr(scim_groups, "_ci_mapping", lambda key: {"ops": "operator"})
     monkeypatch.setattr(scim_groups, "group_names_for_principal",
                         lambda p: frozenset({"ops"}) if p == LEE else frozenset())
@@ -397,3 +408,73 @@ def test_posting_a_mention_reads_the_directory_once_for_the_check(env, monkeypat
     posted = client.post("/api/v1/comments", json={"kind": "policy", "id": "tools", "body": "@Lee",
                                                    "mentions": [LEE]})
     assert posted.status_code == 201 and len(reads) == 2
+
+
+def test_a_grant_holder_who_can_no_longer_open_the_task_is_not_offered_mentioned_or_told(env, monkeypatch):
+    # Vic still holds a reviewed grant for Ana's task but is now a viewer: a
+    # grant opens another person's task only to a global administrator. Vic
+    # is not offered, cannot be mentioned, and an earlier mention does not
+    # reach Vic with the task's title.
+    from maverick import comments
+    from maverick_dashboard import content_access
+    from maverick_dashboard.comments_api import mention_sources
+
+    client, world = env
+    goal_id = world.create_goal("Secret layoff plan for Q3", owner=ANA)
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list", lambda: [_current_grant(ANA, VIC, "goal", goal_id),
+                                                               _current_grant(ANA, LEE, "goal", goal_id)])
+    _as(monkeypatch, ANA)
+    task = {"kind": "task", "id": str(goal_id)}
+    assert [p["principal"] for p in client.get("/api/v1/comments", params=task).json()["people"]] == [LEE]
+    assert client.post("/api/v1/comments", json={**task, "body": "@Vic", "mentions": [VIC]}).status_code == 422
+    comments.add("task", str(goal_id), author=ANA, body="@Vic @Lee", mentions=[VIC, LEE])
+    assert mention_sources(VIC) == []
+    assert [source["title"] for source in mention_sources(LEE)] == ["Task: Secret layoff plan for Q3"]
+
+
+def test_a_mention_of_someone_who_cannot_open_the_item_is_refused_beside_one_that_cannot_be_confirmed(env, monkeypatch):
+    from maverick_dashboard import content_access
+
+    client, world = env
+    goal_id = world.create_goal("Reconcile vendor spend", owner=ANA)
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list", lambda: [_current_grant(ANA, LEE, "goal", goal_id)])
+    _as(monkeypatch, ANA)
+    _directory_unreadable(monkeypatch)
+    posted = client.post("/api/v1/comments", json={"kind": "task", "id": str(goal_id), "body": "@Lee @Vic",
+                                                   "mentions": [LEE, VIC]})
+    assert posted.status_code == 422
+
+
+def test_mentioning_an_approvals_owner_does_not_wait_on_the_grant_store(env, monkeypatch):
+    # Lee opens Ana's request through a grant; the grant store then fails.
+    # Ana's own access needs no grant, so mentioning Ana is still checked.
+    from maverick_dashboard import content_access
+
+    client, world = env
+    approval_id = world.create_approval("Pay invoice", requested_by=ANA)
+    revision = content_access.approval_resource(world.get_approval(approval_id), world)["resource_revision"]
+    reads = []
+
+    def grants():
+        reads.append(1)
+        if len(reads) > 1:
+            raise OSError("grant store unreadable")
+        return [_current_grant(ANA, LEE, "approval", approval_id, revision)]
+
+    monkeypatch.setattr(content_access, "enabled", lambda: True)
+    monkeypatch.setattr(content_access.STORE, "list", grants)
+    _as(monkeypatch, LEE)
+    posted = client.post("/api/v1/comments", json={"kind": "approval", "id": str(approval_id), "body": "@Ana",
+                                                   "mentions": [ANA]})
+    assert posted.status_code == 201, posted.text
+
+
+def test_a_policy_mention_of_someone_without_the_role_is_refused_while_the_directory_is_unreadable(env, monkeypatch):
+    client, _world = env
+    _as(monkeypatch, DANA)
+    _directory_unreadable(monkeypatch)
+    posted = client.post("/api/v1/comments", json={"kind": "policy", "id": "tools", "body": "@Vic",
+                                                   "mentions": [VIC]})
+    assert posted.status_code == 422
