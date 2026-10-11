@@ -28,6 +28,8 @@ POLICIES = {
     "data-use": ("Data use rules", "/data-use", "operate"),
 }
 _TASK_PERMISSION = "view"
+_UNCHECKED = ("Mentions can't be checked right now: the company directory could not be read. "
+              "Post without the mention or try again.")
 
 
 def _comments():
@@ -83,7 +85,8 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
             auth.require_permission(request, _TASK_PERMISSION)
             auth.assert_goal_access(request, goal)
         readers = _goal_readers(goal)
-        return {"label": f"Task: {str(goal.title)[:120]}", "href": f"/chat/goal/{goal.id}", "readers": readers}
+        return {"label": f"Task: {str(goal.title)[:120]}", "href": f"/chat/goal/{goal.id}", "readers": readers,
+                "possible": readers}
     if kind == "run":
         from maverick.flow import store
 
@@ -98,8 +101,9 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
             raise HTTPException(404, "That run no longer exists.")
         owner = getattr(run, "owner", "") or ""
         flow_id = getattr(run, "flow_id", "") or "flow"
+        readers = {owner} if owner else set()
         return {"label": "Workflow run", "href": f"/flows/{flow_id}/runs/{object_id}",
-                "readers": {owner} if owner else set()}
+                "readers": readers, "possible": readers}
     if kind == "approval":
         from . import content_access
 
@@ -112,10 +116,11 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
             approval = world.get_approval(int(object_id))
             if approval is None:
                 raise HTTPException(404, "No such approval.")
-        readers = people_directory.allowed(content_access.approval_readers(approval, world), "operate")
+        possible = set(content_access.approval_readers(approval, world))
+        readers = people_directory.allowed(possible, "operate")
         # ``checked``: these readers already passed the company directory check.
         return {"label": f"Request #{approval.id}", "href": f"/approvals#approval-{approval.id}",
-                "readers": readers, "checked": True}
+                "readers": readers, "checked": True, "possible": possible}
     if kind == "policy":
         if object_id not in POLICIES:
             raise HTTPException(404, "That policy has no comments.")
@@ -125,32 +130,37 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
         readers = {p["principal"] for p in people_directory.candidates(permission)}
         if principal and not people_directory.may(principal, permission):
             readers.discard(principal)
-        return {"label": f"Policy: {title}", "href": href, "readers": readers, "checked": True}
+        return {"label": f"Policy: {title}", "href": href, "readers": readers, "checked": True,
+                "permission": permission}
     raise HTTPException(404, "Comments work on tasks, runs, approvals and policies.")
 
 
-def _signed_in(principals) -> set[str]:
-    """Those the company directory (SCIM) has not turned off: an account it
-    turned off can no longer sign in to read a mention. Who may read the item
-    is unchanged. Raises when the directory cannot be read."""
-    principals = set(principals)
-    if not principals:
-        return set()
-    from .scim_groups import active_check
+def _mentionable(target: dict, mentions: set[str]) -> set[str]:
+    """Those of ``mentions`` who may be mentioned on ``target`` now, decided by
+    one fresh read of the roster and company directory: an account the
+    directory turned off can no longer sign in to read a mention. Raises when
+    either cannot be read (the readers ``_object`` lists would then be empty,
+    which must not read as "not allowed")."""
+    from . import people_directory
 
-    check = active_check()
-    return {principal for principal in principals if check(principal) is not False}
+    if "permission" in target:  # a policy: whoever holds its permission now
+        holders = people_directory.candidates(target["permission"], strict=True)
+        return mentions & {person["principal"] for person in holders}
+    if target.get("checked"):  # an approval: of those who can open it, whoever may operate now
+        return people_directory.allowed(mentions & target["possible"], "operate", strict=True)
+    return people_directory.signed_in(mentions & target["readers"])
 
 
 def _people(readers: set[str], viewer: str, *, checked: bool = False) -> list[dict]:
     """The people a mention can name. ``checked``: the readers already
     passed the directory check (approvals and policies)."""
+    from . import people_directory
     from .identity_format import humanize_principal
 
     offered = readers - {viewer}
     if not checked:
         try:
-            offered = _signed_in(offered)
+            offered = people_directory.signed_in(offered)
         except Exception:  # noqa: BLE001 -- an unreadable directory offers nobody to mention
             log.warning("comment mentions unavailable: the company directory could not be read")
             offered = set()
@@ -201,18 +211,19 @@ def _post(request: Request, body: CommentIn) -> dict:
     if not author.startswith("user:"):
         raise HTTPException(403, "Sign in with your own account to comment.")
     target = _object(request, body.kind, body.id)
-    signed_in = set()
-    if body.mentions:
-        # Checked first, for every kind: an unreadable directory also empties
-        # an approval's or policy's readers, which would read as "not allowed".
+    mentions = set(body.mentions)
+    refused = HTTPException(422, "You can mention only people who can open this item. Choose someone from the list.")
+    # Yourself, or someone who cannot open the item whatever the directory
+    # says, is refused before the directory is read.
+    if author in mentions or not mentions <= target.get("possible", mentions):
+        raise refused
+    if mentions:
         try:
-            signed_in = _signed_in(body.mentions)
+            mentionable = _mentionable(target, mentions)
         except Exception as exc:  # noqa: BLE001 -- never mention someone unchecked
-            raise HTTPException(503, "Mentions can't be checked right now: the company directory could not "
-                                     "be read. Post without the mention or try again.") from exc
-    outside = [m for m in body.mentions if m not in target["readers"] or m == author or m not in signed_in]
-    if outside:
-        raise HTTPException(422, "You can mention only people who can open this item. Choose someone from the list.")
+            raise HTTPException(503, _UNCHECKED) from exc
+        if mentions - mentionable:
+            raise refused
     try:
         row = store.add(body.kind, body.id, author=author, body=body.body, mentions=body.mentions)
     except store.CommentError as exc:

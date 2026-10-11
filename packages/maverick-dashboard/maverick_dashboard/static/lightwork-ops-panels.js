@@ -792,7 +792,8 @@
         var submit = form.querySelector('button[type="submit"]');
         var body = {action: form.elements.action.value.trim(), detail: form.elements.detail.value.trim(),
           decision_class: form.elements.decision_class.value.trim(), flaw: form.elements.flaw.value.trim(),
-          risk: form.elements.risk.value, requested_by: form.elements.requested_by.value || null};
+          risk: form.elements.risk.value, requested_by: form.elements.requested_by.value || null,
+          undoable: !form.elements.undoable || form.elements.undoable.value !== 'no'};
         if (!body.action || !body.detail || !body.decision_class || !body.flaw) { say(msg, 'Fill in every field.'); return; }
         if (!(await confirmed('Place this test approval in the approvals queue? Reviewers are not told it is a test.', 'Place test'))) return;
         submit.disabled = true;

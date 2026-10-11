@@ -280,7 +280,24 @@ test('a written reviewer test is placed only after confirming', async (t) => {
   await ui.settle();
   assert.match(ui.confirms[0], /not told it is a test/);
   assert.deepEqual(posts(ui, '/canaries/written')[0].body, {action: 'Pay invoice', detail: 'Pay Acme',
-    decision_class: 'payments', flaw: 'Changed account', risk: 'medium', requested_by: 'user:bo'});
+    decision_class: 'payments', flaw: 'Changed account', risk: 'medium', requested_by: 'user:bo', undoable: true});
+});
+
+test('a written reviewer test can imitate a request that takes effect at once', async (t) => {
+  const ui = await fixture(partial('_ops_immune.html'), (url) => {
+    if (url.endsWith('/choices')) return response({people: [], decision_classes: ['merges']});
+    return response({planted: 1, message: 'The test approval is in the approvals queue.'});
+  });
+  t.after(() => ui.window.close());
+  const form = ui.document.getElementById('ops-canary-form');
+  form.elements.action.value = 'Merge branch';
+  form.elements.detail.value = 'Merge feature into main';
+  form.elements.decision_class.value = 'merges';
+  form.elements.flaw.value = 'Skips the tests';
+  form.elements.undoable.value = 'no';
+  form.dispatchEvent(new ui.window.Event('submit', {cancelable: true}));
+  await ui.settle();
+  assert.equal(posts(ui, '/canaries/written')[0].body.undoable, false);
 });
 
 // ---- checkpoint folder and pinned keys (installation administrators) -----------

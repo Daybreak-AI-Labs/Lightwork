@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from click.testing import CliRunner
 from maverick import config
 from maverick.cli import main
@@ -221,3 +222,18 @@ def test_a_pack_with_no_allowlist_can_call_every_tool(monkeypatch):
     monkeypatch.setattr(domain, "domain_capability", lambda *a, **k: Capability(principal="agent:custom"))
     tools = n.runtime_tools(type("P", (), {"name": "custom"})())
     assert {"read_file", "email", "http_fetch"} <= tools
+
+
+@pytest.mark.parametrize(("flags", "held"), [((), True), (("--acts-at-once",), False)])
+def test_the_canary_command_matches_the_undo_of_the_request_it_imitates(tmp_path, monkeypatch, flags, held):
+    from maverick import config, world_model
+    from maverick.channel_approvals import held_for_undo
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "w.db")
+    monkeypatch.setattr(config, "get_immune", lambda: {"canaries": True})
+    world = world_model.WorldModel(tmp_path / "w.db")
+    import maverick.cli._immune_groups as groups
+    monkeypatch.setattr(groups, "open_world", lambda *a, **k: world)
+    out = _run("canary", "--action", "a", "--detail", "d", "--class", "c", "--flaw", "f", *flags)
+    assert out.exit_code == 0, out.output
+    assert held_for_undo(world.pending_approvals()[0]) is held

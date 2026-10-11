@@ -53,9 +53,22 @@ def _roster():
     return tenant, (rbac.list_tenant_roles(tenant) if tenant else rbac.list_users())
 
 
-def allowed(principals, permission: str) -> set[str]:
+def signed_in(principals) -> set[str]:
+    """Those of ``principals`` the company directory has not turned off (see
+    :func:`_active_check`). Not read for no principals; raises when it cannot
+    be read."""
+    principals = set(principals)
+    if not principals:
+        return set()
+    active = _active_check()
+    return {principal for principal in principals if active(principal)}
+
+
+def allowed(principals, permission: str, *, strict: bool = False) -> set[str]:
     """Those of ``principals`` who currently hold ``permission`` in this
-    workspace (see :func:`may`), reading the roster and directory once."""
+    workspace (see :func:`may`), reading the roster and directory once.
+    ``strict``: an unreadable roster or directory raises instead of
+    allowing nobody."""
     from . import rbac
 
     try:
@@ -66,6 +79,8 @@ def allowed(principals, permission: str) -> set[str]:
                 and permission in rbac.permissions_for(_role(principal, tenant, roles))
                 and active(principal)}
     except Exception:  # noqa: BLE001 -- an unreadable roster offers nobody
+        if strict:
+            raise
         log.warning("people directory unavailable", exc_info=True)
         return set()
 
@@ -76,8 +91,10 @@ def may(principal: str, permission: str) -> bool:
     return principal.startswith("user:") and principal in allowed({principal}, permission)
 
 
-def candidates(permission: str, *, limit: int = 200) -> list[dict]:
-    """``[{principal, label}]`` for everyone who holds ``permission`` now."""
+def candidates(permission: str, *, limit: int = 200, strict: bool = False) -> list[dict]:
+    """``[{principal, label}]`` for everyone who holds ``permission`` now.
+    ``strict``: an unreadable roster or directory raises instead of
+    offering nobody."""
     from . import rbac
     from .identity_format import humanize_principal
 
@@ -86,6 +103,8 @@ def candidates(permission: str, *, limit: int = 200) -> list[dict]:
         known = _known(tenant, roles)
         active = _active_check()
     except Exception:  # noqa: BLE001 -- an unreadable roster offers nobody
+        if strict:
+            raise
         log.warning("people directory unavailable", exc_info=True)
         return []
     out: dict[str, dict] = {}

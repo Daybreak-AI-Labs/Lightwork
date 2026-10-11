@@ -183,7 +183,7 @@ def test_an_unreadable_company_directory_offers_nobody_and_holds_mentions(env, m
 
 def test_an_unreadable_company_directory_holds_a_mention_on_any_thread_with_the_same_answer(env, monkeypatch):
     # On an approval or policy thread the readers themselves come from the
-    # directory, so the mention check runs first: a 503, not "not allowed".
+    # directory, so an unreadable one is a 503, not "not allowed".
     from maverick_dashboard import scim_groups
 
     client, world = env
@@ -209,3 +209,63 @@ def test_a_thread_with_nobody_else_to_offer_does_not_read_the_directory(env, mon
     monkeypatch.setattr(scim_groups, "active_check", lambda: reads.append(1) or real())
     assert client.get("/api/v1/comments", params={"kind": "task", "id": str(goal_id)}).json()["people"] == []
     assert reads == []
+
+
+def test_a_mention_nobody_could_accept_is_refused_while_the_directory_is_unreadable(env, monkeypatch):
+    # Someone who cannot open the item, or yourself, is refused whatever the
+    # directory says: a 422 now, not a 503 that fails again after a retry.
+    from maverick_dashboard import scim_groups
+
+    client, world = env
+    goal_id = world.create_goal("Reconcile vendor spend", owner=ANA)
+    _as(monkeypatch, ANA)
+
+    def unreadable():
+        raise OSError("directory unreadable")
+
+    monkeypatch.setattr(scim_groups, "active_check", unreadable)
+    task = {"kind": "task", "id": str(goal_id)}
+    assert client.post("/api/v1/comments", json={**task, "body": "@Lee", "mentions": [LEE]}).status_code == 422
+    assert client.post("/api/v1/comments", json={**task, "body": "@Ana", "mentions": [ANA]}).status_code == 422
+    _as(monkeypatch, DANA)
+    policy = {"kind": "policy", "id": "tools"}
+    assert client.post("/api/v1/comments", json={**policy, "body": "@Dana", "mentions": [DANA]}).status_code == 422
+
+
+def test_a_mention_is_decided_by_one_fresh_read_of_the_directory(env, monkeypatch):
+    # The directory read that lists the policy's readers fails; the one that
+    # checks the mention a moment later succeeds. The mention is decided by
+    # that read: Lee manages tool permissions, so it is posted.
+    from maverick_dashboard import scim_groups
+
+    client, _world = env
+    _as(monkeypatch, DANA)
+    real, failures = scim_groups.active_check, [1]
+
+    def flaky():
+        if failures:
+            failures.pop()
+            raise OSError("directory briefly unreadable")
+        return real()
+
+    monkeypatch.setattr(scim_groups, "active_check", flaky)
+    posted = client.post("/api/v1/comments", json={"kind": "policy", "id": "tools", "body": "@Lee",
+                                                   "mentions": [LEE]})
+    assert posted.status_code == 201, posted.text
+    assert failures == []
+
+
+def test_an_unreadable_role_list_holds_a_mention_instead_of_refusing_it(env, monkeypatch):
+    from maverick_dashboard import rbac
+
+    client, _world = env
+    _as(monkeypatch, DANA)
+
+    def unreadable():
+        raise OSError("role list unreadable")
+
+    monkeypatch.setattr(rbac, "list_users", unreadable)
+    posted = client.post("/api/v1/comments", json={"kind": "policy", "id": "tools", "body": "@Lee",
+                                                   "mentions": [LEE]})
+    assert posted.status_code == 503
+    assert "can't be checked right now" in posted.json()["detail"]

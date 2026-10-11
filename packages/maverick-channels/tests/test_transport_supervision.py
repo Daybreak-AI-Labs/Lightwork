@@ -616,14 +616,15 @@ def _unreadable_journal(count, failing):
     return journal
 
 
-def test_a_receipt_that_never_opens_leaves_the_worker_idle(monkeypatch, caplog):
-    # Only that receipt is read again each retry period; the worker no longer
-    # re-reads and decrypts every saved receipt while it stays unreadable.
+def test_a_receipt_that_never_opens_is_reported_once_and_new_messages_keep_their_order(monkeypatch, caplog):
+    # While a receipt stays unreadable the worker keeps scanning (it may open
+    # again) and new messages go through that ordered scan; the warning is
+    # written when the set of unreadable receipts changes, not every scan.
     import logging
 
     monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.02)
     poisoned = []
-    journal = _unreadable_journal(2, lambda record_id: record_id in poisoned)
+    journal = _unreadable_journal(1, lambda record_id: record_id in poisoned)
     poisoned.append(next(record_id for _, record_id in journal.store.iter_record_ids(start_after="", limit=10)))
     async def run():
         order = []
@@ -631,18 +632,40 @@ def test_a_receipt_that_never_opens_leaves_the_worker_idle(monkeypatch, caplog):
             order.append(message.text)
             return "answer"
         worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
-                                 send=AsyncMock(return_value="confirmed"), journal=journal)
-        original, scans = worker._oldest_window, []
-        worker._oldest_window = lambda: scans.append(1) or original()
-        worker.start()
-        await until(lambda: len(order) == 1)
-        await asyncio.sleep(0.3)
-        idle_scans = len(scans)   # before close(), whose shutdown scan is expected
+                                 send=AsyncMock(return_value="confirmed"), journal=journal).start()
+        for index in range(3):
+            await worker.submit(IncomingMessage(user_id="p", sender_id="p", text=f"new-{index}",
+                                                channel=Adapter.name, message_id=f"n{index}"), external_id=f"n{index}")
+        await until(lambda: len(order) == 3)
+        await asyncio.sleep(0.2)
         await worker.close()
-        assert idle_scans == 1
+        assert order == ["new-0", "new-1", "new-2"]
     with caplog.at_level(logging.WARNING):
         asyncio.run(run())
-    assert sum("could not be read" in record.getMessage() for record in caplog.records) <= 2  # start-up, shutdown
+    assert sum("could not be read" in record.getMessage() for record in caplog.records) == 1
+
+
+def test_a_receipt_that_opens_again_is_answered_before_a_newer_message(monkeypatch):
+    # The start-up scan could not read X; the key comes back; the person
+    # sends Y. X was accepted first, so it is answered first.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 60)
+    outage = [True]
+    journal = _unreadable_journal(1, lambda record_id: outage[0])
+    async def run():
+        order = []
+        async def handler(message):
+            order.append(message.text)
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=AsyncMock(return_value="confirmed"), journal=journal).start()
+        await asyncio.sleep(0.05)
+        outage[0] = False
+        await worker.submit(IncomingMessage(user_id="person", sender_id="person", text="Y", channel=Adapter.name,
+                                            message_id="y"), external_id="y")
+        await until(lambda: len(order) == 2)
+        await worker.close()
+        assert order == ["saved-0", "Y"]
+    asyncio.run(run())
 
 
 def test_every_receipt_is_recovered_after_a_store_wide_read_outage(monkeypatch):
@@ -707,4 +730,80 @@ def test_a_conversation_blocked_behind_a_briefly_unreadable_receipt_continues(mo
         await until(lambda: "Y" in sends)
         await worker.close()
         assert sends == ["X", "X", "Y"] and worker._blocked_conversations == {}
+    asyncio.run(run())
+
+
+def test_a_conversation_blocked_behind_a_receipt_that_stays_unreadable_waits_a_retry_period(monkeypatch):
+    # X's send is refused, so Y waits behind X; then X cannot be read at all.
+    # Y keeps waiting (X may open again and was accepted first), checked once
+    # a retry period instead of in back-to-back full scans.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)
+    state = {"x": None, "sealed": False}
+    journal = _unreadable_journal(0, lambda record_id: state["sealed"] and record_id == state["x"])
+    sends = []
+
+    async def send(message, reply, route):
+        sends.append(message.text)
+        if message.text == "X":
+            raise DeliveryNotSent("X's send is refused")
+        return "confirmed"
+
+    async def run():
+        async def handler(message):
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=send, journal=journal).start()
+        await asyncio.sleep(0.05)
+        x = await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="X", channel=Adapter.name,
+                                                message_id="x"), external_id="x")
+        state["x"] = x["id"]
+        await until(lambda: bool(worker._blocked_conversations))
+        state["sealed"] = True
+        scans = []
+        real_window = worker._oldest_window
+
+        def counted():
+            scans.append(1)
+            return real_window()
+
+        worker._oldest_window = counted
+        await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="Y", channel=Adapter.name,
+                                            message_id="y"), external_id="y")
+        await asyncio.sleep(0.5)
+        await worker.close()
+        assert sends == ["X"]
+        # Ten retry periods: one scan picks up Y, and one more follows its
+        # batch because the scan was incomplete. Back to back, it was over 1,000.
+        assert len(scans) <= 25, len(scans)
+    asyncio.run(run())
+
+
+def test_a_conversation_continues_once_its_blocking_receipt_is_gone(monkeypatch):
+    # X's send is refused, so Y waits behind X; X is then removed (erased or
+    # settled elsewhere). Nothing will ever retry X, so Y is delivered.
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)
+    journal = _unreadable_journal(0, lambda record_id: False)
+    sends = []
+
+    async def send(message, reply, route):
+        sends.append(message.text)
+        if message.text == "X":
+            raise DeliveryNotSent("X's send is refused")
+        return "confirmed"
+
+    async def run():
+        async def handler(message):
+            return "answer"
+        worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
+                                 send=send, journal=journal).start()
+        await asyncio.sleep(0.05)
+        x = await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="X", channel=Adapter.name,
+                                                message_id="x"), external_id="x")
+        await until(lambda: bool(worker._blocked_conversations))
+        journal.store.delete(x["id"], expected_revision=journal.store.get(x["id"])["revision"])
+        await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="Y", channel=Adapter.name,
+                                            message_id="y"), external_id="y")
+        await until(lambda: "Y" in sends)
+        await worker.close()
+        assert sends == ["X", "Y"] and worker._blocked_conversations == {}
     asyncio.run(run())
