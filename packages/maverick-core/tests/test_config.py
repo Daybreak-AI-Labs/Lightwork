@@ -576,7 +576,7 @@ def _sealed_overlay(home):
 
     (home / "config.toml").write_text('[budget]\nmax_dollars = 5.0\n', encoding="utf-8")
     with crypto_at_rest.deployment_key_scope():
-        token = crypto_at_rest.seal_to_str("sk-test-not-a-real-key")
+        token = crypto_at_rest.seal_to_str("sk-test-not-a-real-key")  # pragma: allowlist secret
     config.dashboard_overrides_path().write_text(f'[providers.anthropic]\napi_key = "{token}"\n', encoding="utf-8")
 
 
@@ -603,7 +603,7 @@ def test_a_snapshot_scope_reads_and_decrypts_the_configuration_once(sealed_home,
     monkeypatch.setattr(crypto_at_rest, "unseal_many_from_str", lambda values: opened.append(1) or real(values))
     with config.config_snapshot_scope():
         for _ in range(50):
-            assert config.load_config()["providers"]["anthropic"]["api_key"] == "sk-test-not-a-real-key"
+            assert config.load_config()["providers"]["anthropic"]["api_key"] == "sk-test-not-a-real-key"  # pragma: allowlist secret
     assert len(opened) == 1
     load_config()
     load_config()
@@ -619,7 +619,7 @@ def test_each_reader_in_a_snapshot_scope_gets_its_own_copy(sealed_home):
         first["providers"].clear()
         second = config.load_config()
     assert second["budget"]["max_dollars"] == 5.0
-    assert second["providers"]["anthropic"]["api_key"] == "sk-test-not-a-real-key"
+    assert second["providers"]["anthropic"]["api_key"] == "sk-test-not-a-real-key"  # pragma: allowlist secret
 
 
 def test_a_policy_saved_inside_a_snapshot_scope_is_read_at_once(sealed_home):

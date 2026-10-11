@@ -113,7 +113,7 @@ def test_a_request_reads_the_sealed_configuration_once_and_still_sees_a_policy_s
     config.reset_config_cache()
     (tmp_path / "config.toml").write_text("[budget]\nmax_dollars = 5.0\n", encoding="utf-8")
     with crypto_at_rest.deployment_key_scope():
-        token = crypto_at_rest.seal_to_str("sk-test-not-a-real-key")
+        token = crypto_at_rest.seal_to_str("sk-test-not-a-real-key")  # pragma: allowlist secret
     config.dashboard_overrides_path().write_text(f'[providers.anthropic]\napi_key = "{token}"\n', encoding="utf-8")
     opened = []
     real = crypto_at_rest.unseal_many_from_str
@@ -136,7 +136,7 @@ def test_a_request_reads_the_sealed_configuration_once_and_still_sees_a_policy_s
         return {"keys": sorted(set(keys)), "budget": budget}
 
     try:
-        assert TestClient(app).get("/x").json() == {"keys": ["sk-test-not-a-real-key"], "budget": 7.0}
+        assert TestClient(app).get("/x").json() == {"keys": ["sk-test-not-a-real-key"], "budget": 7.0}  # pragma: allowlist secret
         assert len(opened) == 2  # once, then once more after the save
     finally:
         config.reset_config_cache()
