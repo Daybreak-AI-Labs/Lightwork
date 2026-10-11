@@ -9,17 +9,12 @@ request and :func:`memoized` serves repeat display/configuration questions.
 An authorization boundary uses :func:`fresh_configuration` because policy may
 change while a request waits. Retained background workers explicitly discard
 their copied HTTP memo. Outside a request scope nothing is cached.
-
-An HTTP request also reuses the at-rest key that opens secrets saved from
-Settings (``maverick.config.at_rest_key_scope``) while the key files are
-unchanged. Every authorization boundary resolves it again, and the scope closes
-when the response is sent; a retained worker discards it with the memo.
 """
 from __future__ import annotations
 
 import contextvars
 from collections.abc import Callable
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from typing import Any, TypeVar
 
 T = TypeVar("T")
@@ -52,22 +47,15 @@ def discard_request_memo() -> None:
     grants belong to the originating HTTP request, not the worker's lifetime.
     Call this in the copied context, leaving the live request's memo intact.
     """
-    from maverick.config import discard_at_rest_key_scope
-
     _SCOPE.set(None)
-    discard_at_rest_key_scope()
 
 
 @contextmanager
 def fresh_configuration():
     """Recheck live policy at an authorization boundary without clearing a page."""
-    from maverick.config import at_rest_key_scope
-
-    in_request = _SCOPE.get() is not None
     token = _SCOPE.set(None)
     try:
-        with at_rest_key_scope() if in_request else nullcontext():
-            yield
+        yield
     finally:
         _SCOPE.reset(token)
 
@@ -89,22 +77,6 @@ class RequestMemoMiddleware:
             return
         token = _SCOPE.set({})
         try:
-            if scope["type"] == "http":
-                await self._http(scope, receive, send)
-            else:
-                await self.app(scope, receive, send)
+            await self.app(scope, receive, send)
         finally:
             _SCOPE.reset(token)
-
-    async def _http(self, scope, receive, send) -> None:
-        from maverick.config import at_rest_key_scope
-
-        with at_rest_key_scope() as keys:
-
-            async def send_and_close(message) -> None:
-                # Background tasks run after the last body; they resolve per read.
-                if message["type"] == "http.response.body" and not message.get("more_body", False):
-                    keys.close()
-                await send(message)
-
-            await self.app(scope, receive, send_and_close)

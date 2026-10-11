@@ -36,7 +36,6 @@ import math
 import os
 import re
 import time
-from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -289,66 +288,6 @@ def _tree_contains_sealed_value(value: object) -> bool:
 _UNSEALING: ContextVar[bool] = ContextVar("maverick_config_unsealing", default=False)
 
 
-class _AtRestKeys:
-    """The deployment at-rest keys resolved within one dashboard request."""
-
-    __slots__ = ("open", "entry")
-
-    def __init__(self) -> None:
-        self.open = True
-        self.entry: tuple[tuple, dict] | None = None
-
-    def close(self) -> None:
-        self.open = False
-        self.entry = None
-
-
-# Opening the sealed dashboard overlay resolves the at-rest key: it re-secures
-# the key directory and file (on Windows re-applying their owner-only ACLs) and
-# reads the key. A dashboard page reads the configuration about 350 times, so
-# once a secret was saved from Settings that was most of the page's time. Inside
-# a request the resolved key is reused while
-# ``crypto_at_rest.key_material_identity()`` is unchanged; any rotation,
-# replacement, ownership or permission change resolves it again. Every other
-# step of a read (file stats, parsing, ${VAR} interpolation, source errors and
-# the decryption itself) still runs each time. The request closes the scope
-# when it sends its response, so background work that copied it resolves on
-# every read again.
-_AT_REST_KEYS: ContextVar[_AtRestKeys | None] = ContextVar("maverick_config_at_rest_keys", default=None)
-
-
-@contextmanager
-def at_rest_key_scope():
-    """Reuse the resolved at-rest key for the dashboard overlay in this scope."""
-    keys = _AtRestKeys()
-    token = _AT_REST_KEYS.set(keys)
-    try:
-        yield keys
-    finally:
-        keys.close()
-        _AT_REST_KEYS.reset(token)
-
-
-def discard_at_rest_key_scope() -> None:
-    """Stop reusing resolved keys in a copied context (a retained worker)."""
-    _AT_REST_KEYS.set(None)
-
-
-def _unseal_tokens(sealed: list[str]) -> list[str]:
-    keys = _AT_REST_KEYS.get()
-    if keys is None or not keys.open:
-        return crypto_at_rest.unseal_many_from_str(sealed)
-    entry = keys.entry
-    if entry is not None and entry[0] == crypto_at_rest.key_material_identity():
-        return crypto_at_rest.unseal_many_from_str(sealed, key_cache=entry[1])
-    ciphers: dict = {}
-    opened = crypto_at_rest.unseal_many_from_str(sealed, key_cache=ciphers)
-    if keys.open:
-        # Resolving may have tightened the key files: label what is on disk now.
-        keys.entry = (crypto_at_rest.key_material_identity(), ciphers)
-    return opened
-
-
 def _unseal_config_tree(value: object) -> object:
     """Return a detached config tree with authenticated ciphertext opened.
 
@@ -357,10 +296,8 @@ def _unseal_config_tree(value: object) -> object:
     tenant context.  Legacy plaintext remains readable; a genuine ciphertext
     that cannot be authenticated fails closed through ``unseal_many_from_str``.
     Each key is resolved once within this read, never cached across config
-    reads outside an ``at_rest_key_scope`` (and inside one only while the key
-    material is unchanged), so rotations and key-file permission changes remain
-    observable. Re-entrant loads (see ``_UNSEALING``) receive the tokens
-    unopened.
+    reads, so rotations and key-file permission changes remain observable.
+    Re-entrant loads (see ``_UNSEALING``) receive the tokens unopened.
     """
     if not _tree_contains_sealed_value(value) or _UNSEALING.get():
         return value
@@ -391,7 +328,7 @@ def _unseal_config_tree(value: object) -> object:
 
         with crypto_at_rest.deployment_key_scope():
             collect(value)
-            opened = dict(zip(sealed, _unseal_tokens(list(sealed)), strict=True))
+            opened = dict(zip(sealed, crypto_at_rest.unseal_many_from_str(list(sealed)), strict=True))
             return walk(value)
     finally:
         _UNSEALING.reset(token)
