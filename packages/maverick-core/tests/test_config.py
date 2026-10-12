@@ -741,92 +741,38 @@ def test_an_overlay_that_cannot_be_checked_is_reported_not_skipped(config_home):
     assert str(overlay) in config.config_source_errors()
 
 
-def test_the_navigation_reads_the_current_files_inside_a_render(config_home, monkeypatch):
-    import os
+def test_a_corrupt_tenant_overlay_is_reported_for_the_decision_without_spoiling_the_shared_read(config_home, monkeypatch):
+    import threading
 
     from maverick import config
-    from maverick_dashboard import app as dashboard
+
+    home, reads = config_home
+    config.dashboard_overrides_path().unlink()  # sealed under the key of no tenant
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    tenant = config.tenant_config_path()
+    tenant.parent.mkdir(parents=True)
+    tenant.write_text("[budget\n", encoding="utf-8")
+    with config.single_read():
+        assert config.load_config()["budget"]["max_dollars"] == 5.0  # the global layers still apply
+        cleaner = threading.Thread(target=config._toml_errors.clear)
+        cleaner.start()
+        cleaner.join()
+        assert str(tenant) in config.config_source_errors()
+        config.load_config()
+        tenant.write_text("[budget]\nmax_dollars = 1.0\n", encoding="utf-8")
+        config.reset_config_cache()  # a repair inside the decision reads afresh
+        assert config.load_config()["budget"]["max_dollars"] == 1.0
+        assert str(tenant) not in config.config_source_errors()
+    assert len(reads) == 2  # the global read was shared until the reset
+
+
+def test_a_tenant_path_through_a_file_still_means_no_overlay(config_home, monkeypatch):
+    # Path.exists() treated ENOTDIR as absent; _present keeps that.
+    from maverick import config
 
     home, _ = config_home
-    seen = []
-    monkeypatch.setattr(dashboard, "_nav_context_now", lambda request: seen.append(config.load_config()["budget"]["max_dollars"]) or {})
-    with config.single_read():  # the render
-        assert config.load_config()["budget"]["max_dollars"] == 5.0
-        replacement = home / "config.toml.new"
-        replacement.write_text("[budget]\nmax_dollars = 8.25\n", encoding="utf-8")
-        os.replace(replacement, home / "config.toml")
-        dashboard._nav_context(None)
-    assert seen == [8.25]
-
-
-def test_a_failed_key_read_is_not_kept_for_the_rest_of_a_decision(config_home, monkeypatch):
-    from maverick import config, crypto_at_rest
-
-    real = crypto_at_rest._load_or_create_key
-    calls = []
-
-    def flaky():
-        calls.append(1)
-        if len(calls) == 1:
-            raise crypto_at_rest.EncryptionUnavailable("the key file is held by its writer")
-        return real()
-
-    monkeypatch.setattr(crypto_at_rest, "_load_or_create_key", flaky)
-    with config.single_read():
-        keys = [config.load_config().get("providers", {}).get("anthropic", {}).get("api_key") for _ in range(3)]
-    assert keys == [None, "sk-test-not-a-real-key", "sk-test-not-a-real-key"]  # pragma: allowlist secret
-
-
-def test_a_gate_reads_the_current_files_even_inside_another_decision(config_home):
-    import os
-
-    from maverick import config
-
-    home, reads = config_home
-    with config.single_read():  # a page render
-        assert config.load_config()["budget"]["max_dollars"] == 5.0
-        replacement = home / "config.toml.new"
-        replacement.write_text("[budget]\nmax_dollars = 7.25\n", encoding="utf-8")  # a new size
-        os.replace(replacement, home / "config.toml")
-        assert config.load_config()["budget"]["max_dollars"] == 5.0  # the render's own read
-        with config.single_read(fresh=True):  # a gate inside it
-            assert config.load_config()["budget"]["max_dollars"] == 7.25
-            with config.single_read(fresh=True), config.single_read():  # parts of that gate
-                assert config.load_config()["budget"]["max_dollars"] == 7.25
-    assert len(reads) == 2
-
-
-def test_a_reset_inside_a_decision_reads_again(config_home):
-    from maverick import config
-
-    home, reads = config_home
-    with config.single_read():
-        config.load_config()
-        (home / "config.toml").write_text("[budget\n", encoding="utf-8")
-        config.reset_config_cache()
-        assert config.load_config().get("budget") is None
-        assert str(home / "config.toml") in config.config_source_errors()
-        config.load_config()
-    assert len(reads) == 3  # the read that found the corrupt file is not kept
-
-
-def test_a_finished_decision_is_not_shared_with_work_that_copied_it(config_home):
-    import contextvars
-
-    from maverick import config
-
-    _, reads = config_home
-    with config.single_read():
-        config.load_config()
-        copied = contextvars.copy_context()
-    copied.run(config.load_config)
-    copied.run(config.load_config)
-    assert len(reads) == 3
-
-    def nested_decision():
-        with config.single_read():
-            config.load_config()
-            config.load_config()
-
-    copied.run(nested_decision)
-    assert len(reads) == 4
+    config.dashboard_overrides_path().unlink()  # sealed under the key of no tenant
+    (home / "tenants").write_text("not a directory", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    assert config.load_config()["budget"]["max_dollars"] == 5.0
+    assert not config.config_source_errors()

@@ -175,29 +175,28 @@ def test_a_garbage_round_unfreezes_collects_then_freezes(monkeypatch):
     assert order == ["unfreeze", "collect", "freeze"]
 
 
-def test_garbage_rounds_wait_until_no_request_has_started_and_stop_with_the_dashboard(monkeypatch):
+def test_garbage_rounds_wait_for_a_quiet_moment_and_stop_with_the_dashboard(monkeypatch):
     import threading
-    import time
 
     from maverick_dashboard import request_activity
 
     rounds, waits, sleeps = [], [], []
-    monkeypatch.setattr(request_activity, "_last_start", time.monotonic() + 3600)  # a request just started
-    monkeypatch.setattr(request_activity, "_in_flight", 1)  # an open event stream does not hold rounds back
+    monkeypatch.setattr(request_activity, "_in_flight", 1)  # restored after the test
+    monkeypatch.setattr(request_activity, "_last_start", 0.0)
     monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: rounds.append("round"))
     monkeypatch.setattr(dashboard.gc, "unfreeze", lambda: rounds.append("unfreeze"))
 
     def sleep(_seconds):
         sleeps.append(1)
         if len(sleeps) == 3:
-            monkeypatch.setattr(request_activity, "_last_start", 0.0)  # no new request since
+            monkeypatch.setattr(request_activity, "_in_flight", 0)  # the request ends
 
     def wait(seconds):
         waits.append(seconds)
         return len(waits) == 2  # the dashboard stops during the second pause
 
     dashboard._collect_when_idle(threading.Event(), quiet=0.0, sleep=sleep, wait=wait, every=60.0)
-    assert len(sleeps) == 3, "no round while requests keep starting"
+    assert len(sleeps) == 3, "no round while a request is in flight"
     assert rounds == ["round", "round"] and waits == [60.0, 60.0]
 
 
@@ -205,12 +204,11 @@ def test_traffic_that_never_quietens_unfreezes_instead_of_keeping_garbage(monkey
     """A round that finds no quiet moment returns the frozen objects to
     ordinary collection, so nothing frozen is kept indefinitely."""
     import threading
-    import time
 
     from maverick_dashboard import request_activity
 
     calls = []
-    monkeypatch.setattr(request_activity, "_last_start", time.monotonic() + 3600)
+    monkeypatch.setattr(request_activity, "_in_flight", 1)
     monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: calls.append("round"))
     monkeypatch.setattr(dashboard.gc, "unfreeze", lambda: calls.append("unfreeze"))
     dashboard._collect_when_idle(threading.Event(), quiet=0.0, sleep=lambda _s: None,

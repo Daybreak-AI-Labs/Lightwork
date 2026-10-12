@@ -1125,15 +1125,13 @@ def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float
     return True
 
 
-def _wait_for_quiet(quiet: float, sleep, limit: float, stop: threading.Event | None,
-                    check=None) -> bool:
+def _wait_for_quiet(quiet: float, sleep, limit: float, stop: threading.Event | None) -> bool:
     """Whether ``quiet`` seconds without a request arrived before ``limit``
     seconds of traffic passed and before ``stop`` was set."""
     from . import request_activity
 
-    check = check or request_activity.quiet_for
     waited = 0.0
-    while not check(quiet):
+    while not request_activity.quiet_for(quiet):
         if waited >= limit or (stop is not None and stop.is_set()):
             return False
         sleep(0.5)
@@ -1166,18 +1164,16 @@ def _collect_when_idle(stop: threading.Event, quiet: float = 10.0, sleep=time.sl
                        wait=None, every: float = _GC_ROUND_SECONDS, limit: float = 1800.0) -> None:
     """Run :func:`_freeze_long_lived_objects` in quiet moments until shutdown.
 
-    Each round waits until no request has started for ``quiet`` seconds
-    (open event streams and sockets do not count), so its own full
-    collection lands on no new request. When ``limit`` seconds of traffic pass
-    first, the round only unfreezes: automatic collections then reclaim
-    garbage as they did without a freeze, so nothing frozen is kept
-    indefinitely. Rounds are ``every`` seconds apart.
+    Each round waits for ``quiet`` seconds without a request in flight or
+    started (open event streams and sockets do not count), so its own full
+    collection lands on none. When ``limit`` seconds of traffic pass first,
+    the round only unfreezes: automatic collections then reclaim garbage as
+    they did without a freeze, so nothing frozen is kept indefinitely. Rounds
+    are ``every`` seconds apart.
     """
-    from . import request_activity
-
     wait = wait or stop.wait
     while not stop.is_set():
-        if _wait_for_quiet(quiet, sleep, limit, stop, check=request_activity.idle_for):
+        if _wait_for_quiet(quiet, sleep, limit, stop):
             _freeze_long_lived_objects()
         elif not stop.is_set():
             gc.unfreeze()
