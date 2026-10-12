@@ -887,6 +887,74 @@ def test_a_parse_of_a_file_replaced_meanwhile_does_not_clear_the_new_files_error
     assert str(path) in config.config_source_errors()
 
 
+def test_a_failed_parse_of_a_file_replaced_meanwhile_is_reported_until_the_next_read(config_home, monkeypatch):
+    # The slower read found the old file corrupt and gave its caller no policy
+    # from it, so the caller must see the error even though the file is now
+    # fine; the next read parses the new file and clears it.
+    import threading
+
+    from maverick import config
+
+    home, _ = config_home
+    path = home / "config.toml"
+    path.write_text("[budget\n", encoding="utf-8")
+    real = config.atomic_read_bytes
+    parsed, resume = threading.Event(), threading.Event()
+
+    def slow_first_read(target):
+        data = real(target)
+        if threading.current_thread() is not threading.main_thread():
+            parsed.set()
+            resume.wait(10)
+        return data
+
+    monkeypatch.setattr(config, "atomic_read_bytes", slow_first_read)
+    config.reset_config_cache()
+    results = []
+    reader = threading.Thread(target=lambda: results.append(config._read_toml_raw(path)))
+    reader.start()
+    assert parsed.wait(10)
+    path.write_text("[budget]\nmax_dollars = 4.5\n", encoding="utf-8")
+    assert config._read_toml_raw(path) == {"budget": {"max_dollars": 4.5}}
+    resume.set()
+    reader.join(10)
+    assert results == [{}]
+    assert str(path) in config.config_source_errors()
+    assert config._read_toml_raw(path) == {"budget": {"max_dollars": 4.5}}
+    assert str(path) not in config.config_source_errors()
+
+
+def test_a_failed_unseal_of_a_replaced_overlay_is_reported_until_the_next_read(config_home, monkeypatch):
+    import threading
+
+    from maverick import config
+
+    overlay = config.dashboard_overrides_path()
+    real = config._unseal_config_tree
+    reached, resume = threading.Event(), threading.Event()
+
+    def failing_slow_unseal(tree):
+        if threading.current_thread() is not threading.main_thread():
+            reached.set()
+            resume.wait(10)
+            raise ValueError("the key could not open this value")
+        return real(tree)
+
+    monkeypatch.setattr(config, "_unseal_config_tree", failing_slow_unseal)
+    results = []
+    reader = threading.Thread(target=lambda: results.append(config._load_config_file(overlay)))
+    reader.start()
+    assert reached.wait(10)
+    overlay.write_text('[budget]\nmax_dollars = 3.5\n', encoding="utf-8")  # saved again, in plain text
+    assert config._load_config_file(overlay) == {"budget": {"max_dollars": 3.5}}
+    resume.set()
+    reader.join(10)
+    assert results == [{}]  # its caller got nothing from the overlay
+    assert str(overlay) in config.config_source_errors()
+    assert config._load_config_file(overlay) == {"budget": {"max_dollars": 3.5}}
+    assert str(overlay) not in config.config_source_errors()
+
+
 def test_a_file_created_while_another_read_found_it_absent_keeps_its_error(config_home, monkeypatch):
     import threading
 

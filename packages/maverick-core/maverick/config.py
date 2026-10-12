@@ -153,11 +153,6 @@ _READ_ERRORS: ContextVar[dict[str, str] | None] = ContextVar("maverick_config_re
 def _record_source_error(key: str, message: str) -> None:
     """Report an unreadable source to config_source_errors() and to this read."""
     _toml_errors[key] = message
-    _note_read_error(key, message)
-
-
-def _note_read_error(key: str, message: str) -> None:
-    """Report an unreadable source to this read only (see ``single_read``)."""
     noted = _READ_ERRORS.get()
     if noted is not None:
         noted[key] = message
@@ -323,10 +318,14 @@ def _read_toml_raw(path: Path) -> dict:
         raw = _UnreadableTable(error) if cache else {}
     with _toml_lock:
         if not _unchanged_since(path, st):
-            # Replaced while it was parsed: this result describes a file that
-            # is gone, and another read may already have recorded the new one.
+            # Replaced while it was parsed. A clean result is not kept and
+            # clears nothing: another read may already have found the new file
+            # corrupt. A failed one is still reported, since its caller got no
+            # policy from this source, and whatever the cache holds is dropped
+            # so the next read parses the new file and settles its state.
             if error is not None:
-                _note_read_error(key, error)
+                _record_source_error(key, error)
+                _toml_cache.pop(key, None)
             return raw
         if error is None:
             _toml_errors.pop(key, None)
@@ -439,13 +438,13 @@ def _load_config_file(path: Path) -> dict:
             # config_source_errors() surfaces it (health goes red and security
             # callers fail closed), and drop the overlay so callers fall back to
             # base/env config instead of load_config() raising process-wide.
-            # A newer read of a replaced file reports that file's own state.
+            # If the file was replaced meanwhile, the newer cached tree is
+            # dropped so its next read parses it again and settles its state.
             with _toml_lock:
+                _record_source_error(key, f"{type(exc).__name__}: {exc}")
                 cached = _toml_cache.get(key)
-                if cached is None or cached[2] is raw:
-                    _record_source_error(key, f"{type(exc).__name__}: {exc}")
-                else:
-                    _note_read_error(key, f"{type(exc).__name__}: {exc}")
+                if cached is not None and cached[2] is not raw:
+                    _toml_cache.pop(key, None)
             logging.getLogger(__name__).warning(
                 "dashboard overlay %s could not be decrypted; dropping it "
                 "(rotate keys / re-save provider settings to restore): %s",
