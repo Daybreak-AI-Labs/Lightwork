@@ -197,3 +197,35 @@ def test_each_gate_reads_the_configuration_once_and_sees_a_policy_saved_before_i
         assert len(reads) == 3
     finally:
         config.reset_config_cache()
+
+
+def test_a_gate_inside_a_page_render_reads_a_policy_saved_during_the_render(tmp_path, monkeypatch):
+    # A page render reads the configuration once for its display; the
+    # navigation's permission checks are gates and read the current files.
+    import os
+
+    import pytest
+    from maverick import config
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    for name in ("MAVERICK_DASHBOARD_TOKEN", "MAVERICK_DASHBOARD_REQUIRE_AUTH"):
+        monkeypatch.delenv(name, raising=False)
+    config.reset_config_cache()
+    (tmp_path / "config.toml").write_text("[budget]\nmax_dollars = 5.0\n", encoding="utf-8")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: None)
+    scope = {"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""}
+    try:
+        with config.single_read():  # what templates.TemplateResponse opens
+            assert config.load_config()["budget"]["max_dollars"] == 5.0  # the render's read
+            assert auth._authorization_principal(Request(scope)) is None
+            replacement = tmp_path / "config.toml.new"
+            replacement.write_text("[dashboard]\nrequire_auth = true\n", encoding="utf-8")
+            os.replace(replacement, tmp_path / "config.toml")
+            assert "dashboard" not in config.load_config(), "the render keeps its own read"
+            with pytest.raises(HTTPException):
+                auth._authorization_principal(Request(scope))
+            with pytest.raises(HTTPException):
+                auth.has_permission(Request(scope), "view")  # what the navigation asks
+    finally:
+        config.reset_config_cache()

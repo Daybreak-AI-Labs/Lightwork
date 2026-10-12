@@ -163,44 +163,57 @@ def test_leaving_the_lifespan_stops_its_warm_up_thread(monkeypatch, tmp_path):
     dashboard._world_cache.clear()
 
 
-def test_warm_up_freezes_the_long_lived_objects_after_the_schema(monkeypatch):
-    """A full garbage collection walked every warmed object (about 700,000),
-    pausing whichever request triggered it for 350-450 ms."""
-    import threading
-
+def test_a_garbage_round_unfreezes_collects_then_freezes(monkeypatch):
+    """A full collection walked every warmed object (about 700,000), pausing
+    whichever request triggered it for 350-450 ms. Each round reclaims what
+    was frozen and has become garbage since, then freezes the survivors."""
     order = []
-    monkeypatch.setattr(dashboard, "_warm_pack_catalogue", lambda: None)
-    monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: {})
-    monkeypatch.setattr(dashboard, "_build_openapi_when_idle", lambda stop=None: order.append("schema") or True)
+    monkeypatch.setattr(dashboard.gc, "unfreeze", lambda: order.append("unfreeze"))
     monkeypatch.setattr(dashboard.gc, "collect", lambda: order.append("collect") or 0)
     monkeypatch.setattr(dashboard.gc, "freeze", lambda: order.append("freeze"))
-    done = threading.Event()
-    real = dashboard._freeze_long_lived_objects
-    monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: (real(), done.set()))
-    dashboard._warm_goal_runtime()
-    assert done.wait(30)
-    assert order == ["schema", "collect", "freeze"]
+    dashboard._freeze_long_lived_objects()
+    assert order == ["unfreeze", "collect", "freeze"]
 
 
-def test_a_stopped_warm_up_does_not_freeze(monkeypatch):
+def test_garbage_rounds_wait_for_a_quiet_moment_and_stop_with_the_dashboard(monkeypatch):
     import threading
-    import time
 
-    frozen = []
-    reached = threading.Event()
-    stops = []
-    monkeypatch.setattr(dashboard, "_warm_pack_catalogue", lambda: None)
-    monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: {})
+    from maverick_dashboard import request_activity
 
-    def schema(stop=None):
-        stops.append(stop)
-        stop.set()  # shutdown arrives while waiting for a quiet moment
-        reached.set()
-        return False
+    rounds, waits, sleeps = [], [], []
+    monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: rounds.append(request_activity.in_flight()))
+    stop = threading.Event()
 
-    monkeypatch.setattr(dashboard, "_build_openapi_when_idle", schema)
-    monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: frozen.append(1))
-    dashboard._warm_goal_runtime()
-    assert reached.wait(30)
-    time.sleep(0.2)
-    assert frozen == []
+    def sleep(_seconds):
+        sleeps.append(1)
+        if len(sleeps) == 3:
+            request_activity.finished()  # the request in flight ends
+
+    def wait(seconds):
+        waits.append(seconds)
+        return len(waits) == 2  # the dashboard stops during the second pause
+
+    request_activity.started()
+    dashboard._collect_when_idle(stop, quiet=0.0, sleep=sleep, wait=wait, every=60.0)
+    assert len(sleeps) == 3, "no round while a request is in flight"
+    assert rounds == [0, 0] and waits == [60.0, 60.0]
+
+
+def test_steady_traffic_skips_a_garbage_round_and_a_stop_ends_them(monkeypatch):
+    import threading
+
+    from maverick_dashboard import request_activity
+
+    rounds = []
+    monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: rounds.append(1))
+    stop = threading.Event()
+    request_activity.started()
+    try:
+        dashboard._collect_when_idle(stop, quiet=0.0, sleep=lambda _s: None,
+                                     wait=lambda _s: True, limit=2.0)
+        assert rounds == [], "a busy dashboard skips the round"
+        stop.set()
+        dashboard._collect_when_idle(stop, quiet=0.0, sleep=lambda _s: None, wait=lambda _s: False)
+        assert rounds == []
+    finally:
+        request_activity.finished()

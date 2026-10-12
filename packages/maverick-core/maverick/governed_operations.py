@@ -33,9 +33,9 @@ class ActionReviewRequiredError(ValueError):
         self.code = code
 
 
-def digest(value: Any) -> str:
+def digest(value: Any, *, default: Any = None) -> str:
     return hashlib.sha256(json.dumps(
-        value, sort_keys=True, separators=(",", ":"), allow_nan=False,
+        value, default=default, sort_keys=True, separators=(",", ":"), allow_nan=False,
     ).encode("utf-8")).hexdigest()
 
 
@@ -52,9 +52,7 @@ def dataclass_digest(value: Any) -> str:
     digest) is byte-identical; a 2,000-specialist list took 180 ms per page
     the other way.
     """
-    return hashlib.sha256(json.dumps(
-        value, default=_dataclass_fields, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode("utf-8")).hexdigest()
+    return digest(value, default=_dataclass_fields)
 
 
 @dataclass(frozen=True)

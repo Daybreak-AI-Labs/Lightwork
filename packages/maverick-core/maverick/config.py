@@ -137,7 +137,8 @@ _TOML_CACHE_MAX = 512
 def reset_config_cache() -> None:
     """Drop the parsed-TOML and .env-file caches (test hook; prod files rarely
     change)."""
-    global _env_last_check
+    global _env_last_check, _reset_generation
+    _reset_generation += 1  # a shared read in flight must not be kept
     _toml_cache.clear()
     _toml_errors.clear()
     _env_file_cache.clear()
@@ -145,7 +146,6 @@ def reset_config_cache() -> None:
     shared = _SINGLE_READ.get()
     if shared is not None:
         shared.tree = None  # the next read in this decision starts again
-        shared.errors = {}
 
 
 # Wizard-persisted secrets: the installer writes every collected key to
@@ -425,19 +425,11 @@ def _source_errors(paths: list[Path]) -> dict[str, str]:
             _toml_errors.pop(key, None)
         except OSError:
             pass
-    errors = {
+    return {
         str(path): _toml_errors[str(path)]
         for path in paths
         if str(path) in _toml_errors
     }
-    shared = _SINGLE_READ.get()
-    if shared is not None and shared.open and shared.errors:
-        # What the shared read saw stays reported for the rest of the decision,
-        # even if another thread has reset the cache since.
-        for path in paths:
-            if str(path) in shared.errors:
-                errors.setdefault(str(path), shared.errors[str(path)])
-    return errors
 
 
 def config_source_errors(*, include_tenant: bool = True) -> dict[str, str]:
@@ -555,12 +547,12 @@ def _strict_config_bool(
 
 
 class _SharedRead:
-    __slots__ = ("open", "tree", "errors")
+    __slots__ = ("open", "fresh", "tree")
 
-    def __init__(self) -> None:
+    def __init__(self, fresh: bool) -> None:
         self.open = True
+        self.fresh = fresh
         self.tree: dict | None = None
-        self.errors: dict[str, str] = {}
 
 
 # One authorization decision asks a dozen questions of the deployment-global
@@ -568,22 +560,26 @@ class _SharedRead:
 # dashboard token). Each used to read the files again and, once a secret had
 # been saved from Settings, resolve the at-rest key and decrypt it: about 15
 # reads per decision and 350 per dashboard page. Inside ``single_read()`` the
-# decision reads once and every caller gets its own copy. Errors that read saw
-# stay reported by config_source_errors() until the scope ends, even if another
-# thread resets the cache meanwhile; reset_config_cache() inside the scope
-# starts a fresh read. The scope covers one decision, never a write: the next
-# decision reads the files again.
+# first clean read is shared and every caller gets its own copy. A read that
+# reported a source error, or during which the cache was reset, is never
+# shared: the next caller reads the files again, exactly as before.
+# reset_config_cache() inside the scope also starts a fresh read.
+#
+# A plain scope (a page render, a roster audit) joins any open scope. A gate
+# opens ``single_read(fresh=True)``: it reads the current files even inside a
+# render, joining only another gate's read. No scope outlives its decision.
 _SINGLE_READ: ContextVar[_SharedRead | None] = ContextVar("maverick_config_single_read", default=None)
+_reset_generation = 0
 
 
 @contextmanager
-def single_read():
+def single_read(*, fresh: bool = False):
     """Read the deployment-global configuration once for one decision."""
     current = _SINGLE_READ.get()
-    if current is not None and current.open:
-        yield  # already inside a decision: share its read
+    if current is not None and current.open and (current.fresh or not fresh):
+        yield  # already inside this decision: share its read
         return
-    shared = _SharedRead()
+    shared = _SharedRead(fresh)
     token = _SINGLE_READ.set(shared)
     try:
         yield
@@ -616,11 +612,15 @@ def load_global_config() -> dict:
     shared = _SINGLE_READ.get()
     if shared is None or not shared.open or _UNSEALING.get():
         return _read_global_config()
-    if shared.tree is None:
-        tree = _read_global_config()
-        shared.errors = config_source_errors(include_tenant=False)
-        shared.tree = tree
-    return _copy_tree(shared.tree)
+    tree = shared.tree
+    if tree is not None:
+        return _copy_tree(tree)
+    generation = _reset_generation
+    tree = _read_global_config()
+    if (shared.open and generation == _reset_generation
+            and not config_source_errors(include_tenant=False)):
+        shared.tree = _copy_tree(tree)  # only a clean, uninterrupted read
+    return tree
 
 
 def _read_global_config() -> dict:

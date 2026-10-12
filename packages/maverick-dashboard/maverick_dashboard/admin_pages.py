@@ -117,7 +117,19 @@ def _api_keys_enabled() -> bool:
 def _settings_response(request: Request, saved: str = "", *, notice: str = "",
                        status_code: int = 200) -> HTMLResponse:
     """The settings page; ``notice`` is a message shown instead of "Saved"
-    (a change waiting for other administrators' approval)."""
+    (a change waiting for other administrators' approval).
+
+    The page reads the configuration once (``config.single_read``): its price,
+    model-routing and readiness rows read it about 150 times otherwise. A save
+    runs before this, so the page shows it; its gate still reads afresh.
+    """
+    from maverick.config import single_read
+
+    with single_read():
+        return _settings_page(request, saved, notice=notice, status_code=status_code)
+
+
+def _settings_page(request: Request, saved: str, *, notice: str, status_code: int) -> HTMLResponse:
     # Every form on this page changes deployment-wide process configuration.
     # A tenant-local admin must not see an apparently actionable console whose
     # POSTs all fail the correct global gate.

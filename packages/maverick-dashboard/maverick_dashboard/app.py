@@ -1124,22 +1124,51 @@ def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float
     return True
 
 
+_GC_ROUND_SECONDS = 600.0
+
+
 def _freeze_long_lived_objects() -> None:
-    """Keep full garbage collections off the warmed start-up objects.
+    """One full collection, then keep its survivors out of later ones.
 
     After warm-up the process tracks about 700,000 long-lived objects (the
     pack catalogue, templates, routes, modules, the OpenAPI schema). A full
     collection walked all of them, 350-450 ms, on whichever request triggered
-    it. One collection, then ``gc.freeze()``, leaves them out of every later
-    collection; objects created afterwards are collected as before. It runs
-    after the quiet-time schema build, so its own collection lands on no
-    request either.
+    it. ``gc.freeze()`` leaves them out of every automatic collection. Each
+    round first unfreezes, so warmed structures replaced since the last round
+    (a rebuilt catalogue, a cleared cache) are reclaimed rather than kept.
     """
     try:
+        gc.unfreeze()
         gc.collect()
         gc.freeze()
     except Exception:  # pragma: no cover - a tuning step never breaks the dashboard
         log.debug("garbage-collector freeze skipped", exc_info=True)
+
+
+def _collect_when_idle(stop: threading.Event, quiet: float = 10.0, sleep=time.sleep,
+                       wait=None, every: float = _GC_ROUND_SECONDS, limit: float = 1800.0) -> None:
+    """Run :func:`_freeze_long_lived_objects` in quiet moments until shutdown.
+
+    Each round waits for ``quiet`` seconds without a request, so its own full
+    collection lands on none; after ``limit`` seconds of steady traffic it
+    skips the round (automatic collections continue as without it). Rounds
+    are ``every`` seconds apart.
+    """
+    from . import request_activity
+
+    wait = wait or stop.wait
+    while not stop.is_set():
+        waited = 0.0
+        while not request_activity.quiet_for(quiet):
+            if waited >= limit or stop.is_set():
+                break
+            sleep(0.5)
+            waited += 0.5
+        else:
+            if not stop.is_set():
+                _freeze_long_lived_objects()
+        if wait(every):
+            return
 
 
 def _warm_goal_runtime() -> threading.Event:
@@ -1169,8 +1198,7 @@ def _warm_goal_runtime() -> threading.Event:
         log.info("dashboard warm-up done: %s",
                  ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
         _build_openapi_when_idle(stop=stop)
-        if not stop.is_set():
-            _freeze_long_lived_objects()
+        _collect_when_idle(stop)
 
     threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
     return stop

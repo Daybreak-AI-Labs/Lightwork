@@ -625,9 +625,9 @@ def test_the_next_decision_reads_a_policy_saved_after_the_last_one(config_home):
     assert len(reads) == 2
 
 
-def test_errors_a_decision_read_saw_stay_reported_after_another_thread_resets_the_cache(config_home):
-    # Several settings readers reset the cache first. Fail-closed checks must
-    # still see a corrupt policy for the rest of a decision that read it.
+def test_a_read_that_reports_an_error_is_never_shared(config_home):
+    # A corrupt policy is re-read and reported again at every check, even if
+    # another thread resets the cache in between.
     import threading
 
     from maverick import config
@@ -641,11 +641,78 @@ def test_errors_a_decision_read_saw_stay_reported_after_another_thread_resets_th
         resetter = threading.Thread(target=config.reset_config_cache)
         resetter.start()
         resetter.join()
-        assert config._toml_errors == {}
         config.load_config()
         assert path in config.config_source_errors()
-        assert path in config.config_source_errors(include_tenant=False)
-    assert len(reads) == 1
+        (home / "config.toml").write_text("[budget]\nmax_dollars = 6.0\n", encoding="utf-8")
+        assert config.load_config()["budget"]["max_dollars"] == 6.0
+        assert not config.config_source_errors()
+        config.load_config()
+    assert len(reads) == 3  # the corrupt reads were not kept; the clean one is
+
+
+def test_a_read_during_which_the_cache_was_reset_is_not_shared(config_home, monkeypatch):
+    # A reset between the read and its error check could clear the error the
+    # read had just recorded. Such a read is used once and not kept.
+    import threading
+
+    from maverick import config
+
+    home, reads = config_home
+    (home / "config.toml").write_text("[budget\n", encoding="utf-8")
+    counted = config._read_global_config  # the fixture's counting reader
+
+    def read_then_reset():
+        tree = counted()
+        resetter = threading.Thread(target=config.reset_config_cache)
+        resetter.start()
+        resetter.join()  # clears the error this read just recorded
+        return tree
+
+    monkeypatch.setattr(config, "_read_global_config", read_then_reset)
+    with config.single_read():
+        config.load_config()
+        config.load_config()
+        monkeypatch.setattr(config, "_read_global_config", counted)
+        config.load_config()
+        assert str(home / "config.toml") in config.config_source_errors()
+    assert len(reads) == 3
+
+
+def test_a_failed_key_read_is_not_kept_for_the_rest_of_a_decision(config_home, monkeypatch):
+    from maverick import config, crypto_at_rest
+
+    real = crypto_at_rest._load_or_create_key
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) == 1:
+            raise crypto_at_rest.EncryptionUnavailable("the key file is held by its writer")
+        return real()
+
+    monkeypatch.setattr(crypto_at_rest, "_load_or_create_key", flaky)
+    with config.single_read():
+        keys = [config.load_config().get("providers", {}).get("anthropic", {}).get("api_key") for _ in range(3)]
+    assert keys == [None, "sk-test-not-a-real-key", "sk-test-not-a-real-key"]  # pragma: allowlist secret
+
+
+def test_a_gate_reads_the_current_files_even_inside_another_decision(config_home):
+    import os
+
+    from maverick import config
+
+    home, reads = config_home
+    with config.single_read():  # a page render
+        assert config.load_config()["budget"]["max_dollars"] == 5.0
+        replacement = home / "config.toml.new"
+        replacement.write_text("[budget]\nmax_dollars = 7.0\n", encoding="utf-8")
+        os.replace(replacement, home / "config.toml")
+        assert config.load_config()["budget"]["max_dollars"] == 5.0  # the render's own read
+        with config.single_read(fresh=True):  # a gate inside it
+            assert config.load_config()["budget"]["max_dollars"] == 7.0
+            with config.single_read(fresh=True), config.single_read():  # parts of that gate
+                assert config.load_config()["budget"]["max_dollars"] == 7.0
+    assert len(reads) == 2
 
 
 def test_a_reset_inside_a_decision_reads_again(config_home):
@@ -659,7 +726,7 @@ def test_a_reset_inside_a_decision_reads_again(config_home):
         assert config.load_config().get("budget") is None
         assert str(home / "config.toml") in config.config_source_errors()
         config.load_config()
-    assert len(reads) == 2
+    assert len(reads) == 3  # the read that found the corrupt file is not kept
 
 
 def test_a_finished_decision_is_not_shared_with_work_that_copied_it(config_home):

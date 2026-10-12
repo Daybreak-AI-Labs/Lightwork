@@ -448,9 +448,10 @@ def anonymous_local_access_allowed() -> bool:
     Having no configured identity mechanism is necessary but not sufficient:
     client-bound/enterprise deployments explicitly disable ambient loopback
     trust. An unreadable binding policy denies the compatibility path.
-    The whole decision reads the configuration once (``single_read``).
+    The whole decision reads the current configuration once, even inside a
+    page render (``single_read(fresh=True)``).
     """
-    with single_read():
+    with single_read(fresh=True):
         if not auth_genuinely_off():
             return False
         try:
@@ -475,7 +476,7 @@ def _authorization_principal(request: Request) -> str | None:
     if principal is not None:
         return principal
     state = getattr(request, "state", None)
-    with fresh_configuration(), single_read():
+    with fresh_configuration(), single_read(fresh=True):
         if anonymous_local_access_allowed() or _dashboard_token_authenticated(request):
             if state is not None:
                 state._anonymous_grant_verified = True
@@ -1328,9 +1329,10 @@ def _resolve_principal(
     allowed only in genuine local auth-off mode. Probe,
     discovery, login-bootstrap, share, SCIM, SAML, form, and webhook paths carry
     their own narrower credential or are intentionally public bootstrap routes.
-    The whole resolution reads the configuration once (``single_read``).
+    The whole resolution reads the current configuration once
+    (``single_read(fresh=True)``).
     """
-    with single_read():
+    with single_read(fresh=True):
         return _resolve_principal_now(request, websocket)
 
 
