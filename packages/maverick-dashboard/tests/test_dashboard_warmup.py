@@ -181,39 +181,66 @@ def test_garbage_rounds_wait_for_a_quiet_moment_and_stop_with_the_dashboard(monk
     from maverick_dashboard import request_activity
 
     rounds, waits, sleeps = [], [], []
+    monkeypatch.setattr(request_activity, "_in_flight", 1)  # restored after the test
     monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: rounds.append(request_activity.in_flight()))
-    stop = threading.Event()
+    monkeypatch.setattr(dashboard.gc, "unfreeze", lambda: rounds.append("unfreeze"))
 
     def sleep(_seconds):
         sleeps.append(1)
         if len(sleeps) == 3:
-            request_activity.finished()  # the request in flight ends
+            monkeypatch.setattr(request_activity, "_in_flight", 0)  # the request ends
 
     def wait(seconds):
         waits.append(seconds)
         return len(waits) == 2  # the dashboard stops during the second pause
 
-    request_activity.started()
-    dashboard._collect_when_idle(stop, quiet=0.0, sleep=sleep, wait=wait, every=60.0)
+    dashboard._collect_when_idle(threading.Event(), quiet=0.0, sleep=sleep, wait=wait, every=60.0)
     assert len(sleeps) == 3, "no round while a request is in flight"
     assert rounds == [0, 0] and waits == [60.0, 60.0]
 
 
-def test_steady_traffic_skips_a_garbage_round_and_a_stop_ends_them(monkeypatch):
+def test_traffic_that_never_quietens_unfreezes_instead_of_keeping_garbage(monkeypatch):
+    """An open stream or socket counts as in flight: a round that cannot find a
+    quiet moment returns the frozen objects to ordinary collection."""
     import threading
 
     from maverick_dashboard import request_activity
 
-    rounds = []
-    monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: rounds.append(1))
+    calls = []
+    monkeypatch.setattr(request_activity, "_in_flight", 1)
+    monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: calls.append("round"))
+    monkeypatch.setattr(dashboard.gc, "unfreeze", lambda: calls.append("unfreeze"))
+    dashboard._collect_when_idle(threading.Event(), quiet=0.0, sleep=lambda _s: None,
+                                 wait=lambda _s: True, limit=2.0)
+    assert calls == ["unfreeze"]
     stop = threading.Event()
-    request_activity.started()
-    try:
-        dashboard._collect_when_idle(stop, quiet=0.0, sleep=lambda _s: None,
-                                     wait=lambda _s: True, limit=2.0)
-        assert rounds == [], "a busy dashboard skips the round"
-        stop.set()
-        dashboard._collect_when_idle(stop, quiet=0.0, sleep=lambda _s: None, wait=lambda _s: False)
-        assert rounds == []
-    finally:
-        request_activity.finished()
+    stop.set()
+    dashboard._collect_when_idle(stop, quiet=0.0, sleep=lambda _s: None, wait=lambda _s: False)
+    assert calls == ["unfreeze"], "a stopped dashboard does nothing"
+
+
+def test_the_warm_up_collects_only_after_building_the_schema(monkeypatch):
+    import threading
+
+    steps, targets = [], []
+
+    class _Thread:
+        def __init__(self, target, **_kwargs):
+            targets.append(target)
+
+        def start(self):
+            pass
+
+    async def _hooks():
+        steps.append("hooks")
+
+    monkeypatch.setattr(dashboard.threading, "Thread", _Thread)
+    monkeypatch.setattr(dashboard, "_warm_pack_catalogue", lambda: steps.append("packs"))
+    monkeypatch.setattr("maverick.hooks.ensure_loaded", _hooks)
+    monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: steps.append("caches") or {})
+    monkeypatch.setattr(dashboard, "_build_openapi_when_idle", lambda stop=None: steps.append("schema") or True)
+    monkeypatch.setattr(dashboard, "_collect_when_idle", lambda stop: steps.append(("gc", stop.is_set())))
+    stop = dashboard._warm_goal_runtime()
+    assert isinstance(stop, threading.Event) and len(targets) == 1
+    targets[0]()
+    assert steps == ["packs", "hooks", "caches", "schema", ("gc", False)]

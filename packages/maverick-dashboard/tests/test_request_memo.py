@@ -229,3 +229,30 @@ def test_a_gate_inside_a_page_render_reads_a_policy_saved_during_the_render(tmp_
                 auth.has_permission(Request(scope), "view")  # what the navigation asks
     finally:
         config.reset_config_cache()
+
+
+def test_a_signed_in_role_check_inside_a_render_reads_a_role_saved_during_it(tmp_path, monkeypatch):
+    import os
+
+    from maverick import config
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    config.reset_config_cache()
+    (tmp_path / "config.toml").write_text('[test_roles]\nx = "admin"\n', encoding="utf-8")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:x")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: config.load_config()["test_roles"]["x"])
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: config.load_config()["test_roles"]["x"])
+    scope = {"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""}
+    try:
+        with config.single_read():  # what templates.TemplateResponse opens
+            assert config.load_config()["test_roles"]["x"] == "admin"  # the render's read
+            assert auth.has_permission(Request(scope), "admin") is True
+            replacement = tmp_path / "config.toml.new"
+            replacement.write_text('[test_roles]\nx = "viewer"\n', encoding="utf-8")
+            os.replace(replacement, tmp_path / "config.toml")
+            assert auth.has_permission(Request(scope), "admin") is False
+            assert auth.has_global_permission(Request(scope), "admin") is False
+            assert auth.caller_role(Request(scope)) == "viewer"
+    finally:
+        config.reset_config_cache()

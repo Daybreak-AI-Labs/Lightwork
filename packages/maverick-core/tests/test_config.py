@@ -678,6 +678,46 @@ def test_a_read_during_which_the_cache_was_reset_is_not_shared(config_home, monk
     assert len(reads) == 3
 
 
+def test_a_read_whose_error_another_thread_clears_is_not_shared(config_home, monkeypatch):
+    # Another request's successful read (or a cache eviction) removes the
+    # process-wide error entry; the read that met the error still is not kept.
+    import threading
+
+    from maverick import config
+
+    home, reads = config_home
+    (home / "config.toml").write_text("[budget\n", encoding="utf-8")
+    counted = config._read_global_config
+
+    def read_then_cleared_elsewhere():
+        tree = counted()
+        cleaner = threading.Thread(target=config._toml_errors.clear)
+        cleaner.start()
+        cleaner.join()
+        return tree
+
+    monkeypatch.setattr(config, "_read_global_config", read_then_cleared_elsewhere)
+    with config.single_read():
+        assert config.load_config().get("budget") is None
+        monkeypatch.setattr(config, "_read_global_config", counted)
+        (home / "config.toml").write_text("[budget]\nmax_dollars = 6.5\n", encoding="utf-8")
+        assert config.load_config()["budget"]["max_dollars"] == 6.5
+    assert len(reads) == 2
+
+
+def test_a_cached_corrupt_file_still_counts_as_an_error(config_home):
+    from maverick import config
+
+    home, reads = config_home
+    (home / "config.toml").write_text("[budget\n", encoding="utf-8")
+    config.load_config()  # the corrupt file is now cached as an empty table
+    config._toml_errors.clear()  # e.g. another thread's cleanup
+    with config.single_read():
+        config.load_config()
+        config.load_config()
+    assert len(reads) == 3  # each read in the scope met the corrupt file again
+
+
 def test_a_failed_key_read_is_not_kept_for_the_rest_of_a_decision(config_home, monkeypatch):
     from maverick import config, crypto_at_rest
 
@@ -705,13 +745,13 @@ def test_a_gate_reads_the_current_files_even_inside_another_decision(config_home
     with config.single_read():  # a page render
         assert config.load_config()["budget"]["max_dollars"] == 5.0
         replacement = home / "config.toml.new"
-        replacement.write_text("[budget]\nmax_dollars = 7.0\n", encoding="utf-8")
+        replacement.write_text("[budget]\nmax_dollars = 7.25\n", encoding="utf-8")  # a new size
         os.replace(replacement, home / "config.toml")
         assert config.load_config()["budget"]["max_dollars"] == 5.0  # the render's own read
         with config.single_read(fresh=True):  # a gate inside it
-            assert config.load_config()["budget"]["max_dollars"] == 7.0
+            assert config.load_config()["budget"]["max_dollars"] == 7.25
             with config.single_read(fresh=True), config.single_read():  # parts of that gate
-                assert config.load_config()["budget"]["max_dollars"] == 7.0
+                assert config.load_config()["budget"]["max_dollars"] == 7.25
     assert len(reads) == 2
 
 

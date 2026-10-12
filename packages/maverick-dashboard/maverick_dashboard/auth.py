@@ -448,8 +448,9 @@ def anonymous_local_access_allowed() -> bool:
     Having no configured identity mechanism is necessary but not sufficient:
     client-bound/enterprise deployments explicitly disable ambient loopback
     trust. An unreadable binding policy denies the compatibility path.
-    The whole decision reads the current configuration once, even inside a
-    page render (``single_read(fresh=True)``).
+    Its own configuration reads share one current read, even inside a page
+    render (``single_read(fresh=True)``). Outside an authorization boundary
+    ``auth_genuinely_off`` is still answered once per request (its memo).
     """
     with single_read(fresh=True):
         if not auth_genuinely_off():
@@ -654,7 +655,8 @@ def role_for_principal(principal: str | None) -> str | None:
 
 def caller_role(request: Request) -> str | None:
     """The RBAC role of the current caller (None when auth is off)."""
-    return role_for_principal(_authorization_principal(request))
+    with single_read(fresh=True):  # a gate: the current files, even inside a render
+        return role_for_principal(_authorization_principal(request))
 
 
 def api_key_permissions(request) -> frozenset[str] | None:
@@ -726,15 +728,17 @@ def has_permission(request: Request, permission: str, *, api_scope: str | None =
 
     Auth off -> True (legacy single-user; the local operator owns everything).
     Otherwise gated by the caller's role, and for an API-key bearer also by
-    the key's scopes.
+    the key's scopes. A gate: it reads the current configuration once, even
+    inside a page render (``single_read(fresh=True)``).
     """
-    principal = _authorization_principal(request)
-    if principal is None:
-        return True
-    if not _api_key_allows(request, permission, api_scope=api_scope):
-        return False
-    from . import rbac
-    return permission in rbac.permissions_for(role_for_principal(principal))
+    with single_read(fresh=True):
+        principal = _authorization_principal(request)
+        if principal is None:
+            return True
+        if not _api_key_allows(request, permission, api_scope=api_scope):
+            return False
+        from . import rbac
+        return permission in rbac.permissions_for(role_for_principal(principal))
 
 
 def _permission_denied(request: Request, permission: str, *, installation: bool = False,
@@ -777,16 +781,18 @@ def has_global_permission(request: Request, permission: str) -> bool:
     """Whether the caller may perform a dashboard-wide control-plane action.
 
     Tenant memberships are intentionally ignored so a tenant-local admin cannot
-    satisfy global admin gates for other tenants or dashboard settings.
+    satisfy global admin gates for other tenants or dashboard settings. A gate:
+    it reads the current configuration once (``single_read(fresh=True)``).
     """
-    principal = _authorization_principal(request)
-    if principal is None:
-        return True
-    if not _api_key_allows(request, permission):
-        return False
-    from . import rbac
+    with single_read(fresh=True):
+        principal = _authorization_principal(request)
+        if principal is None:
+            return True
+        if not _api_key_allows(request, permission):
+            return False
+        from . import rbac
 
-    return permission in rbac.permissions_for(global_role_for_principal(principal))
+        return permission in rbac.permissions_for(global_role_for_principal(principal))
 
 
 def require_global_permission(request: Request, permission: str) -> None:

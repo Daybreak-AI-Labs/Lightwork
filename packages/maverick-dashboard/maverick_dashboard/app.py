@@ -1106,15 +1106,7 @@ def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float
     starts. A request for /openapi.json before then builds it on demand, as
     FastAPI always did. Gives up after ``limit`` seconds of steady traffic,
     or as soon as ``stop`` is set (the dashboard is shutting down)."""
-    from . import request_activity
-
-    waited = 0.0
-    while not request_activity.quiet_for(quiet):
-        if waited >= limit or (stop is not None and stop.is_set()):
-            return False
-        sleep(0.5)
-        waited += 0.5
-    if stop is not None and stop.is_set():
+    if not _wait_for_quiet(quiet, sleep, limit, stop):
         return False
     try:
         app.openapi()
@@ -1124,7 +1116,21 @@ def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float
     return True
 
 
-_GC_ROUND_SECONDS = 600.0
+def _wait_for_quiet(quiet: float, sleep, limit: float, stop: threading.Event | None) -> bool:
+    """Whether ``quiet`` seconds without a request arrived before ``limit``
+    seconds of traffic passed and before ``stop`` was set."""
+    from . import request_activity
+
+    waited = 0.0
+    while not request_activity.quiet_for(quiet):
+        if waited >= limit or (stop is not None and stop.is_set()):
+            return False
+        sleep(0.5)
+        waited += 0.5
+    return not (stop is not None and stop.is_set())
+
+
+_GC_ROUND_SECONDS = 3600.0
 
 
 def _freeze_long_lived_objects() -> None:
@@ -1150,23 +1156,17 @@ def _collect_when_idle(stop: threading.Event, quiet: float = 10.0, sleep=time.sl
     """Run :func:`_freeze_long_lived_objects` in quiet moments until shutdown.
 
     Each round waits for ``quiet`` seconds without a request, so its own full
-    collection lands on none; after ``limit`` seconds of steady traffic it
-    skips the round (automatic collections continue as without it). Rounds
-    are ``every`` seconds apart.
+    collection lands on none. When ``limit`` seconds of traffic pass first
+    (or a stream or socket stays open), the round only unfreezes: automatic
+    collections then reclaim garbage as they did without a freeze, so nothing
+    frozen is kept indefinitely. Rounds are ``every`` seconds apart.
     """
-    from . import request_activity
-
     wait = wait or stop.wait
     while not stop.is_set():
-        waited = 0.0
-        while not request_activity.quiet_for(quiet):
-            if waited >= limit or stop.is_set():
-                break
-            sleep(0.5)
-            waited += 0.5
-        else:
-            if not stop.is_set():
-                _freeze_long_lived_objects()
+        if _wait_for_quiet(quiet, sleep, limit, stop):
+            _freeze_long_lived_objects()
+        elif not stop.is_set():
+            gc.unfreeze()
         if wait(every):
             return
 

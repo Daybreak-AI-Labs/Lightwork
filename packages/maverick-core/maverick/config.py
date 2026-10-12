@@ -128,6 +128,22 @@ _toml_cache: dict[str, tuple[int, int, dict]] = {}
 # distinguish "file absent" from "present but unreadable/corrupt". Track the
 # latter alongside the parsed cache so trust/auth callers can fail closed.
 _toml_errors: dict[str, str] = {}
+
+
+class _UnreadableTable(dict):
+    """The empty table a corrupt file is cached as; a hit still reports it."""
+
+
+# The errors one read itself ran into (see ``single_read``). _toml_errors is
+# process-wide: another thread's reset or successful read can clear an entry
+# while a read is in flight, so it cannot tell whether *this* read was clean.
+_READ_ERRORS: ContextVar[list[str] | None] = ContextVar("maverick_config_read_errors", default=None)
+
+
+def _note_read_error(key: str) -> None:
+    noted = _READ_ERRORS.get()
+    if noted is not None:
+        noted.append(key)
 # Bound the cache so a deployment with many per-tenant config paths
 # (~/.maverick/tenants/<t>/config.toml) can't grow it without limit. Entries
 # are cheap to rebuild (a stat + parse), so a simple oldest-first cap is enough.
@@ -137,8 +153,7 @@ _TOML_CACHE_MAX = 512
 def reset_config_cache() -> None:
     """Drop the parsed-TOML and .env-file caches (test hook; prod files rarely
     change)."""
-    global _env_last_check, _reset_generation
-    _reset_generation += 1  # a shared read in flight must not be kept
+    global _env_last_check
     _toml_cache.clear()
     _toml_errors.clear()
     _env_file_cache.clear()
@@ -226,9 +241,12 @@ def _read_toml_raw(path: Path) -> dict:
     except OSError as e:
         _toml_cache.pop(key, None)
         _toml_errors[key] = f"{type(e).__name__}: {e}"
+        _note_read_error(key)
         return {}  # general callers stay fail-soft; security callers inspect health
     cached = _toml_cache.get(key)
     if cached is not None and cached[0] == st.st_mtime_ns and cached[1] == st.st_size:
+        if isinstance(cached[2], _UnreadableTable):
+            _note_read_error(key)
         return cached[2]
     try:
         # Private Windows publication retains the verified write handle until
@@ -245,13 +263,14 @@ def _read_toml_raw(path: Path) -> dict:
             path, type(e).__name__, e,
         )
         _toml_errors[key] = f"{type(e).__name__}: {e}"
+        _note_read_error(key)
         if isinstance(e, OSError):
             # A sharing/permission failure is not parsed file content. Keep
             # health fail-closed now, but retry the next read even when this
             # complete file's mtime and size have not changed.
             _toml_cache.pop(key, None)
             return {}
-        raw = {}
+        raw = _UnreadableTable()
     else:
         _toml_errors.pop(key, None)
     # Evict oldest entries first when over the cap (dicts preserve insertion
@@ -358,6 +377,7 @@ def _load_config_file(path: Path) -> dict:
             # callers fail closed), and drop the overlay so callers fall back to
             # base/env config instead of load_config() raising process-wide.
             _toml_errors[str(path)] = f"{type(exc).__name__}: {exc}"
+            _note_read_error(str(path))
             logging.getLogger(__name__).warning(
                 "dashboard overlay %s could not be decrypted; dropping it "
                 "(rotate keys / re-save provider settings to restore): %s",
@@ -561,15 +581,15 @@ class _SharedRead:
 # been saved from Settings, resolve the at-rest key and decrypt it: about 15
 # reads per decision and 350 per dashboard page. Inside ``single_read()`` the
 # first clean read is shared and every caller gets its own copy. A read that
-# reported a source error, or during which the cache was reset, is never
-# shared: the next caller reads the files again, exactly as before.
+# itself ran into an unreadable, corrupt or undecryptable source (recorded in
+# ``_READ_ERRORS`` as it happens, never inferred from process-wide state) is
+# used once: the next caller reads the files again, exactly as before.
 # reset_config_cache() inside the scope also starts a fresh read.
 #
 # A plain scope (a page render, a roster audit) joins any open scope. A gate
 # opens ``single_read(fresh=True)``: it reads the current files even inside a
 # render, joining only another gate's read. No scope outlives its decision.
 _SINGLE_READ: ContextVar[_SharedRead | None] = ContextVar("maverick_config_single_read", default=None)
-_reset_generation = 0
 
 
 @contextmanager
@@ -615,11 +635,14 @@ def load_global_config() -> dict:
     tree = shared.tree
     if tree is not None:
         return _copy_tree(tree)
-    generation = _reset_generation
-    tree = _read_global_config()
-    if (shared.open and generation == _reset_generation
-            and not config_source_errors(include_tenant=False)):
-        shared.tree = _copy_tree(tree)  # only a clean, uninterrupted read
+    noted: list[str] = []
+    token = _READ_ERRORS.set(noted)
+    try:
+        tree = _read_global_config()
+    finally:
+        _READ_ERRORS.reset(token)
+    if shared.open and not noted:
+        shared.tree = _copy_tree(tree)  # only a read that met no error itself
     return tree
 
 
