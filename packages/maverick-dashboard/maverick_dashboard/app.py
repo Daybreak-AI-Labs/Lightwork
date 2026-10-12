@@ -668,6 +668,15 @@ def _account_pages_unavailable(request: Request) -> set[str]:
 
 
 def _nav_context(request: Request) -> dict:
+    """The navigation's permission and role checks share one current read
+    (``single_read(fresh=True)``), even inside the page render's own read."""
+    from maverick.config import single_read
+
+    with single_read(fresh=True):
+        return _nav_context_now(request)
+
+
+def _nav_context_now(request: Request) -> dict:
     from . import ui_visibility
     from .api import _shared_halt_backend
     from .auth import api_key_permissions, api_key_scopes
@@ -1116,13 +1125,15 @@ def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float
     return True
 
 
-def _wait_for_quiet(quiet: float, sleep, limit: float, stop: threading.Event | None) -> bool:
+def _wait_for_quiet(quiet: float, sleep, limit: float, stop: threading.Event | None,
+                    check=None) -> bool:
     """Whether ``quiet`` seconds without a request arrived before ``limit``
     seconds of traffic passed and before ``stop`` was set."""
     from . import request_activity
 
+    check = check or request_activity.quiet_for
     waited = 0.0
-    while not request_activity.quiet_for(quiet):
+    while not check(quiet):
         if waited >= limit or (stop is not None and stop.is_set()):
             return False
         sleep(0.5)
@@ -1155,15 +1166,18 @@ def _collect_when_idle(stop: threading.Event, quiet: float = 10.0, sleep=time.sl
                        wait=None, every: float = _GC_ROUND_SECONDS, limit: float = 1800.0) -> None:
     """Run :func:`_freeze_long_lived_objects` in quiet moments until shutdown.
 
-    Each round waits for ``quiet`` seconds without a request, so its own full
-    collection lands on none. When ``limit`` seconds of traffic pass first
-    (or a stream or socket stays open), the round only unfreezes: automatic
-    collections then reclaim garbage as they did without a freeze, so nothing
-    frozen is kept indefinitely. Rounds are ``every`` seconds apart.
+    Each round waits until no request has started for ``quiet`` seconds
+    (open event streams and sockets do not count), so its own full
+    collection lands on no new request. When ``limit`` seconds of traffic pass
+    first, the round only unfreezes: automatic collections then reclaim
+    garbage as they did without a freeze, so nothing frozen is kept
+    indefinitely. Rounds are ``every`` seconds apart.
     """
+    from . import request_activity
+
     wait = wait or stop.wait
     while not stop.is_set():
-        if _wait_for_quiet(quiet, sleep, limit, stop):
+        if _wait_for_quiet(quiet, sleep, limit, stop, check=request_activity.idle_for):
             _freeze_long_lived_objects()
         elif not stop.is_set():
             gc.unfreeze()
@@ -1171,7 +1185,7 @@ def _collect_when_idle(stop: threading.Event, quiet: float = 10.0, sleep=time.sl
             return
 
 
-def _warm_goal_runtime() -> threading.Event:
+def _warm_goal_runtime(thread_factory=threading.Thread) -> threading.Event:
     """Pay the kernel's once-per-process start-up cost (hook discovery across
     installed distributions, about 1.5 s cold) and the dashboard's first-hit
     costs (:func:`_warm_dashboard_caches`) now, in the background, instead of
@@ -1200,7 +1214,7 @@ def _warm_goal_runtime() -> threading.Event:
         _build_openapi_when_idle(stop=stop)
         _collect_when_idle(stop)
 
-    threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
+    thread_factory(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
     return stop
 
 

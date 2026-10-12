@@ -1,6 +1,7 @@
 """Config loader tests."""
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -645,8 +646,9 @@ def test_a_read_that_reports_an_error_is_never_shared(config_home):
         assert path in config.config_source_errors()
         (home / "config.toml").write_text("[budget]\nmax_dollars = 6.0\n", encoding="utf-8")
         assert config.load_config()["budget"]["max_dollars"] == 6.0
-        assert not config.config_source_errors()
+        assert path in config.config_source_errors(), "reported until this decision ends"
         config.load_config()
+    assert not config.config_source_errors()
     assert len(reads) == 3  # the corrupt reads were not kept; the clean one is
 
 
@@ -697,8 +699,11 @@ def test_a_read_whose_error_another_thread_clears_is_not_shared(config_home, mon
         return tree
 
     monkeypatch.setattr(config, "_read_global_config", read_then_cleared_elsewhere)
+    path = str(home / "config.toml")
     with config.single_read():
         assert config.load_config().get("budget") is None
+        assert config._toml_errors == {}
+        assert path in config.config_source_errors(), "still reported for this decision"
         monkeypatch.setattr(config, "_read_global_config", counted)
         (home / "config.toml").write_text("[budget]\nmax_dollars = 6.5\n", encoding="utf-8")
         assert config.load_config()["budget"]["max_dollars"] == 6.5
@@ -712,10 +717,46 @@ def test_a_cached_corrupt_file_still_counts_as_an_error(config_home):
     (home / "config.toml").write_text("[budget\n", encoding="utf-8")
     config.load_config()  # the corrupt file is now cached as an empty table
     config._toml_errors.clear()  # e.g. another thread's cleanup
+    path = str(home / "config.toml")
+    assert config.load_config() == {"providers": config.load_config()["providers"]}
+    assert path in config.config_source_errors(), "a cache hit reports the corrupt file again"
+    config._toml_errors.clear()
     with config.single_read():
         config.load_config()
         config.load_config()
-    assert len(reads) == 3  # each read in the scope met the corrupt file again
+        assert path in config.config_source_errors()
+    assert len(reads) == 5  # each read met the corrupt file again; none was shared
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink loop")
+def test_an_overlay_that_cannot_be_checked_is_reported_not_skipped(config_home):
+    # Path.exists() hides ELOOP: a settings overlay turned into a symlink loop
+    # used to be dropped silently, losing every Settings-saved policy.
+    from maverick import config
+
+    overlay = config.dashboard_overrides_path()
+    overlay.unlink()
+    overlay.symlink_to(overlay)
+    assert "providers" not in config.load_config()
+    assert str(overlay) in config.config_source_errors()
+
+
+def test_the_navigation_reads_the_current_files_inside_a_render(config_home, monkeypatch):
+    import os
+
+    from maverick import config
+    from maverick_dashboard import app as dashboard
+
+    home, _ = config_home
+    seen = []
+    monkeypatch.setattr(dashboard, "_nav_context_now", lambda request: seen.append(config.load_config()["budget"]["max_dollars"]) or {})
+    with config.single_read():  # the render
+        assert config.load_config()["budget"]["max_dollars"] == 5.0
+        replacement = home / "config.toml.new"
+        replacement.write_text("[budget]\nmax_dollars = 8.25\n", encoding="utf-8")
+        os.replace(replacement, home / "config.toml")
+        dashboard._nav_context(None)
+    assert seen == [8.25]
 
 
 def test_a_failed_key_read_is_not_kept_for_the_rest_of_a_decision(config_home, monkeypatch):

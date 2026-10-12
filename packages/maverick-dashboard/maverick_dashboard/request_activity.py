@@ -38,6 +38,13 @@ def quiet_for(seconds: float) -> bool:
         return _in_flight == 0 and time.monotonic() - _last_start >= seconds
 
 
+def idle_for(seconds: float) -> bool:
+    """No request started in the last ``seconds``; requests still open (an
+    event stream, a WebSocket) do not count."""
+    with _lock:
+        return time.monotonic() - _last_start >= seconds
+
+
 class RequestActivityMiddleware:
     """Pure ASGI: counts HTTP requests and WebSocket connections in flight."""
 
