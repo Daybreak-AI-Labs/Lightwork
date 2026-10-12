@@ -40,9 +40,9 @@ def quiet_for(seconds: float) -> bool:
         return _in_flight == 0 and time.monotonic() - _last_start >= seconds
 
 
-def _is_event_stream(message) -> bool:
-    for name, value in message.get("headers") or ():
-        if name.lower() == b"content-type" and value.lower().startswith(b"text/event-stream"):
+def _is_event_stream(headers, name: bytes) -> bool:
+    for key, value in headers or ():
+        if key.lower() == name and b"text/event-stream" in value.lower():
             return True
     return False
 
@@ -54,7 +54,9 @@ class RequestActivityMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http":
+        # A browser's EventSource asks for a stream up front; the response
+        # start alone can arrive late, since GZip holds it until the first event.
+        if scope["type"] != "http" or _is_event_stream(scope.get("headers"), b"accept"):
             await self.app(scope, receive, send)
             return
         started()
@@ -62,7 +64,11 @@ class RequestActivityMiddleware:
 
         async def send_and_watch(message) -> None:
             nonlocal counted
-            if counted and message["type"] == "http.response.start" and _is_event_stream(message):
+            if (
+                counted
+                and message["type"] == "http.response.start"
+                and _is_event_stream(message.get("headers"), b"content-type")
+            ):
                 counted = False
                 finished()  # an open event stream is not work in flight
             await send(message)

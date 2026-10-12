@@ -776,3 +776,239 @@ def test_a_tenant_path_through_a_file_still_means_no_overlay(config_home, monkey
     monkeypatch.setenv("MAVERICK_TENANT", "acme")
     assert config.load_config()["budget"]["max_dollars"] == 5.0
     assert not config.config_source_errors()
+
+
+def test_a_failed_key_read_is_not_kept_for_the_rest_of_a_decision(config_home, monkeypatch):
+    from maverick import config, crypto_at_rest
+
+    real = crypto_at_rest._load_or_create_key
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) == 1:
+            raise crypto_at_rest.EncryptionUnavailable("the key file is held by its writer")
+        return real()
+
+    monkeypatch.setattr(crypto_at_rest, "_load_or_create_key", flaky)
+    with config.single_read():
+        keys = [config.load_config().get("providers", {}).get("anthropic", {}).get("api_key") for _ in range(3)]
+    assert keys == [None, "sk-test-not-a-real-key", "sk-test-not-a-real-key"]  # pragma: allowlist secret
+
+
+def test_a_gate_reads_the_current_files_even_inside_another_decision(config_home):
+    import os
+
+    from maverick import config
+
+    home, reads = config_home
+    with config.single_read():  # a page render
+        assert config.load_config()["budget"]["max_dollars"] == 5.0
+        replacement = home / "config.toml.new"
+        replacement.write_text("[budget]\nmax_dollars = 7.25\n", encoding="utf-8")  # a new size
+        os.replace(replacement, home / "config.toml")
+        assert config.load_config()["budget"]["max_dollars"] == 5.0  # the render's own read
+        with config.single_read(fresh=True):  # a gate inside it
+            assert config.load_config()["budget"]["max_dollars"] == 7.25
+            with config.single_read(fresh=True), config.single_read():  # parts of that gate
+                assert config.load_config()["budget"]["max_dollars"] == 7.25
+    assert len(reads) == 2
+
+
+def test_a_reset_inside_a_decision_reads_again(config_home):
+    from maverick import config
+
+    home, reads = config_home
+    with config.single_read():
+        config.load_config()
+        (home / "config.toml").write_text("[budget\n", encoding="utf-8")
+        config.reset_config_cache()
+        assert config.load_config().get("budget") is None
+        assert str(home / "config.toml") in config.config_source_errors()
+        config.load_config()
+    assert len(reads) == 3  # the read that found the corrupt file is not kept
+
+
+def test_a_finished_decision_is_not_shared_with_work_that_copied_it(config_home):
+    import contextvars
+
+    from maverick import config
+
+    _, reads = config_home
+    with config.single_read():
+        config.load_config()
+        copied = contextvars.copy_context()
+    copied.run(config.load_config)
+    copied.run(config.load_config)
+    assert len(reads) == 3
+
+    def nested_decision():
+        with config.single_read():
+            config.load_config()
+            config.load_config()
+
+    copied.run(nested_decision)
+    assert len(reads) == 4
+
+
+def test_a_parse_of_a_file_replaced_meanwhile_does_not_clear_the_new_files_error(config_home, monkeypatch):
+    # One read parsed the old, valid file; while it ran another read found the
+    # replacement corrupt. The slower read used to commit last and erase that
+    # error, so health reported the corrupt policy as fine.
+    import threading
+
+    from maverick import config
+
+    home, _ = config_home
+    path = home / "config.toml"
+    real = config.atomic_read_bytes
+    parsed, resume = threading.Event(), threading.Event()
+
+    def slow_first_read(target):
+        data = real(target)
+        if threading.current_thread() is not threading.main_thread():
+            parsed.set()
+            resume.wait(10)
+        return data
+
+    monkeypatch.setattr(config, "atomic_read_bytes", slow_first_read)
+    config.reset_config_cache()  # the reader parses rather than hitting the cache
+    results = []
+    reader = threading.Thread(target=lambda: results.append(config._read_toml_raw(path)))
+    reader.start()
+    assert parsed.wait(10)
+    path.write_text("[budget\n", encoding="utf-8")  # a different size: a new file
+    assert config._read_toml_raw(path) == {}
+    resume.set()
+    reader.join(10)
+    assert results == [{"budget": {"max_dollars": 5.0}}]  # the slow read still answers
+    assert str(path) in config.config_source_errors()
+    assert config._read_toml_raw(path) == {}  # the cache holds the new file
+    assert str(path) in config.config_source_errors()
+
+
+def test_a_file_created_while_another_read_found_it_absent_keeps_its_error(config_home, monkeypatch):
+    import threading
+
+    from maverick import config
+
+    home, _ = config_home
+    path = home / "late.toml"
+    real_stat = Path.stat
+    first = []
+
+    def created_meanwhile(self, *args, **kwargs):
+        if self == path and not first:
+            first.append(1)
+            path.write_text("[budget\n", encoding="utf-8")
+            other = threading.Thread(target=config._read_toml_raw, args=(path,))
+            other.start()
+            other.join(10)
+            assert str(path) in config._toml_errors
+            raise FileNotFoundError(str(path))  # this read saw it absent
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", created_meanwhile)
+    assert config._read_toml_raw(path) == {}
+    assert str(path) in config._toml_errors
+
+
+def test_a_replaced_overlays_error_is_not_cleared_by_unsealing_the_old_one(config_home, monkeypatch):
+    import threading
+
+    from maverick import config
+
+    overlay = config.dashboard_overrides_path()
+    real = config._unseal_config_tree
+    reached, resume = threading.Event(), threading.Event()
+
+    def slow_unseal(tree):
+        if threading.current_thread() is not threading.main_thread():
+            reached.set()
+            resume.wait(10)
+        return real(tree)
+
+    monkeypatch.setattr(config, "_unseal_config_tree", slow_unseal)
+    results = []
+    reader = threading.Thread(target=lambda: results.append(config._load_config_file(overlay)))
+    reader.start()
+    assert reached.wait(10)
+    overlay.write_text("[providers\n", encoding="utf-8")
+    assert config._load_config_file(overlay) == {}
+    resume.set()
+    reader.join(10)
+    assert results[0]["providers"]["anthropic"]["api_key"] == "sk-test-not-a-real-key"  # pragma: allowlist secret
+    assert str(overlay) in config.config_source_errors()
+
+
+def test_an_overlay_that_cannot_be_checked_for_permission_is_reported_not_raised(config_home, monkeypatch):
+    # Path.exists() raised PermissionError out of every load_config().
+    from maverick import config
+
+    overlay = config.dashboard_overrides_path()
+    real_stat = Path.stat
+
+    def denied(self, *args, **kwargs):
+        if self == overlay:
+            raise PermissionError("policy source is not readable")
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", denied)
+    assert "providers" not in config.load_config()
+    assert "PermissionError" in config.config_source_errors()[str(overlay)]
+
+
+def test_a_tenant_overlay_whose_folder_became_a_file_is_no_longer_reported(config_home, monkeypatch):
+    import shutil
+
+    from maverick import config
+
+    home, _ = config_home
+    config.dashboard_overrides_path().unlink()  # sealed under the key of no tenant
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    tenant = config.tenant_config_path()
+    tenant.parent.mkdir(parents=True)
+    tenant.write_text("[budget\n", encoding="utf-8")
+    config.load_config()
+    assert str(tenant) in config.config_source_errors()
+    shutil.rmtree(home / "tenants")
+    (home / "tenants").write_text("not a directory", encoding="utf-8")
+    assert config.load_config()["budget"]["max_dollars"] == 5.0  # skipped as absent
+    assert not config.config_source_errors()  # and no longer reported
+
+
+def test_the_cache_keeps_errors_it_evicts_and_evicts_nothing_to_replace_an_entry(config_home, monkeypatch):
+    from maverick import config
+
+    home, _ = config_home
+    monkeypatch.setattr(config, "_TOML_CACHE_MAX", 2)
+    config.reset_config_cache()
+    corrupt, first, second = home / "corrupt.toml", home / "first.toml", home / "second.toml"
+    corrupt.write_text("[budget\n", encoding="utf-8")
+    first.write_text("a = 1\n", encoding="utf-8")
+    second.write_text("b = 2\n", encoding="utf-8")
+    for path in (corrupt, first, second):
+        config._read_toml_raw(path)
+    assert str(corrupt) not in config._toml_cache
+    assert str(corrupt) in config._source_errors([corrupt]), "evicting it must not hide the error"
+    second.write_text("b = 22\n", encoding="utf-8")
+    assert config._read_toml_raw(second) == {"b": 22}
+    assert list(config._toml_cache) == [str(first), str(second)]
+
+
+def test_a_reset_inside_a_gate_also_restarts_the_render_it_is_in(config_home):
+    import os
+
+    from maverick import config
+
+    home, reads = config_home
+    with config.single_read():  # a page render
+        assert config.load_config()["budget"]["max_dollars"] == 5.0
+        with config.single_read(fresh=True):  # a gate inside it saves new settings
+            config.load_config()
+            replacement = home / "config.toml.new"
+            replacement.write_text("[budget]\nmax_dollars = 9.75\n", encoding="utf-8")
+            os.replace(replacement, home / "config.toml")
+            config.reset_config_cache()
+        assert config.load_config()["budget"]["max_dollars"] == 9.75
+    assert len(reads) == 3
