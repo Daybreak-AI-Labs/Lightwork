@@ -1328,7 +1328,13 @@ def _resolve_principal(
     allowed only in genuine local auth-off mode. Probe,
     discovery, login-bootstrap, share, SCIM, SAML, form, and webhook paths carry
     their own narrower credential or are intentionally public bootstrap routes.
+    The whole resolution reads the configuration once (``single_read``).
     """
+    with single_read():
+        return _resolve_principal_now(request, websocket)
+
+
+def _resolve_principal_now(request, websocket) -> VerifiedPrincipal | None:
     if request is None:
         return _resolve_websocket_principal(websocket)
 
