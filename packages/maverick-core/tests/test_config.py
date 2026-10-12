@@ -1009,8 +1009,9 @@ def test_a_replaced_overlays_error_is_not_cleared_by_unsealing_the_old_one(confi
     assert str(overlay) in config.config_source_errors()
 
 
-def test_an_overlay_that_cannot_be_checked_for_permission_is_reported_not_raised(config_home, monkeypatch):
-    # Path.exists() raised PermissionError out of every load_config().
+def test_an_overlay_that_cannot_be_checked_for_permission_still_raises(config_home, monkeypatch):
+    # As Path.exists() did: callers such as the workspace IP allowlist never
+    # check config_source_errors() and treat the exception as "loopback only".
     from maverick import config
 
     overlay = config.dashboard_overrides_path()
@@ -1022,8 +1023,8 @@ def test_an_overlay_that_cannot_be_checked_for_permission_is_reported_not_raised
         return real_stat(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "stat", denied)
-    assert "providers" not in config.load_config()
-    assert "PermissionError" in config.config_source_errors()[str(overlay)]
+    with pytest.raises(PermissionError):
+        config.load_config()
 
 
 def test_a_tenant_overlay_whose_folder_became_a_file_is_no_longer_reported(config_home, monkeypatch):
@@ -1080,3 +1081,141 @@ def test_a_reset_inside_a_gate_also_restarts_the_render_it_is_in(config_home):
             config.reset_config_cache()
         assert config.load_config()["budget"]["max_dollars"] == 9.75
     assert len(reads) == 3
+
+
+def test_a_slower_clean_read_does_not_clear_a_newer_reads_error(config_home, monkeypatch):
+    # One read was parsing the file when another could not open it (an
+    # antivirus or backup lock). The slower read finished clean and erased that
+    # error, though the other read's caller got no policy from the file.
+    import threading
+
+    from maverick import config
+
+    home, _ = config_home
+    path = home / "config.toml"
+    real = config.atomic_read_bytes
+    parsed, resume = threading.Event(), threading.Event()
+
+    def locked_or_slow(target):
+        if threading.current_thread() is threading.main_thread():
+            raise PermissionError("the file is locked by another program")
+        data = real(target)
+        parsed.set()
+        resume.wait(10)
+        return data
+
+    monkeypatch.setattr(config, "atomic_read_bytes", locked_or_slow)
+    config.reset_config_cache()
+    results = []
+    reader = threading.Thread(target=lambda: results.append(config._read_toml_raw(path)))
+    reader.start()
+    assert parsed.wait(10)
+    assert config._read_toml_raw(path) == {}
+    resume.set()
+    reader.join(10)
+    assert results == [{"budget": {"max_dollars": 5.0}}]
+    assert "PermissionError" in config.config_source_errors()[str(path)]
+    monkeypatch.setattr(config, "atomic_read_bytes", real)
+    assert config._read_toml_raw(path) == {"budget": {"max_dollars": 5.0}}  # the next read settles it
+    assert str(path) not in config.config_source_errors()
+
+
+def test_a_slower_unseal_does_not_clear_a_newer_unseal_failure(config_home, monkeypatch):
+    import threading
+
+    from maverick import config
+
+    overlay = config.dashboard_overrides_path()
+    real = config._unseal_config_tree
+    reached, resume = threading.Event(), threading.Event()
+    broken = [True]
+
+    def slow_or_failing(tree):
+        if threading.current_thread() is not threading.main_thread():
+            reached.set()
+            resume.wait(10)
+            return real(tree)
+        if broken[0]:
+            raise ValueError("the key file can no longer be read")
+        return real(tree)
+
+    monkeypatch.setattr(config, "_unseal_config_tree", slow_or_failing)
+    config._read_toml_raw(overlay)  # cached, so both reads open the same tree
+    results = []
+    reader = threading.Thread(target=lambda: results.append(config._load_config_file(overlay)))
+    reader.start()
+    assert reached.wait(10)
+    assert config._load_config_file(overlay) == {}
+    resume.set()
+    reader.join(10)
+    assert results[0]["providers"]["anthropic"]["api_key"] == "sk-test-not-a-real-key"  # pragma: allowlist secret
+    assert str(overlay) in config.config_source_errors()
+    broken[0] = False
+    config._load_config_file(overlay)  # the next read settles it
+    assert str(overlay) not in config.config_source_errors()
+
+
+def test_a_clean_parse_does_not_clear_an_overlay_that_still_cannot_be_opened(config_home, monkeypatch):
+    # The overlay parses fine, but its values cannot be decrypted. Parsing it
+    # again (a touched file, a cache eviction) cleared that error before the
+    # values were tried again.
+    import os
+
+    from maverick import config
+
+    overlay = config.dashboard_overrides_path()
+    real = config._unseal_config_tree
+    broken = [True]
+
+    def failing(tree):
+        if broken[0]:
+            raise ValueError("the key could not open this value")
+        return real(tree)
+
+    monkeypatch.setattr(config, "_unseal_config_tree", failing)
+    assert config._load_config_file(overlay) == {}
+    assert str(overlay) in config.config_source_errors()
+    stat = overlay.stat()
+    os.utime(overlay, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    assert "providers" in config._read_toml_raw(overlay)  # a clean parse of the same values
+    assert str(overlay) in config.config_source_errors()
+    broken[0] = False
+    assert "providers" in config._load_config_file(overlay)
+    assert str(overlay) not in config.config_source_errors()
+
+
+def test_a_reset_inside_a_gate_keeps_the_renders_own_errors(config_home):
+    from maverick import config
+
+    home, _ = config_home
+    path = str(home / "config.toml")
+    (home / "config.toml").write_text("[budget\n", encoding="utf-8")
+    with config.single_read():  # a page render that met the corrupt file
+        assert config.load_config().get("budget") is None
+        with config.single_read(fresh=True):  # a gate inside it resets the cache
+            config.reset_config_cache()
+        assert path in config.config_source_errors(), "the render got no policy from it"
+
+
+def test_no_file_is_checked_while_the_cache_lock_is_held(config_home, monkeypatch):
+    # A slow check of one file (a network share) held the lock every
+    # configuration read takes, stalling the whole process behind it.
+    from maverick import config
+
+    home, _ = config_home
+    real_stat = Path.stat
+    held = []
+
+    def watched(self, *args, **kwargs):
+        held.append(config._toml_lock._is_owned())
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", watched)
+    config.load_config()
+    (home / "config.toml").write_text("[budget\n", encoding="utf-8")
+    config.load_config()
+    config.config_source_errors()
+    (home / "config.toml").unlink()
+    config.load_config()
+    config.config_source_errors()
+    assert held and not any(held)
