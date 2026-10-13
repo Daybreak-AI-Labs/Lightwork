@@ -110,9 +110,9 @@ def _finding(text: str) -> str:
 
 # ---- what each specialist can do (domains-audit) ----------------------------------
 
-def _audits(suite: str | None):
+def _audits(suite: str | None, *, runtime: bool = True):
     from maverick.domain_audit import audit_roster
-    audits = audit_roster()
+    audits = audit_roster(runtime=runtime)
     suites = sorted({a.suite for a in audits if a.suite})
     if suite:
         if suite not in suites:
@@ -125,7 +125,8 @@ def _inventory(suite: str | None) -> dict:
     from maverick.agent_autonomy import levels_enabled
     from maverick.departments import department_title
     from maverick.domain_audit import summarize
-    audits, suites = _audits(suite)
+    # The inventory shows no runtime capability: skip computing it (about 80 ms).
+    audits, suites = _audits(suite, runtime=False)
     s = summarize(audits)
     flagged = [a for a in audits if a.reachable_dangerous and not a.is_builder]
     return {

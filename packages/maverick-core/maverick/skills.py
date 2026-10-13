@@ -15,9 +15,10 @@ import logging
 import os
 import re
 import stat
+import threading
 import urllib.error
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .blackboard import Blackboard
@@ -270,10 +271,9 @@ def validate_skill_text(text: str, path: Path | None = None) -> SkillValidation:
     return SkillValidation(ok=not errors, errors=errors, warnings=warnings)
 
 
-def load_skills(skills_dir: Path | None = None) -> list[Skill]:
-    target_dir = _resolved_skills_dir(skills_dir)
-    if not target_dir.exists():
-        return []
+def _parse_skill_files(target_dir: Path) -> list[tuple[Skill, bytes]]:
+    """Every readable ``*.md`` skill in ``target_dir`` with its raw bytes,
+    before any learned-snapshot binding or readability check."""
     out = []
     for p in target_dir.glob("*.md"):
         try:
@@ -281,7 +281,19 @@ def load_skills(skills_dir: Path | None = None) -> list[Skill]:
                 raw = stream.read(MAX_SKILL_DOWNLOAD_BYTES + 1)
             if len(raw) > MAX_SKILL_DOWNLOAD_BYTES:
                 continue
-            skill = Skill.parse(raw.decode("utf-8").replace("\r\n", "\n"), p)
+            out.append((Skill.parse(raw.decode("utf-8").replace("\r\n", "\n"), p), raw))
+        except Exception:
+            continue
+    return out
+
+
+def load_skills(skills_dir: Path | None = None) -> list[Skill]:
+    target_dir = _resolved_skills_dir(skills_dir)
+    if not target_dir.exists():
+        return []
+    out = []
+    for skill, raw in _parse_skill_files(target_dir):
+        try:
             _bind_learned_snapshot(skill, raw)
             if _source_readable(skill):
                 out.append(skill)
@@ -359,10 +371,42 @@ def builtin_skills_dir() -> Path:
     return BUILTIN_SKILLS_DIR
 
 
+_builtin_parsed: tuple[tuple, list[Skill]] | None = None
+_builtin_parsed_lock = threading.Lock()
+
+
+def _builtin_files_key() -> tuple:
+    """The library's identity: each file's name, size and modification time
+    (one directory listing), so an edit in place is seen like an added file."""
+    with os.scandir(BUILTIN_SKILLS_DIR) as entries:
+        files = sorted((entry.name, entry.stat().st_size, entry.stat().st_mtime_ns)
+                       for entry in entries if entry.name.lower().endswith(".md"))
+    return str(BUILTIN_SKILLS_DIR), tuple(files)
+
+
 def load_builtin_skills() -> list[Skill]:
     """The shipped first-party skills library. Always readable (no env gate);
-    the enablement check is applied by :func:`available_skills`."""
-    return load_skills(BUILTIN_SKILLS_DIR)
+    the enablement check is applied by :func:`available_skills`.
+
+    Parsed once while no file in it changed (keyed by each file's name, size
+    and modification time): every agent build read and parsed all 514 files,
+    about 15-25 ms per chat turn. Each call gets its own copies. A library
+    holding learned (auto-distilled) entries, whose readability depends on
+    the caller, is loaded afresh every time."""
+    global _builtin_parsed
+    try:
+        key = _builtin_files_key()
+    except OSError:
+        return load_skills(BUILTIN_SKILLS_DIR)
+    with _builtin_parsed_lock:
+        cached = _builtin_parsed
+        if cached is None or cached[0] != key:
+            parsed = [skill for skill, _raw in _parse_skill_files(BUILTIN_SKILLS_DIR)]
+            cached = _builtin_parsed = (key, parsed)
+    if any(skill.source.startswith("auto-distilled") for skill in cached[1]):
+        return load_skills(BUILTIN_SKILLS_DIR)
+    return [replace(skill, triggers=list(skill.triggers), tools_needed=list(skill.tools_needed))
+            for skill in cached[1]]
 
 
 def _builtin_skills_enabled() -> bool:

@@ -17,6 +17,7 @@ import os
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request, WebSocket
+from maverick.config import single_read
 from maverick.oidc import (
     OIDCError,
     VerifiedPrincipal,
@@ -280,14 +281,15 @@ def _non_static_auth_configured() -> bool:
         from .local_owner import claimed
         from .saml import saml_enabled
 
-        return any((
-            oidc_enabled(),
-            proxy_auth_enabled(),
-            invites_enabled(),
-            saml_enabled(),
-            _saml_policy_configured(),
-            claimed(),
-        ))
+        with single_read():
+            return any((
+                oidc_enabled(),
+                proxy_auth_enabled(),
+                invites_enabled(),
+                saml_enabled(),
+                _saml_policy_configured(),
+                claimed(),
+            ))
     except Exception:
         return True
 
@@ -434,9 +436,10 @@ def auth_genuinely_off() -> bool:
 def _auth_genuinely_off() -> bool:
     from ._shared import dashboard_token
 
-    if dashboard_token() or _dashboard_require_auth_enabled():
-        return False
-    return not non_static_auth_configured()
+    with single_read():
+        if dashboard_token() or _dashboard_require_auth_enabled():
+            return False
+        return not non_static_auth_configured()
 
 
 def anonymous_local_access_allowed() -> bool:
@@ -445,15 +448,19 @@ def anonymous_local_access_allowed() -> bool:
     Having no configured identity mechanism is necessary but not sufficient:
     client-bound/enterprise deployments explicitly disable ambient loopback
     trust. An unreadable binding policy denies the compatibility path.
+    Its own configuration reads share one current read, even inside a page
+    render (``single_read(fresh=True)``). Outside an authorization boundary
+    ``auth_genuinely_off`` is still answered once per request (its memo).
     """
-    if not auth_genuinely_off():
-        return False
-    try:
-        from maverick.client import client_binding_enforced
+    with single_read(fresh=True):
+        if not auth_genuinely_off():
+            return False
+        try:
+            from maverick.client import client_binding_enforced
 
-        return not client_binding_enforced()
-    except Exception:
-        return False
+            return not client_binding_enforced()
+        except Exception:
+            return False
 
 
 def _authorization_principal(request: Request) -> str | None:
@@ -470,7 +477,7 @@ def _authorization_principal(request: Request) -> str | None:
     if principal is not None:
         return principal
     state = getattr(request, "state", None)
-    with fresh_configuration():
+    with fresh_configuration(), single_read(fresh=True):
         if anonymous_local_access_allowed() or _dashboard_token_authenticated(request):
             if state is not None:
                 state._anonymous_grant_verified = True
@@ -602,6 +609,10 @@ def global_role_for_principal(principal: str | None) -> str | None:
         # A damaged role roster, group-membership source, or config default is
         # deny-all. Falling through to the historical operator default would
         # turn a policy outage into a privilege escalation.
+        from . import strict_reads
+
+        if strict_reads.active():
+            raise
         return None
 
 
@@ -634,13 +645,18 @@ def role_for_principal(principal: str | None) -> str | None:
     except Exception:
         # Never replace an unreadable tenant-local demotion with the broader
         # global/default role.
+        from . import strict_reads
+
+        if strict_reads.active():
+            raise
         return None
     return global_role_for_principal(principal)
 
 
 def caller_role(request: Request) -> str | None:
     """The RBAC role of the current caller (None when auth is off)."""
-    return role_for_principal(_authorization_principal(request))
+    with single_read(fresh=True):  # a gate: the current files, even inside a render
+        return role_for_principal(_authorization_principal(request))
 
 
 def api_key_permissions(request) -> frozenset[str] | None:
@@ -712,15 +728,17 @@ def has_permission(request: Request, permission: str, *, api_scope: str | None =
 
     Auth off -> True (legacy single-user; the local operator owns everything).
     Otherwise gated by the caller's role, and for an API-key bearer also by
-    the key's scopes.
+    the key's scopes. A gate: it reads the current configuration once, even
+    inside a page render (``single_read(fresh=True)``).
     """
-    principal = _authorization_principal(request)
-    if principal is None:
-        return True
-    if not _api_key_allows(request, permission, api_scope=api_scope):
-        return False
-    from . import rbac
-    return permission in rbac.permissions_for(role_for_principal(principal))
+    with single_read(fresh=True):
+        principal = _authorization_principal(request)
+        if principal is None:
+            return True
+        if not _api_key_allows(request, permission, api_scope=api_scope):
+            return False
+        from . import rbac
+        return permission in rbac.permissions_for(role_for_principal(principal))
 
 
 def _permission_denied(request: Request, permission: str, *, installation: bool = False,
@@ -763,16 +781,18 @@ def has_global_permission(request: Request, permission: str) -> bool:
     """Whether the caller may perform a dashboard-wide control-plane action.
 
     Tenant memberships are intentionally ignored so a tenant-local admin cannot
-    satisfy global admin gates for other tenants or dashboard settings.
+    satisfy global admin gates for other tenants or dashboard settings. A gate:
+    it reads the current configuration once (``single_read(fresh=True)``).
     """
-    principal = _authorization_principal(request)
-    if principal is None:
-        return True
-    if not _api_key_allows(request, permission):
-        return False
-    from . import rbac
+    with single_read(fresh=True):
+        principal = _authorization_principal(request)
+        if principal is None:
+            return True
+        if not _api_key_allows(request, permission):
+            return False
+        from . import rbac
 
-    return permission in rbac.permissions_for(global_role_for_principal(principal))
+        return permission in rbac.permissions_for(global_role_for_principal(principal))
 
 
 def require_global_permission(request: Request, permission: str) -> None:
@@ -984,6 +1004,111 @@ def can_access_goal(request: Request, goal) -> bool:
     try:
         require_copy_sources(_world(), goal.id, authorize=authorize)
     except (PermissionError, SourceContextUnavailable, AttachmentRejected):
+        return False
+    return True
+
+
+def _goal_readable_by(principal: str, goal, grants=None) -> bool:
+    """The task page's rules for a read by ``principal`` (the ``view``
+    permission the page and its thread require, then
+    :func:`_goal_read_policy`: department access, then ownership or a current
+    reviewed read grant held by a global administrator), without a request
+    and without recording a read. ``grants`` is the task's grant readers
+    (or the error reading them) when the caller already read them. Keep in
+    step with :func:`_goal_read_policy` (tests compare the two).
+
+    Every rule is checked: one that refuses decides, whatever order the
+    sources are read in, and a source that cannot be read only matters when
+    no readable rule refuses (it then raises)."""
+    from maverick.domain import suites_for_domain
+
+    from . import content_access, rbac, suite_grants
+
+    owner = getattr(goal, "owner", "") or ""
+
+    def department():
+        domain = getattr(goal, "domain", None)
+        if not domain:
+            return True
+        suites = None if is_dashboard_admin(principal) else suite_grants.granted_suites(principal)  # as caller_suites
+        return suites is None or all(suite is None or suite in suites for suite in suites_for_domain(domain))
+
+    def granted():
+        found = grants
+        if found is None:
+            found = content_access.grant_readers(owner, resource_kind="goal", resource_id=str(goal.id),
+                                                 among={principal})
+        if isinstance(found, Exception):
+            raise found
+        return principal in found
+
+    rules = [lambda: "view" in rbac.permissions_for(role_for_principal(principal)), department]
+    if owner != principal:
+        rules += [lambda: "admin" in rbac.permissions_for(global_role_for_principal(principal)),
+                  lambda: scim_groups.active_for_principal(principal) is not False, granted]
+    unreadable = None
+    for rule in rules:
+        try:
+            if not rule():
+                return False
+        except Exception as exc:  # noqa: BLE001 -- only decides if no readable rule refuses
+            unreadable = unreadable or exc
+    if unreadable is not None:
+        raise unreadable
+    return True
+
+
+def goal_readable_by(principal: str, goal, *, grants=None) -> bool:
+    """Whether ``principal`` could open ``goal`` now, by the rules
+    :func:`can_access_goal` applies to a read from them (copied
+    conversations included), for someone to be told about the task.
+    ``grants`` is as for :func:`_goal_readable_by`. A source that cannot be
+    read denies (it raises inside ``strict_reads.strict()``)."""
+    from maverick.attachments import AttachmentRejected
+    from maverick.chat_message_actions import require_copy_sources
+    from maverick.knowledge_task_context import SourceContextUnavailable
+
+    from ._shared import _world
+
+    unreadable = []
+
+    def authorize(source):
+        if source.id == goal.id:
+            return  # the task's own rules are checked below, with the grants already read
+        try:
+            readable = _goal_readable_by(principal, source)
+        except Exception as exc:  # noqa: BLE001 -- a later source may still refuse
+            unreadable.append(exc)
+            return
+        if not readable:
+            raise PermissionError("A copied source is unavailable to this account.")
+
+    if goal is None or not principal:
+        return False
+    # The task's own rules and every copied source are each checked, so a
+    # refusal from any of them decides even while another cannot be read.
+    try:
+        if not _goal_readable_by(principal, goal, grants):
+            return False
+    except Exception as exc:  # noqa: BLE001 -- a copied source may still refuse
+        unreadable.append(exc)
+    try:
+        require_copy_sources(_world(), goal.id, authorize=authorize, defer_errors=True)
+    except PermissionError:
+        return False
+    except (SourceContextUnavailable, AttachmentRejected) as exc:
+        # These also wrap outages (an unreachable connector, an unreadable
+        # file): a refusal only when nothing else was unreadable.
+        if not unreadable:
+            return False
+        unreadable.append(exc)
+    except Exception as exc:  # noqa: BLE001 -- an unreadable access rule is not evidence of access
+        unreadable.append(exc)
+    if unreadable:
+        from . import strict_reads
+
+        if strict_reads.active():
+            raise unreadable[0]
         return False
     return True
 
@@ -1210,7 +1335,14 @@ def _resolve_principal(
     allowed only in genuine local auth-off mode. Probe,
     discovery, login-bootstrap, share, SCIM, SAML, form, and webhook paths carry
     their own narrower credential or are intentionally public bootstrap routes.
+    The whole resolution reads the current configuration once
+    (``single_read(fresh=True)``).
     """
+    with single_read(fresh=True):
+        return _resolve_principal_now(request, websocket)
+
+
+def _resolve_principal_now(request, websocket) -> VerifiedPrincipal | None:
     if request is None:
         return _resolve_websocket_principal(websocket)
 

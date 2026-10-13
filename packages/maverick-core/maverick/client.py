@@ -158,7 +158,15 @@ def client_binding_enforced() -> bool:
 
     On via ``MAVERICK_CLIENT_ENFORCE``, ``[client] enforce = true``, or
     enterprise mode (a deployment handling a real client's sensitive data must
-    be provably bound to that client). Off by default."""
+    be provably bound to that client). Off by default. One decision reads the
+    configuration once (``config.single_read``)."""
+    from .config import single_read
+
+    with single_read():
+        return _client_binding_enforced()
+
+
+def _client_binding_enforced() -> bool:
     env = os.environ.get("MAVERICK_CLIENT_ENFORCE")
     if env is not None and env.strip() != "":
         return is_truthy(env)

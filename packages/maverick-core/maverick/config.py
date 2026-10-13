@@ -29,13 +29,16 @@ Schema overview::
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import logging
 import math
 import os
 import re
+import threading
 import time
+from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -127,6 +130,57 @@ _toml_cache: dict[str, tuple[int, int, dict]] = {}
 # distinguish "file absent" from "present but unreadable/corrupt". Track the
 # latter alongside the parsed cache so trust/auth callers can fail closed.
 _toml_errors: dict[str, str] = {}
+# The dashboard overlay's decryption failures, kept apart from its parse
+# errors: a clean parse of a file whose values still cannot be opened must not
+# clear them.
+_unseal_errors: dict[str, str] = {}
+# How many errors have been recorded for each source, ever (never reset). A
+# read notes it before touching the file and clears an error only if none was
+# recorded meanwhile: a slower read must not erase what a newer one found (a
+# replaced file's corruption, a passing permission failure, a key that stopped
+# working). It leaves that error for the next read to settle instead.
+_toml_gen: dict[str, int] = {}
+# A cache entry and its error change together, so a reader never re-reports an
+# error another thread has just cleared with a fresh parse, nor the reverse.
+# Nothing touches the filesystem while holding it.
+_toml_lock = threading.RLock()
+# What Path.exists() treats as absent: no such file, or a path through a file.
+_ABSENT = (FileNotFoundError, NotADirectoryError)
+
+
+class _UnreadableTable(dict):
+    """The empty table a corrupt file is cached as; every hit reports it again."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__()
+        self.message = message
+
+
+# The errors one read itself ran into (see ``single_read``). _toml_errors is
+# process-wide: another thread's reset or successful read can clear an entry
+# while a read is in flight, so it cannot tell whether *this* read was clean.
+_READ_ERRORS: ContextVar[dict[str, str] | None] = ContextVar("maverick_config_read_errors", default=None)
+
+
+def _record_source_error(key: str, message: str, table: dict[str, str] | None = None) -> None:
+    """Report an unreadable source to config_source_errors() and to this read."""
+    (_toml_errors if table is None else table)[key] = message
+    _toml_gen[key] = _toml_gen.get(key, 0) + 1
+    noted = _READ_ERRORS.get()
+    if noted is not None:
+        noted[key] = message
+
+
+def _forget_absent(key: str, since: int) -> None:
+    """Drop a source found absent, unless an error was recorded for it after
+    ``since`` was noted: that came from a read of a file created meanwhile."""
+    with _toml_lock:
+        if _toml_gen.get(key, 0) == since:
+            _toml_cache.pop(key, None)
+            _toml_errors.pop(key, None)
+            _unseal_errors.pop(key, None)
+
+
 # Bound the cache so a deployment with many per-tenant config paths
 # (~/.maverick/tenants/<t>/config.toml) can't grow it without limit. Entries
 # are cheap to rebuild (a stat + parse), so a simple oldest-first cap is enough.
@@ -137,10 +191,21 @@ def reset_config_cache() -> None:
     """Drop the parsed-TOML and .env-file caches (test hook; prod files rarely
     change)."""
     global _env_last_check
-    _toml_cache.clear()
-    _toml_errors.clear()
+    with _toml_lock:
+        _toml_cache.clear()
+        _toml_errors.clear()
+        _unseal_errors.clear()
     _env_file_cache.clear()
     _env_last_check = None
+    kept = _KEPT_READ.get()
+    if kept is not None:
+        kept.entry = None
+    shared = _SINGLE_READ.get()
+    if shared is not None:
+        shared.noted = {}  # this decision's errors; enclosing ones keep theirs
+    while shared is not None:  # this decision and every one it is nested in
+        shared.tree = None  # the next read starts again
+        shared = shared.outer
 
 
 # Wizard-persisted secrets: the installer writes every collected key to
@@ -212,19 +277,27 @@ def _read_toml_raw(path: Path) -> dict:
     """Parsed TOML for ``path`` (NO interpolation), memoized by mtime+size.
     Returns ``{}`` for a missing file, and ``{}`` + a warning for a corrupt one."""
     key = str(path)
+    since = _toml_gen.get(key, 0)
     try:
         st = path.stat()
-    except FileNotFoundError:
-        _toml_cache.pop(key, None)
-        _toml_errors.pop(key, None)
+    except _ABSENT:
+        _forget_absent(key, since)
         return {}  # an absent optional config legitimately means defaults
     except OSError as e:
-        _toml_cache.pop(key, None)
-        _toml_errors[key] = f"{type(e).__name__}: {e}"
+        with _toml_lock:
+            _toml_cache.pop(key, None)
+            _record_source_error(key, f"{type(e).__name__}: {e}")
         return {}  # general callers stay fail-soft; security callers inspect health
-    cached = _toml_cache.get(key)
-    if cached is not None and cached[0] == st.st_mtime_ns and cached[1] == st.st_size:
-        return cached[2]
+    with _toml_lock:
+        cached = _toml_cache.get(key)
+        if cached is not None and cached[0] == st.st_mtime_ns and cached[1] == st.st_size:
+            if isinstance(cached[2], _UnreadableTable):
+                # A reset may have cleared the entry while the corrupt table
+                # stayed cached: report it on every hit.
+                _record_source_error(key, cached[2].message)
+            return cached[2]
+    error = None
+    cache = True
     try:
         # Private Windows publication retains the verified write handle until
         # rename completes. A reader can see the name before that handle closes.
@@ -239,23 +312,33 @@ def _read_toml_raw(path: Path) -> dict:
             "ignoring unreadable %s (%s: %s); using defaults",
             path, type(e).__name__, e,
         )
-        _toml_errors[key] = f"{type(e).__name__}: {e}"
-        if isinstance(e, OSError):
-            # A sharing/permission failure is not parsed file content. Keep
-            # health fail-closed now, but retry the next read even when this
-            # complete file's mtime and size have not changed.
-            _toml_cache.pop(key, None)
-            return {}
-        raw = {}
-    else:
-        _toml_errors.pop(key, None)
-    # Evict oldest entries first when over the cap (dicts preserve insertion
-    # order). Re-fetching ``key`` below keeps the just-read path resident.
-    while len(_toml_cache) >= _TOML_CACHE_MAX:
-        evicted = next(iter(_toml_cache))
-        _toml_cache.pop(evicted, None)
-        _toml_errors.pop(evicted, None)
-    _toml_cache[key] = (st.st_mtime_ns, st.st_size, raw)
+        error = f"{type(e).__name__}: {e}"
+        # A sharing/permission failure is not parsed file content. Keep
+        # health fail-closed now, but retry the next read even when this
+        # complete file's mtime and size have not changed.
+        cache = not isinstance(e, OSError)
+        raw = _UnreadableTable(error) if cache else {}
+    with _toml_lock:
+        if error is not None:
+            # Its caller gets no policy from this source, so it is always
+            # reported, even if the file was replaced meanwhile; a later read
+            # of the new file clears it.
+            _record_source_error(key, error)
+        elif _toml_gen.get(key, 0) != since:
+            # Another read found this source unreadable while this one ran,
+            # perhaps in a newer file: keep its error and its cache entry.
+            return raw
+        else:
+            _toml_errors.pop(key, None)
+        _toml_cache.pop(key, None)
+        if not cache:
+            return raw
+        # Evict oldest entries first when over the cap (dicts preserve
+        # insertion order); ``key`` is re-inserted as the newest. An evicted
+        # source keeps its error: only a clean read or its absence clears it.
+        while len(_toml_cache) >= _TOML_CACHE_MAX:
+            _toml_cache.pop(next(iter(_toml_cache)))
+        _toml_cache[key] = (st.st_mtime_ns, st.st_size, raw)
     return raw
 
 
@@ -340,8 +423,11 @@ def _load_config_file(path: Path) -> dict:
     # dashboard overlay accepts encrypted scalar tokens.  Hand-authored base or
     # tenant configs retain their literal values and existing interpolation
     # contract.
-    loaded = _interp(_read_toml_raw(path))
+    raw = _read_toml_raw(path)
+    loaded = _interp(raw)
     if path.name == DASHBOARD_OVERRIDES_BASENAME:
+        key = str(path)
+        since = _toml_gen.get(key, 0)
         try:
             unsealed = _unseal_config_tree(loaded)
         except Exception as exc:
@@ -352,18 +438,24 @@ def _load_config_file(path: Path) -> dict:
             # config_source_errors() surfaces it (health goes red and security
             # callers fail closed), and drop the overlay so callers fall back to
             # base/env config instead of load_config() raising process-wide.
-            _toml_errors[str(path)] = f"{type(exc).__name__}: {exc}"
+            with _toml_lock:
+                _record_source_error(key, f"{type(exc).__name__}: {exc}", _unseal_errors)
             logging.getLogger(__name__).warning(
                 "dashboard overlay %s could not be decrypted; dropping it "
                 "(rotate keys / re-save provider settings to restore): %s",
                 path, exc,
             )
             return {}
-        # A corrected key can recover the same cached TOML without a file edit.
-        # Only clear a decryption error after a complete unseal; plaintext or
-        # recursive reads must not erase parse errors or a prior failed unseal.
-        if _tree_contains_sealed_value(loaded) and not _UNSEALING.get():
-            _toml_errors.pop(str(path), None)
+        # A corrected key can recover the same cached TOML without a file
+        # edit, and a tree with nothing sealed has nothing left to open. Only a
+        # complete read clears a decryption error (a recursive one returns the
+        # tokens unopened), only while the tree it opened is still the cached
+        # one, and only if no error was recorded while it was being opened.
+        if not _UNSEALING.get():
+            with _toml_lock:
+                cached = _toml_cache.get(key)
+                if cached is not None and cached[2] is raw and _toml_gen.get(key, 0) == since:
+                    _unseal_errors.pop(key, None)
         return unsealed  # type: ignore[return-value]
     return loaded
 
@@ -411,20 +503,31 @@ def _source_errors(paths: list[Path]) -> dict[str, str]:
     # cannot be inspected.
     for path in paths:
         key = str(path)
-        if key not in _toml_errors:
-            continue
-        try:
-            path.stat()
-        except FileNotFoundError:
-            _toml_cache.pop(key, None)
-            _toml_errors.pop(key, None)
-        except OSError:
-            pass
-    return {
-        str(path): _toml_errors[str(path)]
-        for path in paths
-        if str(path) in _toml_errors
-    }
+        if key in _toml_errors or key in _unseal_errors:
+            since = _toml_gen.get(key, 0)
+            try:
+                path.stat()
+            except _ABSENT:
+                _forget_absent(key, since)
+            except OSError:
+                pass
+    errors = {}
+    with _toml_lock:
+        for path in paths:
+            key = str(path)
+            message = _toml_errors.get(key)
+            if message is None:
+                message = _unseal_errors.get(key)
+            if message is not None:
+                errors[key] = message
+    shared = _SINGLE_READ.get()
+    if shared is not None and shared.open and shared.noted:
+        # A source this decision found unreadable stays reported until the
+        # decision ends, even if another thread clears the process-wide entry.
+        for path in paths:
+            if str(path) in shared.noted:
+                errors.setdefault(str(path), shared.noted[str(path)])
+    return errors
 
 
 def config_source_errors(*, include_tenant: bool = True) -> dict[str, str]:
@@ -541,6 +644,64 @@ def _strict_config_bool(
     return value if isinstance(value, bool) else bool(invalid)
 
 
+class _SharedRead:
+    __slots__ = ("open", "fresh", "tree", "noted", "outer")
+
+    def __init__(self, fresh: bool, outer: _SharedRead | None) -> None:
+        self.open = True
+        self.fresh = fresh
+        self.tree: dict | None = None
+        self.noted: dict[str, str] = {}  # sources this decision found unreadable
+        self.outer = outer  # the open decision this one is nested in, if any
+
+
+# One authorization decision asks a dozen questions of the deployment-global
+# configuration (the sign-in methods, the profile, the client binding, the
+# dashboard token). Each used to read the files again and, once a secret had
+# been saved from Settings, resolve the at-rest key and decrypt it: about 15
+# reads per decision and 350 per dashboard page. Inside ``single_read()`` the
+# first clean read is shared and every caller gets its own copy. A read that
+# itself ran into an unreadable, corrupt or undecryptable source (recorded in
+# ``_READ_ERRORS`` as it happens, never inferred from process-wide state) is
+# used once: the next caller reads the files again, exactly as before, and
+# config_source_errors() keeps reporting that source until the scope ends.
+# reset_config_cache() inside the scope also starts a fresh read.
+#
+# A plain scope (a page render, a roster audit) joins any open scope. A gate
+# opens ``single_read(fresh=True)``: it reads the current files even inside a
+# render, joining only another gate's read. No scope outlives its decision.
+_SINGLE_READ: ContextVar[_SharedRead | None] = ContextVar("maverick_config_single_read", default=None)
+
+
+@contextmanager
+def single_read(*, fresh: bool = False):
+    """Read the deployment-global configuration once for one decision."""
+    current = _SINGLE_READ.get()
+    if current is not None and current.open and (current.fresh or not fresh):
+        yield  # already inside this decision: share its read
+        return
+    shared = _SharedRead(fresh, current if current is not None and current.open else None)
+    token = _SINGLE_READ.set(shared)
+    try:
+        yield
+    finally:
+        shared.open = False
+        shared.tree = None
+        _SINGLE_READ.reset(token)
+
+
+def _copy_tree(value):
+    if isinstance(value, dict):
+        return {key: _copy_tree(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_copy_tree(child) for child in value]
+    if isinstance(value, (str, int, float, bool, type(None))):
+        return value
+    import copy
+
+    return copy.deepcopy(value)
+
+
 def load_global_config() -> dict:
     """Load deployment-global config without a per-tenant overlay.
 
@@ -549,6 +710,158 @@ def load_global_config() -> dict:
     The dashboard overlay remains writable by the global admin; the optional
     operator-owned config overlay still has higher precedence.
     """
+    if _UNSEALING.get():
+        return _read_global_config()
+    shared = _SINGLE_READ.get()
+    if shared is not None and not shared.open:
+        shared = None
+    if shared is not None and shared.tree is not None:
+        return _copy_tree(shared.tree)
+    kept = _KEPT_READ.get()
+    if shared is None and kept is None:
+        return _read_global_config()
+    witness = _read_witness() if kept is not None else None
+    entry = kept.entry if kept is not None else None
+    if (entry is not None and witness is not None and entry[1] == witness
+            and _monotonic() - entry[2] <= _KEEP_READ_SECONDS and _same_environment(entry[3])):
+        if shared is not None:
+            shared.tree = entry[0]
+        return _copy_tree(entry[0])
+    started = _monotonic()
+    environment = _environment() if kept is not None else None
+    with _collecting_read_errors() as noted:
+        tree = _read_global_config()
+    if noted:
+        if shared is not None:
+            shared.noted.update(noted)
+        return tree
+    clean = _copy_tree(tree)  # only a read that met no error itself is shared
+    if shared is not None and shared.open:
+        shared.tree = clean
+    if kept is not None and witness is not None:
+        kept.entry = (clean, witness, started, environment)
+    return tree
+
+
+class _KeptRead:
+    __slots__ = ("entry",)
+
+    def __init__(self) -> None:
+        self.entry: tuple[dict, tuple, float, dict] | None = None  # (tree, files, read at, environment)
+
+
+# Within one request, a decision whose inputs are provably unchanged since the
+# request's last clean read uses that read: a page asked about 29 times, each
+# reading the files, resolving the at-rest key and decrypting the saved
+# secrets again. "Unchanged" is the whole environment and the identity
+# (modification and change times, size, device, inode, links, mode, owner) of
+# every file a read depends on: config.toml, the Settings overlay, the
+# operator overlay, the wizard's .env, the at-rest key, its folder and its
+# keyring (their own entries, so a link put in their place shows too). A saved
+# policy, a rotated key or a changed permission changes one of them and the
+# next decision reads again. A Windows ACL change is not visible to stat, so
+# a kept read is used for at most _KEEP_READ_SECONDS after the read that fully
+# checked the key folder.
+_KEEP_READ_SECONDS = 2.0
+_KEPT_READ: ContextVar[_KeptRead | None] = ContextVar("maverick_config_kept_read", default=None)
+
+
+@contextmanager
+def kept_reads():
+    """Let the decisions of one request share a read while its inputs are unchanged."""
+    token = _KEPT_READ.set(_KeptRead())
+    try:
+        yield
+    finally:
+        _KEPT_READ.reset(token)
+
+
+def discard_kept_reads() -> None:
+    """Drop a request's kept read from a context copied into a background worker."""
+    _KEPT_READ.set(None)
+
+
+def _file_state(path: Path, *, key_material: bool = False, rechmodded: bool = False) -> object:
+    try:
+        # The key's own entries, not what they point to: a read refuses a
+        # key file or folder replaced by a link, or a hard-linked key file.
+        st = os.lstat(path) if key_material else os.stat(path)
+    except OSError as e:
+        return type(e).__name__
+    # Every read re-applies the key folder's private mode, which moves its
+    # change time; its mode, owner and link count still show any change.
+    changed = None if rechmodded else st.st_ctime_ns
+    return (st.st_mtime_ns, changed, st.st_size, st.st_dev, st.st_ino, st.st_nlink,
+            st.st_mode, st.st_uid, st.st_gid)
+
+
+def _environment() -> dict:
+    data = getattr(os.environ, "_data", None)
+    return dict(data) if isinstance(data, dict) else dict(os.environ)
+
+
+def _same_environment(kept: dict) -> bool:
+    data = getattr(os.environ, "_data", None)
+    return (data if isinstance(data, dict) else dict(os.environ)) == kept
+
+
+def _read_witness() -> tuple | None:
+    """The files a deployment-global read depends on, as cheap facts (the
+    environment is compared separately, against a copy taken at the read).
+    None when they cannot be stated: that read is neither kept nor reused."""
+    token = _UNSEALING.set(True)  # resolving the key path may read [client] id once
+    try:
+        key = crypto_at_rest._key_path()
+    except Exception:  # e.g. an invalid [client] id: the read itself reports it
+        return None
+    finally:
+        _UNSEALING.reset(token)
+    keyring = key.parent / "at_rest.d"
+    base = config_path()
+    paths = [base, dashboard_overrides_path(), base.parent / _ENV_FILE_BASENAME, keyring]
+    overlay = os.environ.get(CONFIG_OVERLAY_ENV)
+    if overlay:
+        paths.append(Path(overlay).expanduser())
+    keys = [key]
+    try:
+        with os.scandir(keyring) as entries:
+            keys.extend(sorted(keyring / e.name for e in entries if e.name.endswith(".key")))
+    except OSError:
+        pass
+    return (tuple(str(path) for path in [*paths, key.parent, *keys]),
+            tuple(_file_state(path) for path in paths),
+            _file_state(key.parent, key_material=True, rechmodded=True),
+            tuple(_file_state(path, key_material=True) for path in keys),
+            crypto_at_rest._FORCE_EXTERNAL_FLEET_KEY.get())
+
+
+@contextmanager
+def _collecting_read_errors():
+    noted: dict[str, str] = {}
+    token = _READ_ERRORS.set(noted)
+    try:
+        yield noted
+    finally:
+        _READ_ERRORS.reset(token)
+
+
+def _present(path: Path) -> bool:
+    """``Path.exists`` for an optional source, except that a symlink loop is
+    read so the read reports it: ``exists`` treats a loop as absent and
+    silently dropped the policy. A permission error still raises, as callers
+    such as the workspace IP allowlist rely on it."""
+    if path.exists():
+        return True
+    try:
+        path.stat()
+    except OSError as e:
+        return e.errno == errno.ELOOP or getattr(e, "winerror", None) == 1921  # a loop
+    except ValueError:
+        return False
+    return True  # created since
+
+
+def _read_global_config() -> dict:
     # Wizard-persisted secrets must be in the environment BEFORE interpolation,
     # or every "${ANTHROPIC_API_KEY}" the wizard wrote resolves to "" on a bare
     # pip/CLI install. setdefault semantics: a real export always wins.
@@ -557,7 +870,7 @@ def load_global_config() -> dict:
     # Dashboard Settings overlay (always-on, fixed path): UI-edited provider
     # keys / capability+feature toggles merge over config.toml without touching it.
     dash = dashboard_overrides_path()
-    if dash.exists():
+    if _present(dash):
         from .config_resets import merge_dashboard
         cfg = merge_dashboard(cfg, _load_config_file(dash), _deep_merge_config)
     overlay = os.environ.get(CONFIG_OVERLAY_ENV)
@@ -578,8 +891,14 @@ def load_config(path: Path | None = None) -> dict:
     # choices and budget without sharing one global credential set. Skipped in
     # single-tenant mode, so the legacy path is byte-for-byte unchanged.
     tcfg = tenant_config_path()
-    if tcfg is not None and tcfg.exists():
-        cfg = _deep_merge_config(cfg, _load_config_file(tcfg))
+    if tcfg is not None and _present(tcfg):
+        shared = _SINGLE_READ.get()
+        if shared is None or not shared.open:
+            return _deep_merge_config(cfg, _load_config_file(tcfg))
+        with _collecting_read_errors() as noted:
+            tenant = _load_config_file(tcfg)
+        shared.noted.update(noted)  # reported for the rest of the decision
+        cfg = _deep_merge_config(cfg, tenant)
     return cfg
 
 

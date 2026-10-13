@@ -40,8 +40,9 @@ def _index(request):
     return value
 
 
-def _identity(request, world, goal_id):
-    goal = world.get_goal(goal_id)
+def _identity(request, world, goal_id, goal=None):
+    if goal is None or goal.id != goal_id:
+        goal = world.get_goal(goal_id)
     if goal is None:
         raise HTTPException(404, "Conversation is unavailable.")
     assert_goal_access(request, goal)
@@ -51,19 +52,23 @@ def _identity(request, world, goal_id):
     if not domain_suites_allowed(request, goal.domain):
         raise HTTPException(403, "Conversation department access changed.")
     binding = ChatThreads(world).binding(goal.id)
-    root = world.get_goal(binding.root_id) if binding else goal
+    # A conversation's own root is the goal read and checked above; only a
+    # different root is read and checked again.
+    root = goal if binding is None or binding.root_id == goal.id else world.get_goal(binding.root_id)
     if root is None or (root.owner or "") != owner:
         raise HTTPException(404, "Conversation ownership changed. Reload before continuing.")
-    assert_goal_access(request, root)
-    if not domain_suites_allowed(request, root.domain):
-        raise HTTPException(403, "Conversation department access changed.")
+    if root is not goal:
+        assert_goal_access(request, root)
+        if not domain_suites_allowed(request, root.domain):
+            raise HTTPException(403, "Conversation department access changed.")
     identity = [root.id, root.created_at, owner]
     key = "CO-" + hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:48]
     return root, key
 
 
-def organization(request, world, goal_id):
-    root, key = _identity(request, world, goal_id)
+def organization(request, world, goal_id, *, goal=None):
+    """``goal``: the conversation's goal when the caller has just read it."""
+    root, key = _identity(request, world, goal_id, goal)
     index = _index(request)
     record = index.get("entries", {}).get(key)
     if record and (record.get("root_id") != root.id or record.get("owner") != (root.owner or "")):

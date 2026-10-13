@@ -50,7 +50,8 @@ def page(request: Request):
 @router.get("/static/lightwork-local-runtime.{extension}", include_in_schema=False)
 def asset(extension: Literal["js", "css"]):
     return FileResponse(Path(__file__).parent / "static" / ("lightwork-local-runtime." + extension),
-                        media_type="application/javascript" if extension == "js" else "text/css")
+                        media_type="application/javascript" if extension == "js" else "text/css",
+                        headers={"Cache-Control": "public, max-age=300"})
 
 
 @router.get(BASE)

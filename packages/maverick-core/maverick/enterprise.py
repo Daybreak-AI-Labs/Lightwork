@@ -270,8 +270,16 @@ def enterprise_enabled() -> bool:
     policy fails closed to enterprise-on. When neither is set, the named
     deployment profile decides (``profile = "enterprise"`` turns it on; see
     :mod:`maverick.profile`). Off by default only after the policy sources are
-    read successfully (the default profile is ``standard``).
+    read successfully (the default profile is ``standard``). One decision reads
+    the configuration once (``config.single_read``).
     """
+    from .config import single_read
+
+    with single_read():
+        return _enterprise_enabled()
+
+
+def _enterprise_enabled() -> bool:
     try:
         from .compliance_profiles import FLOOR_EGRESS_LOCK, requires_floor
         if requires_floor(FLOOR_EGRESS_LOCK):

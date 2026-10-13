@@ -815,4 +815,5 @@ __all__ = [
 
 @page_router.get("/static/lightwork-source-analysis.js", include_in_schema=False)
 def source_analysis_script():
-    return FileResponse(_STATIC_DIR / "lightwork-source-analysis.js", media_type="application/javascript")
+    return FileResponse(_STATIC_DIR / "lightwork-source-analysis.js", media_type="application/javascript",
+                        headers={"Cache-Control": "public, max-age=300"})

@@ -4502,8 +4502,14 @@ class Agent:
             # than let the AI keep acting in a conversation it may not own.
             log.warning("human-handoff check unreadable; stopping goal %s: %s", goal_id, e)
             return True
+        world = self.ctx.world
         try:
-            goal = self.ctx.world.get_goal(goal_id)
+            # The status column alone, not the whole row with its sealed fields
+            # (about 0.9 ms against 0.005, several times per model call).
+            if callable(getattr(type(world), "goal_stream_state", None)):
+                goal = world.goal_stream_state(goal_id)
+            else:
+                goal = world.get_goal(goal_id)
         except Exception as e:  # pragma: no cover -- a stop check must not crash the run
             log.debug("goal-cancelled check skipped: %s", e)
             return False

@@ -374,3 +374,14 @@ def test_unreadable_handoff_record_stops_cleanly_like_a_real_hold(stop_world, mo
     monkeypatch.setattr(human_conversation_handoffs, "require_ai_open", held)
     world.set_goal_status(gid, "active")
     assert Agent._goal_cancelled(agent) is True
+
+
+def test_the_cancel_check_reads_only_the_status(stop_world, monkeypatch):
+    world, _ = stop_world
+    gid = world.create_goal("poll the stop checks", "")
+    world.set_goal_status(gid, "active")
+    agent = _guard_agent(world, gid, Budget())
+    monkeypatch.setattr(world, "get_goal", lambda *_a: pytest.fail("the whole goal was read"))
+    assert Agent._goal_cancelled(agent) is False
+    world.set_goal_status(gid, "cancelled")
+    assert Agent._goal_cancelled(agent) is True

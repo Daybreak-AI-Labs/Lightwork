@@ -561,8 +561,13 @@ SUITE_PREFIXES: dict[str, str] = {
 }
 
 
+@functools.lru_cache(maxsize=8192)
 def suite_for(name: str) -> str | None:
-    """The business suite a domain pack belongs to, or ``None`` (legacy/generic)."""
+    """The business suite a domain pack belongs to, or ``None`` (legacy/generic).
+
+    Memoised: the roster pages ask it about 6,000 times per render and
+    ``SUITE_PREFIXES`` is fixed at import (clear the cache after changing it).
+    """
     for prefix, suite in SUITE_PREFIXES.items():
         if name.startswith(prefix):
             return suite

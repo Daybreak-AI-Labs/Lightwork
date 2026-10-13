@@ -7,8 +7,10 @@ dozen times (the shell's nav context and bearer middleware ask again), each
 costing ~1 ms of config reads. A pure-ASGI middleware opens a memo scope per
 request and :func:`memoized` serves repeat display/configuration questions.
 An authorization boundary uses :func:`fresh_configuration` because policy may
-change while a request waits. Retained background workers explicitly discard
-their copied HTTP memo. Outside a request scope nothing is cached.
+change while a request waits; it still shares the request's last clean
+configuration read while every input of it is unchanged (``config.kept_reads``).
+Retained background workers explicitly discard their copied HTTP memo and that
+read. Outside a request scope nothing is cached.
 """
 from __future__ import annotations
 
@@ -47,7 +49,10 @@ def discard_request_memo() -> None:
     grants belong to the originating HTTP request, not the worker's lifetime.
     Call this in the copied context, leaving the live request's memo intact.
     """
+    from maverick.config import discard_kept_reads
+
     _SCOPE.set(None)
+    discard_kept_reads()
 
 
 @contextmanager
@@ -75,8 +80,11 @@ class RequestMemoMiddleware:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
+        from maverick.config import kept_reads
+
         token = _SCOPE.set({})
         try:
-            await self.app(scope, receive, send)
+            with kept_reads():
+                await self.app(scope, receive, send)
         finally:
             _SCOPE.reset(token)

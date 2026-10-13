@@ -57,3 +57,82 @@ def test_builtin_skills_load_when_enabled(monkeypatch, tmp_path):
 def test_builtin_skills_excluded_when_disabled(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_BUILTIN_SKILLS", "0")
     assert available_skills(skills_dir=tmp_path / "empty-user-dir") == []
+
+
+def test_the_library_is_parsed_once_and_each_caller_gets_its_own_copies(monkeypatch):
+    from maverick import skills
+
+    monkeypatch.setattr(skills, "_builtin_parsed", None)
+    first = load_builtin_skills()
+    assert first == skills.load_skills(builtin_skills_dir()), "the same skills as an uncached load"
+    parses = []
+    real = skills.Skill.parse
+    monkeypatch.setattr(skills.Skill, "parse", classmethod(lambda cls, *a: parses.append(1) or real(*a)))
+    first[0].triggers.append("changed by one caller")
+    second = load_builtin_skills()
+    assert parses == [], "the unchanged library is not read again"
+    assert "changed by one caller" not in second[0].triggers and second[0] is not first[0]
+
+
+def _write_skill(directory, name):
+    (directory / f"{name}.md").write_text(
+        f"---\nname: {name}\ntriggers:\n  - {name}\ntools_needed: []\n---\n# {name}\nDo it.\n", encoding="utf-8")
+
+
+def test_a_changed_library_directory_is_read_again(monkeypatch, tmp_path):
+    import os
+
+    from maverick import skills
+
+    monkeypatch.setattr(skills, "BUILTIN_SKILLS_DIR", tmp_path)
+    monkeypatch.setattr(skills, "_builtin_parsed", None)
+    _write_skill(tmp_path, "first-skill")
+    assert [s.name for s in load_builtin_skills()] == ["first-skill"]
+    _write_skill(tmp_path, "second-skill")
+    assert sorted(s.name for s in load_builtin_skills()) == ["first-skill", "second-skill"]
+    # An editor that rewrites a file in place leaves the directory's time alone.
+    folder = tmp_path.stat()
+    path = tmp_path / "first-skill.md"
+    path.write_text(path.read_text(encoding="utf-8").replace("Do it.", "Do it again."), encoding="utf-8")
+    later = path.stat().st_mtime_ns + 1_000_000_000  # a coarse clock must not hide the edit
+    os.utime(path, ns=(later, later))
+    os.utime(tmp_path, ns=(folder.st_atime_ns, folder.st_mtime_ns))
+    assert tmp_path.stat().st_mtime_ns == folder.st_mtime_ns
+    bodies = {s.name: s.body for s in load_builtin_skills()}
+    assert "Do it again." in bodies["first-skill"]
+
+
+def test_a_library_with_learned_entries_is_read_for_each_caller(monkeypatch, tmp_path):
+    """Whether a learned skill is readable depends on whose task asks; the
+    first caller's answer must never be served to the next one."""
+    from maverick import skills
+    from maverick.logging_config import reset_goal_context, set_goal_context
+    from maverick.world_model import WorldModel, default_db_path
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    library = tmp_path / "library"
+    library.mkdir(mode=0o700)
+    world = WorldModel(default_db_path())
+    alice_goal = world.create_goal("alice task", owner="user:alice")
+    bob_goal = world.create_goal("bob task", owner="user:bob")
+    alice_turn = world.create_goal("alice later task", owner="user:alice")
+    world.close()
+    _write_skill(library, "plain")
+    (library / "learned.md").write_text(
+        f"---\nname: learned\nsource: auto-distilled-v1\nsource_goal_ids: {alice_goal}\n---\nAlice's step.\n",
+        encoding="utf-8")
+    monkeypatch.setattr(skills, "BUILTIN_SKILLS_DIR", library)
+    monkeypatch.setattr(skills, "_builtin_parsed", None)
+
+    def names_as(goal_id):
+        tokens = set_goal_context(goal_id=goal_id)
+        try:
+            return (sorted(s.name for s in load_builtin_skills()),
+                    sorted(s.name for s in skills.load_skills(library)))
+        finally:
+            reset_goal_context(tokens)
+
+    bob = names_as(bob_goal)
+    alice = names_as(alice_turn)
+    assert bob[0] == bob[1] and alice[0] == alice[1]
+    assert "learned" in alice[0] and "learned" not in bob[0]

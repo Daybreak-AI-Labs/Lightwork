@@ -1,6 +1,9 @@
 const {test,expect}=require('@playwright/test');
 test.beforeEach(async({context,page,baseURL})=>{await context.route('**/*',r=>new URL(r.request().url()).origin===new URL(baseURL).origin?r.continue():r.abort());page.__errors=[];page.on('pageerror',e=>page.__errors.push(e.message));page.on('dialog',d=>d.accept());});
-test.afterEach(async({page,context},info)=>{await context.unrouteAll({behavior:'ignoreErrors'});const path=info.outputPath('rendered-state.png');await page.screenshot({path,fullPage:true});await info.attach('rendered-state',{path,contentType:'image/png'});expect(page.__errors).toEqual([]);});
+// Screenshot while the route above still releases requests: a test can end on a
+// navigation whose fonts are still loading, and a request Chromium paused just as
+// interception is switched off is never released, so the screenshot waited forever.
+test.afterEach(async({page,context},info)=>{const path=info.outputPath('rendered-state.png');await page.screenshot({path,fullPage:true});await info.attach('rendered-state',{path,contentType:'image/png'});await context.unrouteAll({behavior:'ignoreErrors'});expect(page.__errors).toEqual([]);});
 async function fits(page){expect(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1)).toBe(true);}
 
 test('Goals keeps search failures distinct and its primary task link opens the normal work view',async({page})=>{

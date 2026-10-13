@@ -258,3 +258,30 @@ def test_expected_workspace_tenant_refuses_non_ascii_text_with_a_409(monkeypatch
         with pytest.raises(HTTPException) as refused:
             check(headers, body)
         assert refused.value.status_code == 409
+
+
+def test_the_navigation_reads_the_current_files_inside_a_render(tmp_path, monkeypatch):
+    # A page render shares one configuration read; the navigation's role and
+    # permission checks are gates and read the current files once.
+    import os
+
+    from maverick import config
+    from maverick_dashboard import app as dashboard
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    config.reset_config_cache()
+    (tmp_path / "config.toml").write_text("[budget]\nmax_dollars = 5.0\n", encoding="utf-8")
+    seen = []
+    monkeypatch.setattr(dashboard, "_nav_context_now",
+                        lambda request: seen.append(config.load_config()["budget"]["max_dollars"]) or {})
+    try:
+        with config.single_read():  # the render
+            assert config.load_config()["budget"]["max_dollars"] == 5.0
+            replacement = tmp_path / "config.toml.new"
+            replacement.write_text("[budget]\nmax_dollars = 8.25\n", encoding="utf-8")
+            os.replace(replacement, tmp_path / "config.toml")
+            dashboard._nav_context(None)
+        assert seen == [8.25]
+    finally:
+        config.reset_config_cache()

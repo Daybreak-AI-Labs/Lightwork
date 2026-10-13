@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gc
 import hashlib
 import hmac
 import ipaddress
@@ -18,6 +19,7 @@ import math
 import os
 import re
 import secrets
+import sys
 import threading
 import time
 from collections import deque
@@ -62,6 +64,7 @@ from . import auth_metrics as _auth_metrics
 from . import (
     capability_assessment_controls_api,
     learning_acquisition_api,
+    page_handoff,
     runtime_policy_recovery_api,
 )
 from . import health_routes as _health_routes
@@ -231,7 +234,23 @@ def _template_bytecode_cache():
         return None
 
 
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+class _Templates(Jinja2Templates):
+    """Page templates whose shell reads the deployment configuration once.
+
+    The context processors (navigation, theme, help, drafts, search, ...) and
+    the template each asked the configuration again: about 60 reads per page.
+    One render is one ``config.single_read()``; the route's own gates ran
+    before it with their own reads, and the next page reads the files again.
+    """
+
+    def TemplateResponse(self, *args, **kwargs):  # noqa: N802 -- Starlette's name
+        from maverick.config import single_read
+
+        with single_read():
+            return super().TemplateResponse(*args, **kwargs)
+
+
+templates = _Templates(directory=str(TEMPLATES_DIR))
 # Starlette builds the Environment itself; both are plain Environment
 # attributes read at get_template time.
 templates.env.auto_reload = _templates_auto_reload()
@@ -651,6 +670,15 @@ def _account_pages_unavailable(request: Request) -> set[str]:
 
 
 def _nav_context(request: Request) -> dict:
+    """The navigation's permission and role checks share one current read
+    (``single_read(fresh=True)``), even inside the page render's own read."""
+    from maverick.config import single_read
+
+    with single_read(fresh=True):
+        return _nav_context_now(request)
+
+
+def _nav_context_now(request: Request) -> dict:
     from . import ui_visibility
     from .api import _shared_halt_backend
     from .auth import api_key_permissions, api_key_scopes
@@ -995,11 +1023,25 @@ async def _start_privacy_notice_publication_scheduler() -> None:
         log.exception("privacy-notice publication scheduler not started")
 
 
-#: Templates every session renders early: the shell, the page finder and the
-#: landing pages. Compiling them (and their includes) here moves the Jinja
-#: compile cost off the first request.
+#: Templates every session renders early: the shell, the page finder, the
+#: landing pages and the main tabs. Compiling them, and every shared partial
+#: (:func:`_warm_template_names`), here moves the Jinja compile cost off the
+#: first visits: after an install or upgrade (an empty or stale bytecode
+#: cache) that was about 1.15 s, 50-170 ms on each main tab's first click.
 _WARM_TEMPLATES = ("base.html", "_navfinder.html", "index.html", "goals.html",
-                   "chat.html", "approvals.html")
+                   "chat.html", "approvals.html", "agents.html", "audit.html",
+                   "billing.html", "chat_base.html", "compliance.html",
+                   "connections.html", "learning.html", "me.html",
+                   "permissions.html", "privacy.html", "security.html",
+                   "settings.html", "store.html", "tools.html", "users.html",
+                   "workflows_index.html", "workforce.html")
+
+
+def _warm_template_names() -> list[str]:
+    """The pages above, then every shared partial (``_*.html``) they include."""
+    partials = [name for name in templates.env.list_templates()
+                if name.startswith("_") and name.endswith(".html")]
+    return list(dict.fromkeys((*_WARM_TEMPLATES, *partials)))
 
 
 def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, float]:
@@ -1026,7 +1068,7 @@ def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, flo
         timings[name] = time.perf_counter() - started
 
     def _templates() -> None:
-        for name in _WARM_TEMPLATES:
+        for name in _warm_template_names():
             try:
                 templates.env.get_template(name)
             except Exception:  # pragma: no cover - a renamed page is not fatal
@@ -1068,16 +1110,7 @@ def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, flo
     return timings
 
 
-def _warm_pack_catalogue() -> None:
-    """Parse the shipped pack catalogue (2,031 files) and the roster's tool
-    inventory before hook discovery: both are person-independent and cached
-    for the process, and Ctrl+K's first agent lookup needs them."""
-    try:
-        from maverick.domain_edit import list_agents
-
-        list_agents()
-    except Exception:  # pragma: no cover - warm-up is best-effort
-        log.debug("pack catalogue warm-up skipped", exc_info=True)
+_SCHEMA_BUILD_SWITCH_INTERVAL = 0.0001
 
 
 def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float = 1800.0,
@@ -1089,35 +1122,119 @@ def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float
     starts. A request for /openapi.json before then builds it on demand, as
     FastAPI always did. Gives up after ``limit`` seconds of steady traffic,
     or as soon as ``stop`` is set (the dashboard is shutting down)."""
-    from . import request_activity
-
-    waited = 0.0
-    while not request_activity.quiet_for(quiet):
-        if waited >= limit or (stop is not None and stop.is_set()):
-            return False
-        sleep(0.5)
-        waited += 0.5
-    if stop is not None and stop.is_set():
+    if not _wait_for_quiet(quiet, sleep, limit, stop):
         return False
+    # The build is about six seconds of pure-Python CPU. At the default 5 ms
+    # switch interval, a request arriving meanwhile waited for the GIL after
+    # each of its I/O calls: the clicks after someone's first pause took about
+    # a second each. A short interval for the build hands it back at once.
+    switch = sys.getswitchinterval()
+    sys.setswitchinterval(_SCHEMA_BUILD_SWITCH_INTERVAL)
     try:
         app.openapi()
     except Exception:  # pragma: no cover - the schema still builds on demand
         log.debug("OpenAPI warm-up skipped", exc_info=True)
         return False
+    finally:
+        sys.setswitchinterval(switch)
     return True
 
 
-def _warm_goal_runtime() -> threading.Event:
-    """Pay the kernel's once-per-process start-up cost (hook discovery across
-    installed distributions, about 1.5 s cold) and the dashboard's first-hit
-    costs (:func:`_warm_dashboard_caches`) now, in the background, instead of
-    on the first request or chat turn after start. Fail-open: never blocks
-    startup. Returns the event the lifespan sets on shutdown, so a stopped
-    dashboard does not keep warming (or build its schema) in the background."""
+def _wait_for_quiet(quiet: float, sleep, limit: float, stop: threading.Event | None) -> bool:
+    """Whether ``quiet`` seconds without a request arrived before ``limit``
+    seconds of traffic passed and before ``stop`` was set.
+
+    The quiet must also last ``quiet`` seconds from the start of the wait: a
+    dashboard that has just started has served nothing yet, and its schema
+    build used to begin at once, landing four seconds of CPU on the first
+    pages someone opened."""
+    from . import request_activity
+
+    waited = 0.0
+    while waited < quiet or not request_activity.quiet_for(quiet):
+        if waited >= limit or (stop is not None and stop.is_set()):
+            return False
+        sleep(0.5)
+        waited += 0.5
+    return not (stop is not None and stop.is_set())
+
+
+_GC_ROUND_SECONDS = 3600.0
+
+
+def _freeze_long_lived_objects() -> None:
+    """One full collection, then keep its survivors out of later ones.
+
+    After warm-up the process tracks about 700,000 long-lived objects (the
+    pack catalogue, templates, routes, modules, the OpenAPI schema). A full
+    collection walked all of them, 350-450 ms, on whichever request triggered
+    it. ``gc.freeze()`` leaves them out of every automatic collection. Each
+    round first unfreezes, so warmed structures replaced since the last round
+    (a rebuilt catalogue, a cleared cache) are reclaimed rather than kept.
+    """
+    try:
+        gc.unfreeze()
+        gc.collect()
+        gc.freeze()
+    except Exception:  # pragma: no cover - a tuning step never breaks the dashboard
+        log.debug("garbage-collector freeze skipped", exc_info=True)
+
+
+def _collect_when_idle(stop: threading.Event, quiet: float = 10.0, sleep=time.sleep,
+                       wait=None, every: float = _GC_ROUND_SECONDS, limit: float = 1800.0) -> None:
+    """Run :func:`_freeze_long_lived_objects` in quiet moments until shutdown.
+
+    Each round waits for ``quiet`` seconds without a request in flight or
+    started (open event streams and sockets do not count), so its own full
+    collection lands on none. When ``limit`` seconds of traffic pass first,
+    the round only unfreezes: automatic collections then reclaim garbage as
+    they did without a freeze, so nothing frozen is kept indefinitely. Rounds
+    are ``every`` seconds apart.
+    """
+    wait = wait or stop.wait
+    while not stop.is_set():
+        if _wait_for_quiet(quiet, sleep, limit, stop):
+            _freeze_long_lived_objects()
+        elif not stop.is_set():
+            gc.unfreeze()
+        if wait(every):
+            return
+
+
+# How long startup waits for the request-path caches before it serves anyway
+# (the desktop splash gives the whole start 60 s; this is about 5 s normally).
+_WARM_BEFORE_SERVING_SECONDS = 15.0
+
+
+def _warm_goal_runtime(thread_factory=threading.Thread,
+                       ready: threading.Event | None = None) -> threading.Event:
+    """Pay the dashboard's first-hit costs (:func:`_warm_dashboard_caches`)
+    and the kernel's once-per-process start-up cost (hook discovery across
+    installed distributions, about 1.5 s cold) in a background thread,
+    instead of on the first request or chat turn after start.
+
+    ``ready`` is set once the request-path caches are warm (or their warm-up
+    failed): the lifespan waits for it before serving, because a first page
+    opened while they were still cold took 4 to 9 seconds. Fail-open.
+    Returns the event the lifespan sets on shutdown, so a stopped dashboard
+    does not keep warming (or build its schema) in the background."""
     stop = threading.Event()
 
     def _warm() -> None:
-        _warm_pack_catalogue()
+        try:
+            timings = _warm_dashboard_caches(stop)
+            if not stop.is_set():
+                # Freeze what warm-up built while startup still waits: the
+                # first garbage round needs ten quiet seconds, and until then
+                # every full collection walked it, 0.4-0.6 s on a request.
+                started = time.perf_counter()
+                _freeze_long_lived_objects()
+                timings["freeze"] = time.perf_counter() - started
+            log.info("dashboard warm-up done: %s",
+                     ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
+        finally:
+            if ready is not None:
+                ready.set()
         if stop.is_set():
             return
         try:
@@ -1130,12 +1247,10 @@ def _warm_goal_runtime() -> threading.Event:
             log.debug("goal runtime warm-up skipped", exc_info=True)
         if stop.is_set():
             return
-        timings = _warm_dashboard_caches(stop)
-        log.info("dashboard warm-up done: %s",
-                 ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
         _build_openapi_when_idle(stop=stop)
+        _collect_when_idle(stop)
 
-    threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
+    thread_factory(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
     return stop
 
 
@@ -1231,7 +1346,6 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(repair_default_workspace)
         await _reclaim_orphans()
         await _install_queue_dispatcher()
-        await _install_automation_scheduler()
         try:
             from .personal_notification_scheduler import start_personal_notification_scheduler
             await run_in_threadpool(start_personal_notification_scheduler)
@@ -1243,7 +1357,8 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_knowledge_sources_scheduler)
         from .consent_delivery_scheduler import start_consent_delivery_scheduler
         await run_in_threadpool(start_consent_delivery_scheduler)
-        warm_stop = _warm_goal_runtime()
+        warm_ready = threading.Event()
+        warm_stop = _warm_goal_runtime(ready=warm_ready)
         try:
             from maverick_dashboard.security_api import start_hunter_scheduler
 
@@ -1346,6 +1461,13 @@ async def _lifespan(app: FastAPI):
             start_warmup(app)
         except Exception:  # pragma: no cover - never block startup
             log.exception("voice STT warm-up not started")
+        # Serve only once the first page will not pay the cold caches (it
+        # waits, never fails: past the limit the warm-up simply continues).
+        await run_in_threadpool(warm_ready.wait, _WARM_BEFORE_SERVING_SECONDS)
+        # After the warm-up: a dream cycle that came due while the dashboard
+        # was stopped is claimed at once, and run beside the warm-up it
+        # stretched from about 0.3 s to 3 s and delayed serving by as much.
+        await _install_automation_scheduler()
         supervisor.phase = "running"
         from maverick.runtime_configuration import start as start_runtime_receipt
         runtime_receipt = start_runtime_receipt("dashboard")
@@ -4379,7 +4501,8 @@ async def perf_page(request: Request) -> HTMLResponse:
 
 @app.get("/static/lightwork-task-views.js")
 def task_views_script():
-    return FileResponse(Path(__file__).parent / "static" / "lightwork-task-views.js", media_type="application/javascript")
+    return FileResponse(Path(__file__).parent / "static" / "lightwork-task-views.js", media_type="application/javascript",
+                        headers={"Cache-Control": STATIC_SHORT_CACHE})
 @app.get("/nav/finder", response_class=HTMLResponse, include_in_schema=False)
 def nav_finder_items(request: Request) -> HTMLResponse:
     """The page finder's destinations for the caller, as the ``<li>`` items of
@@ -5009,13 +5132,19 @@ def spend_page(request: Request) -> HTMLResponse:
     episode_provenance = {e.id: {"runtime_basis": runtime_basis(e.cost_dollars), **for_goal(e.goal_id)} for e in episodes}
     # Task titles for the table (the episodes are already scoped to the caller).
     goal_titles: dict[int, str] = {}
-    for gid in {e.goal_id for e in episodes if e.goal_id}:
-        try:
-            g = w.get_goal(gid)
-            if g is not None and getattr(g, "title", ""):
-                goal_titles[gid] = g.title
-        except Exception:  # noqa: BLE001 - a missing title falls back to "Task"
-            continue
+    try:
+        from maverick.world_model import goals_by_id
+
+        goal_titles = {gid: g.title for gid, g in goals_by_id(w, [e.goal_id for e in episodes if e.goal_id]).items()
+                       if getattr(g, "title", "")}
+    except Exception:  # noqa: BLE001 - a missing title falls back to "Task"
+        for gid in {e.goal_id for e in episodes if e.goal_id}:
+            try:
+                g = w.get_goal(gid)
+                if g is not None and getattr(g, "title", ""):
+                    goal_titles[gid] = g.title
+            except Exception:  # noqa: BLE001
+                continue
     import datetime as _dt
     today = _dt.date.today().replace(day=1)
     months = []
@@ -8049,17 +8178,22 @@ def chat_specialist_choices(
     """
     require_permission(request, "operate")
     require_page_visible(request, "/chat")
+    from maverick.governed_operations import dataclass_digest
+
     from .product_operations_task_launch import published_specialists
 
-    current = published_specialists(request)
+    current = published_specialists(request, revisions=False)
     query = " ".join(q.split()).casefold()
     matches = [
         choice for choice in current["choices"]
         if not query or query in choice["label"].casefold() or query in choice["value"].casefold()
     ]
     matches.sort(key=lambda choice: (not choice["label"].casefold().startswith(query), choice["label"].casefold()))
+    # Each revision digests a whole specialist: only the page returned needs one.
+    items = [{"value": choice["value"], "label": choice["label"], "revision": dataclass_digest(choice["profile"])}
+             for choice in matches[:limit]]
     return JSONResponse(
-        {"context": current["context"], "items": matches[:limit], "total": len(matches)},
+        {"context": current["context"], "items": items, "total": len(matches)},
         headers={"Cache-Control": "no-store, private"},
     )
 
@@ -11250,15 +11384,17 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
         published_selection,
         published_specialists,
     )
-    specialist_choices = published_specialists(request) if has_permission(request, "operate") else {"context": "", "choices": []}
     requested_specialist = request.query_params.get("specialist")
-    if requested_specialist is not None:
-        published_selection(request, requested_specialist)
+
     # The roster has 2,000+ specialists: the page ships only the requested and
     # saved choices, and Find a specialist searches the rest (/api/v1/chat/specialists).
-    shown = {requested_specialist, specialist_choices.get("personal_default")} - {None, ""}
-    specialist_choices = {**specialist_choices,
-                          "choices": [c for c in specialist_choices["choices"] if c["value"] in shown]}
+    def shown(personal_default):
+        return {requested_specialist, personal_default} - {None, ""}
+
+    specialist_choices = (published_specialists(request, only=shown) if has_permission(request, "operate")
+                          else {"context": "", "choices": []})
+    if requested_specialist is not None:
+        published_selection(request, requested_specialist)
     return templates.TemplateResponse(
         request,
         "chat.html",
@@ -11371,6 +11507,12 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         pass  # Current authorized tasks remain readable if organization storage is unavailable.
     from .run_status import status_label
 
+    try:  # one read for the listed conversations; each is still checked below
+        from maverick.world_model import goals_by_id
+
+        loaded = goals_by_id(w, [g.id for g in goals])
+    except Exception:
+        loaded = {}
     threads: list[dict] = []
     for g in goals:
         target_id = ChatThreads(w).latest(g.id)
@@ -11387,7 +11529,7 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
             except Exception:
                 pass  # A sidebar label must not make a task page unavailable.
         try:
-            metadata = organization(request, w, g.id)
+            metadata = organization(request, w, g.id, goal=loaded.get(g.id))
         except Exception:
             metadata = {"title": "", "pinned": False, "archived": False}
         if metadata["archived"] and g.id != active_root:
@@ -11483,7 +11625,11 @@ def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conve
     user_id = execution_user_id_from_request(request)
     if user_id:
         kwargs.update(channel="dashboard", user_id=user_id)
-    bg.add_task(dispatch, _world(), receipt, run_goal_in_background_async, goal_id, **kwargs)
+    # Every caller redirects to the task's page: the run starts once that page
+    # was served (at most half a second later), not while the browser waits.
+    page_handoff.expect(goal_id)
+    bg.add_task(dispatch, _world(), receipt, page_handoff.after_page(run_goal_in_background_async),
+                goal_id, **kwargs)
 
 
 def _submission_conversation(w, receipt) -> int | None:
@@ -13210,7 +13356,10 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     """A task's page; built again when the task changed while it was read."""
     from .answer_projection import settled
 
-    return settled(lambda: _chat_goal_page(request, goal_id))
+    try:
+        return settled(lambda: _chat_goal_page(request, goal_id))
+    finally:
+        page_handoff.served(goal_id)
 
 
 def _chat_goal_page(request: Request, goal_id: int) -> HTMLResponse:
@@ -15521,6 +15670,18 @@ from .request_activity import RequestActivityMiddleware  # noqa: E402
 
 app.add_middleware(RequestMemoMiddleware)
 app.add_middleware(RequestActivityMiddleware)
+
+# The 13 consecutive function middlewares above run as one layer (about 2 ms
+# of task groups and streams per request); order and isolation are unchanged.
+from .middleware_chain import merge_function_middleware  # noqa: E402
+
+merge_function_middleware(app)
+
+# A request for a path served before goes straight to its route instead of
+# trying the 575 entries before it (6.5-7.4 ms for a late page).
+from .route_dispatch import install as _remember_route_matches  # noqa: E402
+
+_remember_route_matches(app.router)
 
 
 if __name__ == "__main__":

@@ -97,3 +97,51 @@ def test_content_only_match_beyond_recent_25_is_found_without_other_owner(thread
     found = organization.conversations(request(), Response(), q="ledger", before_id=None, view="all")
     assert [row["root_id"] for row in found["items"]] == [root]
     assert found["items"][0]["matched_goal_id"] == root
+
+
+def _counting(monkeypatch, world):
+    seen = {"reads": [], "access": [], "suites": []}
+    real = world.get_goal
+    monkeypatch.setattr(world, "get_goal", lambda goal_id: seen["reads"].append(goal_id) or real(goal_id))
+    monkeypatch.setattr(organization, "assert_goal_access", lambda request, goal: seen["access"].append(goal.id))
+    monkeypatch.setattr(organization, "domain_suites_allowed", lambda request, domain: seen["suites"].append(domain) or True)
+    return seen
+
+
+def test_a_root_conversation_is_read_and_checked_once(thread, monkeypatch):
+    world, root, child = thread
+    seen = _counting(monkeypatch, world)
+    assert organization.organization(request(), world, root)["root_id"] == root
+    assert seen["reads"] == [root] and seen["access"] == [root] and len(seen["suites"]) == 1
+    loaded = world.get_goals([root])[root]
+    seen["reads"].clear(), seen["access"].clear(), seen["suites"].clear()
+    assert organization.organization(request(), world, root, goal=loaded)["root_id"] == root
+    assert seen["reads"] == [], "the sidebar's batch read is used"
+    assert seen["access"] == [root] and len(seen["suites"]) == 1, "and still checked"
+
+
+def test_a_later_turn_still_reads_and_checks_its_root(thread, monkeypatch):
+    world, root, child = thread
+    seen = _counting(monkeypatch, world)
+    assert organization.organization(request(), world, child)["root_id"] == root
+    assert seen["reads"] == [child, root] and seen["access"] == [child, root] and len(seen["suites"]) == 2
+
+
+def test_a_goal_handed_in_for_another_id_is_not_trusted(thread, monkeypatch):
+    world, root, child = thread
+    other = SubmissionStore(world).create(
+        token="other-request", fingerprint=hashlib.sha256(b"other").hexdigest(), owner="user:alice",
+        title="Another conversation", description="", manifest=[], chat_text="Something else")["goal_id"]
+    wrong = world.get_goals([other])[other]
+    seen = _counting(monkeypatch, world)
+    assert organization.organization(request(), world, root, goal=wrong)["root_id"] == root
+    assert seen["reads"] == [root] and seen["access"] == [root]
+
+
+def test_a_root_owned_by_someone_else_still_refuses(thread, monkeypatch):
+    world, root, child = thread
+    monkeypatch.setattr(organization, "caller_principal", lambda request: "user:mallory")
+    loaded = world.get_goals([root])[root]
+    with pytest.raises(HTTPException) as refused:
+        organization.organization(request(), world, root, goal=loaded)
+    assert refused.value.status_code == 403

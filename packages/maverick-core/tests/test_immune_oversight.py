@@ -216,3 +216,11 @@ def test_a_generated_canary_is_held_for_undo_exactly_when_its_model_was(world, m
                           detail=_card("deploy", "Deploy build 42 to production", after="Build 42 is live."))
     out = o.generate_canary(world, rng=random.Random(1))
     assert held_for_undo(world.get_approval(out["approval_id"])) is held
+
+
+def test_a_written_canary_is_held_like_a_task_request(world):
+    # The reviewer test page and the CLI plant canaries that imitate a task's
+    # step, which the consent wait holds for undo.
+    from maverick.channel_approvals import held_for_undo
+
+    assert held_for_undo(world.get_approval(_canary(world)))

@@ -266,6 +266,10 @@ def role_for_principal(principal: str) -> str | None:
         # and falls through to the deployment default (historically operator).
         # Return the least-privileged valid role instead, so corrupt SCIM state
         # or policy cannot silently broaden access through that fallback.
+        from . import strict_reads
+
+        if strict_reads.active():
+            raise
         return "viewer"
 
 

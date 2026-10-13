@@ -1085,11 +1085,35 @@ def _goal_from_row(row, *, at_rest: bool | None = None) -> Goal:
 
 
 def _goals_from_rows(rows) -> list[Goal]:
-    """Build Goals from a result set with one at-rest policy check per query."""
-    from .crypto_at_rest import at_rest_enabled
+    """Build Goals from a result set with one at-rest policy and key lookup
+    per query (each sealed field used to load the key again)."""
+    records = [dict(row) for row in rows]
+    texts: list[str | None] = []
+    for d in records:
+        texts += [d.get("title"), d.get("description")]
+        if "result" in d:
+            texts.append(d["result"])
+    decoded = iter(_dec_fields(texts))
+    for d in records:
+        d["title"] = next(decoded)
+        d["description"] = next(decoded)
+        if "result" in d:
+            d["result"] = next(decoded)
+    return [Goal(**_row_for(Goal, d)) for d in records]
 
-    at_rest = at_rest_enabled()
-    return [_goal_from_row(r, at_rest=at_rest) for r in rows]
+
+def goals_by_id(world, goal_ids) -> dict:
+    """``{id: goal}`` for the ids that exist, in one read when the world can
+    (:meth:`WorldModel.get_goals`), else one :meth:`get_goal` per id."""
+    batch = getattr(world, "get_goals", None)
+    if callable(batch):
+        return batch(goal_ids)
+    found = {}
+    for goal_id in dict.fromkeys(goal_ids):
+        goal = world.get_goal(goal_id)
+        if goal is not None:
+            found[goal_id] = goal
+    return found
 
 
 def _goal_event_from_row(row) -> GoalEvent:
@@ -1110,12 +1134,15 @@ def _goal_events_from_rows(rows: list) -> list[GoalEvent]:
     return events
 
 
-def _episode_spend_from_row(row) -> EpisodeSpend:
-    """Build an EpisodeSpend from a row, decrypting the sealed outcome field."""
-    d = dict(row)
-    if "outcome" in d:
-        d["outcome"] = _dec_field(d.get("outcome"))
-    return EpisodeSpend(**_row_for(EpisodeSpend, d))
+def _episode_spends_from_rows(rows: list) -> list[EpisodeSpend]:
+    """Build run-cost episodes, decrypting the sealed outcome field, while
+    resolving encryption policy and keys once."""
+    records = [dict(row) for row in rows]
+    decoded = iter(_dec_fields([d.get("outcome") for d in records if "outcome" in d]))
+    for d in records:
+        if "outcome" in d:
+            d["outcome"] = next(decoded)
+    return [EpisodeSpend(**_row_for(EpisodeSpend, d)) for d in records]
 
 
 def _notify_approval_created(world, approval_id: int, provenance: str | None) -> None:
@@ -1136,6 +1163,22 @@ def _approval_from_row(row) -> Approval:
     d["scope"] = _dec_field(d.get("scope"))
     d["detail"] = _dec_field(d.get("detail"))
     return Approval(**_row_for(Approval, d))
+
+
+def _approvals_from_rows(rows: list) -> list[Approval]:
+    """Build approvals while resolving encryption policy and keys once.
+
+    Decoding each row on its own checked the policy (the compliance profile
+    configuration) and loaded the key for every sealed field: listing 500
+    approvals took 250-450 ms.
+    """
+    sealed = ("action", "scope", "detail")
+    records = [dict(row) for row in rows]
+    decoded = iter(_dec_fields([d.get(name) for d in records for name in sealed]))
+    for d in records:
+        for name in sealed:
+            d[name] = next(decoded)
+    return [Approval(**_row_for(Approval, d)) for d in records]
 
 
 def _single_approver(approval, approvers: list[str]) -> list[str]:
@@ -1311,6 +1354,9 @@ class WorldModel:
         # mutation so each commit() bounds exactly one logical write.
         self._write_lock = threading.RLock()
         self._write_depth = 0
+        # Goals whose stored state this transaction changed; their in-process
+        # watchers (the chat page's event stream) are woken after it commits.
+        self._changed_goals: set[int] = set()
         # Per-thread READ connections: WAL gives each its own connection a
         # consistent committed snapshot, so reads run concurrently with the one
         # writer instead of serialising on the write lock (WAL's many-readers
@@ -1444,14 +1490,37 @@ class WorldModel:
                 yield self.conn
                 if is_outermost:
                     self.conn.commit()
+                    self._wake_changed_goals()
             except Exception:
                 if is_outermost:
                     self.conn.rollback()
+                    self.__dict__.pop("_changed_goals", None)
                 raise
             finally:
                 self._write_depth -= 1
                 if self._write_depth == 0:
                     self._writer_ident = None
+
+    def _goal_changed(self, goal_id: int) -> None:
+        """Note, inside a write, that a watched goal's stored state changes."""
+        self.__dict__.setdefault("_changed_goals", set()).add(int(goal_id))
+
+    def _wake_changed_goals(self) -> None:
+        """After the commit: wake in-process watchers. Never raises (the write
+        already succeeded); a missed wake only leaves a watcher on its timer."""
+        changed = self.__dict__.pop("_changed_goals", None)
+        if not changed or getattr(self, "_is_memory", True):
+            return
+        try:
+            from .goal_wakeup import notify, watching, world_key
+
+            if not watching():
+                return
+            world = world_key(self.path)
+            for goal_id in changed:
+                notify(world, goal_id)
+        except Exception:  # noqa: BLE001
+            log.debug("goal wake-up skipped", exc_info=True)
 
     def _prune_dead_reader_conns_locked(self) -> None:
         """Close and drop reader connections whose owning thread has exited.
@@ -2278,6 +2347,7 @@ class WorldModel:
                 "result = COALESCE(?, result) WHERE id = ?",
                 (status, now, status, now, _enc_field(result), goal_id),
                 )
+                self._goal_changed(goal_id)
             # A sign-off is authority over one immutable terminal payload, not
             # over a goal id forever.  Reruns, failures, and any result rewrite
             # revoke it atomically so old approval cannot authorize new bytes.
@@ -2317,6 +2387,8 @@ class WorldModel:
                 "('done', 'completed', 'failed', 'cancelled', 'blocked', 'error')",
                 (_enc_field(text), now, goal_id),
             )
+            if cur.rowcount == 1:
+                self._goal_changed(goal_id)
             return cur.rowcount == 1
 
     def shoring_measurements(self, department: str, *, since: float, until: float, owner: str | None = None) -> dict:
@@ -2451,7 +2523,20 @@ class WorldModel:
 
     def get_goal(self, goal_id: int) -> Goal | None:
         row = self._read_one("SELECT * FROM goals WHERE id = ?", (goal_id,))
-        return _goal_from_row(row) if row else None
+        # One at-rest policy and key lookup for the row's sealed fields.
+        return _goals_from_rows([row])[0] if row else None
+
+    def get_goals(self, goal_ids) -> dict[int, Goal]:
+        """``{id: goal}`` for the ids that exist: one read per 500 ids, each
+        decrypted with one at-rest policy and key lookup (a page that read 50
+        goals one by one loaded the key for every sealed field of each)."""
+        found: dict[int, Goal] = {}
+        for chunk in self._chunks(sorted({int(goal_id) for goal_id in goal_ids})):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self._read_all(f"SELECT * FROM goals WHERE id IN ({placeholders})", tuple(chunk))
+            for goal in _goals_from_rows(rows):
+                found[goal.id] = goal
+        return found
 
     def recent_goals_by_domain(self, domains: list[str], *, owner: str | None = None,
                                per_domain: int = 5) -> dict[str, list[Goal]]:
@@ -2796,7 +2881,7 @@ class WorldModel:
         sql += "ORDER BY e.started_at DESC LIMIT ?"
         params.append(limit)
         rows = self._read_all(sql, tuple(params))
-        return [_episode_spend_from_row(r) for r in rows]
+        return _episode_spends_from_rows(rows)
 
     def episode_costs_since(self, since: float, *, limit: int = 100_000) -> list[tuple[str, float, float]]:
         """Finished runs that ended at or after ``since``, oldest first, as
@@ -2926,6 +3011,7 @@ class WorldModel:
                 "INSERT INTO goal_events(goal_id, agent, kind, content, ts) VALUES(?, ?, ?, ?, ?)",
                 (goal_id, agent, kind, _enc_field(content), time.time()),
             )
+            self._goal_changed(goal_id)
             return cur.lastrowid
 
     def goal_events(self, goal_id: int, since_id: int = 0, limit: int = 200) -> list[GoalEvent]:
@@ -3142,10 +3228,11 @@ class WorldModel:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY key LIMIT ? OFFSET ?"
         rows = self._read_all(sql, (*params, max(1, min(limit, 101)), max(0, offset)))
+        values = _dec_fields([row["value"] for row in rows])  # one policy and key lookup
         result = []
-        for row in rows:
+        for row, value in zip(rows, values, strict=True):
             item = dict(row)
-            item["value"] = _dec_field(item["value"])
+            item["value"] = value
             item["tags"] = json.loads(item.pop("tags_json"))
             result.append(item)
         return result
@@ -3164,7 +3251,8 @@ class WorldModel:
         rows = self._read_all(
             "SELECT key, value FROM facts ORDER BY id DESC"
         )
-        return {r["key"]: _dec_field(r["value"]) for r in rows}
+        values = _dec_fields([r["value"] for r in rows])
+        return {r["key"]: value for r, value in zip(rows, values, strict=True)}
 
     def get_facts_with_trust(self) -> dict[str, tuple[str, int]]:
         """All current facts as ``{key: (value, trust_tier)}``, newest first --
@@ -3174,7 +3262,9 @@ class WorldModel:
             "SELECT key, value, trust_tier FROM facts "
             "ORDER BY id DESC"
         )
-        return {r["key"]: (_dec_field(r["value"]), int(r["trust_tier"])) for r in rows}
+        values = _dec_fields([r["value"] for r in rows])
+        return {r["key"]: (value, int(r["trust_tier"]))
+                for r, value in zip(rows, values, strict=True)}
 
     def facts_matching(self, token: str) -> dict[str, str]:
         """Facts explicitly scoped to ``token`` by key prefix.
@@ -3537,13 +3627,13 @@ class WorldModel:
             "SELECT * FROM approvals ORDER BY requested_at DESC, id DESC LIMIT ?",
             (max(1, int(limit)),),
         )
-        return [_approval_from_row(r) for r in rows]
+        return _approvals_from_rows(rows)
 
     def pending_approvals(self) -> list[Approval]:
         rows = self._read_all(
             "SELECT * FROM approvals WHERE status = 'pending' ORDER BY id"
         )
-        return [_approval_from_row(r) for r in rows]
+        return _approvals_from_rows(rows)
 
     def approval_audit_event_id(
         self,
