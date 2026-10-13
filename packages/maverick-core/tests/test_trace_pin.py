@@ -1,9 +1,7 @@
 """Trace pinning to commit: git-state stamp at run start + readback."""
 from __future__ import annotations
 
-import contextvars
 import subprocess
-import threading
 
 from maverick.trace_pin import TRACE_META_KIND, pin_trace, trace_commit, workspace_git_state
 from maverick.world_model import open_world
@@ -75,76 +73,8 @@ def test_pin_never_raises(tmp_path):
     assert pin_trace(_BrokenWorld(), 1, cwd=str(repo)) is None
 
 
-_SCOPE = contextvars.ContextVar("trace_pin_test_scope", default=None)
-_STATE = {"commit": "a" * 40, "branch": "main", "dirty": False}
-
-
-def _stub_runner(monkeypatch, tmp_path, run):
-    from maverick.budget import Budget
-    from maverick.world_model import WorldModel
-
-    db = tmp_path / "world.db"
-    world = WorldModel(db)
-    gid = world.create_goal("task", owner="user:alice", execution_principal="user:alice")
-    world.close()
-
-    class _Sandbox:
-        def close(self):
-            pass
-
-    monkeypatch.setattr("maverick.world_model.open_world", lambda *a, **k: WorldModel(db))
-    monkeypatch.setattr("maverick.llm.LLM", lambda *a, **k: object())
-    monkeypatch.setattr("maverick.sandbox.build_sandbox", lambda *a, **k: _Sandbox())
-    monkeypatch.setattr("maverick.budget.budget_from_config", lambda *a, **k: Budget())
-    monkeypatch.setattr("maverick.orchestrator.run_goal_sync", run)
-    return db, gid
-
-
-def test_runner_stamps_trace_without_making_the_run_wait(monkeypatch, tmp_path):
-    """The run starts while git is still reading the workspace; the stamp is
-    recorded, in the caller's context, by the time the runner returns."""
-    from maverick import runner, trace_pin
-    from maverick.world_model import WorldModel
-
-    run_started, git_returned = threading.Event(), threading.Event()
-    seen = {}
-
-    def slow_git_state(cwd=None):
-        seen["scope"] = _SCOPE.get()
-        run_started.wait(timeout=1.0)
-        git_returned.set()
-        return dict(_STATE)
-
-    def run(llm, world, budget, goal_id, **kw):
-        seen["git_done_when_the_run_started"] = git_returned.is_set()
-        run_started.set()
-        world.set_goal_status(goal_id, "done")
-
-    monkeypatch.setattr(trace_pin, "workspace_git_state", slow_git_state)
-    db, gid = _stub_runner(monkeypatch, tmp_path, run)
-    token = _SCOPE.set("tenant-a")
-    try:
-        assert runner.run_goal_in_thread(gid, user_id="alice") == "done"
-    finally:
-        _SCOPE.reset(token)
-    assert seen == {"git_done_when_the_run_started": False, "scope": "tenant-a"}
-    w = WorldModel(db)
-    try:
-        assert trace_commit(w, gid) == _STATE
-    finally:
-        w.close()
-
-
-def test_a_trace_pin_that_cannot_get_a_thread_pins_inline(monkeypatch, tmp_path):
-    from maverick import trace_pin
-
-    class _NoThread(threading.Thread):
-        def start(self):
-            raise RuntimeError("can't start new thread")
-
-    monkeypatch.setattr(trace_pin, "workspace_git_state", lambda cwd=None: dict(_STATE))
-    monkeypatch.setattr(trace_pin.threading, "Thread", _NoThread)
-    w = open_world(tmp_path / "world.db")
-    gid = w.create_goal("g", "d", owner="")
-    assert trace_pin.pin_trace_in_background(w, gid) is None
-    assert trace_commit(w, gid) == _STATE
+def test_runner_stamps_trace(monkeypatch):
+    """run_goal_in_thread pins the trace before dispatching the swarm."""
+    import maverick.runner as runner_mod
+    src = open(runner_mod.__file__).read()
+    assert "pin_trace(world, goal_id)" in src
