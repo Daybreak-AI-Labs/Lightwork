@@ -63,4 +63,5 @@ def check_saved_change(request: Request, identity: str, body: Check):
 def recovery_asset():
     from .app import _STATIC_DIR
 
-    return FileResponse(_STATIC_DIR / "lightwork-webhook-recovery.js", media_type="application/javascript")
+    return FileResponse(_STATIC_DIR / "lightwork-webhook-recovery.js", media_type="application/javascript",
+                        headers={"Cache-Control": "public, max-age=300"})

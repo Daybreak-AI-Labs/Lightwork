@@ -4501,7 +4501,8 @@ async def perf_page(request: Request) -> HTMLResponse:
 
 @app.get("/static/lightwork-task-views.js")
 def task_views_script():
-    return FileResponse(Path(__file__).parent / "static" / "lightwork-task-views.js", media_type="application/javascript")
+    return FileResponse(Path(__file__).parent / "static" / "lightwork-task-views.js", media_type="application/javascript",
+                        headers={"Cache-Control": STATIC_SHORT_CACHE})
 @app.get("/nav/finder", response_class=HTMLResponse, include_in_schema=False)
 def nav_finder_items(request: Request) -> HTMLResponse:
     """The page finder's destinations for the caller, as the ``<li>`` items of

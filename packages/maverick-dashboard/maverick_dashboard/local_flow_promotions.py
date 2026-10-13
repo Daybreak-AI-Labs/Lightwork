@@ -777,4 +777,5 @@ def review_release(request: Request, candidate_id: str):
 @asset_router.get("/static/lightwork-local-flow-release.js")
 def local_release_asset():
     from .app import _STATIC_DIR
-    return FileResponse(_STATIC_DIR / "lightwork-local-flow-release.js", media_type="application/javascript")
+    return FileResponse(_STATIC_DIR / "lightwork-local-flow-release.js", media_type="application/javascript",
+                        headers={"Cache-Control": "public, max-age=300"})
