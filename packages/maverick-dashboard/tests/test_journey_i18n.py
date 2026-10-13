@@ -164,3 +164,22 @@ def test_display_options_are_text_and_custom_theme_names_stay_verbatim(monkeypat
     assert not parsed.nested
     assert '<option value="Save" lang="und" dir="auto" data-user-content selected>Save</option>' in rendered
     assert 'lang="fr">Sombre</option>' in rendered
+
+
+def test_a_plain_region_is_looked_up_once_and_renders_as_before(monkeypatch):
+    # A page renders about 200 regions; each hashed its text and searched the
+    # catalog again (2-3.5 ms a page).
+    from markupsafe import Markup, escape
+
+    calls = []
+    real = i18n_journeys.entry
+    monkeypatch.setattr(i18n_journeys, "entry", lambda source, lang: calls.append(source) or real(source, lang))
+    for _ in range(3):
+        i18n_journeys.region("Save private draft", "fr")
+    assert len(calls) <= 1  # once, or not at all if an earlier render cached it
+    for source, *_ in i18n_journeys.ROWS:
+        for lang in ("en", "ar", *i18n_journeys.TRANSLATION_LANGS):
+            value, actual = real(source, lang)
+            expected = Markup('<span lang="{}" dir="{}" data-product-copy>{}</span>').format(
+                actual, "rtl" if actual == "ar" else "ltr", escape(value))
+            assert i18n_journeys.region(source, lang) == expected

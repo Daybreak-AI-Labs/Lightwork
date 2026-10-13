@@ -5,6 +5,7 @@ and consequence-copy review. Arabic remains the community seed, unchanged.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import re
@@ -45,6 +46,7 @@ TRANSLATION_LANGS = ("fr", "de", "ja", "zh")
 # Rows are source, French, German, Japanese, Chinese. No Arabic machine completion.
 
 
+@functools.lru_cache(maxsize=8192)
 def key(source):
     return "journey." + hashlib.sha256(source.encode("utf-8")).hexdigest()[:20]
 
@@ -78,11 +80,19 @@ def text(source, lang="en", /, **values):
 
 def region(source, lang="en", /, **values):
     """A product-copy region, with caller-supplied content escaped and isolated."""
+    if not values:
+        return _plain_region(source, lang)
     value, actual = entry(source, lang)
-    safe = escape(value)
-    if values:
-        safe = safe.format_map({name: Markup('<bdi lang="und" dir="auto">{}</bdi>').format(escape(str(value))) for name, value in values.items()})
+    safe = escape(value).format_map({name: Markup('<bdi lang="und" dir="auto">{}</bdi>').format(escape(str(value))) for name, value in values.items()})
     return Markup('<span lang="{}" dir="{}" data-product-copy>{}</span>').format(actual, "rtl" if actual == "ar" else "ltr", safe)
+
+
+@functools.lru_cache(maxsize=8192)
+def _plain_region(source, lang):
+    # A page renders about 200 of these; without values one depends only on
+    # the fixed catalog, the text and the language.
+    value, actual = entry(source, lang)
+    return Markup('<span lang="{}" dir="{}" data-product-copy>{}</span>').format(actual, "rtl" if actual == "ar" else "ltr", escape(value))
 
 
 def accepted_locales(request):
