@@ -15607,6 +15607,12 @@ from .request_activity import RequestActivityMiddleware  # noqa: E402
 app.add_middleware(RequestMemoMiddleware)
 app.add_middleware(RequestActivityMiddleware)
 
+# A request for a path served before goes straight to its route instead of
+# trying the 575 entries before it (6.5-7.4 ms for a late page).
+from .route_dispatch import install as _remember_route_matches  # noqa: E402
+
+_remember_route_matches(app.router)
+
 
 if __name__ == "__main__":
     main()
