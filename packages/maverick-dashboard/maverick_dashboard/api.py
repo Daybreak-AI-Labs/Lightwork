@@ -13658,9 +13658,15 @@ def _probe_container_daemon(binary: str) -> dict:
             "available": False,
             "detail": f"{product} is not installed on this computer.",
         }
+    # ``docker version`` asks the daemon for its version without running every
+    # CLI plugin's metadata command first, as ``docker info`` does (about 80
+    # ms against 20 here, more with Docker Desktop's plugins); both fail the
+    # same way when the daemon is unreachable.
+    query = (["version", "--format", "{{.Server.Version}}"] if binary == "docker"
+             else ["info", "--format", "{{.ServerVersion}}"])
     try:
         proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
-            [path, "info", "--format", "{{.ServerVersion}}"],
+            [path, *query],
             capture_output=True,
             text=True,
             timeout=6,
