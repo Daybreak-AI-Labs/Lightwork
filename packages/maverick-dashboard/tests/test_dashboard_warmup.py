@@ -28,7 +28,9 @@ def test_warm_dashboard_caches_compiles_templates_and_routes_but_not_the_schema(
     assert list(timings)[:3] == ["domains", "agents", "routes"], "the pack catalogue and routes warm first"
     assert walked, "every route context is materialised"
     cached = {getattr(t, "name", None) for t in env.cache.values()}
-    for name in dashboard._WARM_TEMPLATES:
+    partials = [name for name in env.list_templates() if name.startswith("_") and name.endswith(".html")]
+    assert "_sidebar_nav.html" in partials and "settings.html" in dashboard._WARM_TEMPLATES
+    for name in (*dashboard._WARM_TEMPLATES, *partials):
         assert name in cached, name
     assert dashboard.app.openapi_schema is None, "the schema is not built with the request-path caches"
 

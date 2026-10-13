@@ -1022,11 +1022,25 @@ async def _start_privacy_notice_publication_scheduler() -> None:
         log.exception("privacy-notice publication scheduler not started")
 
 
-#: Templates every session renders early: the shell, the page finder and the
-#: landing pages. Compiling them (and their includes) here moves the Jinja
-#: compile cost off the first request.
+#: Templates every session renders early: the shell, the page finder, the
+#: landing pages and the main tabs. Compiling them, and every shared partial
+#: (:func:`_warm_template_names`), here moves the Jinja compile cost off the
+#: first visits: after an install or upgrade (an empty or stale bytecode
+#: cache) that was about 1.15 s, 50-170 ms on each main tab's first click.
 _WARM_TEMPLATES = ("base.html", "_navfinder.html", "index.html", "goals.html",
-                   "chat.html", "approvals.html")
+                   "chat.html", "approvals.html", "agents.html", "audit.html",
+                   "billing.html", "chat_base.html", "compliance.html",
+                   "connections.html", "learning.html", "me.html",
+                   "permissions.html", "privacy.html", "security.html",
+                   "settings.html", "store.html", "tools.html", "users.html",
+                   "workflows_index.html", "workforce.html")
+
+
+def _warm_template_names() -> list[str]:
+    """The pages above, then every shared partial (``_*.html``) they include."""
+    partials = [name for name in templates.env.list_templates()
+                if name.startswith("_") and name.endswith(".html")]
+    return list(dict.fromkeys((*_WARM_TEMPLATES, *partials)))
 
 
 def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, float]:
@@ -1053,7 +1067,7 @@ def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, flo
         timings[name] = time.perf_counter() - started
 
     def _templates() -> None:
-        for name in _WARM_TEMPLATES:
+        for name in _warm_template_names():
             try:
                 templates.env.get_template(name)
             except Exception:  # pragma: no cover - a renamed page is not fatal
