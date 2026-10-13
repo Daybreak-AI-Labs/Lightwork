@@ -108,3 +108,13 @@ def test_a_failing_watcher_never_fails_the_write(world):
         assert event_id and _committed_events(path, gid) == 1
     finally:
         stop()
+
+
+def test_a_write_nobody_watches_does_no_wake_up_work(world, monkeypatch):
+    wm, path, gid = world
+    monkeypatch.setattr(goal_wakeup, "_watchers", {})
+    monkeypatch.setattr(goal_wakeup, "world_key", lambda _path: pytest.fail("resolved a path nobody watches"))
+    monkeypatch.setattr(goal_wakeup, "notify", lambda *_a: pytest.fail("announced a change nobody watches"))
+    wm.append_event(gid, "agent", "plan", "unwatched")
+    wm.set_goal_status(gid, "done", "the answer")
+    assert _committed_events(path, gid) == 1

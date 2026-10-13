@@ -22,6 +22,12 @@ def world_key(path: object) -> str:
     return os.path.normcase(os.path.realpath(str(path)))
 
 
+def watching() -> bool:
+    """Whether any goal is watched: a write with no watchers skips the rest
+    (read without the lock; a watcher added meanwhile keeps its timer)."""
+    return bool(_watchers)
+
+
 def watch(world: str, goal_id: int, wake: Callable[[], None]) -> int:
     """Call ``wake()`` (from any thread) after each announced change."""
     global _tokens

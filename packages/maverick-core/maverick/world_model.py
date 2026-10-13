@@ -1512,8 +1512,10 @@ class WorldModel:
         if not changed or getattr(self, "_is_memory", True):
             return
         try:
-            from .goal_wakeup import notify, world_key
+            from .goal_wakeup import notify, watching, world_key
 
+            if not watching():
+                return
             world = world_key(self.path)
             for goal_id in changed:
                 notify(world, goal_id)
