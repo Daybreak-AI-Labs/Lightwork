@@ -1340,6 +1340,9 @@ class WorldModel:
         # mutation so each commit() bounds exactly one logical write.
         self._write_lock = threading.RLock()
         self._write_depth = 0
+        # Goals whose stored state this transaction changed; their in-process
+        # watchers (the chat page's event stream) are woken after it commits.
+        self._changed_goals: set[int] = set()
         # Per-thread READ connections: WAL gives each its own connection a
         # consistent committed snapshot, so reads run concurrently with the one
         # writer instead of serialising on the write lock (WAL's many-readers
@@ -1473,14 +1476,35 @@ class WorldModel:
                 yield self.conn
                 if is_outermost:
                     self.conn.commit()
+                    self._wake_changed_goals()
             except Exception:
                 if is_outermost:
                     self.conn.rollback()
+                    self.__dict__.pop("_changed_goals", None)
                 raise
             finally:
                 self._write_depth -= 1
                 if self._write_depth == 0:
                     self._writer_ident = None
+
+    def _goal_changed(self, goal_id: int) -> None:
+        """Note, inside a write, that a watched goal's stored state changes."""
+        self.__dict__.setdefault("_changed_goals", set()).add(int(goal_id))
+
+    def _wake_changed_goals(self) -> None:
+        """After the commit: wake in-process watchers. Never raises (the write
+        already succeeded); a missed wake only leaves a watcher on its timer."""
+        changed = self.__dict__.pop("_changed_goals", None)
+        if not changed or getattr(self, "_is_memory", True):
+            return
+        try:
+            from .goal_wakeup import notify, world_key
+
+            world = world_key(self.path)
+            for goal_id in changed:
+                notify(world, goal_id)
+        except Exception:  # noqa: BLE001
+            log.debug("goal wake-up skipped", exc_info=True)
 
     def _prune_dead_reader_conns_locked(self) -> None:
         """Close and drop reader connections whose owning thread has exited.
@@ -2307,6 +2331,7 @@ class WorldModel:
                 "result = COALESCE(?, result) WHERE id = ?",
                 (status, now, status, now, _enc_field(result), goal_id),
                 )
+                self._goal_changed(goal_id)
             # A sign-off is authority over one immutable terminal payload, not
             # over a goal id forever.  Reruns, failures, and any result rewrite
             # revoke it atomically so old approval cannot authorize new bytes.
@@ -2346,6 +2371,8 @@ class WorldModel:
                 "('done', 'completed', 'failed', 'cancelled', 'blocked', 'error')",
                 (_enc_field(text), now, goal_id),
             )
+            if cur.rowcount == 1:
+                self._goal_changed(goal_id)
             return cur.rowcount == 1
 
     def shoring_measurements(self, department: str, *, since: float, until: float, owner: str | None = None) -> dict:
@@ -2955,6 +2982,7 @@ class WorldModel:
                 "INSERT INTO goal_events(goal_id, agent, kind, content, ts) VALUES(?, ?, ?, ?, ?)",
                 (goal_id, agent, kind, _enc_field(content), time.time()),
             )
+            self._goal_changed(goal_id)
             return cur.lastrowid
 
     def goal_events(self, goal_id: int, since_id: int = 0, limit: int = 200) -> list[GoalEvent]:
