@@ -11506,6 +11506,12 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         pass  # Current authorized tasks remain readable if organization storage is unavailable.
     from .run_status import status_label
 
+    try:  # one read for the listed conversations; each is still checked below
+        from maverick.world_model import goals_by_id
+
+        loaded = goals_by_id(w, [g.id for g in goals])
+    except Exception:
+        loaded = {}
     threads: list[dict] = []
     for g in goals:
         target_id = ChatThreads(w).latest(g.id)
@@ -11522,7 +11528,7 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
             except Exception:
                 pass  # A sidebar label must not make a task page unavailable.
         try:
-            metadata = organization(request, w, g.id)
+            metadata = organization(request, w, g.id, goal=loaded.get(g.id))
         except Exception:
             metadata = {"title": "", "pinned": False, "archived": False}
         if metadata["archived"] and g.id != active_root:
