@@ -80,7 +80,7 @@ def text(source, lang="en", /, **values):
 
 def region(source, lang="en", /, **values):
     """A product-copy region, with caller-supplied content escaped and isolated."""
-    if not values:
+    if not values and type(source) is str:  # a Markup equals its text: never share one's escaping
         return _plain_region(source, lang)
     value, actual = entry(source, lang)
     safe = escape(value).format_map({name: Markup('<bdi lang="und" dir="auto">{}</bdi>').format(escape(str(value))) for name, value in values.items()})

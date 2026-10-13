@@ -1359,6 +1359,7 @@ def test_a_key_folder_that_cannot_be_named_is_not_kept_and_still_fails_soft(conf
     from maverick import config, crypto_at_rest
 
     _, reads = config_home
+    config.dashboard_overrides_path().unlink()  # the read itself needs no key
 
     def unnamed():
         raise RuntimeError("the client binding is invalid")
@@ -1367,4 +1368,46 @@ def test_a_key_folder_that_cannot_be_named_is_not_kept_and_still_fails_soft(conf
     with config.kept_reads():
         for _ in range(2):
             assert _decision(config)["budget"]["max_dollars"] == 5.0  # no exception
+    assert len(reads) == 2
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX links")
+def test_a_link_put_in_place_of_the_key_is_read_by_the_next_decision(config_home, tmp_path_factory):
+    # A read refuses a hard-linked key file or a key folder replaced by a
+    # link; a kept read must not keep opening the secrets past that.
+    import os
+
+    from maverick import config, crypto_at_rest
+
+    home, reads = config_home
+    with crypto_at_rest.deployment_key_scope():
+        key = crypto_at_rest._key_path()
+    elsewhere = tmp_path_factory.mktemp("elsewhere")
+    with config.kept_reads():
+        _decision(config)
+        os.link(key, elsewhere / "copy.key")
+        assert "providers" not in _decision(config)
+        assert str(config.dashboard_overrides_path()) in config.config_source_errors()
+        (elsewhere / "copy.key").unlink()
+        assert "providers" in _decision(config)
+        os.rename(key.parent, home / "keys-real")
+        os.symlink(home / "keys-real", key.parent)
+        assert "providers" not in _decision(config)
+    assert len(reads) == 4
+
+
+def test_a_key_rewritten_in_place_with_its_time_restored_is_read_again(config_home):
+    import os
+
+    from maverick import config, crypto_at_rest
+
+    _, reads = config_home
+    with crypto_at_rest.deployment_key_scope():
+        key = crypto_at_rest._key_path()
+    with config.kept_reads():
+        assert "providers" in _decision(config)
+        before = key.stat()
+        key.write_text("ab" * 32, encoding="utf-8")  # another key, the same size
+        os.utime(key, ns=(before.st_atime_ns, before.st_mtime_ns))
+        assert "providers" not in _decision(config)  # the saved secret no longer opens
     assert len(reads) == 2

@@ -80,6 +80,16 @@ def test_a_route_added_ahead_of_a_remembered_one_takes_over(client):
     assert "first now" not in page and "first again" not in page and "<!doctype" in page.lower()
 
 
+def test_a_long_path_is_never_remembered(client):
+    # Each remembered path is kept in memory; a flood of long unique paths
+    # must not grow it.
+    dispatcher = dash_app.app.router.middleware_stack
+    long_path = "/share/" + "x" * 400
+    for _ in range(2):
+        assert client.get(long_path).status_code in {401, 403, 404}
+    assert not any(len(key[2]) > 256 for key in dispatcher.remembered)
+
+
 def test_a_route_that_matches_on_the_host_turns_the_memory_off():
     app = FastAPI()
 

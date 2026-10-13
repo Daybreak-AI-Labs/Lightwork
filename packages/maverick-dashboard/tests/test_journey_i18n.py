@@ -183,3 +183,12 @@ def test_a_plain_region_is_looked_up_once_and_renders_as_before(monkeypatch):
             expected = Markup('<span lang="{}" dir="{}" data-product-copy>{}</span>').format(
                 actual, "rtl" if actual == "ar" else "ltr", escape(value))
             assert i18n_journeys.region(source, lang) == expected
+
+
+def test_trusted_markup_never_answers_for_plain_text():
+    from markupsafe import Markup
+
+    trusted = i18n_journeys.region(Markup("<b>Not in the catalog</b>"), "en")
+    plain = i18n_journeys.region("<b>Not in the catalog</b>", "en")
+    assert "<b>" in str(trusted)
+    assert "<b>" not in str(plain) and "&lt;b&gt;" in str(plain)

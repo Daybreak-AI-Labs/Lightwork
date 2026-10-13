@@ -292,7 +292,7 @@ def test_a_slow_warm_up_delays_serving_only_up_to_its_limit(monkeypatch, tmp_pat
     try:
         started = time.monotonic()
         with TestClient(dashboard.app, headers={"Origin": "http://testserver"}) as client:
-            assert time.monotonic() - started < 20, "startup did not wait for the stuck warm-up"
+            assert time.monotonic() - started < 10, "startup waited past its limit (15 s by default)"
             assert client.get("/livez").status_code == 200
     finally:
         release.set()

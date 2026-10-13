@@ -23,6 +23,9 @@ log = logging.getLogger(__name__)
 # Entries this early cost less to scan than to check the route version.
 _SCAN_IS_CHEAPER_BELOW = 16
 _MAX_REMEMBERED = 4096
+# Longer paths are never remembered, which bounds the memory to about 1 MiB
+# however many distinct paths arrive (a page's own paths are far shorter).
+_MAX_REMEMBERED_PATH = 256
 _PATH_ONLY_MODULES = frozenset({"starlette.routing", "fastapi.routing"})
 
 
@@ -84,7 +87,11 @@ class RememberedRouteDispatch:
         if scope["type"] not in ("http", "websocket"):
             await self.dispatch(scope, receive, send)
             return
-        key = (scope["type"], scope.get("method"), get_route_path(scope))
+        path = get_route_path(scope)
+        if len(path) > _MAX_REMEMBERED_PATH:
+            await self.dispatch(scope, receive, send)
+            return
+        key = (scope["type"], scope.get("method"), path)
         known = self.remembered.get(key)
         if known is not None and known[0] < _SCAN_IS_CHEAPER_BELOW:
             # An early entry, or no full match (-1): the ordinary dispatch,

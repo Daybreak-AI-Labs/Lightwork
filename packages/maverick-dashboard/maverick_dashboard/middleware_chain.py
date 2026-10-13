@@ -4,11 +4,18 @@ Each function is a ``BaseHTTPMiddleware``; every layer adds a task group and a
 memory stream to each request, about 150 microseconds, and the dashboard
 stacks 13 of them in a row (about 2 ms on every page, file and poll). A run of
 consecutive function middlewares becomes one ``BaseHTTPMiddleware`` whose
-dispatch calls the functions in the same order. Everything a separate layer
-gave the next function is kept: the same cached request (so a bounded body
-replays once), the response or exception of the functions inside it, and its
-own task with a copy of the caller's context, so a context variable an inner
-function sets never reaches an outer one.
+dispatch calls the functions in the same order, with the same cached request
+(so a bounded body replays once), the inner functions' response or exception,
+and each inner function in its own task with a copy of the caller's context,
+so a context variable an inner function sets never reaches an outer one.
+
+Three things differ from separate layers, and none of the merged functions
+does them: an outer function receives the inner function's own response
+object rather than a streaming copy of it (a plain response has no
+``body_iterator``); if it then returns a different response, the inner one's
+background task does not run; and a different request passed to
+``call_next`` reaches the inner function. A function that does any of these
+must stay outside the merged run.
 """
 from __future__ import annotations
 

@@ -754,10 +754,11 @@ class _KeptRead:
 # request's last clean read uses that read: a page asked about 29 times, each
 # reading the files, resolving the at-rest key and decrypting the saved
 # secrets again. "Unchanged" is the whole environment and the identity
-# (modification and change times, size, inode, mode, owner) of every file a
-# read depends on: config.toml, the Settings overlay, the operator overlay,
-# the wizard's .env, the at-rest key, its folder and its keyring. A saved
-# policy, a rotated key or a tightened permission changes one of them and the
+# (modification and change times, size, device, inode, links, mode, owner) of
+# every file a read depends on: config.toml, the Settings overlay, the
+# operator overlay, the wizard's .env, the at-rest key, its folder and its
+# keyring (their own entries, so a link put in their place shows too). A saved
+# policy, a rotated key or a changed permission changes one of them and the
 # next decision reads again. A Windows ACL change is not visible to stat, so
 # a kept read is used for at most _KEEP_READ_SECONDS after the read that fully
 # checked the key folder.
@@ -780,15 +781,18 @@ def discard_kept_reads() -> None:
     _KEPT_READ.set(None)
 
 
-def _file_state(path: Path, *, rehardened: bool = False) -> object:
+def _file_state(path: Path, *, key_material: bool = False, rechmodded: bool = False) -> object:
     try:
-        st = os.stat(path)
+        # The key's own entries, not what they point to: a read refuses a
+        # key file or folder replaced by a link, or a hard-linked key file.
+        st = os.lstat(path) if key_material else os.stat(path)
     except OSError as e:
         return type(e).__name__
-    # Every read re-applies the key folder's and key files' private mode, which
-    # moves their change time; their mode and owner still show any change.
-    changed = None if rehardened else st.st_ctime_ns
-    return (st.st_mtime_ns, changed, st.st_size, st.st_ino, st.st_mode, st.st_uid, st.st_gid)
+    # Every read re-applies the key folder's private mode, which moves its
+    # change time; its mode, owner and link count still show any change.
+    changed = None if rechmodded else st.st_ctime_ns
+    return (st.st_mtime_ns, changed, st.st_size, st.st_dev, st.st_ino, st.st_nlink,
+            st.st_mode, st.st_uid, st.st_gid)
 
 
 def _environment() -> dict:
@@ -818,15 +822,17 @@ def _read_witness() -> tuple | None:
     overlay = os.environ.get(CONFIG_OVERLAY_ENV)
     if overlay:
         paths.append(Path(overlay).expanduser())
-    rehardened = [key, key.parent]
+    keys = [key]
     try:
         with os.scandir(keyring) as entries:
-            rehardened.extend(sorted(keyring / e.name for e in entries if e.name.endswith(".key")))
+            keys.extend(sorted(keyring / e.name for e in entries if e.name.endswith(".key")))
     except OSError:
         pass
-    return (tuple(str(path) for path in paths + rehardened),
+    return (tuple(str(path) for path in [*paths, key.parent, *keys]),
             tuple(_file_state(path) for path in paths),
-            tuple(_file_state(path, rehardened=True) for path in rehardened))
+            _file_state(key.parent, key_material=True, rechmodded=True),
+            tuple(_file_state(path, key_material=True) for path in keys),
+            crypto_at_rest._FORCE_EXTERNAL_FLEET_KEY.get())
 
 
 @contextmanager

@@ -276,6 +276,7 @@ def test_a_page_reads_the_configuration_files_about_once(tmp_path, monkeypatch):
     reads = []
     real = config._read_global_config
     monkeypatch.setattr(config, "_read_global_config", lambda: reads.append(1) or real())
+    monkeypatch.setattr(config, "_KEEP_READ_SECONDS", 600.0)  # a slow render is not what is tested
     client = TestClient(dashboard.app, headers={"Origin": "http://testserver"})
     try:
         assert client.get("/approvals").status_code == 200
