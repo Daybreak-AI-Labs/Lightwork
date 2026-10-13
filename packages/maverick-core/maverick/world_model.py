@@ -3226,10 +3226,11 @@ class WorldModel:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY key LIMIT ? OFFSET ?"
         rows = self._read_all(sql, (*params, max(1, min(limit, 101)), max(0, offset)))
+        values = _dec_fields([row["value"] for row in rows])  # one policy and key lookup
         result = []
-        for row in rows:
+        for row, value in zip(rows, values, strict=True):
             item = dict(row)
-            item["value"] = _dec_field(item["value"])
+            item["value"] = value
             item["tags"] = json.loads(item.pop("tags_json"))
             result.append(item)
         return result

@@ -55,6 +55,7 @@ READS = {
     "list_episodes": lambda wm: wm.list_episodes(limit=100),
     "get_facts": lambda wm: wm.get_facts(),
     "get_facts_with_trust": lambda wm: wm.get_facts_with_trust(),
+    "fact_records": lambda wm: wm.fact_records(limit=100),
     "iter_episodes": lambda wm: list(iter_episodes(wm)),
 }
 
@@ -101,6 +102,8 @@ def test_each_batch_reads_exactly_as_its_rows_one_at_a_time(sealed_world, monkey
     assert wm.get_facts() == {r["key"]: world_model._dec_field(r["value"]) for r in facts}
     assert wm.get_facts_with_trust() == {
         r["key"]: (world_model._dec_field(r["value"]), int(r["trust_tier"])) for r in facts}
+    assert {r["key"]: r["value"] for r in wm.fact_records(limit=100)} == {
+        r["key"]: world_model._dec_field(r["value"]) for r in facts}
     withheld = world_model._UNSEALED_WITHHELD
     legacy = {a.id: a for a in wm.list_approvals(limit=100)}[1]
     assert legacy.scope is None
