@@ -158,3 +158,23 @@ class TestGovernance:
         summary = workforce_value._governance_summary()
 
         assert summary["chain_verifiable"] is True
+
+
+def test_runs_read_with_their_goal_domain_skip_a_second_goal_read(tmp_path, monkeypatch):
+    # A goal without a domain was read again for each of its runs' departments
+    # (500 such runs: 500 goal reads on every Savings page).
+    import pytest
+    from maverick.world_model import WorldModel
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    wm = WorldModel(tmp_path / "w.db")
+    for domain in ("finance_ap", "", "finance_ap"):
+        goal = wm.create_goal("task", "", domain=domain)
+        episode = wm.start_episode(goal)
+        wm.end_episode(episode, "summary", "success", cost_dollars=1.0)
+    reread = workforce_value.compute(wm)
+    monkeypatch.setattr(wm, "get_goal", lambda *_: pytest.fail("the goal was read again"))
+    value = workforce_value.compute(wm)
+    assert {d.department: d.deliverables for d in value.by_department} == {
+        "finance_ap": 2, "(unattributed)": 1}
+    assert value.by_department == reread.by_department

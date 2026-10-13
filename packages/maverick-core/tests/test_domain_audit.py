@@ -7,6 +7,7 @@ state-mutator) and the report shape.
 """
 from __future__ import annotations
 
+import pytest
 from click.testing import CliRunner
 from maverick.domain import DomainProfile, builtin_dir, load_domains
 from maverick.domain_audit import (
@@ -147,3 +148,39 @@ def test_cli_json_export(tmp_path):
     assert res.exit_code == 0, res.output
     doc = json.loads(out.read_text())
     assert doc["summary"]["drafting_agents_reaching_a_mutator"] == 0
+
+
+@pytest.mark.parametrize("levels", ["0", "1"])
+@pytest.mark.parametrize("grounding", ["0", "1"])
+def test_the_roster_audits_each_pack_as_it_audits_alone(monkeypatch, levels, grounding):
+    # The roster reads a dial that is off once, not once per pack.
+    monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", levels)
+    monkeypatch.setenv("MAVERICK_WORKFORCE_DATA_GROUNDING", grounding)
+    subset = {name: _BUILTIN[name] for name in sorted(_BUILTIN)[::25] + ["finance_ap"]}
+    roster = audit_roster(subset)
+    assert roster == [audit_profile(subset[name]) for name in sorted(subset)]
+    granted = {tool for a in roster for tool in a.runtime_expansion}
+    assert ({"email", "notify", "calendar"} <= granted) is (levels == "1")
+
+
+def test_a_dial_that_is_off_is_read_once_per_roster(monkeypatch):
+    from maverick import agent_autonomy, domain
+
+    monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "0")
+    monkeypatch.setenv("MAVERICK_WORKFORCE_DATA_GROUNDING", "0")
+    reads = {"levels": 0, "grounding": 0}
+    levels_enabled, data_grounding_enabled = agent_autonomy.levels_enabled, domain.data_grounding_enabled
+
+    def counting_levels(*override):
+        reads["levels"] += not override
+        return levels_enabled(*override)
+
+    def counting_grounding(*override):
+        reads["grounding"] += not override
+        return data_grounding_enabled(*override)
+
+    monkeypatch.setattr(agent_autonomy, "levels_enabled", counting_levels)
+    monkeypatch.setattr(domain, "data_grounding_enabled", counting_grounding)
+    subset = {name: _BUILTIN[name] for name in sorted(_BUILTIN)[:40]}
+    assert all(not a.runtime_expansion for a in audit_roster(subset))
+    assert reads == {"levels": 1, "grounding": 1}

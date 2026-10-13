@@ -73,8 +73,13 @@ class PackAudit:
     runtime_reachable_dangerous: list[str] = field(default_factory=list)
 
 
-def audit_profile(profile: DomainProfile) -> PackAudit:
-    """The governance posture of one pack (pure)."""
+def audit_profile(profile: DomainProfile, *, levels: bool | None = None,
+                  grounding: bool | None = None) -> PackAudit:
+    """The governance posture of one pack (pure).
+
+    ``levels`` / ``grounding`` pass through to :func:`domain_capability`:
+    ``None`` reads the deployment's dial, ``False`` is that dial off.
+    """
     allow = set(profile.allow_tools)
     # Builder status is a roster classification, not something a drafting pack
     # can acquire merely by adding shell/code_exec to its allowlist.
@@ -89,7 +94,8 @@ def audit_profile(profile: DomainProfile) -> PackAudit:
     )
     reachable = [t for t in dangerous if cap.permits(t)]
     denied = [t for t in _IRREVERSIBLE if t in set(profile.deny_tools)]
-    runtime = domain_capability(profile, None, f"agent:{profile.name}")
+    runtime = domain_capability(profile, None, f"agent:{profile.name}",
+                                levels=levels, grounding=grounding)
     refusals = refusals_for(profile.name, profile.refuse)
     from .agent_autonomy import effective_profile
     _auto = effective_profile(profile.name, profile.autonomy)
@@ -126,11 +132,19 @@ def audit_roster(domains: dict[str, DomainProfile] | None = None) -> list[PackAu
     pack's workforce settings used to read it again (about 6,400 reads, most
     of the time of the workforce pages).
     """
+    from .agent_autonomy import levels_enabled
     from .config import single_read
+    from .domain import data_grounding_enabled
 
     with single_read():
         domains = domains if domains is not None else available_domains()
-        return [audit_profile(domains[name]) for name in sorted(domains)]
+        # A deployment-wide dial that is off is off for every pack: say so
+        # once instead of reading the settings again for each one. A dial that
+        # is on is still checked per pack, as before.
+        levels = None if levels_enabled() else False
+        grounding = None if data_grounding_enabled() else False
+        return [audit_profile(domains[name], levels=levels, grounding=grounding)
+                for name in sorted(domains)]
 
 
 def summarize(audits: list[PackAudit]) -> dict:

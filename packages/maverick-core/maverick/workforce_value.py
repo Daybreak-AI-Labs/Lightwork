@@ -159,7 +159,13 @@ def compute(
             raise ValueError("A finished episode has no recorded cost.")
         cost = float(raw_cost)
         done = _is_done(getattr(ep, "outcome", None))
-        dept = getattr(ep, "domain", None) or _department_of(world, getattr(ep, "goal_id", 0), cache)
+        domain = getattr(ep, "domain", None)
+        if domain is None:
+            dept = _department_of(world, getattr(ep, "goal_id", 0), cache)
+        else:
+            # Read with its goal's domain (iter_episodes): a goal without one
+            # is unattributed, as reading the goal again (once per goal) says.
+            dept = domain or "(unattributed)"
         dv = depts.setdefault(dept, DepartmentValue(department=dept))
         dv.agent_cost += cost
         out.agent_cost += cost
