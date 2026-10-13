@@ -354,6 +354,13 @@ def _runner_principal_binding(world, goal, execution_principal):
     return True
 
 
+def _wait_for_trace_pin(pinning) -> None:
+    """Join the run's trace pin before its world closes. Bounded: each of the
+    pin's git calls times out after five seconds."""
+    if pinning is not None:
+        pinning.join()
+
+
 def _goal_run_exception_status(world, goal_id: int, exc: Exception) -> str:
     """Distinguish an intentional legacy hold from a retryable run crash."""
     from .event_admission import EventRegistryUnavailable, LegacyEventGoalHeld
@@ -574,9 +581,7 @@ def run_goal_in_thread(
                     close()
                 except Exception:  # pragma: no cover
                     log.debug("run_goal_in_thread: sandbox.close() failed", exc_info=True)
-        if pinning is not None:
-            # Bounded: each of its git calls times out after five seconds.
-            pinning.join()
+        _wait_for_trace_pin(pinning)
         if world is not None:
             try:
                 close_world_if_owned(world)
