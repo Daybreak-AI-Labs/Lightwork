@@ -1331,7 +1331,6 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(repair_default_workspace)
         await _reclaim_orphans()
         await _install_queue_dispatcher()
-        await _install_automation_scheduler()
         try:
             from .personal_notification_scheduler import start_personal_notification_scheduler
             await run_in_threadpool(start_personal_notification_scheduler)
@@ -1450,6 +1449,10 @@ async def _lifespan(app: FastAPI):
         # Serve only once the first page will not pay the cold caches (it
         # waits, never fails: past the limit the warm-up simply continues).
         await run_in_threadpool(warm_ready.wait, _WARM_BEFORE_SERVING_SECONDS)
+        # After the warm-up: a dream cycle that came due while the dashboard
+        # was stopped is claimed at once, and run beside the warm-up it
+        # stretched from about 0.3 s to 3 s and delayed serving by as much.
+        await _install_automation_scheduler()
         supervisor.phase = "running"
         from maverick.runtime_configuration import start as start_runtime_receipt
         runtime_receipt = start_runtime_receipt("dashboard")

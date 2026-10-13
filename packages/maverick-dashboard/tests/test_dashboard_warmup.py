@@ -322,6 +322,27 @@ def test_the_dashboard_serves_only_after_its_request_path_caches_are_warm(monkey
         dashboard._world_cache.clear()
 
 
+def test_overdue_automation_starts_after_the_warm_up(monkeypatch, tmp_path):
+    """A dream cycle missed while the dashboard was stopped is claimed as soon
+    as the automation worker starts; beside the warm-up it delayed serving by
+    about 2.8 s. The worker now starts once the caches are warm."""
+    from fastapi.testclient import TestClient
+    from maverick import world_model
+    from maverick_dashboard import automation_queue
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    dashboard._world_cache.clear()
+    monkeypatch.setattr(dashboard.app, "openapi", lambda: None)
+    order = []
+    monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: order.append("warm") or {})
+    monkeypatch.setattr(automation_queue, "start", lambda: order.append("automation") or False)
+    try:
+        with TestClient(dashboard.app, headers={"Origin": "http://testserver"}):
+            assert order == ["warm", "automation"]
+    finally:
+        dashboard._world_cache.clear()
+
+
 def test_a_slow_warm_up_delays_serving_only_up_to_its_limit(monkeypatch, tmp_path):
     import threading
     import time
