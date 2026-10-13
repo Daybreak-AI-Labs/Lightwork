@@ -530,9 +530,9 @@ def workforce_posture(request: Request) -> dict:
     """
     require_permission(request, "view")
     from maverick.agent_autonomy import graduation_candidates, levels_enabled
-    from maverick.domain_audit import audit_roster, summarize
+    from maverick.domain_audit import autonomy_posture
 
-    s = summarize(audit_roster())
+    s = autonomy_posture()
     out: dict = {
         "levels_enabled": levels_enabled(),
         "autonomy_posture": s.get("autonomy_posture", {}),
@@ -812,8 +812,10 @@ def _board_workforce(w, owner, days: int) -> dict:
 
     _, since, prev_since = _board_day_list(days)
     own, params = _owner_sql(owner)
-    firm = firm_totals(assemble(w, owner=owner)).to_dict()
-    cards = worker_cards(w, owner=owner)
+    # One Operating Record for both (each assembly decodes up to 5,000 approvals).
+    records = assemble(w, owner=owner)
+    firm = firm_totals(records).to_dict()
+    cards = worker_cards(w, owner=owner, records=records)
     depts: dict[str, dict] = {}
     for c in cards:
         row = depts.setdefault(

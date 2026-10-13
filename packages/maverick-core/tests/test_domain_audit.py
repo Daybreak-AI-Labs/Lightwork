@@ -184,3 +184,32 @@ def test_a_dial_that_is_off_is_read_once_per_roster(monkeypatch):
     subset = {name: _BUILTIN[name] for name in sorted(_BUILTIN)[:40]}
     assert all(not a.runtime_expansion for a in audit_roster(subset))
     assert reads == {"levels": 1, "grounding": 1}
+
+
+def test_posture_counts_equal_the_full_audit_including_overrides(tmp_path, monkeypatch):
+    # The workforce posture call audited all 2,031 packs to count these two.
+    from maverick.domain_audit import autonomy_posture
+
+    names = sorted(_BUILTIN)
+    (tmp_path / "config.toml").write_text(
+        f'[[workforce.agents]]\nname = "{names[0]}"\ndefault = "auto"\nonboarding = false\n'
+        f'[[workforce.agents]]\nname = "{names[3]}"\ndefault = "observe"\n', encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    subset = {name: _BUILTIN[name] for name in names[:60]}
+    full = summarize(audit_roster(subset))
+    posture = autonomy_posture(subset)
+    assert posture == {"autonomy_posture": full["autonomy_posture"], "packs_onboarding": full["packs_onboarding"]}
+    assert posture["autonomy_posture"]["auto"] >= 1 and posture["autonomy_posture"]["observe"] >= 1
+
+
+def test_an_audit_without_runtime_differs_only_in_its_runtime_fields(monkeypatch):
+    monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "1")
+    subset = {name: _BUILTIN[name] for name in sorted(_BUILTIN)[::40]}
+    with_runtime = audit_roster(subset)
+    without = audit_roster(subset, runtime=False)
+    assert any(a.runtime_expansion for a in with_runtime)
+    assert all(not a.runtime_expansion and not a.runtime_reachable_dangerous for a in without)
+    blank = {"runtime_expansion": [], "runtime_reachable_dangerous": []}
+    from dataclasses import replace
+    assert [replace(a, **blank) for a in with_runtime] == without
+    assert summarize(with_runtime) == summarize(without)
