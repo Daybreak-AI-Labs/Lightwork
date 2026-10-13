@@ -129,11 +129,13 @@ def test_a_later_turn_still_reads_and_checks_its_root(thread, monkeypatch):
 
 def test_a_goal_handed_in_for_another_id_is_not_trusted(thread, monkeypatch):
     world, root, child = thread
+    other = SubmissionStore(world).create(
+        token="other-request", fingerprint=hashlib.sha256(b"other").hexdigest(), owner="user:alice",
+        title="Another conversation", description="", manifest=[], chat_text="Something else")["goal_id"]
+    wrong = world.get_goals([other])[other]
     seen = _counting(monkeypatch, world)
-    wrong = world.get_goals([child])[child]
-    seen["reads"].clear()
     assert organization.organization(request(), world, root, goal=wrong)["root_id"] == root
-    assert seen["reads"] == [root]
+    assert seen["reads"] == [root] and seen["access"] == [root]
 
 
 def test_a_root_owned_by_someone_else_still_refuses(thread, monkeypatch):

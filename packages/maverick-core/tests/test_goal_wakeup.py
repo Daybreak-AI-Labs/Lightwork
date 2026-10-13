@@ -73,6 +73,9 @@ def test_a_rolled_back_write_wakes_nothing(world):
             wm.append_event(gid, "agent", "plan", "discarded")
             raise RuntimeError("abandon")
         assert seen == [] and _committed_events(path, gid) == 0
+        other = wm.create_goal("another task", "")
+        wm.append_event(other, "agent", "plan", "elsewhere")
+        assert seen == [], "the discarded change is not announced by the next commit"
         wm.append_event(gid, "agent", "plan", "kept")
         assert seen == [1]
     finally:
