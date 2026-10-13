@@ -117,3 +117,38 @@ def test_chat_searches_published_specialists_instead_of_shipping_the_roster(monk
     assert all("invoice" in (item["label"] + item["value"]).casefold() for item in body["items"])
     assert client.get("/api/v1/chat/specialists", params={"limit": 51}).status_code == 422
 
+
+
+def test_chat_digests_only_the_specialists_it_ships(monkeypatch, tmp_path):
+    """Each revision digests a whole specialist definition: /chat digested all
+    2,031 (about 93 ms of every open) to ship at most two, and each search
+    digested every match to return one page."""
+    import re
+
+    from maverick import governed_operations
+    from maverick.domain import enabled_domains
+    from maverick.governed_operations import dataclass_digest
+    from maverick_dashboard import product_operations_task_launch as launch
+
+    _prep(monkeypatch, tmp_path)
+    client = _client()
+    name = sorted(enabled_domains())[7]
+    digests = []
+    real = governed_operations.dataclass_digest
+
+    def counting(value):
+        digests.append(value)
+        return real(value)
+
+    monkeypatch.setattr(launch, "dataclass_digest", counting)
+    monkeypatch.setattr(governed_operations, "dataclass_digest", counting)
+    page = client.get("/chat", params={"specialist": name}).text
+    assert len(digests) <= 2
+    picker = page.split('id="chat-specialist"', 1)[1].split("</select>", 1)[0]
+    option = re.search(rf'<option value="{name}" data-revision="([0-9a-f]+)"', picker)
+    assert option and option.group(1) == real(enabled_domains()[name])
+    digests.clear()
+    body = client.get("/api/v1/chat/specialists", params={"q": "invoice", "limit": 5}).json()
+    assert len(digests) == len(body["items"]) <= 5
+    profiles = enabled_domains()
+    assert all(item["revision"] == dataclass_digest(profiles[item["value"]]) for item in body["items"])

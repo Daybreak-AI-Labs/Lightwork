@@ -8153,17 +8153,22 @@ def chat_specialist_choices(
     """
     require_permission(request, "operate")
     require_page_visible(request, "/chat")
+    from maverick.governed_operations import dataclass_digest
+
     from .product_operations_task_launch import published_specialists
 
-    current = published_specialists(request)
+    current = published_specialists(request, revisions=False)
     query = " ".join(q.split()).casefold()
     matches = [
         choice for choice in current["choices"]
         if not query or query in choice["label"].casefold() or query in choice["value"].casefold()
     ]
     matches.sort(key=lambda choice: (not choice["label"].casefold().startswith(query), choice["label"].casefold()))
+    # Each revision digests a whole specialist: only the page returned needs one.
+    items = [{"value": choice["value"], "label": choice["label"], "revision": dataclass_digest(choice["profile"])}
+             for choice in matches[:limit]]
     return JSONResponse(
-        {"context": current["context"], "items": matches[:limit], "total": len(matches)},
+        {"context": current["context"], "items": items, "total": len(matches)},
         headers={"Cache-Control": "no-store, private"},
     )
 
@@ -11354,15 +11359,17 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
         published_selection,
         published_specialists,
     )
-    specialist_choices = published_specialists(request) if has_permission(request, "operate") else {"context": "", "choices": []}
     requested_specialist = request.query_params.get("specialist")
-    if requested_specialist is not None:
-        published_selection(request, requested_specialist)
+
     # The roster has 2,000+ specialists: the page ships only the requested and
     # saved choices, and Find a specialist searches the rest (/api/v1/chat/specialists).
-    shown = {requested_specialist, specialist_choices.get("personal_default")} - {None, ""}
-    specialist_choices = {**specialist_choices,
-                          "choices": [c for c in specialist_choices["choices"] if c["value"] in shown]}
+    def shown(personal_default):
+        return {requested_specialist, personal_default} - {None, ""}
+
+    specialist_choices = (published_specialists(request, only=shown) if has_permission(request, "operate")
+                          else {"context": "", "choices": []})
+    if requested_specialist is not None:
+        published_selection(request, requested_specialist)
     return templates.TemplateResponse(
         request,
         "chat.html",
