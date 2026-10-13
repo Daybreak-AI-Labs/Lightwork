@@ -219,7 +219,10 @@ def test_traffic_that_never_quietens_unfreezes_instead_of_keeping_garbage(monkey
     assert calls == ["unfreeze"], "a stopped dashboard does nothing"
 
 
-def test_the_warm_up_collects_only_after_building_the_schema(monkeypatch):
+def test_the_warm_up_freezes_before_serving_and_collects_after_the_schema(monkeypatch):
+    """Until the first quiet garbage round (ten quiet seconds), every full
+    collection walked the warmed objects, 0.4-0.6 s on whichever request
+    triggered it; someone clicking from the start never got that quiet."""
     import threading
 
     steps, targets = [], []
@@ -240,12 +243,33 @@ def test_the_warm_up_collects_only_after_building_the_schema(monkeypatch):
                         lambda stop=None: steps.append(("caches", ready.is_set())) or {})
     monkeypatch.setattr(dashboard, "_build_openapi_when_idle", lambda stop=None: steps.append("schema") or True)
     monkeypatch.setattr(dashboard, "_collect_when_idle", lambda stop: steps.append(("gc", stop.is_set())))
+    monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: steps.append(("freeze", ready.is_set())))
     stop = dashboard._warm_goal_runtime(thread_factory=_Thread, ready=ready)
     assert isinstance(stop, threading.Event) and len(targets) == 1
     targets[0]()
-    # The request-path caches first, then ready; hooks, the schema and the
-    # garbage rounds follow in the background.
-    assert steps == [("caches", False), "hooks", "schema", ("gc", False)] and ready.is_set()
+    # The request-path caches, then their freeze, both before ready; hooks,
+    # the schema and the garbage rounds follow in the background.
+    assert steps == [("caches", False), ("freeze", False), "hooks", "schema", ("gc", False)] and ready.is_set()
+
+
+def test_a_dashboard_stopped_during_warm_up_does_not_freeze(monkeypatch):
+    import threading
+
+    targets, frozen = [], []
+
+    class _Thread:
+        def __init__(self, target, **_kwargs):
+            targets.append(target)
+
+        def start(self):
+            pass
+
+    ready = threading.Event()
+    monkeypatch.setattr(dashboard, "_freeze_long_lived_objects", lambda: frozen.append(1))
+    stop = dashboard._warm_goal_runtime(thread_factory=_Thread, ready=ready)
+    monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: stop.set() or {})
+    targets[0]()
+    assert frozen == [] and ready.is_set() and stop.is_set()
 
 
 def test_the_dashboard_serves_only_after_its_request_path_caches_are_warm(monkeypatch, tmp_path):

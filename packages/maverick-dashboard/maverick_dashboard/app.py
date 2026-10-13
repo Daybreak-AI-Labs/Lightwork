@@ -1196,6 +1196,13 @@ def _warm_goal_runtime(thread_factory=threading.Thread,
     def _warm() -> None:
         try:
             timings = _warm_dashboard_caches(stop)
+            if not stop.is_set():
+                # Freeze what warm-up built while startup still waits: the
+                # first garbage round needs ten quiet seconds, and until then
+                # every full collection walked it, 0.4-0.6 s on a request.
+                started = time.perf_counter()
+                _freeze_long_lived_objects()
+                timings["freeze"] = time.perf_counter() - started
             log.info("dashboard warm-up done: %s",
                      ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
         finally:
