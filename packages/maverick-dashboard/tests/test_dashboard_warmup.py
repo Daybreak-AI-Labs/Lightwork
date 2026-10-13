@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+import pytest
 from maverick_dashboard import app as dashboard
 
 
@@ -60,6 +61,27 @@ def test_the_schema_waits_for_a_quiet_moment(monkeypatch):
 
     assert dashboard._build_openapi_when_idle(quiet=0.0, sleep=fake_sleep) is True
     assert built == [1] and len(waits) >= 2, "it waited while a request was in flight"
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_the_schema_build_hands_the_gil_back_quickly_then_restores_it(monkeypatch, fails):
+    """About six seconds of pure-Python CPU: at the default 5 ms switch
+    interval each I/O call of a request arriving meanwhile waited for the GIL,
+    and the clicks after someone's first pause took about a second each."""
+    import sys
+
+    before = sys.getswitchinterval()
+    during = []
+
+    def build():
+        during.append(sys.getswitchinterval())
+        if fails:
+            raise RuntimeError("schema failed")
+
+    monkeypatch.setattr(dashboard.app, "openapi", build)
+    assert dashboard._build_openapi_when_idle(quiet=0.0, sleep=lambda _s: None) is (not fails)
+    assert during and during[0] < before and during[0] <= 0.0001
+    assert sys.getswitchinterval() == before
 
 
 def test_request_activity_counts_requests_in_flight():

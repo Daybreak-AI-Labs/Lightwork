@@ -19,6 +19,7 @@ import math
 import os
 import re
 import secrets
+import sys
 import threading
 import time
 from collections import deque
@@ -1094,6 +1095,9 @@ def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, flo
     return timings
 
 
+_SCHEMA_BUILD_SWITCH_INTERVAL = 0.0001
+
+
 def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float = 1800.0,
                              stop: threading.Event | None = None) -> bool:
     """Build the OpenAPI schema once the dashboard has been quiet for
@@ -1105,11 +1109,19 @@ def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float
     or as soon as ``stop`` is set (the dashboard is shutting down)."""
     if not _wait_for_quiet(quiet, sleep, limit, stop):
         return False
+    # The build is about six seconds of pure-Python CPU. At the default 5 ms
+    # switch interval, a request arriving meanwhile waited for the GIL after
+    # each of its I/O calls: the clicks after someone's first pause took about
+    # a second each. A short interval for the build hands it back at once.
+    switch = sys.getswitchinterval()
+    sys.setswitchinterval(_SCHEMA_BUILD_SWITCH_INTERVAL)
     try:
         app.openapi()
     except Exception:  # pragma: no cover - the schema still builds on demand
         log.debug("OpenAPI warm-up skipped", exc_info=True)
         return False
+    finally:
+        sys.setswitchinterval(switch)
     return True
 
 
