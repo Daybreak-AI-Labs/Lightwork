@@ -256,3 +256,32 @@ def test_a_signed_in_role_check_inside_a_render_reads_a_role_saved_during_it(tmp
             assert auth.caller_role(Request(scope)) == "viewer"
     finally:
         config.reset_config_cache()
+
+
+def test_a_page_reads_the_configuration_files_about_once(tmp_path, monkeypatch):
+    # About 29 decisions per page each read the files, resolved the at-rest
+    # key and decrypted the saved secrets again (6-11 ms a page here).
+    from fastapi.testclient import TestClient
+    from maverick import config, world_model
+    from maverick_dashboard import app as dashboard
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    for name in ("MAVERICK_DASHBOARD_TOKEN", "MAVERICK_DASHBOARD_REQUIRE_AUTH"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    dashboard._world_cache.clear()
+    config.reset_config_cache()
+    (tmp_path / "config.toml").write_text("[budget]\nmax_dollars = 5.0\n", encoding="utf-8")
+    reads = []
+    real = config._read_global_config
+    monkeypatch.setattr(config, "_read_global_config", lambda: reads.append(1) or real())
+    client = TestClient(dashboard.app, headers={"Origin": "http://testserver"})
+    try:
+        assert client.get("/approvals").status_code == 200
+        reads.clear()
+        assert client.get("/approvals").status_code == 200
+        assert 1 <= len(reads) <= 2, len(reads)
+    finally:
+        config.reset_config_cache()
+        dashboard._world_cache.clear()

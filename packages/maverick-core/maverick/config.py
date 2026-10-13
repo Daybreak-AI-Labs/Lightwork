@@ -197,6 +197,9 @@ def reset_config_cache() -> None:
         _unseal_errors.clear()
     _env_file_cache.clear()
     _env_last_check = None
+    kept = _KEPT_READ.get()
+    if kept is not None:
+        kept.entry = None
     shared = _SINGLE_READ.get()
     if shared is not None:
         shared.noted = {}  # this decision's errors; enclosing ones keep theirs
@@ -707,19 +710,123 @@ def load_global_config() -> dict:
     The dashboard overlay remains writable by the global admin; the optional
     operator-owned config overlay still has higher precedence.
     """
-    shared = _SINGLE_READ.get()
-    if shared is None or not shared.open or _UNSEALING.get():
+    if _UNSEALING.get():
         return _read_global_config()
-    tree = shared.tree
-    if tree is not None:
-        return _copy_tree(tree)
+    shared = _SINGLE_READ.get()
+    if shared is not None and not shared.open:
+        shared = None
+    if shared is not None and shared.tree is not None:
+        return _copy_tree(shared.tree)
+    kept = _KEPT_READ.get()
+    if shared is None and kept is None:
+        return _read_global_config()
+    witness = _read_witness() if kept is not None else None
+    entry = kept.entry if kept is not None else None
+    if (entry is not None and witness is not None and entry[1] == witness
+            and _monotonic() - entry[2] <= _KEEP_READ_SECONDS and _same_environment(entry[3])):
+        if shared is not None:
+            shared.tree = entry[0]
+        return _copy_tree(entry[0])
+    started = _monotonic()
+    environment = _environment() if kept is not None else None
     with _collecting_read_errors() as noted:
         tree = _read_global_config()
     if noted:
-        shared.noted.update(noted)
-    elif shared.open:
-        shared.tree = _copy_tree(tree)  # only a read that met no error itself
+        if shared is not None:
+            shared.noted.update(noted)
+        return tree
+    clean = _copy_tree(tree)  # only a read that met no error itself is shared
+    if shared is not None and shared.open:
+        shared.tree = clean
+    if kept is not None and witness is not None:
+        kept.entry = (clean, witness, started, environment)
     return tree
+
+
+class _KeptRead:
+    __slots__ = ("entry",)
+
+    def __init__(self) -> None:
+        self.entry: tuple[dict, tuple, float, dict] | None = None  # (tree, files, read at, environment)
+
+
+# Within one request, a decision whose inputs are provably unchanged since the
+# request's last clean read uses that read: a page asked about 29 times, each
+# reading the files, resolving the at-rest key and decrypting the saved
+# secrets again. "Unchanged" is the whole environment and the identity
+# (modification and change times, size, inode, mode, owner) of every file a
+# read depends on: config.toml, the Settings overlay, the operator overlay,
+# the wizard's .env, the at-rest key, its folder and its keyring. A saved
+# policy, a rotated key or a tightened permission changes one of them and the
+# next decision reads again. A Windows ACL change is not visible to stat, so
+# a kept read is used for at most _KEEP_READ_SECONDS after the read that fully
+# checked the key folder.
+_KEEP_READ_SECONDS = 2.0
+_KEPT_READ: ContextVar[_KeptRead | None] = ContextVar("maverick_config_kept_read", default=None)
+
+
+@contextmanager
+def kept_reads():
+    """Let the decisions of one request share a read while its inputs are unchanged."""
+    token = _KEPT_READ.set(_KeptRead())
+    try:
+        yield
+    finally:
+        _KEPT_READ.reset(token)
+
+
+def discard_kept_reads() -> None:
+    """Drop a request's kept read from a context copied into a background worker."""
+    _KEPT_READ.set(None)
+
+
+def _file_state(path: Path, *, rehardened: bool = False) -> object:
+    try:
+        st = os.stat(path)
+    except OSError as e:
+        return type(e).__name__
+    # Every read re-applies the key folder's and key files' private mode, which
+    # moves their change time; their mode and owner still show any change.
+    changed = None if rehardened else st.st_ctime_ns
+    return (st.st_mtime_ns, changed, st.st_size, st.st_ino, st.st_mode, st.st_uid, st.st_gid)
+
+
+def _environment() -> dict:
+    data = getattr(os.environ, "_data", None)
+    return dict(data) if isinstance(data, dict) else dict(os.environ)
+
+
+def _same_environment(kept: dict) -> bool:
+    data = getattr(os.environ, "_data", None)
+    return (data if isinstance(data, dict) else dict(os.environ)) == kept
+
+
+def _read_witness() -> tuple | None:
+    """The files a deployment-global read depends on, as cheap facts (the
+    environment is compared separately, against a copy taken at the read).
+    None when they cannot be stated: that read is neither kept nor reused."""
+    token = _UNSEALING.set(True)  # resolving the key path may read [client] id once
+    try:
+        key = crypto_at_rest._key_path()
+    except Exception:  # e.g. an invalid [client] id: the read itself reports it
+        return None
+    finally:
+        _UNSEALING.reset(token)
+    keyring = key.parent / "at_rest.d"
+    base = config_path()
+    paths = [base, dashboard_overrides_path(), base.parent / _ENV_FILE_BASENAME, keyring]
+    overlay = os.environ.get(CONFIG_OVERLAY_ENV)
+    if overlay:
+        paths.append(Path(overlay).expanduser())
+    rehardened = [key, key.parent]
+    try:
+        with os.scandir(keyring) as entries:
+            rehardened.extend(sorted(keyring / e.name for e in entries if e.name.endswith(".key")))
+    except OSError:
+        pass
+    return (tuple(str(path) for path in paths + rehardened),
+            tuple(_file_state(path) for path in paths),
+            tuple(_file_state(path, rehardened=True) for path in rehardened))
 
 
 @contextmanager

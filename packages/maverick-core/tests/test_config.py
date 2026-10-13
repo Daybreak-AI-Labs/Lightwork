@@ -1219,3 +1219,152 @@ def test_no_file_is_checked_while_the_cache_lock_is_held(config_home, monkeypatc
     config.load_config()
     config.config_source_errors()
     assert held and not any(held)
+
+
+def _decision(config):
+    with config.single_read(fresh=True):
+        return config.load_config()
+
+
+def test_one_request_reads_the_configuration_once_while_nothing_changes(config_home):
+    # A page asked about 29 times; each read the files, resolved the at-rest
+    # key and decrypted the saved secret again.
+    from maverick import config
+
+    _, reads = config_home
+    with config.kept_reads():
+        for _ in range(5):
+            assert _decision(config)["budget"]["max_dollars"] == 5.0
+            assert config.load_config()["providers"]["anthropic"]["api_key"] == "sk-test-not-a-real-key"  # pragma: allowlist secret
+        first = config.load_config()
+        first["budget"]["max_dollars"] = 999  # each caller has its own copy
+        assert _decision(config)["budget"]["max_dollars"] == 5.0
+    assert len(reads) == 1
+    config.load_config()
+    assert len(reads) == 2, "outside a request every read is fresh, as before"
+
+
+def test_a_policy_saved_during_a_request_is_read_by_its_next_decision(config_home):
+    import os
+
+    from maverick import config
+
+    home, reads = config_home
+    with config.kept_reads():
+        assert _decision(config)["budget"]["max_dollars"] == 5.0
+        replacement = home / "config.toml.new"
+        replacement.write_text("[budget]\nmax_dollars = 9.5\n", encoding="utf-8")
+        os.replace(replacement, home / "config.toml")
+        assert _decision(config)["budget"]["max_dollars"] == 9.5
+        assert _decision(config)["budget"]["max_dollars"] == 9.5
+    assert len(reads) == 2
+
+
+def test_an_environment_change_is_read_by_the_next_decision(config_home, monkeypatch):
+    from maverick import config
+
+    home, reads = config_home
+    (home / "config.toml").write_text('[models]\nsummarizer = "${MAVERICK_KEPT_MODEL}"\n', encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_KEPT_MODEL", "first:model")
+    with config.kept_reads():
+        assert _decision(config)["models"]["summarizer"] == "first:model"
+        monkeypatch.setenv("MAVERICK_KEPT_MODEL", "second:model")
+        assert _decision(config)["models"]["summarizer"] == "second:model"
+    assert len(reads) == 2
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_a_loosened_key_file_is_read_by_the_next_decision(config_home):
+    from maverick import config, crypto_at_rest
+
+    _, reads = config_home
+    with config.kept_reads():
+        _decision(config)
+        with crypto_at_rest.deployment_key_scope():
+            key = crypto_at_rest._key_path()
+        key.chmod(0o644)
+        _decision(config)  # reads again, and the read makes the key private again
+        assert len(reads) == 2
+        assert key.stat().st_mode & 0o077 == 0
+        key.parent.chmod(0o755)
+        _decision(config)
+        assert len(reads) == 3
+
+
+def test_a_new_rotation_key_is_read_by_the_next_decision(config_home):
+    from maverick import config, crypto_at_rest
+
+    _, reads = config_home
+    with config.kept_reads():
+        _decision(config)
+        with crypto_at_rest.deployment_key_scope():
+            keyring = crypto_at_rest._keyring_dir()
+        keyring.mkdir(parents=True, exist_ok=True)
+        _decision(config)
+        (keyring / "0011223344556677.key").write_text("00" * 32, encoding="utf-8")
+        _decision(config)
+    assert len(reads) == 3
+
+
+def test_a_kept_read_is_used_for_two_seconds_at_most(config_home, monkeypatch):
+    # A Windows ACL change on the key folder does not show in its file facts.
+    from maverick import config
+
+    _, reads = config_home
+    now = [1000.0]
+    monkeypatch.setattr(config, "_monotonic", lambda: now[0])
+    with config.kept_reads():
+        _decision(config)
+        now[0] += 1.9
+        _decision(config)
+        assert len(reads) == 1
+        now[0] += 0.2
+        _decision(config)
+    assert len(reads) == 2
+
+
+def test_a_read_that_met_an_error_is_not_kept(config_home):
+    from maverick import config
+
+    home, reads = config_home
+    (home / "config.toml").write_text("[budget\n", encoding="utf-8")
+    with config.kept_reads():
+        for _ in range(3):
+            _decision(config)
+            config.load_config()
+            assert str(home / "config.toml") in config.config_source_errors()
+    assert len(reads) == 6
+
+
+def test_a_reset_or_a_copied_worker_reads_for_itself(config_home):
+    import contextvars
+
+    from maverick import config
+
+    _, reads = config_home
+    with config.kept_reads():
+        _decision(config)
+        config.reset_config_cache()  # a settings save
+        _decision(config)
+        assert len(reads) == 2
+        worker = contextvars.copy_context()
+        worker.run(config.discard_kept_reads)
+        worker.run(config.load_config)
+        assert len(reads) == 3
+        _decision(config)  # the request itself still has its read
+        assert len(reads) == 3
+
+
+def test_a_key_folder_that_cannot_be_named_is_not_kept_and_still_fails_soft(config_home, monkeypatch):
+    from maverick import config, crypto_at_rest
+
+    _, reads = config_home
+
+    def unnamed():
+        raise RuntimeError("the client binding is invalid")
+
+    monkeypatch.setattr(crypto_at_rest, "_key_path", unnamed)
+    with config.kept_reads():
+        for _ in range(2):
+            assert _decision(config)["budget"]["max_dollars"] == 5.0  # no exception
+    assert len(reads) == 2
