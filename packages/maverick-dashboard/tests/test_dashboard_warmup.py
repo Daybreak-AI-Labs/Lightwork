@@ -146,7 +146,6 @@ def test_leaving_the_lifespan_stops_its_warm_up_thread(monkeypatch, tmp_path):
     dashboard._world_cache.clear()
     built = []
     monkeypatch.setattr(dashboard.app, "openapi", lambda: built.append(1))
-    monkeypatch.setattr(dashboard, "_warm_pack_catalogue", lambda: None)
 
     def mine():
         return {t for t in threading.enumerate() if t.name == "lightwork-warm-hooks"}
@@ -235,12 +234,79 @@ def test_the_warm_up_collects_only_after_building_the_schema(monkeypatch):
     async def _hooks():
         steps.append("hooks")
 
-    monkeypatch.setattr(dashboard, "_warm_pack_catalogue", lambda: steps.append("packs"))
+    ready = threading.Event()
     monkeypatch.setattr("maverick.hooks.ensure_loaded", _hooks)
-    monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: steps.append("caches") or {})
+    monkeypatch.setattr(dashboard, "_warm_dashboard_caches",
+                        lambda stop=None: steps.append(("caches", ready.is_set())) or {})
     monkeypatch.setattr(dashboard, "_build_openapi_when_idle", lambda stop=None: steps.append("schema") or True)
     monkeypatch.setattr(dashboard, "_collect_when_idle", lambda stop: steps.append(("gc", stop.is_set())))
-    stop = dashboard._warm_goal_runtime(thread_factory=_Thread)
+    stop = dashboard._warm_goal_runtime(thread_factory=_Thread, ready=ready)
     assert isinstance(stop, threading.Event) and len(targets) == 1
     targets[0]()
-    assert steps == ["packs", "hooks", "caches", "schema", ("gc", False)]
+    # The request-path caches first, then ready; hooks, the schema and the
+    # garbage rounds follow in the background.
+    assert steps == [("caches", False), "hooks", "schema", ("gc", False)] and ready.is_set()
+
+
+def test_the_dashboard_serves_only_after_its_request_path_caches_are_warm(monkeypatch, tmp_path):
+    """A first page opened while the route table, templates and pack catalogue
+    were still cold took 4 to 9 seconds (and longer while the background
+    warm-up competed with it). Startup now waits for them before serving."""
+    import asyncio
+    import threading
+
+    from fastapi.testclient import TestClient
+    from maverick import world_model
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    dashboard._world_cache.clear()
+    monkeypatch.setattr(dashboard.app, "openapi", lambda: None)
+    warmed, release = [], threading.Event()
+
+    async def slow_hooks():  # hook discovery is not needed for the first page
+        await asyncio.to_thread(release.wait, 30)
+
+    monkeypatch.setattr("maverick.hooks.ensure_loaded", slow_hooks)
+    monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: warmed.append(1) or {})
+    try:
+        with TestClient(dashboard.app, headers={"Origin": "http://testserver"}):
+            assert warmed == [1], "the caches were warm before the first request"
+    finally:
+        release.set()
+        dashboard._world_cache.clear()
+
+
+def test_a_slow_warm_up_delays_serving_only_up_to_its_limit(monkeypatch, tmp_path):
+    import threading
+    import time
+
+    from fastapi.testclient import TestClient
+    from maverick import world_model
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    dashboard._world_cache.clear()
+    monkeypatch.setattr(dashboard.app, "openapi", lambda: None)
+    monkeypatch.setattr(dashboard, "_WARM_BEFORE_SERVING_SECONDS", 0.2)
+    release = threading.Event()
+    monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: release.wait(30) and {})
+    try:
+        started = time.monotonic()
+        with TestClient(dashboard.app, headers={"Origin": "http://testserver"}) as client:
+            assert time.monotonic() - started < 20, "startup did not wait for the stuck warm-up"
+            assert client.get("/livez").status_code == 200
+    finally:
+        release.set()
+        dashboard._world_cache.clear()
+
+
+def test_a_dashboard_that_just_started_is_not_yet_quiet(monkeypatch):
+    """Before its first request the dashboard counted as quiet, so the
+    schema build (about 4 s of CPU) started at once and slowed the first
+    pages to 4 seconds; a garbage round did the same."""
+    from maverick_dashboard import request_activity
+
+    monkeypatch.setattr(request_activity, "_in_flight", 0)
+    monkeypatch.setattr(request_activity, "_last_start", 0.0)  # nothing served yet
+    sleeps = []
+    assert dashboard._wait_for_quiet(2.0, sleeps.append, 60.0, None) is True
+    assert len(sleeps) == 4, "it waited the quiet period itself"

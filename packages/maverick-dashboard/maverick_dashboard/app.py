@@ -1094,18 +1094,6 @@ def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, flo
     return timings
 
 
-def _warm_pack_catalogue() -> None:
-    """Parse the shipped pack catalogue (2,031 files) and the roster's tool
-    inventory before hook discovery: both are person-independent and cached
-    for the process, and Ctrl+K's first agent lookup needs them."""
-    try:
-        from maverick.domain_edit import list_agents
-
-        list_agents()
-    except Exception:  # pragma: no cover - warm-up is best-effort
-        log.debug("pack catalogue warm-up skipped", exc_info=True)
-
-
 def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float = 1800.0,
                              stop: threading.Event | None = None) -> bool:
     """Build the OpenAPI schema once the dashboard has been quiet for
@@ -1127,11 +1115,16 @@ def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float
 
 def _wait_for_quiet(quiet: float, sleep, limit: float, stop: threading.Event | None) -> bool:
     """Whether ``quiet`` seconds without a request arrived before ``limit``
-    seconds of traffic passed and before ``stop`` was set."""
+    seconds of traffic passed and before ``stop`` was set.
+
+    The quiet must also last ``quiet`` seconds from the start of the wait: a
+    dashboard that has just started has served nothing yet, and its schema
+    build used to begin at once, landing four seconds of CPU on the first
+    pages someone opened."""
     from . import request_activity
 
     waited = 0.0
-    while not request_activity.quiet_for(quiet):
+    while waited < quiet or not request_activity.quiet_for(quiet):
         if waited >= limit or (stop is not None and stop.is_set()):
             return False
         sleep(0.5)
@@ -1181,17 +1174,33 @@ def _collect_when_idle(stop: threading.Event, quiet: float = 10.0, sleep=time.sl
             return
 
 
-def _warm_goal_runtime(thread_factory=threading.Thread) -> threading.Event:
-    """Pay the kernel's once-per-process start-up cost (hook discovery across
-    installed distributions, about 1.5 s cold) and the dashboard's first-hit
-    costs (:func:`_warm_dashboard_caches`) now, in the background, instead of
-    on the first request or chat turn after start. Fail-open: never blocks
-    startup. Returns the event the lifespan sets on shutdown, so a stopped
-    dashboard does not keep warming (or build its schema) in the background."""
+# How long startup waits for the request-path caches before it serves anyway
+# (the desktop splash gives the whole start 60 s; this is about 5 s normally).
+_WARM_BEFORE_SERVING_SECONDS = 15.0
+
+
+def _warm_goal_runtime(thread_factory=threading.Thread,
+                       ready: threading.Event | None = None) -> threading.Event:
+    """Pay the dashboard's first-hit costs (:func:`_warm_dashboard_caches`)
+    and the kernel's once-per-process start-up cost (hook discovery across
+    installed distributions, about 1.5 s cold) in a background thread,
+    instead of on the first request or chat turn after start.
+
+    ``ready`` is set once the request-path caches are warm (or their warm-up
+    failed): the lifespan waits for it before serving, because a first page
+    opened while they were still cold took 4 to 9 seconds. Fail-open.
+    Returns the event the lifespan sets on shutdown, so a stopped dashboard
+    does not keep warming (or build its schema) in the background."""
     stop = threading.Event()
 
     def _warm() -> None:
-        _warm_pack_catalogue()
+        try:
+            timings = _warm_dashboard_caches(stop)
+            log.info("dashboard warm-up done: %s",
+                     ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
+        finally:
+            if ready is not None:
+                ready.set()
         if stop.is_set():
             return
         try:
@@ -1204,9 +1213,6 @@ def _warm_goal_runtime(thread_factory=threading.Thread) -> threading.Event:
             log.debug("goal runtime warm-up skipped", exc_info=True)
         if stop.is_set():
             return
-        timings = _warm_dashboard_caches(stop)
-        log.info("dashboard warm-up done: %s",
-                 ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
         _build_openapi_when_idle(stop=stop)
         _collect_when_idle(stop)
 
@@ -1318,7 +1324,8 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_knowledge_sources_scheduler)
         from .consent_delivery_scheduler import start_consent_delivery_scheduler
         await run_in_threadpool(start_consent_delivery_scheduler)
-        warm_stop = _warm_goal_runtime()
+        warm_ready = threading.Event()
+        warm_stop = _warm_goal_runtime(ready=warm_ready)
         try:
             from maverick_dashboard.security_api import start_hunter_scheduler
 
@@ -1421,6 +1428,9 @@ async def _lifespan(app: FastAPI):
             start_warmup(app)
         except Exception:  # pragma: no cover - never block startup
             log.exception("voice STT warm-up not started")
+        # Serve only once the first page will not pay the cold caches (it
+        # waits, never fails: past the limit the warm-up simply continues).
+        await run_in_threadpool(warm_ready.wait, _WARM_BEFORE_SERVING_SECONDS)
         supervisor.phase = "running"
         from maverick.runtime_configuration import start as start_runtime_receipt
         runtime_receipt = start_runtime_receipt("dashboard")
