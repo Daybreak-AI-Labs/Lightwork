@@ -121,3 +121,60 @@ def test_with_encryption_off_values_pass_through_untouched(tmp_path, monkeypatch
     assert world_model._approvals_from_rows([]) == []
     assert world_model._goals_from_rows([]) == []
     assert world_model._episode_spends_from_rows([]) == []
+
+
+@pytest.mark.parametrize("strict", ["0", "1"])
+def test_goals_read_together_equal_goals_read_one_by_one(sealed_world, monkeypatch, strict):
+    monkeypatch.setenv("MAVERICK_ENCRYPT_STRICT", strict)
+    wm, path = sealed_world
+    _with_legacy_rows(path)
+    ids = [1, 2, 3, 25, 999]
+    one_by_one = {gid: wm.get_goal(gid) for gid in ids}
+    together = wm.get_goals(ids + [2])
+    assert together == {gid: goal for gid, goal in one_by_one.items() if goal is not None}
+    assert 999 not in together and together[1].title == (
+        world_model._UNSEALED_WITHHELD if strict == "1" else "legacy title")
+    rows = {r["id"]: r for r in _rows(path, "SELECT * FROM goals")}
+    assert wm.get_goal(2) == world_model._goal_from_row(rows[2])
+
+
+@pytest.mark.parametrize("read", ["get_goal", "get_goals"])
+def test_a_goal_read_loads_the_key_once(sealed_world, monkeypatch, read):
+    # Each sealed field (title, description, result) loaded the key again.
+    wm, _ = sealed_world
+    keys = _counting(monkeypatch, "_load_or_create_key", "_resolve_key_by_id")
+    goal = wm.get_goal(3) if read == "get_goal" else wm.get_goals(range(1, 26))[3]
+    assert goal.title == "goal 2" and keys["n"] == 1
+
+
+def test_goals_by_id_falls_back_to_one_read_per_goal(sealed_world):
+    wm, _ = sealed_world
+
+    class OneByOne:
+        def get_goal(self, goal_id):
+            return wm.get_goal(goal_id)
+
+    assert world_model.goals_by_id(OneByOne(), [3, 1, 3, 999]) == wm.get_goals([1, 3])
+
+
+def test_experience_recall_reads_its_goals_together(sealed_world, monkeypatch):
+    from maverick import experience
+
+    wm, _ = sealed_world
+    monkeypatch.setattr(experience, "enabled", lambda: True)
+    singles = []
+
+    class OneByOne:
+        def list_episodes(self, **kwargs):
+            return wm.list_episodes(**kwargs)
+
+        def get_goal(self, goal_id):
+            singles.append(goal_id)
+            return wm.get_goal(goal_id)
+
+    expected = experience.recall(OneByOne(), "goal 7 follow-up")
+    assert expected and singles, "the fallback reads each goal"
+    original = wm.get_goal
+    monkeypatch.setattr(wm, "get_goal", lambda goal_id: singles.append(goal_id) or original(goal_id))
+    singles.clear()
+    assert experience.recall(wm, "goal 7 follow-up") == expected and singles == []

@@ -5113,13 +5113,19 @@ def spend_page(request: Request) -> HTMLResponse:
     episode_provenance = {e.id: {"runtime_basis": runtime_basis(e.cost_dollars), **for_goal(e.goal_id)} for e in episodes}
     # Task titles for the table (the episodes are already scoped to the caller).
     goal_titles: dict[int, str] = {}
-    for gid in {e.goal_id for e in episodes if e.goal_id}:
-        try:
-            g = w.get_goal(gid)
-            if g is not None and getattr(g, "title", ""):
-                goal_titles[gid] = g.title
-        except Exception:  # noqa: BLE001 - a missing title falls back to "Task"
-            continue
+    try:
+        from maverick.world_model import goals_by_id
+
+        goal_titles = {gid: g.title for gid, g in goals_by_id(w, [e.goal_id for e in episodes if e.goal_id]).items()
+                       if getattr(g, "title", "")}
+    except Exception:  # noqa: BLE001 - a missing title falls back to "Task"
+        for gid in {e.goal_id for e in episodes if e.goal_id}:
+            try:
+                g = w.get_goal(gid)
+                if g is not None and getattr(g, "title", ""):
+                    goal_titles[gid] = g.title
+            except Exception:  # noqa: BLE001
+                continue
     import datetime as _dt
     today = _dt.date.today().replace(day=1)
     months = []

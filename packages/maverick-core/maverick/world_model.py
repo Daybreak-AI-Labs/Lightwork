@@ -1102,6 +1102,20 @@ def _goals_from_rows(rows) -> list[Goal]:
     return [Goal(**_row_for(Goal, d)) for d in records]
 
 
+def goals_by_id(world, goal_ids) -> dict:
+    """``{id: goal}`` for the ids that exist, in one read when the world can
+    (:meth:`WorldModel.get_goals`), else one :meth:`get_goal` per id."""
+    batch = getattr(world, "get_goals", None)
+    if callable(batch):
+        return batch(goal_ids)
+    found = {}
+    for goal_id in dict.fromkeys(goal_ids):
+        goal = world.get_goal(goal_id)
+        if goal is not None:
+            found[goal_id] = goal
+    return found
+
+
 def _goal_event_from_row(row) -> GoalEvent:
     """Build a GoalEvent from a row, decrypting the sealed content field."""
     d = dict(row)
@@ -2507,7 +2521,20 @@ class WorldModel:
 
     def get_goal(self, goal_id: int) -> Goal | None:
         row = self._read_one("SELECT * FROM goals WHERE id = ?", (goal_id,))
-        return _goal_from_row(row) if row else None
+        # One at-rest policy and key lookup for the row's sealed fields.
+        return _goals_from_rows([row])[0] if row else None
+
+    def get_goals(self, goal_ids) -> dict[int, Goal]:
+        """``{id: goal}`` for the ids that exist: one read per 500 ids, each
+        decrypted with one at-rest policy and key lookup (a page that read 50
+        goals one by one loaded the key for every sealed field of each)."""
+        found: dict[int, Goal] = {}
+        for chunk in self._chunks(sorted({int(goal_id) for goal_id in goal_ids})):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self._read_all(f"SELECT * FROM goals WHERE id IN ({placeholders})", tuple(chunk))
+            for goal in _goals_from_rows(rows):
+                found[goal.id] = goal
+        return found
 
     def recent_goals_by_domain(self, domains: list[str], *, owner: str | None = None,
                                per_domain: int = 5) -> dict[str, list[Goal]]:

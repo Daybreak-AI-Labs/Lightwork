@@ -81,11 +81,16 @@ def _identity(goal):
 
 
 def check(request, goals, expected):
+    from maverick.world_model import goals_by_id
+
     from ._shared import _world
 
     world = _world()
+    # One read for the page's goals; every goal still passes its own access
+    # check and identity comparison.
+    current = goals_by_id(world, [goal.id for goal in goals])
     for goal in goals:
-        latest = world.get_goal(goal.id)
+        latest = current.get(goal.id)
         if not auth.can_access_goal(request, latest) or _identity(latest) != _identity(goal):
             raise HTTPException(409, "A matching task or its access changed during search. Search again to read current results.")
     if not hmac.compare_digest(expected, context(request)):
