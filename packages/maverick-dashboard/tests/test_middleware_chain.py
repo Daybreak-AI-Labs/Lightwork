@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextvars
 import inspect
+from itertools import pairwise
 
 import pytest
 from fastapi import FastAPI, Request
@@ -110,7 +111,7 @@ def test_merged_and_separate_layers_answer_alike(method, path, body):
 def test_the_dashboard_runs_its_consecutive_function_middlewares_as_one_layer():
     layers = dash_app.app.user_middleware
     kinds = [m.cls is BaseHTTPMiddleware for m in layers]
-    assert not any(a and b for a, b in zip(kinds, kinds[1:])), "no two function layers in a row"
+    assert not any(a and b for a, b in pairwise(kinds)), "no two function layers in a row"
     chained = [m.kwargs["dispatch"] for m in layers if m.cls is BaseHTTPMiddleware
                and hasattr(m.kwargs["dispatch"], "chained")]
     assert len(chained) == 1
