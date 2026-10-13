@@ -64,6 +64,7 @@ from . import auth_metrics as _auth_metrics
 from . import (
     capability_assessment_controls_api,
     learning_acquisition_api,
+    page_handoff,
     runtime_policy_recovery_api,
 )
 from . import health_routes as _health_routes
@@ -11617,7 +11618,11 @@ def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conve
     user_id = execution_user_id_from_request(request)
     if user_id:
         kwargs.update(channel="dashboard", user_id=user_id)
-    bg.add_task(dispatch, _world(), receipt, run_goal_in_background_async, goal_id, **kwargs)
+    # Every caller redirects to the task's page: the run starts once that page
+    # was served (at most half a second later), not while the browser waits.
+    page_handoff.expect(goal_id)
+    bg.add_task(dispatch, _world(), receipt, page_handoff.after_page(run_goal_in_background_async),
+                goal_id, **kwargs)
 
 
 def _submission_conversation(w, receipt) -> int | None:
@@ -13344,7 +13349,10 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     """A task's page; built again when the task changed while it was read."""
     from .answer_projection import settled
 
-    return settled(lambda: _chat_goal_page(request, goal_id))
+    try:
+        return settled(lambda: _chat_goal_page(request, goal_id))
+    finally:
+        page_handoff.served(goal_id)
 
 
 def _chat_goal_page(request: Request, goal_id: int) -> HTMLResponse:
