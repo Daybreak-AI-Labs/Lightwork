@@ -13918,6 +13918,69 @@ def _copilot_provider_setup(
     }
 
 
+def _copilot_detail_navigation_task(request: Request, message: str, permissions: frozenset[str]):
+    """Match only reviewed control names while a private record is open."""
+    from . import ui_visibility
+    from .app import _account_pages_unavailable, _page_role, _switched_off_pages
+    from .copilot_tasks import TASKS
+
+    def words(value: str) -> tuple[str, ...]:
+        parts = re.findall(r"[a-z0-9]+", value.casefold())
+        if tuple(parts[:3]) in {
+            ("where", "do", "i"), ("how", "do", "i"),
+            ("where", "can", "i"), ("how", "can", "i"),
+        }:
+            parts = parts[3:]
+        return tuple(part for part in parts if part != "the")
+
+    requested = words(message)
+    # The older task registry names the Settings control by spending, while
+    # people also ask where to change their task limits from a task detail.
+    task_limits = requested in {("change", "task", "limits"), ("change", "task", "limit")}
+    if task_limits:
+        requested = words("Set a spending limit")
+    hidden = _switched_off_pages() | _account_pages_unavailable(request)
+    roles = {"workspace": _page_role(request), "global": _page_role(request, global_scope=True)}
+    visible = {
+        link["href"]
+        for group in ui_visibility.finder_pages(None, scope_roles=roles)
+        for link in group["links"]
+    } - hidden
+    matches = [
+        task for path, tasks in TASKS.items() if path in visible
+        for task in tasks
+        if task.floor in permissions and task.href.split("?", 1)[0] in visible
+        and words(task.label) == requested
+    ]
+    return (matches[0], task_limits) if len(matches) == 1 else None
+
+
+def _copilot_detail_reply(request: Request, message: str, permissions: frozenset[str],
+                          context, record_context) -> dict | None:
+    """Keep detail-page guidance deterministic and out of model history."""
+    from .copilot_context import built_in_reply, is_action_request, public_context
+    from .copilot_tasks import reply as task_reply
+
+    reviewed = _copilot_detail_navigation_task(request, message, permissions)
+    if reviewed is not None:
+        task, task_limits = reviewed
+        answer = task_reply(task)
+        if task_limits:
+            answer["reply"] = (
+                "In Settings, set the amount one task may spend under Spending limits. "
+                "For its time limit, open All settings, then Spending & limits and Time limit per task."
+            )
+        return {**answer, "page_context": public_context(context, permissions)}
+    if is_action_request(message):
+        return None
+    return {
+        "reply": built_in_reply(context, message, permissions),
+        "mode": "live" if record_context else "built_in",
+        "source": context.title,
+        "page_context": public_context(context, permissions),
+    }
+
+
 @router.post("/copilot")
 async def copilot_endpoint(request: Request, payload: CopilotIn, response: Response) -> dict:
     """One turn of the platform copilot -- the lower-right helper on every
@@ -13986,16 +14049,12 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
             result["conversation_context_status"] = "unavailable"
         return result
 
-    if is_detail_page and not is_action_request(msg):
-        # A detail URL identifies one current record. Keep its authorized
-        # name, status, and stop explanation out of external model prompts and
-        # out of later guide history, including for exact status questions.
-        return {
-            "reply": built_in_reply(context, msg, permissions),
-            "mode": "live" if record_context else "built_in",
-            "source": context.title,
-            "page_context": public_context(context, permissions),
-        }
+    # A detail URL identifies one current record. Never send its authorized
+    # name, status or stop explanation to a model or later guide history.
+    if is_detail_page and (detail_reply := _copilot_detail_reply(
+        request, msg, permissions, context, record_context,
+    )) is not None:
+        return detail_reply
 
     # Exact read questions use live, request-authorized native records. Their
     # contents stay on this server; no model receives private tasks or reviews.

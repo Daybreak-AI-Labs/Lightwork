@@ -71,6 +71,46 @@ def _api(client) -> dict:
     }
 
 
+@pytest.mark.parametrize("path", ["/settings", "/providers"])
+def test_provider_pages_assemble_one_readiness_snapshot(workspace, monkeypatch, path):
+    """The displayed header and rows share one current provider verdict."""
+    from maverick.providers import KNOWN_PROVIDERS
+    from maverick_dashboard import integration_readiness, provider_readiness
+
+    real_workspace = provider_readiness.workspace_readiness
+    real_provider = integration_readiness.provider_readiness
+    calls = {"workspace": 0, "provider": 0}
+
+    def workspace_once():
+        calls["workspace"] += 1
+        return real_workspace()
+
+    def provider_once(name, *, configured):
+        calls["provider"] += 1
+        return real_provider(name, configured=configured)
+
+    monkeypatch.setattr(provider_readiness, "workspace_readiness", workspace_once)
+    monkeypatch.setattr(integration_readiness, "provider_readiness", provider_once)
+    response = workspace.client.get(path)
+    assert response.status_code == 200
+    assert calls == {"workspace": 1, "provider": len(KNOWN_PROVIDERS)}
+
+
+def test_provider_pages_fail_closed_when_workspace_verdict_is_unavailable(workspace, monkeypatch):
+    from maverick_dashboard import provider_readiness
+
+    monkeypatch.setattr(provider_readiness, "workspace_readiness", lambda: provider_readiness._unavailable(
+        "AI settings could not be checked."
+    ))
+    for path in ("/settings", "/providers"):
+        response = workspace.client.get(path)
+        assert response.status_code == 503, path
+        assert "OpenAI" not in response.text, path
+    response = workspace.client.get("/api/v1/providers")
+    assert response.status_code == 503
+    assert "providers" not in response.json()
+
+
 def test_saved_key_never_tested_reads_the_same_everywhere(workspace, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-0000")  # pragma: allowlist secret
     monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE", "openai:gpt-test")
