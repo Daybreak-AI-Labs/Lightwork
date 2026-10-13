@@ -13,9 +13,11 @@ shell), per the tools/host-exec doctrine.
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import subprocess
+import threading
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +71,28 @@ def pin_trace(world, goal_id: int, *, cwd: str | None = None) -> dict | None:
         return None
 
 
+def pin_trace_in_background(world, goal_id: int) -> threading.Thread | None:
+    """Run :func:`pin_trace` beside the run instead of ahead of it.
+
+    ``git status`` walks the whole workspace (about 35 ms per task on a Linux
+    checkout of this repository, all before the first model call). The thread
+    runs in a copy of the caller's context, so the stamp is written under the
+    same tenant and at-rest scope. The caller joins it before closing ``world``.
+    Returns None when it pinned inline because no thread could start.
+    """
+    context = contextvars.copy_context()
+    thread = threading.Thread(
+        target=context.run, args=(pin_trace, world, goal_id),
+        name=f"trace-pin-{goal_id}", daemon=True,
+    )
+    try:
+        thread.start()
+    except RuntimeError:  # no thread available: pin inline, as before
+        pin_trace(world, goal_id)
+        return None
+    return thread
+
+
 def trace_commit(world, goal_id: int) -> dict | None:
     """The pinned git state for a run (first trace_meta event), or None."""
     try:
@@ -83,4 +107,4 @@ def trace_commit(world, goal_id: int) -> dict | None:
     return None
 
 
-__all__ = ["pin_trace", "trace_commit", "workspace_git_state", "TRACE_META_KIND"]
+__all__ = ["pin_trace", "pin_trace_in_background", "trace_commit", "workspace_git_state", "TRACE_META_KIND"]

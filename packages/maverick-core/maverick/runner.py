@@ -464,6 +464,7 @@ def run_goal_in_thread(
     world = None
     sandbox = None
     budget = None
+    pinning = None
     try:
         from .budget import budget_from_config
         from .llm import LLM
@@ -535,9 +536,10 @@ def run_goal_in_thread(
             llm = LLM()
         sandbox = build_sandbox()
         # Trace pinning: stamp the run with the workspace's git state so the
-        # trace/replay ties to an exact commit. Best-effort, never blocks.
-        from .trace_pin import pin_trace
-        pin_trace(world, goal_id)
+        # trace/replay ties to an exact commit. Best-effort, never blocks: it
+        # runs beside the run and is joined before the world closes.
+        from .trace_pin import pin_trace_in_background
+        pinning = pin_trace_in_background(world, goal_id)
         try:
             with run_scope(director), runtime_scope(world, goal_id, alternative), task_model_scope(world, goal_id):
                 run_goal_sync(
@@ -572,6 +574,9 @@ def run_goal_in_thread(
                     close()
                 except Exception:  # pragma: no cover
                     log.debug("run_goal_in_thread: sandbox.close() failed", exc_info=True)
+        if pinning is not None:
+            # Bounded: each of its git calls times out after five seconds.
+            pinning.join()
         if world is not None:
             try:
                 close_world_if_owned(world)
