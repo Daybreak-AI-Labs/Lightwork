@@ -15,9 +15,10 @@ import logging
 import os
 import re
 import stat
+import threading
 import urllib.error
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .blackboard import Blackboard
@@ -359,10 +360,32 @@ def builtin_skills_dir() -> Path:
     return BUILTIN_SKILLS_DIR
 
 
+_builtin_parsed: tuple[tuple[str, int], list[Skill]] | None = None
+_builtin_parsed_lock = threading.Lock()
+
+
 def load_builtin_skills() -> list[Skill]:
     """The shipped first-party skills library. Always readable (no env gate);
-    the enablement check is applied by :func:`available_skills`."""
-    return load_skills(BUILTIN_SKILLS_DIR)
+    the enablement check is applied by :func:`available_skills`.
+
+    Parsed once while the directory is unchanged (keyed by its path and
+    modification time, as the built-in domains are): every agent build read
+    and parsed all 514 files, about 15-25 ms per chat turn. Each call gets its
+    own copies. A library with learned (auto-distilled) entries, whose
+    readability depends on the caller, is loaded afresh every time."""
+    global _builtin_parsed
+    try:
+        key = (str(BUILTIN_SKILLS_DIR), BUILTIN_SKILLS_DIR.stat().st_mtime_ns)
+    except OSError:
+        return load_skills(BUILTIN_SKILLS_DIR)
+    with _builtin_parsed_lock:
+        cached = _builtin_parsed
+        if cached is None or cached[0] != key:
+            cached = _builtin_parsed = (key, load_skills(BUILTIN_SKILLS_DIR))
+    if any(skill.source.startswith("auto-distilled") for skill in cached[1]):
+        return load_skills(BUILTIN_SKILLS_DIR)
+    return [replace(skill, triggers=list(skill.triggers), tools_needed=list(skill.tools_needed))
+            for skill in cached[1]]
 
 
 def _builtin_skills_enabled() -> bool:

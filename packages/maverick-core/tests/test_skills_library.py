@@ -57,3 +57,38 @@ def test_builtin_skills_load_when_enabled(monkeypatch, tmp_path):
 def test_builtin_skills_excluded_when_disabled(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_BUILTIN_SKILLS", "0")
     assert available_skills(skills_dir=tmp_path / "empty-user-dir") == []
+
+
+def test_the_library_is_parsed_once_and_each_caller_gets_its_own_copies(monkeypatch):
+    from maverick import skills
+
+    monkeypatch.setattr(skills, "_builtin_parsed", None)
+    first = load_builtin_skills()
+    assert first == skills.load_skills(builtin_skills_dir()), "the same skills as an uncached load"
+    parses = []
+    real = skills.Skill.parse
+    monkeypatch.setattr(skills.Skill, "parse", classmethod(lambda cls, *a: parses.append(1) or real(*a)))
+    first[0].triggers.append("changed by one caller")
+    second = load_builtin_skills()
+    assert parses == [], "the unchanged library is not read again"
+    assert "changed by one caller" not in second[0].triggers and second[0] is not first[0]
+
+
+def _write_skill(directory, name):
+    (directory / f"{name}.md").write_text(
+        f"---\nname: {name}\ntriggers:\n  - {name}\ntools_needed: []\n---\n# {name}\nDo it.\n", encoding="utf-8")
+
+
+def test_a_changed_library_directory_is_read_again(monkeypatch, tmp_path):
+    import os
+
+    from maverick import skills
+
+    monkeypatch.setattr(skills, "BUILTIN_SKILLS_DIR", tmp_path)
+    monkeypatch.setattr(skills, "_builtin_parsed", None)
+    _write_skill(tmp_path, "first-skill")
+    assert [s.name for s in load_builtin_skills()] == ["first-skill"]
+    _write_skill(tmp_path, "second-skill")
+    stamp = tmp_path.stat().st_mtime_ns + 1_000_000_000
+    os.utime(tmp_path, ns=(stamp, stamp))  # a coarse clock must not hide the new file
+    assert sorted(s.name for s in load_builtin_skills()) == ["first-skill", "second-skill"]
