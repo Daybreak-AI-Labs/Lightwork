@@ -646,9 +646,9 @@ def test_a_response_cut_short_is_a_lightwork_error(monkeypatch):
 
 
 @pytest.mark.parametrize("base", [
-    "https://user:pw-probe-secret@example.com",
+    "https://user:pw-probe-secret@example.com",  # pragma: allowlist secret
     "https://user@example.com",
-    "http://:pw-probe-secret@127.0.0.1:8765",
+    "http://:pw-probe-secret@127.0.0.1:8765",  # pragma: allowlist secret
 ])
 def test_credentials_in_the_base_url_are_refused_without_echoing_them(base):
     with pytest.raises(ValueError) as caught:
