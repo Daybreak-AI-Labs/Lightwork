@@ -228,6 +228,15 @@ def test_the_text_a_call_must_include_is_matched_against_the_whole_argument_valu
     assert len(stored["tool_calls"][0]["arguments"]) <= tools._RECORD_LIMIT
 
 
+def test_each_tool_step_gets_an_equal_share_of_the_run_output_allowance():
+    from maverick_dashboard import specialist_tool_checks as tools
+
+    assert tools.tool_step_tokens(512) == 128  # a tool check's four steps share its four-question allowance
+    assert tools.tool_step_tokens(None) == 256
+    assert tools.tool_step_tokens(10) == 32
+    assert tools.tool_step_tokens(10_000) == 256
+
+
 def test_offered_tools_are_the_named_ones_plus_the_allowed_ones_minus_the_denied():
     from maverick_dashboard import specialist_tool_checks as tools
 
@@ -293,6 +302,7 @@ def test_the_check_calls_the_expected_tool_with_the_text_and_no_real_tool_runs(
     tool_results = calls[1]["messages"][-1]["content"]
     assert tool_results[0]["content"] == "Invoice 77 is a duplicate."
     assert calls[0]["kwargs"]["_no_failover"] is True
+    assert {call["kwargs"]["max_tokens"] for call in calls} == {128}  # the run's output allowance, shared by four steps
     run_audit = [row for row in audit_rows if row.get("verb") == "specialist_test_run"]
     assert run_audit and run_audit[-1]["tool_checks"] == 1 and "task" not in run_audit[-1]
 

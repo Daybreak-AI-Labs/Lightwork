@@ -106,6 +106,13 @@ def tool_call_ceiling(cases: list[dict], *, enabled: bool) -> int:
     return MAX_TOOL_CALLS * sum(1 for case in cases if enabled and case.get("with_tools"))
 
 
+def tool_step_tokens(output_ceiling: int | None) -> int:
+    """Output tokens for one tool-using model turn: an equal share of the run's output allowance, 32 to 256."""
+    if output_ceiling is None:
+        return 256
+    return max(32, min(256, output_ceiling // MAX_TOOL_STEPS))
+
+
 def tool_check_results(case: dict, calls: list[dict]) -> list[dict]:
     """One plain-words line per expectation, each passed or not."""
     results = []

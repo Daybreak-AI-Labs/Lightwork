@@ -347,7 +347,7 @@ def _perform_answer_tests(job, *, specialist, model, instruction_hash, cases, ac
     from maverick.llm import LLM
 
     from . import specialist_test_sets as saved
-    from .specialist_tool_checks import offered_tools, run_tool_check
+    from .specialist_tool_checks import offered_tools, run_tool_check, tool_step_tokens
     run, created = saved.begin_run(specialist, model, instruction_hash, cases, actor, identity=operation_id,
                                    instructions_key=instructions_key, instructions=tested_instructions, effect_guard=persistence_guard)
     if not created:
@@ -382,7 +382,7 @@ def _perform_answer_tests(job, *, specialist, model, instruction_hash, cases, ac
                         text, tool_calls = run_tool_check(
                             llm, system=systems[variant], task=case["task"], case=case,
                             names=offered_tools(case, allow=list(allow), deny=list(deny)), budget=budget,
-                            before_call=tool_guard, max_tokens=256)
+                            before_call=tool_guard, max_tokens=tool_step_tokens(budget.max_output_tokens))
                     except _ToolGuardStopped:
                         final_state, message = "stopped", _STOPPED_BY_GUARD
                         break
