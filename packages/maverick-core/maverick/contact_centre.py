@@ -270,7 +270,7 @@ def enqueue_handoff(*, handoff_id: str, title: str, reason: str, requester_name:
         entry = {"key": key, "provider": policy["provider"],
                  "destination": "" if problem else _destination(policy),
                  "state": "failed" if problem else "queued", "attempts": 0, "next_attempt_at": now,
-                 "reason": problem or "Waiting to send.", "ticket_id": "", "payload": content,
+                 "reason": problem or "Lightwork will send it in the background.", "ticket_id": "", "payload": content,
                  "created_at": now, "updated_at": now}
         data[key] = entry
         _save(path, data)
@@ -470,5 +470,30 @@ def resume_pending() -> int:
     return len(pending)
 
 
+def resume_all_workspaces() -> int:
+    """Resume pending deliveries in the shared workspace and in every active workspace.
+
+    One failing workspace is logged by exception type and does not stop the others.
+    """
+    from .paths import reset_tenant, set_tenant
+    from .tenant.registry import list_tenants
+    total = 0
+    try:
+        total += resume_pending()
+    except Exception as exc:
+        log.warning("contact centre: shared workspace not resumed (%s)", type(exc).__name__)
+    for record in list_tenants():
+        if not record.active:
+            continue
+        token = set_tenant(record.id)
+        try:
+            total += resume_pending()
+        except Exception as exc:
+            log.warning("contact centre: a workspace was not resumed (%s)", type(exc).__name__)
+        finally:
+            reset_tenant(token)
+    return total
+
+
 __all__ = ["OutboxFull", "OutboxUnavailable", "conversation_link", "enqueue_handoff",
-           "resume_pending", "run_delivery", "status_for"]
+           "resume_all_workspaces", "resume_pending", "run_delivery", "status_for"]

@@ -348,6 +348,28 @@ def test_interrupted_send_is_marked_unknown_on_resume_and_never_resent(tmp_path,
     assert receiver.calls == []
 
 
+def test_restart_resumes_interrupted_handoffs_in_every_active_workspace(tmp_path, monkeypatch):
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick.tenant import registry
+    _configure(tmp_path, ZENDESK_CONFIG)
+    monkeypatch.setattr(registry, "list_tenants", lambda: [SimpleNamespace(id="acme", active=True),
+                                                           SimpleNamespace(id="retired", active=False)])
+    token = set_tenant("acme")
+    try:
+        _write_state("handoff:" + HANDOFF, state="sending", attempts=1)
+    finally:
+        reset_tenant(token)
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    assert contact_centre.resume_all_workspaces() == 0
+    token = set_tenant("acme")
+    try:
+        assert contact_centre.status_for(HANDOFF)["state"] == "unknown"
+    finally:
+        reset_tenant(token)
+    assert receiver.calls == []
+
+
 def test_outbox_is_scoped_to_the_workspace(tmp_path, monkeypatch):
     _configure(tmp_path, ZENDESK_CONFIG)
     receiver = Receiver(CREATED)

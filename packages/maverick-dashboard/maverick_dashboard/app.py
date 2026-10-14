@@ -1444,6 +1444,14 @@ async def _lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - never block startup
             log.exception("deadline alerts scheduler not started")
         try:
+            # Contact-centre handoffs still waiting when the server stopped continue; a send
+            # that was in flight is shown as not confirmed and is never sent again.
+            from maverick.contact_centre import resume_all_workspaces
+
+            await run_in_threadpool(resume_all_workspaces)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("contact centre deliveries not resumed")
+        try:
             # Profiling, the kernel activity monitor and the model proxy, each
             # only when its setting is on (All settings); stopped at shutdown.
             from maverick_dashboard.background_programs import start_enabled
