@@ -721,7 +721,7 @@
   <script src="/static/lightwork-planning-steps.js" defer></script>
   <script src="{{ asset('lightwork-read-aloud.js') }}"></script>
   <script src="{{ asset('lightwork-run-status.js') }}"></script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // Explicit product bindings. Source text is passed only to textContent/renderers.
     function cgText(source,values) { return window.LightworkI18n ? window.LightworkI18n.text(source,values) : String(source||'').replace(/\{(\w+)\}/g,function(whole,key){return values&&Object.prototype.hasOwnProperty.call(values,key)?String(values[key]):whole;}); }
     function cgCopy(node,source,values) { if(window.LightworkI18n)window.LightworkI18n.set(node,source,values);else node.textContent=cgText(source,values); }
@@ -733,7 +733,7 @@
       return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
     }
   </script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     (function() {
       const goalId = {{ goal.id }};
       const eventsEl = document.getElementById('events');
@@ -1609,7 +1609,7 @@
   </script>
   <script src="/static/lightwork-task-resume.js" defer></script>
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // Earlier answers retain the exact text shown in the conversation.
     (function () {
       // The project picker submits on change; the share link selects itself on click.
@@ -1643,7 +1643,7 @@
     })();
   </script>
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // "Show work" strip: mirror the latest trace line into the collapsed
     // summary (so a glance shows the current step, not a firehose) and
     // auto-collapse once the goal reaches a terminal state. Purely additive —
@@ -1714,7 +1714,7 @@
 
 
   <script src="/static/lightwork-deliverable-sharing.js" defer></script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // Attachments panel: list the goal's files (uploads + machine-generated
     // transcript/extract companions), download each, add more to a goal.
     (function () {
@@ -1872,7 +1872,7 @@
       window.addEventListener('pagehide', clearPrivate);
     })();
   </script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     {% include "_voice_mic.js" %}
 
     // Voice: dictate a clarifying-question answer (mic → browser-side 16 kHz

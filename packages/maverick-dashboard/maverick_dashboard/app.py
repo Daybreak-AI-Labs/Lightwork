@@ -592,6 +592,15 @@ def _theme_context(request: Request) -> dict:
 # TemplateResponse picks up the resolved theme automatically.
 templates.context_processors.append(_theme_context)
 
+
+# Context processor: every page template gets this response's CSP script nonce
+# (drawn per request by security_headers) for its inline <script> tags.
+def _csp_nonce_context(request: Request) -> dict:
+    return {"csp_script_nonce": getattr(request.state, "csp_script_nonce", "")}
+
+
+templates.context_processors.append(_csp_nonce_context)
+
 templates.context_processors.append(_draft_page_context)
 templates.context_processors.append(_record_search_page_context)
 
@@ -3855,6 +3864,10 @@ async def security_headers(request: Request, call_next):
     (clickjacking, MIME sniffing, Referer leakage, cross-origin
     exfiltration) the dashboard had no defense against before.
     """
+    # One script nonce per response, for the inline <script> tags the templates
+    # render (csp_script_nonce, see _csp_nonce_context).
+    script_nonce = secrets.token_urlsafe(16)
+    request.state.csp_script_nonce = script_nonce
     response = await call_next(request)
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")

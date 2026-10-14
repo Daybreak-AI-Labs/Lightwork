@@ -127,7 +127,7 @@
 {% endif %}
 
 <script src="/static/lightwork-goal-export.js" defer></script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
   // Step-by-step replay: hide steps past the slider so a person can walk
   // through the run after the fact.
   (function() {

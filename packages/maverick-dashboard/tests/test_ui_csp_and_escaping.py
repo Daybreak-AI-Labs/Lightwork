@@ -133,3 +133,39 @@ def test_no_template_uses_an_inline_event_handler_attribute():
             line = text.count("\n", 0, match.start()) + 1
             found.append(f"{path.relative_to(TEMPLATES)}:{line} {match.group(1)}=")
     assert found == []
+
+
+# ---------- every inline template script carries the response nonce ----------
+
+def test_every_inline_template_script_carries_the_response_nonce():
+    """A nonce-based script-src runs only the scripts that carry this response's
+    nonce, so a bare inline <script> would be blocked. JSON data blocks are
+    stamped too, so the rule has no exceptions to maintain."""
+    opener = re.compile(r"<script\b([^>]*)>", re.IGNORECASE)
+    stamp = 'nonce="{{ csp_script_nonce }}"'
+    found = []
+    for path in sorted(TEMPLATES.rglob("*.html")):
+        text = path.read_text(encoding="utf-8")
+        for match in opener.finditer(text):
+            if re.search(r"\bsrc\s*=", match.group(1)) or stamp in match.group(1):
+                continue
+            line = text.count("\n", 0, match.start()) + 1
+            found.append(f"{path.relative_to(TEMPLATES)}:{line}")
+    assert found == []
+
+
+def test_macros_that_stamp_the_nonce_are_imported_with_context():
+    """An imported macro sees only globals, not the page's context, so a macro
+    that stamps csp_script_nonce must be imported ``with context``."""
+    stamping = {
+        path.name for path in TEMPLATES.rglob("*.html")
+        if "csp_script_nonce" in path.read_text(encoding="utf-8")
+    }
+    importer = re.compile(r"{%-?\s*(?:from|import)\s+\"([^\"]+)\"[^%]*%}")
+    found = []
+    for path in sorted(TEMPLATES.rglob("*.html")):
+        text = path.read_text(encoding="utf-8")
+        for match in importer.finditer(text):
+            if match.group(1) in stamping and "with context" not in match.group(0):
+                found.append(f"{path.relative_to(TEMPLATES)} imports {match.group(1)}")
+    assert found == []

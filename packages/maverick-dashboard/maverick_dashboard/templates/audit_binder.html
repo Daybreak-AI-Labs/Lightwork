@@ -182,8 +182,8 @@
     {% if b.chain.anchor_breaks %}<ul class="bnd-mono">{% for br in b.chain.anchor_breaks %}<li>{{ br.reason | humanize }}</li>{% endfor %}</ul>{% endif %}
   </details>
 
-  <script id="binder-payload" type="application/json">{{ b | tojson }}</script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}" id="binder-payload" type="application/json">{{ b | tojson }}</script>
+  <script nonce="{{ csp_script_nonce }}">
     (function () {
       const print = document.getElementById('binder-print');
       if (print) print.addEventListener('click', function () { window.print(); });

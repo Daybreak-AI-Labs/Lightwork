@@ -199,7 +199,7 @@
           {% for value, label in area_choices.recent %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
         </optgroup>{% endif %}
       </select>
-      <script type="application/json" id="tr-area-groups">{{ area_choices.groups | tojson }}</script>
+      <script nonce="{{ csp_script_nonce }}" type="application/json" id="tr-area-groups">{{ area_choices.groups | tojson }}</script>
     </div>
     <div class="tr-actions" style="margin-top:var(--space-3)">
       <button type="submit" class="btn btn--primary" id="tr-save">Add agent</button>
@@ -222,7 +222,7 @@
 </div>
 {% if tab_host %}</div>{% endif %}
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   var agents = {{ agents | tojson }};
   var form = document.getElementById("trust-add");

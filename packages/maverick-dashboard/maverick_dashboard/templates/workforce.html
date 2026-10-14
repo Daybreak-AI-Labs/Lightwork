@@ -128,7 +128,7 @@
 
   <script src="/static/board.js"></script>
   <script src="/static/lightwork-department-team-updates.js"></script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     var B = window.LWBoard;
@@ -224,7 +224,7 @@
     B.attach({ board: 'workforce', render: render });
   })();
   </script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     (function () {
       function esc(s) {
         return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {

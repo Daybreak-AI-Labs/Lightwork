@@ -40,7 +40,7 @@
             {% for row in answer_agent.since_last_use %}{{ row.date_text }}, {{ row.changes | join('; ') }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
           <button type="button" class="btn btn--ghost" data-hide-notice>{{ ui('Hide this notice') }}</button>
         </div>
-        <script>
+        <script nonce="{{ csp_script_nonce }}">
         (function () {
           var notice = document.getElementById('answer-agent-notice');
           if (!notice) return;

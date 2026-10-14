@@ -56,7 +56,7 @@
         or browse <a href="/skills">skills</a>.
       </p>
     </div>
-    <script>
+    <script nonce="{{ csp_script_nonce }}">
     (function () {
       var field = document.querySelector('form[action="/chat/send"] textarea[name="title"]');
       function fit() { field.style.height = 'auto'; field.style.height = Math.min(field.scrollHeight, 224) + 'px'; }
@@ -127,7 +127,7 @@
     </div>
 
     <script src="/static/board.js"></script>
-    <script>
+    <script nonce="{{ csp_script_nonce }}">
     (function () {
       'use strict';
       var B = window.LWBoard, DATA = null, statusFilter = '';

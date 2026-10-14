@@ -1,5 +1,5 @@
 {% extends "public_base.html" %}
-{% from "_passphrase_fields.html" import styles, passphrase, script %}
+{% from "_passphrase_fields.html" import styles, passphrase, script with context %}
 {% block title %}{{ 'Choose a new passphrase' if state == 'form' else 'Passphrase reset' }} · Lightwork{% endblock %}
 {% block public_label %}Passphrase reset{% endblock %}
 {% block public_footer %}Passphrase reset for Lightwork{% endblock %}

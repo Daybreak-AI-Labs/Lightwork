@@ -555,7 +555,7 @@
 
 {% include "_workspace_memory_catalog.html" %}
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   var LIST_KEYS = { control_ids: 1, evidence_ids: 1, clock_ids: 1, mitre_techniques: 1 };
@@ -858,7 +858,7 @@
 })();
 </script>
 <script src="/static/board.js"></script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   var B = window.LWBoard;

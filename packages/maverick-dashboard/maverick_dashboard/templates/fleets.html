@@ -190,7 +190,7 @@
     .fl-run { margin-top: 0.75rem; }
   </style>
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // Give a task to a team agent (POST /api/v1/fleets/<team>/run). The agent
     // runs under its role capability + its own audit principal, so the
     // oversight control plane governs it. Values set via textContent.

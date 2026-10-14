@@ -128,7 +128,7 @@
   <p id="invoice-msg" class="muted" role="status" aria-live="polite"></p>
   <div id="invoice-out" class="bill-scroll"></div>
 </div>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   var form = document.getElementById('invoice-form');
