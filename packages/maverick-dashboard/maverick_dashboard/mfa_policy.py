@@ -47,7 +47,9 @@ def require_mfa() -> bool:
 
         if config_source_errors():
             return True
-        return bool(policy()["require"])
+        require = bool(policy()["require"])
+        # The load can be what finds the source unreadable: that stays "on".
+        return bool(config_source_errors()) or require
     except Exception:
         return True
 

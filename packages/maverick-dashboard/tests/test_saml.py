@@ -104,6 +104,29 @@ def test_pysaml_config_disables_unsolicited_responses(monkeypatch):
     assert conf["crypto_backend"] == "XMLSecurity"
 
 
+@pytest.mark.parametrize(
+    "assertions_signed, response_signed", [(True, False), (False, True)]
+)
+def test_at_least_one_signature_is_always_required(
+    monkeypatch, assertions_signed, response_signed
+):
+    # Signed assertions are the default. With that switched off, the response
+    # signature must carry the requirement, or an unsigned assertion is accepted.
+    fake = types.ModuleType("saml2")
+    fake.BINDING_HTTP_POST = "post"
+    fake.BINDING_HTTP_REDIRECT = "redirect"
+    monkeypatch.setitem(sys.modules, "saml2", fake)
+    monkeypatch.setattr(saml_mod, "runtime_readiness", lambda: {
+        "ready": True, "backend": "XMLSecurity", "message": "installed"})
+    cfg = saml_mod.SamlConfig(**ENABLED_CFG, want_assertions_signed=assertions_signed)
+
+    sp = saml_mod._pysaml2_config(cfg)["service"]["sp"]
+
+    assert sp["want_assertions_signed"] is assertions_signed
+    assert sp["want_response_signed"] is response_signed
+    assert sp["want_assertions_signed"] or sp["want_response_signed"]
+
+
 def test_routes_404_when_disabled(monkeypatch):
     monkeypatch.setattr(saml_mod, "_auth_saml_cfg", dict)
     c = _client()

@@ -1282,7 +1282,9 @@ class PostgresWorldModel:
         # point there but harmless.
         self._lock = threading.RLock()
         self._tx_depth = threading.local()
+        self.rls_bypass_reason: str | None = None
         try:
+            self._check_database_role()
             self._migrate()
             if self._rls:
                 self._preflight_rls_or_die()
@@ -1290,6 +1292,51 @@ class PostgresWorldModel:
         except BaseException:
             self.close()
             raise
+
+    def _check_database_role(self) -> None:
+        """Note, once per open, whether this login bypasses row-level security.
+
+        A superuser or BYPASSRLS role skips every RLS policy, FORCE included.
+        With RLS in use, enterprise mode refuses to open; otherwise the problem
+        is logged once and reported by the deep health check. With RLS off no
+        policy is bypassed, so it is only logged. A failed lookup is only
+        logged, so an unreadable catalog never blocks boot.
+        """
+        try:
+            with self._tx() as cur:
+                cur.execute(
+                    "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user"
+                )
+                superuser, bypass = cur.fetchone()
+        except Exception as e:
+            log.warning(
+                "Could not check whether the Postgres login bypasses row-level security "
+                "(%s); tenant row policies are not verified at this start.", e,
+            )
+            return
+        if not (superuser or bypass):
+            return
+        problem = (
+            "the Postgres login is a superuser, which bypasses row-level security"
+            if superuser
+            else "the Postgres login has BYPASSRLS, which bypasses row-level security"
+        )
+        fix = (
+            "connect with a dedicated login that is neither a superuser nor BYPASSRLS "
+            "(for example CREATE ROLE maverick_app LOGIN NOSUPERUSER NOBYPASSRLS)"
+        )
+        if not self._rls:
+            # No row policy is in use, so nothing is bypassed yet: a hint only.
+            log.warning("%s. Turning on [world_model] rls would not protect tenants "
+                        "for this login. Fix: %s.", problem, fix)
+            return
+        self.rls_bypass_reason = f"{problem}; {fix}"
+        if _enterprise_default():
+            raise RuntimeError(
+                "Enterprise mode relies on Postgres row-level security for tenant "
+                f"isolation, but {problem}. Fix: {fix}."
+            )
+        log.warning("%s. Tenant row policies do not apply to this login. Fix: %s.", problem, fix)
 
     def __enter__(self) -> PostgresWorldModel:
         return self
