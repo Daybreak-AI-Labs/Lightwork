@@ -300,9 +300,10 @@ def test_the_notice_states_this_workspaces_configured_limits(service, monkeypatc
     _set_limits(monkeypatch, {})
     assert ("At most 64 items, 4 MiB per download and 256 KiB of extracted source text are supported."
             in service.public(row)["notice"])
-    _set_limits(monkeypatch, {"max_items": 200, "max_download_mib": 8, "max_text_kib": 512})
-    assert ("At most 200 items, 8 MiB per download and 512 KiB of extracted source text are supported."
-            in service.public(row)["notice"])
+    assert "Each refresh must finish within 5 minutes." in service.public(row)["notice"]
+    _set_limits(monkeypatch, {"max_items": 200, "max_download_mib": 8, "max_text_kib": 512, "max_refresh_minutes": 30})
+    assert ("At most 200 items, 8 MiB per download and 512 KiB of extracted source text are supported. "
+            "Each refresh must finish within 30 minutes." in service.public(row)["notice"])
 
 
 def test_an_invalid_limit_refuses_the_saved_source_listing_with_its_name(service, monkeypatch):
@@ -451,3 +452,50 @@ def test_a_save_under_an_invalid_limit_writes_nothing(service, monkeypatch, oper
     assert service.sources.list(limit=10) == []
     if operation is not None:
         assert native.DECISION_STORE.get("KNO-" + operation) is None
+
+
+def test_a_refresh_defaults_to_a_five_minute_deadline_and_budget(service, monkeypatch):
+    _set_limits(monkeypatch, {})
+    prepared, _ = _prepared(service, 3600)
+    before = time.time()
+    job = service.start(prepared, "6" * 32)
+    stored = service.jobs.get(job["id"])
+    assert stored["deadline"] - before == pytest.approx(300, abs=5)
+    assert stored["max_wall_seconds"] == 300
+
+
+def test_a_raised_refresh_time_limit_raises_the_deadline_and_the_budget_wall_cap(service, monkeypatch):
+    from maverick.tenant import provider_admission
+
+    prepared, _ = _prepared(service, 3600)
+    _set_limits(monkeypatch, {"max_refresh_minutes": 30})
+    before = time.time()
+    job = service.start(prepared, "7" * 32)
+    stored = service.jobs.get(job["id"])
+    assert stored["deadline"] - before == pytest.approx(1800, abs=5)
+    # A paid embedder gets a budget whose wall cap is the same reviewed limit as the deadline.
+    monkeypatch.setattr(provider_admission, "bind_budget", lambda budget, principal, scope=None: None)
+    kb = SimpleNamespace(embedder=SimpleNamespace(dim=8))
+    service._prepare_embedder(kb, dict(stored, prepared={"embedding": {"billing": {"unit": "test"}}}))
+    assert kb.embedder.budget.max_wall_seconds == 1800
+
+
+def test_a_refresh_queued_before_the_setting_existed_keeps_its_five_minute_budget(service, monkeypatch):
+    from maverick.tenant import provider_admission
+
+    prepared, _ = _prepared(service, 3600)
+    _set_limits(monkeypatch, {})
+    job = service.start(prepared, "9" * 32)
+    legacy = {key: value for key, value in service.jobs.get(job["id"]).items() if key != "max_wall_seconds"}
+    monkeypatch.setattr(provider_admission, "bind_budget", lambda budget, principal, scope=None: None)
+    kb = SimpleNamespace(embedder=SimpleNamespace(dim=8))
+    service._prepare_embedder(kb, dict(legacy, prepared={"embedding": {"billing": {"unit": "test"}}}))
+    assert kb.embedder.budget.max_wall_seconds == 300
+
+
+@pytest.mark.parametrize("value", [0, 61, 2.5])
+def test_an_out_of_range_refresh_time_limit_fails_the_refresh_with_the_named_setting(service, monkeypatch, value):
+    result = _start_refresh(service, monkeypatch, {"first": "a" * 600}, {"max_refresh_minutes": value})
+    assert result["state"] == "failed"
+    assert result["message"] == "knowledge_sources.max_refresh_minutes must be a whole number from 1 to 60"
+    assert native.JOB_STORE.get(result["id"])["max_wall_seconds"] == 300

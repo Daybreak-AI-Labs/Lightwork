@@ -691,6 +691,7 @@ _INTEGER_KEYS: dict[str, set[str]] = {
         "max_pages",
         "max_download_mib",
         "max_text_kib",
+        "max_refresh_minutes",
     },
     "customer_sandbox_lifecycle": {"source_revision"},
     "agent_tests": {"max_cases_per_specialist"},
