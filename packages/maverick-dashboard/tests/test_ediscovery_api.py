@@ -459,3 +459,46 @@ def test_legal_holds_form_says_how_to_find_a_linked_account(monkeypatch):
     assert 'id="edh-custodian-help"' in page.text
     assert "account:" in page.text and ":person:" in page.text
     assert "A person&rsquo;s data" in page.text  # where an administrator finds the account
+
+
+def _old_chat(world: WorldModel) -> None:
+    import time as _time
+
+    world.get_or_create_conversation("web", "old-chat")
+    with world._writing() as conn:  # noqa: SLF001 -- backdate the one conversation the preview counts
+        conn.execute("UPDATE conversations SET last_seen = ?", (_time.time() - 200 * 86400,))
+
+
+def test_tidy_up_preview_reports_a_held_workspace_as_held_with_no_counts(env, monkeypatch):
+    from maverick.audit import preservation
+
+    _old_chat(env.world)
+    assert system_checks_api._cleanup_preview(90, 30) == {
+        "conversations": 1, "activity": 0, "days": 90, "activity_days": 30}
+    monkeypatch.setattr(preservation, "preservation_snapshot", lambda: {"blocked": True})
+    # The preview must not promise removals the run will refuse; the run keeps refusing too.
+    assert system_checks_api._cleanup_preview(90, 30) == {
+        "conversations": 0, "activity": 0, "days": 90, "activity_days": 30, "held": True}
+    with pytest.raises(HTTPException) as refused:
+        system_checks_api._cleanup_run(90, 30)
+    assert refused.value.status_code == 409
+
+
+def test_tidy_up_asks_for_a_workspace_before_it_reports_a_hold(env, monkeypatch):
+    from maverick import world_model_backends
+    from maverick.audit import preservation
+
+    # An unbound shared database: the hold ledger cannot be read against a workspace, so it fails
+    # closed with its own message.  The workspace choice must be reported first, as before.
+    monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: True)
+    monkeypatch.setattr(paths_module, "current_tenant_id", lambda: None)
+
+    def unbound_ledger():
+        raise RuntimeError("Preservation ledger workspace binding is invalid")
+
+    monkeypatch.setattr(preservation, "preservation_snapshot", unbound_ledger)
+    for run in (lambda: system_checks_api._cleanup_preview(90, 30), lambda: system_checks_api._cleanup_run(90, 30)):
+        with pytest.raises(HTTPException) as refused:
+            run()
+        assert refused.value.status_code == 409
+        assert refused.value.detail == "Choose a workspace first. Nothing was changed."

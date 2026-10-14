@@ -840,11 +840,15 @@ def _cleanup_admin(request: Request) -> None:
     require_permission(request, "admin")
 
 
-def _cleanup_world():
+def _require_workspace() -> None:
     from maverick.paths import current_tenant_id
     from maverick.world_model_backends import is_postgres_configured
     if is_postgres_configured() and current_tenant_id() is None:
         raise HTTPException(409, "Choose a workspace first. Nothing was changed.")
+
+
+def _cleanup_world():
+    _require_workspace()
     from ._shared import _world
     return _world()
 
@@ -859,6 +863,16 @@ def _count_idle_conversations(world: Any, cutoff: float) -> int | None:
 
 def _cleanup_preview(days: int, activity_days: int) -> dict[str, Any]:
     import time as _time
+
+    from maverick.ediscovery import LegalHoldApplies
+    from maverick.records_gc import assert_no_broad_holds
+
+    # The same gate as the run: a held workspace shows no counts, so the preview promises nothing the run refuses.
+    _require_workspace()
+    try:
+        assert_no_broad_holds()
+    except LegalHoldApplies:
+        return {"conversations": 0, "activity": 0, "days": days, "activity_days": activity_days, "held": True}
     world = _cleanup_world()
     now = _time.time()
     conversations = _count_idle_conversations(world, now - days * 86400)
@@ -871,6 +885,7 @@ def _cleanup_run(days: int, activity_days: int) -> dict[str, int]:
     from maverick.records_gc import assert_no_broad_holds
 
     # The same gate as `maverick gc`: a recorded privacy-rights case hold or an active matter pauses it.
+    _require_workspace()
     try:
         assert_no_broad_holds()
     except LegalHoldApplies as exc:
