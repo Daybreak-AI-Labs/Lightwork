@@ -1486,6 +1486,12 @@ limits are recorded in the [operation coverage register](post-install-operation-
   (`[REDACTED:email]`); span-exact, idempotent on its own output, text
   only by design (no OCR — a dependency decision, not a drive-by). Used
   by the DSAR response path to scrub third-party identifiers.
+- **Legal holds and matter export** (`ediscovery.py`, `ediscovery_export.py`,
+  opt-in `[ediscovery] enable`, `/api/v1/ediscovery/matters`; the Legal holds section
+  on Compliance) — tenant-scoped matters over custodians, dates and record types.
+  While one is active, bulk deletion pauses for the workspace and in-scope erasure is
+  refused with a plain message. Export is a streamed ZIP with per-type JSONL, a signed
+  manifest and offline verification. See `docs/EDISCOVERY_LEGAL_HOLDS.md`.
 - **Breach-notification planner** (`breach_notification.py`, opt-in
   `[breach_notification] enable`, `maverick breach`,
   `POST /api/v1/breach/plan`,

@@ -1597,6 +1597,7 @@ MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "explainability",
     "content_provenance",
     "breach_notification",
+    "ediscovery",
     # agent_topology.enabled also needs the entity graph, which is on by
     # default and has its own switch on the Learning page.
     "agent_topology",

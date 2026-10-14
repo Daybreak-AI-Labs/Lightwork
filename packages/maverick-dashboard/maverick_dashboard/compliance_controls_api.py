@@ -640,11 +640,12 @@ def _run_erase(channel: str, user: str, actor: str = "local") -> dict:
     from maverick.cli import erase as erase_command
 
     world = _world_for_request()
+    from maverick.ediscovery import conversation_user_matches
+
     before = sum(
         1
         for conv in world.list_conversations(channel)
-        if conv.user_id == user
-        or (channel == "cli" and user == "local" and str(conv.user_id).startswith("local:"))
+        if conversation_user_matches(conv.user_id, user, channel)
     )
     if not before:
         return {"erased": False, "conversations": 0, "clean": False,
@@ -663,6 +664,10 @@ def _run_erase(channel: str, user: str, actor: str = "local") -> dict:
             refused = True
         except (SystemExit, click.exceptions.Exit, click.ClickException) as exc:
             # A command-line exit must not end the server's worker thread.
+            if obj.get("erase_refusal"):
+                # A legal hold refused the erasure before anything was deleted.
+                return {"erased": False, "conversations": before, "clean": False,
+                        "message": obj["erase_refusal"]}
             raise RuntimeError("erasure command stopped") from exc
     # Who erased, never whose data (the subject is exactly what was erased).
     from maverick.audit import EventKind, audit_event

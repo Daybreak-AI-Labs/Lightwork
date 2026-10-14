@@ -884,9 +884,18 @@ def _roster() -> list[Any]:
 
 
 def _sweep_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{"workspace": row["name"], "empty": bool(row.get("empty")),
+    return [{"workspace": row["name"], "empty": bool(row.get("empty")), "held": bool(row.get("held")),
              "conversations": row.get("conversations"), "activity": row.get("activity"),
              "duplicate_checks": row.get("duplicate_checks")} for row in rows]
+
+
+def _held_note(rows: list[dict[str, Any]]) -> str:
+    """Plain words for workspaces skipped because a legal hold applies there."""
+    held = sum(1 for row in rows if row["held"])
+    if not held:
+        return ""
+    return (f" {held} workspace{'s' if held != 1 else ''} skipped: a legal hold applies there, "
+            "so its old records were kept.")
 
 
 def _sweep_preview(days: int, activity_days: int) -> dict[str, Any]:
@@ -903,7 +912,8 @@ def _sweep_preview(days: int, activity_days: int) -> dict[str, Any]:
     unknown = any(r["conversations"] is None and not r["empty"] for r in rows)
     summary = (f"Across {len(rows)} workspace{'s' if len(rows) != 1 else ''}: {conversations:,} "
                f"conversation{'s' if conversations != 1 else ''}{' or more' if unknown else ''} and "
-               f"{activity:,} activity entr{'ies' if activity != 1 else 'y'} would be removed.")
+               f"{activity:,} activity entr{'ies' if activity != 1 else 'y'} would be removed."
+               + _held_note(rows))
     return {"workspaces": rows, "total_conversations": conversations, "total_activity": activity,
             "summary": summary}
 
@@ -931,7 +941,7 @@ async def all_workspaces_cleanup(body: SweepIn, request: Request) -> dict:
                   for key in ("conversations", "activity", "duplicate_checks")}
         return {"workspaces": rows, **totals,
                 "summary": f"Removed {totals['conversations']:,} conversations and {totals['activity']:,} "
-                           f"activity entries across {len(rows)} workspaces."}
+                           f"activity entries across {len(rows)} workspaces." + _held_note(rows)}
 
     def failure(exc: BaseException) -> str:
         return ("The clean-up stopped part way. Workspaces already tidied stay tidied; run it again to "

@@ -13185,6 +13185,10 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Breach notifications",
         "requires": (),
     },
+    "ediscovery": {  # ediscovery.enable
+        "label": "Legal holds and matter export",
+        "requires": (),
+    },
     "privacy_automation.drop_management": {  # privacy_drop_management.enabled
         "label": "Data broker deletion requests",
         "requires": ("privacy_automation", "privacy_automation.rights_orchestration"),
@@ -17852,6 +17856,7 @@ from .data_use_provider_api import router as data_use_provider_router  # noqa: E
 from .data_use_provider_audit_api import (  # noqa: E402
     router as data_use_provider_audit_router,
 )
+from .ediscovery_api import router as ediscovery_router  # noqa: E402
 from .finance_api import router as finance_operations_router  # noqa: E402
 from .governance_agent_cross_suite_context_api import (  # noqa: E402
     router as governance_agent_cross_suite_context_router,
@@ -17975,6 +17980,7 @@ router.include_router(privacy_drop_management_router)
 router.include_router(privacy_regulatory_intelligence_router)
 router.include_router(privacy_notice_governance_router)
 router.include_router(privacy_rights_orchestration_router)
+router.include_router(ediscovery_router)
 router.include_router(privacy_rights_consumer_delivery_router)
 router.include_router(third_party_intelligence_router)
 router.include_router(third_party_contracts_router)

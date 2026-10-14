@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import html as _html
 import re
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -541,3 +542,21 @@ def test_a_failing_change_still_leaves_the_request_in_the_activity_record(client
     for requested, outcome in pairs.items():
         assert requested in verbs, requested
         assert outcome in failed and verbs.index(requested) < verbs.index(outcome), outcome
+
+
+def test_a_workspace_under_a_legal_hold_is_shown_as_held_not_as_a_clean_zero(monkeypatch):
+    from maverick import records_gc
+    from maverick_dashboard import installation_ops_api as ops
+
+    monkeypatch.setattr(ops, "_roster", lambda: [SimpleNamespace(id="ws-a", display_name="Acme"),
+                                                 SimpleNamespace(id="ws-b", display_name="Beta")])
+    monkeypatch.setattr(records_gc, "sweep_workspaces", lambda tenants, **kwargs: [
+        {"workspace": "ws-a", "name": "Acme", "empty": False, "held": True,
+         "conversations": 0, "activity": 0},
+        {"workspace": "ws-b", "name": "Beta", "empty": False, "conversations": 2, "activity": 1},
+    ])
+    preview = ops._sweep_preview(90, 30)
+    rows = {row["workspace"]: row for row in preview["workspaces"]}
+    assert rows["Acme"]["held"] is True and rows["Beta"]["held"] is False
+    assert "1 workspace skipped: a legal hold applies there" in preview["summary"]
+    assert "1 activity entry would be removed" in preview["summary"]

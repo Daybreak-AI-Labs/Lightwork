@@ -18,6 +18,11 @@ DEDUP_SECONDS = 30 * 24 * 3600
 
 def prune_world(world: Any, *, days: int, events_days: int) -> tuple[int, int, int]:
     """``(conversations, goal events, processed messages)`` removed from ``world``."""
+    from .ediscovery import assert_no_active_matters
+
+    # Idle-conversation and activity pruning are broad purges: any active legal
+    # matter in this workspace pauses them, as it pauses retention enforcement.
+    assert_no_active_matters()
     convs = world.prune_conversations(idle_for_seconds=days * 24 * 3600)
     events = world.prune_goal_events(older_than_seconds=events_days * 24 * 3600)
     # Twilio dedup rows accumulate one-per-webhook forever; reap after
@@ -60,6 +65,7 @@ def sweep_workspaces(tenants: Iterable[Any], *, days: int, events_days: int, dry
     out a local workspace whose records database was never created (so a
     preview never creates one). Returns one row per workspace.
     """
+    from .ediscovery import LegalHoldApplies, assert_no_active_matters
     from .paths import tenant_scope
     from .world_model import close_world_if_owned
     from .world_model_backends import is_postgres_configured
@@ -79,10 +85,19 @@ def sweep_workspaces(tenants: Iterable[Any], *, days: int, events_days: int, dry
             world = open_world()
             try:
                 if dry_run:
-                    counts = preview_world(world, days=days, events_days=events_days)
+                    try:
+                        assert_no_active_matters()
+                        counts = preview_world(world, days=days, events_days=events_days)
+                    except LegalHoldApplies:
+                        # The preview must not promise removals a legal hold will refuse.
+                        counts = {"conversations": 0, "activity": 0, "held": True}
                 else:
-                    convs, events, dedup = prune_world(world, days=days, events_days=events_days)
-                    counts = {"conversations": convs, "activity": events, "duplicate_checks": dedup}
+                    try:
+                        convs, events, dedup = prune_world(world, days=days, events_days=events_days)
+                        counts = {"conversations": convs, "activity": events, "duplicate_checks": dedup}
+                    except LegalHoldApplies:
+                        # Skip this workspace only; the other workspaces still sweep.
+                        counts = {"conversations": 0, "activity": 0, "duplicate_checks": 0, "held": True}
             finally:
                 close_world_if_owned(world)
         rows.append({"workspace": workspace, "name": name, "empty": False, **counts})

@@ -867,6 +867,12 @@ def _cleanup_preview(days: int, activity_days: int) -> dict[str, Any]:
 
 
 def _cleanup_run(days: int, activity_days: int) -> dict[str, int]:
+    from maverick.ediscovery import LegalHoldApplies, assert_no_active_matters
+
+    try:
+        assert_no_active_matters()
+    except LegalHoldApplies as exc:
+        raise HTTPException(409, str(exc)) from exc
     world = _cleanup_world()
     return {
         "conversations": int(world.prune_conversations(idle_for_seconds=days * 86400)),
