@@ -944,11 +944,13 @@ def test_report_states_when_its_recorded_work_last_changed_not_the_read_time(con
     assert client.post(BASE + "/sync", headers=headers()).status_code == 200
     report = client.get(BASE, headers=headers()).json()
     newest = max(row["updated_at"] for row in service.WORKS.list(limit=100))
-    assert "checked_at" not in report
     assert report["recorded_as_of"] == newest
+    # The deprecated checked_at is kept for existing clients, with the same value.
+    assert report["checked_at"] == newest
     assert client.get(BASE, headers=headers()).json()["recorded_as_of"] == newest
     empty = client.get(BASE, headers=headers("bob")).json()
     assert empty["recorded_as_of"] is None
+    assert empty["checked_at"] is None
 
 
 def test_saving_assumptions_fails_closed_when_work_cannot_be_read(context, monkeypatch):
