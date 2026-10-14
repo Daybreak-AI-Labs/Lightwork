@@ -216,6 +216,6 @@ def _answer(request, message, page, token, permissions):
                   (proposals[0]["label"] + ": " + proposals[0]["current_evidence"]["reason"] if proposals else "More identifiable work and completed examples are needed."))
     href = "/work-value?" + urlencode(query)
     return {"reply": reply, "mode": "live", "source": "Work value: shared metric service",
-            "checked_at": result["checked_at"], "metrics": result,
+            "checked_at": time.time(), "metrics": result,  # This answer's read recorded new work first.
             "conversation_token": _context_token(request, permissions, query),
             "action_link": {"href": href, "label": "Inspect contributing work and assumptions"}}

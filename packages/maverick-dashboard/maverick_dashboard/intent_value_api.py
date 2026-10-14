@@ -92,9 +92,39 @@ def period(start="", end="", *, now=None):
     return left.timestamp(), right.timestamp()
 
 
+def _gone_sources(rows, world):
+    """Ids of the rows whose recorded flow run, task or conversation turn no longer exists.
+
+    A read cannot re-derive the ledger without writing, so a row whose source was
+    deleted since the last sync is withheld until the sync retires or re-derives
+    it. Each source kind costs one bounded lookup, not one per row."""
+    from maverick.flow import store
+
+    named = {"flow": set(), "goal": set(), "turn": set()}
+    for row in rows:
+        for source in row["source"]["sources"]:
+            if source["kind"] in named:
+                named[source["kind"]].add(str(source["id"]))
+    if not any(named.values()):
+        return set()
+    present = {kind: set() for kind in named}
+    if named["flow"]:
+        present["flow"] = {run.run_id for run in store.iter_run_metadata()}
+    for kind, table in (("goal", "goals"), ("turn", "turns")):
+        ids = sorted(int(value) for value in named[kind] if value.isdigit())
+        for index in range(0, len(ids), 500):
+            chunk = ids[index:index + 500]
+            found = world.query(f"SELECT id FROM {table} WHERE id IN ({','.join('?' * len(chunk))})", tuple(chunk))
+            present[kind].update(str(row[0]) for row in found)
+    return {row["id"] for row in rows if any(
+        source["kind"] in named and str(source["id"]) not in present[source["kind"]]
+        for source in row["source"]["sources"])}
+
+
 def records(request, *, scope="own", refresh=True):
     """Work rows for ``request``. ``refresh=True`` records newly observed work
-    (a write); ``refresh=False`` is a read of the recorded ledger only."""
+    (a write); ``refresh=False`` is a read of the recorded ledger only, which
+    still withholds a row whose recorded source has since been deleted."""
     authority(request, company=scope == "company")
     world = _world()
     rows = service.refresh(world) if refresh else opportunities.conversions(service.WORKS.list(limit=10_001), pin=False)
@@ -105,7 +135,9 @@ def records(request, *, scope="own", refresh=True):
         rows = [row for row in rows if row["owner"] == owner and all(
             auth.can_access_goal(request, world.get_goal(gid)) for gid in row["source"]["goal_ids"])]
     authority(request, company=scope == "company")
-    return [row for row in rows if not row.get("deleted")]
+    rows = [row for row in rows if not row.get("deleted")]
+    withheld = _gone_sources(rows, world)
+    return [row for row in rows if row["id"] not in withheld]
 
 
 def read_report(request, *, start="", end="", scope="own", intent="", entity_kind="", entity_id="", refresh=True):
@@ -115,7 +147,9 @@ def read_report(request, *, start="", end="", scope="own", intent="", entity_kin
     from maverick.intent_value.reconciliation import bridge
     result["legacy_bridge"] = bridge(_world(), rows, result)
     _label_entities(request, result["by_entity"])
-    result.update(scope=scope, checked_at=time.time(), incomplete=any(row.get("_audit_pending") for row in rows))
+    # The newest recorded change, not the read time: a read reports the ledger as it was recorded.
+    stamps = [row["updated_at"] for row in rows if isinstance(row.get("updated_at"), (int, float))]
+    result.update(scope=scope, recorded_as_of=max(stamps, default=None), incomplete=any(row.get("_audit_pending") for row in rows))
     return result
 
 
@@ -181,14 +215,17 @@ def work(request, identifier, *, write=False, company=False):
     world = _world()
     if not company and any(not auth.can_access_goal(request, world.get_goal(gid)) for gid in row["source"]["goal_ids"]):
         raise HTTPException(404, "This work item's source is no longer accessible.")
+    if row["id"] in _gone_sources([row], world):
+        raise HTTPException(404, "This work item is unavailable.")
     return row
 
 
 @router.get("/work/{identifier}")
 def work_endpoint(request: Request, identifier: str, scope: Literal["own", "company"] = "own"):
     def read():
-        # Fresh native source reads enforce deletion and access changes before
-        # any explanation is released, even for an old bookmarked work ID.
+        # Reads withhold work whose recorded source was deleted and whose access
+        # changed, before any explanation is released, even for an old bookmarked
+        # work ID. A deletion is retired durably only by the explicit sync.
         current_rows = records(request, scope=scope, refresh=False)
         row = work(request, identifier, company=scope == "company")
         converted = next((item.get("converted_to") for item in current_rows if item["id"] == identifier), None)

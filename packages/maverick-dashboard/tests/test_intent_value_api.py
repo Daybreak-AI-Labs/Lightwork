@@ -906,3 +906,37 @@ def test_pending_audit_receipts_are_retried_only_by_the_explicit_sync(context, m
     benchmarks_after = client.get(BASE + "/benchmarks", headers=headers("root"))
     assert benchmarks_after.status_code == 200
     assert next(row for row in benchmarks_after.json()["benchmarks"] if row["id"] == item["id"])["benchmark"]["minutes"] == 10
+
+
+def test_deleted_flow_run_is_withheld_from_reads_until_the_sync(context):
+    from maverick.flow.store import FlowRun
+
+    client, _world = context
+    now = time.time()
+    store.save_run(FlowRun(run_id="probe-run", flow_id="probe-flow", owner="user:alice", status="completed",
+                           created=now, updated=now, definition_revision=1))
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    identifier = next(row["id"] for row in service.WORKS.list(limit=100)
+                      if any(source.get("id") == "probe-run" for source in row["source"]["sources"]))
+    assert client.get(BASE + "/work/" + identifier, headers=headers()).status_code == 200
+
+    # The run is deleted, but no sync has run: reads must not release its cost or evidence.
+    assert store.delete_run("probe-run")
+    assert client.get(BASE + "/work/" + identifier, headers=headers()).status_code == 404
+    report = client.get(BASE, headers=headers()).json()
+    assert identifier not in {row["id"] for row in report["rows"]}
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    assert client.get(BASE + "/work/" + identifier, headers=headers()).status_code == 404
+
+
+def test_report_states_when_its_recorded_work_last_changed_not_the_read_time(context):
+    client, world = context
+    seed(world, count=2)
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    report = client.get(BASE, headers=headers()).json()
+    newest = max(row["updated_at"] for row in service.WORKS.list(limit=100))
+    assert "checked_at" not in report
+    assert report["recorded_as_of"] == newest
+    assert client.get(BASE, headers=headers()).json()["recorded_as_of"] == newest
+    empty = client.get(BASE, headers=headers("bob")).json()
+    assert empty["recorded_as_of"] is None
