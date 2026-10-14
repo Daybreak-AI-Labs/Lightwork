@@ -916,7 +916,7 @@ class TestDatabaseLoginBypassingRls:
 
     def test_a_superuser_login_warns_once_and_is_reported(self, monkeypatch, caplog):
         with caplog.at_level(logging.WARNING, logger=postgres.__name__):
-            world = _open_as(monkeypatch, conn=_RoleConnection(role_row=(True, False)))
+            world = _open_as(monkeypatch, conn=_RoleConnection(role_row=(True, False)), rls=True)
 
         assert len(_role_warnings(caplog)) == 1
         assert "superuser" in _role_warnings(caplog)[0].getMessage()
@@ -925,14 +925,14 @@ class TestDatabaseLoginBypassingRls:
 
     def test_a_bypassrls_login_warns_once_and_is_reported(self, monkeypatch, caplog):
         with caplog.at_level(logging.WARNING, logger=postgres.__name__):
-            world = _open_as(monkeypatch, conn=_RoleConnection(role_row=(False, True)))
+            world = _open_as(monkeypatch, conn=_RoleConnection(role_row=(False, True)), rls=True)
 
         assert len(_role_warnings(caplog)) == 1
         assert "BYPASSRLS" in world.rls_bypass_reason
 
     def test_a_login_with_neither_privilege_is_silent(self, monkeypatch, caplog):
         with caplog.at_level(logging.WARNING, logger=postgres.__name__):
-            world = _open_as(monkeypatch, conn=_RoleConnection(role_row=(False, False)))
+            world = _open_as(monkeypatch, conn=_RoleConnection(role_row=(False, False)), rls=True)
 
         assert _role_warnings(caplog) == []
         assert world.rls_bypass_reason is None
@@ -962,7 +962,8 @@ class TestDatabaseLoginBypassingRls:
                              rls=False, enterprise=True)
 
         assert len(_role_warnings(caplog)) == 1
-        assert "superuser" in world.rls_bypass_reason
+        # No policy is in use, so nothing is bypassed: the health check stays ok.
+        assert world.rls_bypass_reason is None
 
     def test_a_failed_role_check_warns_once_and_never_crashes_the_open(self, monkeypatch, caplog):
         with caplog.at_level(logging.WARNING, logger=postgres.__name__):

@@ -1297,9 +1297,10 @@ class PostgresWorldModel:
         """Note, once per open, whether this login bypasses row-level security.
 
         A superuser or BYPASSRLS role skips every RLS policy, FORCE included.
-        Enterprise mode that relies on those policies refuses to open; otherwise
-        the problem is logged once and reported by the deep health check. A
-        failed lookup is only logged, so an unreadable catalog never blocks boot.
+        With RLS in use, enterprise mode refuses to open; otherwise the problem
+        is logged once and reported by the deep health check. With RLS off no
+        policy is bypassed, so it is only logged. A failed lookup is only
+        logged, so an unreadable catalog never blocks boot.
         """
         try:
             with self._tx() as cur:
@@ -1324,8 +1325,13 @@ class PostgresWorldModel:
             "connect with a dedicated login that is neither a superuser nor BYPASSRLS "
             "(for example CREATE ROLE maverick_app LOGIN NOSUPERUSER NOBYPASSRLS)"
         )
+        if not self._rls:
+            # No row policy is in use, so nothing is bypassed yet: a hint only.
+            log.warning("%s. Turning on [world_model] rls would not protect tenants "
+                        "for this login. Fix: %s.", problem, fix)
+            return
         self.rls_bypass_reason = f"{problem}; {fix}"
-        if self._rls and _enterprise_default():
+        if _enterprise_default():
             raise RuntimeError(
                 "Enterprise mode relies on Postgres row-level security for tenant "
                 f"isolation, but {problem}. Fix: {fix}."
