@@ -1010,3 +1010,19 @@ def test_the_authority_refuses_an_address_that_is_not_normalised(email):
     with pytest.raises(ValueError, match="normalized address"):
         KnowledgeActorAuthority(tenant="acme", principal="user:alice", action="analyze", purpose="support",
                                 authorization_sha256="a" * 64, verified_email=email)
+
+
+@pytest.mark.parametrize(("mode", "stated"), [("by_email", True), ("off", False)])
+def test_saved_sources_panel_says_when_files_are_matched_to_their_sharing(customer, monkeypatch, mode, stated):
+    from maverick import config, knowledge_sources
+
+    client, *_ = customer
+    monkeypatch.setattr(knowledge_sources, "enabled", lambda: True)
+    monkeypatch.setattr(config, "get_knowledge_sources", lambda: {
+        "max_items": 64, "max_pages": 16, "max_download_mib": 4, "max_text_kib": 256,
+        "max_refresh_minutes": 5, "permission_filter": mode,
+    })
+    page = client.get("/knowledge-access")
+    assert page.status_code == 200, page.text
+    assert ("shown only to the people it is shared with" in page.text) is stated
+    assert ("shows no files until it is refreshed again" in page.text) is stated
