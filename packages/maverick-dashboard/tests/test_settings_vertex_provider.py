@@ -209,3 +209,23 @@ def test_providers_without_a_server_address_field_refuse_one(workspace, provider
     }, follow_redirects=False)
     assert response.status_code == 400
     assert config.get_provider_config(provider) == {}
+
+
+def test_vertex_receipt_goes_stale_when_the_routed_region_changes(workspace, monkeypatch):
+    """A passed connection test is for the route it ran on. Here the region comes from the environment."""
+    from maverick import config
+    from maverick_dashboard import integration_readiness as readiness
+
+    monkeypatch.setenv("CLOUD_ML_REGION", "us-east5")
+    saved = {"project_id": "acme-ai", "model_id": _HAIKU}
+    assert workspace.post("/settings/providers", data={"provider": "vertex", **saved},
+                          follow_redirects=False).status_code == 303
+    material = config.get_provider_config("vertex")
+    readiness.record("provider", "vertex", readiness._cloud_receipt_material("vertex", material),
+                     verified=True, detail="provider accepted the bounded model request")
+    assert readiness.get("provider", "vertex",
+                         readiness._cloud_receipt_material("vertex", material))["status"] == "verified"
+
+    monkeypatch.setenv("CLOUD_ML_REGION", "europe-west4")
+    assert readiness.get("provider", "vertex",
+                         readiness._cloud_receipt_material("vertex", material))["status"] != "verified"

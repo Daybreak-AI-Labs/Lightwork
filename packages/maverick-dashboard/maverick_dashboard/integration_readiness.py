@@ -321,7 +321,7 @@ _SELF_HOSTED_PROVIDERS = frozenset({"ollama", "vllm", "tgi", "openai_compatible"
 
 def _cloud_receipt_material(name: str, material: dict[str, Any]) -> object:
     """Bind cloud receipts to the actual routed identity, including env inputs."""
-    if name not in {"azure", "bedrock"}:
+    if name not in {"azure", "bedrock", "vertex"}:
         return material
     try:
         from maverick.llm import LLM
