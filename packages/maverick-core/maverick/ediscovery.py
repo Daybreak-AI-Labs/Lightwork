@@ -157,6 +157,14 @@ def _date(value: object, label: str) -> str | None:
     return value
 
 
+def _principal_id(text: str) -> bool:
+    """``user:<name>`` or ``user:<channel>:<identifier>``, with something after ``user:``."""
+    if not text.startswith("user:") or not _PRINCIPAL_RE.fullmatch(text):
+        return False
+    rest = text[5:]
+    return bool(rest) and not rest.startswith(":") and not rest.endswith(":")
+
+
 def _custodians(value: object) -> list[str]:
     if not isinstance(value, list) or not value:
         raise MatterValidationError("Add at least one custodian")
@@ -164,11 +172,11 @@ def _custodians(value: object) -> list[str]:
         raise MatterValidationError(f"A matter can name at most {MAX_CUSTODIANS} custodians")
     found: set[str] = set()
     for item in value:
-        if (not isinstance(item, str) or not _PRINCIPAL_RE.fullmatch(item.strip())
-                or not item.strip().startswith("user:")):
+        text = item.strip() if isinstance(item, str) else ""
+        if not _principal_id(text):
             raise MatterValidationError(
                 "Each custodian must be a principal id such as user:name or user:channel:identifier")
-        found.add(item.strip())
+        found.add(text)
     return sorted(found)
 
 
