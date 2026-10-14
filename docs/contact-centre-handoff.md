@@ -33,7 +33,8 @@ handoff is recorded as **Not sent** with the reason, and nothing leaves Lightwor
 
 - The conversation title, as the subject (or the webhook's `payload.subject`).
 - Why the person was asked for, as the reason.
-- The requester's name and, when it is an email address, the email.
+- The requester's name and email. When the account name is itself an email address,
+  the name is left empty and the email is sent once.
 - The most recent messages, oldest first, each shortened to 2,000 characters.
 - A link back to the conversation, when a Lightwork web address is set.
 

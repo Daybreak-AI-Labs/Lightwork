@@ -128,17 +128,29 @@ def _clean(value: object, limit: int) -> str:
     return _redact(value)[:limit]
 
 
+def _plain(value: object, limit: int) -> str:
+    """A short field such as the requester's name: not free text, so it is not redacted.
+
+    Control characters are replaced with spaces so the name cannot break the comment layout.
+    """
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"[\x00-\x1f\x7f]", " ", value).strip()[:limit]
+
+
 def _content(*, title: str, reason: str, requester_name: str, requester_email: str,
              messages: list[tuple[str, str]], link: str, limit: int) -> dict[str, Any]:
     """The reviewed handoff content. Each free-text field is redacted and bounded."""
     email = requester_email.strip() if isinstance(requester_email, str) else ""
+    name = _plain(requester_name, MAX_REQUESTER)
+    if _EMAIL_RE.search(name):
+        name = ""  # the account name is an email address: the email field carries it, so the name is left empty
     rows = [{"from": "customer" if role == "user" else "lightwork", "text": _clean(text, MAX_MESSAGE)}
             for role, text in list(messages)[-limit:]]
     return {
         "subject": _clean(title, MAX_SUBJECT).strip() or "Lightwork conversation",
         "reason": _clean(reason, MAX_REASON).strip(),
-        "requester": {"name": _clean(requester_name, MAX_REQUESTER).strip(),
-                      "email": email if _EMAIL_RE.fullmatch(email) else ""},
+        "requester": {"name": name, "email": email if _EMAIL_RE.fullmatch(email) else ""},
         "messages": rows,
         "link": link if isinstance(link, str) else "",
     }

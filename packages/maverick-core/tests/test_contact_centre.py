@@ -199,6 +199,18 @@ def test_zendesk_requester_is_omitted_when_no_email_is_known(tmp_path, monkeypat
     assert "requester" not in json.loads(receiver.calls[0][1])["ticket"]
 
 
+def test_an_email_shaped_requester_is_sent_as_the_email_not_redacted(tmp_path, monkeypatch):
+    _configure(tmp_path, ZENDESK_CONFIG)
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    _enqueue(requester_name="ana@example.com", requester_email="ana@example.com")
+    body = receiver.calls[0][1].decode("utf-8")
+    ticket = json.loads(body)["ticket"]
+    assert ticket["requester"] == {"name": "ana@example.com", "email": "ana@example.com"}
+    assert "Customer: ana@example.com" in ticket["comment"]["body"]
+    assert "[REDACTED" not in body
+
+
 def test_only_the_last_configured_messages_are_sent_and_each_is_truncated(tmp_path, monkeypatch):
     _configure(tmp_path, ZENDESK_CONFIG.replace('dashboard_url', 'max_messages = 3\ndashboard_url'))
     receiver = Receiver(CREATED)
