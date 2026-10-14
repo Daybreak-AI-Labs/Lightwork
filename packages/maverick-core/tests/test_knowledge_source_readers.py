@@ -302,7 +302,7 @@ def test_an_unrestricted_or_unreadable_confluence_page_is_unknown(monkeypatch, b
 @pytest.mark.parametrize("provider", [GRAPH_BINDING, DRIVE, CONFLUENCE])
 def test_a_permission_read_failure_is_unknown_and_never_raises(monkeypatch, provider):
     item = {"sharepoint": PERM_GRAPH_ITEM, "drive": PERM_DRIVE_ITEM, "confluence": PERM_CONFLUENCE_ITEM}[provider["kind"]]
-    _serve_permission_rows(monkeypatch, error=readers.SourceReadError("provider said no; token=abc123"))
+    _serve_permission_rows(monkeypatch, error=readers.SourceReadError("provider refused https://signed.example/leak-marker"))
     result = readers.permissions(provider, "user:alice", item, lambda: None)
     assert result == _unknown()
-    assert "abc123" not in repr(result) and set(result) == {"emails", "domains", "anyone", "has_group_grants", "unknown"}
+    assert "leak-marker" not in repr(result) and set(result) == {"emails", "domains", "anyone", "has_group_grants", "unknown"}
