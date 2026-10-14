@@ -5,7 +5,8 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parent
 if os.name == 'nt' and not str(root).startswith('\\\\?\\'):
-    root = Path('\\\\?\\' + str(root))
+    prefix = '\\\\?\\UNC\\' if str(root).startswith('\\\\') else '\\\\?\\'
+    root = Path(prefix + (str(root)[2:] if str(root).startswith('\\\\') else str(root)))
 checked = 0
 errors = []
 for line in (root / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
