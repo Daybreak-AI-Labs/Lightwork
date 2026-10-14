@@ -124,7 +124,8 @@ chooses the blast radius**. Defense in depth, from outermost to innermost:
 1. **Sandbox backend** — the real containment boundary. `local` = your host;
    `docker`/`podman` run each command in a throwaway container
    (`--network=none`, `--cap-drop=ALL`, `--security-opt=no-new-privileges`,
-   `--pids-limit`); `firecracker`/`kubernetes`/`ssh` isolate further. The
+   `--pids-limit`); `kubernetes`/`ssh` isolate further.
+   `firecracker` is an experimental scaffold, not a supported isolation backend. The
    setup wizard defaults real installs to a container when one is available,
    and the kernel logs a one-time warning when it runs on `local` (louder
    when the shield is absent). **For any untrusted goal, use a container

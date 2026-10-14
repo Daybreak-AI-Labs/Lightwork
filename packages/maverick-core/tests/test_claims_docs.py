@@ -67,6 +67,7 @@ def test_firecracker_is_described_as_a_scaffold_not_a_deploy_target():
     local scaffold unsupported. Any doc line that names Firecracker as a deploy
     target or shipped backend must say it is an experimental scaffold."""
     checked = {
+        "SECURITY.md": None,
         "pitch/SECURITY-QUESTIONNAIRE.md": "deploy targets",
         "docs/architecture.md": None,
         "docs/handbook.md": None,
@@ -74,7 +75,7 @@ def test_firecracker_is_described_as_a_scaffold_not_a_deploy_target():
     }
     for relpath, needle in checked.items():
         for line in _read(relpath).splitlines():
-            if "Firecracker" not in line or (needle and needle not in line):
+            if "firecracker" not in line.lower() or (needle and needle not in line):
                 continue
             assert "scaffold" in line.lower(), f"{relpath}: {line[:120]}"
 
