@@ -38,9 +38,15 @@
     const version = ++generation;
     $('iv-status').textContent = 'Refreshing authorized work and execution evidence…';
     $('iv-report').hidden = true; $('iv-error').hidden = true; $('iv-retry').hidden = true;
+    if (!$('iv-device').checkValidity()) {
+      // The device name goes with the sync and the suggestions, so a malformed one is refused before any request.
+      $('iv-status').textContent = 'Report unavailable; no zero-value claim was made.';
+      error(new Error('Enter the name of an enrolled Ekko device, using letters, numbers, dots, dashes, colons or underscores, then review its observations again.'));
+      return;
+    }
     try {
       // Reads never record work. Recording newly observed work is the explicit sync, so the page syncs first.
-      const synced = await request('/sync', 'POST', {});
+      const synced = await request('/sync?device_id=' + encodeURIComponent($('iv-device').value), 'POST', {});
       if (version !== generation) return;
       const [metrics, config, defaults, suggestions] = await Promise.all([
         request('?' + filters()), request('/settings'), request('/benchmarks'),

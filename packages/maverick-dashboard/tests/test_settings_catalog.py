@@ -97,6 +97,7 @@ def test_catalog_does_not_change_kernel_defaults():
         "knowledge_sources.max_pages": config.get_knowledge_sources()["max_pages"],
         "knowledge_sources.max_download_mib": config.get_knowledge_sources()["max_download_mib"],
         "knowledge_sources.max_text_kib": config.get_knowledge_sources()["max_text_kib"],
+        "knowledge_sources.max_refresh_minutes": config.get_knowledge_sources()["max_refresh_minutes"],
     }
     for setting_id, kernel_default in defaults.items():
         assert catalog.BY_ID[setting_id].default == kernel_default, setting_id

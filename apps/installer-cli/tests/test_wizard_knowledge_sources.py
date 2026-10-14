@@ -15,7 +15,7 @@ def test_saved_source_limits_are_kept_at_their_defaults_unless_changed(monkeypat
 def test_saved_source_limits_reask_until_each_value_is_a_whole_number_in_range(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter(["lots", "5000", "100", "16", "8", "512"])
+    answers = iter(["lots", "5000", "100", "16", "8", "512", "0", "30"])
     prompts = []
 
     def text(prompt, default=""):
@@ -24,17 +24,19 @@ def test_saved_source_limits_reask_until_each_value_is_a_whole_number_in_range(m
 
     monkeypatch.setattr(wizard, "_q_confirm", lambda prompt, *, default: True)
     monkeypatch.setattr(wizard, "_q_text", text)
-    assert wizard.pick_knowledge_sources() == {"max_items": 100, "max_pages": 16, "max_download_mib": 8, "max_text_kib": 512}
-    # The two refused answers ask the first question again, before the four accepted ones.
-    assert len(prompts) == 6
+    assert wizard.pick_knowledge_sources() == {"max_items": 100, "max_pages": 16, "max_download_mib": 8,
+                                               "max_text_kib": 512, "max_refresh_minutes": 30}
+    # Each refused answer asks its own question again, before the accepted one.
+    assert len(prompts) == 8
     assert prompts[0] == prompts[1] == prompts[2]
-    assert "(1-1000" in prompts[0] and "(1-8192" in prompts[-1]
+    assert prompts[-1] == prompts[-2]
+    assert "(1-1000" in prompts[0] and "(1-60" in prompts[-1]
 
 
 def test_saved_source_limits_config_is_closed_integer_toml():
     from maverick_installer import wizard
 
-    values = {"max_items": 100, "max_pages": 16, "max_download_mib": 8, "max_text_kib": 512}
+    values = {"max_items": 100, "max_pages": 16, "max_download_mib": 8, "max_text_kib": 512, "max_refresh_minutes": 30}
     assert wizard._cfg_knowledge_sources(values) == [
         "",
         "[knowledge_sources]",
@@ -42,6 +44,7 @@ def test_saved_source_limits_config_is_closed_integer_toml():
         "max_pages = 16",
         "max_download_mib = 8",
         "max_text_kib = 512",
+        "max_refresh_minutes = 30",
     ]
     assert wizard._cfg_knowledge_sources({}) == []
     assert wizard._cfg_knowledge_sources(None) == []
@@ -53,4 +56,13 @@ def test_saved_source_limits_config_rejects_values_outside_the_runtime_range(val
 
     values = {"max_items": value, "max_pages": 16, "max_download_mib": 4, "max_text_kib": 256}
     with pytest.raises(ValueError, match=r"knowledge_sources\.max_items must be a whole number from 1 to 1000"):
+        wizard._cfg_knowledge_sources(values)
+
+
+@pytest.mark.parametrize("value", [0, 61, True, "5"])
+def test_saved_source_refresh_minutes_config_rejects_values_outside_the_runtime_range(value):
+    from maverick_installer import wizard
+
+    values = {"max_items": 64, "max_pages": 16, "max_download_mib": 4, "max_text_kib": 256, "max_refresh_minutes": value}
+    with pytest.raises(ValueError, match=r"knowledge_sources\.max_refresh_minutes must be a whole number from 1 to 60"):
         wizard._cfg_knowledge_sources(values)

@@ -1422,11 +1422,13 @@ def test_knowledge_sources_defaults_keep_the_historical_bounds(monkeypatch):
     _knowledge_sources_section(monkeypatch, {})
     assert config_module.get_knowledge_sources() == {
         "max_items": 64, "max_pages": 16, "max_download_mib": 4, "max_text_kib": 256,
+        "max_refresh_minutes": 5,
     }
 
 
 @pytest.mark.parametrize(("key", "low", "high"), [
     ("max_items", 1, 1000), ("max_pages", 1, 200), ("max_download_mib", 1, 32), ("max_text_kib", 1, 8192),
+    ("max_refresh_minutes", 1, 60),
 ])
 def test_knowledge_sources_limits_accept_their_documented_range(monkeypatch, key, low, high):
     for value in (low, high):
@@ -1438,6 +1440,7 @@ def test_knowledge_sources_limits_accept_their_documented_range(monkeypatch, key
     ("max_items", 0), ("max_items", 1001), ("max_items", True), ("max_items", "64"), ("max_items", 64.0),
     ("max_pages", 0), ("max_pages", 201), ("max_download_mib", 33), ("max_download_mib", -1),
     ("max_text_kib", 8193), ("max_text_kib", None),
+    ("max_refresh_minutes", 0), ("max_refresh_minutes", 61), ("max_refresh_minutes", 5.0),
 ])
 def test_out_of_range_knowledge_sources_limits_fail_closed_with_a_named_error(monkeypatch, key, value):
     _knowledge_sources_section(monkeypatch, {key: value})

@@ -20,6 +20,7 @@ import dataclasses
 import hashlib
 import itertools
 import json
+import logging
 import os
 import threading
 import time
@@ -1660,11 +1661,33 @@ async def catalog_update(request: Request, body: CatalogUpdate, full: bool = Fal
                 raise HTTPException(422, "Confirm the complete reviewed changes before saving.")
             from .settings_catalog_requests import apply
             value, status = apply(request, body.reviewed_token, full=full)
+            _resume_contact_centre(value)  # apply has released the writer lock
             return JSONResponse(value, status_code=status, headers={"Cache-Control": "private, no-store"})
         with settings_store._locked(strict=True):
-            return _catalog_update_locked(request, body, full)
+            response = _catalog_update_locked(request, body, full)
+        _resume_contact_centre(json.loads(response.body))  # the writer lock is released
+        return response
 
     return await run_in_threadpool(save)
+
+
+def _resume_contact_centre(saved) -> None:
+    """Handoffs waiting for contact-centre settings are sent now, not at the next restart.
+
+    This runs after the settings writer lock is released, so the outbox files of every
+    workspace are not read while other settings writers wait. The settings are
+    deployment-wide, so every active workspace's waiting handoffs are checked.
+    The save is already recorded, so a failure here is logged and the handoffs keep
+    their state for the next save or restart.
+    """
+    if not any(str(item).startswith("contact_centre.") for item in (saved or {}).get("changed") or []):
+        return
+    try:
+        from maverick.contact_centre import resume_all_workspaces
+
+        resume_all_workspaces(restarted=False)
+    except Exception as exc:  # noqa: BLE001 -- the saved settings stand; only the resume is lost
+        logging.getLogger(__name__).warning("contact centre handoffs not resumed after a settings save (%s)", type(exc).__name__)
 
 
 def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=False, *, effect_guard=None) -> JSONResponse:

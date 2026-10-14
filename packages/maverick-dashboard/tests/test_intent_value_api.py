@@ -944,11 +944,13 @@ def test_report_states_when_its_recorded_work_last_changed_not_the_read_time(con
     assert client.post(BASE + "/sync", headers=headers()).status_code == 200
     report = client.get(BASE, headers=headers()).json()
     newest = max(row["updated_at"] for row in service.WORKS.list(limit=100))
-    assert "checked_at" not in report
     assert report["recorded_as_of"] == newest
+    # The deprecated checked_at is kept for existing clients, with the same value.
+    assert report["checked_at"] == newest
     assert client.get(BASE, headers=headers()).json()["recorded_as_of"] == newest
     empty = client.get(BASE, headers=headers("bob")).json()
     assert empty["recorded_as_of"] is None
+    assert empty["checked_at"] is None
 
 
 def test_saving_assumptions_fails_closed_when_work_cannot_be_read(context, monkeypatch):
@@ -1011,3 +1013,145 @@ def test_specialist_intents_are_memoised_without_changing_the_classification():
         direct = taxonomy.classify(profile.description)["intents"]
         assert list(intent_value_api._domain_intents(profile.description)) == direct
         assert list(intent_value_api._domain_intents(profile.description)) == direct
+
+
+def _ekko_with_an_expired_event(monkeypatch, tmp_path):
+    """An enrolled device whose only observation is 15 days old: past its 14-day retention."""
+    from maverick.work_discovery import CapturePolicy, WorkEvent
+    from maverick.work_discovery_store import WorkDiscoveryStore
+    from maverick_dashboard import ekko_routes, intent_value_discovery
+
+    monkeypatch.setenv("MAVERICK_KMS_KEK", "ab" * 32)
+    monkeypatch.setattr(intent_value_discovery, "get_ekko", lambda: {"enable": True})
+    now = 1_800_000_000.0
+    path = tmp_path / "ekko.sqlite3"
+    policy = CapturePolicy(
+        enabled=True, capture_level="guided", allowed_apps=frozenset({"chrome"}),
+        allowed_actions=frozenset({"download"}), allowed_object_types=frozenset({"report"}),
+        retention_days=14, min_occurrences=2, min_distinct_days=2, poll_interval_seconds=1,
+        provider_egress=False,
+    )
+
+    def ekko(clock, device="local-device"):
+        return WorkDiscoveryStore("user:alice", device, tenant="acme", path=path,
+                                  clock=lambda: clock, authority_check=lambda _policy: None)
+
+    writer = ekko(now)
+    writer.enroll(policy)
+    writer.create_session(policy=policy, session_id="expired-session")
+    writer.claim_collector("expired-session", "collector-test-capability", policy=policy, ttl_seconds=30)
+    writer.append_event(WorkEvent(event_id="event-1", session_id="expired-session", sequence=1, occurred_at=now,
+                                  app="chrome", action="download", object_type="report", duration_seconds=8),
+                        policy=policy, collector_id="collector-test-capability")
+    def store(request, device_id):
+        # The real route checks the device name before it opens a store.
+        return ekko(now + 15 * 86_400.0, ekko_routes._device_id(device_id))
+
+    monkeypatch.setattr(ekko_routes, "_store", store)
+    return path
+
+
+def _ekko_event_ids(path):
+    with sqlite3.connect(path) as conn:
+        return [row[0] for row in conn.execute("SELECT event_id FROM ekko_events").fetchall()]
+
+
+def test_the_sync_deletes_expired_ekko_events_for_the_device_it_is_called_for(context, monkeypatch, tmp_path):
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+
+    # The read leaves expired ciphertext in place; the explicit sync of another device leaves it too.
+    assert client.get(BASE + "/opportunities", headers=headers()).status_code == 200
+    assert _ekko_event_ids(path) == ["event-1"]
+    assert client.post(BASE + "/sync?device_id=laptop-2", headers=headers()).status_code == 200
+    assert _ekko_event_ids(path) == ["event-1"]
+
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    assert _ekko_event_ids(path) == []
+
+
+def test_a_sync_naming_an_invalid_device_still_records_and_deletes_no_ekko_events(context, monkeypatch, tmp_path):
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+
+    response = client.post(BASE + "/sync?device_id=not%20a%20device", headers=headers())
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "recorded"
+    assert _ekko_event_ids(path) == ["event-1"]
+
+
+def test_a_viewer_sync_does_not_delete_expired_ekko_events(context, monkeypatch, tmp_path):
+    from maverick_dashboard import auth
+
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+    real = auth.has_permission
+    monkeypatch.setattr(auth, "has_permission", lambda request, permission, **kwargs: permission != "operate" and real(request, permission, **kwargs))
+
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    assert _ekko_event_ids(path) == ["event-1"]
+
+
+def test_pausing_watching_deletes_expired_ekko_events(context, monkeypatch, tmp_path):
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+
+    response = client.post("/api/v1/ekko/sessions/expired-session/pause", json={"device_id": "local-device"}, headers=headers())
+    assert response.status_code == 200, response.text
+    assert _ekko_event_ids(path) == []
+
+
+def test_starting_watching_deletes_expired_ekko_events(context, monkeypatch, tmp_path):
+    from maverick import config
+    from maverick.work_discovery import SessionState
+
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+    # The earlier session is stopped first, so the device may be watched again.
+    monkeypatch.setattr(config, "get_ekko", lambda: {"enable": True, "allowed_apps": ["chrome"]})
+    monkeypatch.setattr(config, "validate_ekko_policy_ceiling", lambda policy: None)
+    from maverick_dashboard import ekko_routes
+    store = ekko_routes._store(None, "local-device")
+    store.transition_session("expired-session", SessionState.STOPPED)
+
+    response = client.post("/api/v1/ekko/sessions", json={"device_id": "local-device", "acknowledge_capture_scope": True},
+                           headers=headers())
+    assert response.status_code == 201, response.text
+    assert _ekko_event_ids(path) == []
+
+
+def test_pausing_watching_still_pauses_when_its_retention_record_cannot_be_queued(context, monkeypatch, tmp_path):
+    from maverick import work_discovery_store
+
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+    monkeypatch.setattr(work_discovery_store, "MAX_AUDIT_OUTBOX", 0)
+
+    response = client.post("/api/v1/ekko/sessions/expired-session/pause", json={"device_id": "local-device"}, headers=headers())
+    # The pause is the safety action and stands; nothing is deleted without its record.
+    assert response.status_code == 200, response.text
+    assert response.json()["session"]["state"] == "paused"
+    assert _ekko_event_ids(path) == ["event-1"]
+
+    monkeypatch.setattr(work_discovery_store, "MAX_AUDIT_OUTBOX", 2_000)
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    assert _ekko_event_ids(path) == []
+
+
+def test_a_pause_delivers_the_retention_record_with_the_number_removed(context, monkeypatch, tmp_path):
+    client, world = context
+    seed(world)
+    _ekko_with_an_expired_event(monkeypatch, tmp_path)
+    delivered = []
+    monkeypatch.setattr(audit, "record", lambda kind, **payload: delivered.append((kind, payload)) or True)
+
+    response = client.post("/api/v1/ekko/sessions/expired-session/pause", json={"device_id": "local-device"}, headers=headers())
+    assert response.status_code == 200, response.text
+    purges = [payload["lifecycle"] for kind, payload in delivered if kind == "ekko_retention_purge"]
+    assert purges == [{"state": "expired_removed", "removed": 1}]

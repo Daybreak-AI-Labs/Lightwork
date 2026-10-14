@@ -68,6 +68,8 @@ _TICKET_ID_RE = re.compile(r'"ticket"\s*:\s*\{[^}]*?"id"\s*:\s*(\d{1,20})')
 
 _thread_lock = threading.RLock()
 _active: set[str] = set()
+# Handoffs whose settings were saved while a delivery thread held them: that thread checks them again.
+_rescan: set[str] = set()
 _sleep = time.sleep
 
 
@@ -573,28 +575,58 @@ def run_delivery(key: str) -> None:
         action, seconds = _attempt(key, honour_schedule=False)
 
 
-def _start(key: str) -> None:
-    """Deliver in a daemon thread that keeps the caller's workspace context."""
+def _start(key: str) -> bool:
+    """Deliver in a daemon thread that keeps the caller's workspace context.
+
+    Returns ``False`` when a thread already holds the handoff. That thread checks the
+    handoff once more before it stops, so the request is not lost.
+    """
     with _thread_lock:
         if key in _active:
-            return
+            _rescan.add(key)
+            return False
         _active.add(key)
     context = contextvars.copy_context()
 
     def _main() -> None:
         try:
             context.run(run_delivery, key)
+            while _take_rescan(key):
+                context.run(run_delivery, key)
         except Exception as exc:
             log.warning("contact centre: delivery stopped unexpectedly (%s)", type(exc).__name__)
-        finally:
-            with _thread_lock:
-                _active.discard(key)
+            _forget(key)
+        except BaseException:
+            _forget(key)
+            raise
 
     threading.Thread(target=_main, name="mvk-contact-centre", daemon=True).start()
+    return True
+
+
+def _take_rescan(key: str) -> bool:
+    """Called by a delivery thread before it stops. ``True``: a save asked for another check, so keep going.
+
+    ``False``: the thread has released the handoff. Both happen under one lock, so a save
+    cannot arrive between the check and the release and be left unanswered.
+    """
+    with _thread_lock:
+        if key in _rescan:
+            _rescan.discard(key)
+            return True
+        _active.discard(key)
+        return False
+
+
+def _forget(key: str) -> None:
+    """Release a handoff after its delivery thread stopped with an error."""
+    with _thread_lock:
+        _active.discard(key)
+        _rescan.discard(key)
 
 
 def resume_pending() -> int:
-    """After a restart: an interrupted send becomes unconfirmed (never resent); queued and retrying handoffs continue."""
+    """After a restart: an interrupted send becomes unconfirmed (never resent); queued, retrying and waiting handoffs continue."""
     if not _path().exists():
         return 0
     now = time.time()
@@ -616,16 +648,32 @@ def resume_pending() -> int:
     return len(pending)
 
 
-def resume_all_workspaces() -> int:
+def start_pending() -> int:
+    """While the server runs, after Settings are saved: start the waiting, queued and retrying handoffs now.
+
+    Unlike resume_pending, no send is marked unconfirmed: a send may be in flight in this process.
+    Returns how many deliveries it started. A handoff a thread already holds is checked again by that thread.
+    """
+    if not _path().exists():
+        return 0
+    with _locked(create=False) as path:
+        pending = [key for key, entry in _load(path).items() if entry.get("state") in PENDING]
+    return sum(1 for key in pending if _start(key))
+
+
+def resume_all_workspaces(*, restarted: bool = True) -> int:
     """Resume pending deliveries in the shared workspace and in every active workspace.
 
+    ``restarted=False`` (Settings were saved while the server runs) starts the pending
+    handoffs without marking any send unconfirmed; see :func:`start_pending`.
     One failing workspace is logged by exception type and does not stop the others.
     """
     from .paths import reset_tenant, set_tenant
     from .tenant.registry import list_tenants
+    resume = resume_pending if restarted else start_pending
     total = 0
     try:
-        total += resume_pending()
+        total += resume()
     except Exception as exc:
         log.warning("contact centre: shared workspace not resumed (%s)", type(exc).__name__)
     for record in list_tenants():
@@ -633,7 +681,7 @@ def resume_all_workspaces() -> int:
             continue
         token = set_tenant(record.id)
         try:
-            total += resume_pending()
+            total += resume()
         except Exception as exc:
             log.warning("contact centre: a workspace was not resumed (%s)", type(exc).__name__)
         finally:
@@ -642,4 +690,4 @@ def resume_all_workspaces() -> int:
 
 
 __all__ = ["OutboxFull", "OutboxUnavailable", "conversation_link", "disclosure", "enabled", "enqueue_handoff",
-           "resume_all_workspaces", "resume_pending", "run_delivery", "shown_status", "status_for"]
+           "resume_all_workspaces", "resume_pending", "run_delivery", "shown_status", "start_pending", "status_for"]

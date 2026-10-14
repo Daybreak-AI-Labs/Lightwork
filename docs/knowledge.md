@@ -145,10 +145,11 @@ separate sources. Each refresh is bounded by the `[knowledge_sources]` table
 
 ```toml
 [knowledge_sources]
-max_items        = 64    # 1-1000: direct items one refresh may list
-max_pages        = 16    # 1-200: provider listing pages (each holds up to 64 items)
-max_download_mib = 4     # 1-32: largest SharePoint, OneDrive or Drive file downloaded
-max_text_kib     = 256   # 1-8192: extracted text kept per refresh
+max_items           = 64   # 1-1000: direct items one refresh may list
+max_pages           = 16   # 1-200: provider listing pages (each holds up to 64 items)
+max_download_mib    = 4    # 1-32: largest SharePoint, OneDrive or Drive file downloaded
+max_text_kib        = 256  # 1-8192: extracted text kept per refresh
+max_refresh_minutes = 5    # 1-60: wall-clock minutes one refresh may run
 ```
 
 `max_download_mib` applies to SharePoint, OneDrive and Google Drive files. A
@@ -166,8 +167,9 @@ with `max_items`: the defaults cover 1,024 items. The search chunker also limits
 one document to about 1.6 million characters, so a larger document cannot be
 imported whatever `max_text_kib` says.
 
-Each refresh must also finish within five minutes. A refresh that runs past that
-fails and publishes no new snapshot, and the source stops supplying specialists
+Each refresh must also finish within `max_refresh_minutes` (default 5). The limit is
+read when the refresh is queued, and that refresh keeps it. A refresh that runs past
+that fails and publishes no new snapshot, and the source stops supplying specialists
 until a complete refresh succeeds. Throughput has not been measured, so raise
 `max_items` or `max_download_mib` only for a folder that one refresh can read in
 that time.

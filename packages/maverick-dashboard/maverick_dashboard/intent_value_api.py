@@ -155,6 +155,10 @@ def read_report(request, *, start="", end="", scope="own", intent="", entity_kin
     # The newest recorded change, not the read time: a read reports the ledger as it was recorded.
     stamps = [row["updated_at"] for row in rows if isinstance(row.get("updated_at"), (int, float))]
     result.update(scope=scope, recorded_as_of=max(stamps, default=None), incomplete=any(row.get("_audit_pending") for row in rows))
+    # Deprecated alias for clients that still read checked_at. It carries the same value as recorded_as_of.
+    from maverick.deprecations import warn_once
+    result["checked_at"] = result["recorded_as_of"]
+    warn_once("intent_value.checked_at")
     return result
 
 
@@ -187,19 +191,26 @@ def synced_report(request, **kwargs):
 @router.get("")
 def report_endpoint(request: Request, start: str = "", end: str = "", scope: Literal["own", "company"] = "own",
                     intent: str = "", entity_kind: Literal["", "specialists", "agents", "processes"] = "", entity_id: str = ""):
+    """The work-value report. ``recorded_as_of`` is when the recorded work last changed. ``checked_at`` is a
+    deprecated alias with the same value, kept for existing clients until its removal in 0.3.0."""
     return _call(lambda: read_report(request, start=start, end=end, scope=scope, intent=intent, entity_kind=entity_kind,
                                      entity_id=entity_id, refresh=False))
 
 
 @router.post("/sync")
-def sync_endpoint(request: Request):
-    """Record newly observed work and suggestions. Reads do not record them; the page calls this before it reads."""
-    return _call(lambda: _record(request))
+def sync_endpoint(request: Request, device_id: str = "local-device"):
+    """Record newly observed work and suggestions, and delete the expired Ekko observations of ``device_id``
+    (none when the name is not a device name). Reads do not record them; the page calls this before it reads."""
+    return _call(lambda: _record(request, device_id))
 
 
-def _record(request):
+def _record(request, device_id="local-device"):
     authority(request)
     settings.retry_pending()
+    if auth.has_permission(request, "operate"):
+        # Expired Ekko observations are deleted by this explicit write; a page read does not delete them.
+        from .ekko_routes import _purge_expired_for_device
+        _purge_expired_for_device(request, device_id)
     rows = records(request)
     enabled = settings.policy()["recommendations"]
     if enabled:

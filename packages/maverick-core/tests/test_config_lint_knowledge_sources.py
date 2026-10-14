@@ -16,3 +16,8 @@ def test_whole_number_knowledge_sources_limits_lint_clean() -> None:
 def test_a_fractional_knowledge_sources_limit_is_an_error() -> None:
     messages = _messages({"knowledge_sources": {"max_items": 64.5}})
     assert "knowledge_sources.max_items must be an integer, got float" in messages
+
+
+def test_a_fractional_refresh_time_limit_is_an_error() -> None:
+    messages = _messages({"knowledge_sources": {"max_refresh_minutes": 5.5}})
+    assert "knowledge_sources.max_refresh_minutes must be an integer, got float" in messages

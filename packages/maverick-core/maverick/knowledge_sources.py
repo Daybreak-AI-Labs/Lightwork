@@ -22,7 +22,8 @@ from .paths import canonical_tenant_id, tenant_scope
 from .privacy_ops import RecordConflict
 
 MAX_SOURCES, MAX_JOBS = 100, 10000
-MAX_WALL_SECONDS = 300
+# The default refresh limit ([knowledge_sources] max_refresh_minutes = 5), in seconds.
+DEFAULT_REFRESH_WALL_SECONDS = 300
 SOURCE_STORE = GovernedRecordStore("knowledge-remote-sources", "KNS", "knowledge_remote_source")
 JOB_STORE = GovernedRecordStore("knowledge-source-refreshes", "KNJ", "knowledge_source_refresh")
 SNAPSHOT_STORE = GovernedRecordStore("knowledge-source-snapshots", "KNV", "knowledge_source_snapshot")
@@ -35,9 +36,22 @@ def notice():
     return ("Refresh reads only the selected folder's direct files or the selected space's current pages. "
             f"Subfolders need separate sources. At most {bounds['max_items']} items, {bounds['max_download_mib']} MiB per download "
             f"and {bounds['max_text_kib']} KiB of extracted source text are supported. "
+            f"Each refresh must finish within {bounds['max_refresh_minutes']} minutes. "
             "Changed items are screened and indexed through the native Knowledge writer. A complete snapshot requires a different authorized registry reviewer before specialists may use it. "
             "Connection sharing determines who can use its cached knowledge; attaching it never grants account or data-use rights. "
             "A dated refresh does not confirm future provider delivery or permanent deletion. Interrupted outcomes are kept and are never repeated automatically.")
+
+
+def refresh_wall_seconds() -> float:
+    """The wall-clock limit of one refresh, read from [knowledge_sources] when the refresh is queued.
+
+    An invalid [knowledge_sources] value keeps the default here, and the refresh then
+    reports that named setting when it runs, as its other limits do.
+    """
+    try:
+        return config.get_knowledge_sources()["max_refresh_minutes"] * 60.0
+    except config.KnowledgeSourcesConfigError:
+        return float(DEFAULT_REFRESH_WALL_SECONDS)
 
 
 def digest(value):
@@ -378,6 +392,8 @@ class KnowledgeSources:
             if existing.get("binding") != digest(prepared):
                 raise RecordConflict("This original request has different reviewed settings.")
             return self.original_job(job_id)
+        # Read before the claim, so the deadline is fixed at the reviewed limit when the refresh is queued.
+        wall_seconds = refresh_wall_seconds()
         row = self.owned(prepared["source"])
         if row.get("_audit_pending") or row["plan_sha256"] != prepared["plan_sha256"] or row["revision"] != prepared["revision"]:
             raise RecordConflict("The saved source changed. Read its original outcome or review a fresh refresh.")
@@ -397,7 +413,8 @@ class KnowledgeSources:
                 return {"id": job_id, "state": "unconfirmed", "message": "Refresh admission has a retained pending activity record. It will not run automatically."}
             try:
                 job = self.jobs.create({"id": job_id, "source": row["id"], "tenant": self.tenant, "owner": self.actor, "plan": row["plan"],
-                                        "plan_sha256": row["plan_sha256"], "binding": digest(prepared), "state": "queued", "deadline": time.time() + MAX_WALL_SECONDS,
+                                        "plan_sha256": row["plan_sha256"], "binding": digest(prepared), "state": "queued",
+                                        "deadline": time.time() + wall_seconds, "max_wall_seconds": wall_seconds,
                                         "prepared": prepared, "items": [], "changed": 0, "unchanged": 0, "removed": 0,
                                         "observed_dollars": 0.0, "unresolved_dollars": 0.0, "price_basis": prepared["embedding"]["price_basis"],
                                         "message": "Refresh queued. No document delivery or registry approval is yet confirmed."},
@@ -609,7 +626,8 @@ class KnowledgeSources:
             return
         from .budget import Budget
         from .tenant.provider_admission import bind_budget
-        budget = Budget(max_dollars=job["plan"]["max_dollars"], max_wall_seconds=MAX_WALL_SECONDS)
+        # The wall cap is the limit this refresh was queued with, the same one its deadline uses.
+        budget = Budget(max_dollars=job["plan"]["max_dollars"], max_wall_seconds=job.get("max_wall_seconds", DEFAULT_REFRESH_WALL_SECONDS))
         budget._organization_run_id = job["id"]
         budget._organization_run_ids = [job["id"]]
         budget._organization_principal = job["owner"]
