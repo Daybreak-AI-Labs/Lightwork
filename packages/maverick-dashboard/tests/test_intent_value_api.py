@@ -66,10 +66,15 @@ def get(client, path="", user="alice"):
     return response.json()
 
 
+# A first render of a fresh home may create these, and nothing else: the empty
+# authority fence that the shared navigation takes, and the template bytecode cache.
+FIRST_RENDER_FILES = {"home/authority-effects.lock"}
+
+
 def tree(root):
-    """Content digests of every stored file under ``root`` (locks and caches excluded)."""
+    """Content digests of every file under ``root``, lock files and caches included."""
     return {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in sorted(root.rglob("*")) if path.is_file() and path.suffix != ".lock" and "cache" not in path.parts}
+            for path in sorted(root.rglob("*")) if path.is_file()}
 
 
 def stable(payload):
@@ -760,8 +765,11 @@ def test_copilot_admin_assumptions_require_review_preserve_history_and_deduplica
 def test_reads_leave_stores_unchanged_until_the_page_syncs(context, tmp_path):
     client, world = context
     seed(world, count=3)
-    before = tree(tmp_path)
+    empty = tree(tmp_path)
     assert client.get("/work-value", headers=headers()).status_code == 200
+    created = set(tree(tmp_path)) - set(empty)
+    assert all(path in FIRST_RENDER_FILES or path.startswith("home/cache/templates/") for path in created), created
+    before = tree(tmp_path)
     unrecorded = client.get(BASE, headers=headers())
     assert unrecorded.status_code == 200 and unrecorded.json()["totals"]["performed_work"] == 0
     for path in ("/opportunities", "/settings", "/benchmarks"):
@@ -772,6 +780,7 @@ def test_reads_leave_stores_unchanged_until_the_page_syncs(context, tmp_path):
     assert recorded != before
     first = client.get(BASE, headers=headers()).json()
     assert first["totals"]["performed_work"] == 3
+    assert client.get(BASE + "/work/" + first["rows"][0]["id"], headers=headers()).status_code == 200
     assert tree(tmp_path) == recorded
     assert client.post(BASE + "/sync", headers=headers()).status_code == 200
     assert tree(tmp_path) == recorded
