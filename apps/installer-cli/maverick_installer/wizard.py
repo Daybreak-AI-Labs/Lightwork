@@ -7681,6 +7681,13 @@ _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 # The installer does not import the dashboard, so the text is copied; a test keeps the two equal.
 _COLLECTOR_PATTERN = (r"(https://[^\s\"'<>?#]{1,300}|http://(localhost|127\.0\.0\.1|\[::1\])"
                       r"(:[0-9]{1,5})?(/[^\s\"'<>?#]{0,300})?)?")
+# The settings page's patterns for the key service and the security monitoring address
+# (settings_catalog_access.py). Copied for the same reason; a test keeps each equal.
+_KEY_ID_PATTERN = r"[A-Za-z0-9:/._-]{1,300}"
+_REGION_PATTERN = r"[a-z]{2}(-[a-z]+)+-[0-9]{1,2}"
+_VAULT_ADDRESS_PATTERN = r"https://[^\s\"'<>?#]{1,300}"
+_VAULT_MOUNT_PATTERN = r"[A-Za-z0-9._-]{1,64}"
+_SIEM_PATTERN = r"(https?|tcp|udp|datadog|sentinel)://[^\s\"'<>]{1,300}"
 _SIEM_KINDS: list[tuple[str, str]] = [
     ("https", "A web address (https://)"),
     ("tcp", "Syslog over TCP (host:port)"),
@@ -7810,17 +7817,37 @@ def _pick_trace_collector() -> dict[str, Any]:
 
 
 def _key_name_problem(value: str) -> str | None:
-    if not value or re.search(r"\s", value):
-        return "Enter the key name exactly as your key service shows it, without spaces."
+    if re.fullmatch(_KEY_ID_PATTERN, value) is None:
+        return ("Enter the key name exactly as your key service shows it: letters, digits and "
+                ": / . _ - only, without spaces.")
     return None
 
 
 def _azure_key_problem(value: str) -> str | None:
     from maverick.kms_backends import _azure_key_parts
 
-    if _azure_key_parts(value) is None:
+    if re.fullmatch(_KEY_ID_PATTERN, value) is None or _azure_key_parts(value) is None:
         return ("Enter the key's web address, such as https://<vault>.vault.azure.net/keys/<name>, "
                 "optionally with its version at the end.")
+    return None
+
+
+def _region_problem(value: str) -> str | None:
+    if value and re.fullmatch(_REGION_PATTERN, value) is None:
+        return "Enter a region name such as us-east-1, or leave the answer blank."
+    return None
+
+
+def _vault_address_problem(value: str) -> str | None:
+    problem = _web_address_problem(value, ("https",))
+    if problem is None and re.fullmatch(_VAULT_ADDRESS_PATTERN, value) is None:
+        return "Enter a web address with no spaces, quotes, question marks or # in it."
+    return problem
+
+
+def _vault_mount_problem(value: str) -> str | None:
+    if value and re.fullmatch(_VAULT_MOUNT_PATTERN, value) is None:
+        return "Enter the name of the Vault key area: letters, digits and . _ - only."
     return None
 
 
@@ -7843,14 +7870,16 @@ def _pick_key_service(keys: dict[str, str]) -> dict[str, Any]:
         kms["key_id"] = _ask_until(
             "  Key name at the service", default="", check=_key_name_problem)
     if provider == "aws":
-        region = _q_text("  Region of the key (blank = the AWS_REGION setting)", default="").strip()
+        region = _ask_until(
+            "  Region of the key (blank = the AWS_REGION setting)", default="",
+            check=_region_problem)
         if region:
             kms["region"] = region
     if provider == "vault":
         kms["address"] = _ask_until(
-            "  Vault web address (https://...)", default="",
-            check=lambda value: _web_address_problem(value, ("https",)))
-        mount = _q_text("  Vault key area", default="transit").strip() or "transit"
+            "  Vault web address (https://...)", default="", check=_vault_address_problem)
+        mount = _ask_until(
+            "  Vault key area", default="transit", check=_vault_mount_problem) or "transit"
         if mount != "transit":
             kms["mount"] = mount
         token = _ask_credential("VAULT_TOKEN", "Vault access token")
@@ -7879,6 +7908,8 @@ def _siem_address_problem(address: str, kind: str) -> str | None:
     if scheme not in _SIEM_SCHEMES[kind]:
         return ("That address is not one of the kind you chose. Example: "
                 f"{_SIEM_ADDRESS_EXAMPLES[kind]}")
+    if re.fullmatch(_SIEM_PATTERN, address) is None:
+        return "Lightwork cannot send to that address. Check it against the example."
     return None
 
 

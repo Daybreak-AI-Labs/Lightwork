@@ -236,10 +236,20 @@ def test_plain_http_collector_on_this_computer_is_accepted(monkeypatch, address)
     assert config["observability"]["otel_endpoint"] == address
 
 
-def test_collector_pattern_is_the_settings_page_pattern():
+@pytest.mark.parametrize(("setting", "constant"), [
+    ("observability.otel_endpoint", "_COLLECTOR_PATTERN"),
+    ("kms.key_id", "_KEY_ID_PATTERN"),
+    ("kms.region", "_REGION_PATTERN"),
+    ("kms.address", "_VAULT_ADDRESS_PATTERN"),
+    ("kms.mount", "_VAULT_MOUNT_PATTERN"),
+    ("audit.siem_dest", "_SIEM_PATTERN"),
+])
+def test_wizard_patterns_are_the_settings_page_patterns(setting, constant):
+    # The wizard checks the same text the settings page checks, so an answer it accepts
+    # is one the settings page keeps.
     from maverick_dashboard import settings_catalog
 
-    assert settings_catalog.BY_ID["observability.otel_endpoint"].pattern == wizard._COLLECTOR_PATTERN
+    assert settings_catalog.BY_ID[setting].pattern == getattr(wizard, constant)
 
 
 # ---------- key services ----------
@@ -297,6 +307,62 @@ def test_key_name_with_spaces_is_reasked(monkeypatch, capsys):
     )
     assert config["kms"]["key_id"] == "lightwork-workspace"
     assert "without spaces" in capsys.readouterr().out
+
+
+def test_key_name_outside_the_settings_page_pattern_is_reasked(monkeypatch, capsys):
+    config, _keys = _pick(
+        monkeypatch,
+        (TRACE, False),
+        (KMS, _label(wizard._KMS_PROVIDERS, "gcp")),
+        (KEY_NAME, "lightwork@prod"),
+        (KEY_NAME, "lightwork-prod"),
+        (SIEM, False),
+    )
+    assert config["kms"]["key_id"] == "lightwork-prod"
+    assert "without spaces" in capsys.readouterr().out
+
+
+def test_aws_region_must_be_a_region_name(monkeypatch):
+    config, _keys = _pick(
+        monkeypatch,
+        (TRACE, False),
+        (KMS, _label(wizard._KMS_PROVIDERS, "aws")),
+        (KEY_NAME, "alias-lightwork"),
+        (REGION, "useast1"),
+        (REGION, "us-east-1"),
+        (SIEM, False),
+    )
+    assert config["kms"] == {"provider": "aws", "key_id": "alias-lightwork", "region": "us-east-1"}
+
+
+def test_vault_address_and_key_area_must_fit_the_settings_page(monkeypatch):
+    config, _keys = _pick(
+        monkeypatch,
+        (TRACE, False),
+        (KMS, _label(wizard._KMS_PROVIDERS, "vault")),
+        (KEY_NAME, "lightwork"),
+        (VAULT_ADDRESS, "https://vault.internal:8200/?token=x"),
+        (VAULT_ADDRESS, "https://vault.internal:8200"),
+        (VAULT_MOUNT, "kv keys"),
+        (VAULT_MOUNT, "kv-keys"),
+        (VAULT_TOKEN, "hvs.token-for-the-test"),  # pragma: allowlist secret
+        (SIEM, False),
+    )
+    assert config["kms"]["address"] == "https://vault.internal:8200"
+    assert config["kms"]["mount"] == "kv-keys"
+
+
+def test_siem_address_outside_the_settings_page_pattern_is_reasked(monkeypatch, capsys):
+    config, _keys = _pick(
+        monkeypatch,
+        (TRACE, False), (KMS, _label(wizard._KMS_PROVIDERS, "local")),
+        (SIEM, True), (KIND, KIND_HTTPS),
+        (ADDRESS, "https://siem.example.com/<raw>"),
+        (ADDRESS, "https://siem.example.com/raw"),
+        (SIEM_TOKEN, ""),
+    )
+    assert config["audit"] == {"siem_dest": "https://siem.example.com/raw"}
+    assert "cannot send to that address" in capsys.readouterr().out
 
 
 def test_azure_key_address_is_checked_and_reasked(tmp_path, monkeypatch, capsys):
