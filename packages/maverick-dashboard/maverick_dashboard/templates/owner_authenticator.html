@@ -1,5 +1,6 @@
 {% extends "public_base.html" %}
 {% from "_passphrase_fields.html" import styles with context %}
+{% from "_back_link.html" import back_link with context %}
 {% block title %}Authenticator app · Lightwork{% endblock %}
 {% block public_label %}Your sign-in{% endblock %}
 {% block public_footer %}Owner of this installation{% endblock %}
@@ -48,6 +49,6 @@
       <div class="own__actions"><button type="submit" class="btn btn--primary">Set up an authenticator app</button></div>
     </form>
   {% endif %}
-  <div class="own__actions"><a href="/start">Back to Get started</a></div>
+  <div class="own__actions">{{ back_link('/start', 'Get started') }}</div>
 </div>
 {% endblock %}
