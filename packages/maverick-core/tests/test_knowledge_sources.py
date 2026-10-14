@@ -1,10 +1,12 @@
 """Saved remote Knowledge sources: the refresh claim and the freshness window."""
 from __future__ import annotations
 
+import hashlib
 import time
 from types import SimpleNamespace
 
 import pytest
+from maverick import config
 from maverick import knowledge_sources as native
 from maverick.paths import tenant_scope
 
@@ -260,3 +262,116 @@ def test_withheld_recovery_waits_for_its_activity_receipt(service, monkeypatch):
     assert service.jobs.retry_pending() == 1
     native.KnowledgeSources.withhold_queued(retained)
     assert service.sources.get(before["id"])["active_job"] is None
+
+
+def _set_limits(monkeypatch, section):
+    monkeypatch.setattr(config, "load_config", lambda: {"knowledge_sources": section})
+
+
+class _KnowledgeBase:
+    """Stands in for the native Knowledge writer: it keeps every ingested text."""
+
+    def __init__(self):
+        self.records = {}
+
+    def ingest_text(self, collection, text, **_kwargs):
+        self.records[(collection, hashlib.sha256(text.encode()).hexdigest())] = {"text": text, "metadata": {}}
+        return 1
+
+    def exact_document(self, collection, document_sha256):
+        return self.records[(collection, document_sha256)]
+
+    def close(self):
+        pass
+
+
+def test_the_notice_states_this_workspaces_configured_limits(service, monkeypatch):
+    _, row = _prepared(service, 3600)
+    _set_limits(monkeypatch, {})
+    assert ("At most 64 items, 4 MiB per download and 256 KiB of extracted source text are supported."
+            in service.public(row)["notice"])
+    _set_limits(monkeypatch, {"max_items": 200, "max_download_mib": 8, "max_text_kib": 512})
+    assert ("At most 200 items, 8 MiB per download and 512 KiB of extracted source text are supported."
+            in service.public(row)["notice"])
+
+
+def test_an_invalid_limit_refuses_the_saved_source_listing_with_its_name(service, monkeypatch):
+    _, row = _prepared(service, 3600)
+    _set_limits(monkeypatch, {"max_text_kib": 0})
+    with pytest.raises(config.KnowledgeSourcesConfigError, match=r"knowledge_sources\.max_text_kib must be a whole number"):
+        service.public(row)
+
+
+def _start_refresh(service, monkeypatch, texts, limits):
+    """Save a source, then queue and run a refresh under ``limits`` whose inventory lists one file per text."""
+    rows = [{"id": name, "name": f"{name}.txt", "revision": "r1", "mime": "text/plain", "size": None,
+             "citation": "", "kind": "file"} for name in texts]
+    monkeypatch.setattr(native.readers, "inventory", lambda binding, actor, guard: rows)
+    monkeypatch.setattr(native.readers, "document", lambda binding, actor, item, guard: (texts[item["id"]], "r" * 64, {"warnings": []}))
+    monkeypatch.setattr(service, "_open", lambda: _KnowledgeBase())
+    prepared, _ = _prepared(service, 3600)
+    _set_limits(monkeypatch, limits)
+    job = service.start(dict(prepared, inventory_sha256=native.digest(rows)), "e" * 32)
+    return service.run(job["id"])
+
+
+def test_a_refresh_refuses_extracted_text_above_the_configured_limit_and_names_it(service, monkeypatch):
+    result = _start_refresh(service, monkeypatch, {"first": "a" * 600, "second": "b" * 600}, {"max_text_kib": 1})
+    assert result["state"] == "partial"
+    assert [item["state"] for item in result["items"]] == ["imported", "error"]
+    assert result["items"][1]["message"] == "The extracted source exceeds 1 KiB. Choose a smaller source."
+
+
+def test_a_refresh_admits_text_within_a_raised_limit(service, monkeypatch):
+    # 390 KiB in all: over the 256 KiB default, so only the raised limit admits it.
+    monkeypatch.setattr(service, "_publish", lambda job, items, kb: {"id": "KNV-" + "c" * 32, "reference": {"id": "ref"}})
+    result = _start_refresh(service, monkeypatch, {"first": "a" * 200_000, "second": "b" * 200_000}, {"max_text_kib": 512})
+    assert result["state"] == "completed"
+    assert [item["state"] for item in result["items"]] == ["imported", "imported"]
+
+
+def test_a_refresh_with_an_invalid_limit_fails_with_the_named_setting(service, monkeypatch):
+    result = _start_refresh(service, monkeypatch, {"first": "a" * 600}, {"max_text_kib": 0})
+    assert result["state"] == "failed"
+    assert result["message"] == "knowledge_sources.max_text_kib must be a whole number from 1 to 8192"
+
+
+def _retained_snapshot(service, items, *, text):
+    """A complete snapshot of ``items`` retained under a saved source, as a refresh writes it."""
+    _, row = _prepared(service, 3600)
+    version = "f" * 32
+    identifier = "KNV-" + native.digest([row["id"], version])[:32]
+    kb, manifest = _KnowledgeBase(), []
+    for number in range(items):
+        collection = f"remote-{row['id'][4:]}-{number:016x}"
+        document_sha = hashlib.sha256(f"{text}{number}".encode()).hexdigest()
+        record = {"text": f"{text}{number}", "metadata": {"remote_source_id": row["id"], "remote_item_id": f"item-{number}"}}
+        kb.records[(collection, document_sha)] = record
+        manifest.append({"remote_id": f"item-{number}", "collection": collection, "document_sha256": document_sha,
+                         "native_document_sha256": native.digest(native._committed_document(record))})
+    service.snapshots.create({"id": identifier, "tenant": TENANT, "owner": OWNER, "version": version, "source": row["id"],
+                              "plan_sha256": native.content_binding(row["plan"]), "items": manifest, "binding": row["plan"]["binding"],
+                              "name": row["plan"]["name"], "observed_at": time.time(), "reference": None},
+                             action="test.snapshot", actor=OWNER)
+    return kb, row["id"], version
+
+
+def test_an_existing_snapshot_validates_under_any_allowed_item_limit(service, monkeypatch):
+    kb, identifier, version = _retained_snapshot(service, 100, text="x")
+    _set_limits(monkeypatch, {"max_items": 1})  # lower than the manifest it was retained under
+    assert len(native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb)["items"]) == 100
+
+
+def test_a_manifest_above_the_hard_ceiling_is_still_refused(service):
+    kb, identifier, version = _retained_snapshot(service, 1001, text="x")
+    with pytest.raises(ValueError, match="item manifest is incomplete"):
+        native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb)
+
+
+def test_the_projection_text_bound_follows_the_current_max_text_kib(service, monkeypatch):
+    kb, identifier, version = _retained_snapshot(service, 3, text="t" * 600)
+    _set_limits(monkeypatch, {"max_text_kib": 1})
+    with pytest.raises(ValueError, match="bounded text projection"):
+        native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb)
+    _set_limits(monkeypatch, {"max_text_kib": 2})
+    assert native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb)["text_bytes"] == 3 * 601

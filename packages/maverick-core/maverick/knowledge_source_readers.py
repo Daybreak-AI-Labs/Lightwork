@@ -14,10 +14,13 @@ from base64 import b64encode
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urljoin, urlsplit
 
-from . import connections
+from . import config, connections
 from .authority_effects import authority_effect_fence
 
-MAX_ITEMS, MAX_PAGES, MAX_BYTES = 64, 16, 4 * 1024 * 1024
+# The item, page and download bounds are [knowledge_sources] settings, read at
+# every listing, download and refresh (config.get_knowledge_sources). This is
+# the most items any saved manifest can hold, whatever the current setting.
+MAX_ITEMS_CEILING = 1000
 SOURCES = {
     "sharepoint": {"label": "SharePoint library folder", "connector": "msgraph"},
     "onedrive": {"label": "OneDrive folder", "connector": "msgraph"},
@@ -89,11 +92,13 @@ def _url(binding, path):
     return url
 
 
-def read_bytes(binding, actor, path, guard, *, limit=MAX_BYTES):
+def read_bytes(binding, actor, path, guard, *, limit=None):
     """Use the native pinned transport, with no cross-origin credential redirect."""
     from .automation_events import _http_read_bytes
     from .enterprise import enterprise_egress_denial
 
+    if limit is None:
+        limit = config.get_knowledge_sources()["max_download_mib"] * 1024 * 1024
     cfg = validate(binding)
     url = _url(cfg, path)
     with authority_effect_fence(), connections._mutation_lock():
@@ -112,6 +117,7 @@ def read_bytes(binding, actor, path, guard, *, limit=MAX_BYTES):
 def _download(binding, actor, url, guard):
     from .doc_discovery import _guarded_client
 
+    max_bytes = config.get_knowledge_sources()["max_download_mib"] * 1024 * 1024
     deadline = time.monotonic() + 45
     for _ in range(5):
         parsed = urlsplit(url)
@@ -136,7 +142,7 @@ def _download(binding, actor, url, guard):
                     chunks, total = [], 0
                     for chunk in response.iter_bytes():
                         total += len(chunk)
-                        if total > MAX_BYTES or time.monotonic() >= deadline:
+                        if total > max_bytes or time.monotonic() >= deadline:
                             raise SourceReadError("The document exceeded its bounded download limit.")
                         chunks.append(chunk)
                     return b"".join(chunks)
@@ -155,9 +161,10 @@ def read_json(binding, actor, path, guard):
 
 
 def collection(binding, actor, path, guard, *, key="value"):
+    bounds = config.get_knowledge_sources()
     rows, seen = [], set()
     initial = urlsplit(_url(binding, path))
-    for _ in range(MAX_PAGES):
+    for _ in range(bounds["max_pages"]):
         if path in seen:
             raise SourceReadError("The provider repeated a result page. Nothing was marked complete.")
         seen.add(path)
@@ -166,8 +173,8 @@ def collection(binding, actor, path, guard, *, key="value"):
         if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
             raise SourceReadError("The selected account did not return a complete document list.")
         rows.extend(page)
-        if len(rows) > MAX_ITEMS:
-            raise SourceReadError("This source exceeds 64 items. Choose a smaller folder or space.")
+        if len(rows) > bounds["max_items"]:
+            raise SourceReadError(f"This source exceeds {bounds['max_items']} items. Choose a smaller folder or space.")
         if binding["kind"] == "drive":
             token = body.get("nextPageToken")
             path = (path.split("&pageToken=", 1)[0] + "&pageToken=" + quote(str(token), safe="")) if token else None
@@ -187,7 +194,7 @@ def collection(binding, actor, path, guard, *, key="value"):
             before, after = parse_qs(initial.query), parse_qs(parsed.query)
             if any(before.get(name) != after.get(name) for name in ("spaceKey", "type", "status") if name in before):
                 raise SourceReadError("The provider changed the selected space between result pages.")
-    raise SourceReadError("The document listing exceeded 16 pages. Nothing was marked complete.")
+    raise SourceReadError(f"The document listing exceeded {bounds['max_pages']} pages. Nothing was marked complete.")
 
 
 def picker(binding, actor, step, chosen, guard):
@@ -297,8 +304,9 @@ def document(binding, actor, item, guard):
         if not isinstance(value, str):
             raise SourceReadError("This page has no complete readable body.")
         raw, name = value.encode("utf-8"), name + ".html"
-    if not raw or len(raw) > MAX_BYTES:
-        raise SourceReadError("The document is empty or exceeds the 4 MiB download limit.")
+    max_mib = config.get_knowledge_sources()["max_download_mib"]
+    if not raw or len(raw) > max_mib * 1024 * 1024:
+        raise SourceReadError(f"The document is empty or exceeds the {max_mib} MiB download limit.")
     from maverick_knowledge.parse import extract_document
     suffix = Path(name).suffix.lower()
     if suffix not in {".txt", ".md", ".csv", ".html", ".htm", ".pdf", ".docx", ".xlsx"}:
