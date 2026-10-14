@@ -123,3 +123,40 @@ def test_a_bearer_key_cannot_end_sessions_and_a_late_audit_refusal_is_reported_h
     with pytest.raises(HTTPException) as late:
         sessions_page._audit_revoke(object(), target="user:x", sid="", count=1, everywhere=True)
     assert late.value.status_code == 503 and "were signed out" in late.value.detail
+
+
+def test_the_store_connection_is_reused_until_the_file_is_replaced():
+    with sr._connect() as first:
+        pass
+    with sr._connect() as second:
+        pass
+    assert second is first
+    sr._path().unlink()
+    with sr._connect() as third:
+        pass
+    assert third is not first
+    _register("after-replace")
+    assert sr.status("after-replace") is True
+    assert sr.status("never-registered") is None
+
+
+def test_a_refresh_inside_the_window_does_not_reach_the_store(monkeypatch):
+    sr._TOUCHED.clear()
+    _register("s1")
+    sr.touch("s1", ip="203.0.113.10", activity=True)   # this process's first refresh writes
+    calls = []
+    real_connect = sr._connect
+
+    def counting_connect():
+        calls.append(1)
+        return real_connect()
+
+    monkeypatch.setattr(sr, "_connect", counting_connect)
+    sr.touch("s1", activity=True)
+    sr.touch("s1", activity=True)
+    assert calls == []
+    sr._TOUCHED.clear()
+    sr.touch("s1", activity=True)
+    assert calls == [1]
+    assert sr.get("s1").ip == "203.0.113.9"   # last_seen is recent, so the UPDATE matches nothing, as before
+

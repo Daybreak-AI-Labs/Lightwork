@@ -20,6 +20,7 @@ shows on no list, and still ends with "Sign out everywhere".
 """
 from __future__ import annotations
 
+import os
 import secrets
 import sqlite3
 import threading
@@ -32,6 +33,7 @@ from maverick.paths import maverick_home
 
 _LOCK = threading.Lock()
 _TOUCH_INTERVAL_SECONDS = 60
+_TOUCHED: dict[str, float] = {}  # sid -> last refresh this process wrote
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     sid TEXT PRIMARY KEY,
@@ -100,6 +102,45 @@ def _path() -> Path:
     return maverick_home() / "dashboard-sessions.sqlite3"
 
 
+# The store connection is kept open between calls, under _LOCK, and reopened
+# whenever the file it was opened on is no longer there (replaced, removed, or
+# this is a forked child). Every read still goes to the database.
+_SHARED: dict = {"key": None, "conn": None}
+
+
+def _file_key(path: Path) -> tuple | None:
+    try:
+        info = os.stat(path)
+    except OSError:
+        return None
+    return (str(path), info.st_dev, info.st_ino, os.getpid())
+
+
+def _drop_shared() -> None:
+    conn, _SHARED["conn"], _SHARED["key"] = _SHARED["conn"], None, None
+    if conn is not None:
+        try:
+            conn.close()
+        except sqlite3.Error:
+            pass
+
+
+def _open_store(path: Path) -> sqlite3.Connection:
+    key = _file_key(path)
+    if _SHARED["conn"] is not None and key is not None and key == _SHARED["key"]:
+        return _SHARED["conn"]
+    _drop_shared()
+    # Shared across request threads; every use happens under _LOCK.
+    conn = sqlite3.connect(str(path), timeout=5.0, check_same_thread=False)
+    try:
+        conn.executescript(_SCHEMA)
+    except BaseException:
+        conn.close()
+        raise
+    _SHARED["conn"], _SHARED["key"] = conn, _file_key(path)
+    return conn
+
+
 @contextmanager
 def _connect():
     from maverick.file_lock import ensure_private_directory, ensure_private_file
@@ -108,15 +149,17 @@ def _connect():
     try:
         ensure_private_directory(path.parent)
         with _LOCK:
-            conn = sqlite3.connect(str(path), timeout=5.0)
+            conn = _open_store(path)
+            ensure_private_file(path)
             try:
-                conn.executescript(_SCHEMA)
-                ensure_private_file(path)
                 yield conn
-                conn.commit()
-            finally:
-                conn.close()
+            except BaseException:
+                conn.rollback()
+                raise
+            conn.commit()
     except (OSError, sqlite3.Error) as exc:
+        if isinstance(exc, sqlite3.Error):
+            _drop_shared()
         raise SessionStoreError(f"session record unavailable: {exc}") from exc
 
 
@@ -181,6 +224,10 @@ def touch(sid: str, *, ip: str = "", user_agent: str = "", activity: bool = Fals
     if idle and not activity:
         return  # Background requests never extend the inactivity limit.
     now = time.time()
+    interval = min(_TOUCH_INTERVAL_SECONDS, idle * 15) if idle else _TOUCH_INTERVAL_SECONDS
+    last = _TOUCHED.get(sid)
+    if last is not None and now - last < interval:
+        return  # This process already refreshed it inside the window: the UPDATE would match nothing.
     summary = user_agent_summary(user_agent) if user_agent else ""
     try:
         with _connect() as conn:
@@ -192,11 +239,13 @@ def touch(sid: str, *, ip: str = "", user_agent: str = "", activity: bool = Fals
                 "UPDATE sessions SET last_seen = ?, ip = COALESCE(NULLIF(?, ''), ip), "
                 "user_agent = CASE WHEN ? = '' THEN user_agent ELSE ? END "
                 "WHERE sid = ? AND last_seen < ?",
-                (now, str(ip or ""), summary, summary, sid,
-                 now - min(_TOUCH_INTERVAL_SECONDS, idle * 15) if idle else now - _TOUCH_INTERVAL_SECONDS),
+                (now, str(ip or ""), summary, summary, sid, now - interval),
             )
     except SessionStoreError:
         return
+    if len(_TOUCHED) > 4096:
+        _TOUCHED.clear()
+    _TOUCHED[sid] = now
 
 
 def _rows(conn, where: str, params: tuple) -> list[SessionRecord]:
