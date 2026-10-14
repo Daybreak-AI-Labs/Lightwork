@@ -212,10 +212,13 @@ def create_site(tenant: str | None, *, site_id: str, fields: dict[str, Any],
                               (origin, _tenant_key(tenant), site_id))
             index.execute("INSERT INTO chat_keys (key_sha256, tenant_id, site_id, created_at) "
                           "VALUES (?, ?, ?, ?)", (digest(key), _tenant_key(tenant), site_id, now))
-    except sqlite3.IntegrityError as exc:
+    except Exception as exc:
+        # Any failed index write removes the site row again, so no site is left without its key.
         with _write(sites_path(tenant), _TENANT_SCHEMA) as db:
             db.execute("DELETE FROM chat_sites WHERE id = ?", (site_id,))
-        raise ChatStoreError("origin_in_use") from exc
+        if isinstance(exc, sqlite3.IntegrityError):
+            raise ChatStoreError("origin_in_use") from exc
+        raise
     return get_site(tenant, site_id) or {}, key
 
 

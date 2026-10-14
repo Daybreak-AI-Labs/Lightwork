@@ -496,6 +496,66 @@ def test_admin_actions_are_audited_without_key_material(chat, model, monkeypatch
     assert all(created["publishable_key"] not in json.dumps(row, default=str) for row in recorded)
 
 
+def test_a_refused_site_creation_writes_no_created_audit_event(chat, model, monkeypatch):
+    from maverick import audit
+
+    recorded = []
+    monkeypatch.setattr(audit, "audit_event", lambda kind, **detail: recorded.append(detail))
+    _site(chat)
+    duplicate = chat.client.post("/api/v1/public-chat/sites", json={
+        "display_name": "Second", "origins": [SHOP], "specialist": "finance_ap",
+        "daily_cap_dollars": 1.0})
+    assert duplicate.status_code == 409
+    created = [row for row in recorded if row.get("verb") == "public_chat_site_created"]
+    assert len(created) == 1
+
+
+def test_a_failed_index_write_leaves_no_site_behind(chat, model, monkeypatch):
+    import sqlite3
+
+    from maverick_dashboard import public_chat_store as store
+
+    real_write = store._write
+
+    def _failing_index(path, schema):
+        if path == store.index_path():
+            raise sqlite3.OperationalError("database is locked")
+        return real_write(path, schema)
+
+    monkeypatch.setattr(store, "_write", _failing_index)
+    failed = chat.client.post("/api/v1/public-chat/sites", json={
+        "display_name": "Acme shop", "origins": [SHOP], "specialist": "finance_ap",
+        "daily_cap_dollars": 1.0})
+    assert failed.status_code == 503
+    monkeypatch.setattr(store, "_write", real_write)
+    assert chat.client.get("/api/v1/public-chat/sites").json()["sites"] == []
+
+
+def test_a_site_whose_creation_cannot_be_audited_is_revoked_again(chat, model, monkeypatch):
+    from maverick import audit
+
+    def _refuse(kind, **detail):
+        raise audit.AuditRefused("the activity record is closed")
+
+    monkeypatch.setattr(audit, "audit_event", _refuse)
+    response = chat.client.post("/api/v1/public-chat/sites", json={
+        "display_name": "Acme shop", "origins": [SHOP], "specialist": "finance_ap",
+        "daily_cap_dollars": 1.0})
+    assert response.status_code == 503
+    assert "publishable_key" not in response.text
+    listed = chat.client.get("/api/v1/public-chat/sites").json()["sites"]
+    assert [site["state"] for site in listed] == ["revoked"]
+
+
+def test_admin_create_refuses_an_oversized_body(chat, model):
+    body = json.dumps({"display_name": "x" * 20_000, "origins": [SHOP], "specialist": "finance_ap",
+                       "daily_cap_dollars": 1.0})
+    response = chat.client.post("/api/v1/public-chat/sites", content=body.encode("utf-8"),
+                                headers={"Content-Type": "application/json"})
+    assert response.status_code == 413
+    assert chat.client.get("/api/v1/public-chat/sites").json()["sites"] == []
+
+
 def test_admin_routes_need_the_admin_permission(chat, model, monkeypatch):
     from fastapi import HTTPException
     from maverick_dashboard import auth

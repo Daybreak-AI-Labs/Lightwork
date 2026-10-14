@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 SESSION_KEY_PER_MINUTE = 60
 SESSION_CLIENT_PER_MINUTE = 20
 MAX_BODY_BYTES = 4 * 1024
+MAX_ADMIN_BODY_BYTES = 16 * 1024
 MAX_MESSAGE_CHARS = 1_000
 MAX_ANSWER_CHARS = 2_000
 _ANSWER_MAX_TOKENS = 300
@@ -152,20 +153,20 @@ def _client_digest(request: Request) -> str:
     return hashlib.sha256(host.encode("utf-8")).hexdigest()
 
 
-async def _json_body(request: Request, origin: str | None) -> dict[str, Any]:
-    """At most ``MAX_BODY_BYTES`` are read, checked before any parsing."""
+async def _json_body(request: Request, origin: str | None, *, limit: int = MAX_BODY_BYTES) -> dict[str, Any]:
+    """At most ``limit`` bytes are read, checked before any parsing."""
     declared = request.headers.get("content-length")
     if declared is not None:
         try:
             size = int(declared)
         except ValueError:
             raise _Refused(400, "invalid request", origin=origin) from None
-        if size < 0 or size > MAX_BODY_BYTES:
+        if size < 0 or size > limit:
             raise _Refused(413, "request body too large", origin=origin)
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
-        if len(body) > MAX_BODY_BYTES:
+        if len(body) > limit:
             raise _Refused(413, "request body too large", origin=origin)
     try:
         value = json.loads(bytes(body).strip() or b"{}")
@@ -501,15 +502,17 @@ def create_public_chat_admin_router() -> APIRouter:
         # feature answers 404 whatever the body holds.
         await run_in_threadpool(_admin, request)
         try:
-            body = SiteIn.model_validate(await request.json())
+            payload = await _json_body(request, None, limit=MAX_ADMIN_BODY_BYTES)
+        except _Refused as refused:
+            raise HTTPException(status_code=refused.status, detail=refused.detail) from None
+        try:
+            body = SiteIn.model_validate(payload)
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=422, detail="Check the chat settings and try again.") from exc
         origins = _clean_origins(body.origins)
         if not await run_in_threadpool(_published, body.specialist):
             raise HTTPException(status_code=422, detail="Choose a specialist that is published in this workspace.")
         site_id = uuid.uuid4().hex
-        await run_in_threadpool(_audit, request, "public_chat_site_created", site=site_id,
-                                specialist=body.specialist, origins=len(origins))
         fields = body.model_dump()
         fields.pop("origins")
         try:
@@ -521,6 +524,14 @@ def create_public_chat_admin_router() -> APIRouter:
             raise HTTPException(status_code=409, detail=detail) from exc
         except sqlite3.Error as exc:
             raise HTTPException(status_code=503, detail="The chat store is not available right now.") from exc
+        try:
+            # Recorded only once the site exists. If the record cannot be written, the new
+            # site is stopped again, so nothing is left running without its audit event.
+            await run_in_threadpool(_audit, request, "public_chat_site_created", site=site_id,
+                                    specialist=body.specialist, origins=len(origins))
+        except HTTPException:
+            await run_in_threadpool(store.revoke_site, _tenant(), site_id, now=_now())
+            raise
         return {"site": site, "publishable_key": key, "shown_once": True}
 
     @router.post("/sites/{site_id}/rotate")
