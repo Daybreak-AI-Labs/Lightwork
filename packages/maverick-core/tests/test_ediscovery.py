@@ -167,7 +167,7 @@ def test_change_is_not_saved_when_its_audit_record_is_unavailable(tmp_path, monk
     assert store.list("ws-a") == []
 
 
-def test_matters_are_tenant_scoped_and_tamper_evident(tmp_path, events):
+def test_matters_are_tenant_scoped_and_integrity_checked(tmp_path, events):
     store = ediscovery.MatterStore(tmp_path / "ledger.sqlite3")
     matter = store.create("ws-a", actor="auditor", values=_values())
     with pytest.raises(ediscovery.MatterNotFound):
