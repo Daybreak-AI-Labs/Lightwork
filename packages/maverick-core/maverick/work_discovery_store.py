@@ -2255,7 +2255,9 @@ class WorkDiscoveryStore:
                     ).fetchall()
                 ]
             with self._session_authority_barriers(session_ids):
-                self._purge_expired_events(now=trusted_now)
+                # A projection is a read: the listing below already excludes
+                # expired rows, and their physical deletion stays with the
+                # store's write and maintenance paths.
                 events = self._list_events_locked(
                     session_id=None,
                     since=None,

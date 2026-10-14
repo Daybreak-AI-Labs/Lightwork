@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 import time
 
 import pytest
@@ -827,3 +828,44 @@ def test_domain_suites_checker_matches_each_pack_check(monkeypatch):
     with pytest.raises(HTTPException) as checked:
         auth.domain_suites_checker(request)(next(name for name in names if suites_for_domain(name)))
     assert checked.value.status_code == direct.value.status_code == 503
+
+
+def test_opportunities_read_with_ekko_enabled_leaves_expired_events_in_place(context, monkeypatch, tmp_path):
+    from maverick.work_discovery import CapturePolicy, WorkEvent
+    from maverick.work_discovery_store import WorkDiscoveryStore
+    from maverick_dashboard import ekko_routes, intent_value_discovery
+
+    client, world = context
+    seed(world)
+    monkeypatch.setenv("MAVERICK_KMS_KEK", "ab" * 32)
+    monkeypatch.setattr(intent_value_discovery, "get_ekko", lambda: {"enable": True})
+    now = 1_800_000_000.0
+    path = tmp_path / "ekko.sqlite3"
+    policy = CapturePolicy(
+        enabled=True, capture_level="guided", allowed_apps=frozenset({"chrome"}),
+        allowed_actions=frozenset({"download"}), allowed_object_types=frozenset({"report"}),
+        retention_days=14, min_occurrences=2, min_distinct_days=2, poll_interval_seconds=1,
+        provider_egress=False,
+    )
+
+    def ekko(clock):
+        return WorkDiscoveryStore("user:alice", "local-device", tenant="acme", path=path,
+                                  clock=lambda: clock, authority_check=lambda _policy: None)
+
+    writer = ekko(now)
+    writer.enroll(policy)
+    writer.create_session(policy=policy, session_id="expired-session")
+    writer.claim_collector("expired-session", "collector-test-capability", policy=policy, ttl_seconds=30)
+    writer.append_event(WorkEvent(event_id="event-1", session_id="expired-session", sequence=1, occurred_at=now,
+                                  app="chrome", action="download", object_type="report", duration_seconds=8),
+                        policy=policy, collector_id="collector-test-capability")
+    with sqlite3.connect(path) as conn:
+        stored = conn.execute("SELECT event_id,event_digest,ingested_at,expires_at,payload FROM ekko_events").fetchall()
+    assert len(stored) == 1
+    monkeypatch.setattr(ekko_routes, "_store", lambda request, device_id: ekko(now + 15 * 86_400.0))
+
+    response = client.get(BASE + "/opportunities", headers=headers())
+    assert response.status_code == 200, response.text
+    assert response.json()["external_observations"]["state"] == "available"
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT event_id,event_digest,ingested_at,expires_at,payload FROM ekko_events").fetchall() == stored
