@@ -622,3 +622,35 @@ def test_the_second_step_never_returns_the_owner_off_site_or_to_a_sign_in_page(c
             assert done.headers["location"] == "/start"
             clock.advance(30)
             client.cookies.clear()
+
+
+def test_the_owners_account_page_links_to_the_authenticator_app(monkeypatch):
+    """R5: the owner reaches set-up from the account page, and off hides the link."""
+    from maverick_dashboard import local_passphrases
+    from maverick_dashboard.app import app
+    enroll_owner()
+    local_passphrases.reset_attempt_limit()
+    with TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 53217),
+                    headers={"Origin": ORIGIN}, follow_redirects=False) as client:
+        assert client.post("/auth/local-login", data={"email": EMAIL, "password": PASSPHRASE}).status_code == 303
+        page = client.get("/account")
+        assert page.status_code == 200, page.text
+        assert 'href="/account/owner-authenticator"' in page.text
+        set_mode(monkeypatch, "off")
+        hidden = client.get("/account")
+        assert hidden.status_code == 200
+        assert 'href="/account/owner-authenticator"' not in hidden.text
+
+
+def test_a_colleague_is_not_offered_the_owner_authenticator_link():
+    from maverick.oidc import VerifiedPrincipal
+    from maverick_dashboard import local_owner_mfa_routes
+    enroll_owner()
+    owner_request = request()
+    owner_request.state.principal = VerifiedPrincipal(sub=EMAIL, issuer="invite-session", audience="", claims={"via": "invite"})
+    colleague_request = request()
+    colleague_request.state.principal = VerifiedPrincipal(sub="colleague@example.com", issuer="invite-session",
+                                                          audience="", claims={"via": "invite"})
+    assert local_owner_mfa_routes.owner_link_visible(owner_request) is True
+    assert local_owner_mfa_routes.owner_link_visible(colleague_request) is False
+    assert local_owner_mfa_routes.owner_link_visible(request()) is False

@@ -142,6 +142,22 @@ async def second_step_submit(request: Request):
     return response
 
 
+def owner_link_visible(request: Request) -> bool:
+    """Whether the account page offers the authenticator app: only to the owner signed in here.
+
+    Hidden when the option is off and no app is on, since the page could only say so.
+    """
+    try:
+        row = local_owner._read()
+        if row is None or row["status"] != "ready":
+            return False
+        if auth.caller_principal(request) != "user:" + row["email"]:
+            return False
+        return second.mode() != "off" or "totp" in row
+    except HTTPException:
+        return False
+
+
 def _owner_row(request: Request, *, mutate: bool = False) -> dict:
     """The owner record, for the owner signed in on this computer."""
     local_owner._local(request, mutate=mutate)
