@@ -207,3 +207,38 @@ def test_a_trial_applies_only_to_its_own_specialist(env):
     # Another specialist keeps its own, untouched, current version.
     assert canary.version_for_goal("proc_other_pack", 1) == (canary.CURRENT, None)
     assert canary.live("proc_other_pack") is None
+
+
+def test_automatic_roll_back_waits_for_a_finished_current_goal_to_compare_with(env):
+    canary = env.canary
+    env.settings("[agent_tests]\ncanary_auto_rollback = true\n")
+    world = FakeWorld()
+    _start(canary, percent=50)
+    candidate = _goals_on(canary, canary.CANDIDATE, 10)
+    current = _goals_on(canary, canary.CURRENT, 10, first=1000)
+    for goal_id in candidate:
+        world.status[goal_id] = "failed"
+    # With no finished current goal there is no current failure share to compare with, so the trial is not rolled back.
+    for goal_id in current:
+        world.status[goal_id] = "running"
+    assert canary.auto_rollback_due(PACK, world, canary.live(PACK)) is False
+    # Once one current goal finishes, the comparison exists and the failing trial is rolled back.
+    world.status[current[0]] = "done"
+    assert canary.auto_rollback_due(PACK, world, canary.live(PACK)) is True
+
+
+def test_the_automatic_check_runs_at_most_once_a_minute_for_a_trial(env, monkeypatch):
+    canary = env.canary
+    env.settings("[agent_tests]\ncanary_auto_rollback = true\n")
+    world = FakeWorld()
+    _start(canary, percent=50)
+    calls = []
+    monkeypatch.setattr(canary, "auto_rollback_due", lambda *args: calls.append(args) or False)
+    clock = [1000.0]
+    monkeypatch.setattr(canary, "_now", lambda: clock[0])
+    for goal_id in range(1, 6):
+        canary.version_for_goal(PACK, goal_id, world=world)
+    assert len(calls) == 1
+    clock[0] += canary.AUTO_CHECK_SECONDS + 1
+    canary.version_for_goal(PACK, 7, world=world)
+    assert len(calls) == 2

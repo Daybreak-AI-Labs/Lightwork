@@ -29,12 +29,20 @@ PROMOTED, ROLLED_BACK, ROLLED_BACK_AUTOMATICALLY = "promoted", "rolled_back", "r
 MIN_FINISHED_GOALS = 10
 MAX_FAILURE_GAP = Fraction(1, 5)  # 20 percentage points
 MAX_ROWS = 10_000
+AUTO_CHECK_SECONDS = 60  # the automatic check reads every trial goal, so it runs at most this often
 SYSTEM_ACTOR = "system:canary"
 
 # One record per specialist (its live trial, if any) and one per goal that ran
 # during a trial (the version it used). Both are tenant-scoped governed records.
 TRIALS = GovernedRecordStore("specialist-canaries", "SPC", "specialist_canary", archive_when_full=False)
 TRIAL_GOALS = GovernedRecordStore("specialist-canary-goals", "SCG", "specialist_canary_goal", archive_when_full=False)
+
+
+_LAST_AUTO_CHECK: dict[str, tuple[str, float]] = {}  # specialist -> (candidate id, when it was last checked)
+
+
+def _now() -> float:
+    return time.monotonic()
 
 
 class TrialAlreadyLive(ValueError):
@@ -143,6 +151,16 @@ def auto_rollback_due(name: str, world, trial: dict) -> bool:
     return candidate_share - current_share > MAX_FAILURE_GAP
 
 
+def _auto_check_due(name: str, trial: dict) -> bool:
+    """Whether the automatic check may run now; it is throttled per specialist and trial."""
+    now = _now()
+    last = _LAST_AUTO_CHECK.get(name)
+    if last is not None and last[0] == trial["candidate_id"] and now - last[1] < AUTO_CHECK_SECONDS:
+        return False
+    _LAST_AUTO_CHECK[name] = (trial["candidate_id"], now)
+    return True
+
+
 def version_for_goal(name: str, goal_id: int, *, world=None, resume: bool = False) -> tuple[str, dict | None]:
     """The version a goal runs with: ``(CANDIDATE, trial)`` or ``(CURRENT, None)``.
 
@@ -154,7 +172,8 @@ def version_for_goal(name: str, goal_id: int, *, world=None, resume: bool = Fals
     trial = live(name)
     if trial is None:
         return CURRENT, None
-    if world is not None and agent_tests_policy.canary_auto_rollback() and auto_rollback_due(name, world, trial):
+    if (world is not None and agent_tests_policy.canary_auto_rollback() and _auto_check_due(name, trial)
+            and auto_rollback_due(name, world, trial)):
         from maverick.audit import EventKind, audit_event
 
         finish(name, candidate_id=trial["candidate_id"], outcome=ROLLED_BACK_AUTOMATICALLY, actor=SYSTEM_ACTOR)
