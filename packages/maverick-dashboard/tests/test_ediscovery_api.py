@@ -437,3 +437,25 @@ def test_tidy_up_is_paused_by_a_recorded_privacy_rights_hold(env, monkeypatch):
 def test_tidy_up_runs_unchanged_when_no_hold_is_recorded(env):
     # No privacy-rights ledger exists in this temporary home, so nothing is held.
     assert system_checks_api._cleanup_run(30, 30) == {"conversations": 0, "activity": 0, "duplicate_checks": 0}
+
+
+def test_a_linked_messaging_account_is_accepted_only_in_its_exact_form(env):
+    account = "account:" + "a" * 64 + ":person:" + "b" * 64
+    created = env.client.post(BASE, json=_body(custodians=[account]))
+    assert created.status_code == 201, created.text
+    assert created.json()["custodians"] == [account]
+    assert env.client.post(BASE, json=_body(custodians=["user:slack:" + account])).status_code == 422
+    assert env.client.post(BASE, json=_body(custodians=["account:" + "a" * 63 + ":person:" + "b" * 64])).status_code == 422
+
+
+def test_legal_holds_form_says_how_to_find_a_linked_account(monkeypatch):
+    from fastapi.testclient import TestClient
+    from maverick_dashboard.app import app
+
+    monkeypatch.setattr(ediscovery, "enabled", lambda: True)
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+    page = client.get("/compliance")
+    assert page.status_code == 200
+    assert 'id="edh-custodian-help"' in page.text
+    assert "account:" in page.text and ":person:" in page.text
+    assert "A person&rsquo;s data" in page.text  # where an administrator finds the account

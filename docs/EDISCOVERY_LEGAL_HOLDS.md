@@ -26,10 +26,32 @@ with audit access.
 | Field | Meaning |
 | --- | --- |
 | Name, description | Shown to people with audit access only. |
-| Custodians | Principal ids, one per line: `user:<name>` for a dashboard user, or `user:<channel>:<identifier>` for a messaging account (for example `user:cli:local` for the local command line). A bare name is refused. |
+| Custodians | Principal ids, one per line: `user:<name>` for a dashboard user, or `user:<channel>:<identifier>` for a messaging account (for example `user:cli:local` for the local command line). A linked messaging account is written exactly as `account:<hash>:person:<hash>` (see below). A bare name is refused. |
 | From / To (optional) | Calendar dates in UTC. Both ends are inclusive. |
 | Records to keep | Any of: tasks and their runs, chat conversations (including employee companion history and conversation-inbox messages), attachments, approval requests. |
 | Status | `active` or `released`. Releasing is final for that matter and is audited. |
+
+### Linked messaging accounts
+
+A person who links a Slack, Teams, Telegram or other messaging account has that
+account's chats stored under the account's identity, `account:<hash>:person:<hash>`.
+Room and thread histories add `:conversation:<hash>` to it. Name the account as
+the custodian, written exactly in that form with 64 lowercase hexadecimal characters
+in each hash. The matter then holds:
+
+- every chat of that account on every channel, including each room and thread;
+- the tasks owned by that account on each messaging channel, and their runs,
+  attachments and approvals.
+
+Any other text is not that account. A custodian with a different hash, a longer
+identifier that only starts with the same text, or a `user:<channel>:account:` form is
+refused or not matched. Companion history and conversation-inbox messages belong to
+dashboard users, not to channel accounts. To hold those, name the dashboard user as well.
+
+To find an account's identity, an administrator opens **Compliance** and goes to
+**A person's data**. The **Person** list shows each linked account as
+`account:<hash>:person:<hash>`, followed by `:conversation:` for room and thread
+histories. Copy the text up to the second hash.
 
 Every create, edit, release, export, and every reading of matter details writes an
 audit event that records the matter ID, who acted, the revision and which fields
@@ -139,10 +161,9 @@ tamper evidence for an export.
 
 ## What is not covered
 
-- **Linked messaging accounts.** Their conversations are stored under an
-  account-keyed identifier (`account:<hash>:person:<hash>`, sometimes with a
-  `:conversation:<digest>` suffix). A custodian name does not reach them, so their
-  deletion is not refused and they are not in the export.
+- **Linked messaging accounts named by a dashboard user.** A custodian `user:<name>`
+  does not reach a linked account's chats, which are held only when the account
+  itself is named (see above). Name each account the matter covers.
 - **Unsent drafts, derived memory and other copies of chat text.** Recovery drafts,
   personal recall notes and similar derived stores are not part of a matter.
 - **Attachment file bytes** are not copied into the archive. Each attachment row has

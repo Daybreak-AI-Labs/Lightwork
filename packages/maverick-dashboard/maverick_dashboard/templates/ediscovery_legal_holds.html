@@ -14,9 +14,10 @@
         <textarea class="input" name="description" maxlength="2000" rows="2"></textarea>
       </label>
       <label>Custodians: one person per line
-        <textarea class="input" name="custodians" rows="3" required
-                  placeholder="user:name for a dashboard user, or user:channel:identifier for a messaging account"></textarea>
+        <textarea class="input" name="custodians" rows="3" required aria-describedby="edh-custodian-help"
+                  placeholder="user:name, or account:&lt;hash&gt;:person:&lt;hash&gt; for a linked messaging account"></textarea>
       </label>
+      <p class="muted" id="edh-custodian-help" style="margin-top: 0;">Dashboard user: <code>user:name</code>. This computer&rsquo;s command line: <code>user:cli:local</code>. A linked messaging account (Slack, Teams, Telegram and the others) is written <code>account:</code>, then its first long code, then <code>:person:</code>, then its second long code. To find one, an administrator opens Compliance and goes to &ldquo;A person&rsquo;s data&rdquo;. Only administrators see that Person list, and each linked account appears there as <code>account:</code> followed by the two codes. Copy that text up to the second code. Leave off any <code>:conversation:</code> part: the matter covers those threads too.</p>
       <label>From (optional)
         <input class="input" type="date" name="date_from">
       </label>
@@ -112,6 +113,7 @@
       control.name = field[0];
       if (field[3] === "date") { control.type = "date"; }
       if (field[3] === "textarea") { control.rows = field[0] === "custodians" ? 3 : 2; }
+      if (field[0] === "custodians") { control.placeholder = "user:name, or account:<hash>:person:<hash> for a linked messaging account"; }
       control.value = field[2];
       label.appendChild(control);
       form.appendChild(label);
