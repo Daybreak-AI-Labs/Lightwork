@@ -692,6 +692,7 @@ def _wrapped_audit_key_error(value: str, cfg: dict[str, Any]) -> str:
     try:
         from .kms_backends import (
             _AWS_MAGIC,
+            _AZURE_MAGIC,
             _GCP_MAGIC,
             _VAULT_MAGIC,
             build_cloud_kms,
@@ -707,6 +708,7 @@ def _wrapped_audit_key_error(value: str, cfg: dict[str, Any]) -> str:
         )
     envelope_magic = {
         "aws": _AWS_MAGIC,
+        "azure": _AZURE_MAGIC,
         "gcp": _GCP_MAGIC,
         "vault": _VAULT_MAGIC,
     }[provider]
@@ -725,12 +727,13 @@ def _wrapped_audit_key_error(value: str, cfg: dict[str, Any]) -> str:
                 "The KMS-wrapped audit signing key does not use the configured "
                 "provider's runtime envelope format."
             )
-    dependency = {
-        "aws": "boto3",
-        "gcp": "google.cloud.kms",
-        "vault": "hvac",
+    dependencies = {
+        "aws": ("boto3",),
+        "azure": ("azure.keyvault.keys.crypto", "azure.identity"),
+        "gcp": ("google.cloud.kms",),
+        "vault": ("hvac",),
     }[provider]
-    if not _module_available(dependency):
+    if not all(_module_available(dependency) for dependency in dependencies):
         return (
             "The configured KMS backend dependency needed to unwrap the audit "
             "signing key is not installed."
