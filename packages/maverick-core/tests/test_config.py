@@ -1422,8 +1422,22 @@ def test_knowledge_sources_defaults_keep_the_historical_bounds(monkeypatch):
     _knowledge_sources_section(monkeypatch, {})
     assert config_module.get_knowledge_sources() == {
         "max_items": 64, "max_pages": 16, "max_download_mib": 4, "max_text_kib": 256,
-        "max_refresh_minutes": 5,
+        "max_refresh_minutes": 5, "permission_filter": "off",
     }
+
+
+@pytest.mark.parametrize("value", ["off", "by_email"])
+def test_knowledge_sources_permission_filter_accepts_its_two_modes(monkeypatch, value):
+    _knowledge_sources_section(monkeypatch, {"permission_filter": value})
+    assert config_module.get_knowledge_sources()["permission_filter"] == value
+
+
+@pytest.mark.parametrize("value", ["on", "by_group", "", True, None, 1])
+def test_an_unknown_knowledge_sources_permission_filter_fails_closed_with_a_named_error(monkeypatch, value):
+    _knowledge_sources_section(monkeypatch, {"permission_filter": value})
+    with pytest.raises(config_module.KnowledgeSourcesConfigError,
+                       match=r'^knowledge_sources\.permission_filter must be "off" or "by_email"$'):
+        config_module.get_knowledge_sources()
 
 
 @pytest.mark.parametrize(("key", "low", "high"), [

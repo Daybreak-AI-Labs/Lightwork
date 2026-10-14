@@ -1885,6 +1885,10 @@ def get_knowledge_sources() -> dict:
     ``max_download_mib`` (default 4, 1-32) one downloaded document and
     ``max_text_kib`` (default 256, 1-8192) the extracted text one refresh keeps,
     and ``max_refresh_minutes`` (default 5, 1-60) the wall-clock time one refresh may run.
+    ``permission_filter`` (default "off") set to "by_email" reads each item's sharing
+    permissions at refresh and shows an item only to a signed-in person whose verified
+    email, or whose email domain, the item is shared with, or to anyone when it is shared
+    by link. Group grants are not expanded, so group-only items are withheld.
     The defaults are the historical bounds. A malformed value raises instead of
     falling back, so a reviewed bound never changes silently.
     """
@@ -1900,7 +1904,11 @@ def get_knowledge_sources() -> dict:
             )
         return value
 
+    mode = cfg.get("permission_filter", "off")
+    if mode not in ("off", "by_email"):
+        raise KnowledgeSourcesConfigError('knowledge_sources.permission_filter must be "off" or "by_email"')
     return {
+        "permission_filter": mode,
         "max_items": bounded("max_items", 64, 1, 1000),
         "max_pages": bounded("max_pages", 16, 1, 200),
         "max_download_mib": bounded("max_download_mib", 4, 1, 32),
