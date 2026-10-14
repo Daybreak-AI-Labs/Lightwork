@@ -152,7 +152,8 @@ max_text_kib     = 256   # 1-8192: extracted text kept per refresh
 ```
 
 The defaults are the historical bounds. A value outside its range stops the
-saved-source list and refreshes with a message that names the setting. Each
+saved-source list, saving and refreshes with a message that names the setting;
+a save is refused before anything is written. Each
 refresh reads the current values. A retained snapshot still validates after
 `max_items` is lowered. Its text is checked against the current `max_text_kib`
 whenever it is used, and the exact copy used by specialists is held to that same

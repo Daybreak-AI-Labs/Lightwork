@@ -293,6 +293,9 @@ class KnowledgeSources:
 
     def save(self, plan, *, expected_revision, paused=False, operation=None):
         self._plan_guard(plan)
+        # An invalid [knowledge_sources] setting refuses the save before anything is
+        # written: the receipt built after the write states the configured limits.
+        config.get_knowledge_sources()
         existing_intent = self._save_intent(plan, expected_revision, paused, operation)
         if existing_intent is not None:
             return existing_intent
