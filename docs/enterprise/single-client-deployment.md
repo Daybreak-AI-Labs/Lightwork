@@ -95,11 +95,13 @@ Sequenced by leverage. Each phase is independently shippable.
 - **Secrets hygiene** ✅: `doctor` warns when `config.toml` is group/world-
   accessible; use `${ENV}` refs for tokens (the systemd unit injects them).
 - **BYOK** ✅: real cloud-KMS backends (`maverick/kms_backends.py`) behind the
-  `tenant/kms.py` `KMS` Protocol — AWS KMS, GCP KMS, and Vault transit. `[kms]
-  provider = aws|gcp|vault` keeps the KEK in the customer's HSM (the tenant
-  context binds as the KMS EncryptionContext / AAD); a missing SDK or unknown
-  provider fails closed (never downgrades to in-process keys). Env-injected
-  keys (`MAVERICK_ENCRYPTION_KEY` / `MAVERICK_KMS_KEK`) remain for self-managed.
+  `tenant/kms.py` `KMS` Protocol — AWS KMS, GCP KMS, Vault transit, and Azure
+  Key Vault / Managed HSM (`azure-kms` extra). `[kms] provider =
+  aws|gcp|vault|azure` keeps the KEK in the customer's HSM (the tenant context
+  binds as the KMS EncryptionContext / AAD; Azure binds it locally, since its RSA
+  wrap takes no context); a missing SDK or unknown provider fails closed (never
+  downgrades to in-process keys). Env-injected keys (`MAVERICK_ENCRYPTION_KEY` /
+  `MAVERICK_KMS_KEK`) remain for self-managed.
 
 ### Phase 5 — Packaging & headless provisioning (VM + image) ✅
 - **Build-time gRPC stubs** ✅: `maverick gen-stubs` pre-generates every
@@ -185,9 +187,9 @@ per_tenant = true         # DEK bound to the client id
 
 # BYOK: keep the KEK in the customer's HSM (omit for the in-process/env key).
 [kms]
-provider = "aws"          # aws | gcp | vault | local
-key_id   = "arn:aws:kms:us-east-1:123:key/<uuid>"   # or GCP resource name / Vault key
-region   = "us-east-1"    # AWS; Vault uses address + VAULT_TOKEN
+provider = "aws"          # aws | gcp | vault | azure | local
+key_id   = "arn:aws:kms:us-east-1:123:key/<uuid>"   # or GCP resource name / Vault key / Azure key URL
+region   = "us-east-1"    # AWS; Vault uses address + VAULT_TOKEN; Azure uses DefaultAzureCredential
 
 [audit]
 sign = true               # tamper-evident, per-client signed chain

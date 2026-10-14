@@ -606,12 +606,15 @@ def _security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "the service can lock and unlock a test value and still open the keys already in use.",
           "select", grp, "local", "maverick.tenant.kms", subgroup=keys,
           choices=(("local", "On this server"), ("aws", "Amazon key service"),
-                   ("gcp", "Google Cloud key service"), ("vault", "HashiCorp Vault")),
+                   ("gcp", "Google Cloud key service"), ("vault", "HashiCorp Vault"),
+                   ("azure", "Azure key service")),
           restart=True, test="kms", weaker="change",
           warning="Lightwork will lock and unlock its data keys with a different service.",
           aliases="kms byok key management"),
         S("kms", "key_id", "Key name at the key service",
-          "The full name of the key at your key service.",
+          "The full name of the key at your key service. For Azure, the key's address, "
+          "such as https://<vault>.vault.azure.net/keys/<name>/<version>. Without the version, "
+          "the account needs the keys/get permission.",
           "text", grp, "", "maverick.kms_backends", subgroup=keys, max_length=300,
           pattern=r"[A-Za-z0-9:/._-]{1,300}", restart=True, test="kms",
           env=("MAVERICK_KMS_KEY_ID",), aliases="key id arn"),

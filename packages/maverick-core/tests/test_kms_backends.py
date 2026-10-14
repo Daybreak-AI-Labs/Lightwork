@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import sys
 import types
 
 import pytest
@@ -115,6 +116,208 @@ def test_wrong_provider_magic_rejected(make):
         kms.unwrap(b"NOT-OUR-MAGIC" + b"x" * 40, context=b"c")
 
 
+# ---- Azure Key Vault / Managed HSM ----------------------------------------
+
+_AZ_VAULT = "https://acme-kv.vault.azure.net"
+_AZ_V1 = "a" * 32
+_AZ_V2 = "b" * 32
+_AZ_KEY = f"{_AZ_VAULT}/keys/tenant-kek"          # unversioned key identifier
+_AZ_V1_ID = f"{_AZ_KEY}/{_AZ_V1}"
+_AZ_V2_ID = f"{_AZ_KEY}/{_AZ_V2}"
+
+
+class _FakeAzureCrypto:
+    """Stands in for ``azure.keyvault.keys.crypto.CryptographyClient`` bound to one
+    key identifier. The RSA step is simulated; the results carry the attribute
+    names the SDK uses (``WrapResult.key_id``/``encrypted_key``, ``UnwrapResult.key``)."""
+
+    def __init__(self, key_id, log, reported_id=None):
+        self._key_id = key_id
+        self._reported = reported_id or key_id
+        self._log = log
+
+    def wrap_key(self, algorithm, key):
+        self._log.append(("wrap", self._key_id, algorithm))
+        return types.SimpleNamespace(key_id=self._reported, encrypted_key=_enc(key, b""))
+
+    def unwrap_key(self, algorithm, encrypted_key):
+        self._log.append(("unwrap", self._key_id, algorithm))
+        return types.SimpleNamespace(key_id=self._reported, key=_dec(encrypted_key, b""))
+
+
+class _FakeAzureVault:
+    """The ``client_factory`` injected into AzureKeyVaultKEK: one fake per key id."""
+
+    def __init__(self, reported_id=None):
+        self.log = []
+        self._reported = reported_id
+
+    def __call__(self, key_id):
+        return _FakeAzureCrypto(key_id, self.log, self._reported)
+
+
+def _azure_kek(key_id=_AZ_V1_ID, reported_id=None):
+    fake = _FakeAzureVault(reported_id)
+    return kms_backends.AzureKeyVaultKEK(key_id=key_id, client_factory=fake), fake
+
+
+def test_azure_round_trip_wraps_under_rsa_oaep_256():
+    kek, fake = _azure_kek()
+    dek = b"\x42" * 32
+    wrapped = kek.wrap(dek, context=b"tenant:acme")
+    assert wrapped.startswith(kms_backends._AZURE_MAGIC)
+    assert dek not in wrapped
+    assert kek.unwrap(wrapped, context=b"tenant:acme") == dek
+    assert fake.log[0] == ("wrap", _AZ_V1_ID, "RSA-OAEP-256")
+    # A fresh key and nonce per wrap: the same DEK never wraps to the same bytes.
+    assert kek.wrap(dek, context=b"tenant:acme") != wrapped
+
+
+def test_azure_wrong_context_fails():
+    kek, _ = _azure_kek()
+    wrapped = kek.wrap(b"\x42" * 32, context=b"tenant:acme")
+    with pytest.raises(EncryptionUnavailable):
+        kek.unwrap(wrapped, context=b"tenant:evil")
+    with pytest.raises(EncryptionUnavailable):
+        kek.unwrap(wrapped)  # no context is a different context too
+
+
+def test_azure_tampered_ciphertext_fails():
+    kek, _ = _azure_kek()
+    tampered = bytearray(kek.wrap(b"\x42" * 32, context=b"c"))
+    tampered[-1] ^= 0x01
+    with pytest.raises(EncryptionUnavailable):
+        kek.unwrap(bytes(tampered), context=b"c")
+
+
+def test_azure_every_truncation_and_trailing_bytes_fail():
+    kek, _ = _azure_kek()
+    wrapped = kek.wrap(b"\x42" * 32, context=b"c")
+    for cut in range(len(kms_backends._AZURE_MAGIC), len(wrapped)):
+        with pytest.raises(EncryptionUnavailable):
+            kek.unwrap(wrapped[:cut], context=b"c")
+    with pytest.raises(EncryptionUnavailable):
+        kek.unwrap(wrapped + b"\x00", context=b"c")
+
+
+def test_azure_rejects_empty_envelope_fields():
+    kek, fake = _azure_kek()
+    empty_key = kms_backends._AZURE_MAGIC + b"\x00\x00" + b"\x00\x05" + b"x" * 5 + b"\x00" * 28
+    with pytest.raises(EncryptionUnavailable):
+        kek.unwrap(empty_key, context=b"c")
+    assert not any(op == "unwrap" for op, *_ in fake.log)
+
+
+@pytest.mark.parametrize("other_key_id", [
+    f"https://evil-kv.vault.azure.net/keys/tenant-kek/{_AZ_V1}",   # another vault
+    f"{_AZ_VAULT}/keys/other-kek/{_AZ_V1}",                        # another key name
+])
+def test_azure_refuses_a_stored_key_from_another_vault_or_key(other_key_id):
+    kek, _ = _azure_kek()
+    wrapped = kek.wrap(b"\x42" * 32, context=b"c")
+    other, fake = _azure_kek(key_id=other_key_id)
+    with pytest.raises(EncryptionUnavailable):
+        other.unwrap(wrapped, context=b"c")
+    assert not any(op == "unwrap" for op, *_ in fake.log)
+
+
+def test_azure_accepts_another_version_of_the_same_key():
+    kek_v1, _ = _azure_kek(key_id=_AZ_V1_ID)
+    wrapped = kek_v1.wrap(b"\x42" * 32, context=b"c")
+    for configured in (_AZ_V2_ID, _AZ_KEY):   # rotated to v2, or unversioned
+        rotated, fake = _azure_kek(key_id=configured)
+        assert rotated.unwrap(wrapped, context=b"c") == b"\x42" * 32
+        # The DEK is opened with the version that wrapped it, not the configured one.
+        assert ("unwrap", _AZ_V1_ID, "RSA-OAEP-256") in fake.log
+
+
+@pytest.mark.parametrize("configured, reported", [
+    (_AZ_KEY, _AZ_KEY),                                            # no version
+    (_AZ_V1_ID, f"https://evil-kv.vault.azure.net/keys/tenant-kek/{_AZ_V1}"),
+])
+def test_azure_wrap_refuses_a_result_that_is_not_a_pinned_version_of_the_key(configured, reported):
+    kek, _ = _azure_kek(key_id=configured, reported_id=reported)
+    with pytest.raises(EncryptionUnavailable):
+        kek.wrap(b"\x42" * 32, context=b"c")
+
+
+def test_azure_unversioned_key_error_says_how_to_fix_it():
+    # Without keys/get the SDK cannot read the current version, so the operator must
+    # either pin one or grant keys/get; the error has to say so.
+    kek, _ = _azure_kek(key_id=_AZ_KEY, reported_id=_AZ_KEY)
+    with pytest.raises(EncryptionUnavailable, match="pin a version") as err:
+        kek.wrap(b"\x42" * 32, context=b"c")
+    assert "keys/get" in str(err.value)
+
+
+def test_azure_foreign_key_error_does_not_send_the_operator_to_pin_a_version():
+    kek, _ = _azure_kek(
+        key_id=_AZ_V1_ID,
+        reported_id=f"https://evil-kv.vault.azure.net/keys/tenant-kek/{_AZ_V1}")
+    with pytest.raises(EncryptionUnavailable, match="different key") as err:
+        kek.wrap(b"\x42" * 32, context=b"c")
+    assert "pin a version" not in str(err.value)
+
+
+@pytest.mark.parametrize("bad", [
+    "http://acme-kv.vault.azure.net/keys/tenant-kek",              # not https
+    "https://acme-kv.vault.azure.net/secrets/tenant-kek",          # a secret, not a key
+    "https://acme-kv.vault.azure.net/keys/",                       # no key name
+    f"{_AZ_KEY}/{_AZ_V1}/extra",                                   # too many segments
+    "tenant-kek",                                                  # a bare name
+    "https://user@acme-kv.vault.azure.net/keys/tenant-kek",        # userinfo
+    "https://acme-kv.vault.azure.net:8443/keys/tenant-kek",        # explicit port
+    "https://acme-kv.vault.azure.net/keys/tenant-kek?api-version=7.4",
+    "https://acme-kv.vault.azure.net/keys/tenant/kek",             # slash in the name
+])
+def test_azure_rejects_a_malformed_key_id(bad):
+    with pytest.raises(EncryptionUnavailable):
+        kms_backends.AzureKeyVaultKEK(key_id=bad, client_factory=_FakeAzureVault())
+
+
+@pytest.mark.parametrize("good", [
+    _AZ_KEY,
+    _AZ_V1_ID,
+    "https://acme-hsm.managedhsm.azure.net/keys/tenant-kek/" + _AZ_V1,
+])
+def test_azure_accepts_vault_and_managed_hsm_key_ids(good):
+    kek = kms_backends.AzureKeyVaultKEK(key_id=good, client_factory=_FakeAzureVault())
+    assert kek.key_id == good
+
+
+def test_azure_rejects_other_providers_envelopes():
+    vault_wrapped = kms_backends.VaultTransitKMS(
+        key_id="k", client=_FakeVault()).wrap(b"\x42" * 32, context=b"c")
+    kek, _ = _azure_kek()
+    with pytest.raises(EncryptionUnavailable):
+        kek.unwrap(vault_wrapped, context=b"c")
+
+
+def test_azure_missing_sdk_gives_the_install_hint(monkeypatch):
+    monkeypatch.setitem(sys.modules, "azure.keyvault.keys.crypto", None)
+    kek = kms_backends.AzureKeyVaultKEK(key_id=_AZ_V1_ID)  # no fake: the real SDK path
+    with pytest.raises(EncryptionUnavailable, match=r"maverick-core\[azure-kms\]"):
+        kek.wrap(b"\x42" * 32, context=b"c")
+
+
+def test_build_cloud_kms_azure_dispatch(monkeypatch):
+    monkeypatch.delenv("MAVERICK_KMS_KEY_ID", raising=False)
+    kek = kms_backends.build_cloud_kms("azure", {"key_id": _AZ_V1_ID})
+    assert isinstance(kek, kms_backends.AzureKeyVaultKEK)
+    assert kek.key_id == _AZ_V1_ID
+    tenant = kms_backends.build_cloud_kms("azure", {"key_id": _AZ_V1_ID}, key_id=_AZ_V2_ID)
+    assert tenant.key_id == _AZ_V2_ID  # a pinned tenant key outranks the config key
+    with pytest.raises(EncryptionUnavailable):
+        kms_backends.build_cloud_kms("azure", {"key_id": "operator-global"})
+
+
+def test_azure_key_id_is_required(monkeypatch):
+    monkeypatch.setattr("maverick.config.load_config", lambda: {"kms": {}})
+    monkeypatch.delenv("MAVERICK_KMS_KEY_ID", raising=False)
+    with pytest.raises(EncryptionUnavailable):
+        kms_backends.AzureKeyVaultKEK()
+
+
 # ---- factory + get_kms dispatch -------------------------------------------
 
 
@@ -158,6 +361,12 @@ def test_get_kms_routes_to_cloud(monkeypatch):
     monkeypatch.setattr("maverick.config.load_config",
                         lambda: {"kms": {"provider": "vault", "key_id": "k"}})
     assert isinstance(tenant_kms.get_kms(), kms_backends.VaultTransitKMS)
+
+
+def test_get_kms_routes_to_azure(monkeypatch):
+    monkeypatch.setattr("maverick.config.load_config",
+                        lambda: {"kms": {"provider": "azure", "key_id": _AZ_V1_ID}})
+    assert isinstance(tenant_kms.get_kms(), kms_backends.AzureKeyVaultKEK)
 
 
 def test_get_kms_local_default(monkeypatch):

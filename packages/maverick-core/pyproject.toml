@@ -124,6 +124,11 @@ voice-unlock    = ["speechbrain>=1.0", "torch>=2.2", "torchaudio>=2.2"]
 clap            = ["transformers>=4.40", "torch>=2.2"]
 notifications   = ["httpx>=0.27"]
 audit-signing   = ["cryptography>=48.0.1"]
+# Azure Key Vault / Managed HSM BYOK ([kms] provider = "azure"); imported lazily by
+# maverick.kms_backends. Floors are the 4.10.0 and 1.25.3 releases, checked on the
+# package index: they export CryptographyClient.wrap_key/unwrap_key with key_id on
+# the results, and DefaultAzureCredential.
+azure-kms       = ["azure-keyvault-keys>=4.10.0,<5", "azure-identity>=1.25.3,<2"]
 sigstore        = ["sigstore>=3.0"]
 oidc            = ["pyjwt[crypto]>=2.13.0"]
 training        = ["torch>=2.2", "transformers>=4.40", "peft>=0.10",
