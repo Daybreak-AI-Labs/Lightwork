@@ -24,7 +24,7 @@ SECRET_BYTES = 20
 
 RECOVERY_CODE_COUNT = 10
 # No 0, O, 1, I or L: codes are read aloud and typed by hand.
-RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # pragma: allowlist secret - a character set, not a secret
 _RECOVERY_LENGTH = 8
 
 
