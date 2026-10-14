@@ -408,3 +408,22 @@ def test_a_completed_activation_spends_the_proof_and_clears_its_cookie(owner, cl
     assert done.status_code == 200, done.text
     assert "flow_proofs" not in record()
     assert f"Path={prefix}" in " ".join(proof_cookies(done))
+
+
+@pytest.mark.parametrize("prefix, review", [
+    ("/api/v1/settings/sign-in-migration", "/review"),
+    ("/api/v1/settings/single-sign-on", "/activation-review"),
+])
+def test_a_signed_in_owner_review_that_is_rejected_does_not_echo_the_code(owner, clock, prefix, review):
+    from maverick_dashboard import local_passphrases
+    with client() as web:
+        local_passphrases.reset_attempt_limit()
+        assert web.post("/auth/local-login", data={"email": EMAIL, "password": PASSPHRASE}).status_code == 200
+        local_passphrases.reset_attempt_limit()
+        assert web.post("/auth/owner-second-factor", data={"code": current_code(owner, clock)}).status_code == 303
+        clock.advance(30)
+        # No review context is sent, so the whole body is reported as missing: it holds both secrets.
+        refused = web.post(prefix + review, json={"check": "no-such-check", "password": "SHORTPHRASE",
+                                                  "code": "CODEMARK" * 5})
+    assert refused.status_code == 422, refused.text
+    assert "CODEMARK" not in refused.text and "SHORTPHRASE" not in refused.text
