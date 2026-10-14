@@ -35,6 +35,7 @@ dashboard page for this is not built yet.
 | `daily_cap_dollars` | Required. Above 0, at most 1000. |
 | `messages_per_session` | 1 to 30 (default 20) |
 | `messages_per_minute` | 1 to 6 (default 6) |
+| `messages_per_client_per_day` | 1 to 5000 (default 200). Messages per client address in any 24 hours, across all its sessions. |
 | `retention_days` | 1 to 365 (default 30) |
 
 The response includes `publishable_key` (`lwpk_...`). It is shown once. Only
@@ -99,8 +100,14 @@ A visitor cannot:
   forwarded visitor address only when the request comes from a proxy listed in
   `[auth.proxy] trusted_proxies`; otherwise it is the direct address. Messages
   are limited per session (at most 30) and per minute (at most 6 in any 60
-  seconds). A new session starts with new message limits, so one client can
-  send more messages across sessions. The daily cap bounds the cost.
+  seconds). A new session starts with new message limits, so the per-client
+  daily limit (`messages_per_client_per_day`) counts across a site's sessions:
+  each message counts for 24 hours from when it was sent. Every message that
+  passes the origin and size checks counts, including one that a session or
+  minute limit then refuses. Visitors who share one address, such as people on
+  the same company network, share that limit. The count is kept in memory and
+  restarts with the dashboard; the spending cap is kept on disk and bounds the
+  cost.
 - **Answers.** Each answer is one tool-free provider call
   (`LLM.complete` with `tools=None`, one physical attempt, no failover),
   through the budgeted path. Before each call, the answer's share (5 cents)
@@ -132,8 +139,6 @@ A visitor cannot:
 - Transcripts past retention are removed when a visit or an admin view runs,
   not by a background timer. An installation with no visits and no admin views
   keeps them until one happens. A scheduled sweep is not built yet.
-- Message limits are per session. A limit per client across sessions is not
-  built; whether to add one is an open decision for the owner.
 - The answer hold is a fixed 5 cents. A model whose estimated cost for one
   answer is above that is refused before the call, so a premium model needs a
   larger hold first. Not built.

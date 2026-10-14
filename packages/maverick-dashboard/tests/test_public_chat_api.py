@@ -54,6 +54,7 @@ def chat(tmp_path, monkeypatch):
         limit_source=lambda: api.SESSION_KEY_PER_MINUTE, clock=lambda: clock["now"]))
     monkeypatch.setattr(api, "_SESSION_CLIENT_LIMITER", PublicConsentRateLimiter(
         limit_source=lambda: api.SESSION_CLIENT_PER_MINUTE, clock=lambda: clock["now"]))
+    monkeypatch.setattr(api, "_CLIENT_DAY_LIMITER", api._ClientDayLimiter())
     yield SimpleNamespace(
         client=TestClient(dash_app.app, headers={"Origin": "http://testserver"}),
         anon=TestClient(dash_app.app),
@@ -181,6 +182,8 @@ def test_admin_create_shows_key_once_and_stores_only_its_digest(chat, model):
     {"messages_per_session": 31},
     {"messages_per_minute": 7},
     {"retention_days": 0},
+    {"messages_per_client_per_day": 0},
+    {"messages_per_client_per_day": 5001},
     {"origins": ["http://shop.example"]},
     {"origins": ["https://*.example"]},
     {"origins": ["https://shop.example/path"]},
@@ -326,6 +329,80 @@ def test_message_limits_per_session_and_per_minute(chat, model):
     chat.clock["now"] += 61
     assert _say(chat, token, "three").status_code == 200
     assert _say(chat, token, "four").status_code == 429
+
+
+def test_a_client_address_is_capped_per_site_per_day_across_its_sessions(chat, model):
+    created = _site(chat, messages_per_session=10, messages_per_client_per_day=3)
+    key = created["publishable_key"]
+    first = _session(chat, key)
+    assert _say(chat, first, "one").status_code == 200
+    assert _say(chat, first, "two").status_code == 200
+    # A new session has its own per-session count, but the client's day is shared by all its sessions.
+    assert _say(chat, _session(chat, key), "three").status_code == 200
+    capped = _say(chat, _session(chat, key), "four")
+    assert capped.status_code == 429
+    assert capped.json()["detail"] == "this chat has reached its daily message limit. Try again tomorrow."
+    assert "access-control-allow-origin" in capped.headers
+    assert len(model.calls) == 3
+    # Each message counts for 24 hours from when it was sent: the first slot frees only after a full day.
+    chat.clock["now"] += 86_399
+    assert _say(chat, _session(chat, key), "still capped").status_code == 429
+    chat.clock["now"] += 1
+    assert _say(chat, _session(chat, key), "a day later").status_code == 200
+
+
+def test_the_daily_client_cap_is_counted_separately_for_each_site(chat, model):
+    first = _site(chat, messages_per_client_per_day=1)
+    second = _site(chat, origins=[OTHER], messages_per_client_per_day=1)
+    assert _say(chat, _session(chat, first["publishable_key"]), "one").status_code == 200
+    assert _say(chat, _session(chat, first["publishable_key"]), "two").status_code == 429
+    other_token = _start(chat, second["publishable_key"], origin=OTHER).json()["session_token"]
+    assert _say(chat, other_token, "one", origin=OTHER).status_code == 200
+
+
+def test_the_client_daily_cap_defaults_to_200_and_accepts_up_to_5000(chat, model):
+    created = _site(chat)
+    assert created["site"]["messages_per_client_per_day"] == 200
+    assert chat.client.get("/api/v1/public-chat/sites").json()["sites"][0]["messages_per_client_per_day"] == 200
+    assert _site(chat, origins=[OTHER], messages_per_client_per_day=5000)["site"][
+        "messages_per_client_per_day"] == 5000
+
+
+def test_the_client_day_limiter_keeps_bounded_memory(monkeypatch):
+    from maverick_dashboard import public_chat_api as api
+
+    limiter = api._ClientDayLimiter()
+    monkeypatch.setattr(api, "_MAX_CLIENT_DAY_BUCKETS", 2)
+    assert limiter.allow("site", "a", 1, 0.0) and limiter.allow("site", "b", 1, 0.0)
+    # The table is full and nothing has aged out, so a new client is refused rather than tracked.
+    assert not limiter.allow("site", "c", 1, 10.0)
+    assert not limiter.allow("site", "a", 1, 10.0)  # a known client at its limit
+    # A day later the old counts have aged out, so the table makes room again.
+    assert limiter.allow("site", "c", 1, 86_400.0)
+    assert len(limiter._buckets) <= 2
+
+
+def test_a_site_store_from_before_the_client_cap_gains_the_column(chat, model):
+    import sqlite3
+
+    from maverick_dashboard import public_chat_store as store
+
+    path = store.sites_path(None)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    legacy = sqlite3.connect(str(path))
+    try:
+        legacy.execute("CREATE TABLE chat_sites (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, "
+                       "origins_json TEXT NOT NULL, specialist TEXT NOT NULL, greeting TEXT NOT NULL, "
+                       "daily_cap_dollars REAL NOT NULL, messages_per_session INTEGER NOT NULL, "
+                       "messages_per_minute INTEGER NOT NULL, retention_days INTEGER NOT NULL, "
+                       "state TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL)")
+        legacy.execute("INSERT INTO chat_sites VALUES ('old', 'Old shop', ?, 'finance_ap', '', 1.0, "
+                       "10, 6, 30, 'active', 1.0, 1.0)", (json.dumps([SHOP]),))
+        legacy.commit()
+    finally:
+        legacy.close()
+    assert store.get_site(None, "old")["messages_per_client_per_day"] == 200
+    assert store.get_site(None, "old")["messages_per_client_per_day"] == 200
 
 
 def test_per_minute_limit_is_a_sliding_window_not_a_fixed_one(chat, model):

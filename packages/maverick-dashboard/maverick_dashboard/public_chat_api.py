@@ -23,8 +23,10 @@ import hashlib
 import json
 import logging
 import sqlite3
+import threading
 import time
 import uuid
+from collections import deque
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -63,6 +65,46 @@ _SESSION_LIMIT_DETAIL = "this chat has reached its message limit. Start a new ch
 
 _SESSION_KEY_LIMITER = PublicConsentRateLimiter(limit_source=lambda: SESSION_KEY_PER_MINUTE)
 _SESSION_CLIENT_LIMITER = PublicConsentRateLimiter(limit_source=lambda: SESSION_CLIENT_PER_MINUTE)
+_DAY_SECONDS = 86_400.0
+_MAX_CLIENT_DAY_BUCKETS = 10_000
+_CLIENT_DAY_DETAIL = "this chat has reached its daily message limit. Try again tomorrow."
+
+
+class _ClientDayLimiter:
+    """Messages per site and client digest in the last 24 hours, across that client's sessions.
+
+    In process, like the session limiters. At most ``_MAX_CLIENT_DAY_BUCKETS``
+    clients are tracked, and each keeps no more times than its site's limit, so
+    memory is bounded. A new client is refused while the table is full and no
+    count has aged out. Counts restart when the dashboard restarts.
+    """
+
+    def __init__(self) -> None:
+        self._buckets: dict[tuple[str, str], deque[float]] = {}
+        self._lock = threading.Lock()
+
+    def allow(self, site_id: str, client: str, limit: int, now: float) -> bool:
+        """Count one message when the client is under ``limit``; False (nothing counted) when not."""
+        key = (site_id, client)
+        with self._lock:
+            if key not in self._buckets and len(self._buckets) >= _MAX_CLIENT_DAY_BUCKETS:
+                for candidate, times in tuple(self._buckets.items()):
+                    while times and now - times[0] >= _DAY_SECONDS:
+                        times.popleft()
+                    if not times:
+                        del self._buckets[candidate]
+                if len(self._buckets) >= _MAX_CLIENT_DAY_BUCKETS:
+                    return False
+            times = self._buckets.setdefault(key, deque())
+            while times and now - times[0] >= _DAY_SECONDS:
+                times.popleft()
+            if len(times) >= limit:
+                return False
+            times.append(now)
+            return True
+
+
+_CLIENT_DAY_LIMITER = _ClientDayLimiter()
 
 
 def _now() -> float:
@@ -341,6 +383,11 @@ async def _post_message(request: Request) -> JSONResponse:
     if origin is None or origin != session["origin"] or origin not in site["origins"]:
         raise _Refused(403, _ORIGIN_DETAIL)
     text = _message_text(await _json_body(request, origin), origin)
+    # Counted per client address across all of this site's sessions. A message the session
+    # limits refuse below has already been counted here.
+    if not _CLIENT_DAY_LIMITER.allow(site["id"], _client_digest(request),
+                                     site["messages_per_client_per_day"], now):
+        raise _Refused(429, _CLIENT_DAY_DETAIL, origin=origin)
     try:
         remaining = await run_in_threadpool(
             store.reserve_message, token, now=now, per_session=site["messages_per_session"],
@@ -440,6 +487,7 @@ class SiteIn(BaseModel):
     daily_cap_dollars: float = Field(gt=0, le=store.MAX_DAILY_CAP_DOLLARS)
     messages_per_session: int = Field(default=20, ge=1, le=30)
     messages_per_minute: int = Field(default=6, ge=1, le=6)
+    messages_per_client_per_day: int = Field(default=200, ge=1, le=5000)
     retention_days: int = Field(default=30, ge=1, le=365)
 
     @field_validator("display_name", "greeting")
