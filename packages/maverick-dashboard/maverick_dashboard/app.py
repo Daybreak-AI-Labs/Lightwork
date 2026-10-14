@@ -14547,6 +14547,20 @@ async def consent_native_admin_client() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-public-chat-admin.js")
+async def public_chat_admin_client() -> FileResponse:
+    """Same-origin client for the public website chat section of the Channels page."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-public-chat-admin.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @app.get("/static/lightwork-third-party-contracts.js")
 async def third_party_contracts_client() -> FileResponse:
     """Closed-input client for Contract and Engagement lifecycle operations."""

@@ -859,6 +859,17 @@ def test_the_channels_page_shows_the_public_chat_section_only_while_enabled(chat
     assert "pc-sites" not in hidden.text and "lightwork-public-chat-admin.js" not in hidden.text
 
 
+def test_the_channels_page_serves_the_admin_script_it_references(chat, model):
+    page = chat.client.get("/channels")
+    assert page.status_code == 200
+    source = "/static/lightwork-public-chat-admin.js"
+    assert source in page.text
+    script = chat.client.get(source)
+    assert script.status_code == 200
+    assert script.headers["content-type"].startswith("application/javascript")
+    assert script.content == ADMIN_JS.read_bytes()
+
+
 def test_the_section_needs_the_same_admin_check_as_the_admin_api(chat, model, monkeypatch):
     from maverick_dashboard import auth
 
