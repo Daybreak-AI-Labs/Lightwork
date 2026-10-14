@@ -364,8 +364,10 @@ def _classify(provider: str, status: int | None, error: object, snippet: str) ->
     if status == 429:
         return "retry", f"{name} is busy. Lightwork will try again.", ""
     if status >= 500:
+        # The receiver answered with an error after it may have accepted the request, so it is not repeated.
         if provider == "webhook":
-            return "retry", f"The webhook had a server error (HTTP {status}). Lightwork will try again.", ""
+            return "unknown", (f"The webhook had a server error (HTTP {status}). It may have received this, "
+                               "so it was not sent again. Check the webhook before you send it by hand."), ""
         return "unknown", (f"Zendesk had a server error (HTTP {status}). It may have created the ticket, "
                            "so it was not sent again. Check Zendesk for the tag \"lightwork\" first."), ""
     if status in (401, 403):

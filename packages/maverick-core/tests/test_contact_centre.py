@@ -302,6 +302,31 @@ def test_a_send_that_may_have_arrived_is_not_repeated(tmp_path, monkeypatch):
     assert len(receiver.calls) == 1
 
 
+def test_a_webhook_server_error_is_not_confirmed_and_never_repeated(tmp_path, monkeypatch):
+    _configure(tmp_path, WEBHOOK_CONFIG)
+    receiver = Receiver((503, 4, "busy", "HTTP 503"), (200, 4, "ok", ""))
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    status = _enqueue()
+    assert status["state"] == "unknown"
+    assert "not sent again" in status["reason"]
+    assert len(receiver.calls) == 1
+    contact_centre.run_delivery("handoff:" + HANDOFF)
+    assert len(receiver.calls) == 1
+
+
+def test_a_retried_webhook_keeps_its_delivery_id_and_signs_each_attempt(tmp_path, monkeypatch):
+    _configure(tmp_path, WEBHOOK_CONFIG)
+    receiver = Receiver(BUSY, (200, 4, "ok", ""))
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    status = _enqueue()
+    assert status["state"] == "sent" and len(receiver.calls) == 2
+    deliveries = {headers["X-Lightwork-Delivery"] for _url, _body, headers in receiver.calls}
+    assert len(deliveries) == 1
+    for _url, body, headers in receiver.calls:
+        assert webhooks.verify_signature(body, headers["X-Lightwork-Signature"], WEBHOOK_SECRET,
+                                         timestamp=headers["X-Lightwork-Timestamp"], max_age=300)
+
+
 def test_rejected_credentials_fail_plainly_without_retry_or_leaking_the_token(tmp_path, monkeypatch, caplog):
     _configure(tmp_path, ZENDESK_CONFIG)
     receiver = Receiver(REJECTED_AUTH)

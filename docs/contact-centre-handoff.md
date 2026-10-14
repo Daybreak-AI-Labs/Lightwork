@@ -95,7 +95,9 @@ Verify with the same rule as `maverick.webhooks.verify_signature`.
 - Up to five attempts over about an hour: immediately, then after roughly 1, 5,
   15 and 40 minutes, each ±20 %. The schedule is the webhook retry schedule.
 - A retry happens only when nothing reached the receiver (for example, the
-  connection failed), on a `429` response, and for a webhook on a `5xx` response.
+  connection failed) or on a `429` response. A `5xx` response from Zendesk or a
+  webhook may mean the request was received, so it is shown as **Not confirmed**
+  and is not sent again.
 - Each handoff has one outbox entry keyed by its handoff id. Asking for the same
   handoff again never creates a second ticket.
 - A send that may have arrived but was not confirmed is never repeated.
