@@ -57,3 +57,21 @@ def test_public_material_names_only_a_registered_proof_pack_command():
                 paths.append(path.relative_to(REPO_ROOT).as_posix())
     stale = [p for p in paths if "maverick proof-pack" in _read(p)]
     assert stale == [], f"unregistered 'maverick proof-pack' command in: {stale}"
+
+
+def test_firecracker_is_described_as_a_scaffold_not_a_deploy_target():
+    """The Firecracker backend labels itself a SCAFFOLD (sandbox/firecracker.py
+    docstring) and deploy/aws/EXECUTOR.md and the deployment playbook call the
+    local scaffold unsupported. Any doc line that names Firecracker as a deploy
+    target or shipped backend must say it is an experimental scaffold."""
+    checked = {
+        "pitch/SECURITY-QUESTIONNAIRE.md": "deploy targets",
+        "docs/architecture.md": None,
+        "docs/handbook.md": None,
+        "docs/programs/press-and-case-studies.md": None,
+    }
+    for relpath, needle in checked.items():
+        for line in _read(relpath).splitlines():
+            if "Firecracker" not in line or (needle and needle not in line):
+                continue
+            assert "scaffold" in line.lower(), f"{relpath}: {line[:120]}"
