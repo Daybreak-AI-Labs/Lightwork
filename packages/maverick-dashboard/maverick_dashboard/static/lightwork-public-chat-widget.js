@@ -27,7 +27,14 @@
   var host = document.createElement("div");
   host.setAttribute("data-lightwork-chat", "");
   var root = host.attachShadow({ mode: "closed" });
-  document.body.appendChild(host);
+  // An async tag in <head> can run before <body> exists, so mount when the document is ready.
+  if (document.body) {
+    document.body.appendChild(host);
+  } else {
+    document.addEventListener("DOMContentLoaded", function () {
+      document.body.appendChild(host);
+    });
+  }
 
   var style = document.createElement("style");
   style.textContent = [

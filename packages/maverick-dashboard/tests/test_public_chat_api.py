@@ -158,6 +158,13 @@ def test_widget_panel_uses_a_closed_shadow_root():
     assert 'mode: "open"' not in source
 
 
+def test_widget_waits_for_the_body_before_mounting():
+    source = WIDGET.read_text(encoding="utf-8")
+    # An async tag in <head> can run before <body> exists; the panel mounts when the document is ready.
+    assert 'addEventListener("DOMContentLoaded"' in source
+    assert "document.body" in source
+
+
 def test_admin_create_shows_key_once_and_stores_only_its_digest(chat, model):
     created = _site(chat)
     key = created["publishable_key"]
