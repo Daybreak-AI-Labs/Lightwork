@@ -137,7 +137,8 @@ def _models(S, C) -> tuple:
           aliases="canary gradual rollout trial share percent candidate changed instructions"),
         S("agent_tests", "canary_auto_rollback", "Roll back a trial version that fails clearly more often",
           "After at least 10 finished goals on the trial version, roll it back automatically when its share of "
-          "failed goals is more than 20 percentage points above the current version. The roll back is recorded.",
+          "failed goals is more than 20 percentage points above the current version. It needs a finished goal on "
+          "the current version to compare with. The roll back is recorded.",
           "toggle", "AI models", False, "maverick.agent_tests_policy", subgroup="Effort and planning", weaker=False,
           warning="A trial version that fails more often would stay live until someone rolls it back.",
           aliases="canary automatic rollback trial failures"),

@@ -118,6 +118,16 @@ here.
   it is not presented as an editable working agent. Copilot shares current
   authority, complete review and original-outcome recovery.
 
+- **Gradual rollout of changed specialists** (`specialist_canary.py`,
+  `[agent_tests] canary_percent`, off by default) — with a share from 1 to 50,
+  publishing changed instructions for an existing specialist makes them a trial
+  beside the current version. New goals use the trial for that share, chosen
+  from the goal id, and every goal records the version it used. Workforce shows
+  goal counts and feedback per version, and Promote or Roll back are reviewed,
+  audited actions. `canary_auto_rollback` can roll a failing trial back after 10
+  finished goals. A new specialist publishes normally. Limits are in
+  `docs/configuration.md`.
+
 - **Additional-work capability qualification** — the optional
   `[features] commitment_capability_learning` setting adds guided Promise
   review forms for competing material/capacity/shared-setup explanations,

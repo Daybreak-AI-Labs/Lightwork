@@ -971,8 +971,12 @@ canary_percent = 0                     # 0 (off): publishing changed instruction
                                        # the rest keep the current version. Goals already running are not changed. Each goal
                                        # records which version it used. Promote or roll back the trial in Workforce. Only one
                                        # trial per specialist; a second change is refused until then. A new specialist publishes normally.
+                                       # Goals that ran before or after a trial record no version. Work a trial goal hands to other
+                                       # specialists, and public chat, use the current version. Unreadable settings publish nothing.
 canary_auto_rollback = false           # true: roll the trial back on its own once at least 10 of its goals have finished and its
-                                       # failed share is more than 20 percentage points above the current version's. Recorded in the activity log.
+                                       # failed share is more than 20 percentage points above the current version's. Recorded in the
+                                       # activity log. It needs a finished goal on the current version to compare with, and it is
+                                       # checked at most once a minute. Unreadable settings or a value other than true leave it off.
 
 [autonomy]
 confirm_plan = false          # show the plan in Approvals and wait before a task's first action that reaches outside Lightwork
