@@ -476,3 +476,44 @@ def test_the_draft_notice_and_the_agents_page_describe_tool_checks_as_recording_
     for text in (specialist_drafts.NOTICE, page):
         assert "no real tools" in text and "recording test stubs" in text
         assert "with no tools" not in text and "They use no tools" not in text
+
+
+def test_the_authority_check_runs_before_every_tool_check_provider_call_and_a_refusal_sends_nothing_more(no_real_tools):
+    from maverick import budget as budget_module
+    from maverick_dashboard import specialist_tool_checks as tools
+
+    class Provider:
+        def __init__(self, replies):
+            self.replies, self.sent = list(replies), []
+
+        def complete(self, system, messages, **kwargs):
+            self.sent.append(kwargs)
+            return self.replies.pop(0)
+
+    def run(provider, before_call):
+        return tools.run_tool_check(provider, system="s", task="Late delivery?", case=_tool_case(),
+                                    names=["send_email"], budget=budget_module.Budget(max_tool_calls=4, max_output_tokens=512),
+                                    before_call=before_call, max_tokens=128)
+
+    # Every provider call is preceded by the authority check; the stub answers the call with its fixed refusal.
+    checks = []
+    provider = Provider([_use("send_email", {"to": "Acme"}), _say("I emailed Acme.")])
+    text, calls = run(provider, lambda: checks.append(1))
+    assert text == "I emailed Acme." and [c["answer"] for c in calls] == ["not_available"]
+    assert len(checks) == len(provider.sent) == 2
+
+    # A refusal at the second check stops the loop before the second provider call is sent.
+    class Refused(Exception):
+        pass
+
+    seen = []
+
+    def refuse_after_first() -> None:
+        seen.append(1)
+        if len(seen) > 1:
+            raise Refused("authority withdrawn")
+
+    provider = Provider([_use("send_email", {"to": "Acme"}), _say("I emailed Acme.")])
+    with pytest.raises(Refused):
+        run(provider, refuse_after_first)
+    assert len(provider.sent) == 1
