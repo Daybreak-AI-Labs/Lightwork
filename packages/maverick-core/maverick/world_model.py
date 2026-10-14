@@ -1127,6 +1127,19 @@ def goals_by_id(world, goal_ids) -> dict:
     return found
 
 
+def episodes_by_goal_batch(world, goal_ids, *, per_goal: int) -> dict | None:
+    """``{goal_id: newest per_goal runs}`` in one read when the world can batch
+    (:meth:`WorldModel.episodes_by_goal`). ``None`` when it cannot, or when the
+    batch read fails, so the caller reads goal by goal as it did before."""
+    batch = getattr(world, "episodes_by_goal", None)
+    if not callable(batch):
+        return None
+    try:
+        return batch(goal_ids, per_goal=per_goal)
+    except Exception:
+        return None
+
+
 def _goal_event_from_row(row) -> GoalEvent:
     """Build a GoalEvent from a row, decrypting the sealed content field."""
     d = dict(row)
@@ -2928,6 +2941,29 @@ class WorldModel:
         params.append(limit)
         rows = self._read_all(sql, tuple(params))
         return _episode_spends_from_rows(rows)
+
+    def episodes_by_goal(self, goal_ids, *, per_goal: int = 50) -> dict[int, list[EpisodeSpend]]:
+        """The newest ``per_goal`` runs of each listed goal, newest first: the
+        rows ``list_episodes(goal_id=..., limit=per_goal)`` returns for each
+        goal, read in one query per 500 goals with one decode. Every listed
+        goal is a key, with an empty list when it has no runs."""
+        found: dict[int, list[EpisodeSpend]] = {}
+        ids = list(dict.fromkeys(int(goal_id) for goal_id in goal_ids))
+        cap = max(1, int(per_goal))
+        for gid in ids:
+            found[gid] = []
+        for chunk in self._chunks(ids):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self._read_all(
+                "SELECT * FROM (SELECT " + _EPISODE_SPEND_COLS + ", ROW_NUMBER() OVER ("
+                "PARTITION BY e.goal_id ORDER BY e.started_at DESC, e.id DESC) AS rn "
+                f"FROM episodes e WHERE e.goal_id IN ({placeholders})) "
+                "WHERE rn <= ? ORDER BY goal_id, rn",
+                (*chunk, cap),
+            )
+            for episode in _episode_spends_from_rows(rows):
+                found[episode.goal_id].append(episode)
+        return found
 
     def episodes_for_owner_goals(self, owner: str, *, goal_limit: int = 10_000,
                                  limit: int = 500) -> list[EpisodeSpend]:

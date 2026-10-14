@@ -1,7 +1,7 @@
 """Tests for the compounding metric (cold -> warm improvement signal)."""
 from __future__ import annotations
 
-from maverick.compounding_metric import Row, compute, report_from_world
+from maverick.compounding_metric import Row, compute, report_from_world, rows_from_world
 
 
 def _rows(cls, costs, successes=None):
@@ -63,3 +63,33 @@ def test_report_from_world_groups_by_verb():
     reps = report_from_world(_World(), window=2, min_runs=4)
     assert reps and reps[0].task_class == "research"
     assert reps[0].improving
+
+
+class _GoalByGoal:
+    """A world without the batch reader: the pre-change per-goal reads."""
+
+    def __init__(self, world):
+        self._world = world
+
+    def list_goals(self, **kwargs):
+        return self._world.list_goals(**kwargs)
+
+    def list_episodes(self, **kwargs):
+        return self._world.list_episodes(**kwargs)
+
+
+def test_rows_from_world_batches_episode_reads_without_changing_rows(tmp_path):
+    from maverick.world_model import WorldModel
+
+    world = WorldModel(tmp_path / "w.db")
+    goals = [world.create_goal(f"review invoice {i}", owner="user:alice") for i in range(4)]
+    with world._writing() as conn:
+        for index in range(240):   # more than 50 runs for some goals
+            conn.execute(
+                "INSERT INTO episodes(goal_id, started_at, cost_dollars, outcome) VALUES (?, ?, ?, ?)",
+                (goals[index % 4], 2_000.0 + index, 0.01 * (index % 7), "done" if index % 3 else "failed"),
+            )
+    rows = rows_from_world(world)
+    assert len(rows) == 200
+    assert rows == rows_from_world(_GoalByGoal(world))
+
