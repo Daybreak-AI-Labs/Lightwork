@@ -241,6 +241,21 @@ def _route_configuration_missing(
             for item, present in (("api_key", key), ("region", region))
             if not present
         )
+    if provider == "vertex":
+        # Google ADC carries no key: the project and region are the prerequisites
+        # (the model id is named per route). Sign-in itself is checked when a
+        # client is built, not here.
+        project = (
+            _present(table.get("project_id"))
+            or _present(os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID"))
+            or _present(os.environ.get("GOOGLE_CLOUD_PROJECT"))
+        )
+        region = _present(table.get("region")) or _present(os.environ.get("CLOUD_ML_REGION"))
+        return tuple(
+            item
+            for item, present in (("project_id", project), ("region", region))
+            if not present
+        )
     if provider == "codex_cli":
         try:
             from .providers.codex_cli_provider import _auth_file_present
@@ -292,6 +307,8 @@ def _format_route_missing(
             "authentication",
         ): "AZURE_OPENAI_API_KEY or Azure Entra credentials",
         ("bedrock", "region"): "AWS_REGION",
+        ("vertex", "project_id"): "GOOGLE_CLOUD_PROJECT or ANTHROPIC_VERTEX_PROJECT_ID",
+        ("vertex", "region"): "CLOUD_ML_REGION",
         ("codex_cli", "login"): "codex login",
     }
     rendered: list[str] = []

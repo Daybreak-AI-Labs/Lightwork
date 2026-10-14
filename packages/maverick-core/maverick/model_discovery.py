@@ -58,6 +58,9 @@ UNSUPPORTED: dict[str, str] = {
              "data-plane key; pick from the catalog or type a deployment name.",
     "bedrock": "Bedrock lists foundation models through AWS IAM, not a data-plane key; "
                "pick from the catalog or type a model id.",
+    "vertex": "Vertex AI model lists need Google Cloud sign-in, not a data-plane key, "
+              "and this client does not list them; type the model id exactly as shown "
+              "in the Vertex AI Model Garden.",
     "codex_cli": "Codex CLI serves whatever the signed-in ChatGPT plan offers; pick "
                  "from the catalog or type a model id.",
 }

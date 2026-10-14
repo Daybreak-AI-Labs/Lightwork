@@ -1353,6 +1353,10 @@ def any_provider_configured() -> bool:
         # explicit auth_mode is the configuration (W1-10).
         if provider == "bedrock" and str(pcfg.get("auth_mode", "")).strip().lower() == "iam":
             return True
+        # Vertex AI signs in with Google Application Default Credentials: the
+        # configured project is the configuration (no key exists).
+        if provider == "vertex" and str(pcfg.get("project_id", "")).strip():
+            return True
     return False
 
 

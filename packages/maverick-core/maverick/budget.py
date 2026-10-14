@@ -437,6 +437,73 @@ def _bedrock_estimate_quote(
     )
 
 
+def vertex_rate_card_model_id(model_id: str | None) -> str | None:
+    """The Claude API catalogue id behind a Vertex AI Claude model id, or ``None``.
+
+    ``vertex:claude-haiku-4-5@20251001`` -> ``claude-haiku-4-5``. Vertex AI
+    serves Claude under ``name@version`` ids; any other publisher's model maps
+    to ``None``, so strict accounting refuses it as before.
+    """
+    mid = (model_id or "").strip().removeprefix("vertex:").strip()
+    if not mid.startswith("claude-"):
+        return None
+    return mid.split("@", 1)[0] or None
+
+
+def _vertex_estimate_quote(
+    requested: str,
+    canonical: str,
+    *,
+    estimate_only: bool,
+) -> ModelPrice | None:
+    """Estimate-only quote for a Vertex AI Claude model id from the Claude API
+    list rate of the model behind it.
+
+    Google Cloud invoices Vertex AI usage at its own rates, which are not in
+    the verified rate card (the regional and global endpoint tariffs are not
+    verified here), so this is never a bill: strict accounting raises with the
+    remedy, and planning gets a clearly provisional estimate.
+    """
+    from .llm import model_price_quote
+
+    try:
+        base = model_price_quote(canonical, estimate_only=True)
+    except UnverifiedRateError:
+        base = None
+    if base is None:
+        return None
+    if not estimate_only:
+        raise UnpricedModelError(
+            f"no verified USD price for Vertex AI model {requested!r}: Google Cloud "
+            "invoices Vertex AI usage at its own rates, which are not in Lightwork's "
+            f"rate card. Planning estimates use the Claude API list rate for {canonical!r}; "
+            "to account live usage at that estimate set [budget] strict_pricing=false."
+        )
+    if requested not in _UNPRICED_WARNED:
+        _UNPRICED_WARNED.add(requested)
+        log.warning(
+            "estimate-only accounting for Vertex AI model %r uses the Claude API "
+            "list rate for %r ($%.2f/$%.2f per Mtok); Google Cloud invoices are "
+            "authoritative and this must not be used for billing",
+            requested, canonical, base.rates[0], base.rates[1],
+        )
+    return _estimate_policy_price(
+        requested,
+        base.rates,
+        source="maverick://pricing-policy/vertex-anthropic-list-estimate",
+        confidence=0.6,
+        version="vertex-anthropic-list-estimate-v1",
+        evidence_id="vertex-anthropic-list-estimate-v1",
+        pricing_basis=(
+            f"Claude API list rate for {canonical} applied to the Vertex AI model "
+            "id; Google Cloud invoices are authoritative"
+        ),
+        applicability=(
+            "Estimate-only; Vertex AI regional and global endpoint tariffs are not verified"
+        ),
+    )
+
+
 def _openrouter_advertised_free(model_id: str) -> bool:
     """Whether OpenRouter's own listing, as cached by model discovery, prices
     ``model_id`` at $0 for both prompt and completion. Any cache trouble prices
@@ -613,6 +680,17 @@ def _lookup_price_quote(  # noqa: C901 - ordered evidence and policy precedence
         )
         if quote is not None:
             return quote
+
+    # Vertex AI Claude ids (name@version), same policy: the explicit ``vertex:``
+    # prefix is required so a bare id is never priced as a Vertex route.
+    if requested.startswith("vertex:"):
+        vertex_canonical = vertex_rate_card_model_id(requested)
+        if vertex_canonical is not None:
+            quote = _vertex_estimate_quote(
+                requested, vertex_canonical, estimate_only=estimate_only,
+            )
+            if quote is not None:
+                return quote
 
     # Unknown self-hosted ids incur no metered API-token charge. This does not
     # claim infrastructure is free; the source makes the accounting scope

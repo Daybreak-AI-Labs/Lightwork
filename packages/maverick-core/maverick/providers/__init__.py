@@ -31,6 +31,7 @@ _PROVIDER_ALIASES = {
     "vllm":       (),
     "azure":      ("azure-openai",),
     "bedrock":    ("aws-bedrock",),
+    "vertex":     ("vertex-ai",),
     "openai_compatible": ("openai-compatible", "custom"),
     # ChatGPT/Codex subscription via the local Codex CLI (`codex exec`) --
     # NOT the metered OpenAI API (that's the `openai` provider above).
@@ -59,7 +60,7 @@ def get_provider_client(
 
     ``base_url`` reaches the self-hosted / OpenAI-compatible clients (vllm,
     tgi, ollama, openai, openai_compatible), anthropic (for a proxy /
-    gateway endpoint), azure / bedrock (whose clients use it as the
+    gateway endpoint), azure / bedrock / vertex (whose clients use it as the
     endpoint, falling back to their env var / regional default when unset),
     AND the OpenAI-translated cloud vendors (openrouter, gemini, moonshot,
     deepseek, xai — each defaults to its vendor endpoint when unset) so a
@@ -135,6 +136,15 @@ def get_provider_client(
             default_headers=default_headers,
             environment=environment,
         )
+    if canon == "vertex":
+        from .vertex_provider import VertexClient
+        # Claude on Vertex AI: project, region and model come from the admitted
+        # environment snapshot; authentication is Google ADC only (no api_key).
+        return VertexClient(
+            base_url=base_url,
+            default_headers=default_headers,
+            environment=environment,
+        )
     if canon == "openai_compatible":
         from .openai_compatible_provider import OpenAICompatibleClient
         return OpenAICompatibleClient(api_key=api_key, base_url=base_url, **extra)
@@ -152,20 +162,21 @@ def get_provider_client(
 KNOWN_PROVIDERS = (
     "anthropic", "openai", "moonshot", "xai", "gemini",
     "deepseek", "openrouter", "ollama", "tgi", "vllm",
-    "azure", "bedrock", "openai_compatible", "codex_cli",
+    "azure", "bedrock", "vertex", "openai_compatible", "codex_cli",
 )
 
 # The pip package each provider's client imports at construction/call time.
-# Everything OpenAI-translated needs ``openai``; anthropic and bedrock (the
-# Anthropic SDK's Bedrock clients; IAM auth additionally needs boto3 via the
-# ``bedrock`` extra, checked at client construction) need ``anthropic``.
-# codex_cli needs NO pip SDK -- it shells out to the Codex CLI binary
-# (checked separately below).
+# Everything OpenAI-translated needs ``openai``; anthropic, bedrock and vertex
+# (the Anthropic SDK's Bedrock and Vertex clients; IAM and Google auth need
+# boto3 / google-auth via their extras, checked at client construction) need
+# ``anthropic``. codex_cli needs NO pip SDK -- it shells out to the Codex CLI
+# binary (checked separately below).
 _SDK_MODULE: dict[str, str] = {
     "anthropic": "anthropic",
     "bedrock": "anthropic",
+    "vertex": "anthropic",
     **{p: "openai" for p in KNOWN_PROVIDERS
-       if p not in ("anthropic", "bedrock", "codex_cli")},
+       if p not in ("anthropic", "bedrock", "vertex", "codex_cli")},
 }
 
 _SDK_HINT: dict[str, str] = {
@@ -240,6 +251,15 @@ def missing_sdks(model_specs) -> list[str]:
                     "checkout run: python -m pip install -e "
                     "'./packages/maverick-core[azure]'"
                 )
+        # Vertex AI signs in with Google Application Default Credentials, which
+        # need google-auth (the ``vertex`` extra) beside the anthropic SDK.
+        if provider == "vertex" and "google.auth" not in seen:
+            seen.add("google.auth")
+            from .vertex_provider import google_auth_hint
+
+            hint = google_auth_hint()
+            if hint is not None:
+                msgs.append(hint)
         mod = _SDK_MODULE.get(provider)
         if mod is None or mod in seen:
             continue
