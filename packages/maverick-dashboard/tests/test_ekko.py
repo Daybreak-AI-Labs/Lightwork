@@ -1,6 +1,7 @@
 """Ekko dashboard lifecycle, discovery, and preview-only authoring handoff."""
 from __future__ import annotations
 
+import re
 from datetime import datetime, time, timedelta, timezone
 
 import pytest
@@ -328,16 +329,17 @@ def test_ekko_inline_script_runs_after_shared_ui_helpers_load(tmp_path, monkeypa
     html = page.text
 
     ui_tag = '<script src="/static/lightwork-ui.js'
-    bootstrap_tag = 'id="ekko-initial" type="application/json">'
+    # The bootstrap must be a <script> element, not any element with these attributes.
+    bootstrap =re.search(r'<script\b[^>]*\bid="ekko-initial"[^>]*type="application/json">', html)
     assert ui_tag in html
-    assert bootstrap_tag in html
+    assert bootstrap is not None
 
     first_mv_el = html.index("mvEl(")
     inline_script_open = html.rfind('<script nonce="', 0, first_mv_el)
     assert inline_script_open != -1
     assert inline_script_open > html.index(ui_tag)
     # The JSON bootstrap must still precede the code that reads it.
-    assert html.index(bootstrap_tag) < inline_script_open
+    assert bootstrap.start() < inline_script_open
 
 
 def test_enroll_from_the_page_narrows_apps_and_is_audited(tmp_path, monkeypatch):
