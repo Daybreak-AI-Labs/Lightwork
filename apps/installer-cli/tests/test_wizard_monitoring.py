@@ -43,7 +43,7 @@ SIEM_TOKEN = "Access key for the service"
 DD_KEY = "Datadog API key"
 TENANT = "Directory (tenant) ID"
 CLIENT = "App (client) ID"
-CLIENT_SECRET = "App client secret"
+CLIENT_SECRET = "App client secret"  # pragma: allowlist secret
 
 KMS_LOCAL = "On this computer"
 KMS_AWS = "Amazon Web Services key service"
@@ -58,7 +58,7 @@ KIND_SENTINEL = "Microsoft Sentinel"
 
 SENTINEL_ADDRESS = (
     "sentinel://acme-dce.eastus-1.ingest.monitor.azure.com"
-    "/dcr-0123456789abcdef0123456789abcdef/Custom-LightworkAudit"
+    "/dcr-0123456789abcdef0123456789abcdef/Custom-LightworkAudit"  # pragma: allowlist secret
 )
 
 
@@ -195,7 +195,7 @@ def test_measurements_reask_an_address_they_cannot_use(monkeypatch, capsys):
 
 
 def test_collector_address_with_a_password_is_refused(monkeypatch, capsys):
-    secret = "collector-password-do-not-store"
+    secret = "collector-password-do-not-store"  # pragma: allowlist secret
     config, _keys = _pick(
         monkeypatch,
         (TRACE, True), (METRICS, False),
@@ -398,7 +398,7 @@ def test_datadog_without_a_key_is_not_saved(tmp_path, monkeypatch, capsys):
 
 
 def test_sentinel_destination_and_credentials(tmp_path, monkeypatch, capsys):
-    secret = "entra-client-secret-do-not-store"
+    secret = "entra-client-secret-do-not-store"  # pragma: allowlist secret
     tenant = "11111111-2222-3333-4444-555555555555"
     client = "66666666-7777-8888-9999-aaaaaaaaaaaa"
     config, keys = _pick(
@@ -570,7 +570,7 @@ def test_step_is_listed_after_security_and_before_advanced():
 
 def test_run_keeps_credentials_out_of_partial_state(tmp_path, monkeypatch):
     """The credentials reach write_config's keys (and so .env), and never the partial state."""
-    secret = "dd-key-that-must-not-be-saved"
+    secret = "dd-key-that-must-not-be-saved"  # pragma: allowlist secret
     saved: list[str] = []
     written: dict = {}
 

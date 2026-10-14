@@ -32,8 +32,10 @@ import stat
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 try:
     import tomllib  # Python 3.11+
@@ -303,6 +305,7 @@ STEPS: list[tuple[str, str]] = [
     ("intent_value", "Intent, work value and opportunities"),
     ("assessments", "Assessment assists"),
     ("security_suite", "Security & GRC"),
+    ("monitoring", "Monitoring and key management"),
     ("advanced", "Advanced reasoning"),
     ("api_keys", "API access"),
     ("web_search", "Web search"),
@@ -7670,6 +7673,313 @@ def pick_connectors() -> dict[str, str]:
     return keys
 
 
+# ---------- monitoring and key management ----------
+
+_MONITORING_TRACE_DEFAULT = "http://localhost:4318/v1/traces"
+_SIEM_KINDS: list[tuple[str, str]] = [
+    ("https", "A web address (https://)"),
+    ("tcp", "Syslog over TCP (host:port)"),
+    ("udp", "Syslog over UDP (host:port)"),
+    ("datadog", "Datadog"),
+    ("sentinel", "Microsoft Sentinel"),
+]
+_SIEM_ADDRESS_EXAMPLES = {
+    "https": "https://collector.example.com/services/collector/raw",
+    "tcp": "siem.example.com:514",
+    "udp": "siem.example.com:514",
+    "sentinel": "sentinel://<data-collection-host>/<dcr-id>/Custom-<stream>",
+}
+# The schemes each kind of destination may use: https also takes http, which is asked for.
+_SIEM_SCHEMES = {
+    "https": {"https", "http"}, "tcp": {"tcp"}, "udp": {"udp"}, "sentinel": {"sentinel"},
+}
+_KMS_PROVIDERS: list[tuple[str, str]] = [
+    ("local", "On this computer (Lightwork's own keys, the default)"),
+    ("aws", "Amazon Web Services key service"),
+    ("gcp", "Google Cloud key service"),
+    ("vault", "HashiCorp Vault"),
+    ("azure", "Azure Key Vault or Managed HSM"),
+]
+
+
+def _choice_value(choices: list[tuple[str, str]], label: str) -> str:
+    """The value behind a label that a select prompt returned."""
+    return next(value for value, shown in choices if shown == label)
+
+
+def _ask_until(message: str, *, default: str, check: Callable[[str], str | None]) -> str:
+    """Ask a text question until ``check`` accepts the answer; ``check`` returns the
+    problem to show, or ``None`` when the answer is fine."""
+    while True:
+        answer = _q_text(message, default=default).strip()
+        problem = check(answer)
+        if problem is None:
+            return answer
+        console.print(f"  [yellow]{problem}[/yellow]")
+
+
+def _web_address_problem(value: str, schemes: tuple[str, ...]) -> str | None:
+    """Why ``value`` is not a web address of one of ``schemes``, or ``None``."""
+    try:
+        parts = urlsplit(value)
+        valid = (parts.scheme in schemes and bool(parts.hostname)
+                 and "@" not in parts.netloc)
+    except ValueError:
+        valid = False
+    if valid:
+        return None
+    return ("Enter a web address that starts with " + " or ".join(f"{s}://" for s in schemes)
+            + " and has no user name or password in it.")
+
+
+def _ask_credential(env_name: str, label: str) -> str:
+    """A credential for ~/.maverick/.env, asked the way the connector prompts ask: blank
+    keeps the value the environment already holds."""
+    current = os.environ.get(env_name, "")
+    masked = (current[:4] + "...") if current else "(none)"
+    return _q_secret(f"  {label} [current: {masked}] (blank = keep current)").strip() or current
+
+
+def _ask_azure_id(env_name: str, label: str) -> str:
+    """An Azure directory or app ID, checked with the forwarder's own pattern. Blank
+    returns ``""``, which leaves the service off."""
+    from maverick.audit.forwarder import _AZURE_ID_RE
+
+    current = os.environ.get(env_name, "")
+    while True:
+        answer = _q_text(f"  {label} (blank = leave this service off)", default=current).strip()
+        if not answer or _AZURE_ID_RE.fullmatch(answer):
+            return answer
+        console.print("  [yellow]Enter the ID as Azure shows it: letters, digits, dots and "
+                      "dashes.[/yellow]")
+
+
+def _collector_problem(address: str, *, metrics: bool) -> str | None:
+    from maverick.observability import _otlp_metrics_endpoint
+
+    problem = _web_address_problem(address, ("http", "https"))
+    if problem is not None:
+        return problem
+    if metrics and _otlp_metrics_endpoint(address) is None:
+        return ("Measurements need an address that ends in /v1/traces. Enter that address, "
+                "or answer no to measurements.")
+    return None
+
+
+def _pick_trace_collector() -> dict[str, Any]:
+    """The ``[observability]`` table for an OpenTelemetry collector, or ``{}`` to skip."""
+    if not _q_confirm(
+        "Send a trace of each task's steps to a monitoring collector? "
+        "(Traces name tasks and tools.)",
+        default=False,
+    ):
+        return {}
+    metrics = _q_confirm(
+        "  Also send measurements (counts, timings and spending) to the same collector? "
+        "(They name tools and models.)",
+        default=False,
+    )
+    address = _ask_until(
+        "  Collector address",
+        default=_MONITORING_TRACE_DEFAULT,
+        check=lambda value: _collector_problem(value, metrics=metrics),
+    )
+    observability: dict[str, Any] = {"otel_exporter": "otlp", "otel_endpoint": address}
+    if metrics:
+        observability["otlp_metrics"] = True
+    return {"observability": observability}
+
+
+def _key_name_problem(value: str) -> str | None:
+    if not value or re.search(r"\s", value):
+        return "Enter the key name exactly as your key service shows it, without spaces."
+    return None
+
+
+def _azure_key_problem(value: str) -> str | None:
+    from maverick.kms_backends import _azure_key_parts
+
+    if _azure_key_parts(value) is None:
+        return ("Enter the key's web address, such as https://<vault>.vault.azure.net/keys/<name>, "
+                "optionally with its version at the end.")
+    return None
+
+
+def _pick_key_service(keys: dict[str, str]) -> dict[str, Any]:
+    """The ``[kms]`` table for a cloud key service, or ``{}`` to keep the built-in keys."""
+    labels = [label for _value, label in _KMS_PROVIDERS]
+    provider = _choice_value(_KMS_PROVIDERS, _q_select(
+        "Where should Lightwork lock each workspace's data keys? Choose before Lightwork stores "
+        "any data: data already locked with the built-in keys is not moved to a new service.",
+        labels, default=labels[0],
+    ))
+    if provider == "local":
+        return {}
+    kms: dict[str, Any] = {"provider": provider}
+    if provider == "azure":
+        kms["key_id"] = _ask_until(
+            "  Key address (https://<vault>.vault.azure.net/keys/<name>)",
+            default="", check=_azure_key_problem)
+    else:
+        kms["key_id"] = _ask_until(
+            "  Key name at the service", default="", check=_key_name_problem)
+    if provider == "aws":
+        region = _q_text("  Region of the key (blank = the AWS_REGION setting)", default="").strip()
+        if region:
+            kms["region"] = region
+    if provider == "vault":
+        kms["address"] = _ask_until(
+            "  Vault web address (https://...)", default="",
+            check=lambda value: _web_address_problem(value, ("https",)))
+        mount = _q_text("  Vault key area", default="transit").strip() or "transit"
+        if mount != "transit":
+            kms["mount"] = mount
+        token = _ask_credential("VAULT_TOKEN", "Vault access token")
+        if token:
+            keys["VAULT_TOKEN"] = token
+    return {"kms": kms}
+
+
+def _siem_address_problem(address: str, kind: str) -> str | None:
+    """Why ``address`` is not a valid destination of ``kind``, or ``None``.
+
+    The kernel's own parser decides. Its error text can echo the address, so that text
+    is not shown.
+    """
+    from maverick.audit.forwarder import parse_dest
+
+    try:
+        if "@" in urlsplit(address).netloc:
+            return "Leave out any user name or password. The access key is asked on its own."
+        scheme = parse_dest(address)[0]
+    except ValueError:
+        return "Lightwork cannot send to that address. Check it against the example."
+    if scheme not in _SIEM_SCHEMES[kind]:
+        return ("That address is not one of the kind you chose. Example: "
+                f"{_SIEM_ADDRESS_EXAMPLES[kind]}")
+    return None
+
+
+def _ask_siem_address(kind: str) -> str | None:
+    """A destination address of ``kind``, asked until the kernel accepts it; ``None`` when
+    left blank. A plain http:// address is accepted only when the operator says so."""
+    from maverick.audit.forwarder import parse_dest
+
+    while True:
+        answer = _q_text(
+            f"  Address (for example {_SIEM_ADDRESS_EXAMPLES[kind]}; blank = leave this off)",
+            default="",
+        ).strip()
+        if not answer:
+            return None
+        if kind in ("tcp", "udp") and "://" not in answer:
+            answer = f"{kind}://{answer}"
+        problem = _siem_address_problem(answer, kind)
+        if problem is not None:
+            console.print(f"  [yellow]{problem}[/yellow]")
+            continue
+        if parse_dest(answer)[0] == "http" and not _q_confirm(
+            "  This address is not encrypted, so activity records cross the network in plain "
+            "text. Use it anyway?",
+            default=False,
+        ):
+            continue
+        return answer
+
+
+def _siem_credentials(scheme: str) -> dict[str, str] | None:
+    """The credentials a destination needs, as ``{ENV_NAME: value}`` for ~/.maverick/.env,
+    or ``None`` when a required one is left blank."""
+    if scheme == "https":
+        # Sent only over https: the kernel refuses to send it over plain http.
+        token = _ask_credential("MAVERICK_SIEM_TOKEN", "Access key for the service")
+        return {"MAVERICK_SIEM_TOKEN": token} if token else {}
+    if scheme == "datadog":
+        values = {"MAVERICK_DATADOG_API_KEY": _ask_credential(
+            "MAVERICK_DATADOG_API_KEY", "Datadog API key")}
+    elif scheme == "sentinel":
+        values = {
+            "MAVERICK_SENTINEL_TENANT_ID": _ask_azure_id(
+                "MAVERICK_SENTINEL_TENANT_ID", "Directory (tenant) ID"),
+            "MAVERICK_SENTINEL_CLIENT_ID": _ask_azure_id(
+                "MAVERICK_SENTINEL_CLIENT_ID", "App (client) ID"),
+            "MAVERICK_SENTINEL_CLIENT_SECRET": _ask_credential(
+                "MAVERICK_SENTINEL_CLIENT_SECRET", "App client secret"),
+        }
+    else:
+        # tcp and udp carry no credentials; plain http gets no token, which the kernel
+        # would refuse to send anyway.
+        return {}
+    if not all(values.values()):
+        console.print("  [yellow]Not saved: this service needs its access details. Add the "
+                      "destination later in Lightwork Settings.[/yellow]")
+        return None
+    return values
+
+
+def _pick_siem_destination() -> tuple[str, dict[str, str]] | None:
+    """``(siem_dest, credentials)`` for a security monitoring service, or ``None`` to skip."""
+    from maverick.audit.forwarder import _DATADOG_SITES, parse_dest
+
+    if not _q_confirm(
+        "Send each activity record to a security monitoring service?", default=False,
+    ):
+        return None
+    labels = [label for _value, label in _SIEM_KINDS]
+    kind = _choice_value(_SIEM_KINDS, _q_select(
+        "Which kind of service?", labels, default=labels[0]))
+    if kind == "datadog":
+        site = _q_select("Datadog site", sorted(_DATADOG_SITES), default="datadoghq.com")
+        address = f"datadog://{site}"
+    else:
+        address = _ask_siem_address(kind)
+        if address is None:
+            return None
+    creds = _siem_credentials(parse_dest(address)[0])
+    if creds is None:
+        return None
+    return address, creds
+
+
+def _siem_destination(monitoring: dict[str, Any] | None) -> str:
+    """The ``[audit] siem_dest`` the monitoring step chose, or ``""``."""
+    return str(((monitoring or {}).get("audit") or {}).get("siem_dest") or "")
+
+
+def _cfg_monitoring(monitoring: dict[str, Any] | None) -> list[str]:
+    """``[observability]`` and ``[kms]`` from the monitoring step. A skipped answer writes
+    nothing; ``[audit] siem_dest`` is written by ``_cfg_advanced``, which owns that table."""
+    monitoring = monitoring or {}
+    return (_cfg_table("observability", monitoring.get("observability"))
+            + _cfg_table("kms", monitoring.get("kms")))
+
+
+def pick_monitoring() -> tuple[dict[str, Any], dict[str, str]]:
+    """The optional monitoring and key-management step. Returns ``(config, keys)``.
+
+    ``config`` holds the ``[observability]`` and ``[kms]`` tables and the ``[audit]``
+    ``siem_dest``. ``keys`` maps environment names to credential values for
+    ~/.maverick/.env, the file that holds the provider keys and connector credentials, so
+    config.toml never holds a credential. Every question defaults to no, and a skipped
+    answer writes nothing.
+    """
+    config: dict[str, Any] = {}
+    keys: dict[str, str] = {}
+    console.print()
+    console.print(
+        "[dim]Optional. Skip a question to keep the default, which sends nothing and keeps "
+        "Lightwork's own keys.[/dim]"
+    )
+    config.update(_pick_trace_collector())
+    config.update(_pick_key_service(keys))
+    destination = _pick_siem_destination()
+    if destination is not None:
+        address, creds = destination
+        config["audit"] = {"siem_dest": address}
+        keys.update(creds)
+    return config, keys
+
+
 def collect_api_keys(providers: list[str], channel_envs: set[str]) -> dict[str, str]:
     keys: dict[str, str] = {}
     needed: list[str] = []
@@ -9100,8 +9410,10 @@ def _cfg_license(license_cfg: dict[str, Any] | None) -> list[str]:
 def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     advanced: dict[str, Any] | None,
     providers: list[str],
+    *,
+    siem_dest: str = "",
 ) -> list[str]:
-    if not advanced:
+    if not advanced and not siem_dest:
         return []
     lines: list[str] = []
     budget_reporting = advanced.get("agent_budget_reporting")
@@ -9579,10 +9891,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             "backfill` before first start (see docs/multi-tenancy.md)."
         )
         lines.append("rls = true")
-    if advanced.get("audit_sign") or advanced.get("unified_audit"):
+    if advanced.get("audit_sign") or advanced.get("unified_audit") or siem_dest:
         lines.append("")
         lines.append("[audit]")
-        lines.append("sign = true")
+        if advanced.get("audit_sign") or advanced.get("unified_audit"):
+            lines.append("sign = true")
+        if siem_dest:
+            lines.append(f"siem_dest = {_toml_str(siem_dest)}")
     if advanced.get("unified_audit"):
         lines.append("")
         lines.append("[audit.unified]")
@@ -10615,6 +10930,7 @@ def write_config(
     intent_value: dict[str, Any] | None = None,
     assessments: dict[str, Any] | None = None,
     security_suite: dict[str, Any] | None = None,
+    monitoring: dict[str, Any] | None = None,
     deployment: str | None = None,
     suites: dict[str, bool] | None = None,
     license_cfg: dict[str, Any] | None = None,
@@ -10789,7 +11105,7 @@ def write_config(
     lines += _cfg_practice(practice_mode, practice_cap)
     lines += _cfg_suites(suites)
     lines += _cfg_license(license_cfg)
-    lines += _cfg_advanced(advanced, providers)
+    lines += _cfg_advanced(advanced, providers, siem_dest=_siem_destination(monitoring))
     lines += _cfg_mcp_servers(mcp_servers)
     lines += _cfg_registries("mcp_registries", mcp_registries)
     lines += _cfg_registries("template_registries", template_registries)
@@ -10817,6 +11133,7 @@ def write_config(
     lines += _cfg_table("personas", personas)
     lines += _cfg_table("a2a", a2a)
     lines += _cfg_table("first_outcome", first_outcome)
+    lines += _cfg_monitoring(monitoring)
 
     # SECURITY: config.toml is NOT secret-free. Unlike API keys (which live in
     # ~/.maverick/.env and are referenced via ${VAR}), the OIDC browser-login
@@ -11862,6 +12179,11 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         state["security_suite"] = security_suite
         _save_partial(state)
 
+    # Not saved with the partial state: its credentials must never be written there,
+    # so a resumed run asks this optional step again.
+    _announce()
+    monitoring, monitoring_keys = pick_monitoring()
+
     _announce()
     advanced = state.get("advanced") or pick_advanced()
     state["advanced"] = advanced
@@ -11901,6 +12223,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "intent_value": intent_value,
         "assessments": assessments,
         "security_suite": security_suite,
+        "monitoring": (monitoring, monitoring_keys),
         "advanced": advanced,
     }
 
@@ -12127,6 +12450,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     intent_value = _simple["intent_value"]
     assessments = _simple["assessments"]
     security_suite = _simple["security_suite"]
+    monitoring, monitoring_keys = _simple["monitoring"]
     advanced = _simple["advanced"]
 
     _announce()
@@ -12208,6 +12532,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     # user wants to wire up now (merged into ~/.maverick/.env, never persisted
     # to partial state). Editable later in the .env file.
     keys.update(pick_connectors())
+    keys.update(monitoring_keys)
 
     suites = pick_suites()
 
@@ -12287,6 +12612,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         intent_value=intent_value,
         assessments=assessments or None,
         security_suite=security_suite,
+        monitoring=monitoring,
         approval=approval,
         suites=suites,
         license_cfg=license_cfg or None,

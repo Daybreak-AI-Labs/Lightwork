@@ -6,7 +6,7 @@ from __future__ import annotations
 
 def test_steps_list_is_ordered_and_unique():
     from maverick_installer import wizard
-    assert len(wizard.STEPS) == 43
+    assert len(wizard.STEPS) == 44
     keys = [k for k, _ in wizard.STEPS]
     assert keys[0] == "deployment"
     assert keys[-1] == "a2a"
@@ -14,7 +14,7 @@ def test_steps_list_is_ordered_and_unique():
     assert keys[9] == "research_execution"
     assert keys[10] == "candidate_promotion"
     assert keys[11] == "knowledge_access"
-    assert keys[25:29] == ["intent_value", "assessments", "security_suite", "advanced"]
+    assert keys[25:30] == ["intent_value", "assessments", "security_suite", "monitoring", "advanced"]
     assert len(set(keys)) == len(keys)  # no dupes
 
 
@@ -23,14 +23,14 @@ def test_steps_list_is_ordered_and_unique():
 def test_step_indicator_formats_step_n_of_m():
     from maverick_installer import wizard
     out = wizard._step_indicator(3)
-    assert "Step 3/43" in out
+    assert "Step 3/44" in out
     assert wizard.STEPS[2][1] in out  # the label
 
 
 def test_step_indicator_includes_breadcrumb_of_done_labels():
     from maverick_installer import wizard
     out = wizard._step_indicator(3, done=["Deployment", "Providers"])
-    assert "Step 3/43" in out
+    assert "Step 3/44" in out
     assert "Deployment" in out
     assert "Providers" in out
 
@@ -38,7 +38,7 @@ def test_step_indicator_includes_breadcrumb_of_done_labels():
 def test_step_indicator_no_breadcrumb_when_done_empty():
     from maverick_installer import wizard
     out = wizard._step_indicator(1, done=[])
-    assert "Step 1/43" in out
+    assert "Step 1/44" in out
     assert "›" not in out
 
 
@@ -88,6 +88,7 @@ def test_run_prints_step_indicators(monkeypatch, tmp_path):
     monkeypatch.setattr(wizard, "pick_ekko", lambda: {"enable": False})
     monkeypatch.setattr(wizard, "pick_intent_value", lambda: {"enabled": True, "recommendations": True, "completion_confirmation": False})
     monkeypatch.setattr(wizard, "pick_security_suite", dict)
+    monkeypatch.setattr(wizard, "pick_monitoring", lambda: ({}, {}))
     monkeypatch.setattr(wizard, "pick_advanced", dict)
     monkeypatch.setattr(wizard, "pick_web_search", lambda: (False, []))
     monkeypatch.setattr(wizard, "pick_mcp_servers", dict)
@@ -120,9 +121,10 @@ def test_run_prints_step_indicators(monkeypatch, tmp_path):
     assert rc == 0
 
     out = wizard.console.file.getvalue()
-    assert "Step 1/43" in out
-    assert "Step 3/43" in out
-    assert "Step 28/43 Security & GRC" in out
-    assert "Step 43/43" in out
+    assert "Step 1/44" in out
+    assert "Step 3/44" in out
+    assert "Step 28/44 Security & GRC" in out
+    assert "Step 29/44 Monitoring and key management" in out
+    assert "Step 44/44" in out
     # Breadcrumb of earlier answers trails later steps.
     assert "Deployment" in out
