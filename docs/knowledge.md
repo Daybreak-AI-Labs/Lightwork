@@ -163,20 +163,30 @@ lower-case email addresses it is shared with, the email domains it is shared wit
 whether it is shared by link ("anyone"), and whether any group is granted access.
 Tokens and raw provider responses are never stored.
 
-At use, a file is shown only to a signed-in person whose verified email matches
-one of the recorded addresses, whose email domain matches a recorded domain, or
-to anyone when the file is shared by link. The address is the one the identity
-provider asserted for the current sign-in (single sign-on or OIDC). API keys,
-agents and workers have no such address, so they see no files under this setting.
+At use, a file is shown only to a signed-in person who has a verified email, when
+that email matches one of the recorded addresses, when its domain matches a recorded
+domain, or when the file is shared by link. The verified address comes only from an
+OIDC sign-in whose `email` claim the provider marks `email_verified: true`. Many
+identity providers do not send that flag, and then no address is matched. Usernames,
+UPNs and subject identifiers are never used as the address. SAML sign-ins carry no
+such address, because a SAML assertion does not prove that an email is verified, so
+SAML users see no files under this setting. API keys, agents and workers have no
+address either, so they see no files under this setting.
 
 Files are withheld, and not named, when:
 
 - they are shared only with a group. Group grants are **not expanded**, so group
   members are not read and such files are withheld, even for members of the group;
 - the provider's permissions could not be read, or their shape was not understood;
-- the saved source was last refreshed before this setting was turned on. Refresh
-  the source once after changing the setting;
+- the saved source has not been refreshed while this setting is on. A refresh made
+  with the setting off removes the sharing records it reuses, so turning the setting
+  back on withholds those files until the next refresh. Refresh the source once after
+  changing the setting;
 - the signed-in person has no verified address.
+
+A refresh that does not complete keeps the previous snapshot, and its sharing
+records, until that snapshot's freshness window ends. Only a completed refresh reads sharing
+again.
 
 Search reports how many files were withheld for permissions. A refresh whose
 permission reads fail still completes; the affected files stay withheld until a
