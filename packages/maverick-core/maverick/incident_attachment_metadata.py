@@ -1155,6 +1155,11 @@ class IncidentAttachmentStore:
         current = _normalize_record(current_raw)
         if current.status != "active":
             raise IncidentAttachmentConflict("deleted attachment metadata is immutable")
+        # A rebind overwrites the binding in place and keeps no copy of the earlier one, so
+        # a held record cannot be changed at all while its matter is active.
+        refusal = _matter_refusal(self.tenant_id, current, actor=actor)
+        if refusal is not None:
+            raise IncidentAttachmentConflict(refusal)
         incident_authority = self._resolve_incident(
             current.incident_kind, current.incident_id
         )

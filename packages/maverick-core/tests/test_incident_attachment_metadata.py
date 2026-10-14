@@ -393,6 +393,41 @@ def test_a_matter_naming_the_uploader_refuses_their_attachment_delete_and_keeps_
         assert "alice" not in json.dumps(refusals) and "incident-report" not in json.dumps(refusals)
 
 
+def test_a_matter_naming_the_uploader_refuses_their_attachment_rebind_and_keeps_the_binding(held_store):
+    s = held_store
+    with tenant_scope(tenant="alpha"):
+        created = _create(s.store, s.incident, s.document)
+        _matter(s.ledger)
+        s.incident["revision"] = 4
+        s.incident["sha256"] = _digest("incident-v4")
+        s.document["revision"] = 8
+        s.document["authority_sha256"] = _digest("document-authority-v8")
+        s.document["content_sha256"] = _digest("replacement-content")
+        s.document["safe_display_name"] = "replacement.pdf"
+        with pytest.raises(iam.IncidentAttachmentConflict) as refused:
+            s.store.update_attachment(
+                "alpha",
+                created.attachment_id,
+                expected_revision=created.revision,
+                incident_revision=4,
+                incident_sha256=_digest("incident-v4"),
+                document_revision=8,
+                document_authority_sha256=_digest("document-authority-v8"),
+                sha256=_digest("replacement-content"),
+                redaction_state="redacted",
+                idempotency_key="rebind-held",
+            )
+        assert str(refused.value) == ediscovery_module().LEGAL_HOLD_MESSAGE
+        kept = s.store.get_attachment("alpha", created.attachment_id)
+        assert kept.revision == created.revision
+        assert kept.sha256 == created.sha256
+        assert kept.safe_display_name == "incident-report.pdf"
+        assert kept.redaction_state == created.redaction_state
+        assert len(s.store.history("alpha", created.attachment_id)) == 1
+        refusals = [payload for verb, payload in s.events if verb == "ediscovery_erasure_refused"]
+        assert refusals and refusals[-1]["attachments"] == 1
+
+
 @pytest.mark.parametrize("overrides", [
     {"date_from": "2001-01-01", "date_to": "2001-01-02"},   # the attachment is outside the dates
     {"custodians": ["user:bob"]},                           # another person is named
