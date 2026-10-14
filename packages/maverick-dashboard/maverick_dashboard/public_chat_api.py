@@ -26,7 +26,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -67,7 +67,7 @@ _SESSION_KEY_LIMITER = PublicConsentRateLimiter(limit_source=lambda: SESSION_KEY
 _SESSION_CLIENT_LIMITER = PublicConsentRateLimiter(limit_source=lambda: SESSION_CLIENT_PER_MINUTE)
 _DAY_SECONDS = 86_400.0
 _MAX_CLIENT_DAY_BUCKETS = 10_000
-_CLIENT_DAY_DETAIL = "this chat has reached its daily message limit. Try again tomorrow."
+_CLIENT_DAY_DETAIL = "you have reached the daily message limit for this chat. Try again later."
 
 
 class _ClientDayLimiter:
@@ -75,32 +75,37 @@ class _ClientDayLimiter:
 
     In process, like the session limiters. At most ``_MAX_CLIENT_DAY_BUCKETS``
     clients are tracked, and each keeps no more times than its site's limit, so
-    memory is bounded. A new client is refused while the table is full and no
-    count has aged out. Counts restart when the dashboard restarts.
+    memory is bounded. The table is ordered by each client's latest counted
+    message, so when it is full the client counted longest ago gives way. That
+    client's day has expired whenever any client's has, so no live count is
+    dropped while an expired one exists. A burst of new addresses therefore
+    never refuses a new visitor; the clients it pushes out start a new day. The
+    site's daily spending cap limits cost either way. Counts restart when the
+    dashboard restarts.
     """
 
     def __init__(self) -> None:
-        self._buckets: dict[tuple[str, str], deque[float]] = {}
+        self._buckets: OrderedDict[tuple[str, str], deque[float]] = OrderedDict()
         self._lock = threading.Lock()
 
     def allow(self, site_id: str, client: str, limit: int, now: float) -> bool:
         """Count one message when the client is under ``limit``; False (nothing counted) when not."""
         key = (site_id, client)
         with self._lock:
-            if key not in self._buckets and len(self._buckets) >= _MAX_CLIENT_DAY_BUCKETS:
-                for candidate, times in tuple(self._buckets.items()):
-                    while times and now - times[0] >= _DAY_SECONDS:
-                        times.popleft()
-                    if not times:
-                        del self._buckets[candidate]
-                if len(self._buckets) >= _MAX_CLIENT_DAY_BUCKETS:
-                    return False
-            times = self._buckets.setdefault(key, deque())
+            times = self._buckets.get(key)
+            if times is None:
+                times = deque()
             while times and now - times[0] >= _DAY_SECONDS:
                 times.popleft()
             if len(times) >= limit:
                 return False
             times.append(now)
+            if key in self._buckets:
+                self._buckets.move_to_end(key)
+            else:
+                while self._buckets and len(self._buckets) >= _MAX_CLIENT_DAY_BUCKETS:
+                    self._buckets.popitem(last=False)
+                self._buckets[key] = times
             return True
 
 

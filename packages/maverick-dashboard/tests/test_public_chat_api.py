@@ -341,7 +341,7 @@ def test_a_client_address_is_capped_per_site_per_day_across_its_sessions(chat, m
     assert _say(chat, _session(chat, key), "three").status_code == 200
     capped = _say(chat, _session(chat, key), "four")
     assert capped.status_code == 429
-    assert capped.json()["detail"] == "this chat has reached its daily message limit. Try again tomorrow."
+    assert capped.json()["detail"] == "you have reached the daily message limit for this chat. Try again later."
     assert "access-control-allow-origin" in capped.headers
     assert len(model.calls) == 3
     # Each message counts for 24 hours from when it was sent: the first slot frees only after a full day.
@@ -421,13 +421,32 @@ def test_the_client_day_limiter_keeps_bounded_memory(monkeypatch):
 
     limiter = api._ClientDayLimiter()
     monkeypatch.setattr(api, "_MAX_CLIENT_DAY_BUCKETS", 2)
-    assert limiter.allow("site", "a", 1, 0.0) and limiter.allow("site", "b", 1, 0.0)
-    # The table is full and nothing has aged out, so a new client is refused rather than tracked.
-    assert not limiter.allow("site", "c", 1, 10.0)
-    assert not limiter.allow("site", "a", 1, 10.0)  # a known client at its limit
-    # A day later the old counts have aged out, so the table makes room again.
-    assert limiter.allow("site", "c", 1, 86_400.0)
-    assert len(limiter._buckets) <= 2
+    assert limiter.allow("site", "a", 1, 0.0) and limiter.allow("site", "b", 1, 1.0)
+    # The table is full. A new client is counted anyway, in place of the client counted longest ago.
+    assert limiter.allow("site", "c", 1, 2.0)
+    assert len(limiter._buckets) == 2
+    assert ("site", "a") not in limiter._buckets
+    # A client still in the table keeps its count: at its limit it is refused, and nothing is added.
+    assert not limiter.allow("site", "b", 1, 3.0)
+    assert not limiter.allow("site", "c", 1, 3.0)
+    assert len(limiter._buckets) == 2
+
+
+def test_a_burst_of_new_clients_never_refuses_a_new_visitor(monkeypatch):
+    from maverick_dashboard import public_chat_api as api
+
+    limiter = api._ClientDayLimiter()
+    monkeypatch.setattr(api, "_MAX_CLIENT_DAY_BUCKETS", 2)
+    assert limiter.allow("site", "old", 1, 0.0)  # its day ends at 86400
+    assert limiter.allow("site", "live", 1, 3_600.0)
+    # The table is full, and the old client's day has ended: it gives way, and the live client keeps its count.
+    assert limiter.allow("site", "new", 1, 86_400.0)
+    assert ("site", "old") not in limiter._buckets
+    assert ("site", "live") in limiter._buckets
+    # Nothing has expired now, so a burst of new addresses pushes out the least recently counted client each time.
+    assert all(limiter.allow("site", f"burst-{number}", 1, 86_401.0 + number) for number in range(10))
+    assert len(limiter._buckets) == 2
+    assert ("site", "burst-9") in limiter._buckets
 
 
 def test_a_site_store_from_before_the_client_cap_gains_the_column(chat, model):
