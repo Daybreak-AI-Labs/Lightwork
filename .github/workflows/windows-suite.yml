@@ -42,12 +42,25 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ inputs.python-version }}
+      # setup-python's Windows image carries runner-owned pipx packages in the
+      # global environment, which the constraint closure check rejects. Install
+      # into a fresh venv outside the checkout (as windows-customer.yml does),
+      # so the image cannot change the tested set and tests that walk the
+      # checkout never see the venv. Later steps' `python` is this venv's.
+      - name: Isolate package resolution from runner preinstalled packages
+        shell: pwsh
+        run: |
+          $venv = Join-Path $env:RUNNER_TEMP 'windows-suite-python'
+          & (Join-Path $env:pythonLocation 'python.exe') -I -m venv $venv
+          if ($LASTEXITCODE -ne 0) { throw 'Test environment creation failed.' }
+          (Join-Path $venv 'Scripts') >> $env:GITHUB_PATH
       - name: Install packages
         shell: bash
         # The same installation as .github/actions/test-shard, so a failure
         # here is a Windows difference, not a different environment.
         run: |
           set -x
+          python -c "import sys; print(sys.executable); assert sys.prefix != sys.base_prefix, 'not the isolated venv'"
           python -m pip install --upgrade \
             'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
             'packaging==26.3'
