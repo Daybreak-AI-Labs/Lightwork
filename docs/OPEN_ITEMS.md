@@ -7,17 +7,9 @@ track status per item, so use this file for what is still open.
 
 It was compiled on 2026-10-14 from commit `d8376beb`. Each row was checked in
 that pass with one grep or file read. The evidence column gives `file:line` in
-this repository. This is not an issue tracker: rows have no owners or dates.
-Items that were checked and are already fixed are listed at the end and are
-not in the tables.
-
-## In progress in a separate change
-
-| Item | Evidence | Why open |
-|---|---|---|
-| Postgres world-model role check for row-level-security bypass. RLS is enabled and forced on tenant tables, but nothing checks that the connecting role lacks superuser or BYPASSRLS, and both bypass RLS. | `packages/maverick-core/maverick/world_model_backends/postgres.py:1453-1476`; no `rolsuper` or `rolbypassrls` check in that module | In progress in a separate change. |
-| CSP allows inline scripts: `script-src 'self' 'unsafe-inline'`. | `packages/maverick-dashboard/maverick_dashboard/app.py:2506`, `:2518` | In progress in a separate change. |
-| SAML response signature is never required. `want_assertions_signed` defaults to true and is configurable; `want_response_signed` is hard-coded to false. | `packages/maverick-dashboard/maverick_dashboard/saml.py:67`, `:129`, `:228` | In progress in a separate change. |
+this repository; line numbers are as of that commit and drift as files change.
+This is not an issue tracker: rows have no owners or dates. Items that were
+checked and are already fixed are listed at the end and are not in the tables.
 
 ## Open: owner decision
 
@@ -42,7 +34,8 @@ not in the tables.
 | Helm ingress values are not rendered. `values.yaml` defines an `ingress` block (disabled by default), but `templates/` has no Ingress resource. | `deploy/helm/maverick/values.yaml:154-160`; `deploy/helm/maverick/templates/` (no ingress template); `NOTES.txt:11` tells the operator to add one | Separate change. |
 | Terraform version floor does not match `use_lockfile`. `required_version = ">= 1.9"` allows 1.9.x, but `use_lockfile = true` needs Terraform 1.10 or later, as the file's own comment says. | `deploy/aws/terraform/versions.tf:2`, `:15-16` (comment), `:23` | Raise the floor to 1.10 in a separate change. |
 | Queue side effects on the reclaim path are at-least-once. A worker frozen past its lease, or one that dies after its effect and before `complete()`, has its job run again. Handlers must be idempotent. | `packages/maverick-core/maverick/worker.py:526-548` (`_reclaim_stale` caveat); `packages/maverick-core/maverick/job_queue.py:718` (`reclaim_stale`) | Needs idempotency keys at each side-effect boundary, handler by handler. The soak metric `exactly_once_under_contention` measures claim atomicity only. |
-| `app.py` is about 15,700 lines (15,688). | `packages/maverick-dashboard/maverick_dashboard/app.py` | Splitting it is a refactor with a broad test surface; separate change. |
+| CSP still allows inline styles: `style-src 'self' 'unsafe-inline'`. Inline scripts are closed (see the fixed list); the templates' inline `<style>` blocks and `style=""` attributes still need it. | `packages/maverick-dashboard/maverick_dashboard/app.py` (`_DEFAULT_CSP` and `_DOCS_CSP`, `style-src`) | Moving every inline style into stylesheets or nonce-stamped `<style>` blocks touches most templates; separate change. |
+| `app.py` is about 15,700 lines. | `packages/maverick-dashboard/maverick_dashboard/app.py` | Splitting it is a refactor with a broad test surface; separate change. |
 
 ## Open: unused code (owner decision: keep or remove)
 
@@ -54,6 +47,19 @@ not in the tables.
 
 ## Checked and already fixed (not open)
 
+- Postgres world-model login bypassing row-level security. On open,
+  `PostgresWorldModel._check_database_role` reads the login's `rolsuper` and
+  `rolbypassrls`. With `[world_model] rls` on, such a login is reported by
+  `/healthz` and `/readyz` as degraded (`checks.database_role`), and enterprise
+  mode refuses to open; with RLS off it is only logged. The governed-records
+  store has its own check (`packages/maverick-core/maverick/governed_records.py`,
+  `_schema_status_on`), which refuses such a login.
+- CSP inline scripts. `script-src` is `'self' 'nonce-…'` with a fresh nonce per
+  response, and every inline `<script>` in the dashboard templates carries it;
+  `'unsafe-inline'` is gone from `script-src` (`style-src` keeps it, see above).
+- SAML signatures. `want_response_signed` is now `not want_assertions_signed`
+  (`packages/maverick-dashboard/maverick_dashboard/saml.py`), so at least one
+  signature is always required.
 - Message search index tokenizing ciphertext. Migration v49 retired the SQLite
   full-text index and its triggers (`packages/maverick-core/maverick/world_model.py:455-461`)
   and the Postgres GIN index (`packages/maverick-core/maverick/world_model_backends/postgres.py:753-755`).

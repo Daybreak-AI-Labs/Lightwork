@@ -150,13 +150,17 @@ def test_audit_documents_carry_a_point_in_time_status_note(name):
 
 def test_open_items_lists_the_items_still_open():
     """docs/OPEN_ITEMS.md must carry the candidate items that were verified as
-    open, and mark the first three as in progress in a separate change."""
+    open, and list the three fixed by the follow-up change (the RLS login
+    check, CSP script nonces, SAML signatures) as fixed, not open."""
     text = _read("docs/OPEN_ITEMS.md")
     for phrase in (
-        "row-level-security", "unsafe-inline", "SAML", "oidc.auto.tfvars",
+        "unsafe-inline", "oidc.auto.tfvars",
         "deployer.tf", "image_tag", "recovery_window_in_days", "sslmode",
         "automountServiceAccountToken", "ingress", "use_lockfile",
         "app.py", "prompt_dsl", "REWRITES", "DigestIndex", "at-least-once",
     ):
         assert phrase in text, phrase
-    assert text.count("In progress in a separate change") >= 3
+    assert "In progress in a separate change" not in text
+    fixed = text.split("## Checked and already fixed (not open)", 1)[1]
+    for phrase in ("row-level security", "rolbypassrls", "nonce", "want_response_signed"):
+        assert phrase in fixed, phrase
