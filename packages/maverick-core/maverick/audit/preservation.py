@@ -3,6 +3,10 @@
 The retention stores cannot reliably map every record to a rights-case subject.
 Any active case hold therefore blocks the entire workspace's broad purge.
 External holds still require the records owner's independent confirmation.
+
+Active eDiscovery matters are counted separately.  They block the broad purge
+too, but not per-person erasure: that path checks each closure against the
+matter's custodians, kinds and dates instead (see ``maverick.ediscovery``).
 """
 from __future__ import annotations
 
@@ -12,6 +16,7 @@ import sqlite3
 
 
 def preservation_snapshot() -> dict:
+    from ..ediscovery import active_matter_count
     from ..paths import current_tenant_id, data_dir
     from ..privacy_rights_orchestration import PrivacyRightsOrchestrationStore
 
@@ -37,9 +42,12 @@ def preservation_snapshot() -> dict:
                 retention_blocks += int(blocked)
                 if hold or blocked:
                     gates.append([row["case_id"], hold, blocked])
+    matters = active_matter_count()
     return {
         "legal_holds": legal_holds, "retention_blocks": retention_blocks,
         "blocked": bool(legal_holds or retention_blocks),
+        "active_matters": matters,
+        "broad_purge_blocked": bool(legal_holds or retention_blocks or matters),
         "revision": hashlib.sha256(json.dumps(gates, sort_keys=True).encode()).hexdigest(),
         "coverage": "All recorded privacy-rights cases in this workspace; external holds require separate confirmation.",
     }

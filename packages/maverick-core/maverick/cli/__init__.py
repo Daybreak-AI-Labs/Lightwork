@@ -5679,6 +5679,19 @@ def _dispatch_backend_erasure(world, conversation_ids, erasure_plan):
     return backend_erase(conversation_ids)
 
 
+def _refuse_under_legal_hold(ctx, world, conversation_ids) -> None:
+    """Stop before any deletion when an active legal matter covers this closure."""
+    from ..ediscovery import erasure_refusal
+
+    plan_hook = getattr(world, "plan_conversation_erasure", None)
+    goal_ids = plan_hook(conversation_ids)["goal_ids"] if callable(plan_hook) else []
+    message = erasure_refusal(world, conversation_ids=conversation_ids, goal_ids=goal_ids)
+    if message:
+        ctx.obj["erase_refusal"] = message
+        click.echo(message, err=True)
+        ctx.exit(1)
+
+
 def _erasure_failure_label(error: BaseException) -> str:
     """Describe an erase failure without echoing subject-bearing paths/data."""
     errno = getattr(error, "errno", None)
@@ -5800,6 +5813,7 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
     # these conversations. We use ALL turns (not just recent), so a
     # conversation with >10k turns doesn't leave orphan attachments.
     conv_ids = [c.id for c in convs]
+    _refuse_under_legal_hold(ctx, world, conv_ids)
     (
         erasure_plan,
         erasure_manifest,
@@ -6414,11 +6428,21 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
                 f"pruned {convs} conversation(s), {events} goal_event row(s), "
                 f"{dedup} processed-message row(s) across {len(tenants)} tenant(s)"
             )
+            held = sum(1 for row in rows if row.get("held"))
+            if held:
+                click.echo(
+                    f"{held} workspace(s) were skipped because a legal hold is active there.",
+                    err=True,
+                )
             return
+
+    from ..ediscovery import LegalHoldApplies
 
     world = open_world(ctx.obj["db"])
     try:
         convs, events, dedup = prune_world(world, days=days, events_days=events_days)
+    except LegalHoldApplies as exc:
+        raise click.ClickException(str(exc)) from exc
     finally:
         close_world_if_owned(world)
     click.echo(

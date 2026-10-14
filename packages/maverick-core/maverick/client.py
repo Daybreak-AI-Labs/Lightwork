@@ -239,8 +239,16 @@ def _erase_client_bound(cid: str, *, keep_audit: bool, actor: str | None) -> dic
 
     from . import audit
     from .client_erasure import ErasureReceipt
+    from .ediscovery import LegalHoldApplies, assert_no_active_matters
     from .file_lock import cross_process_lock, ensure_private_directory
     from .paths import data_dir, maverick_home
+
+    # Erasing the whole client root also removes every matter ledger in it, so
+    # any active legal matter stops the erasure before anything is deleted.
+    try:
+        assert_no_active_matters()
+    except LegalHoldApplies as exc:
+        raise ClientErasureError(str(exc)) from exc
 
     # A selected workspace must never silently substitute for the bound client.
     root = data_dir(tenant=cid)
