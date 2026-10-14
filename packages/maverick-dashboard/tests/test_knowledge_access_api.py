@@ -11,7 +11,6 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 from maverick import config, governed_records, knowledge_access, world_model
-from maverick_dashboard import knowledge_access_api
 from maverick.knowledge_access import (
     KnowledgeAccessService,
     KnowledgeActorAuthority,
@@ -23,6 +22,7 @@ from maverick.research_registry import (
     ResearchRegistry,
     ResearchRegistryDenied,
 )
+from maverick_dashboard import knowledge_access_api
 
 BASE = "/api/v1/knowledge-access"
 ORIGIN = "http://127.0.0.1:8765"

@@ -539,7 +539,7 @@ def _shared_items():
 
 def test_the_filter_admits_only_items_shared_with_the_signed_in_address(service, monkeypatch):
     kb, identifier, version = _retained_snapshot(service, 8, text="x")
-    permissions = dict(zip([f"item-{n}" for n in range(8)], list(_shared_items().values()) + [None]))
+    permissions = dict(zip([f"item-{n}" for n in range(8)], list(_shared_items().values()) + [None], strict=True))
     _grant_items(service, identifier, version, {key: value for key, value in permissions.items() if value is not None})
     _set_limits(monkeypatch, {"permission_filter": "by_email"})
     result = native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb, authority=_reader())
