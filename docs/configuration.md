@@ -966,6 +966,9 @@ require_for_new_specialists = false    # true: a specialist never published befo
 bypass_requires_second_person = false  # true: publishing changed instructions without a passing run (with a reason) needs
                                        # another administrator's approval on the Approvals page or in chat. The requester cannot approve it
                                        # on either. Rejecting is never refused.
+tool_checks = false                    # true: a saved check may say which tools the specialist must call, must not call, and
+                                       # what the call must include. Tools run as recording stubs with fixed answers; nothing real runs.
+                                       # While false, such checks cannot be created and any existing ones are skipped (never counted as passing).
 
 [autonomy]
 confirm_plan = false          # show the plan in Approvals and wait before a task's first action that reaches outside Lightwork
