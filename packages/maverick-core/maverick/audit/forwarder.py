@@ -76,6 +76,7 @@ _DCE_HOST_RE = re.compile(r"[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})*\.monitor\.azure\
 _DCR_ID_RE = re.compile(r"dcr-[0-9a-fA-F]{32}")
 _STREAM_RE = re.compile(r"Custom-[A-Za-z0-9_]{1,200}")
 _AZURE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,254}")
+_HEADER_VALUE_RE = re.compile(r"[ -~]*")
 _clock: Callable[[], float] = time.monotonic
 _sentinel_tokens: dict[tuple[str, str], tuple[str, float]] = {}
 _sentinel_token_lock = threading.Lock()
@@ -254,6 +255,12 @@ def _https_post(url: str, body: bytes, headers: dict[str, str], timeout: float,
 
     if urlparse(url).scheme != "https":
         raise RuntimeError(f"{label}: refusing to send to a non-TLS URL")
+    for value in headers.values():
+        # http.client quotes an invalid header value in its ValueError, which would
+        # print the key or token. Refuse anything but printable ASCII before urllib sees it.
+        if not _HEADER_VALUE_RE.fullmatch(value):
+            raise RuntimeError(f"{label}: a request header is not plain ASCII text; "
+                               "check the credential for stray characters")
     req = urllib.request.Request(url, data=body, method="POST")
     for name, value in headers.items():
         req.add_header(name, value)

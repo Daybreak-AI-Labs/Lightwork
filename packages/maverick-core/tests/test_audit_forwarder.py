@@ -382,6 +382,40 @@ def test_https_post_refuses_plaintext_url_before_any_request(vendor_env):
         forwarder._https_post("http://intake.example/api", b"[]", {}, 5.0, "Datadog log intake")
 
 
+def _no_network(monkeypatch):
+    """Fail loudly if a test ever reaches a socket; header errors must come first."""
+    def _connect(self):  # pragma: no cover -- must not be called
+        raise AssertionError("network used for a request that should not be built")
+
+    monkeypatch.setattr("http.client.HTTPSConnection.connect", _connect)
+
+
+@pytest.mark.parametrize("value", [
+    "dd-key-part\nline-two", "dd-key-part\rline-two", "dd-key-part\x00line-two",
+    "dd-key-part line-two",
+])
+def test_https_post_refuses_non_ascii_header_without_echoing_it(vendor_env, value):
+    # http.client's ValueError (or UnicodeEncodeError) quotes the whole header value,
+    # so the value must be refused before urllib ever builds the request.
+    _no_network(vendor_env)
+    with pytest.raises(RuntimeError, match="Datadog log intake") as info:
+        forwarder._https_post("https://http-intake.logs.datadoghq.com/api/v2/logs", b"[]",
+                              {"DD-API-KEY": value}, 5.0, "Datadog log intake")
+    assert "dd-key-part" not in str(info.value) and "line-two" not in str(info.value)
+    assert info.value.__context__ is None
+
+
+def test_datadog_key_with_line_break_is_refused_without_echoing_it(vendor_env, caplog):
+    _no_network(vendor_env)
+    vendor_env.setenv("MAVERICK_DATADOG_API_KEY", "dd-api-key-line-one\ndd-api-key-line-two")
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(RuntimeError, match="Datadog") as info:
+            forwarder.forward(["a"], "datadog://datadoghq.com")
+    for text in (str(info.value), repr(info.value), caplog.text):
+        assert "line-one" not in text and "line-two" not in text
+    assert info.value.__context__ is None
+
+
 def test_sentinel_documented_limits_are_the_batch_bounds():
     # Logs Ingestion API: 1MB per call; fields over 64KB are truncated by Azure.
     assert (forwarder._SENTINEL_MAX_BODY, forwarder._SENTINEL_MAX_FIELD) == (1024 * 1024, 64 * 1024)
