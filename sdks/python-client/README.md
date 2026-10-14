@@ -55,8 +55,9 @@ password is refused too, and the error does not repeat it: pass the key as
 
 Create the idempotency key yourself and store it before you send the request.
 Send the goal with `submit_once()` below. It recovers an uncertain start with
-the same key and never sends the work again under a new key. The test suite
-runs this same function (`test_a_lost_claim_is_recovered_by_replaying_the_same_key`).
+the same key and never sends the work again under a new key. The test suite runs
+a copy of this function with identical logic (`test_a_lost_claim_is_recovered_by_replaying_the_same_key`),
+so the documented path is exercised against the real app.
 
 ```python
 import time
