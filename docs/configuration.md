@@ -926,7 +926,9 @@ require_passing_tests = true  # changed instructions publish only after every sa
 max_cases_per_specialist = 20          # 1 to 200: saved checks one specialist can keep; one run checks at most this many.
                                        # Lowering it keeps saved checks, but a set larger than the limit cannot pass a full run.
 require_for_new_specialists = false    # true: a specialist never published before needs a saved check and a passing full
-                                       # run of every check on its exact draft. A reason does not skip this.
+                                       # run of every check on its exact draft. A reason does not skip this. Business setup,
+                                       # customization bundles and the CLI (onboard, learn-demo) cannot add a new specialist
+                                       # while it is on; add it in Agent Factory instead.
 bypass_requires_second_person = false  # true: publishing changed instructions without a passing run (with a reason) needs
                                        # another administrator's approval on the Approvals page. The requester cannot approve it.
 

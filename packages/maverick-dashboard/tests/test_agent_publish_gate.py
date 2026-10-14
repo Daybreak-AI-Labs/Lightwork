@@ -538,3 +538,23 @@ def test_a_complete_draft_check_of_many_questions_gets_a_limit_that_grows_with_t
     assert len(original["run"]["results"]) == 25 and all(row["passed"] for row in original["run"]["results"])
     published = _decide(app, NEW, "publish", selected=draft)
     assert published.status_code == 200 and published.json()["confirmed"], published.text
+
+
+def test_business_setup_cannot_add_a_new_specialist_while_the_switch_is_on(client, audit_rows):
+    app, tmp = client
+    from maverick import config
+    from maverick.agent_tests_policy import NEW_SPECIALIST_NEEDS_TESTS
+    from maverick.domain import DomainProfile, available_domains
+    from maverick_dashboard import business_agent_ops_api
+
+    profile = DomainProfile(name="acme_setup_helper", persona="You help with setup.", allow_tools=["read_file"], max_risk="low")
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n"
+                                    "[agent_tests]\nrequire_for_new_specialists = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    held = business_agent_ops_api._approve(profile, None, [], "user:admin", "user:admin")
+    assert held == {"saved": False, "message": NEW_SPECIALIST_NEEDS_TESTS}
+    assert "acme_setup_helper" not in available_domains()
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    saved = business_agent_ops_api._approve(profile, None, [], "user:admin", "user:admin")
+    assert saved["saved"] is True and "acme_setup_helper" in available_domains()

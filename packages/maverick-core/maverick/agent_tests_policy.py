@@ -21,6 +21,14 @@ from __future__ import annotations
 DEFAULT_MAX_CASES = 20
 MAX_CASES_LIMIT = 200
 _UNREADABLE = object()
+NEW_SPECIALIST_NEEDS_TESTS = (
+    "A new specialist needs at least one saved check and a full passing run of those checks on its exact draft "
+    "before it can be added. Create it in Agent Factory, add checks in Workforce, run them on the draft, then "
+    "publish it there. Nothing was saved.")
+
+
+class NewSpecialistNeedsTests(PermissionError):
+    """A specialist with no published version cannot be saved while ``require_for_new_specialists`` is on."""
 
 
 def _section():
@@ -68,5 +76,5 @@ def bypass_requires_second_person() -> bool:
     return _switch("bypass_requires_second_person")
 
 
-__all__ = ["DEFAULT_MAX_CASES", "MAX_CASES_LIMIT", "bypass_requires_second_person",
-           "max_cases_per_specialist", "require_for_new_specialists"]
+__all__ = ["DEFAULT_MAX_CASES", "MAX_CASES_LIMIT", "NEW_SPECIALIST_NEEDS_TESTS", "NewSpecialistNeedsTests",
+           "bypass_requires_second_person", "max_cases_per_specialist", "require_for_new_specialists"]

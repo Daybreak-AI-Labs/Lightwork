@@ -1167,6 +1167,7 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
     approval, and on approval saves it so the sealed, knowledge-loaded agent
     goes live. Nothing is activated without your yes.
     """
+    from ..agent_tests_policy import NewSpecialistNeedsTests
     from ..intake import IntakeSpec, attach_docs_to_profile, run_intake, save_profile
 
     # Only prompt when a human is attached (a TTY). In non-interactive use (CI,
@@ -1251,7 +1252,11 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
         return
     if kb is not None and doc_paths:
         attach_docs_to_profile(spec, profile, kb)
-    path = save_profile(profile, approved=True)
+    try:
+        path = save_profile(profile, approved=True)
+    except NewSpecialistNeedsTests as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(1)
     click.echo(click.style(f"\nActivated. Pack saved to {path}", fg="green"))
     click.echo(f"Domain '{profile.name}' is now available to the swarm.")
 
@@ -1277,6 +1282,7 @@ def learn_demo(ctx: click.Context, demo_file, name, industry, source, no_llm, ye
     your approval, and on approval saves it and provisions its skills/tools.
     Nothing is activated without your yes.
     """
+    from ..agent_tests_policy import NewSpecialistNeedsTests
     from ..demonstration import induce_profile, load_demonstration
     from ..intake import save_profile
 
@@ -1315,7 +1321,11 @@ def learn_demo(ctx: click.Context, demo_file, name, industry, source, no_llm, ye
     if not yes and not click.confirm("\nApprove and activate this agent?", default=False):
         click.echo("Discarded. Nothing was saved.")
         return
-    path = save_profile(profile, approved=True)
+    try:
+        path = save_profile(profile, approved=True)
+    except NewSpecialistNeedsTests as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(1)
     click.echo(click.style(f"\nActivated. Pack saved to {path}", fg="green"))
     click.echo(f"Domain '{profile.name}' is now available to the swarm.")
 

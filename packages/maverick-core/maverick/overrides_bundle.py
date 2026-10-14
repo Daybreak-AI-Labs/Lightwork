@@ -28,7 +28,8 @@ try:
 except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib  # type: ignore[no-redef]
 
-from .domain import lint_profile, load_domain, user_dir
+from .agent_tests_policy import NEW_SPECIALIST_NEEDS_TESTS, require_for_new_specialists
+from .domain import available_domains, lint_profile, load_domain, user_dir
 from .role_edit import roles_file, validate_role, write_role_override
 
 
@@ -88,6 +89,10 @@ def load_overrides(src: str | Path) -> dict:
                 continue
             if errs:
                 out["skipped"].append(f"domains/{p.name}: {errs[0]}")
+                continue
+            # A specialist not published yet waits for its saved checks; one already published loads as before.
+            if require_for_new_specialists() and profile.name not in available_domains():
+                out["skipped"].append(f"domains/{p.name}: {NEW_SPECIALIST_NEEDS_TESTS}")
                 continue
             shutil.copy2(p, dst / p.name)
             out["domains"] += 1
