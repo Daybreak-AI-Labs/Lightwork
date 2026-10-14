@@ -1694,7 +1694,10 @@ def get_auth_sessions() -> dict:
     """Installation-wide browser limits and ended-session retention."""
     if config_source_errors(include_tenant=False):
         raise ValueError("Sign-in settings cannot be read.")
-    authentication = load_global_config().get("auth", {})
+    loaded = load_global_config()
+    if config_source_errors(include_tenant=False):  # the load itself may have found it
+        raise ValueError("Sign-in settings cannot be read.")
+    authentication = loaded.get("auth", {})
     if not isinstance(authentication, dict):
         raise ValueError("Sign-in settings must contain named choices.")
     cfg = authentication.get("sessions", {})

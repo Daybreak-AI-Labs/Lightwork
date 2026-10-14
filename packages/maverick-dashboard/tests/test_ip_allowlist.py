@@ -163,6 +163,24 @@ def test_a_mistyped_list_allows_only_loopback_instead_of_everyone(tmp_path, line
     assert ip_allowlist.configured() is True
 
 
+@pytest.mark.parametrize("gate", ["installation_allows", "workspace_allows"])
+def test_a_source_that_breaks_during_the_load_fails_closed(tmp_path, monkeypatch, gate):
+    # The check before the load sees a clean file; the file breaks just before
+    # the load reads it, so only the check after the load can notice the error.
+    _write_config(tmp_path, "[auth.ip_allowlist]\ncidrs = [\"192.0.2.0/24\"]\n")
+    assert config.config_source_errors() == {}
+    real_get = config.get_ip_allowlist
+
+    def get_after_the_file_breaks():
+        (tmp_path / "home" / "config.toml").write_text("[auth.ip_allowlist\n", encoding="utf-8")
+        return real_get()
+
+    monkeypatch.setattr(config, "get_ip_allowlist", get_after_the_file_breaks)
+    check = getattr(ip_allowlist, gate)
+    assert check(_req(host="203.0.113.7")) is False
+    assert check(_req(host="127.0.0.1")) is True
+
+
 # ---- the workspace gate ------------------------------------------------------------
 
 

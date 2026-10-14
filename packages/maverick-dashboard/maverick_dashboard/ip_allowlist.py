@@ -111,7 +111,11 @@ def _policy() -> dict:
 
     if config_source_errors(include_tenant=False):
         raise PolicyUnreadable("ip allowlist policy unreadable")
-    return get_ip_allowlist()
+    policy = get_ip_allowlist()
+    # The load can be what finds the source unreadable: check again after it.
+    if config_source_errors(include_tenant=False):
+        raise PolicyUnreadable("ip allowlist policy unreadable")
+    return policy
 
 
 def address_allowed(addr: _Address | None, entries: list | tuple) -> bool:
