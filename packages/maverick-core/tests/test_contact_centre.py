@@ -409,6 +409,13 @@ def test_status_and_stored_outbox_never_hold_the_token_or_destination_secret(tmp
         assert ZENDESK_TOKEN.encode() not in path.read_bytes()
 
 
+def test_conversation_link_opens_the_conversation_page_that_shows_the_handoff(tmp_path):
+    _configure(tmp_path, ZENDESK_CONFIG)
+    assert contact_centre.conversation_link(7) == "https://lightwork.acme.example/chat/goal/7"
+    _configure(tmp_path, '[contact_centre]\nprovider = "zendesk"\n')
+    assert contact_centre.conversation_link(7) == ""
+
+
 # ------------------------------------------------------------ the in-app handoff is not blocked
 def test_queue_failure_never_blocks_the_in_app_handoff(tmp_path, monkeypatch, caplog):
     from maverick.chat_threads import ChatThreads
@@ -448,4 +455,4 @@ def test_the_handoff_passes_its_reviewed_title_reason_and_link_to_the_outbox(tmp
     assert seen["title"] == "Card declined" and seen["reason"] == "Need a person"
     assert seen["requester_email"] == "ana@example.com"
     assert seen["messages"] == [("user", "hi")]
-    assert seen["link"].endswith("/conversations?goal=7")
+    assert seen["link"] == "https://lightwork.acme.example/chat/goal/7"

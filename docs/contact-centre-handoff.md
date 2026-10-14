@@ -113,6 +113,6 @@ The in-app handoff is confirmed first. A failure here never undoes or blocks it.
   the newest 2,000 handoffs. Finished entries are removed first when it is full.
 - Each send and its outcome is recorded in the audit log without message text
   or credentials.
-- The conversation link opens the conversations list with the conversation id
-  (`/conversations?goal=<id>`). Whether it opens that conversation directly is
-  not verified.
+- The conversation link is `<Lightwork web address>/chat/goal/<id>`, the task page
+  that shows the human handoff panel. Only the route is checked in the test suite;
+  open one link after you set the address to confirm it on your server.

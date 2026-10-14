@@ -72,7 +72,7 @@ class OutboxFull(RuntimeError):
 def conversation_link(goal_id: int) -> str:
     """Absolute link to a conversation, or ``""`` when no dashboard address is set."""
     base = config.get_contact_centre()["dashboard_url"]
-    return f"{base}/conversations?goal={int(goal_id)}" if base else ""
+    return f"{base}/chat/goal/{int(goal_id)}" if base else ""
 
 
 def _secret(env_name: str, key: str) -> str:
