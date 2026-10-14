@@ -371,8 +371,10 @@ def test_failed_provider_call_keeps_its_reservation_and_is_not_retried(chat, mod
     token = _session(chat, key)
     model.error = RuntimeError("provider timeout")
     response = _say(chat, token, "one")
-    assert response.status_code == 200
-    assert "not available right now" in response.json()["answer"]
+    # A provider failure is a server error (503), not a polite answer: a cap refusal is a
+    # normal answer, but an outage must show up as a failed request.
+    assert response.status_code == 503
+    assert response.json()["detail"] == "this chat is not available right now"
     assert "provider timeout" not in response.text
     assert len(model.calls) == 1
     model.error = None

@@ -268,7 +268,7 @@ def _answer(tenant: str | None, site: dict[str, Any], text: str, now: float) -> 
     except Exception as exc:  # noqa: BLE001 -- a provider call may have been billed
         settled = max(reserve, budget.dollars if budget is not None else 0.0)
         logger.warning("public chat answer did not finish (%s)", type(exc).__name__)
-        return _UNAVAILABLE_ANSWER
+        raise  # the route answers 503 with one generic message
     finally:
         store.settle_spend(tenant, site["id"], day, reserved=reserve, actual=settled)
 
