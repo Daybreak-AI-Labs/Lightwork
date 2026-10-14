@@ -312,3 +312,24 @@ def test_an_independence_increase_is_recorded_when_the_trial_is_promoted_not_whe
     promoted = _confirm(app, _review(app, "promote", reason="Reviewed by the supplier lead"))
     assert promoted.status_code == 200 and promoted.json()["confirmed"] is True, promoted.text
     assert recorded == [PACK]
+
+
+def test_publishing_refuses_while_settings_cannot_be_read_so_nothing_reaches_everyone_by_accident(client, monkeypatch, tmp_path):
+    from maverick import config
+
+    app = client
+    _trials_on(monkeypatch, tmp_path, 40)
+    _question(app, 0)
+    from maverick import domain_edit
+
+    draft = _saved_draft(app, {"persona": NEW})
+    before = domain_edit.read_override(PACK)
+    context = app.get(DRAFTS + "/history").json()["context"]
+    # An unreadable settings file would read the share as off; the publish path refuses first.
+    (tmp_path / "config.toml").write_text("[agent_tests\ncanary_percent = 40\n", encoding="utf-8")
+    config.reset_config_cache()
+    refused = app.post(DRAFTS + "/review", json={"name": PACK, "action": "publish", "context": context,
+                                                 "selected": draft, "reason": "Reviewed by the supplier lead"})
+    # The request is turned away (identity or settings check) before any change is made.
+    assert refused.status_code in {401, 403, 503}, refused.text
+    assert domain_edit.read_override(PACK) == before
