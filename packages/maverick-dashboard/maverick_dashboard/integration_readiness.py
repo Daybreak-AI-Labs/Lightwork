@@ -353,6 +353,12 @@ def _probe_native_cloud(name: str) -> dict[str, Any]:
             default_headers=route.headers_dict(), environment=route.environment_dict(),
         )
         model_id = client.deployment if name == "azure" else client.DEFAULT_MODEL
+        if name == "vertex" and not model_id:
+            return {
+                "verified": None,
+                "detail": "enter the model ID shown in your Vertex AI Model Garden",
+                "evidence": {"kind": "setup_incomplete", "external_live_verified": False},
+            }
         chosen = model_for_role("default")
         if chosen.startswith(f"{name}:") and chosen.partition(":")[2] != model_id:
             return {
@@ -475,7 +481,7 @@ def probe_provider(provider: str, provider_config: dict[str, Any]) -> dict[str, 
     from maverick.tools import _ssrf
 
     name = str(provider).strip().lower()
-    if name in {"azure", "bedrock"}:
+    if name in {"azure", "bedrock", "vertex"}:
         return _probe_native_cloud(name)
     key = _provider_key(name, provider_config)
     base_url = str(provider_config.get("base_url") or "").strip()

@@ -1039,12 +1039,15 @@ def provider_configuration_state(provider: str) -> dict[str, Any]:
                 base_source = f"environment:{env_name}"
                 break
 
-    sources = [source for source in (key_source, base_source) if source]
+    # Vertex AI has no key: its configured project is the set-up, so it counts.
+    project_present = name == "vertex" and bool(_text(effective.get("project_id")))
+    project_source = field_sources.get("project_id") if project_present else None
+    sources = [source for source in (key_source, base_source, project_source) if source]
     via = " + ".join(dict.fromkeys(sources)) or None
     protected_sources = {"operator overlay", "tenant config"}
     return {
         "name": name,
-        "configured": bool(key_present or base_url),
+        "configured": bool(key_present or base_url or project_present),
         "api_key_configured": key_present,
         "api_key_source": key_source,
         "api_key_env": key_env,

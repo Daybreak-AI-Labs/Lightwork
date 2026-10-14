@@ -302,6 +302,18 @@ def _providers(S) -> tuple:
           "The Bedrock access key, when Lightwork signs in with one. It is stored sealed and "
           "never shown again.", "secret", "Integrations", "", "maverick.llm",
           subgroup="Amazon Bedrock", max_length=500),
+        S("providers.vertex", "project_id", "Google Cloud project",
+          "The Google Cloud project whose Vertex AI access Lightwork uses.", "text",
+          "Integrations", "", "maverick.llm", subgroup="Google Cloud Vertex AI",
+          pattern=r"([A-Za-z0-9][A-Za-z0-9.:_-]{0,127})?", max_length=128),
+        S("providers.vertex", "region", "Vertex AI region",
+          "The Vertex AI region for your Claude models, such as us-east5.", "text",
+          "Integrations", "", "maverick.llm", subgroup="Google Cloud Vertex AI",
+          pattern=r"([a-z0-9][a-z0-9-]{0,62})?", max_length=63),
+        S("providers.vertex", "model_id", "Claude model on Vertex AI",
+          "The model ID exactly as shown in the Vertex AI Model Garden.", "text",
+          "Integrations", "", "maverick.llm", subgroup="Google Cloud Vertex AI",
+          pattern=r"([A-Za-z0-9][A-Za-z0-9._@-]{0,119})?", max_length=120),
         S("providers", "per_tenant_keys", "Let each workspace use its own AI service key",
           "A workspace that has its own key for an AI service uses it instead of the shared "
           "one.", "toggle", "Integrations", False, "maverick.config",

@@ -50,7 +50,7 @@ def _provider_audit_value(data: dict, name: str) -> dict[str, str]:
     value = providers.get(name) if isinstance(providers, dict) else None
     value = value if isinstance(value, dict) else {}
     setup = {field: value.get(field) for field in
-             ("auth_mode", "deployment", "api_version", "endpoint", "region", "model_id")
+             ("auth_mode", "deployment", "api_version", "endpoint", "region", "model_id", "project_id")
              if value.get(field)}
     return {
         "api_key": "set" if value.get("api_key") else "not set",  # pragma: allowlist secret
@@ -71,7 +71,7 @@ def _provider_changed_fields(old: dict, new: dict, name: str) -> list[str]:
         "api_key": "access key", "base_url": "service address",  # pragma: allowlist secret
         "auth_mode": "sign-in method", "deployment": "deployment",
         "api_version": "service version", "endpoint": "endpoint",
-        "region": "region", "model_id": "model",
+        "region": "region", "model_id": "model", "project_id": "project",
     }
     return [label for field, label in labels.items() if before.get(field) != after.get(field)]
 
@@ -721,6 +721,7 @@ async def settings_set_provider(
     endpoint: str = Form(""),
     region: str = Form(""),
     model_id: str = Form(""),
+    project_id: str = Form(""),
 ) -> RedirectResponse:
     """Rotate only provider fields this dashboard can make effective.
 
@@ -737,7 +738,9 @@ async def settings_set_provider(
     setup = ({"auth_mode": auth_mode, "deployment": deployment, "api_version": api_version}
              if provider_name == "azure" else
              {"auth_mode": auth_mode, "endpoint": endpoint, "region": region, "model_id": model_id}
-             if provider_name == "bedrock" else None)
+             if provider_name == "bedrock" else
+             {"project_id": project_id, "region": region, "model_id": model_id}
+             if provider_name == "vertex" else None)
     try:
         with _setting_write(request, "providers", provider_name, lambda d:
                             _provider_audit_value(d, provider_name), changed_fields=lambda old, new:

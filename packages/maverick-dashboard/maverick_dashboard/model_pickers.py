@@ -13,7 +13,7 @@ import re
 import time
 
 CUSTOM = "__custom__"
-_VALID_SPEC = re.compile(r"[A-Za-z0-9_.:/-]{1,128}")
+_VALID_SPEC = re.compile(r"[A-Za-z0-9_.:/@-]{1,128}")
 _STATUS_TEXT = {
     "pending": "Not checked yet. Refresh to list the models this connection can reach.",
     "unconfigured": "Set up this service under Provider keys to use it.",
@@ -54,14 +54,16 @@ def config_catalog() -> list[str]:
 
 def _configured_cloud_model(name: str) -> str:
     """Offer the exact customer deployment/model selected in provider setup."""
-    if name not in {"azure", "bedrock"}:
+    fields = {"azure": ("deployment", "AZURE_OPENAI_DEPLOYMENT"),
+              "bedrock": ("model_id", "BEDROCK_MODEL_ID"),
+              "vertex": ("model_id", "VERTEX_MODEL_ID")}
+    if name not in fields:
         return ""
     try:
         from maverick.config import get_provider_config
 
         table = get_provider_config(name) or {}
-        field = "deployment" if name == "azure" else "model_id"
-        env = "AZURE_OPENAI_DEPLOYMENT" if name == "azure" else "BEDROCK_MODEL_ID"
+        field, env = fields[name]
         value = str(os.environ.get(env, "") or table.get(field) or "").strip()
         return value if _VALID_SPEC.fullmatch(f"{name}:{value}") else ""
     except Exception:

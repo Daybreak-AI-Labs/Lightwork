@@ -112,6 +112,7 @@ PROVIDERS: list[dict] = [
     {"name": "openai_compatible", "label": "OpenAI-compatible server", "env": ["OPENAI_COMPATIBLE_BASE_URL"], "base_url": True},
     {"name": "azure", "label": "Azure OpenAI", "env": ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"], "base_url": True},
     {"name": "bedrock", "label": "Amazon Bedrock", "env": ["BEDROCK_API_KEY", "AWS_REGION"], "base_url": False},
+    {"name": "vertex", "label": "Google Cloud Vertex AI (Claude)", "env": [], "base_url": False},
 ]
 _PROVIDER_NAMES = {p["name"] for p in PROVIDERS}
 
@@ -577,7 +578,7 @@ def _dump_webhooks(lines: list[str], whk: dict) -> None:
 # page, and sign-in mode, Bedrock endpoint/region and Azure deployment/version
 # on the All settings page.
 _PROVIDER_FIELDS = ("api_key", "base_url", "auth_mode", "endpoint", "region",
-                    "model_id", "deployment", "api_version")
+                    "model_id", "deployment", "api_version", "project_id")
 
 
 def _dump_providers(lines: list[str], providers: dict) -> None:
@@ -862,6 +863,7 @@ def _provider_setup_details(name: str, values: dict[str, str] | None) -> dict[st
     allowed = {
         "azure": {"auth_mode", "deployment", "api_version"},
         "bedrock": {"auth_mode", "endpoint", "region", "model_id"},
+        "vertex": {"project_id", "region", "model_id"},
     }.get(name, set())
     details = {str(k): str(v).strip() for k, v in (values or {}).items() if str(v).strip()}
     if set(details) - allowed:
@@ -882,6 +884,13 @@ def _provider_setup_details(name: str, values: dict[str, str] | None) -> dict[st
             raise ValueError("enter an AWS region such as us-east-1")
         if "model_id" in details and not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,120}", details["model_id"]):
             raise ValueError("enter the Claude model ID shown in your AWS account")
+    if name == "vertex":
+        if "project_id" in details and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:_-]{0,127}", details["project_id"]):
+            raise ValueError("enter the Google Cloud project ID")
+        if "region" in details and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", details["region"]):
+            raise ValueError("enter a Vertex AI region such as us-east5")
+        if "model_id" in details and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,119}", details["model_id"]):
+            raise ValueError("enter the Claude model ID exactly as shown in the Vertex AI Model Garden")
     return details
 
 
@@ -926,6 +935,8 @@ def _checked_provider_setup(
             raise ValueError("enter the secure Azure resource address, starting with https://")
     if name in {"azure", "bedrock"} and len(key_value) > 500:
         raise ValueError("the provider key is too long")
+    if name == "vertex" and key_value:
+        raise ValueError("Vertex AI uses the server's Google sign-in, not a key")
     if key_value and values.get("auth_mode") in {"entra_id", "iam"}:
         raise ValueError("a key cannot be combined with server sign-in")
     if name == "bedrock" and values.get("auth_mode") == "iam" and any(
@@ -957,6 +968,18 @@ def _confirm_cloud_setup(name: str, observed: dict) -> None:
         if not (str(observed.get("model_id") or "").strip()
                 or os.environ.get("BEDROCK_MODEL_ID", "").strip()):
             raise ProviderRotationConflict("enter the Claude model ID shown in your AWS account")
+    if name == "vertex":
+        project = (str(observed.get("project_id") or "").strip()
+                   or os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", "").strip()
+                   or os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip())
+        region = (str(observed.get("region") or "").strip()
+                  or os.environ.get("CLOUD_ML_REGION", "").strip())
+        model = (str(observed.get("model_id") or "").strip()
+                 or os.environ.get("VERTEX_MODEL_ID", "").strip())
+        if not (project and region and model):
+            raise ProviderRotationConflict(
+                "Vertex AI still needs a Google Cloud project, a region and the model ID"
+            )
 
 
 def _provider_rotation_blockers(
@@ -1169,7 +1192,7 @@ def clear_provider(name: str) -> None:
         if isinstance(table, dict):
             # Guided cloud setup removes its whole dashboard-owned connection;
             # other providers retain the All settings sign-in choices.
-            fields = _PROVIDER_FIELDS if name in {"azure", "bedrock"} else ("api_key", "base_url")
+            fields = _PROVIDER_FIELDS if name in {"azure", "bedrock", "vertex"} else ("api_key", "base_url")
             for field in fields:
                 table.pop(field, None)
             if not table:
@@ -2491,6 +2514,7 @@ def state() -> dict:
         setup_fields = {
             "azure": ("auth_mode", "deployment", "api_version"),
             "bedrock": ("auth_mode", "endpoint", "region", "model_id"),
+            "vertex": ("project_id", "region", "model_id"),
         }.get(name, ())
         setup = {field: str(provider_config.get(field) or "").strip() for field in setup_fields}
         if name == "azure":
@@ -2504,9 +2528,18 @@ def state() -> dict:
                                or setup.get("region", ""))
             setup["model_id"] = (os.environ.get("BEDROCK_MODEL_ID", "").strip()
                                  or setup.get("model_id", ""))
+        if name == "vertex":
+            # Config first; the same environment names the client reads fill the gaps.
+            setup["project_id"] = (setup.get("project_id")
+                                   or os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", "").strip()
+                                   or os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip())
+            setup["region"] = setup.get("region") or os.environ.get("CLOUD_ML_REGION", "").strip()
+            setup["model_id"] = setup.get("model_id") or os.environ.get("VERTEX_MODEL_ID", "").strip()
         setup_locked = {field: bool(_provider_detail_blocker(name, field)) for field in setup_fields}
         via = effective["via"]
         if not via and ov and setup.get("auth_mode") in {"iam", "entra_id"}:
+            via = "dashboard"
+        if not via and ov and name == "vertex" and setup.get("project_id"):
             via = "dashboard"
         address, address_needs_repair = provider_address_display(effective["base_url"])
         providers.append({
