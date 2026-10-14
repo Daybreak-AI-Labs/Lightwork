@@ -590,3 +590,30 @@ def test_live_postgres_value_ledger_tenant_isolation_and_reprocessing(value_post
         with tenant_scope(tenant="other-value-tenant"):
             assert report(pg)["totals"]["performed_work"] == 0
             assert service.WORKS.list(limit=100) == []
+
+
+def test_unrecorded_proposals_are_projected_without_any_write(world, monkeypatch):
+    for _ in range(3):
+        goal(world, "Draft an RFP")
+    rows = service.refresh(world)
+    monkeypatch.setattr(opportunities.RECOMMENDATIONS, "create", lambda *a, **k: pytest.fail("a read wrote a proposal"))
+    monkeypatch.setattr(opportunities.RECOMMENDATIONS, "update", lambda *a, **k: pytest.fail("a read advanced a proposal"))
+    projected = opportunities.evaluate(rows, owner="alice", capabilities=[], persist=False)
+    assert len(projected) == 1 and projected[0]["revision"] == 0
+    monkeypatch.undo()
+    recorded = opportunities.evaluate(rows, owner="alice", capabilities=[], persist=True)
+    stored = opportunities.RECOMMENDATIONS.get(projected[0]["id"])
+    assert stored["revision"] == 1
+    for key in ("intent", "label", "work_ids", "kind", "reason", "forecast", "baseline", "status", "steps", "evaluation"):
+        assert projected[0][key] == stored[key] == recorded[0][key], key
+
+
+def test_read_release_evidence_is_returned_without_pinning(monkeypatch):
+    from maverick.intent_value import opportunities as module
+    from maverick.intent_value import workflow_evidence
+    release = {"release_id": "R-1", "definition_digest": "d", "release_digest": "r", "selection": {"flow_id": "f"}}
+    monkeypatch.setattr(workflow_evidence, "release_for", lambda binding, previous: release)
+    monkeypatch.setattr(module.RECOMMENDATIONS, "update", lambda *a, **k: pytest.fail("a read pinned a release"))
+    recommendation = {"id": "IVR-" + "a" * 32, "revision": 1, "owner": "alice", "workflow_release": None}
+    assert module._release_evidence(recommendation, {"flow_id": "f"}, pin=False) == release
+

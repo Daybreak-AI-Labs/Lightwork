@@ -39,6 +39,9 @@
     $('iv-status').textContent = 'Refreshing authorized work and execution evidence…';
     $('iv-report').hidden = true; $('iv-error').hidden = true; $('iv-retry').hidden = true;
     try {
+      // Reads never record work. Recording newly observed work is the explicit sync, so the page syncs first.
+      await request('/sync', 'POST', {});
+      if (version !== generation) return;
       const [metrics, config, defaults, suggestions] = await Promise.all([
         request('?' + filters()), request('/settings'), request('/benchmarks'),
         request('/opportunities?include_decided=' + $('iv-decided').checked + '&device_id=' + encodeURIComponent($('iv-device').value))

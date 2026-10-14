@@ -1,6 +1,7 @@
 """Real native API/builder boundaries with synthetic audit and identity inputs."""
 from __future__ import annotations
 
+import hashlib
 import time
 
 import pytest
@@ -56,9 +57,23 @@ def seed(world, *, owner="user:alice", count=1, performed=True):
 
 
 def get(client, path="", user="alice"):
+    # Reads never record work; the page records it first through the explicit sync.
+    synced = client.post(BASE + "/sync", headers=headers(user))
+    assert synced.status_code == 200, synced.text
     response = client.get(BASE + path, headers=headers(user))
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def tree(root):
+    """Content digests of every stored file under ``root`` (locks and caches excluded)."""
+    return {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(root.rglob("*")) if path.is_file() and path.suffix != ".lock" and "cache" not in path.parts}
+
+
+def stable(payload):
+    """A report without its read-time stamps (the check time and the default period end)."""
+    return {key: value for key, value in payload.items() if key not in {"checked_at", "end"}}
 
 
 def test_native_completed_task_rename_preserves_report_and_copilot_value(context):
@@ -312,8 +327,11 @@ def test_source_failure_is_unavailable_not_zero(context, monkeypatch):
     def unavailable():
         raise OSError("synthetic unreadable audit history")
     monkeypatch.setattr(sources, "audit_population", unavailable)
-    response = client.get(BASE, headers=headers())
+    # Reads report the recorded ledger; the sync that records new work is where an unreadable source surfaces.
+    response = client.post(BASE + "/sync", headers=headers())
     assert response.status_code == 503 and "not zero" in response.text
+    response = client.get(BASE, headers=headers())
+    assert response.status_code == 200 and response.json()["totals"]["performed_work"] == 1
     response = client.post("/api/v1/copilot", headers=headers(), json={"message": "What value delivered this month?", "page": "/work-value"})
     assert response.status_code == 503
 
@@ -736,3 +754,38 @@ def test_copilot_admin_assumptions_require_review_preserve_history_and_deduplica
     assert get(client)["totals"] == original
     ordinary = client.post(base + "/catalog", headers=headers(), json=scope).json()
     assert action["id"] not in {row["id"] for row in ordinary["operations"]}
+
+
+def test_reads_leave_stores_unchanged_until_the_page_syncs(context, tmp_path):
+    client, world = context
+    seed(world, count=3)
+    before = tree(tmp_path)
+    assert client.get("/work-value", headers=headers()).status_code == 200
+    unrecorded = client.get(BASE, headers=headers())
+    assert unrecorded.status_code == 200 and unrecorded.json()["totals"]["performed_work"] == 0
+    for path in ("/opportunities", "/settings", "/benchmarks"):
+        assert client.get(BASE + path, headers=headers()).status_code == 200
+    assert tree(tmp_path) == before
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    recorded = tree(tmp_path)
+    assert recorded != before
+    first = client.get(BASE, headers=headers()).json()
+    assert first["totals"]["performed_work"] == 3
+    assert tree(tmp_path) == recorded
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    assert tree(tmp_path) == recorded
+    assert stable(client.get(BASE, headers=headers()).json()) == stable(first)
+
+
+def test_saved_rate_change_does_not_reprice_work_seen_before_it(context):
+    client, world = context
+    seed(world)
+    settings = client.get(BASE + "/settings", headers=headers("root")).json()
+    response = client.put(BASE + "/settings", headers=headers("root"), json={
+        "revision": settings["revision"], "hourly_rate": 120, "currency": "USD", "completion_confirmation": False})
+    assert response.status_code == 200, response.text
+    row = get(client)["rows"][0]
+    estimate = get(client, "/work/" + row["id"])["estimates"][0]
+    assert estimate["assumptions"]["hourly_rate"] == 60.0
+    assert get(client)["rows"][0]["revision"] == row["revision"]
+

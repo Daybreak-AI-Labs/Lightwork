@@ -93,9 +93,11 @@ def period(start="", end="", *, now=None):
 
 
 def records(request, *, scope="own", refresh=True):
+    """Work rows for ``request``. ``refresh=True`` records newly observed work
+    (a write); ``refresh=False`` is a read of the recorded ledger only."""
     authority(request, company=scope == "company")
     world = _world()
-    rows = service.refresh(world) if refresh else service.WORKS.list(limit=10_001)
+    rows = service.refresh(world) if refresh else opportunities.conversions(service.WORKS.list(limit=10_001), pin=False)
     if len(rows) > 10_000:
         raise ValueError("Work value history exceeds the supported reporting population.")
     owner = auth.goal_owner_filter(request)
@@ -135,10 +137,31 @@ def _label_entities(request, entities):
             row["label"] = identifier.replace("_", " ").capitalize()
 
 
+def synced_report(request, **kwargs):
+    """A report for an authorized write-capable flow: records new work first."""
+    return _call(lambda: read_report(request, **kwargs))
+
+
 @router.get("")
 def report_endpoint(request: Request, start: str = "", end: str = "", scope: Literal["own", "company"] = "own",
                     intent: str = "", entity_kind: Literal["", "specialists", "agents", "processes"] = "", entity_id: str = ""):
-    return _call(lambda: read_report(request, start=start, end=end, scope=scope, intent=intent, entity_kind=entity_kind, entity_id=entity_id))
+    return _call(lambda: read_report(request, start=start, end=end, scope=scope, intent=intent, entity_kind=entity_kind,
+                                     entity_id=entity_id, refresh=False))
+
+
+@router.post("/sync")
+def sync_endpoint(request: Request):
+    """Record newly observed work and suggestions. Reads do not record them; the page calls this before it reads."""
+    return _call(lambda: _record(request))
+
+
+def _record(request):
+    authority(request)
+    rows = records(request)
+    enabled = settings.policy()["recommendations"]
+    if enabled:
+        opportunities.evaluate(rows, owner=auth.goal_owner_filter(request), capabilities=capabilities(request))
+    return {"state": "recorded", "recommendations_enabled": enabled, "checked_at": time.time()}
 
 
 def work(request, identifier, *, write=False, company=False):
@@ -162,7 +185,7 @@ def work_endpoint(request: Request, identifier: str, scope: Literal["own", "comp
     def read():
         # Fresh native source reads enforce deletion and access changes before
         # any explanation is released, even for an old bookmarked work ID.
-        current_rows = records(request, scope=scope)
+        current_rows = records(request, scope=scope, refresh=False)
         row = work(request, identifier, company=scope == "company")
         converted = next((item.get("converted_to") for item in current_rows if item["id"] == identifier), None)
         own = row["owner"] == auth.goal_owner_filter(request)
@@ -231,6 +254,7 @@ def settings_endpoint(request: Request):
 @router.put("/settings")
 def save_settings_endpoint(request: Request, body: SettingsIn):
     authority(request, admin=True)
+    _call(lambda: records(request))  # Work already observed keeps the assumptions in force when it was seen.
     return _mutation(_call(lambda: settings.save_settings(**body.model_dump(exclude={"revision"}),
         expected_revision=body.revision, actor=auth.caller_principal(request) or "local", guard=lambda: authority(request, admin=True))))
 
@@ -250,6 +274,7 @@ def benchmarks_endpoint(request: Request):
 @router.put("/benchmarks/{identifier}")
 def benchmark_endpoint(request: Request, identifier: str, body: BenchmarkIn):
     authority(request, admin=True)
+    _call(lambda: records(request))  # Work already observed keeps the benchmark in force when it was seen.
     return _mutation(_call(lambda: settings.save_benchmark(identifier, **body.model_dump(exclude={"revision"}),
         expected_revision=body.revision, actor=auth.caller_principal(request) or "local", guard=lambda: authority(request, admin=True))))
 
@@ -282,34 +307,42 @@ def capabilities(request):
     return out
 
 
+def synced_opportunities(request, *, include_decided=False, device_id="local-device"):
+    """Suggestions for an authorized write-capable flow: records them first."""
+    return _call(lambda: _opportunities(request, include_decided=include_decided, device_id=device_id, persist=True))
+
+
 @router.get("/opportunities")
 def opportunities_endpoint(request: Request, include_decided: bool = False, device_id: str = "local-device"):
-    def read():
-        authority(request)
-        enabled = settings.policy()["recommendations"]
-        rows = records(request) if enabled else []
-        proposals = opportunities.evaluate(rows, owner=auth.goal_owner_filter(request), capabilities=capabilities(request)) if enabled else []
-        visible = []
-        for proposal in proposals:
-            if proposal.get("_audit_pending") or (not include_decided and proposal["status"] in {"declined", "deferred"}):
-                continue
-            outcome = opportunities.outcome(proposal, rows)
-            proposal = {key: value for key, value in proposal.items() if key not in {"owner", "_audit_pending"}}
-            proposal["outcome"] = outcome
-            visible.append(proposal)
-        from .intent_value_discovery import read as discovery
-        external = discovery(request, device_id) if settings.policy()["recommendations"] else None
-        # Discovery can overlap an administrator changing the policy. Release
-        # neither native nor external suggestions after that revocation.
-        enabled = settings.policy()["recommendations"]
-        if not enabled or external is None:
-            external = {"state": "off", "patterns": [],
-                        "notice": "Reusable-work recommendations are turned off. An administrator can review this setting."}
-        return {"opportunities": visible if enabled else [], "external_observations": external,
-                "recommendations_enabled": enabled,
-                "notice": "Potential value and forecasts are separate from executed work. You choose whether to use, draft, defer or keep your current process." if enabled else
-                    "Reusable-work recommendations are turned off. An administrator can review this setting."}
-    return _call(read)
+    return _call(lambda: _opportunities(request, include_decided=include_decided, device_id=device_id, persist=False))
+
+
+def _opportunities(request, *, include_decided, device_id, persist):
+    authority(request)
+    enabled = settings.policy()["recommendations"]
+    rows = records(request, refresh=persist) if enabled else []
+    proposals = opportunities.evaluate(rows, owner=auth.goal_owner_filter(request), capabilities=capabilities(request),
+                                       persist=persist) if enabled else []
+    visible = []
+    for proposal in proposals:
+        if proposal.get("_audit_pending") or (not include_decided and proposal["status"] in {"declined", "deferred"}):
+            continue
+        outcome = opportunities.outcome(proposal, rows, pin=persist)
+        proposal = {key: value for key, value in proposal.items() if key not in {"owner", "_audit_pending"}}
+        proposal["outcome"] = outcome
+        visible.append(proposal)
+    from .intent_value_discovery import read as discovery
+    external = discovery(request, device_id) if settings.policy()["recommendations"] else None
+    # Discovery can overlap an administrator changing the policy. Release
+    # neither native nor external suggestions after that revocation.
+    enabled = settings.policy()["recommendations"]
+    if not enabled or external is None:
+        external = {"state": "off", "patterns": [],
+                    "notice": "Reusable-work recommendations are turned off. An administrator can review this setting."}
+    return {"opportunities": visible if enabled else [], "external_observations": external,
+            "recommendations_enabled": enabled,
+            "notice": "Potential value and forecasts are separate from executed work. You choose whether to use, draft, defer or keep your current process." if enabled else
+                "Reusable-work recommendations are turned off. An administrator can review this setting."}
 
 
 def recommendation(request, identifier, *, write=False):

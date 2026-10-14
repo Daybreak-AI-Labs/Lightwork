@@ -78,7 +78,12 @@ publication evidence survives later publication changes.
 
 There is no new world-schema migration or queue. Derived work is refreshed on
 demand from complete native reads, including page/Copilot requests. A bad source
-read returns unavailable rather than a zero report. Native governed stores
+read returns unavailable rather than a zero report. Read endpoints do not record
+work or suggestions: `GET` reports the recorded ledger, and the page records newly
+observed work through `POST /api/v1/intent-value/sync` before it reads. Each
+newly observed item keeps the estimate assumptions in force when it was first
+recorded; saving company assumptions records pending work first, so an edit
+never reprices work that was already observed. Native governed stores
 support both existing storage backends; this feature does not change deployment,
 API authentication, billing, connection or activation policy.
 
