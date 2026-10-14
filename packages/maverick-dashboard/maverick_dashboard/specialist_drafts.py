@@ -198,6 +198,34 @@ def original_history(request):
     return {"context": context, "originals": choices}
 
 
+def unpublished_profiles(request, *, name=None) -> dict:
+    """The newest confirmed saved draft, per specialist this person has not published yet.
+
+    Saved answer checks can be kept for these before the first publication; they
+    are read against the draft. ``name`` limits the answer to one specialist.
+    Nothing is returned to a person without admin access or for an unreadable history.
+    """
+    from maverick import domain
+
+    try:
+        actor, context = authority(request)
+        rows = STORE.list(limit=MAX_RECORDS + 1)
+    except HTTPException:
+        return {}
+    if len(rows) > MAX_RECORDS:
+        return {}
+    published = domain.available_domains()
+    found: dict = {}
+    for row in sorted(rows, key=lambda item: (item["created_at"], item["id"]), reverse=True):
+        if (row.get("actor") != actor or row.get("context") != context or row.get("action") != "save"
+                or row.get("state") != "confirmed" or row.get("_audit_pending")):
+            continue
+        if row["name"] in published or row["name"] in found or (name is not None and row["name"] != name):
+            continue
+        found[row["name"]] = domain._coerce(row["name"], row["profile"])
+    return found
+
+
 def inventory(request, name):
     actor, context = authority(request)
     source = _source(request, name)
@@ -279,7 +307,7 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
         raise HTTPException(422, "Enter a fictional sample request of between 8 and 4,000 characters.")
     from . import specialist_test_sets as tests
     cases = tests.cases_for(name) if action == "check" else []
-    if action == "check" and not 1 <= len(cases) <= tests.MAX_CASES_PER_SPECIALIST:
+    if action == "check" and not 1 <= len(cases) <= tests.max_cases_per_specialist():
         raise HTTPException(409, "Add at least one saved answer check before checking this draft.")
     connection = _connection(name, models=profile["models"])
     if action in {"try", "check"}:
@@ -297,16 +325,22 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
                 "reason": reason, "cases": cases, "connection": connection, "expires": time.time() + TTL,
                 "uncertain": uncertain, "acknowledge_previous": acknowledge_previous}
     prepared["tool_services"] = _server_state(profile["mcp_servers"])
-    if action in {"publish", "restore"} and _publication_verdict(prepared)["blocked"] and len(reason.strip()) < 8:
-        raise HTTPException(409, "This complete draft needs a finished passing check of every current saved question, or a reason of at least eight characters for proceeding without one.")
+    if action in {"publish", "restore"}:
+        verdict = _publication_verdict(prepared)
+        if verdict["blocked"] and verdict.get("hard"):
+            raise HTTPException(409, verdict["message"])
+        if verdict["blocked"] and len(reason.strip()) < 8:
+            raise HTTPException(409, "This complete draft needs a finished passing check of every current saved question, or a reason of at least eight characters for proceeding without one.")
     _bounded(prepared)
     authority(request, current, write=True)
     return prepared
 
 
 def changes(request, prepared):
+    from . import specialist_test_sets as tests
     from .plain_labels import model_label
     _guard(request, prepared)
+    limits = tests.draft_answer_limits(len(prepared["cases"]) if prepared["action"] == "check" else 1)
     rows = [{"label": "Decision", "after": ACTIONS[prepared["action"]]},
             {"label": "Complete draft", "after": _readable(prepared["profile"], "definition")},
             {"label": "Currently used definition", "after": _readable(prepared["before"]["profile"], "definition") if prepared["before"]["profile"] else "No active custom agent"},
@@ -328,30 +362,63 @@ def changes(request, prepared):
         rows.append({"label": "Earlier unconfirmed decisions", "after": {
             "Earlier work may already exist": [{"Decision": item["action"], "Recorded": time.strftime("%b %d, %Y %H:%M", time.localtime(item["recorded_at"]))} for item in prepared["uncertain"]],
             "Separate new intent": "I acknowledged the earlier unknown outcomes. This new full review does not confirm or repeat those originals."}})
-    rows.extend([{"label": "Limits and consequences", "after": NOTICE + (" One shared answer-check limit: $0.25, 10,000 input tokens, 640 output tokens and two minutes. A partial or stopped check is not a passing publication check." if prepared["action"] in {"try", "check"} else "")},
+    rows.extend([{"label": "Limits and consequences", "after": NOTICE + (
+                     f" One shared answer-check limit: ${limits['max_dollars']:.2f}, {limits['max_input_tokens']:,} input tokens, "
+                     f"{limits['max_output_tokens']:,} output tokens and {limits['max_wall_seconds']:,} seconds. "
+                     "A partial or stopped check is not a passing publication check." if prepared["action"] in {"try", "check"} else "")},
                  {"label": "If the response is lost", "after": "Read this original decision. An unconfirmed original is not automatically repeated, and a matching current definition does not prove its outcome."}])
     return rows
 
 
+NEW_SPECIALIST_NEEDS_CHECK = ("A new specialist needs at least one saved check before it can be published. "
+                              "Add a check in Workforce, run every saved check on this draft in Agent Factory, "
+                              "then publish it again. A reason cannot skip this.")
+NEW_SPECIALIST_NEEDS_RUN = ("A new specialist can be published only after a full run of every saved check on this "
+                            "exact draft has passed. Run the checks on this draft in Agent Factory, then publish it "
+                            "again. A reason cannot skip this.")
+
+
+def _complete_check(prepared) -> bool:
+    """Whether the latest full run of every current saved check, on exactly this complete draft, passed.
+
+    An older passing run never counts once a newer full run on the same draft has failed or stopped.
+    """
+    from . import specialist_test_sets as tests
+    current = {case["id"]: case["revision"] for case in tests.cases_for(prepared["name"])}
+    if not current:
+        return False
+    full = [run for run in tests.all_runs_for(prepared["name"])  # newest first
+            if run["model"] == prepared["connection"]["model"]
+            and run.get("comparison", {}).get("draft_profile") == prepared["profile"]
+            and run.get("comparison", {}).get("connection") == prepared["connection"]
+            and {case["id"]: case["revision"] for case in run["case_revisions"]} == current]
+    if not full:
+        return False
+    latest = full[0]
+    return (latest["state"] == "done" and len(latest["results"]) == len(current)
+            and all(result["passed"] for result in latest["results"]))
+
+
 def _publication_verdict(prepared):
     from maverick.agent_publish_policy import require_passing_tests
+    from maverick.agent_tests_policy import require_for_new_specialists
 
     from . import agent_publish_gate
     before = prepared["before"]["profile"] or {}
     verdict = agent_publish_gate.check(prepared["name"], model=prepared["connection"]["model"], current_instructions=before.get("persona", ""),
         new_instructions=prepared["profile"]["persona"], creating=not before, required=require_passing_tests())
-    if before and before != prepared["profile"] and require_passing_tests():
-        from . import specialist_test_sets as tests
-        current = {case["id"]: case["revision"] for case in tests.cases_for(prepared["name"])}
-        complete = any(run["state"] == "done" and run["model"] == prepared["connection"]["model"]
-            and run.get("comparison", {}).get("draft_profile") == prepared["profile"]
-            and run.get("comparison", {}).get("connection") == prepared["connection"]
-            and {case["id"]: case["revision"] for case in run["case_revisions"]} == current
-            and bool(current) and len(run["results"]) == len(current)
-            and all(result["passed"] for result in run["results"]) for run in tests.runs_for(prepared["name"]))
-        verdict.update(required=True, passing=complete, blocked=not complete,
-            message="Every current saved question passed on this complete draft." if complete else
-            "This complete draft has no finished passing check of every current saved question. Publishing needs a new complete check or an explicit recorded reason.")
+    # A specialist never published before is "hard": no reason publishes it without this proof.
+    new = not before and require_for_new_specialists()
+    if new or (before and before != prepared["profile"] and require_passing_tests()):
+        complete = _complete_check(prepared)
+        if complete:
+            message = "Every current saved question passed on this complete draft."
+        elif new:
+            from . import specialist_test_sets as tests
+            message = NEW_SPECIALIST_NEEDS_RUN if tests.cases_for(prepared["name"]) else NEW_SPECIALIST_NEEDS_CHECK
+        else:
+            message = "This complete draft has no finished passing check of every current saved question. Publishing needs a new complete check or an explicit recorded reason."
+        verdict.update(required=True, passing=complete, blocked=not complete, hard=new, message=message)
     return verdict
 
 
@@ -407,9 +474,10 @@ def original(request, operation, *, prepared=None):
               "recorded_at": row["updated_at"], "notice": NOTICE}
     try:
         source = _source(request, row["name"])
-        if source["profile"] is None:
-            return result
     except HTTPException:
+        return result
+    # A specialist not yet published has no live profile, but its own check outcome is still read here.
+    if source["profile"] is None and not row.get("run"):
         return result
     result.update(name=row["name"], draft=row["id"] if row["action"] == "save" and confirmed else None)
     if row.get("run"):
@@ -479,7 +547,7 @@ def _publish(request, prepared, row, began):
     payload = AgentOverrideIn.model_validate({**prepared["patch"], "publish_without_passing_tests": bool(prepared["reason"]),
         "override_reason": prepared["reason"], "expected_generation": prepared["before"]["generation"]})
 
-    _publication_admission(request, prepared, payload)
+    second_person = _publication_admission(request, prepared, payload)
 
     def guard():
         _guard(request, prepared)
@@ -489,7 +557,8 @@ def _publish(request, prepared, row, began):
 
     domain_edit.write_override(prepared["name"], prepared["patch"], expected_generation=prepared["before"]["generation"], effect_guard=guard)
     published = digest(_source(request, prepared["name"]))
-    STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published), expected_revision=row["revision"],
+    STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published,
+        bypass_approval=(second_person or {}).get("approval")), expected_revision=row["revision"],
         action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared, published=published))
     # The agent's own plain-words history (who, when, what) records every
     # published or restored definition, as the retired direct save did.
@@ -508,22 +577,47 @@ def _publication_current(request, prepared, payload):
         raise HTTPException(409, "Current passing tests no longer support this complete publication. Review a new check or an explicit reason.")
 
 
-def _publication_admission(request, prepared, payload):
+def bypass_used(name: str, approval_id: int) -> bool:
+    """Whether a publication of this specialist already spent this second-person approval."""
+    rows = STORE.list(limit=MAX_RECORDS + 1)
+    return len(rows) > MAX_RECORDS or any(row.get("name") == name and row.get("bypass_approval") == approval_id for row in rows)
+
+
+def _publication_admission(request, prepared, payload) -> dict | None:
+    """Admit a publication. Returns the second person's approval that a reasoned bypass used, if any."""
+    from maverick.agent_tests_policy import bypass_requires_second_person
     from maverick.audit import EventKind, audit_event
 
-    from .api import _record_agent_autonomy_intent, _require_tested_instructions
+    from . import agent_publish_bypass
+    from .api import _publish_check, _record_agent_autonomy_intent, _require_tested_instructions
     _guard(request, prepared)
+    verdict = _publication_verdict(prepared)
+    if verdict["blocked"] and verdict.get("hard"):
+        # A brand-new specialist is refused before any reasoned bypass is considered or recorded.
+        raise HTTPException(409, verdict["message"])
     _publication_current(request, prepared, payload)
-    _require_tested_instructions(request, prepared["name"], payload, prepared["before"]["profile"])
-    if _publication_verdict(prepared)["blocked"]:
+    reason = " ".join((payload.override_reason or "").split())
+    second_person = None
+    if payload.publish_without_passing_tests and len(reason) >= 8 and bypass_requires_second_person():
+        try:
+            plain_blocked = _publish_check(prepared["name"], payload, prepared["before"]["profile"])["blocked"]
+        except Exception as exc:
+            raise HTTPException(503, "The saved test results could not be read. Nothing was changed.") from exc
+        if plain_blocked or verdict["blocked"]:
+            second_person = agent_publish_bypass.second_person_approval(
+                request, prepared["name"], prepared["profile"], reason,
+                used=lambda approval_id: bypass_used(prepared["name"], approval_id))
+    _require_tested_instructions(request, prepared["name"], payload, prepared["before"]["profile"], second_person=second_person)
+    if verdict["blocked"]:
         accepted = audit_event(EventKind.CONTROL_PLANE_ACTION, agent="dashboard", verb="agent_draft_published_without_complete_check",
-            actor=prepared["actor"], specialist=prepared["name"], reason=prepared["reason"])
+            actor=prepared["actor"], specialist=prepared["name"], reason=prepared["reason"], **(second_person or {}))
         if not accepted:
             raise HTTPException(503, "The reason could not be recorded. Read the original decision before another publication intent.")
     before = (prepared["before"]["profile"] or {}).get("autonomy") or {}
     after = prepared["profile"].get("autonomy") or {}
     if before != after and after:
         _record_agent_autonomy_intent(request, prepared["name"], before, after)
+    return second_person
 
 
 def _start_answers(request, prepared, row, began):

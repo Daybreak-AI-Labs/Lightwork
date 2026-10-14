@@ -23,7 +23,7 @@
   var testLiveEnabled = false;
   var editingCase = null;
   var testBaseline = '', testInstructions = '', testContext = '', testLoad = 0, comparisonReview = null;
-  // A whole saved set runs at once (the most an agent or specialist can save).
+  // A whole saved set runs at once, up to the [agent_tests] limit the server reports (20 by default).
   var MAX_RUN = 20, PER_QUESTION = 0.05;
   function costLimit(n) { return '$' + (PER_QUESTION * n).toFixed(2); }
   // The editor in Agent Factory hands over the instructions it wants tested.
@@ -127,6 +127,7 @@
   }
   function renderTests(data) {
     testCases = data.cases || [];
+    MAX_RUN = Number(data.max_checks) || 20;
     testLiveEnabled = !!data.live_enabled;
     testBaseline = data.baseline_revision || ''; testInstructions = data.current_instructions || ''; testContext = data.context || '';
     $('wo-test-current-instructions').textContent = testInstructions;

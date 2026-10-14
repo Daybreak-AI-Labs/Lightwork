@@ -1536,6 +1536,7 @@ def pick_capabilities() -> dict[str, Any]:
         default=True,
     )
     require_passing_tests = pick_agent_publish_gate()
+    agent_tests = pick_agent_test_rules()
     practice_mode = pick_practice_mode()
     practice_cap = pick_practice_spend_cap() if practice_mode else 1.0
     return {
@@ -1548,6 +1549,7 @@ def pick_capabilities() -> dict[str, Any]:
         "tool_exposure": tool_exposure,
         "jd_hiring": jd_hiring,
         "require_passing_tests": require_passing_tests,
+        **agent_tests,
         "practice_mode": practice_mode,
         "practice_daily_spend_cap": practice_cap,
     }
@@ -1597,6 +1599,44 @@ def pick_agent_publish_gate() -> bool:
         "reason, which is recorded.)",
         default=True,
     )
+
+
+def pick_agent_test_rules() -> dict[str, Any]:
+    """Saved answer checks that gate publishing. The defaults keep today's behaviour.
+
+    How many checks one specialist may keep (1 to 200, 20 by default); whether a
+    brand-new specialist needs a passing full run before it is published; and
+    whether a second administrator must approve publishing without a passing run.
+    Written under ``[agent_tests]`` only when an answer differs from the default.
+    """
+    limit = _prompt_check_limit()
+    new_needs_run = _q_confirm(
+        "Require a passing run of every saved answer check before a brand-new specialist "
+        "is published? (A reason does not skip this.)",
+        default=False,
+    )
+    second_person = _q_confirm(
+        "Should a second administrator approve publishing changed instructions without "
+        "passing tests? (The person who asked cannot approve their own reason.)",
+        default=False,
+    )
+    return {"max_cases_per_specialist": limit, "require_for_new_specialists": new_needs_run,
+            "bypass_requires_second_person": second_person}
+
+
+def _prompt_check_limit() -> int:
+    while True:
+        raw = _q_text(
+            "How many saved answer checks may one specialist keep? (1 to 200; 20 is the default)",
+            default="20",
+        ).strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 0
+        if 1 <= value <= 200:
+            return value
+        console.print("[yellow]Enter a whole number from 1 to 200.[/yellow]")
 
 
 def pick_self_learning() -> dict[str, Any]:
@@ -9017,6 +9057,20 @@ def _cfg_agent_factory(jd_hiring: bool, require_passing_tests: bool = True) -> l
     return ["", "[agent_factory]", *lines] if lines else []
 
 
+def _cfg_agent_tests(values: dict[str, Any]) -> list[str]:
+    # Saved answer checks (maverick.agent_tests_policy) default to today's
+    # behaviour, so the table is written only where an answer differs.
+    lines = []
+    limit = int(values["max_cases_per_specialist"])
+    if limit != 20:
+        lines.append(f"max_cases_per_specialist = {limit}")
+    if values["require_for_new_specialists"]:
+        lines.append("require_for_new_specialists = true")
+    if values["bypass_requires_second_person"]:
+        lines.append("bypass_requires_second_person = true")
+    return ["", "[agent_tests]", *lines] if lines else []
+
+
 def _cfg_suites(suites: dict[str, bool] | None) -> list[str]:
     if not suites:
         return []
@@ -10707,6 +10761,10 @@ def write_config(
     # JD hiring lives under [agent_factory] (kernel: maverick.jd_hiring).
     jd_hiring = bool(capability_config.pop("jd_hiring", True))
     require_passing_tests = bool(capability_config.pop("require_passing_tests", True))
+    # Saved answer checks live under [agent_tests] (kernel: maverick.agent_tests_policy).
+    agent_tests = {"max_cases_per_specialist": capability_config.pop("max_cases_per_specialist", 20),
+                   "require_for_new_specialists": bool(capability_config.pop("require_for_new_specialists", False)),
+                   "bypass_requires_second_person": bool(capability_config.pop("bypass_requires_second_person", False))}
     # Practice mode lives under [practice] (kernel: maverick.practice), written only when off.
     practice_mode = bool(capability_config.pop("practice_mode", True))
     practice_cap = _safe_float(capability_config.pop("practice_daily_spend_cap", 1.0), default=1.0)
@@ -10718,6 +10776,7 @@ def write_config(
 
     lines += _cfg_capabilities(capability_config, embedded_flash)
     lines += _cfg_agent_factory(jd_hiring, require_passing_tests)
+    lines += _cfg_agent_tests(agent_tests)
     lines += _cfg_practice(practice_mode, practice_cap)
     lines += _cfg_suites(suites)
     lines += _cfg_license(license_cfg)

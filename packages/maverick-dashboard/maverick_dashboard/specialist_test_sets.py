@@ -13,6 +13,7 @@ import uuid
 from contextlib import nullcontext
 from typing import Any
 
+from maverick.agent_tests_policy import max_cases_per_specialist
 from maverick.file_lock import (
     atomic_read_text,
     atomic_write_text,
@@ -21,12 +22,25 @@ from maverick.file_lock import (
 )
 from maverick.paths import data_dir
 
-MAX_CASES_PER_SPECIALIST = 20
 # A Copilot-reviewed run picks at most this many; a person can run the whole set.
 MAX_CASES_PER_RUN = 5
-MAX_CASES_PER_FULL_RUN = MAX_CASES_PER_SPECIALIST
-_MAX_ALL_CASES = 1000
 _MAX_RUNS = 500
+
+
+def _max_all_cases() -> int:
+    """Every specialist's saved checks together: 50 full sets at the configured limit, never below 1,000."""
+    return max(1000, 50 * max_cases_per_specialist())
+
+
+def draft_answer_limits(questions: int) -> dict:
+    """The spending and size ceilings for one complete-draft check, before the configured caps apply.
+
+    Five questions keep the original $0.25 run. Each further question adds the same allowance a
+    saved-test run gets, so a set the limit allows can finish inside its budget.
+    """
+    count = max(5, int(questions))
+    return {"max_dollars": round(.05 * count, 2), "max_input_tokens": 2000 * count,
+            "max_output_tokens": 128 * count, "max_wall_seconds": max(120, 24 * count)}
 
 
 def _path():
@@ -78,6 +92,8 @@ def cases_for_specialists(specialists: set[str]) -> dict[str, list[dict]]:
 
 def save_case(specialist: str, fields: dict, *, identity: str | None = None,
               expected_revision: int | None = None) -> dict:
+    limit, total = max_cases_per_specialist(), _max_all_cases()
+
     def mutate(db):
         cases = db["cases"]
         prior = cases.get(identity) if identity else None
@@ -85,8 +101,8 @@ def save_case(specialist: str, fields: dict, *, identity: str | None = None,
             raise ValueError("This test no longer exists. Refresh the list.")
         if prior and prior["revision"] != expected_revision:
             raise ValueError("This test changed. Refresh it before saving again.")
-        if not prior and (len(cases) >= _MAX_ALL_CASES or sum(
-                c["specialist"] == specialist for c in cases.values()) >= MAX_CASES_PER_SPECIALIST):
+        if not prior and (len(cases) >= total or sum(
+                c["specialist"] == specialist for c in cases.values()) >= limit):
             raise ValueError("This test list is full. Remove an old test before adding another.")
         now = time.time()
         row = {"id": identity or uuid.uuid4().hex, "specialist": specialist,
@@ -99,14 +115,16 @@ def save_case(specialist: str, fields: dict, *, identity: str | None = None,
 
 def save_once(specialist: str, fields: dict, identity: str) -> dict:
     """Copilot's sealed operation ID is the case ID, so a retry cannot add two."""
+    limit, total = max_cases_per_specialist(), _max_all_cases()
+
     def mutate(db):
         prior = db["cases"].get(identity)
         if prior is not None:
             if prior["specialist"] != specialist or any(prior.get(key) != value for key, value in fields.items()):
                 raise ValueError("This reviewed operation already belongs to a different test.")
             return dict(prior), False
-        if len(db["cases"]) >= _MAX_ALL_CASES or sum(
-                c["specialist"] == specialist for c in db["cases"].values()) >= MAX_CASES_PER_SPECIALIST:
+        if len(db["cases"]) >= total or sum(
+                c["specialist"] == specialist for c in db["cases"].values()) >= limit:
             raise ValueError("This test list is full. Remove an old test before adding another.")
         now = time.time()
         row = {"id": identity, "specialist": specialist, **fields,
@@ -136,15 +154,16 @@ def snapshot(specialist: str, selected_ids: list[str] | None = None) -> list[dic
     rows = cases_for(specialist)
     if not rows:
         raise ValueError("Add at least one test before running the checks.")
+    limit = max_cases_per_specialist()
     if selected_ids:
-        if len(selected_ids) > MAX_CASES_PER_FULL_RUN or len(set(selected_ids)) != len(selected_ids):
-            raise ValueError(f"Choose between 1 and {MAX_CASES_PER_FULL_RUN} different checks.")
+        if len(selected_ids) > limit or len(set(selected_ids)) != len(selected_ids):
+            raise ValueError(f"Choose between 1 and {limit} different checks.")
         selected = set(selected_ids)
         rows = [row for row in rows if row["id"] in selected]
         if len(rows) != len(selected):
             raise ValueError("One selected check changed or was removed. Refresh the list.")
-    elif len(rows) > MAX_CASES_PER_FULL_RUN:
-        raise ValueError(f"Choose at most {MAX_CASES_PER_FULL_RUN} checks for one run.")
+    elif len(rows) > limit:
+        raise ValueError(f"Choose at most {limit} checks for one run.")
     return rows
 
 
@@ -255,11 +274,16 @@ def finish_run(run_id: str, state: str, spent_dollars: float, message: str = "",
     return _with_store(mutate, effect_guard=effect_guard)
 
 
-def runs_for(specialist: str) -> list[dict]:
+def all_runs_for(specialist: str) -> list[dict]:
+    """Every retained run of one specialist, newest first (``runs_for`` shows only the latest 20)."""
     rows = _with_store(lambda db: (
         sorted((dict(row) for row in db["runs"].values() if row["specialist"] == specialist),
-               key=lambda row: row["started_at"], reverse=True)[:20], False))
+               key=lambda row: row["started_at"], reverse=True), False))
     return [public_run(row) for row in rows]
+
+
+def runs_for(specialist: str) -> list[dict]:
+    return all_runs_for(specialist)[:20]
 
 
 def _stale_after(row: dict) -> float:

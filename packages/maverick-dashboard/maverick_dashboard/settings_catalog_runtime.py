@@ -108,6 +108,25 @@ def _models(S, C) -> tuple:
           "AI models", True, "maverick.agent_publish_policy", subgroup="Effort and planning", weaker=False,
           warning="Changed instructions could be published without any test run.",
           aliases="publish gate test set test cases agent tests answer checks"),
+        S("agent_tests", "max_cases_per_specialist", "Saved answer checks per specialist",
+          "How many saved answer checks one specialist can keep, and how many one run checks at once. "
+          "Lowering it keeps the checks already saved, but a set larger than the limit cannot pass "
+          "a full run.", "number", "AI models", 20, "maverick.agent_tests_policy",
+          subgroup="Effort and planning", minimum=1, maximum=200, integer=True, unit="checks",
+          aliases="test cases answer checks test set limit"),
+        S("agent_tests", "require_for_new_specialists", "Require a passing run before a new specialist is published",
+          "A specialist that has never been published needs at least one saved check, and a full run of "
+          "every saved check on its exact draft must pass, before it can be published. A reason does not "
+          "skip this.", "toggle", "AI models", False, "maverick.agent_tests_policy",
+          subgroup="Effort and planning", weaker=False,
+          warning="A new specialist could be published without any test run.",
+          aliases="new agent publish gate test cases answer checks"),
+        S("agent_tests", "bypass_requires_second_person", "Second administrator approves publishing without passing tests",
+          "When changed instructions are published without a passing run, a different administrator must "
+          "approve the reason first. The person who asked cannot approve their own reason.", "toggle",
+          "AI models", False, "maverick.agent_tests_policy", subgroup="Effort and planning", weaker=False,
+          warning="A reason alone is enough to publish changed instructions without a passing run.",
+          aliases="four eyes approval reason publish gate test cases answer checks"),
 
         # ------------------------------------------------ conversation length
         S("context", "max_output_tokens", "Longest reply per step",

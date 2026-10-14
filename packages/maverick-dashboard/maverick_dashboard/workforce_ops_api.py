@@ -74,13 +74,13 @@ class SpecialistCaseDelete(BaseModel):
 class SpecialistRunIn(BaseModel):
     specialist: str = Field(min_length=1, max_length=100)
     operation_id: str = Field(pattern=r"^[a-f0-9]{32}$")
-    # A whole saved test set (up to 20) can run at once before publishing.
-    case_ids: list[str] = Field(default_factory=list, max_length=20)
-    case_revisions: dict[str, int] = Field(min_length=1, max_length=20)
+    # A whole saved set can run at once, up to the [agent_tests] limit (checked when the run starts).
+    case_ids: list[str] = Field(default_factory=list, max_length=200)
+    case_revisions: dict[str, int] = Field(min_length=1, max_length=200)
 
 
 class SpecialistCompareIn(SpecialistRunIn):
-    case_ids: list[str] = Field(min_length=1, max_length=20)
+    case_ids: list[str] = Field(min_length=1, max_length=200)
     proposed_instructions: str = Field(min_length=8, max_length=6000)
     baseline_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
     expected_context: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -223,7 +223,10 @@ async def test_suite(request: Request) -> dict:
 
 def _test_profile(request: Request, name: str):
     from maverick.domain import available_domains
-    profile = available_domains().get(name)
+
+    from . import specialist_drafts
+    # A specialist not yet published keeps its saved checks against its own saved draft.
+    profile = available_domains().get(name) or specialist_drafts.unpublished_profiles(request, name=name).get(name)
     if profile is None:
         raise HTTPException(status_code=404, detail="Choose an agent or specialist from the list.")
     if not domain_suites_allowed(request, name):
@@ -234,17 +237,23 @@ def _test_profile(request: Request, name: str):
 @router.get("/test-suite/specialists")
 async def test_specialists(request: Request) -> dict:
     require_permission(request, "view")
+    from maverick.domain import available_domains
+
     from .plain_labels import pack_display_name
     profiles = _test_profiles(request)
-    return {"specialists": [{"value": name, "label": pack_display_name(name, profile.persona, profile.description)}
+    published = set(available_domains())
+    return {"specialists": [{"value": name, "label": pack_display_name(name, profile.persona, profile.description)
+                             + ("" if name in published else " · not published yet")}
                            for name, profile in sorted(profiles.items())]}
 
 
 def _test_profiles(request: Request) -> dict:
     from maverick.domain import available_domains, suites_for_domain
 
+    from . import specialist_drafts
     from .auth import caller_suites
-    profiles = available_domains()
+    # Published specialists first; a specialist not yet published appears once, from its own saved draft.
+    profiles = {**specialist_drafts.unpublished_profiles(request), **available_domains()}
     allowed = caller_suites(request)
     return {name: profile for name, profile in profiles.items()
             if allowed is None or suites_for_domain(name, profile) <= allowed}
@@ -268,7 +277,7 @@ async def customer_tests(request: Request, specialist: str = Query(max_length=10
     _test_profile(request, specialist)
     for run in runs:
         _current_test_result(run, revision, cases)
-    return {"specialist": specialist, "cases": cases,
+    return {"specialist": specialist, "cases": cases, "max_checks": saved.max_cases_per_specialist(),
             "runs": runs, "current_instructions": profile.persona, "baseline_revision": revision,
             "context": context_for(request), "live_enabled": _live_tests_enabled()}
 
@@ -517,11 +526,11 @@ def _start_draft_customer_test_job(request, specialist, operation, draft, source
     system = saved.answer_system(profile) + "\nEntered draft settings (instructions only; these grant no tools or connections):\n" + json.dumps(draft["profile"], ensure_ascii=False)
     cases = draft["cases"] if draft["action"] == "check" else [{"id": digest([operation, "sample"])[:32], "revision": 1,
         "specialist": specialist, "task": draft["task"], "includes": [], "excludes": [], "refusal": False, "citation": False, "sample": True}]
-    if not 1 <= len(cases) <= saved.MAX_CASES_PER_SPECIALIST:
+    if not 1 <= len(cases) <= saved.max_cases_per_specialist():
         raise HTTPException(409, "The complete chosen draft questions exceed the supported limit.")
     budget = _budget("specialist_eval")
-    for key, ceiling in (("max_dollars", .25), ("max_input_tokens", 10000), ("max_output_tokens", 640),
-                         ("max_wall_seconds", 120), ("max_tool_calls", 0)):
+    # Grows with the questions, as a saved-test run does; five or fewer keep the original $0.25 run.
+    for key, ceiling in (*saved.draft_answer_limits(len(cases)).items(), ("max_tool_calls", 0)):
         current = getattr(budget, key)
         setattr(budget, key, ceiling if current is None else min(current, ceiling))
     source_guard(budget)

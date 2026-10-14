@@ -42,6 +42,9 @@ def owned(request, approval_id: int, *, status: str | None = None):
         require_approval_authority(request, action="approval." + ("approve" if status == "approved" else "deny"),
                                    resource=str(approval_id))
         api._require_settings_decider(request, world, approval_id, actor(request), approving=status == "approved")
+        from . import agent_publish_bypass
+        agent_publish_bypass.require_decider(request, world.get_approval(approval_id), actor(request),
+                                             approving=status == "approved")
     return world, row
 
 

@@ -27,6 +27,11 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .agent_tests_policy import (
+    NEW_SPECIALIST_NEEDS_TESTS,
+    NewSpecialistNeedsTests,
+    require_for_new_specialists,
+)
 from .domain import (
     _DOMAIN_ID_RE,
     DomainProfile,
@@ -425,6 +430,9 @@ def save_profile(profile: DomainProfile, *, approved: bool,
     path = d / f"{profile.name}.toml"
     if profile.name in load_domains(d):
         raise FileExistsError("specialist name belongs to an existing workspace specialist")
+    # Names that reach this point are new: existing specialists were refused above.
+    if require_for_new_specialists():
+        raise NewSpecialistNeedsTests(NEW_SPECIALIST_NEEDS_TESTS)
     created = False
     try:
         with path.open("x", encoding="utf-8") as target:
