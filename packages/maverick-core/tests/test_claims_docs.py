@@ -75,3 +75,24 @@ def test_firecracker_is_described_as_a_scaffold_not_a_deploy_target():
             if "Firecracker" not in line or (needle and needle not in line):
                 continue
             assert "scaffold" in line.lower(), f"{relpath}: {line[:120]}"
+
+
+def test_queue_delivery_is_not_described_as_exactly_once():
+    """JobQueue.claim is atomic (one worker per job at a time), but a job whose
+    worker dies after its side effect and before complete() runs again after the
+    lease expires (JobQueue.reclaim_stale; Worker._reclaim_stale). Delivery is
+    at-least-once, so prose must not say exactly-once for the queue as a whole."""
+    stale = {
+        "packages/maverick-dashboard/maverick_dashboard/app.py":
+            "durable, retrying, exactly-once",
+        "packages/maverick-dashboard/maverick_dashboard/automation_queue.py":
+            "JobQueue's exactly-once",
+        "docs/FEATURES.md":
+            "**exactly-once** — the contention",
+        "docs/evidence/README.md":
+            "**exactly-once** execution",
+        "STRESS_TEST.md":
+            "**JobQueue exactly-once**",
+    }
+    for relpath, phrase in stale.items():
+        assert phrase not in _read(relpath), f"{relpath} still says {phrase!r}"

@@ -983,8 +983,11 @@ def _assert_dashboard_auth_configured() -> None:
 # ---- background automation (event polling + scheduled dreaming) -------------
 # Runs in the dashboard lifespan, NOT the core worker: event triggers are a
 # dashboard-owned store the core worker (a separate process) can't reach. Driven
-# by maverick-core's JobQueue/Worker -- durable, retrying, exactly-once (the
-# flock is gone) -- via maverick_dashboard.automation_queue. Per-trigger polling
+# by maverick-core's JobQueue/Worker -- durable and retrying. A claim is atomic
+# (one worker per job), but delivery is at-least-once: a job whose worker dies
+# after its effect and before completion runs again once its lease expires, so
+# handlers must be idempotent. The flock is gone -- via
+# maverick_dashboard.automation_queue. Per-trigger polling
 # cadence + scheduled dreaming are recurring cron jobs; fired goals are durable
 # run_goal jobs with retry + dead-letter. TestClient skips the lifespan, so this
 # never runs under tests; both halves are OFF by default (their own enabled()).

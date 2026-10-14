@@ -4743,8 +4743,9 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   gRPC, both installed at startup). Two CI-gated proofs back the claim:
   `control_data_plane_e2e.py` (one goal provably runs out-of-process, with a JSON
   evidence artifact) and `control_data_plane_soak.py` (many goals under
-  concurrent workers reach `done` zero-loss and **exactly-once** — the contention
-  test of `JobQueue.claim`'s `WHERE status='pending'` guard). The HTTP
+  concurrent workers reach `done` zero-loss with **exactly-once claims** — the contention
+  test of `JobQueue.claim`'s `WHERE status='pending'` guard; a job reclaimed after a
+  worker dies can run again, so handlers must be idempotent). The HTTP
   plane has its own proof: `maverick_dashboard.load_harness` drives the
   real app with concurrent clients and asserts no 5xx, that admission
   holds under contention (N clients racing one vendor name end with
