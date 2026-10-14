@@ -31,3 +31,14 @@ def test_security_policy_does_not_claim_an_unreleased_supported_line():
     cohort = re.search(r'^version = "([^"]+)"', _read("release-cohort.toml"), re.MULTILINE)
     assert cohort is not None
     assert cohort.group(1) in section
+
+
+def test_readme_tamper_evidence_headline_names_its_key_custody():
+    """The README headline said "Tamper-evident" with no qualifier. The audit
+    signing key is held on the same host by default (audit/signing.py), so the
+    headline must say so and name the off-host setting."""
+    headline = next(
+        line for line in _read("README.md").splitlines() if "Tamper-evident" in line
+    )
+    assert "same host" in headline
+    assert "MAVERICK_AUDIT_SIGNING_KEY" in headline
