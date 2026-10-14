@@ -1280,6 +1280,12 @@ def _switches(S) -> tuple:
           "separated by commas. They are stored sealed and never shown again.", "secret",
           "Performance", "", "maverick.observability", subgroup="Error reporting",
           max_length=2000, restart=True, env=("MAVERICK_OTEL_HEADERS",)),
+        S("observability", "otlp_metrics", "Send measurements to the collector",
+          "Also send the server's measurements (counts, timings and spending) to the same "
+          "collector as the timing traces.", "toggle", "Performance", False,
+          "maverick.observability", subgroup="Error reporting", restart=True,
+          env=("MAVERICK_OTEL_METRICS",), weaker=True,
+          warning="Measurements, which name tools and models, will be sent to the collector."),
         S("observability", "prometheus_port", "Share server measurements on port",
           "Publish the server's measurements on this port for a monitoring system. Leave "
           "empty to not publish them.", "number", "Performance", None,
