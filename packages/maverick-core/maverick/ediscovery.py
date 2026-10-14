@@ -55,6 +55,13 @@ _ID_RE = re.compile(r"mtr-[0-9a-f]{16}\Z")
 _PRINCIPAL_RE = re.compile(r"[^\s\x00-\x1f\x7f]{1,256}\Z")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
+# A linked messaging account, as stored by maverick.personal_identity.account_identity.
+_ACCOUNT_RE = re.compile(r"account:[0-9a-f]{64}:person:[0-9a-f]{64}\Z")
+# Any ``user:<channel>:account:`` text, whatever follows: such a custodian is refused, never
+# narrowed silently to a single thread or to a channel identifier.
+_CHANNEL_ACCOUNT_PREFIX_RE = re.compile(r"user:(?:[^\s:]+:)?account:")
+# Room and thread histories append one digest to the account identity.
+_THREAD_SUFFIX_RE = re.compile(r":conversation:[0-9a-f]{64}\Z")
 
 
 class EdiscoveryError(RuntimeError):
@@ -165,6 +172,27 @@ def _principal_id(text: str) -> bool:
     return bool(rest) and not rest.startswith(":") and not rest.endswith(":")
 
 
+def is_account_custodian(text: str) -> bool:
+    """True for a linked messaging account written exactly as ``account:<hash>:person:<hash>``."""
+    return _ACCOUNT_RE.fullmatch(text) is not None
+
+
+def account_user_matches(conv_user_id: object, account: str) -> bool:
+    """Whether a stored conversation belongs to the linked account ``account``.
+
+    A linked account's chats are stored under the account identity itself, or under
+    that identity followed by ``:conversation:<64 hex>`` for each room or thread.
+    The colon is the boundary: a longer identifier that merely starts with the same
+    text, or a bare substring, never matches.
+    """
+    if not isinstance(conv_user_id, str):
+        return False
+    if conv_user_id == account:
+        return True
+    return (conv_user_id.startswith(account)
+            and _THREAD_SUFFIX_RE.fullmatch(conv_user_id, len(account)) is not None)
+
+
 def _custodians(value: object) -> list[str]:
     if not isinstance(value, list) or not value:
         raise MatterValidationError("Add at least one custodian")
@@ -173,9 +201,14 @@ def _custodians(value: object) -> list[str]:
     found: set[str] = set()
     for item in value:
         text = item.strip() if isinstance(item, str) else ""
-        if not _principal_id(text):
+        if _CHANNEL_ACCOUNT_PREFIX_RE.match(text):
             raise MatterValidationError(
-                "Each custodian must be a principal id such as user:name or user:channel:identifier")
+                "Write a linked messaging account as account:<hash>:person:<hash>, "
+                "without the user: and channel parts")
+        if not (_principal_id(text) or is_account_custodian(text)):
+            raise MatterValidationError(
+                "Each custodian must be a principal id such as user:name or user:channel:identifier, "
+                "or a linked messaging account such as account:<hash>:person:<hash>")
         found.add(text)
     return sorted(found)
 
@@ -493,9 +526,74 @@ def conversation_user_matches(conv_user_id: object, requested: str, channel: str
     return channel == "cli" and requested == "local" and str(conv_user_id).startswith("local:")
 
 
-def _custodian_conversations(world: Any, owner: str, cache: dict[str, list[Any]]) -> list[Any]:
+def _goal_owners(custodian: str) -> list[str]:
+    """The exact goal owners that belong to one custodian.
+
+    A linked account's tasks are owned by ``user:<channel>:<account identity>`` on
+    each messaging channel that can hold one (the channels that link accounts).
+    """
+    if not is_account_custodian(custodian):
+        return [custodian]
+    from .personal_identity import CHANNELS
+
+    return [f"user:{channel}:{custodian}" for channel in sorted(CHANNELS)]
+
+
+def _incident_principal_refs(custodians: Iterable[str], tenant: str) -> set[str]:
+    """Uploader references of the ``user:`` custodians (linked accounts never upload to incidents)."""
+    from .incident_attachment_metadata import principal_ref_for_subject
+
+    return {principal_ref_for_subject(tenant, owner) for owner in custodians if owner.startswith("user:")}
+
+
+def _incident_attachments(custodians: Sequence[str], tenant: str | None,
+                          low: float | None, high: float | None) -> list[Any]:
+    """Incident attachment records uploaded by a custodian, inside the matter's dates.
+
+    The register is read in the active workspace, so the matter's own workspace must be
+    the active one.  Fails closed: a register that cannot be listed completely, or a
+    matter whose workspace is not the active one, refuses the matter's scope.
+    """
+    from .paths import current_tenant_id
+
+    if not any(owner.startswith("user:") for owner in custodians):
+        return []  # only dashboard users upload incident attachments
+    if not tenant or tenant != current_tenant_id():
+        raise MatterScopeUnverifiable("The incident attachments for this matter could not be listed completely")
+    refs = _incident_principal_refs(custodians, tenant)
+    from .incident_attachment_metadata import records_for_principal_refs
+
+    try:
+        rows = records_for_principal_refs(tenant, refs)
+    except Exception as exc:  # failure-policy: fail_closed -- a partial list would hide held records
+        raise MatterScopeUnverifiable("The incident attachments for this matter could not be listed completely") from exc
+    return [row for row in rows if in_range(float(row.created_at), low, high)]
+
+
+def _custodian_goals(world: Any, owner: str, scope: Scope, kinds: set[str],
+                     low: float | None, high: float | None) -> None:
+    for goal_owner in _goal_owners(owner):
+        for goal in _bounded(world.list_goals(owner=goal_owner, limit=MAX_SCOPE_ROWS + 1), "goals"):
+            scope.custodian_goal_ids.add(int(goal.id))
+            if "goals" in kinds and goal.owner == goal_owner and in_range(float(goal.created_at), low, high):
+                scope.goals[int(goal.id)] = goal
+
+
+def _custodian_runs(world: Any, owner: str, scope: Scope, low: float | None, high: float | None) -> None:
+    for goal_owner in _goal_owners(owner):
+        for run in _bounded(world.list_episodes(limit=MAX_SCOPE_ROWS + 1, owner=goal_owner), "runs"):
+            if in_range(float(run.started_at), low, high):
+                scope.runs.append(run)
+
+
+def _custodian_conversations(world: Any, owner: str, cache: dict[str | None, list[Any]]) -> list[Any]:
     """Conversations of one custodian.  Channel conversations are ``user:<channel>:<id>``;
-    a dashboard user ``user:<name>`` is the dashboard conversation of that name."""
+    a dashboard user ``user:<name>`` is the dashboard conversation of that name; a linked
+    account is matched across every channel by its stored identity (see :func:`account_user_matches`)."""
+    if is_account_custodian(owner):
+        if None not in cache:
+            cache[None] = _bounded(world.list_conversations(), "chats")
+        return [conv for conv in cache[None] if account_user_matches(conv.user_id, owner)]
     parts = owner.split(":", 2) if owner.startswith("user:") else []
     if len(parts) == 3 and parts[1] and parts[2]:
         channel, user_id = parts[1], parts[2]
@@ -516,6 +614,8 @@ class Scope:
     runs: list[Any] = field(default_factory=list)
     conversations: dict[int, tuple[Any, list[Any]]] = field(default_factory=dict)
     attachments: list[Any] = field(default_factory=list)
+    # Incident attachment records uploaded by a custodian (metadata only; the bytes are not here).
+    incident_attachments: list[Any] = field(default_factory=list)
     approvals: list[Any] = field(default_factory=list)
     custodian_goal_ids: set[int] = field(default_factory=set)
     # (custodian, record) pairs from the employee companion and the conversation inbox.
@@ -547,6 +647,8 @@ def _inbox_items(owner: str) -> list[dict[str, Any]]:
 
 def _personal_chats(scope: Scope, custodians: Sequence[str], low: float | None, high: float | None) -> None:
     for owner in custodians:
+        if is_account_custodian(owner):
+            continue  # companion history and inbox messages belong to dashboard users, not channel accounts
         for exchange in _bounded(_companion_exchanges(owner), "chats"):
             if in_range(float(exchange["time"]), low, high):
                 scope.companion_exchanges.append((owner, exchange))
@@ -566,17 +668,12 @@ def build_scope(world: Any, matter: Mapping[str, Any], *, for_erasure: bool = Fa
     low, high = bounds(matter)
     scope = Scope()
     for owner in custodians:
-        for goal in _bounded(world.list_goals(owner=owner, limit=MAX_SCOPE_ROWS + 1), "goals"):
-            scope.custodian_goal_ids.add(int(goal.id))
-            if "goals" in kinds and goal.owner == owner and in_range(float(goal.created_at), low, high):
-                scope.goals[int(goal.id)] = goal
+        _custodian_goals(world, owner, scope, kinds, low, high)
     if "goals" in kinds:
         for owner in custodians:
-            for run in _bounded(world.list_episodes(limit=MAX_SCOPE_ROWS + 1, owner=owner), "runs"):
-                if in_range(float(run.started_at), low, high):
-                    scope.runs.append(run)
+            _custodian_runs(world, owner, scope, low, high)
     if "chats" in kinds:
-        cache: dict[str, list[Any]] = {}
+        cache: dict[str | None, list[Any]] = {}
         for owner in custodians:
             for conv in _custodian_conversations(world, owner, cache):
                 turns = _bounded(world.recent_turns(int(conv.id), limit=MAX_SCOPE_ROWS + 1), "chats")
@@ -590,8 +687,10 @@ def build_scope(world: Any, matter: Mapping[str, Any], *, for_erasure: bool = Fa
             for attachment in world.list_attachments(goal_id):
                 if in_range(float(attachment.created_at), low, high):
                     scope.attachments.append(attachment)
+        if not for_erasure:
+            scope.incident_attachments = _incident_attachments(custodians, matter.get("tenant_id"), low, high)
     if "approvals" in kinds and not for_erasure:
-        owners = set(custodians)
+        owners = {goal_owner for owner in custodians for goal_owner in _goal_owners(owner)}
         for approval in _bounded(world.list_approvals(limit=MAX_SCOPE_ROWS + 1), "approvals"):
             linked = approval.requested_by in owners or approval.goal_id in scope.custodian_goal_ids
             if linked and in_range(float(approval.requested_at), low, high):
@@ -600,11 +699,15 @@ def build_scope(world: Any, matter: Mapping[str, Any], *, for_erasure: bool = Fa
 
 
 def _audit_refusal(matter: Mapping[str, Any], *, actor: str, **sizes: int) -> None:
-    from .audit import EventKind, audit_event
+    from .audit import AuditRefused, EventKind, audit_event
 
     # Recorded for the audit reader; the refusal stands even if this record cannot be written.
-    audit_event(EventKind.CONTROL_PLANE_ACTION, agent="ediscovery", verb="ediscovery_erasure_refused",
-                matter_id=matter["id"], actor=actor, **sizes)
+    # The caller raises its hold refusal next, so an audit refusal here must not replace it.
+    try:
+        audit_event(EventKind.CONTROL_PLANE_ACTION, agent="ediscovery", verb="ediscovery_erasure_refused",
+                    matter_id=matter["id"], actor=actor, **sizes)
+    except AuditRefused:
+        pass
 
 
 def personal_holds(owner: str) -> list[dict[str, Any]]:
@@ -673,6 +776,32 @@ def assert_erasure_permitted(world: Any, *, conversation_ids: Sequence[int], goa
             raise LegalHoldApplies(LEGAL_HOLD_MESSAGE)
 
 
+def incident_attachment_refusal(tenant_id: str, *, principal_ref: str, created_at: float,
+                                actor: str = "system") -> str | None:
+    """The plain refusal text when an active matter holds one incident attachment, or ``None``.
+
+    An attachment is held when its uploader is a ``user:`` custodian of a matter that
+    keeps attachments and its upload time falls in the matter's dates.  The matters are
+    those of ``tenant_id`` (the attachment's workspace), whichever workspace is active.
+    An unreadable matter ledger holds every attachment.  Each refusal is audited with the
+    actor and a count, never content.
+    """
+    try:
+        matters = _active_rows(store_path(tenant_id), tenant_id)
+    except Exception:  # failure-policy: fail_closed -- an unreadable ledger holds everything
+        return HOLD_UNVERIFIED_MESSAGE
+    for matter in matters:
+        if "attachments" not in matter["record_kinds"]:
+            continue
+        if principal_ref not in _incident_principal_refs(matter["custodians"], tenant_id):
+            continue
+        low, high = bounds(matter)
+        if in_range(float(created_at), low, high):
+            _audit_refusal(matter, actor=actor, attachments=1)
+            return LEGAL_HOLD_MESSAGE
+    return None
+
+
 def erasure_refusal(world: Any, *, conversation_ids: Sequence[int], goal_ids: Sequence[int],
                     actor: str = "system") -> str | None:
     """The plain refusal text for an erasure closure, or ``None`` when it may proceed."""
@@ -705,10 +834,13 @@ __all__ = [
     "assert_no_active_matters",
     "assert_personal_chats_erasable",
     "build_scope",
+    "account_user_matches",
     "conversation_user_matches",
     "enabled",
     "erasure_refusal",
+    "incident_attachment_refusal",
     "in_hold",
+    "is_account_custodian",
     "normalize",
     "personal_hold_windows",
     "personal_holds",

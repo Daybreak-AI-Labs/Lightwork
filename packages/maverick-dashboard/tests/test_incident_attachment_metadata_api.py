@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 from types import SimpleNamespace
 
-from fastapi import FastAPI, Request
+import pytest
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from maverick import incident_attachment_metadata as iam
 from maverick.paths import tenant_scope
@@ -238,3 +239,17 @@ def test_core_conflicts_map_to_http_409():
         )
     assert response.status_code == 409
     assert response.json()["detail"] == "incident revision or digest changed"
+
+
+def test_the_api_names_the_uploader_with_the_stores_own_reference():
+    from maverick_dashboard import incident_attachment_metadata_api as api
+
+    request = SimpleNamespace(state=SimpleNamespace(principal=SimpleNamespace(sub="operator@example.test")))
+    decomposed = "josé-workspace"  # the store keeps the composed (NFC) form of a tenant name
+    composed = "josé-workspace"
+    expected = iam.principal_ref_for_subject(composed, "operator@example.test")
+    assert api._principal(request, decomposed) == expected
+    assert api._principal(request, composed) == expected
+    with pytest.raises(HTTPException) as unavailable:  # a trailing dot is not a workspace the store can name
+        api._principal(request, "workspace.")
+    assert unavailable.value.status_code == 503

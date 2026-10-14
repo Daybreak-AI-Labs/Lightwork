@@ -26,10 +26,38 @@ with audit access.
 | Field | Meaning |
 | --- | --- |
 | Name, description | Shown to people with audit access only. |
-| Custodians | Principal ids, one per line: `user:<name>` for a dashboard user, or `user:<channel>:<identifier>` for a messaging account (for example `user:cli:local` for the local command line). A bare name is refused. |
+| Custodians | Principal ids, one per line: `user:<name>` for a dashboard user, or `user:<channel>:<identifier>` for a messaging account (for example `user:cli:local` for the local command line). A linked messaging account is written exactly as `account:<hash>:person:<hash>` (see below). A bare name is refused. |
 | From / To (optional) | Calendar dates in UTC. Both ends are inclusive. |
-| Records to keep | Any of: tasks and their runs, chat conversations (including employee companion history and conversation-inbox messages), attachments, approval requests. |
+| Records to keep | Any of: tasks and their runs, chat conversations (including employee companion history and conversation-inbox messages), attachments (including incident attachments the custodian uploaded), approval requests. |
 | Status | `active` or `released`. Releasing is final for that matter and is audited. |
+
+### Linked messaging accounts
+
+A person who links a Slack, Teams, Telegram or other messaging account has that
+account's chats stored under the account's identity, `account:<hash>:person:<hash>`.
+Room and thread histories add `:conversation:<hash>` to it. Name the account as
+the custodian, written exactly in that form with 64 lowercase hexadecimal characters
+in each hash. The matter then holds:
+
+- every chat of that account on every channel, including each room and thread;
+- the tasks owned by that account on each messaging channel, and their runs,
+  attachments and approvals.
+
+Any other text is not that account. A custodian with a different hash, a longer
+identifier that only starts with the same text, or a `user:<channel>:account:` form is
+refused or not matched. Companion history and conversation-inbox messages belong to
+dashboard users, not to channel accounts. To hold those, name the dashboard user as well.
+
+For its tasks and runs, a linked account adds one lookup on each messaging channel, and
+each check reads the workspace's chat list once. A matter with many linked accounts
+therefore takes longer to check. Measured on a local SQLite workspace, 500 account custodians took about
+1 second per check (2.5 seconds with 20,000 other conversations), and 50 took about a
+tenth of a second. Shared (Postgres) databases were not measured.
+
+To find an account's identity, an administrator opens **Compliance** and goes to
+**A person's data**. The **Person** list shows each linked account as
+`account:<hash>:person:<hash>`, followed by `:conversation:` for room and thread
+histories. Copy the text up to the second hash.
 
 Every create, edit, release, export, and every reading of matter details writes an
 audit event that records the matter ID, who acted, the revision and which fields
@@ -46,8 +74,12 @@ active matter still applies, including the ones not listed.
 retention enforcement, `maverick gc`, the dashboard "Tidy up old records" action,
 the all-workspaces clean-up, and the retention review (which shows the workspace as
 blocked). Any active matter blocks these, because the stores cannot reliably tell
-which records belong to which custodian. Whole-client erasure and the erasure of a
-removed workspace are also refused while a matter is active.
+which records belong to which custodian. A privacy-rights case hold recorded for the
+workspace (a legal hold, or a retention block on a privacy request) pauses the same
+actions. If the privacy-rights records cannot be read, the actions pause too. The
+all-workspaces clean-up skips such a workspace and reports it as held. Whole-client
+erasure and the erasure of a removed workspace are also refused while a matter is
+active.
 
 **Erasing a person is refused only for records in scope.** A closure is refused
 when it contains a record that is in the matter's:
@@ -72,6 +104,9 @@ Each of these paths applies the check:
 - An employee clearing their own companion conversation, the companion history
   route, and disabling a companion. Disabling keeps any exchange a matter holds in
   scope, and the companion's retention clock never removes one either.
+- Deleting or changing an incident attachment (only its uploader can do either), and
+  the retention purge of incident attachment records. A held attachment is refused, or
+  skipped by the purge, until the matter is released.
 - Erasing a removed workspace (its whole tree), and whole-client erasure.
 
 ### Date rules
@@ -82,7 +117,7 @@ Each record is tested against its own timestamp:
 - chat: any turn in the range (a conversation with no turn in the range is out of scope);
 - companion exchange: the time it was saved;
 - conversation-inbox message: the time it was created;
-- attachment: upload time;
+- attachment and incident attachment: upload time;
 - approval request: request time.
 
 A closure that mixes in-scope and out-of-scope records is refused as a whole. A
@@ -99,7 +134,10 @@ An auditor exports a matter as a ZIP archive:
 - `goals.jsonl`, `chats.jsonl`, `attachments.jsonl`, `approvals.jsonl`: one file per
   selected record type, holding only the in-scope records, one JSON object per line.
   `chats.jsonl` holds conversation turns, companion exchanges and inbox messages,
-  each marked with its `record_type`.
+  each marked with its `record_type`. `attachments.jsonl` holds the attachment rows
+  and the incident attachment metadata rows (`record_type` `incident_attachment`),
+  never the file bytes. An incident attachment row names its uploader only by the
+  stored one-way reference.
 - `manifest.json`: the matter definition, the SHA-256 and size of every file, the
   record counts, what is not included, and a signature.
 
@@ -135,15 +173,20 @@ tamper evidence for an export.
 
 ## What is not covered
 
-- **Linked messaging accounts.** Their conversations are stored under an
-  account-keyed identifier (`account:<hash>:person:<hash>`, sometimes with a
-  `:conversation:<digest>` suffix). A custodian name does not reach them, so their
-  deletion is not refused and they are not in the export.
+- **Linked messaging accounts named by a dashboard user.** A custodian `user:<name>`
+  does not reach a linked account's chats, which are held only when the account
+  itself is named (see above). Name each account the matter covers.
 - **Unsent drafts, derived memory and other copies of chat text.** Recovery drafts,
   personal recall notes and similar derived stores are not part of a matter.
 - **Attachment file bytes** are not copied into the archive. Each attachment row has
-  its SHA-256 and size. The files stay in their own store. The incident-attachment
-  register has its own delete action, which does not check matters.
+  its SHA-256 and size. The files stay in their own store, and a matter does not change
+  them. Only the metadata rows of incident attachments are held. Their file bytes are
+  kept in the governed document vault, which does not check matters. Once an
+  administrator revokes the document and its retention period ends, the vault can purge
+  the bytes even while a matter holds the metadata row. The held row keeps the document
+  identity, size and digest, but the file itself may then be gone. If a workspace holds
+  more than 10,000 incident attachment records, a matter that keeps attachments cannot
+  be exported, and the export says so.
 - **Audit evidence, knowledge-base copies, model memory, backups and copies held by
   outside providers** are outside the matter. A matter does not change their retention.
 - **Approvals** are never deleted by any erasure path, so no erasure is refused for
@@ -155,8 +198,6 @@ tamper evidence for an export.
 - **Timing.** The hold check runs just before a deletion. The ledger is a separate
   database, so a matter created while a deletion is already running is not seen by
   that deletion. The next check sees it.
-- **Privacy-rights case holds** do not yet pause `maverick gc` or the Tidy up action.
-  They block retention enforcement only. Closing that gap is a separate change.
 
 ## Releasing a hold
 

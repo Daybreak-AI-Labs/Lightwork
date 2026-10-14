@@ -264,6 +264,25 @@ def test_each_refusal_is_audited_with_the_actor_and_no_content(world, ledger, ev
     assert "alice" not in json.dumps(refusals) and "remark" not in json.dumps(refusals)
 
 
+def test_a_refused_audit_record_still_refuses_the_erasure_with_the_hold_message(world, ledger, events, monkeypatch):
+    from maverick import incident_attachment_metadata
+    from maverick.audit import AuditRefused
+
+    seeded = _seed(world)
+    ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(
+        record_kinds=["chats", "attachments"]))
+
+    def refuse_audit(kind, **payload):
+        raise AuditRefused("audit is required")
+
+    monkeypatch.setattr(audit, "audit_event", refuse_audit)
+    assert ediscovery.erasure_refusal(world, conversation_ids=[seeded["alice_conv"]], goal_ids=[],
+                                      actor="reviewer-1") == ediscovery.LEGAL_HOLD_MESSAGE
+    uploader = incident_attachment_metadata.principal_ref_for_subject("ws-a", ALICE)
+    assert ediscovery.incident_attachment_refusal("ws-a", principal_ref=uploader,
+                                                  created_at=0.0, actor="reviewer-1") == ediscovery.LEGAL_HOLD_MESSAGE
+
+
 def test_matter_kinds_limit_what_is_held(world, ledger, events):
     seeded = _seed(world)
     ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(record_kinds=["approvals"]))
@@ -277,6 +296,19 @@ def test_closure_through_another_persons_chat_is_held_when_it_reaches_a_custodia
     ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values())
     assert ediscovery.erasure_refusal(world, conversation_ids=[seeded["bob_conv"]],
                                       goal_ids=[seeded["alice_goal"]]) == ediscovery.LEGAL_HOLD_MESSAGE
+
+
+def test_incident_attachment_refusal_reads_the_ledger_of_the_workspace_it_is_given(events):
+    from maverick import incident_attachment_metadata
+    from maverick.paths import tenant_scope
+
+    ediscovery.MatterStore(ediscovery.store_path("ws-a")).create("ws-a", actor="auditor", values=_values(
+        record_kinds=["attachments"]))
+    uploader = incident_attachment_metadata.principal_ref_for_subject("ws-a", ALICE)
+    with tenant_scope(tenant="ws-b"):  # the active workspace is not the matter's workspace
+        assert ediscovery.incident_attachment_refusal("ws-a", principal_ref=uploader,
+                                                      created_at=0.0) == ediscovery.LEGAL_HOLD_MESSAGE
+        assert ediscovery.incident_attachment_refusal("ws-b", principal_ref=uploader, created_at=0.0) is None
 
 
 def test_released_matter_no_longer_holds_erasure(world, ledger, events):
@@ -573,3 +605,117 @@ def test_a_cli_custodian_holds_every_local_repl_session_like_the_cli_erase_does(
     assert _conversation_user_matches("local:4f2a9c", "local", "cli") is True
     assert ediscovery.erasure_refusal(world, conversation_ids=[local], goal_ids=[]) == ediscovery.LEGAL_HOLD_MESSAGE
     assert ediscovery.erasure_refusal(world, conversation_ids=[other], goal_ids=[]) is None
+
+
+# ---- linked messaging accounts as custodians ---------------------------------------
+
+ACCOUNT = "account:" + "a" * 64 + ":person:" + "b" * 64
+DIGEST = "d" * 64
+
+
+@pytest.mark.parametrize("custodian", [
+    "account:" + "A" * 64 + ":person:" + "b" * 64,           # upper-case hex is never produced
+    "account:" + "a" * 63 + ":person:" + "b" * 64,           # one hex character short
+    "account:" + "a" * 64 + ":person:" + "b" * 65,           # one hex character long
+    "account:" + "a" * 64 + ":person:" + "g" * 64,           # not hex
+    "account:" + "a" * 64 + ":" + "b" * 64,                  # missing the person part
+    ACCOUNT + ":conversation:" + DIGEST,                     # a thread key is not a custodian
+    "user:slack:" + ACCOUNT,                                 # refused: write the account form alone
+    "user:telegram:account:" + "a" * 64 + ":person:" + "b" * 64,
+    "user:slack:" + ACCOUNT + ":conversation:" + DIGEST,     # a thread key is not a custodian either
+    "user:slack:account:" + "a" * 63 + ":person:" + "b" * 64,   # channel form, one hex character short
+    "user:slack:account:" + "a" * 64 + ":person:" + "b" * 63,   # channel form, one hex character short
+    "user:slack:account:" + "a" * 64,                        # channel form without the person part
+    "user:slack:account:" + "a" * 64 + ":person:" + "b" * 64 + ":conversation:" + DIGEST,
+    "user:account:" + ACCOUNT,                               # an account is never a channel name
+])
+def test_account_custodians_must_be_written_exactly(tmp_path, custodian, events):
+    store = ediscovery.MatterStore(tmp_path / "ledger.sqlite3")
+    with pytest.raises(ediscovery.MatterValidationError):
+        store.create("ws-a", actor="auditor", values=_values(custodians=[custodian]))
+    assert store.list("ws-a") == []
+
+
+@pytest.mark.parametrize("custodian", ["user:slack:accountant", "user:cli:account", "user:account"])
+def test_principals_that_only_mention_account_are_still_ordinary_custodians(tmp_path, custodian, events):
+    store = ediscovery.MatterStore(tmp_path / "ledger.sqlite3")
+    matter = store.create("ws-a", actor="auditor", values=_values(custodians=[custodian]))
+    assert matter["custodians"] == [custodian]
+
+
+def test_account_custodian_in_the_exact_form_is_saved_and_listed(tmp_path, events):
+    store = ediscovery.MatterStore(tmp_path / "ledger.sqlite3")
+    matter = store.create("ws-a", actor="auditor", values=_values(custodians=[ACCOUNT, ALICE]))
+    assert matter["custodians"] == sorted([ACCOUNT, ALICE])
+
+
+@pytest.mark.parametrize("stored", [
+    ACCOUNT,
+    ACCOUNT + ":conversation:" + DIGEST,
+    ACCOUNT + ":conversation:" + "0123456789abcdef" * 4,
+])
+def test_account_custodian_matches_its_chats_and_thread_variants(stored):
+    assert ediscovery.account_user_matches(stored, ACCOUNT) is True
+
+
+@pytest.mark.parametrize("stored", [
+    ACCOUNT + "0",                                      # bare prefix: a longer identifier
+    ACCOUNT + ":",
+    ACCOUNT + ":conversation:",
+    ACCOUNT + ":conversation:" + "d" * 63,              # one hex character short
+    ACCOUNT + ":conversation:" + "d" * 65,
+    ACCOUNT + ":conversation:" + "D" * 64,              # upper-case hex is never produced
+    ACCOUNT + ":conversation:" + "d" * 63 + "g",
+    ACCOUNT + ":thread:" + DIGEST,
+    ACCOUNT + ":conversation:" + DIGEST + ":extra",
+    "xx" + ACCOUNT,                                     # a substring is not a match
+    "account:" + "a" * 64 + ":person:" + "c" * 64,      # another person under the same account
+    "account:" + "a" * 64 + ":person:" + "b" * 63,
+    "user:slack:" + ACCOUNT,                            # a principal id is a different subject
+    None,
+])
+def test_near_miss_identifiers_never_match_an_account_custodian(stored):
+    assert ediscovery.account_user_matches(stored, ACCOUNT) is False
+
+
+def test_account_custodian_holds_its_chats_threads_and_goals_but_not_near_misses(world, ledger, events):
+    exact = world.get_or_create_conversation("slack", ACCOUNT).id
+    thread = world.get_or_create_conversation("slack", f"{ACCOUNT}:conversation:{DIGEST}").id
+    near = world.get_or_create_conversation("slack", ACCOUNT + "0").id
+    other = world.get_or_create_conversation("slack", "account:" + "a" * 64 + ":person:" + "c" * 64).id
+    for conv, text in [(exact, "account remark"), (thread, "account thread remark"),
+                       (near, "near remark"), (other, "other person remark")]:
+        world.append_turn(conv, "user", text)
+    held_goal = world.create_goal("Account task", owner=f"user:slack:{ACCOUNT}")
+    telegram_goal = world.create_goal("Telegram account task", owner=f"user:telegram:{ACCOUNT}")
+    near_goal = world.create_goal("Near task", owner=f"user:slack:{ACCOUNT}0")
+    ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(custodians=[ACCOUNT],
+                                                                                  record_kinds=["goals", "chats"]))
+    for conv_id in (exact, thread):
+        assert ediscovery.erasure_refusal(world, conversation_ids=[conv_id], goal_ids=[]) == ediscovery.LEGAL_HOLD_MESSAGE
+    for goal_id in (held_goal, telegram_goal):
+        assert ediscovery.erasure_refusal(world, conversation_ids=[], goal_ids=[goal_id]) == ediscovery.LEGAL_HOLD_MESSAGE
+    assert ediscovery.erasure_refusal(world, conversation_ids=[near, other], goal_ids=[near_goal]) is None
+
+
+def test_export_of_an_account_custodian_holds_exactly_its_records(world, ledger, events, tmp_path):
+    exact = world.get_or_create_conversation("slack", ACCOUNT).id
+    thread = world.get_or_create_conversation("slack", f"{ACCOUNT}:conversation:{DIGEST}").id
+    near = world.get_or_create_conversation("slack", ACCOUNT + "0").id
+    world.append_turn(exact, "user", "account remark")
+    world.append_turn(thread, "user", "account thread remark")
+    world.append_turn(near, "user", "near remark")
+    world.create_goal("Account task", owner=f"user:slack:{ACCOUNT}")
+    world.create_goal("Near task", owner=f"user:slack:{ACCOUNT}0")
+    matter = ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(
+        custodians=[ACCOUNT], record_kinds=["goals", "chats"]))
+
+    result = ediscovery_export.export_matter(world, matter, actor="auditor", out_dir=tmp_path / "exports")
+    with zipfile.ZipFile(result["path"]) as archive:
+        raw = b"".join(archive.read(name) for name in archive.namelist())
+    assert b"account remark" in raw and b"account thread remark" in raw
+    assert b"Account task" in raw
+    assert b"near remark" not in raw and b"Near task" not in raw
+    from maverick.audit.signing import trusted_audit_public_keys
+
+    assert ediscovery_export.verify_export(result["path"], trusted_keys=trusted_audit_public_keys())["valid"] is True

@@ -16,13 +16,33 @@ from typing import Any
 DEDUP_SECONDS = 30 * 24 * 3600
 
 
+def assert_no_broad_holds() -> None:
+    """Refuse a broad purge while a legal hold applies to this workspace.
+
+    Mirrors ``maverick.audit.retention.enforce``: a privacy-rights case hold
+    that cannot be verified fails closed, a recorded hold blocks the whole
+    workspace, and an active eDiscovery matter blocks it too.  Raises
+    :class:`~maverick.ediscovery.LegalHoldApplies` with a plain message that
+    names no matter and no case.
+    """
+    from .audit.preservation import preservation_snapshot
+    from .ediscovery import LegalHoldApplies, assert_no_active_matters
+
+    try:
+        preservation = preservation_snapshot()
+    except Exception as exc:  # failure-policy: fail_closed -- unverified holds prohibit deletion
+        raise LegalHoldApplies("Preservation holds could not be verified; no records were deleted.") from exc
+    if preservation["blocked"]:
+        raise LegalHoldApplies("Recorded preservation holds block broad deletion in this workspace.")
+    assert_no_active_matters()
+
+
 def prune_world(world: Any, *, days: int, events_days: int) -> tuple[int, int, int]:
     """``(conversations, goal events, processed messages)`` removed from ``world``."""
-    from .ediscovery import assert_no_active_matters
-
-    # Idle-conversation and activity pruning are broad purges: any active legal
-    # matter in this workspace pauses them, as it pauses retention enforcement.
-    assert_no_active_matters()
+    # Idle-conversation and activity pruning are broad purges: a recorded case
+    # hold or an active legal matter in this workspace pauses them, as it pauses
+    # retention enforcement.
+    assert_no_broad_holds()
     convs = world.prune_conversations(idle_for_seconds=days * 24 * 3600)
     events = world.prune_goal_events(older_than_seconds=events_days * 24 * 3600)
     # Twilio dedup rows accumulate one-per-webhook forever; reap after
@@ -65,7 +85,7 @@ def sweep_workspaces(tenants: Iterable[Any], *, days: int, events_days: int, dry
     out a local workspace whose records database was never created (so a
     preview never creates one). Returns one row per workspace.
     """
-    from .ediscovery import LegalHoldApplies, assert_no_active_matters
+    from .ediscovery import LegalHoldApplies
     from .paths import tenant_scope
     from .world_model import close_world_if_owned
     from .world_model_backends import is_postgres_configured
@@ -86,7 +106,7 @@ def sweep_workspaces(tenants: Iterable[Any], *, days: int, events_days: int, dry
             try:
                 if dry_run:
                     try:
-                        assert_no_active_matters()
+                        assert_no_broad_holds()
                         counts = preview_world(world, days=days, events_days=events_days)
                     except LegalHoldApplies:
                         # The preview must not promise removals a legal hold will refuse.
@@ -104,4 +124,4 @@ def sweep_workspaces(tenants: Iterable[Any], *, days: int, events_days: int, dry
     return rows
 
 
-__all__ = ["prune_world", "preview_world", "sweep_workspaces", "DEDUP_SECONDS"]
+__all__ = ["assert_no_broad_holds", "prune_world", "preview_world", "sweep_workspaces", "DEDUP_SECONDS"]

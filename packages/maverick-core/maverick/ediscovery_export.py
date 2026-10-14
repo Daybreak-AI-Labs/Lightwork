@@ -81,6 +81,17 @@ def _rows(kind: str, scope: Any) -> Iterator[dict[str, Any]]:
             yield {"record_type": "attachment", "id": att.id, "goal_id": att.goal_id,
                    "filename": att.filename, "mime": att.mime, "size_bytes": att.size_bytes,
                    "sha256": att.sha256, "created_at": att.created_at}
+        for meta in sorted(scope.incident_attachments, key=lambda item: item.attachment_id):
+            # Register metadata only: the uploader is recorded as the matter's stored reference.
+            yield {"record_type": "incident_attachment", "attachment_id": meta.attachment_id,
+                   "incident_kind": meta.incident_kind, "incident_id": meta.incident_id,
+                   "incident_revision": meta.incident_revision, "document_id": meta.document_id,
+                   "document_revision": meta.document_revision, "safe_display_name": meta.safe_display_name,
+                   "media_type": meta.media_type, "byte_size": meta.byte_size, "sha256": meta.sha256,
+                   "redaction_state": meta.redaction_state, "status": meta.status,
+                   "created_at": meta.created_at, "updated_at": meta.updated_at,
+                   "tombstoned_at": meta.tombstoned_at, "purged_at": meta.purged_at,
+                   "uploader_ref": meta.principal_ref}
     elif kind == "approvals":
         for approval in sorted(scope.approvals, key=lambda item: item.id):
             yield {"record_type": "approval", "id": approval.id, "goal_id": approval.goal_id,
