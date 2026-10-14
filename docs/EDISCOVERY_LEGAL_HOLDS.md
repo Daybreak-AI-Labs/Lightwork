@@ -48,6 +48,12 @@ identifier that only starts with the same text, or a `user:<channel>:account:` f
 refused or not matched. Companion history and conversation-inbox messages belong to
 dashboard users, not to channel accounts. To hold those, name the dashboard user as well.
 
+For its tasks and runs, a linked account adds one lookup on each messaging channel, and
+each check reads the workspace's chat list once. A matter with many linked accounts
+therefore takes longer to check. Measured on a local SQLite workspace, 500 account custodians took about
+1 second per check (2.5 seconds with 20,000 other conversations), and 50 took about a
+tenth of a second. Shared (Postgres) databases were not measured.
+
 To find an account's identity, an administrator opens **Compliance** and goes to
 **A person's data**. The **Person** list shows each linked account as
 `account:<hash>:person:<hash>`, followed by `:conversation:` for room and thread
@@ -98,8 +104,8 @@ Each of these paths applies the check:
 - An employee clearing their own companion conversation, the companion history
   route, and disabling a companion. Disabling keeps any exchange a matter holds in
   scope, and the companion's retention clock never removes one either.
-- Deleting an incident attachment (only its uploader can delete it), and the
-  retention purge of incident attachment records. A held attachment is refused, or
+- Deleting or changing an incident attachment (only its uploader can do either), and
+  the retention purge of incident attachment records. A held attachment is refused, or
   skipped by the purge, until the matter is released.
 - Erasing a removed workspace (its whole tree), and whole-client erasure.
 
@@ -173,10 +179,14 @@ tamper evidence for an export.
 - **Unsent drafts, derived memory and other copies of chat text.** Recovery drafts,
   personal recall notes and similar derived stores are not part of a matter.
 - **Attachment file bytes** are not copied into the archive. Each attachment row has
-  its SHA-256 and size. The files stay in their own store. A matter does not change
-  the files of incident attachments either. Only their metadata rows are held. If a
-  workspace holds more than 10,000 incident attachment records, a matter that keeps
-  attachments cannot be exported, and the export says so.
+  its SHA-256 and size. The files stay in their own store, and a matter does not change
+  them. Only the metadata rows of incident attachments are held. Their file bytes are
+  kept in the governed document vault, which does not check matters. Once an
+  administrator revokes the document and its retention period ends, the vault can purge
+  the bytes even while a matter holds the metadata row. The held row keeps the document
+  identity, size and digest, but the file itself may then be gone. If a workspace holds
+  more than 10,000 incident attachment records, a matter that keeps attachments cannot
+  be exported, and the export says so.
 - **Audit evidence, knowledge-base copies, model memory, backups and copies held by
   outside providers** are outside the matter. A matter does not change their retention.
 - **Approvals** are never deleted by any erasure path, so no erasure is refused for
