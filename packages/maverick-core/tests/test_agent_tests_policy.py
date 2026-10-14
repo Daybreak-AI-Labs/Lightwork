@@ -82,3 +82,33 @@ def test_the_config_checker_knows_the_section_and_its_limits():
     assert ("agent_tests", "bypass_requires_second_person") not in flagged
     assert lint_config({"agent_tests": {"max_cases_per_specialist": 200,
                                         "require_for_new_specialists": True}}) == []
+
+
+def test_tool_checks_default_to_off_and_are_on_only_for_exactly_true(settings):
+    from maverick import agent_tests_policy as policy
+
+    assert policy.tool_checks_enabled() is False
+    settings("[agent_tests]\ntool_checks = true\n")
+    assert policy.tool_checks_enabled() is True
+    # Anything that is not the boolean true keeps tool checks off.
+    for value in ["\"yes\"", "1", "\"true\""]:
+        settings(f"[agent_tests]\ntool_checks = {value}\n")
+        assert policy.tool_checks_enabled() is False, value
+
+
+def test_a_broken_settings_file_keeps_tool_checks_off(settings):
+    from maverick import agent_tests_policy as policy
+
+    settings("[agent_tests\ntool_checks = true\n")
+    assert policy.tool_checks_enabled() is False
+
+
+def test_the_config_checker_knows_the_tool_checks_switch():
+    from maverick.config_lint import lint_config
+
+    findings = lint_config({"agent_tests": {"tool_checks": "yes", "mystery": 1}})
+    flagged = {(f.section, f.key) for f in findings}
+    assert ("agent_tests", "tool_checks") in flagged
+    assert ("agent_tests", "mystery") in flagged
+    clean = lint_config({"agent_tests": {"tool_checks": True}})
+    assert not [f for f in clean if f.key == "tool_checks"]
