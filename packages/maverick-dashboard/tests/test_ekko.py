@@ -482,6 +482,7 @@ def planning(tmp_path, monkeypatch):
     candidate = client.get("/api/v1/ekko/candidates?device_id=desk").json()["candidates"][0]
     payload = _review_payload(candidate)
     payload.pop("kind")
+    payload["context"] = client.get("/api/v1/ekko/plans?device_id=desk").json()["context"]
     payload.update(stage="shortlisted", expected_revision="", acknowledge_private_storage=True, assumptions={
         "runs_per_week": 10, "manual_minutes": 30, "remaining_minutes": 6, "setup_hours": 3,
     })
@@ -513,7 +514,7 @@ def test_pilot_retry_is_idempotent_and_failed_outputs_count_rework(planning):
     _, candidate, payload, _ = planning
     plan = save(candidate, payload).json()["plan"]
     path = f"/api/v1/ekko/plans/{candidate['opportunity_id']}/runs"
-    sample = {"device_id": "desk", "expected_revision": plan["revision"],
+    sample = {"device_id": "desk", "context": payload["context"], "expected_revision": plan["revision"],
               "sample_id": "pilot-run-one", "manual_minutes": 30, "remaining_minutes": 6, "accepted": True}
     first = client.post(path, json=sample)
     assert first.status_code == 200, first.text
@@ -575,9 +576,10 @@ def test_disabled_planning_keeps_read_and_delete_available(planning):
     cfg.write_text(cfg.read_text().replace("planning_enabled = true", "planning_enabled = false"))
     config.reset_config_cache()
     assert save(candidate, payload).status_code == 409
-    assert client.get("/api/v1/ekko/plans?device_id=desk").json()["plans"]
+    current = client.get("/api/v1/ekko/plans?device_id=desk").json()
+    assert current["plans"]
     deleted = client.request("DELETE", f"/api/v1/ekko/plans/{candidate['opportunity_id']}",
-                             json={"device_id": "desk", "expected_revision": plan["revision"]})
+                             json={"device_id": "desk", "context": current["context"], "expected_revision": plan["revision"]})
     assert deleted.status_code == 200 and deleted.json()["removed"]
 
 
@@ -630,7 +632,7 @@ def test_pilot_is_bounded_and_never_extends_retention(planning):
     expires_at = plan["expires_at"]
     path = f"/api/v1/ekko/plans/{candidate['opportunity_id']}/runs"
     for number in range(30):
-        sample = {"device_id": "desk", "expected_revision": plan["revision"], "sample_id": f"pilot-run-{number}",
+        sample = {"device_id": "desk", "context": payload["context"], "expected_revision": plan["revision"], "sample_id": f"pilot-run-{number}",
                   "manual_minutes": 30, "remaining_minutes": 6, "accepted": True}
         result = client.post(path, json=sample)
         assert result.status_code == 200, result.text
@@ -664,3 +666,18 @@ def test_plan_save_respects_the_existing_database_size_limit(planning, monkeypat
     monkeypatch.setattr("maverick.work_discovery_store.MAX_DATABASE_BYTES", 1)
     assert save(candidate, payload).status_code == 503
     assert OpportunityPlans(store).list() == []
+
+
+def test_plan_mutations_reject_stale_workspace_context(planning):
+    store, candidate, payload, _ = planning
+    stale = save(candidate, {**payload, "context": "0" * 64})
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "ekko_context_changed"
+    assert OpportunityPlans(store).list() == []
+    plan = save(candidate, payload).json()["plan"]
+    path = f"/api/v1/ekko/plans/{candidate['opportunity_id']}"
+    stale_revision = {"device_id": "desk", "expected_revision": plan["revision"], "context": "0" * 64}
+    assert client.request("DELETE", path, json=stale_revision).status_code == 409
+    assert client.post(path + "/runs", json={**stale_revision, "sample_id": "stale-run-one", "manual_minutes": 30,
+                                            "remaining_minutes": 6, "accepted": True}).status_code == 409
+    assert OpportunityPlans(store).list() == [plan]

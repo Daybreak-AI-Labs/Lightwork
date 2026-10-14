@@ -191,3 +191,22 @@ test('private plan access loss scrubs notes and Copilot opens only the protected
   await expect(page.locator('#ekko-review-goal')).toHaveValue('');
   await expect(page.locator('#ekko-planning-availability')).toContainText('Access changed');
 });
+
+test('a stale-tab save is refused by the native API and clears private notes without a workspace event',async({page,request,context})=>{
+  await page.goto('/ekko');
+  await page.getByRole('button',{name:'Review this opportunity'}).click();
+  for (const field of ['goal','inputs','output','approval']) await page.locator('#ekko-review-'+field).fill('Private stale-tab '+field);
+  await page.locator('#ekko-plan-consent').check();
+  await context.route('**/api/v1/ekko/candidates/*/plan',async route=>{
+    const body=route.request().postDataJSON();
+    expect(body.context).toMatch(/^[a-f0-9]{64}$/);
+    await route.continue({postData:JSON.stringify({...body,context:'0'.repeat(64)})});
+  });
+  const refused=page.waitForResponse(response=>response.url().endsWith('/plan')&&response.request().method()==='PUT');
+  await page.getByRole('button',{name:'Save opportunity plan'}).click();
+  expect((await refused).status()).toBe(409);
+  await expect(page.locator('#ekko-review')).toBeHidden();
+  await expect(page.locator('#ekko-review-goal')).toHaveValue('');
+  await expect(page.locator('#ekko-planning-availability')).toContainText('Access changed');
+  expect((await (await request.get('/api/v1/ekko/plans')).json()).plans).toEqual([]);
+});

@@ -61,6 +61,7 @@ class BenefitIn(_StrictInput):
 
 
 class PlanIn(DeviceIn):
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
     acknowledge_private_storage: bool = Field(False, strict=True)
     review: TaskReviewIn
     assumptions: BenefitIn = Field(default_factory=BenefitIn)
@@ -70,6 +71,7 @@ class PlanIn(DeviceIn):
 
 
 class PlanRevisionIn(DeviceIn):
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
     expected_revision: str = Field(min_length=32, max_length=32)
 
 
@@ -749,18 +751,22 @@ def _plans(request, device_id):
     return OpportunityPlans(_store(request, device_id))
 
 
-def _planning_access(request, *, write=False):
+def _planning_access(request, *, write=False, context=None):
     from maverick import config
 
     from .ekko_ops_api import _access
 
-    _access(request)
-    policy = config.get_ekko()
+    with auth.fresh_configuration():
+        current_context = _access(request)
+        policy = config.get_ekko()
+    if context is not None and not secrets.compare_digest(context, current_context):
+        raise HTTPException(409, {"code": "ekko_context_changed", "message":
+            "Your workspace, access or Ekko settings changed. Refresh the page before changing private plans."})
     if write:
         _app()._require_same_origin(request)
         if not policy["enable"] or not policy["planning_enabled"]:
             raise HTTPException(409, "Saving opportunity plans is off. An administrator can enable it in All settings under Ekko.")
-    return policy
+    return policy, current_context
 
 
 def _plan_result(operation):
@@ -779,15 +785,15 @@ def _plan_result(operation):
 
 @router.get("/api/v1/ekko/plans")
 def ekko_plans(request: Request, device_id: str = Query(_DEFAULT_DEVICE, min_length=1, max_length=64)):
-    policy = _planning_access(request)
+    policy, context = _planning_access(request)
     plans = _plan_result(lambda: _plans(request, device_id).list())
-    return {"plans": plans, "enabled": bool(policy["enable"] and policy["planning_enabled"]),
+    return {"plans": plans, "context": context, "enabled": bool(policy["enable"] and policy["planning_enabled"]),
             "retention_days": policy["retention_days"]}
 
 
 @router.put("/api/v1/ekko/candidates/{opportunity_id}/plan")
 def ekko_save_plan(request: Request, opportunity_id: str, payload: PlanIn):
-    policy = _planning_access(request, write=True)
+    policy, _ = _planning_access(request, write=True, context=payload.context)
     if not payload.acknowledge_private_storage:
         raise HTTPException(422, "Confirm that your task notes, assumptions and pilot results may be saved privately.")
     store = _store(request, payload.device_id)
@@ -805,10 +811,10 @@ def ekko_save_plan(request: Request, opportunity_id: str, payload: PlanIn):
 
 @router.post("/api/v1/ekko/plans/{opportunity_id}/runs")
 def ekko_record_pilot(request: Request, opportunity_id: str, payload: PilotRunIn):
-    _planning_access(request, write=True)
+    _planning_access(request, write=True, context=payload.context)
     if not _OPPORTUNITY_RE.fullmatch(opportunity_id):
         raise HTTPException(404, "Choose a saved opportunity.")
-    sample = payload.model_dump(exclude={"device_id", "expected_revision"})
+    sample = payload.model_dump(exclude={"device_id", "expected_revision", "context"})
     result = _plan_result(lambda: _plans(request, payload.device_id).record_run(
         opportunity_id, sample=sample, expected_revision=payload.expected_revision,
     ))
@@ -817,7 +823,7 @@ def ekko_record_pilot(request: Request, opportunity_id: str, payload: PilotRunIn
 
 @router.delete("/api/v1/ekko/plans/{opportunity_id}")
 def ekko_delete_plan(request: Request, opportunity_id: str, payload: PlanRevisionIn):
-    _planning_access(request)
+    _planning_access(request, context=payload.context)
     _app()._require_same_origin(request)
     removed = _plan_result(lambda: _plans(request, payload.device_id).delete(
         opportunity_id, expected_revision=payload.expected_revision,

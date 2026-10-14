@@ -240,7 +240,10 @@ the separately saved notes. Erasing a linked evidence session, erasing the
 device's data, or forgetting the device removes its linked plans. Audit events
 contain identifiers/stage/count, not the entered task text or assumptions.
 
-Current permissions are checked on every API request. Concurrent edits require
+Current permissions are checked on every API request. Mutations also require
+the fresh workspace/access/configuration context returned when reading plans,
+so a stale tab cannot apply old notes to a different current context.
+Concurrent edits require
 the latest saved revision; an older tab cannot overwrite a newer plan. An
 unconfirmed pilot can be retried with the same reference without double counting.
 After an unconfirmed plan save, use **Refresh saved plans** and **Open saved plan**

@@ -6,7 +6,7 @@
   const $ = id => document.getElementById(id);
   const api = '/api/v1/ekko';
   const discovery = window.LightworkEkkoDiscovery;
-  let plans = [], enabled = false, generation = 0, read = 0, busy = false;
+  let plans = [], enabled = false, generation = 0, read = 0, busy = false, workspaceContext = '';
   let editing = null, selected = null, pendingSample = null;
   const device = () => window.LightworkEkkoDevice();
   const stamp = () => ({generation, device: device()});
@@ -21,7 +21,8 @@
     try { return await window.mvFetchJSON(api + path, {timeout: 15000, ...(options || {})}, 'update your opportunity workspace'); }
     catch (error) {
       const detail = window.mvPlainDetail && window.mvPlainDetail(error.detail);
-      if (current(scope) && [401, 403].includes(error.status)) {
+      const contextChanged = error.status === 409 && error.detail && error.detail.code === 'ekko_context_changed';
+      if (current(scope) && ([401, 403].includes(error.status) || contextChanged)) {
         discovery.close();
         document.dispatchEvent(new CustomEvent('lightwork:ekko-scope-reset'));
         say('ekko-planning-availability', 'Access changed. Refresh the page to check your current permissions.');
@@ -137,7 +138,9 @@
     try {
       const data = await request('/plans?device_id=' + encodeURIComponent(scope.device));
       if (!current(scope) || version !== read) return;
-      if (!data || !Array.isArray(data.plans) || typeof data.enabled !== 'boolean') throw new Error('Saved plans could not be read. Try again.');
+      if (!data || !Array.isArray(data.plans) || typeof data.enabled !== 'boolean' || !/^[a-f0-9]{64}$/.test(data.context || '')) throw new Error('Saved plans could not be read. Try again.');
+      if (workspaceContext && workspaceContext !== data.context) { discovery.close(); clearPilot(); }
+      workspaceContext = data.context;
       plans = data.plans; enabled = data.enabled;
       say('ekko-planning-availability', enabled ? 'Private plans are available. New saves expire within ' + data.retention_days + ' days.' : 'Existing plans can still be inspected and removed.');
       if (selected && !getPlan(selected.opportunity_id)) clearPilot();
@@ -166,7 +169,7 @@
     if (busy || !enabled || !discovery.candidate() || !$('ekko-review-form').reportValidity()) return;
     if (!$('ekko-plan-consent').checked) { say('ekko-plan-save-message', 'Confirm that these notes may be saved privately before saving.'); return; }
     const scope = stamp(), candidate = discovery.candidate();
-    const body = {device_id: scope.device, acknowledge_private_storage: true, review: readReview(), assumptions: assumptions(), stage: $('ekko-plan-stage').value,
+    const body = {device_id: scope.device, context: workspaceContext, acknowledge_private_storage: true, review: readReview(), assumptions: assumptions(), stage: $('ekko-plan-stage').value,
       evidence_revision: candidate.evidence_revision, expected_revision: editing && editing.opportunity_id === candidate.opportunity_id ? editing.revision : ''};
     lock(true); say('ekko-plan-save-message', 'Saving your private plan…');
     try {
@@ -188,7 +191,7 @@
       say('ekko-pilot-message', 'The earlier run was not confirmed. Refresh saved plans and reopen this plan before changing the values.'); return;
     }
     if (!pendingSample) pendingSample = {id: crypto.randomUUID(), values: JSON.stringify(values)};
-    const body = {...values, sample_id: pendingSample.id, expected_revision: plan.revision, device_id: scope.device};
+    const body = {...values, context: workspaceContext, sample_id: pendingSample.id, expected_revision: plan.revision, device_id: scope.device};
     lock(true); say('ekko-pilot-message', 'Recording your observation…');
     try {
       const result = await request('/plans/' + plan.opportunity_id + '/runs', {method: 'POST', body});
@@ -207,7 +210,7 @@
     if (!(await window.mvConfirm('Remove this saved task plan, assumptions and pilot results? Recorded activity and any saved workflows are kept.', {okText: 'Remove plan'})) || !current(scope)) return;
     lock(true);
     try {
-      const result = await request('/plans/' + plan.opportunity_id, {method: 'DELETE', body: {device_id: scope.device, expected_revision: plan.revision}});
+      const result = await request('/plans/' + plan.opportunity_id, {method: 'DELETE', body: {device_id: scope.device, context: workspaceContext, expected_revision: plan.revision}});
       if (!current(scope)) return;
       if (!result || typeof result.removed !== 'boolean') throw new Error('Removal could not be confirmed. Refresh saved plans before trying again.');
       plans = plans.filter(item => item.opportunity_id !== plan.opportunity_id); selected = null; pendingSample = null;
@@ -237,7 +240,7 @@
   });
   document.addEventListener('lightwork:ekko-review-closed', () => { editing = null; });
   document.addEventListener('lightwork:ekko-scope-reset', () => {
-    generation++; read++; plans = []; editing = selected = pendingSample = null; enabled = false;
+    generation++; read++; plans = []; editing = selected = pendingSample = null; enabled = false; workspaceContext = '';
     clearPilot(); say('ekko-plan-save-message', '');
     say('ekko-planning-availability', 'Refresh saved plans for the current device and workspace.'); lock(false); render();
   });
