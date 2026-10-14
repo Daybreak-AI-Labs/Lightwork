@@ -465,3 +465,14 @@ def test_a_complete_draft_with_a_tool_check_is_not_publishable_while_the_switch_
     refused = _decide(app, PACK, "publish", selected=draft)
     assert refused.status_code == 409, refused.text
     assert app.get("/api/v1/agents/" + PACK).json()["persona"] != new
+
+
+def test_the_draft_notice_and_the_agents_page_describe_tool_checks_as_recording_stubs():
+    from pathlib import Path
+
+    from maverick_dashboard import specialist_drafts
+
+    page = (Path(specialist_drafts.__file__).parent / "templates" / "agents.html").read_text(encoding="utf-8")
+    for text in (specialist_drafts.NOTICE, page):
+        assert "no real tools" in text and "recording test stubs" in text
+        assert "with no tools" not in text and "They use no tools" not in text
