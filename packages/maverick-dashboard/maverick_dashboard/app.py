@@ -10572,7 +10572,7 @@ def _render_channels_page(request: Request, *, saved: str = "",
         "email_failed": "The test email could not be sent. Check the mail settings "
                         "(Settings > All settings > Integrations > Email alerts).",
     }.get(saved, "")
-    from . import plain_labels, teams_links_api
+    from . import plain_labels, public_chat_api, teams_links_api
     try:
         from .service_supervisor import status as service_status
 
@@ -10608,6 +10608,7 @@ def _render_channels_page(request: Request, *, saved: str = "",
             "sendable": ["email", "sms", "slack"],
             "channel_runtime": channel_runtime,
             **teams_links_api.page_context(issued_code),
+            **public_chat_api.admin_section_context(request),
             "mail_configured": _mail_configured(),
             "channel_context": _channel_form_context(request),
             "channel_review": _channel_form_review(request),

@@ -750,3 +750,83 @@ def test_settings_catalog_offers_the_two_public_chat_switches():
     assert enabled.reader == "maverick_dashboard.public_chat_api"
     local = catalog.BY_ID["public_chat.allow_localhost_origins"]
     assert local.default is False and local.reader == enabled.reader
+
+
+PARTIAL = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "_public_chat_admin.html"
+ADMIN_JS = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static" / "lightwork-public-chat-admin.js"
+
+
+def test_the_channels_page_shows_the_public_chat_section_only_while_enabled(chat, model):
+    shown = chat.client.get("/channels")
+    assert shown.status_code == 200
+    assert 'id="pc-sites"' in shown.text and 'name="daily_cap_dollars"' in shown.text
+    assert '<option value="finance_ap"' in shown.text
+    assert "/static/lightwork-public-chat-admin.js" in shown.text
+    _write_config(chat.tmp, OFF)
+    hidden = chat.client.get("/channels")
+    assert hidden.status_code == 200
+    assert "Chat on your public website" not in hidden.text
+    assert "pc-sites" not in hidden.text and "lightwork-public-chat-admin.js" not in hidden.text
+
+
+def test_the_section_needs_the_same_admin_check_as_the_admin_api(chat, model, monkeypatch):
+    from maverick_dashboard import auth
+
+    assert chat.api.admin_section_context(object()) != {}
+    monkeypatch.setattr(auth, "has_permission", lambda request, permission, **kwargs: False)
+    assert chat.api.admin_section_context(object()) == {}
+    assert "pc-sites" not in chat.client.get("/channels").text
+
+
+def test_the_section_has_no_inline_handlers_styles_or_inline_scripts():
+    html = PARTIAL.read_text(encoding="utf-8")
+    assert re.search(r"\son[a-z]+\s*=", html) is None
+    assert "style=" not in html
+    # Behaviour lives in the static script, loaded with src; an inline script would need a nonce.
+    for tag in re.findall(r"<script[^>]*>", html):
+        assert "src=" in tag
+
+
+def test_the_section_script_renders_text_only_and_keeps_no_key_in_the_browser():
+    source = ADMIN_JS.read_text(encoding="utf-8")
+    for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "localStorage",
+                      "sessionStorage", "eval(", "Function("):
+        assert forbidden not in source, forbidden
+    assert "textContent" in source
+    # Recent messages: bounded to 50 and shown newest first.
+    assert "limit=50" in source and "slice().reverse()" in source
+
+
+def test_the_form_limits_are_the_api_limits():
+    from maverick_dashboard.public_chat_api import SiteIn
+
+    html = PARTIAL.read_text(encoding="utf-8")
+
+    def tag(name):
+        return re.search(rf'<input[^>]*name="{name}"[^>]*>', html).group(0)
+
+    def attribute(name, attr):
+        return re.search(rf'\s{attr}="([^"]+)"', tag(name)).group(1)
+
+    def bounds(name):
+        found = {}
+        for item in SiteIn.model_fields[name].metadata:
+            for attr in ("gt", "ge", "le", "max_length"):
+                if hasattr(item, attr):
+                    found[attr] = getattr(item, attr)
+        return found
+
+    for name in ("messages_per_session", "messages_per_minute", "messages_per_client_per_day",
+                 "retention_days", "daily_cap_dollars"):
+        limits = bounds(name)
+        assert float(attribute(name, "max")) == float(limits["le"]), name
+        if "ge" in limits:
+            assert float(attribute(name, "min")) == float(limits["ge"]), name
+    for name in ("display_name", "greeting"):
+        assert int(attribute(name, "maxlength")) == bounds(name)["max_length"], name
+
+
+def test_the_admin_form_sends_whole_dollar_limits_the_api_accepts(chat, model):
+    created = _site(chat, daily_cap_dollars=5, messages_per_client_per_day=5000)
+    assert created["site"]["daily_cap_dollars"] == 5.0
+

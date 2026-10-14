@@ -620,3 +620,17 @@ def create_public_chat_admin_router() -> APIRouter:
         return {"site_id": site_id, "messages": rows}
 
     return router
+
+
+def admin_section_context(request: Request) -> dict[str, Any]:
+    """Context for the public chat section of the Channels page.
+
+    The section exists only while ``[public_chat] enabled`` is true and only for
+    a caller who passes the same admin check the admin routes use. Otherwise the
+    page carries nothing of it: no markup, no script, no specialist list.
+    """
+    if not public_chat_enabled() or not auth.has_permission(request, "admin"):
+        return {}
+    from maverick.domain import enabled_domains
+
+    return {"public_chat_section": True, "public_chat_specialists": sorted(enabled_domains())}
