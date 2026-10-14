@@ -322,3 +322,22 @@ def test_a_rejected_owner_code_or_passphrase_is_not_echoed_in_the_validation_err
     for refused in (too_long, no_passphrase, too_short):
         assert refused.status_code == 422, refused.text
         assert "CODEMARK" not in refused.text and short_phrase not in refused.text and "123456" not in refused.text
+
+
+def test_a_refusal_after_the_code_keeps_the_proof_and_gets_the_app_wide_answer(owner, clock, monkeypatch):
+    """A restricted step refused after its code still hands the proof to the browser, and its refusal
+    carries the same fields as every other route: the re-authentication link and no-store."""
+    from maverick_dashboard import company_signin_migration as migration
+    from maverick_dashboard.step_up import StepUpRequired
+
+    def refuse(*args, **kwargs):
+        raise StepUpRequired("/auth/local-login?return_to=%2Fsettings")
+
+    monkeypatch.setattr(migration, "_records", refuse)
+    with client() as web:
+        refused = web.post(COMPANY + "/lookup", json=body(COMPANY, code=current_code(owner, clock)))
+    assert refused.status_code == 403
+    assert refused.json()["reauthenticate"] == "/auth/local-login?return_to=%2Fsettings"
+    assert refused.headers["x-reauthenticate"] == "/auth/local-login?return_to=%2Fsettings"
+    assert "no-store" in refused.headers["cache-control"]
+    assert proof_cookies(refused) and f"Path={COMPANY}" in proof_cookies(refused)[0]

@@ -494,16 +494,30 @@ def recovery_step(request, row: dict, *, flow: str, code: object) -> None:
     request.state.owner_recovery_proof = (flow, token)
 
 
-def attach_proof(request, response) -> None:
-    """Give the browser the recovery proof this request issued, for its flow's path only."""
+def _proof_cookie(request, response, flow: str, token: str) -> None:
     from .oidc_login import _cookie_secure
 
-    issued = getattr(request.state, "owner_recovery_proof", None)
-    if issued is None:
-        return
-    flow, token = issued
     response.set_cookie(PROOF_COOKIE, token, max_age=PROOF_SECONDS, path=FLOW_PATHS[flow],
                         httponly=True, samesite="strict", secure=_cookie_secure(request))
+
+
+def attach_proof(request, response) -> None:
+    """Give the browser the recovery proof this request issued, for its flow's path only."""
+    issued = getattr(request.state, "owner_recovery_proof", None)
+    if issued is not None:
+        _proof_cookie(request, response, *issued)
+
+
+def proof_headers(request) -> dict[str, str]:
+    """The same cookie as :func:`attach_proof`, as a header, for a refusal the app answers."""
+    issued = getattr(request.state, "owner_recovery_proof", None)
+    if issued is None:
+        return {}
+    from starlette.responses import Response
+
+    response = Response()
+    _proof_cookie(request, response, *issued)
+    return {"set-cookie": response.headers["set-cookie"]}
 
 
 def _record_end(email: str, flow: str) -> None:

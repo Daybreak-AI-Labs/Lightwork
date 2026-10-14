@@ -87,16 +87,17 @@ def passphrase_step(request: Request, produce, *, headers: dict, completes: str 
     """The JSON answer for a restricted step that checks the owner's passphrase and code.
 
     A proof that this step issued reaches the browser even when the step is then
-    refused, so an accepted code is never spent for nothing. ``completes`` names
-    the flow whose last step this is: its proof is spent once the step succeeds.
+    refused, so an accepted code is never spent for nothing. The refusal itself is
+    raised, so the app's error handler answers it as on every other route; the
+    proof's cookie and the no-store header travel in the refusal's headers.
+    ``completes`` names the flow whose last step this is: its proof is spent once
+    the step succeeds.
     """
     try:
         response = JSONResponse(produce(), headers=headers)
     except HTTPException as exc:
-        response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code,
-                                headers={**headers, **(exc.headers or {})})
-        second.attach_proof(request, response)
-        return response
+        exc.headers = {**headers, **(exc.headers or {}), **second.proof_headers(request)}
+        raise
     if completes:
         second.close_flow(response, flow=completes)
     else:
