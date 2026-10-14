@@ -2765,6 +2765,14 @@ _MAX_PUBLIC_CONSENT_BODY_BYTES = 64 * 1024
 _MAX_NATIVE_CONSENT_BODY_BYTES = 256 * 1024
 _MAX_THIRD_PARTY_COLLABORATION_BODY_BYTES = 2 * 1024 * 1024
 _EVIDENCE_GATEWAY_PREFIX = "/api/v1/security/assurance/gateway/"
+# Owner passphrase and authenticator-code steps: their bodies hold both secrets, so a 422 names
+# the field and never echoes the value.
+_OWNER_SECRET_PREFIXES = (
+    "/auth/company-signin-recovery/",
+    "/auth/company-saml-recovery/",
+    "/api/v1/settings/sign-in-migration/review",
+    "/api/v1/settings/single-sign-on/activation-review",
+)
 _SECURITY_HUNTER_BODY_PATHS = {
     "/api/v1/security/threats/scan",
     "/api/v1/security/soc/ingest",
@@ -3726,7 +3734,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     from fastapi.encoders import jsonable_encoder
 
     errors = jsonable_encoder(exc.errors())
-    if route_path(request).startswith(_EVIDENCE_GATEWAY_PREFIX):
+    if route_path(request).startswith(_EVIDENCE_GATEWAY_PREFIX) or route_path(request).startswith(
+        _OWNER_SECRET_PREFIXES
+    ):
         for error in errors:
             if isinstance(error, dict) and "input" in error:
                 error["input"] = "[redacted]"

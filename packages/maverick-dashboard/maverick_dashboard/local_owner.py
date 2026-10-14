@@ -75,6 +75,7 @@ def _hex_of(value: object, length: int) -> bool:
 
 def _second_factor_shape_ok(row: dict) -> bool:
     """The optional authenticator-app keys (see :mod:`local_owner_second_factor`)."""
+    from . import local_owner_second_factor as second
     from . import owner_totp
     if "totp" in row and not isinstance(row["totp"], str):
         return False
@@ -94,6 +95,11 @@ def _second_factor_shape_ok(row: dict) -> bool:
     if pending is not None and (not isinstance(pending, dict) or len(pending) > 5
                                 or not all(_pending_ok(v) for v in pending.values())):
         return False
+    proofs = row.get("flow_proofs")
+    if proofs is not None and (not isinstance(proofs, dict)
+                               or len(proofs) > len(second.FLOW_PATHS)
+                               or not all(_hex_of(k, 64) and _proof_ok(v) for k, v in proofs.items())):
+        return False
     return True
 
 
@@ -101,6 +107,12 @@ def _pending_ok(value: object) -> bool:
     return (isinstance(value, dict) and value.get("purpose") in {"sign_in", "enroll"}
             and type(value.get("expires")) in {int, float} and math.isfinite(value["expires"])
             and type(value.get("attempts")) is int and 0 <= value["attempts"] <= 5)
+
+
+def _proof_ok(value: object) -> bool:
+    from . import local_owner_second_factor as second
+    return (isinstance(value, dict) and value.get("flow") in second.FLOW_PATHS
+            and type(value.get("expires")) in {int, float} and math.isfinite(value["expires"]))
 
 
 def _write(row):
@@ -335,11 +347,14 @@ def login(request: Request, *, email: str, password: str):
         return _finish(row, request)
 
 
-def verify_recovery(request: Request, *, email: str, password: str):
+def verify_recovery(request: Request, *, email: str, password: str, flow: str, code: object = ""):
     """Verify the existing owner for one restricted operation; mint no session.
 
-    The caller must enforce its prospective managed policy. This primitive
-    never enrolls an owner, completes pending enrollment or restores a role.
+    An owner with an authenticator app must also give a current code or an unused
+    recovery code, or present the recovery proof that this ``flow`` issued to the
+    browser earlier (see :mod:`local_owner_second_factor`). The caller must
+    enforce its prospective managed policy. This primitive never enrolls an
+    owner, completes pending enrollment or restores a role.
     """
     from maverick.authority_effects import authority_effect_fence
     from maverick.oidc import VerifiedPrincipal
@@ -364,9 +379,12 @@ def verify_recovery(request: Request, *, email: str, password: str):
         if role is None or "admin" not in rbac.permissions_for(role):
             raise HTTPException(403, "The original owner's current role cannot manage installation sign-in.")
         auth._enforce_scim_active(VerifiedPrincipal(sub=email, issuer="invite-session", audience="", claims={}))
-        # An owner with an authenticator app keeps the wrong-code count: only a
-        # sign-in that the app completes clears it (local_owner_second_factor.complete).
-        if "totp" not in row:
+        if "totp" in row:
+            # The passphrase alone never opens a restricted step for an owner with an app.
+            # A code that is accepted is kept by the owner record; a wrong one counts toward the lock.
+            from . import local_owner_second_factor as second
+            second.recovery_step(request, row, flow=flow, code=code)
+        else:
             row.update(failures=0, locked_until=0)
             _write(row)
         return row
