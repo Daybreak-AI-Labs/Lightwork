@@ -1822,6 +1822,40 @@ def get_knowledge() -> dict:
     }
 
 
+class KnowledgeSourcesConfigError(ValueError):
+    """An invalid [knowledge_sources] limit, named without its configured value."""
+
+
+def get_knowledge_sources() -> dict:
+    """Return the ``[knowledge_sources]`` bounds for saved company folders and spaces.
+
+    ``max_items`` (default 64, 1-1000) bounds the direct items one refresh reads,
+    ``max_pages`` (default 16, 1-200) the provider listing pages read to find them,
+    ``max_download_mib`` (default 4, 1-32) one downloaded document and
+    ``max_text_kib`` (default 256, 1-8192) the extracted text one refresh keeps.
+    The defaults are the historical bounds. A malformed value raises instead of
+    falling back, so a reviewed bound never changes silently.
+    """
+    cfg = load_config().get("knowledge_sources", {})
+    if not isinstance(cfg, dict):
+        raise KnowledgeSourcesConfigError("knowledge_sources must be a table of whole-number limits")
+
+    def bounded(key: str, default: int, low: int, high: int) -> int:
+        value = cfg.get(key, default)
+        if type(value) is not int or not low <= value <= high:
+            raise KnowledgeSourcesConfigError(
+                f"knowledge_sources.{key} must be a whole number from {low} to {high}"
+            )
+        return value
+
+    return {
+        "max_items": bounded("max_items", 64, 1, 1000),
+        "max_pages": bounded("max_pages", 16, 1, 200),
+        "max_download_mib": bounded("max_download_mib", 4, 1, 32),
+        "max_text_kib": bounded("max_text_kib", 256, 1, 8192),
+    }
+
+
 def get_automation_import() -> dict:
     """Return the ``[automation_import]`` section with defaults filled in.
 
