@@ -56,7 +56,7 @@ _INDEX_SCHEMA = (
     "CREATE TABLE IF NOT EXISTS chat_sessions (token_sha256 TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, "
     "site_id TEXT NOT NULL, origin TEXT NOT NULL, conversation_id TEXT NOT NULL, issued_at REAL NOT NULL, "
     "expires_at REAL NOT NULL, message_count INTEGER NOT NULL DEFAULT 0, "
-    "window_start REAL NOT NULL DEFAULT 0, window_count INTEGER NOT NULL DEFAULT 0)",
+    "recent_json TEXT NOT NULL DEFAULT '[]')",
     "CREATE INDEX IF NOT EXISTS chat_sessions_site ON chat_sessions (site_id)",
 )
 _TENANT_SCHEMA = (
@@ -304,23 +304,27 @@ def session_row(token: str, *, now: float) -> dict[str, Any] | None:
 
 
 def reserve_message(token: str, *, now: float, per_session: int, per_minute: int) -> int:
-    """Count one visitor message against its session, or refuse without counting it."""
+    """Count one visitor message against its session, or refuse without counting it.
+
+    The per-minute limit is a sliding window: at most ``per_minute`` messages in
+    any 60 seconds, from the times of the session's recent messages.
+    """
     with _write(index_path(), _INDEX_SCHEMA) as index:
         row = index.execute("SELECT * FROM chat_sessions WHERE token_sha256 = ?",
                             (digest(token),)).fetchone()
         if row is None or row["expires_at"] <= now:
             raise ChatStoreError("session")
-        window_start, window_count = float(row["window_start"]), int(row["window_count"])
-        if now - window_start >= _MINUTE_SECONDS:
-            window_start, window_count = now, 0
+        recent = [float(at) for at in json.loads(row["recent_json"])
+                  if now - float(at) < _MINUTE_SECONDS]
         if int(row["message_count"]) >= per_session:
             raise ChatStoreError("session_limit")
-        if window_count >= per_minute:
+        if len(recent) >= per_minute:
             raise ChatStoreError("minute_limit")
+        recent.append(now)
         index.execute(
-            "UPDATE chat_sessions SET message_count = message_count + 1, window_start = ?, "
-            "window_count = ? WHERE token_sha256 = ?",
-            (window_start, window_count + 1, digest(token)),
+            "UPDATE chat_sessions SET message_count = message_count + 1, recent_json = ? "
+            "WHERE token_sha256 = ?",
+            (json.dumps(recent), digest(token)),
         )
         return per_session - int(row["message_count"]) - 1
 

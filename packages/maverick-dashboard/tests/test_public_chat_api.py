@@ -289,6 +289,18 @@ def test_message_limits_per_session_and_per_minute(chat, model):
     assert _say(chat, token, "four").status_code == 429
 
 
+def test_per_minute_limit_is_a_sliding_window_not_a_fixed_one(chat, model):
+    key = _site(chat, messages_per_session=30, messages_per_minute=6)["publishable_key"]
+    token = _session(chat, key)
+    assert _say(chat, token, "one").status_code == 200  # t=0
+    chat.clock["now"] += 59
+    for text in ("two", "three", "four", "five", "six"):  # t=59: six in the last minute
+        assert _say(chat, token, text).status_code == 200
+    chat.clock["now"] += 1  # t=60: only the t=0 message has aged out
+    assert _say(chat, token, "seven").status_code == 200
+    assert _say(chat, token, "eight").status_code == 429
+
+
 def test_message_body_is_capped_at_4_kib(chat, model):
     key = _site(chat)["publishable_key"]
     token = _session(chat, key)
