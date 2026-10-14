@@ -463,6 +463,16 @@ How it works:
 Lost your phone? Sign in with a recovery code, then make new codes on the
 Authenticator app page. The page is `/account/owner-authenticator`.
 
+Making new recovery codes, and turning the app off, are refused while `totp` is
+`off`. To make new codes in that case, an administrator sets `totp = "optional"`,
+the owner signs in with a code from the app (or a recovery code) and makes new
+codes, and the administrator then sets `off` again. Keep the recovery codes
+somewhere safe while the phone is still at hand.
+
+There is no reset that avoids a code. If the phone is lost and every recovery
+code has been used, nothing in Lightwork can give a code, so this computer's
+owner account cannot sign in until a decision is made about a code-free reset.
+
 Known limit: the passphrase-only operations that change company sign-in
 (company SAML setup and company sign-in migration, which call the owner
 recovery check) do not yet ask for a code. An enrolled owner can still complete
