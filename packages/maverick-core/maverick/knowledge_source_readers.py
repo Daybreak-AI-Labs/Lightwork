@@ -21,6 +21,9 @@ from .authority_effects import authority_effect_fence
 # every listing, download and refresh (config.get_knowledge_sources). This is
 # the most items any saved manifest can hold, whatever the current setting.
 MAX_ITEMS_CEILING = 1000
+# Metadata, listing pages and Confluence page bodies are read as JSON under this
+# fixed limit. max_download_mib governs file downloads only.
+_JSON_READ_BYTES = 2 * 1024 * 1024
 SOURCES = {
     "sharepoint": {"label": "SharePoint library folder", "connector": "msgraph"},
     "onedrive": {"label": "OneDrive folder", "connector": "msgraph"},
@@ -114,10 +117,15 @@ def read_bytes(binding, actor, path, guard, *, limit=None):
                                             "Accept": "application/json"}, max_bytes=limit)
 
 
+def _download_too_large(max_mib):
+    return f"The document is larger than the {max_mib} MiB download limit (max_download_mib), so it was not imported."
+
+
 def _download(binding, actor, url, guard):
     from .doc_discovery import _guarded_client
 
-    max_bytes = config.get_knowledge_sources()["max_download_mib"] * 1024 * 1024
+    max_mib = config.get_knowledge_sources()["max_download_mib"]
+    max_bytes = max_mib * 1024 * 1024
     deadline = time.monotonic() + 45
     for _ in range(5):
         parsed = urlsplit(url)
@@ -142,15 +150,17 @@ def _download(binding, actor, url, guard):
                     chunks, total = [], 0
                     for chunk in response.iter_bytes():
                         total += len(chunk)
-                        if total > max_bytes or time.monotonic() >= deadline:
-                            raise SourceReadError("The document exceeded its bounded download limit.")
+                        if time.monotonic() >= deadline:
+                            raise SourceReadError("The document download exceeded its time limit.")
+                        if total > max_bytes:
+                            raise SourceReadError(_download_too_large(max_mib))
                         chunks.append(chunk)
                     return b"".join(chunks)
     raise SourceReadError("The provider returned too many document redirects.")
 
 
 def read_json(binding, actor, path, guard):
-    raw = read_bytes(binding, actor, path, guard, limit=2 * 1024 * 1024)
+    raw = read_bytes(binding, actor, path, guard, limit=_JSON_READ_BYTES)
     try:
         body = json.loads(raw.decode("utf-8"))
     except (UnicodeError, ValueError) as exc:
@@ -263,9 +273,12 @@ def inventory(binding, actor, guard):
 
 def document(binding, actor, item, guard):
     """Read a selected stable item; metadata changes during the read are refused."""
+    from .automation_events import EventSourceTooLarge
+
     kind, chosen = binding["kind"], binding["selection"]
     item_id = quote(identifier(item["id"]), safe="")
     name, mime = item["name"], item["mime"]
+    max_mib = config.get_knowledge_sources()["max_download_mib"]
     if item["kind"] != "file":
         raise SourceReadError("Subfolders are not imported. Add each desired folder as a separate source.")
     if kind in {"sharepoint", "onedrive"}:
@@ -295,16 +308,23 @@ def document(binding, actor, item, guard):
             raise SourceReadError("This Google document type is not supported; export it to PDF, text, Word or Excel first.")
         else:
             path += "?alt=media"
-        raw = read_bytes(binding, actor, path, guard)
+        try:
+            raw = read_bytes(binding, actor, path, guard, limit=max_mib * 1024 * 1024)
+        except EventSourceTooLarge as exc:
+            raise SourceReadError(_download_too_large(max_mib)) from exc
     else:
-        current = read_json(binding, actor, "/wiki/rest/api/content/" + item_id + "?expand=body.storage,version", guard)
+        try:
+            current = read_json(binding, actor, "/wiki/rest/api/content/" + item_id + "?expand=body.storage,version", guard)
+        except EventSourceTooLarge as exc:
+            raise SourceReadError(
+                f"This Confluence page is larger than its {_JSON_READ_BYTES // (1024 * 1024)} MiB read limit, so it was not imported. "
+                "Split it into smaller pages; max_download_mib does not apply to Confluence pages.") from exc
         if str(current.get("version", {}).get("number") or "") != item["revision"]:
             raise SourceReadError("The page changed after listing. Refresh this source again.")
         value = current.get("body", {}).get("storage", {}).get("value")
         if not isinstance(value, str):
             raise SourceReadError("This page has no complete readable body.")
         raw, name = value.encode("utf-8"), name + ".html"
-    max_mib = config.get_knowledge_sources()["max_download_mib"]
     if not raw or len(raw) > max_mib * 1024 * 1024:
         raise SourceReadError(f"The document is empty or exceeds the {max_mib} MiB download limit.")
     from maverick_knowledge.parse import extract_document

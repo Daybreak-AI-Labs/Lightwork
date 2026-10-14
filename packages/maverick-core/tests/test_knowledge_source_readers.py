@@ -1,6 +1,7 @@
 """Saved remote Knowledge sources: listings and downloads use the configured bounds."""
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
 
@@ -15,6 +16,8 @@ NEXT_3 = "https://graph.microsoft.com/v1.0/drives/d1/root/children?$skiptoken=3"
 SHAREPOINT = {"kind": "sharepoint", "origin": "https://graph.microsoft.com"}
 DRIVE = {"kind": "drive", "connection": "team-drive", "revision": "r1", "connector": "gdrive",
          "origin": "https://www.googleapis.com", "selection": {"folder": "root"}}
+CONFLUENCE = {"kind": "confluence", "connection": "wiki", "revision": "r1", "connector": "confluence",
+              "origin": "https://acme.atlassian.net", "selection": {"space": "HR"}}
 
 
 def _set_section(monkeypatch, section):
@@ -72,8 +75,11 @@ def test_the_listing_refusal_names_the_configured_page_limit(monkeypatch):
         readers.collection(SHAREPOINT, "user:alice", PATH, lambda: None)
 
 
-def _transport(monkeypatch):
-    """Stand in for the installed authority, egress policy and HTTP transport."""
+def _transport(monkeypatch, body=b"x"):
+    """Stand in for the installed authority, egress policy and HTTP transport.
+
+    The transport refuses a body over the limit it is given, as the real one does.
+    """
     calls = []
     monkeypatch.setattr(readers, "authority_effect_fence", lambda: nullcontext())
     monkeypatch.setattr(connections, "_mutation_lock", lambda: nullcontext())
@@ -82,7 +88,9 @@ def _transport(monkeypatch):
 
     def http_read_bytes(url, **kwargs):
         calls.append({"url": url, **kwargs})
-        return b"x"
+        if len(body) > kwargs["max_bytes"]:
+            raise automation_events.EventSourceTooLarge(f"source response exceeds {kwargs['max_bytes']} byte limit")
+        return body
 
     monkeypatch.setattr(automation_events, "_http_read_bytes", http_read_bytes)
     return calls
@@ -131,7 +139,7 @@ def test_a_sharepoint_download_stops_at_the_configured_download_limit(monkeypatc
     monkeypatch.setattr(doc_discovery, "_guarded_client", guarded_client)
     url = "https://contoso.sharepoint.com/sites/team/download/handbook.txt"
     if refused:
-        with pytest.raises(readers.SourceReadError, match="exceeded its bounded download limit"):
+        with pytest.raises(readers.SourceReadError, match=r"larger than the 1 MiB download limit \(max_download_mib\)"):
             readers._download(SHAREPOINT, "user:alice", url, lambda: None)
     else:
         assert readers._download(SHAREPOINT, "user:alice", url, lambda: None) == b"x" * (2 * ONE_MIB)
@@ -158,3 +166,40 @@ def test_a_document_within_the_raised_download_limit_is_extracted(monkeypatch):
     item = {"id": "f1", "name": "Handbook.txt", "mime": "text/plain", "kind": "file", "revision": "7"}
     text, _sha, _metadata = readers.document(DRIVE, "user:alice", item, lambda: None)
     assert text == "Handbook text"
+
+
+def test_a_drive_download_over_the_configured_limit_names_the_setting(monkeypatch):
+    _set_section(monkeypatch, {"max_download_mib": 1})
+    _transport(monkeypatch, body=b"x" * (ONE_MIB + 1))
+    monkeypatch.setattr(readers, "read_json", lambda binding, actor, path, guard: {"version": "7"})
+    item = {"id": "f1", "name": "Handbook.txt", "mime": "text/plain", "kind": "file", "revision": "7"}
+    with pytest.raises(readers.SourceReadError, match=r"^The document is larger than the 1 MiB download limit \(max_download_mib\)"):
+        readers.document(DRIVE, "user:alice", item, lambda: None)
+
+
+def _confluence_page(size):
+    return json.dumps({"version": {"number": 7}, "body": {"storage": {"value": "x" * size}}}).encode()
+
+
+CONFLUENCE_ITEM = {"id": "123", "name": "Leave policy", "mime": "text/html", "kind": "file", "revision": "7"}
+
+
+def test_a_confluence_page_keeps_its_fixed_read_limit_whatever_the_download_setting(monkeypatch):
+    # A page is read as JSON under its fixed 2 MiB read limit, so raising
+    # max_download_mib does not raise it.
+    _set_section(monkeypatch, {"max_download_mib": 8})
+    calls = _transport(monkeypatch, body=_confluence_page(3 * ONE_MIB))
+    with pytest.raises(readers.SourceReadError, match=r"^This Confluence page is larger than its 2 MiB read limit"):
+        readers.document(CONFLUENCE, "user:alice", CONFLUENCE_ITEM, lambda: None)
+    assert [call["max_bytes"] for call in calls] == [2 * ONE_MIB]
+
+
+def test_a_confluence_page_within_its_read_limit_is_extracted(monkeypatch):
+    from maverick_knowledge import parse
+
+    _set_section(monkeypatch, {})
+    _transport(monkeypatch, body=_confluence_page(ONE_MIB))
+    monkeypatch.setattr(parse, "extract_document", lambda path: SimpleNamespace(
+        status="complete", omitted_regions=(), text="Leave text", metadata=lambda: {"pages": 1}))
+    text, _sha, _metadata = readers.document(CONFLUENCE, "user:alice", CONFLUENCE_ITEM, lambda: None)
+    assert text == "Leave text"
