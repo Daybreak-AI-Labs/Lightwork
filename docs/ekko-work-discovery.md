@@ -1,9 +1,10 @@
 # Ekko work discovery
 
-Ekko helps a person find repeated work, explain the job and prepare a reviewable
-workflow or assistant draft. The page starts with opportunities, the evidence
-behind them and the next useful action. It does not execute, save, schedule or
-activate work by opening a draft.
+Ekko finds repeated business work and builds private workflow drafts for review.
+The page starts with **Find and build for me**, followed by recorded evidence,
+individual task review and the opportunity workspace. Bulk building saves native
+workflows; opening an individual draft remains unsaved. Neither action publishes,
+schedules or executes work.
 
 Identifying actions such as downloading a report and creating a presentation requires a reviewed `guided` integration to supply the
 semantic labels `download/report` and `create/presentation`. The built-in
@@ -69,6 +70,7 @@ same native policy for installations managed outside the ordinary page:
 [ekko]
 enable = true
 planning_enabled = false # opt in separately to private opportunity plans
+build_enabled = false # opt in separately to automatic workflow draft building
 retention_days = 14
 enrollment_days = 30
 min_occurrences = 3
@@ -257,3 +259,72 @@ benefits conversationally, submit a plan or record a run. Direct conversational
 editing remains outside this implementation. Local browser qualification uses
 synthetic activity against native APIs; real desktop capture, live task execution
 and independently measured savings require separate validation.
+
+## Find and build for me
+
+Enable **Let Ekko find and build workflow drafts** in All settings or the Ekko
+installer step (`ekko.build_enabled`, default false), and enable Workflows.
+The page can inspect discovery results while building is off. Select **Find
+opportunities** to inspect the current sources, or acknowledge saving private
+workflow drafts and select **Find and build my workflows** to discover and build
+them together. Optional additional work is entered once, one task per line;
+customers do not have to design each workflow themselves.
+
+Discovery combines three sources:
+
+- Accessible Lightwork work history: three or more distinct requests for the
+  same recognized business activity. Original prompt text and result contents
+  are not copied into drafts. Requests are distinct from successful execution.
+- Current recorded patterns with an owner-reviewed saved task plan, or guided
+  recordings that already identify semantic task steps. Guided steps can build
+  directly without an additional task form. Parked plans are excluded, and
+  changed or erased evidence requires renewed review.
+- Tasks explicitly supplied in the optional additional-work field. These are
+  customer requests, not inferred observations or proven automation benefits.
+
+Existing workflows with the same exact normalized business title are offered
+for review. A stable source identity also preserves an earlier Ekko draft after
+the customer edits its title. Existing definitions are never overwritten.
+Declined, deferred and explicitly manual Work value recommendations are excluded.
+App switches alone remain a context gap; they do not establish the business job.
+
+Each new workflow is saved through the native Workflows service with input
+approval, input preparation, result production, result checking and final human
+review. The three agent steps pass their outputs explicitly to the next step.
+Reporting, reconciliation, document work and general tasks receive different
+instructions. Run ceilings are 30 minutes, $5 and one concurrent instance;
+normal platform admission, provider and approval controls also apply. Building
+uses deterministic templates and makes no provider calls. The agent steps call
+the configured runtime only if the customer later publishes and runs the flow.
+
+Builds proceed in batches of at most 20, with at most 250 proposals in one pass.
+The page continues through eligible batches and supports **Stop after this
+batch**. It reports built, existing and blocked work, preserves task descriptions
+on recoverable failures, and rescans after each batch. After a lost response,
+**Find opportunities** reveals drafts already saved; retrying preserves them.
+An error on one task does not roll back earlier saved drafts. Current authority,
+workspace context and source revisions are checked again before native writes.
+
+Saved workflow drafts are independent artifacts with the ordinary Workflows
+lifecycle. They remain until removed there; deleting or expiring an Ekko plan
+does not delete an explicitly saved workflow. Review sources and connections in
+the builder, test the task, then explicitly publish and run it. An automatically
+built graph is not proof that integrations, credentials or business outputs are
+ready. Connection readiness checks are shown, but this release does not crawl
+external business-system contents or discover all work across a company.
+
+Copilot's **Find and build my workflows** performs the same discovery and native
+build after its sealed review and confirmation. It requires the existing
+`features.copilot_operations` switch and Learning action family in addition to
+the native feature permissions. Its preview discloses counts and consequences;
+private saved notes are not added to conversational context. Durable, bounded
+operation receipts prevent a replay from rebuilding a subsequently deleted
+workflow; an interrupted operation directs the customer back to the native
+discovery results. Receipts contain context, state and counts, not task text,
+and are eligible for cleanup after 15 minutes, beyond the review-token lifetime.
+
+Qualification includes native graph execution with a synthetic agent callback,
+native persistence, stale-source and authority refusal, partial-build recovery,
+existing-draft preservation, a lost build reply, Copilot execution/replay and
+desktop/narrow browser rendering. External provider execution, autonomous
+connection setup and live customer output quality remain unqualified.

@@ -16,6 +16,7 @@ def test_ekko_is_off_by_default_independent_of_governed_learning(monkeypatch):
 
     assert cfg["enable"] is False
     assert cfg["planning_enabled"] is False
+    assert cfg["build_enabled"] is False
     assert cfg["provider_egress"] is False
     assert cfg["capture_level"] == "application_metadata"
     assert cfg["allowed_apps"] == []  # empty means deny-all, not observe-all
@@ -25,12 +26,13 @@ def test_ekko_is_off_by_default_independent_of_governed_learning(monkeypatch):
 
 def test_ekko_high_authority_booleans_are_strict(monkeypatch):
     cfg = _load(monkeypatch, {
-        "ekko": {"enable": "true", "provider_egress": "false", "planning_enabled": "true"},
+        "ekko": {"enable": "true", "provider_egress": "false", "planning_enabled": "true", "build_enabled": "true"},
     })
 
     assert cfg["enable"] is False
     assert cfg["provider_egress"] is False
     assert cfg["planning_enabled"] is False
+    assert cfg["build_enabled"] is False
 
 
 def test_ekko_env_switch_can_enable_disable_and_fails_closed(monkeypatch):
@@ -164,6 +166,7 @@ def test_ekko_schema_flags_unknown_and_bad_authority_types():
         "enable": "yes",
         "provider_egress": 1,
         "planning_enabled": "yes",
+        "build_enabled": "yes",
     }})
 
     assert {(f.key, f.severity) for f in findings} >= {
@@ -171,6 +174,7 @@ def test_ekko_schema_flags_unknown_and_bad_authority_types():
         ("enable", "error"),
         ("provider_egress", "error"),
         ("planning_enabled", "error"),
+        ("build_enabled", "error"),
     }
 
     unsupported = lint_config({"ekko": {"provider_egress": True}})

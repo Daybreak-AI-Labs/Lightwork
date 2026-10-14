@@ -285,6 +285,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "ekko": {
         "enable",
         "planning_enabled",
+        "build_enabled",
         "retention_days",
         "enrollment_days",
         "min_occurrences",
@@ -776,7 +777,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "distill_local",
         "auto_distill",
     },
-    "ekko": {"provider_egress", "planning_enabled"},
+    "ekko": {"provider_egress", "planning_enabled", "build_enabled"},
     "model_improvement": {
         "enable",
         "allow_hosted",

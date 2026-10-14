@@ -56,7 +56,7 @@ def _enroll(owner: str | None = None, device: str = "desk"):
     return store
 
 
-def _seed_recurring_evidence(store) -> None:
+def _seed_recurring_evidence(store, *, guided=False) -> None:
     from maverick.work_discovery import SessionState, WorkEvent
 
     policy = store.get_policy()
@@ -82,8 +82,8 @@ def _seed_recurring_evidence(store) -> None:
             sequence=1,
             occurred_at=base + day * 86_400 + 10,
             app="excel",
-            action="switch",
-            object_type="none",
+            action="download" if guided else "switch",
+            object_type="report" if guided else "none",
             duration_seconds=120,
         ), policy=policy, collector_id=collector_id)
         store.append_event(WorkEvent(
@@ -92,8 +92,8 @@ def _seed_recurring_evidence(store) -> None:
             sequence=2,
             occurred_at=base + day * 86_400 + 140,
             app="powerpoint",
-            action="switch",
-            object_type="none",
+            action="create" if guided else "switch",
+            object_type="presentation" if guided else "none",
             duration_seconds=480,
         ), policy=policy, collector_id=collector_id)
         store.transition_session(
@@ -681,3 +681,171 @@ def test_plan_mutations_reject_stale_workspace_context(planning):
     assert client.post(path + "/runs", json={**stale_revision, "sample_id": "stale-run-one", "manual_minutes": 30,
                                             "remaining_minutes": 6, "accepted": True}).status_code == 409
     assert OpportunityPlans(store).list() == [plan]
+
+
+@pytest.fixture
+def factory(planning):
+    _, _, payload, cfg = planning
+    cfg.write_text(cfg.read_text() + "build_enabled = true\n[flows]\nenable = true\n")
+    config.reset_config_cache()
+    payload["context"] = client.get("/api/v1/ekko/plans?device_id=desk").json()["context"]
+    return planning
+
+
+def scan_build(brief="", device="desk"):
+    context = client.get("/api/v1/ekko/build/options").json()["context"]
+    body = {"context": context, "device_id": device, "brief": brief}
+    response = client.post("/api/v1/ekko/build/scan", json=body)
+    assert response.status_code == 200, response.text
+    return response.json(), body
+
+
+def build_scan(found, body):
+    return client.post("/api/v1/ekko/build/drafts", json={**body, "scan_revision": found["scan_revision"], "acknowledge_draft_storage": True})
+
+
+def test_factory_builds_real_native_drafts_and_preserves_edited_originals(factory):
+    from maverick.flow import store
+
+    _, candidate, payload, _ = factory
+    assert save(candidate, payload).status_code == 200
+    found, body = scan_build("Review supplier contracts\nReconcile invoice totals")
+    assert found["ready"] == 3
+    assert all("review" not in row and "proof" not in row for row in found["proposals"])
+    result = build_scan(found, body)
+    assert result.status_code == 200, result.text
+    assert result.json()["built"] == 3 and result.json()["started_work"] is False
+    flows = store.list_flows()
+    assert len(flows) == 3
+    assert all(store.load_published_bundle(flow.id) is None and flow.schedule == "" for flow in flows)
+    original = flows[0]
+    original.name = "My edited workflow"
+    store.save_flow(original, expected_version=original.version, expected_revision=original.revision)
+    again = build_scan(found, body)
+    assert again.status_code == 200 and again.json()["built"] == 0 and again.json()["existing"] == 3
+    assert store.load_flow(original.id).name == "My edited workflow"
+
+
+def test_factory_respects_opt_in_acknowledgement_stale_context_and_sources(factory):
+    store, candidate, payload, cfg = factory
+    assert save(candidate, payload).status_code == 200
+    found, body = scan_build()
+    base = {**body, "scan_revision": found["scan_revision"]}
+    assert client.post("/api/v1/ekko/build/drafts", json=base).status_code == 422
+    assert build_scan(found, {**body, "context": "0" * 64}).status_code == 409
+    store.erase(session_id="repeat-0")
+    assert build_scan(found, body).status_code == 409
+    cfg.write_text(cfg.read_text().replace("build_enabled = true", "build_enabled = false"))
+    config.reset_config_cache()
+    fresh, body = scan_build("Review supplier contracts")
+    assert fresh["enabled"] is False
+    assert build_scan(fresh, body).status_code == 409
+
+
+def test_factory_does_not_guess_a_task_from_app_switches_and_respects_parked_plans(factory):
+    _, candidate, payload, _ = factory
+    found, _ = scan_build()
+    assert found["ready"] == 0 and len(found["missing"]) == 1
+    payload["stage"] = "parked"
+    assert save(candidate, payload).status_code == 200
+    found, _ = scan_build()
+    assert found["ready"] == 0 and found["missing"] == []
+
+
+def test_factory_reuses_an_existing_owned_workflow_with_the_same_business_title(factory):
+    from maverick.flow import store
+    from maverick.work_discovery_factory import build_task_flow, review_for_task
+
+    flow = build_task_flow(review_for_task("Review supplier contracts"), identifier="existing-contract-review")
+    store.save_flow(flow, expected_version=0, expected_revision="")
+    found, body = scan_build("Review supplier contracts")
+    assert found["ready"] == 0 and found["existing"] == 1
+    assert found["proposals"][0]["href"].endswith("existing-contract-review")
+    assert build_scan(found, body).json()["built"] == 0
+
+
+def test_factory_can_recover_a_partial_batch_without_duplicating_saved_work(factory, monkeypatch):
+    from fastapi import HTTPException
+    from maverick.flow import store
+    from maverick_dashboard import api
+
+    original = api._save_flow_definition
+    calls = []
+
+    def fail_second(request, payload, **kwargs):
+        calls.append(payload.flow["id"])
+        if len(calls) == 2:
+            raise HTTPException(503, "Storage temporarily unavailable")
+        return original(request, payload, **kwargs)
+
+    found, body = scan_build("Review supplier contracts\nReconcile invoice totals")
+    monkeypatch.setattr(api, "_save_flow_definition", fail_second)
+    first = build_scan(found, body)
+    assert first.status_code == 200, first.text
+    assert first.json()["built"] == 1 and first.json()["blocked"] == 1
+    monkeypatch.setattr(api, "_save_flow_definition", original)
+    second = build_scan(found, body)
+    assert second.json()["built"] == 1 and second.json()["existing"] == 1
+    assert len(store.list_flows()) == 2
+
+
+def test_factory_continues_beyond_one_batch_without_rebuilding_completed_tasks(factory):
+    from maverick.flow import store
+
+    _, candidate, payload, _ = factory
+    assert save(candidate, payload).status_code == 200
+    brief = "\n".join(f"Review supplier contract number {index}" for index in range(20))
+    found, body = scan_build(brief)
+    assert found["ready"] == 21
+    first = build_scan(found, body)
+    assert first.status_code == 200, first.text
+    assert first.json()["built"] == 20 and first.json()["remaining"] == 1
+    refreshed, fresh_body = scan_build(brief)
+    assert refreshed["ready"] == 1 and refreshed["existing"] == 20
+    final = build_scan(refreshed, fresh_body)
+    assert final.status_code == 200, final.text
+    assert final.json()["built"] == 1 and final.json()["remaining"] == 0
+    assert len(store.list_flows()) == 21
+
+
+def test_copilot_build_receipt_cannot_recreate_a_subsequently_deleted_workflow(factory):
+    from maverick.flow import store
+
+    *_, cfg = factory
+    cfg.write_text(cfg.read_text() + '\n[features]\ncopilot_operations=true\n[copilot]\noperation_families=["learning"]\n')
+    config.reset_config_cache()
+    base, scope = "/api/v1/copilot/product-operations", {"page": "/ekko", "selection": {}}
+    catalog = client.post(base + "/catalog", json=scope).json()
+    operation = next(row for row in catalog["operations"] if row["id"] == "learning.ekko_find_build")
+    prepared = client.post(base + "/prepare", json={**scope, "operation": operation["id"],
+        "context": catalog["context"], "revision": operation["revision"],
+        "arguments": {"device_id": "desk", "brief": "Review supplier contracts"}})
+    assert prepared.status_code == 200, prepared.text
+    body = {"token": prepared.json()["token"], "confirmed": True}
+    applied = client.post(base + "/execute", json=body)
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["status"] == "confirmed"
+    flow, = store.list_flows()
+    assert store.delete_flow(flow.id, expected_version=flow.version, expected_revision=flow.revision, expected_release_id="")
+    repeated = client.post(base + "/execute", json=body)
+    assert repeated.status_code == 200 and repeated.json()["status"] == "replayed"
+    assert store.list_flows() == []
+
+
+def test_factory_builds_guided_task_steps_without_an_extra_context_form(factory):
+    from maverick.flow import store
+
+    *_, cfg = factory
+    cfg.write_text(cfg.read_text().replace('capture_level = "application_metadata"', 'capture_level = "guided"'))
+    config.reset_config_cache()
+    recorded = _enroll(device="guided-desk")
+    _seed_recurring_evidence(recorded, guided=True)
+    found, body = scan_build(device="guided-desk")
+    assert found["ready"] == 1 and found["missing"] == []
+    assert found["proposals"][0]["source"] == "Guided recorded task steps"
+    result = build_scan(found, body)
+    assert result.status_code == 200 and result.json()["built"] == 1
+    flow, = store.list_flows()
+    assert "1. download report in excel; 2. create presentation in powerpoint" in flow.nodes["produce"].brief
+    recorded.erase()
+    assert build_scan(found, body).status_code == 409

@@ -210,3 +210,92 @@ test('a stale-tab save is refused by the native API and clears private notes wit
   await expect(page.locator('#ekko-planning-availability')).toContainText('Access changed');
   expect((await (await request.get('/api/v1/ekko/plans')).json()).plans).toEqual([]);
 });
+
+test('Ekko discovers native business work and bulk-builds saved workflows with recovery',async({page,request,context},testInfo)=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('/ekko');
+  await page.locator('#ekko-build-brief').fill('Review supplier contracts\nReconcile invoice totals');
+  await page.getByRole('button',{name:'Find and build my workflows'}).click();
+  await expect(page.locator('#ekko-build-message')).toContainText('Confirm');
+  await page.locator('#ekko-build-consent').check();
+  let built;
+  await context.route('**/api/v1/ekko/build/drafts',async route=>{
+    const response=await route.fetch();built=await response.json();
+    expect(response.ok(),JSON.stringify(built)).toBeTruthy();
+    await route.fulfill({status:502,contentType:'application/json',body:JSON.stringify({detail:'The reply was lost. Inspect saved drafts before retrying.'})});
+  });
+  await page.getByRole('button',{name:'Find and build my workflows'}).click();
+  await expect(page.locator('#ekko-build-message')).toContainText('reply was lost');
+  expect(built.built).toBe(3);expect(built.started_work).toBe(false);
+  await expect(page.locator('#ekko-build-brief')).toHaveValue('Review supplier contracts\nReconcile invoice totals');
+  await context.unroute('**/api/v1/ekko/build/drafts');
+  await page.getByRole('button',{name:'Find opportunities',exact:true}).click();
+  await expect(page.locator('#ekko-build-message')).toContainText('0 tasks ready to build; 3 existing workflows');
+  await expect(page.locator('#ekko-build-results')).toContainText('Draft RFP');
+  await expect(page.locator('#ekko-build-results')).toContainText('4 distinct requests in Lightwork');
+  await page.getByRole('button',{name:'Find and build my workflows'}).click();
+  await expect(page.locator('#ekko-build-message')).toContainText('0 workflows built; 3 available to review');
+  const flows=(await (await request.get('/api/v1/flows')).json()).flows;
+  expect(flows).toHaveLength(3);expect(flows.every(flow=>!flow.published&&!flow.schedule)).toBe(true);
+  await page.addScriptTag({content:axe.source});
+  const audit=await page.evaluate(async()=>axe.run(document.getElementById('ekko-build'),{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}}));
+  expect(audit.violations).toEqual([]);
+  await page.evaluate(()=>window.scrollTo(0,0));
+  await page.screenshot({path:testInfo.outputPath('ekko-find-build-desktop.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1)).toBe(true);
+  await page.screenshot({path:testInfo.outputPath('ekko-find-build-narrow.png'),fullPage:true});
+  await page.locator('#ekko-build-results').getByRole('link',{name:'Review workflow'}).first().click();
+  await expect(page).toHaveURL(/\/flows\/designer\/ekko-built-/);
+  await expect(page.getByRole('textbox',{name:'Flow name',exact:true})).toHaveValue('Review supplier contracts');
+  expect(errors).toEqual([]);
+});
+
+test('Copilot builds through the same native service and replay does not create duplicates',async({request})=>{
+  const catalogResponse=await request.post('/api/v1/copilot/product-operations/catalog',{data:{page:'/ekko',selection:{}}});
+  expect(catalogResponse.ok(),await catalogResponse.text()).toBeTruthy();
+  const catalog=await catalogResponse.json();
+  const operation=catalog.operations.find(row=>row.id==='learning.ekko_find_build');
+  expect(operation.available).toBe(true);
+  const response=await request.post('/api/v1/copilot/product-operations/prepare',{data:{page:'/ekko',selection:{},operation:operation.id,context:catalog.context,revision:operation.revision,
+    arguments:{device_id:'local-device',brief:'Draft a support response'}}});
+  expect(response.ok(),await response.text()).toBeTruthy();
+  const preview=await response.json();expect(preview.read_only).toBe(false);
+  expect(JSON.stringify(preview)).not.toContain('Private stale-tab goal');
+  const before=(await (await request.get('/api/v1/flows')).json()).flows.length;
+  const refused=await request.post('/api/v1/copilot/product-operations/execute',{data:{token:preview.token,confirmed:false}});
+  expect(refused.status()).toBe(400);
+  const applied=await request.post('/api/v1/copilot/product-operations/execute',{data:{token:preview.token,confirmed:true}});
+  expect(applied.ok(),await applied.text()).toBeTruthy();
+  const result=await applied.json();expect(result.status).toBe('confirmed');
+  expect(result.message).toContain('1 workflow drafts built');
+  expect((await (await request.get('/api/v1/flows')).json()).flows.length).toBe(before+1);
+  await request.post('/api/v1/copilot/product-operations/execute',{data:{token:preview.token,confirmed:true}});
+  expect((await (await request.get('/api/v1/flows')).json()).flows.length).toBe(before+1);
+});
+
+test('builder access loss clears every private workspace and supports an explicit retry',async({page,context})=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('/ekko');
+  await page.getByRole('button',{name:'Review this opportunity'}).click();
+  await page.getByLabel('What job are you doing?').fill('Private task review');
+  await page.locator('#ekko-build-brief').fill('Private additional work');
+  await page.locator('#ekko-build-consent').check();
+  let refusals=0;
+  await context.route('**/api/v1/ekko/build/scan',route=>{
+    refusals++;
+    return route.fulfill({status:403,contentType:'application/json',body:JSON.stringify({detail:'Access removed'})});
+  });
+  await page.getByRole('button',{name:'Find opportunities',exact:true}).click();
+  await expect(page.locator('#ekko-build-message')).toContainText('access changed');
+  await expect(page.locator('#ekko-review')).toBeHidden();
+  await expect(page.locator('#ekko-review-goal')).toHaveValue('');
+  await expect(page.locator('#ekko-build-brief')).toHaveValue('');
+  await expect(page.locator('#ekko-build-consent')).not.toBeChecked();
+  await expect(page.locator('#ekko-build-results')).toHaveText('');
+  expect(refusals).toBe(1);
+  await context.unroute('**/api/v1/ekko/build/scan');
+  await page.getByRole('button',{name:'Find opportunities',exact:true}).click();
+  await expect(page.locator('#ekko-build-message')).toContainText('existing workflows');
+  expect(errors).toEqual([]);
+});

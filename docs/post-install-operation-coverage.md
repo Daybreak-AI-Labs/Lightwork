@@ -396,6 +396,27 @@ parking/removal, access withdrawal, keyboard navigation, 390-pixel layout and
 automated accessibility checks. These tests do not establish live automation
 feasibility, real-world savings or released-installer behavior.
 
+October 14 Ekko automatic building: `ekko.build_enabled` has an installer step
+and All settings control; Workflows is an additional prerequisite. **Find and
+build for me** scans repeated accessible business requests, current reviewed
+Ekko plans, guided task steps and optional customer task instructions. It builds private native
+workflow drafts in batches, offers existing workflows, respects parked/declined/
+deferred/manual choices, reports source gaps and lets the customer stop after
+the current batch. Native save applies the same owner, graph validation,
+publication and revision controls as the editor, with fresh source/context
+checks. Recovery rescans real persisted definitions rather than assuming an
+unconfirmed reply means nothing was saved. Explicitly saved workflows have an
+independent lifecycle from expiring Ekko notes.
+
+Copilot's `learning.ekko_find_build` now performs the same build through a sealed
+review and explicit confirmation; `features.copilot_operations` and the Learning
+family must be enabled. The preview retains private task notes outside the
+conversation. Durable operation receipts prevent replay from recreating deleted
+work. Native graph tests use synthetic agent callbacks; browser qualification
+uses authenticated native storage, work history, discovery, save, recovery and
+Copilot execution. No external system content crawling, live-provider output
+quality, automatic credential setup or company-wide completeness is claimed.
+
 October 7 desktop recording follow-through: Ekko offers explicit automatic app
 recording on the installed Windows computer, Mac or local Linux X11 desktop.
 Mac reads only its frontmost application bundle; Linux reads bounded local

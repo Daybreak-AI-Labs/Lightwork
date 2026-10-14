@@ -2269,6 +2269,10 @@ _POLICY: tuple[Setting, ...] = (
       "Let each person save task descriptions, benefit assumptions and pilot results for their own device. "
       "Plans are encrypted, expire within the Ekko retention period and can be erased. This does not enable recording or run work.",
       "toggle", "Privacy", False, "maverick.config", subgroup="Work pattern discovery (Ekko)"),
+    S("ekko", "build_enabled", "Let Ekko find and build workflow drafts",
+      "Build private workflows from repeated business requests, reviewed activity and tasks the customer describes. "
+      "Building starts no execution or schedule. Workflows must also be enabled.",
+      "toggle", "Privacy", False, "maverick.config", subgroup="Work pattern discovery (Ekko)"),
     S("ekko", "min_distinct_days", "Days a pattern must appear on",
       "A pattern must be seen on at least this many different days before it is suggested.",
       "number", "Privacy", 2, "maverick.config", subgroup="Work pattern discovery (Ekko)",

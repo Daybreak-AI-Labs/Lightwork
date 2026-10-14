@@ -52,7 +52,9 @@ def planning_prepare(request, selection, _arguments):
 
 
 def entries():
-    return (Adapter("learning.ekko_recording_controls", "Open activity recording controls", "learning",
+    from .product_operations_ekko_factory import entries as factory_entries
+
+    return (*factory_entries(), Adapter("learning.ekko_recording_controls", "Open activity recording controls", "learning",
         "/ekko#ekko-recording", ("/ekko",), EmptyInput, snapshot, prepare,
         aliases=("record the apps I use", "open activity recording controls",
                  "start recording activity", "how can Ekko record activity")),

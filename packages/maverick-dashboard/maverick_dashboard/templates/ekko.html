@@ -53,11 +53,11 @@
 
 {% call hero('Digital workforce intelligence', 'Ekko',
              subtitle='Work Discovery',
-             lede='With your permission, notices which approved apps you move between (never what you type,
-                   read or see). Find repeated work, explain the job, and turn it into a draft you control.',
+             lede='Find work worth automating and let Ekko build the workflows. Start with business work in Lightwork,
+                   reviewed activity and the tasks you want handled. Review the results, connect the required sources and activate when ready.',
              title_id='ekko-title') %}
   <div class="hero-statebox" aria-live="polite">
-    <div class="hero-statebox__label">Current state</div>
+    <div class="hero-statebox__label">Activity recording</div>
     <div class="hero-statebox__row">
       <strong id="ekko-state-name">Loading…</strong>
       <span class="badge idle" id="ekko-state-badge">Checking</span>
@@ -76,6 +76,25 @@
 
 <div class="ekko-layout">
   <div class="ekko-stack">
+    <section class="card ekko-panel" id="ekko-build" aria-labelledby="ekko-build-heading">
+      <h2 id="ekko-build-heading" tabindex="-1">Find and build for me</h2>
+      <p class="ekko-note">Ekko finds repeated business requests in your accessible Lightwork history and uses reviewed plans or guided task steps to build workflows. Add any other work you want handled below. Each workflow includes agents to prepare, produce and check the result.</p>
+      <label for="ekko-build-brief">Additional work to automate</label>
+      <p class="ekko-note" id="ekko-build-brief-help">Optional, one task per line</p>
+      <textarea class="input" id="ekko-build-brief" aria-describedby="ekko-build-brief-help" rows="3" maxlength="4000" placeholder="Prepare the weekly sales report&#10;Review supplier contracts&#10;Reconcile invoice totals"></textarea>
+      <label class="ekko-consent" for="ekko-build-consent"><input id="ekko-build-consent" type="checkbox">
+        <span>Build and save private workflow drafts for the discovered tasks. They remain in Workflows until I remove them. I will review sources, connections and outputs before publishing or running them.</span></label>
+      <p id="ekko-build-availability" class="ekko-note" role="status">Checking draft building…</p>
+      <p id="ekko-build-off" class="ekko-note" hidden>Enable automatic draft building for Ekko and Workflows in <a href="/settings/all?q=Ekko">All settings</a>. You can inspect discovery results while building is off.</p>
+      <div class="ekko-controls">
+        <button class="btn btn--primary" id="ekko-build-start" type="button" disabled>Find and build my workflows</button>
+        <button class="btn" id="ekko-build-scan" type="button">Find opportunities</button>
+        <button class="btn btn--ghost" id="ekko-build-stop" type="button" hidden>Stop after this batch</button>
+      </div>
+      <p id="ekko-build-message" class="ekko-note" role="status" aria-live="polite"></p>
+      <div id="ekko-build-results" class="ekko-stack" style="margin-top: var(--space-3);"></div>
+      <details id="ekko-build-coverage"><summary>What Ekko checked and what needs attention</summary><div id="ekko-build-sources" class="ekko-stack"></div></details>
+    </section>
     <section class="card ekko-panel" aria-labelledby="ekko-opportunities-heading">
       <div class="section-head">
         <h2 id="ekko-opportunities-heading" tabindex="-1">Find your next automation</h2>
@@ -292,7 +311,7 @@
       {% endif %}
       <dl style="margin: var(--space-3) 0 0;">
         <div class="mv-row"><dt class="mv-row__main">What it notices</dt><dd id="ekko-capture-level">Which apps you switch between</dd></div>
-        <div class="mv-row"><dt class="mv-row__main">Sent to AI providers</dt><dd id="ekko-provider-egress">Never</dd></div>
+        <div class="mv-row"><dt class="mv-row__main">Sent to AI during activity capture</dt><dd id="ekko-provider-egress">Never</dd></div>
         <div class="mv-row"><dt class="mv-row__main">Kept for</dt><dd id="ekko-retention">14 days</dd></div>
       </dl>
       <h3 style="margin-bottom: 0;">Apps it may notice</h3>
@@ -874,4 +893,5 @@
 }());
 </script>
 <script src="/static/lightwork-ekko-planning.js" defer></script>
+<script src="/static/lightwork-ekko-build.js" defer></script>
 {% endblock %}

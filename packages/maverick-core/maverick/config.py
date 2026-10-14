@@ -1936,6 +1936,7 @@ def get_ekko() -> dict:
     return {
         "enable": enabled,
         "planning_enabled": _strict_config_bool(cfg, "planning_enabled", False),
+        "build_enabled": _strict_config_bool(cfg, "build_enabled", False),
         "retention_days": retention_days,
         "enrollment_days": _bounded_int("enrollment_days", 30, 1, 90),
         "min_occurrences": _bounded_int("min_occurrences", 3, 2, 100),
