@@ -190,6 +190,29 @@ _SDK_HINT: dict[str, str] = {
     ),
 }
 
+GOOGLE_AUTH_HINT = (
+    "Vertex AI needs google-auth for Google Application Default Credentials. "
+    "From the reviewed checkout run: python -m pip install -e "
+    "'./packages/maverick-core[vertex]'"
+)
+
+
+def google_auth_hint() -> str | None:
+    """The install hint when google-auth is not importable, else ``None``.
+
+    Lives here, not in ``vertex_provider``, so that ``missing_sdks`` can report
+    it even when the anthropic SDK itself is missing. ``find_spec`` locates the
+    packages without importing them, so the check is cheap and side-effect free.
+    """
+    import importlib.util
+
+    try:
+        present = (importlib.util.find_spec("google.auth") is not None
+                   and importlib.util.find_spec("requests") is not None)
+    except (ImportError, ValueError):
+        present = False
+    return None if present else GOOGLE_AUTH_HINT
+
 
 def missing_sdks(model_specs) -> list[str]:
     """Actionable messages for provider SDKs the given model specs need but
@@ -255,8 +278,6 @@ def missing_sdks(model_specs) -> list[str]:
         # need google-auth (the ``vertex`` extra) beside the anthropic SDK.
         if provider == "vertex" and "google.auth" not in seen:
             seen.add("google.auth")
-            from .vertex_provider import google_auth_hint
-
             hint = google_auth_hint()
             if hint is not None:
                 msgs.append(hint)

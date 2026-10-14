@@ -195,6 +195,20 @@ def test_start_refuses_vertex_routes_without_google_auth(monkeypatch):
     assert any("maverick-core[vertex]" in m for m in msgs)
 
 
+def test_missing_sdks_still_hints_when_the_anthropic_sdk_is_absent(monkeypatch):
+    """A broken install without the anthropic SDK must get the install hint, not an ImportError."""
+    import sys
+
+    from maverick.providers import missing_sdks
+
+    _pretend_google_auth(monkeypatch, False)
+    monkeypatch.delitem(sys.modules, "maverick.providers.vertex_provider", raising=False)
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+    msgs = missing_sdks([f"vertex:{_HAIKU}"])
+    assert any("maverick-core[vertex]" in m for m in msgs)
+    assert any("anthropic SDK not installed" in m for m in msgs)
+
+
 def test_start_accepts_vertex_routes_when_google_auth_is_present(monkeypatch):
     from maverick.providers import missing_sdks
 

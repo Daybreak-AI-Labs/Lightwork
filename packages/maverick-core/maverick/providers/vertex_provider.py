@@ -36,7 +36,6 @@ accounting under the default strict pricing refuses with an actionable message
 """
 from __future__ import annotations
 
-import importlib.util
 import os
 import re
 from collections.abc import Mapping
@@ -45,13 +44,9 @@ from typing import Any
 import anthropic
 
 from ..budget import vertex_rate_card_model_id
+from . import google_auth_hint
 from .anthropic_provider import AnthropicClient
 
-GOOGLE_AUTH_HINT = (
-    "Vertex AI needs google-auth for Google Application Default Credentials. "
-    "From the reviewed checkout run: python -m pip install -e "
-    "'./packages/maverick-core[vertex]'"
-)
 # Project ids are path segments and the region is a host-name label, so both
 # are constrained to characters that cannot change the URL they land in.
 _PROJECT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.:_-]{0,127}")
@@ -59,20 +54,6 @@ _REGION = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
 # The model id is a path segment of the request URL (models/{model}:rawPredict), so
 # it may carry the name@version form but never a slash, colon or query character.
 _MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,127}")
-
-
-def google_auth_hint() -> str | None:
-    """The install hint when google-auth is not importable, else ``None``.
-
-    ``find_spec`` locates the packages without importing them, so the check is
-    cheap and side-effect free.
-    """
-    try:
-        present = (importlib.util.find_spec("google.auth") is not None
-                   and importlib.util.find_spec("requests") is not None)
-    except (ImportError, ValueError):
-        present = False
-    return None if present else GOOGLE_AUTH_HINT
 
 
 def _sdk_clients() -> tuple[Any, Any]:
