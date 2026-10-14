@@ -940,3 +940,27 @@ def test_report_states_when_its_recorded_work_last_changed_not_the_read_time(con
     assert client.get(BASE, headers=headers()).json()["recorded_as_of"] == newest
     empty = client.get(BASE, headers=headers("bob")).json()
     assert empty["recorded_as_of"] is None
+
+
+def test_saving_assumptions_fails_closed_when_work_cannot_be_read(context, monkeypatch):
+    # An edit first records observed work. If that cannot be read completely, the
+    # edit is refused, so unrecorded work can never be priced under the new rate.
+    from maverick.intent_value import sources
+
+    client, world = context
+    seed(world)
+    before = client.get(BASE + "/settings", headers=headers("root")).json()
+    readable = sources.audit_population
+
+    def unreadable():
+        raise OSError("synthetic unreadable audit history")
+    monkeypatch.setattr(sources, "audit_population", unreadable)
+    refused = client.put(BASE + "/settings", headers=headers("root"), json={
+        "revision": before["revision"], "hourly_rate": 90, "currency": "USD", "completion_confirmation": False})
+    assert refused.status_code == 503 and "not zero" in refused.text, refused.text
+    assert client.get(BASE + "/settings", headers=headers("root")).json()["revision"] == before["revision"]
+    monkeypatch.setattr(sources, "audit_population", readable)
+    saved = client.put(BASE + "/settings", headers=headers("root"), json={
+        "revision": before["revision"], "hourly_rate": 90, "currency": "USD", "completion_confirmation": False})
+    assert saved.status_code == 200, saved.text
+    assert client.get(BASE + "/settings", headers=headers("root")).json()["hourly_rate"] == 90
