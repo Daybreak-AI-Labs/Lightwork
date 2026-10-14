@@ -445,14 +445,19 @@ def inspect_existing_source(
             finally:
                 if opened is not None:
                     opened.close()
-            summary = _bounded_summary("\n\n".join(chunk["text"] for item in record["items"] for chunk in item["document"]["chunks"]))
-            payload = _payload("remote_knowledge", f"{remote[1]}/{remote[2]}", record)
-            inspected = {"source_ref": source_ref, "content_sha256": _commitment(payload, limit=_remote_source_limit(record)),
+            # Only the items this authority may see are projected; the commitment above covers all of them.
+            visible = record["visible_items"]
+            summary = _bounded_summary("\n\n".join(chunk["text"] for item in visible for chunk in item["document"]["chunks"]))
+            # The commitment covers the retained snapshot only; the per-reader view is not part of it.
+            committed_record = {key: value for key, value in record.items() if key not in {"visible_items", "withheld_for_permissions"}}
+            payload = _payload("remote_knowledge", f"{remote[1]}/{remote[2]}", committed_record)
+            inspected = {"source_ref": source_ref, "content_sha256": _commitment(payload, limit=_remote_source_limit(committed_record)),
                          "title": _bounded_title(record["name"]),
                          "summary": summary, "claim_state": "inferred", "observed_at": record["observed_at"], "verified_at": None,
                          "projection_schema": _PROJECTION_SCHEMA, "summary_truncated": len(summary.encode()) < record["text_bytes"]}
             if include_retrieval_chunks:
-                inspected["retrieval_chunks"] = tuple(chunk["text"] for item in record["items"] for chunk in item["document"]["chunks"])
+                inspected["retrieval_chunks"] = tuple(chunk["text"] for item in visible for chunk in item["document"]["chunks"])
+            inspected["permissions_withheld"] = record["withheld_for_permissions"]
             return inspected
         match = _NODE_REF.fullmatch(source_ref)
         claim_state = "verified"

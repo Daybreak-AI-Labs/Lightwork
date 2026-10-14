@@ -170,7 +170,10 @@ class KnowledgeSources:
                 approval = str(view.get("status") or view.get("state") or "Draft awaiting an independent reviewer")
             except Exception:
                 approval = "Current registry state unavailable; use is blocked"
+        bounds = config.get_knowledge_sources()
+        needs_refresh = bool(_by_email(bounds) and snapshot and any(not isinstance(item.get("permissions"), dict) for item in snapshot.get("items", [])))
         return {"id": row["id"], "revision": row["revision"], "name": row["plan"]["name"], "plan": row["plan"],
+                "permission_filter": bounds["permission_filter"], "permissions_need_refresh": needs_refresh,
                 "state": row["state"], "paused": row.get("paused", False), "last_refresh": row.get("last_refresh"),
                 "next_refresh": row.get("next_refresh"), "item_count": len(snapshot.get("items", [])) if snapshot else 0,
                 "registry_state": approval, "reference": reference, "active_job": self.job_public(active) if active else None,
@@ -479,7 +482,8 @@ class KnowledgeSources:
             if digest(rows) != job["prepared"]["inventory_sha256"]:
                 raise ValueError("The dated source inventory changed. Review its current refresh before importing.")
             # The text bound is read at this refresh, so a changed setting applies to the next one.
-            text_kib = config.get_knowledge_sources()["max_text_kib"]
+            bounds = config.get_knowledge_sources()
+            text_kib, filtered = bounds["max_text_kib"], _by_email(bounds)
             source = self.sources.get(job["source"])
             prior = self.snapshots.get(source["snapshot"]) if source.get("snapshot") else None
             previous = {row["remote_id"]: row for row in prior.get("items", [])} if prior else {}
@@ -493,7 +497,10 @@ class KnowledgeSources:
                     continue
                 old = previous.get(item["id"])
                 collection = "remote-" + job["source"][4:] + "-" + digest(item["id"])[:16]
-                if old and item["revision"] and old["provider_revision"] == item["revision"]:
+                # Permissions are read for every item on every refresh, because a sharing change alone never changes its revision.
+                grants = readers.permissions(job["plan"]["binding"], self.actor, item, lambda: self._job_guard(job)) if filtered else None
+                reused = bool(old and item["revision"] and old["provider_revision"] == item["revision"])
+                if reused:
                     exact = kb.exact_document(collection, old["document_sha256"])
                     text_bytes = len(exact["text"].encode())
                     candidate = old
@@ -531,8 +538,10 @@ class KnowledgeSources:
                 total += text_bytes
                 if total > text_kib * 1024:
                     raise ValueError("The exact source exceeds its complete text bound.")
+                if grants is not None:
+                    candidate = {**candidate, "permissions": grants}
                 imported.append(candidate)
-                outcomes.append({"name": item["name"], "state": "unchanged" if candidate is old else "imported", "message": "Exact extracted text retained; dataset approval is separate.",
+                outcomes.append({"name": item["name"], "state": "unchanged" if reused else "imported", "message": "Exact extracted text retained; dataset approval is separate.",
                                  "coverage_notes": candidate["extraction"].get("warnings", [])})
                 self._job_update(job, items=outcomes, changed=changed, unchanged=unchanged)
             removed = len(set(previous) - {row["id"] for row in rows})
@@ -682,6 +691,21 @@ def _committed_document(record):
     return committed
 
 
+def _by_email(bounds=None):
+    return (bounds or config.get_knowledge_sources())["permission_filter"] == "by_email"
+
+
+def _visible(item, email):
+    """Under by_email: a verified signed-in address must match the item's recorded grants. Unknown, group-only,
+    unrecorded (older snapshot) and no-address cases are withheld, never guessed."""
+    permissions = item.get("permissions")
+    if not email or not isinstance(permissions, dict) or permissions.get("unknown"):
+        return False
+    if permissions.get("anyone"):
+        return True
+    return email in permissions.get("emails", ()) or email.rpartition("@")[2] in permissions.get("domains", ())
+
+
 def require_remote_document_authority(tenant, collection, document_sha256, authority):
     match = re.fullmatch(r"remote-([a-f0-9]{32})-[a-f0-9]{16}", collection)
     if not match:
@@ -693,8 +717,11 @@ def require_remote_document_authority(tenant, collection, document_sha256, autho
                 or authority.purpose != source["plan"]["purpose"]):
             raise PermissionError("Current saved remote source rights are unavailable.")
         snapshot = SNAPSHOT_STORE.get(source.get("snapshot"))
-        if (not snapshot or snapshot.get("_audit_pending") or not any(row["collection"] == collection and row["document_sha256"] == document_sha256 for row in snapshot["items"])):
+        match = [row for row in (snapshot or {}).get("items", ()) if row["collection"] == collection and row["document_sha256"] == document_sha256]
+        if (not snapshot or snapshot.get("_audit_pending") or not match):
             raise PermissionError("This exact document is no longer in the current remote source.")
+        if _by_email() and not _visible(match[0], getattr(authority, "verified_email", "")):
+            raise PermissionError("This document is not shared with the signed-in person.")
         readers.account(source["plan"]["binding"], authority.principal)
 
 
@@ -720,7 +747,8 @@ def exact_source_snapshot(tenant, identifier, version, *, knowledge_base, author
         items = snapshot.get("items")
         if not isinstance(items, list) or not 1 <= len(items) <= readers.MAX_ITEMS_CEILING:
             raise ValueError("The exact source item manifest is incomplete.")
-        text_limit = config.get_knowledge_sources()["max_text_kib"] * 1024
+        bounds = config.get_knowledge_sources()
+        text_limit = bounds["max_text_kib"] * 1024
         records, total = [], 0
         for item in items:
             record = knowledge_base.exact_document(item["collection"], item["document_sha256"])
@@ -734,5 +762,10 @@ def exact_source_snapshot(tenant, identifier, version, *, knowledge_base, author
             if digest(committed) != item["native_document_sha256"]:
                 raise PermissionError("The source document's exact native publication changed.")
             records.append({"item": item, "document": committed})
+        # items keeps every record, so the commitment is the same for every reader. Only the
+        # records this authority may see under the permission filter are projected to it.
+        email = getattr(authority, "verified_email", "") if authority is not None else ""
+        visible = [record for record in records if _visible(record["item"], email)] if authority is not None and _by_email(bounds) else records
         return {"source": identifier, "version": version, "plan_sha256": snapshot["plan_sha256"], "items": records,
+                "visible_items": visible, "withheld_for_permissions": len(records) - len(visible),
                 "observed_at": snapshot["observed_at"], "name": snapshot["name"], "text_bytes": total}
