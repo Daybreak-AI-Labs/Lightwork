@@ -33,12 +33,16 @@ _METHODS = frozenset({
 def fastapi_telemetry_kwargs() -> dict[str, Any]:
     """``FastAPI(**kwargs)`` options that switch FastAPI's own per-request tracing off.
 
-    FastAPI 0.143 and later open a server span for every request once a global
-    tracer provider is set, and that span records the raw ``url.path`` and
-    ``url.query``, which can carry tokens (``/share/<token>``). The request span
-    above is the dashboard's server span instead, named by route template. Older
-    FastAPI has no native tracing and no such option, so it gets nothing extra.
+    Only with OTLP tracing on. FastAPI 0.143 and later open a server span for every
+    request once a global tracer provider is set, and that span records the raw
+    ``url.path`` and ``url.query``, which can carry tokens (``/share/<token>``). With
+    tracing on, the request span above is the dashboard's server span instead, named
+    by route template. With tracing off nothing changes, so a global provider set
+    elsewhere still gets FastAPI's spans. Older FastAPI has no native tracing and no
+    such option, so it gets nothing extra.
     """
+    if not observability.otlp_tracing_enabled():
+        return {}
     if "telemetry" in inspect.signature(FastAPI).parameters:
         return {"telemetry": {"tracing": False}}
     return {}

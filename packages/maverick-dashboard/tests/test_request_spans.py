@@ -10,6 +10,7 @@ importorskips it, like the repo's other OTel tests.
 from __future__ import annotations
 
 import contextlib
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -87,8 +88,12 @@ def tracer(monkeypatch):
 
 
 def _app(**fastapi_options: Any) -> FastAPI:
-    app = FastAPI(**fastapi_options)
+    app = _add_routes(FastAPI(**fastapi_options))
+    assert request_spans.install(app) is True
+    return app
 
+
+def _add_routes(app: FastAPI) -> FastAPI:
     @app.get("/goals/{goal_id}")
     def goal(goal_id: str):
         return {"goal": goal_id}
@@ -116,7 +121,6 @@ def _app(**fastapi_options: Any) -> FastAPI:
         await websocket.send_text(await websocket.receive_text())
         await websocket.close()
 
-    assert request_spans.install(app) is True
     return app
 
 
@@ -278,6 +282,34 @@ def test_real_sdk_span_and_its_children(monkeypatch):
     work = spans["HTTP GET /work"]
     tool = spans["tool search"]
     assert tool.parent.span_id == work.context.span_id
+
+
+def test_the_fastapi_telemetry_option_is_set_only_with_otlp_tracing_on(monkeypatch):
+    monkeypatch.delenv("MAVERICK_OTEL_EXPORTER", raising=False)
+    assert request_spans.fastapi_telemetry_kwargs() == {}
+    monkeypatch.setenv("MAVERICK_OTEL_EXPORTER", "otlp")
+    if "telemetry" not in inspect.signature(FastAPI).parameters:
+        pytest.skip("this FastAPI has no native tracing option")
+    assert request_spans.fastapi_telemetry_kwargs() == {"telemetry": {"tracing": False}}
+
+
+def test_with_tracing_off_fastapi_keeps_its_own_span_as_a_plain_app_does(monkeypatch):
+    """Off is the default. A global tracer provider set elsewhere still gets FastAPI's own
+    server span, as a plain FastAPI app does, and no Maverick span is added."""
+    pytest.importorskip("fastapi.telemetry")
+    pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry import trace
+
+    monkeypatch.delenv("MAVERICK_OTEL_EXPORTER", raising=False)
+    exporter, provider = _sdk_provider()
+    monkeypatch.setattr(trace, "get_tracer_provider", lambda: provider)
+
+    app = _add_routes(FastAPI(**request_spans.fastapi_telemetry_kwargs()))
+    assert request_spans.install(app) is False
+    _client(app).get("/goals/42")
+    names = [span.name for span in exporter.get_finished_spans()]
+    assert "GET /goals/{goal_id}" in names
+    assert not any(name.startswith("HTTP ") for name in names)
 
 
 def test_fastapi_own_server_span_is_switched_off_so_no_raw_url_is_exported(monkeypatch):
