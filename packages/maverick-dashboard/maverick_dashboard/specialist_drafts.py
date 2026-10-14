@@ -374,15 +374,24 @@ NEW_SPECIALIST_NEEDS_RUN = ("A new specialist can be published only after a full
 
 
 def _complete_check(prepared) -> bool:
-    """Whether a finished run of every current saved check passed on exactly this complete draft."""
+    """Whether the latest full run of every current saved check, on exactly this complete draft, passed.
+
+    An older passing run never counts once a newer full run on the same draft has failed or stopped.
+    """
     from . import specialist_test_sets as tests
     current = {case["id"]: case["revision"] for case in tests.cases_for(prepared["name"])}
-    return any(run["state"] == "done" and run["model"] == prepared["connection"]["model"]
-        and run.get("comparison", {}).get("draft_profile") == prepared["profile"]
-        and run.get("comparison", {}).get("connection") == prepared["connection"]
-        and {case["id"]: case["revision"] for case in run["case_revisions"]} == current
-        and bool(current) and len(run["results"]) == len(current)
-        and all(result["passed"] for result in run["results"]) for run in tests.runs_for(prepared["name"]))
+    if not current:
+        return False
+    full = [run for run in tests.all_runs_for(prepared["name"])  # newest first
+            if run["model"] == prepared["connection"]["model"]
+            and run.get("comparison", {}).get("draft_profile") == prepared["profile"]
+            and run.get("comparison", {}).get("connection") == prepared["connection"]
+            and {case["id"]: case["revision"] for case in run["case_revisions"]} == current]
+    if not full:
+        return False
+    latest = full[0]
+    return (latest["state"] == "done" and len(latest["results"]) == len(current)
+            and all(result["passed"] for result in latest["results"]))
 
 
 def _publication_verdict(prepared):

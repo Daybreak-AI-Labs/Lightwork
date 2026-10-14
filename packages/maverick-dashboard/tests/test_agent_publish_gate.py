@@ -471,3 +471,31 @@ def test_an_administrator_who_may_not_edit_agents_cannot_read_a_bypass_card(monk
     monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:pack-editor")
     request.state.principal.principal = "user:pack-editor"
     assert content_access.can_read_approval(request, card, world=object()) is True
+
+
+def test_a_later_failing_run_on_the_same_draft_blocks_a_new_specialist_until_a_newer_run_passes(client, monkeypatch):
+    app, tmp = client
+    from maverick import config
+
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n"
+                                    "[agent_tests]\nrequire_for_new_specialists = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    draft = _save_draft(app, NEW, NEW_ENTERED)
+    added = app.post(API + "/customer", json={"specialist": NEW, "task": "A PO has no matching receipt; what now?",
+                                              "includes": ["receipt"], "excludes": [], "refusal": False, "citation": False})
+    assert added.status_code == 200, added.text
+    _answers(monkeypatch, text="Hold payment until a receipt matches.")
+    assert _check_draft(app, NEW, draft)["run"]["state"] == "done"
+    # A later run of the same draft fails: the newest full run decides, not an older pass.
+    _answers(monkeypatch, text="Pay the supplier now.")
+    failed = _check_draft(app, NEW, draft)
+    assert failed["run"]["state"] == "done" and not any(row["passed"] for row in failed["run"]["results"])
+    blocked = _decide(app, NEW, "publish", selected=draft)
+    assert blocked.status_code == 409 and "full run" in blocked.json()["detail"], blocked.text
+    assert app.get("/api/v1/agents/" + NEW).json().get("persona") != NEW_ENTERED["persona"]
+    # A newer passing run on the same draft lets it through.
+    _answers(monkeypatch, text="Hold payment until a receipt matches.")
+    assert _check_draft(app, NEW, draft)["run"]["state"] == "done"
+    published = _decide(app, NEW, "publish", selected=draft)
+    assert published.status_code == 200 and published.json()["confirmed"], published.text
+    assert app.get("/api/v1/agents/" + NEW).json()["persona"] == NEW_ENTERED["persona"]

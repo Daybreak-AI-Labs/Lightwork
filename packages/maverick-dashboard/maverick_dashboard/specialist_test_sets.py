@@ -263,11 +263,16 @@ def finish_run(run_id: str, state: str, spent_dollars: float, message: str = "",
     return _with_store(mutate, effect_guard=effect_guard)
 
 
-def runs_for(specialist: str) -> list[dict]:
+def all_runs_for(specialist: str) -> list[dict]:
+    """Every retained run of one specialist, newest first (``runs_for`` shows only the latest 20)."""
     rows = _with_store(lambda db: (
         sorted((dict(row) for row in db["runs"].values() if row["specialist"] == specialist),
-               key=lambda row: row["started_at"], reverse=True)[:20], False))
+               key=lambda row: row["started_at"], reverse=True), False))
     return [public_run(row) for row in rows]
+
+
+def runs_for(specialist: str) -> list[dict]:
+    return all_runs_for(specialist)[:20]
 
 
 def _stale_after(row: dict) -> float:
