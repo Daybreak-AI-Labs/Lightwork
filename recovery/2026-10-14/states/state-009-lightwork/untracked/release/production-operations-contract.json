@@ -1,0 +1,109 @@
+{
+  "schema": "lightwork.production-operations-contract.v1",
+  "profile_id": "enterprise-single-control-plane-v1",
+  "source_version": "0.1.7",
+  "status": "source_controls_complete_live_operations_unqualified",
+  "verifier_failure_policy": {
+    "environment": "MAVERICK_VERIFIER_REJECTION_POLICY",
+    "production_value": "refuse",
+    "refusal_state": "verification_refused",
+    "second_rejection": "withhold_output",
+    "protected_scopes": ["production", "code", "tool_bound", "consequential"],
+    "unknown_policy": "fail_closed",
+    "code_evidence": ["packages/maverick-core/maverick/agent.py", "packages/maverick-core/tests/test_uncertainty_note.py", "docs/env-vars.md"]
+  },
+  "telemetry": {
+    "planes": ["redacted_json_logs", "authenticated_prometheus_metrics", "signed_audit_events"],
+    "log_context": ["goal_id", "conversation_id", "channel"],
+    "authoritative_audit_correlation": ["tenant", "principal", "agent", "flow_or_run", "action", "approval_or_signoff", "receipt", "provider", "connector"],
+    "redaction": "deep_secret_named_and_inline_secret_scrubbing",
+    "metric_labels": "fixed_or_pseudonymous_only",
+    "external_otel": "excluded",
+    "code_evidence": ["packages/maverick-core/maverick/logging_config.py", "packages/maverick-core/maverick/orchestrator.py", "packages/maverick-core/maverick/production_observability.py", "packages/maverick-dashboard/maverick_dashboard/health_routes.py", "packages/maverick-dashboard/maverick_dashboard/tenant_quota_health.py"]
+  },
+  "alerts": {
+    "source": "deploy/observability/prometheus-rules.yaml",
+    "dashboard": "deploy/observability/grafana-production-overview.json",
+    "paging_route": "deployment_selected_and_live_test_required",
+    "required_metadata": ["severity", "owner", "summary", "description", "runbook_url", "evidence", "customer_impact"],
+    "expected": [
+      "MaverickDown", "MaverickConcurrencySaturated", "MaverickSpendSpike",
+      "MaverickGoalFailureRate", "MaverickJobQueueBacklog",
+      "MaverickJobQueueDeadLetter", "MaverickDiskLow",
+      "MaverickAuthFailureSpike", "MaverickMetricsScrapeAuthFailure",
+      "MaverickTenantQuotaAuthorityUnavailable", "MaverickTenantQuotaNearExhaustion",
+      "MaverickProductionAssuranceFailed", "MaverickShieldControlFailure",
+      "MaverickDurableAuditRefusal", "MaverickAuditForwarderFailure",
+      "MaverickAuditForwarderBacklog", "MaverickAuditAnchorStale",
+      "MaverickKeyCustodyUnhealthy", "MaverickControlPlaneLeaseLost",
+      "MaverickIsolationVerificationFailed", "MaverickIndeterminateSideEffect",
+      "MaverickProductionQueueBacklog", "MaverickProductionQueueDeadLetter",
+      "MaverickProductionQueueStaleLease", "MaverickKillSwitchEngaged",
+      "MaverickPolicyFallback"
+    ]
+  },
+  "incident_response": {
+    "runbooks": ["docs/enterprise/production-operations-runbook.md", "docs/compliance/procedures/incident-response-runbook.md", "deploy/observability/runbook.md"],
+    "required_scenarios": ["authentication_or_credential_compromise", "cross_tenant_exposure", "audit_or_evidence_outage", "sandbox_guardrail_or_policy_escape", "malicious_plugin_or_excluded_integration", "provider_incident", "stuck_duplicate_or_indeterminate_action", "database_or_control_plane_loss", "bad_release"]
+  },
+  "emergency_controls": {
+    "halt": "maverick halt --reason REASON",
+    "clear": "maverick unhalt",
+    "required_evidence": ["incident_id", "actor", "utc_time", "halt_generation", "signed_receipt", "readyz_503", "typed_canary_refusal", "recovery_canary"],
+    "prohibited": ["delete_halt_file", "killswitch.clear", "direct_arm_halt", "direct_disarm_halt", "direct_database_edit"],
+    "live_drill_required": true
+  },
+  "capacity_and_cost": {
+    "application_signals": ["concurrency", "queue_depth", "queue_dead_letter", "queue_stale_lease", "disk_free", "tokens", "spend_rate", "quota_authority", "quota_used", "quota_reserved", "quota_limit", "quota_remaining", "quota_over_limit"],
+    "infrastructure_signals_required_live": ["postgres_connection_saturation", "postgres_latency_iops", "backup_growth", "observability_ingestion_storage", "network_dependency_capacity"],
+    "live_baseline_and_forecast_required": true
+  },
+  "audit_evidence_export": {
+    "schema": "lightwork.audit-evidence.v1",
+    "issue_command": "maverick audit evidence",
+    "verify_command": "maverick audit evidence-verify BUNDLE --key KEY",
+    "selector_modes": ["day", "all_days", "since_until"],
+    "exact_selectors": ["goal_id", "incident_id", "action_id"],
+    "fail_closed_on": ["unreadable", "malformed", "unsigned", "untrusted_key", "broken_chain", "missing_completed_day_anchor", "selector_mismatch", "publisher_key_mismatch"],
+    "code_evidence": ["packages/maverick-core/maverick/audit/evidence.py", "packages/maverick-core/maverick/audit_evidence_verify.py", "packages/maverick-core/maverick/cli/__init__.py"]
+  },
+  "support_and_escalation": {
+    "targets_are_internal_not_sla": true,
+    "internal_ack_targets": {"SEV1": "15m", "SEV2": "30m", "SEV3": "4_business_hours", "SEV4": "1_business_day"},
+    "live_requirements": ["named_primary_and_backup_on_call", "tested_page_delivery_and_escalation", "customer_intake", "status_owner", "maintenance_template", "breach_template", "end_to_end_support_exercise"]
+  },
+  "telemetry_pipeline": {
+    "self_monitoring": ["external_up_target", "metrics_scrape_auth_failures", "production_assurance_state", "audit_forwarder_failures", "audit_forwarder_backlog", "audit_anchor_lag"],
+    "metrics_auth_reasons": ["metrics_bad_token", "metrics_credential_unavailable", "metrics_scope_violation"],
+    "target_tls": "live_proof_required",
+    "dropped_traces": "not_applicable_external_otel_excluded",
+    "live_requirements": ["black_box_probe", "rule_evaluation_health", "page_delivery", "ingestion_drop_and_cardinality", "storage_headroom", "scrape_tls"]
+  },
+  "source_bindings": [
+    {"path": "deploy/observability/grafana-production-overview.json", "sha256": "a7150302e25adf2dcd8ff08b4e88116741ac4aa65b26cc2bffceea9360bf67ea", "digest_mode": "utf8-lf-sha256"},
+    {"path": "deploy/observability/prometheus-rules.yaml", "sha256": "28a5ee37a61764eeb349c3a77ab67a72adb1d02a7500361cd244a276e5db5cec", "digest_mode": "utf8-lf-sha256"},
+    {"path": "deploy/observability/runbook.md", "sha256": "4d7625c0955a577e763285dbb03daa56b87ac0de69c71c2fa8167eefcc220014", "digest_mode": "utf8-lf-sha256"},
+    {"path": "docs/compliance/procedures/incident-response-runbook.md", "sha256": "c0b86e88cedb6abce8a2acf08b2ecea364e9d3732000daaba905929a3b1fc436", "digest_mode": "utf8-lf-sha256"},
+    {"path": "docs/enterprise/production-operations-runbook.md", "sha256": "bfb03d755574cea9026651611c4dbfc5029efd532832f4571e260012320e0b2f", "digest_mode": "utf8-lf-sha256"},
+    {"path": "docs/env-vars.md", "sha256": "500642d9956ba7e084a6f95f5f8ac08ba3321d63d6b5babe17fa7661f4fc517b", "digest_mode": "utf8-lf-sha256"},
+    {"path": "packages/maverick-core/maverick/agent.py", "sha256": "616a6cb015f26ab6c3e4e1fdc77f7b9dcede984626e44276ae6c3c23e215c06a", "digest_mode": "utf8-lf-sha256"},
+    {"path": "packages/maverick-core/maverick/audit/evidence.py", "sha256": "d077ed319a4e3892a8cb85bf2618e534a0c1ec23da48c2050b1c93b6043bd4cc", "digest_mode": "utf8-lf-sha256"},
+    {"path": "packages/maverick-core/maverick/audit_evidence_verify.py", "sha256": "145b62c3ea2e6be6212d1349730e6a09b64ee3907fe67062684684b24d76bf5d", "digest_mode": "utf8-lf-sha256"},
+    {"path": "packages/maverick-core/maverick/cli/__init__.py", "sha256": "77e5ab0b714e6b90165a43f56734bfaa9cee7f576830202f586a9167e3912d8a", "digest_mode": "utf8-lf-sha256"},
+    {"path": "packages/maverick-core/maverick/logging_config.py", "sha256": "acef2c229be091cc7aa12b4307c91a97ddb09fe79a19e0e88b2be4aa1730b6b1", "digest_mode": "utf8-lf-sha256"},
+    {"path": "packages/maverick-core/maverick/orchestrator.py", "sha256": "30259f337a6c6860390035f0bf1428fb5ec11ae8f9074ec09b019ebb1c19cbbb", "digest_mode": "utf8-lf-sha256"},
+    {"path": "packages/maverick-core/maverick/production_observability.py", "sha256": "68355b9b0ba66444fb385e76532cc236da2fc63ed3c0f4ecd9ab528c8d1bec01", "digest_mode": "utf8-lf-sha256"},
+    {"path": "packages/maverick-core/tests/test_uncertainty_note.py", "sha256": "c955f85deaaec5a4e4251c8a3afc41de22a926e83f01ce24c4ad2d782aca2cf2", "digest_mode": "utf8-lf-sha256"},
+    {"path": "packages/maverick-dashboard/maverick_dashboard/auth_metrics.py", "sha256": "a265f8d392e7f36303de49d29ba45daab328a01ab2c5a53f34e9bbca4113dfaa", "digest_mode": "utf8-lf-sha256"},
+    {"path": "packages/maverick-dashboard/maverick_dashboard/health_routes.py", "sha256": "ec7914edb108b81a7e166a304eae4f91c8bccf72b5b93da2fd38e5f716719d24", "digest_mode": "utf8-lf-sha256"},
+    {"path": "packages/maverick-dashboard/maverick_dashboard/service_credentials.py", "sha256": "7a427129b91d96764b64c18914954550460553f43aae53c17410d98d02675728", "digest_mode": "utf8-lf-sha256"},
+    {"path": "packages/maverick-dashboard/maverick_dashboard/tenant_quota_health.py", "sha256": "40bb4c21de7f6d37fc9cec548bfbaa4640f6ef8e77c0845f5e8e63e589a18a05", "digest_mode": "utf8-lf-sha256"}
+  ],
+  "live_qualification_requirements": [
+    "Staff and verify primary/backup on-call and customer escalation paths.",
+    "Exercise page delivery, incident response, kill switch, credential revocation, audit outage, and recovery in a production-like environment.",
+    "Install and review dashboards with live baselines, forecasts, budgets, database saturation, and observability-pipeline capacity.",
+    "Approve customer service objectives and support commitments separately from these internal targets.",
+    "Retain revision-bound drill, alert, page, acknowledgement, containment, recovery, and after-action evidence."
+  ]
+}

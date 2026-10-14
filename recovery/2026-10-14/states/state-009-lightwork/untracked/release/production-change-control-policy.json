@@ -1,0 +1,650 @@
+{
+  "schema": "lightwork.production-change-control-policy.v2",
+  "repository": "Daybreak-AI-Labs/Lightwork",
+  "source_version": "0.1.7",
+  "normal_change_policy": {
+    "pull_request_required": true,
+    "minimum_independent_approvals": 1,
+    "author_self_approval_allowed": false,
+    "required_checks_must_pass": true,
+    "direct_production_mutation_allowed": false
+  },
+  "emergency_change_policy": {
+    "release_workflow_bypass_allowed": false,
+    "procedure": "docs/compliance/procedures/change-management-procedure.md#7-emergency-change-procedure",
+    "retroactive_review_business_days": 1,
+    "evidence_boundary": "external-process-record"
+  },
+  "code_owner_routing": {
+    "path": ".github/CODEOWNERS",
+    "required_patterns": [
+      "*",
+      "/packages/maverick-core/",
+      "/packages/maverick-shield/",
+      "/packages/maverick-channels/",
+      "/packages/maverick-dashboard/",
+      "/packages/maverick-mcp/",
+      "/.github/workflows/",
+      "/.github/workflows/ci.yml",
+      "/.github/workflows/release.yml",
+      "/.github/workflows/publish.yml",
+      "/.github/workflows/native.yml",
+      "/.github/workflows/compliance-posture.yml",
+      "/README.md",
+      "/SECURITY.md",
+      "/apps/installer-cli/",
+      "/apps/installer-desktop/",
+      "/deploy/",
+      "/deploy/docker/Dockerfile.production",
+      "/deploy/observability/grafana-production-overview.json",
+      "/deploy/observability/prometheus-rules.yaml",
+      "/deploy/observability/runbook.md",
+      "/deploy/postgres/README.md",
+      "/docs/encryption.md",
+      "/docs/api.md",
+      "/docs/operator-first-run.md",
+      "/docs/compliance/",
+      "/docs/enterprise/legal/",
+      "/docs/programs/",
+      "/docs/strategy/",
+      "/docs/enterprise/dependency-failure-contract.md",
+      "/docs/enterprise/claim-evidence-ledger.md",
+      "/docs/enterprise/deployment-playbook.md",
+      "/docs/enterprise/operator-cli-contract.md",
+      "/docs/enterprise/production-data-boundary.md",
+      "/docs/enterprise/production-migration-safety.md",
+      "/docs/enterprise/production-operations-runbook.md",
+      "/docs/enterprise/production-runtime-contract.md",
+      "/docs/enterprise/production-support-matrix.md",
+      "/docs/enterprise/secret-rotation-contract.md",
+      "/docs/enterprise/tenant-quota-contract.md",
+      "/docs/test-exception-policy.md",
+      "/docs/specs/external-effect-semantics.md",
+      "/docs/specs/flow-node-transition-ledger.md",
+      "/deploy/helm/maverick/",
+      "/packages/maverick-core/maverick/audit/evidence.py",
+      "/packages/maverick-core/maverick/audit_evidence_verify.py",
+      "/packages/maverick-core/maverick/cli/__init__.py",
+      "/packages/maverick-core/maverick/cli/_ops_groups.py",
+      "/packages/maverick-core/maverick/deployment.py",
+      "/packages/maverick-core/maverick/operator_contract.py",
+      "/packages/maverick-core/maverick/postgres_encryption_migrate.py",
+      "/packages/maverick-core/maverick/production_migration.py",
+      "/packages/maverick-core/maverick/production_observability.py",
+      "/packages/maverick-core/maverick/production_identity.py",
+      "/packages/maverick-core/maverick/production_onboarding.py",
+      "/packages/maverick-core/maverick/production_runtime_contract.py",
+      "/packages/maverick-core/maverick/flow/execution.py",
+      "/packages/maverick-core/maverick/flow/runner.py",
+      "/packages/maverick-core/maverick/flow/store.py",
+      "/packages/maverick-core/maverick/logging_config.py",
+      "/packages/maverick-core/maverick/orchestrator.py",
+      "/packages/maverick-core/maverick/support_bundle.py",
+      "/packages/maverick-core/maverick/tenant/registry.py",
+      "/packages/maverick-core/maverick/tenant_quota_authority.py",
+      "/packages/maverick-core/maverick/world_model_backends/pg_rls.py",
+      "/packages/maverick-core/maverick/world_model_backends/postgres.py",
+      "/packages/maverick-dashboard/maverick_dashboard/health_routes.py",
+      "/packages/maverick-dashboard/maverick_dashboard/api_boundary.py",
+      "/packages/maverick-dashboard/maverick_dashboard/contracts/",
+      "/packages/maverick-dashboard/maverick_dashboard/endpoint_policy.py",
+      "/packages/maverick-dashboard/maverick_dashboard/openapi_contract.py",
+      "/packages/maverick-dashboard/maverick_dashboard/production_visibility.py",
+      "/packages/maverick-dashboard/maverick_dashboard/service_credentials.py",
+      "/packages/maverick-dashboard/maverick_dashboard/stream_cursor.py",
+      "/packages/maverick-dashboard/maverick_dashboard/task_dispatch.py",
+      "/packages/maverick-dashboard/maverick_dashboard/tenant_quota_health.py",
+      "/packages/maverick-core/tests/test_audit_evidence.py",
+      "/packages/maverick-core/tests/test_claim_evidence_ledger.py",
+      "/packages/maverick-core/tests/test_dependency_failure_contract.py",
+      "/packages/maverick-core/tests/test_encryption_ops_cli.py",
+      "/packages/maverick-core/tests/test_pg_rls.py",
+      "/packages/maverick-core/tests/test_operator_contract.py",
+      "/packages/maverick-core/tests/test_postgres_encryption_migrate.py",
+      "/packages/maverick-core/tests/test_postgres_production_posture.py",
+      "/packages/maverick-core/tests/test_postgres_rls_unit.py",
+      "/packages/maverick-core/tests/test_postgres_tenant_migrations.py",
+      "/packages/maverick-core/tests/test_production_deployment_gate.py",
+      "/packages/maverick-core/tests/test_production_code_inventory.py",
+      "/packages/maverick-core/tests/test_production_data_boundary.py",
+      "/packages/maverick-core/tests/test_production_migration.py",
+      "/packages/maverick-core/tests/test_production_migration_contract.py",
+      "/packages/maverick-core/tests/test_production_observability.py",
+      "/packages/maverick-core/tests/test_production_identity.py",
+      "/packages/maverick-core/tests/test_production_onboarding.py",
+      "/packages/maverick-core/tests/test_production_operations_contract.py",
+      "/packages/maverick-core/tests/test_production_qa_assurance.py",
+      "/packages/maverick-core/tests/test_production_readiness_evidence.py",
+      "/packages/maverick-core/tests/test_production_runtime_contract.py",
+      "/packages/maverick-core/tests/test_production_runtime_release_verifier.py",
+      "/packages/maverick-core/tests/test_tenant_registry.py",
+      "/packages/maverick-core/tests/test_tenant_rls_cli.py",
+      "/packages/maverick-core/tests/test_pytest_exception_policy.py",
+      "/packages/maverick-core/tests/test_production_support_matrix.py",
+      "/packages/maverick-core/tests/test_secret_rotation_contract.py",
+      "/packages/maverick-core/tests/test_support_bundle_security.py",
+      "/packages/maverick-core/tests/test_tenant_quota_authority.py",
+      "/packages/maverick-core/tests/test_flow_action_tenant_quota.py",
+      "/packages/maverick-core/tests/test_flow_execution_hardening.py",
+      "/packages/maverick-core/tests/test_flow_postgres_authority.py",
+      "/packages/maverick-dashboard/tests/test_dashboard_production_assurance.py",
+      "/packages/maverick-dashboard/tests/test_production_api_contract.py",
+      "/packages/maverick-dashboard/tests/test_tenant_quota_health.py",
+      "/qa/pytest-exceptions.json",
+      "/release/dependency-failure-contract.json",
+      "/release/claim-evidence-ledger.json",
+      "/release/production-api-contract.json",
+      "/release/production-change-control-policy.json",
+      "/release/production-code-inventory.json",
+      "/release/production-data-boundary.json",
+      "/release/production-identity-posture-contract.json",
+      "/release/production-migration-contract.json",
+      "/release/release-state.json",
+      "/release/production-readiness-evidence.json",
+      "/release/production-model-policy.json",
+      "/release/production-onboarding-contract.json",
+      "/release/production-openapi-schema.json",
+      "/release/production-operations-contract.json",
+      "/release/production-qa-assurance.json",
+      "/release/production-runtime-contract.json",
+      "/release/production-surface-manifest.json",
+      "/release/production-support-matrix.json",
+      "/release/service-objectives.json",
+      "/release/secret-rotation-contract.json",
+      "/release/tenant-quota-contract.json",
+      "/scripts/verify_claim_evidence_ledger.py",
+      "/scripts/verify_dependency_failure_contract.py",
+      "/scripts/verify_github_release_assets.py",
+      "/scripts/verify_release_state.py",
+      "/scripts/verify_production_api_contract.py",
+      "/scripts/verify_production_change_control.py",
+      "/scripts/verify_production_code_inventory.py",
+      "/scripts/verify_production_data_boundary.py",
+      "/scripts/verify_production_migration_contract.py",
+      "/scripts/verify_production_model_policy.py",
+      "/scripts/verify_production_onboarding_contract.py",
+      "/scripts/verify_production_operations_contract.py",
+      "/scripts/verify_production_qa_assurance.py",
+      "/scripts/verify_production_readiness.py",
+      "/scripts/verify_production_runtime_contract.py",
+      "/scripts/verify_production_support_matrix.py",
+      "/scripts/verify_pytest_exceptions.py",
+      "/scripts/verify_service_objectives.py",
+      "/scripts/verify_secret_rotation_contract.py",
+      "/scripts/verify_tenant_quota_contract.py",
+      "/packages/maverick-core/tests/test_release_integrity.py",
+      "/packages/maverick-core/tests/test_release_policy.py"
+    ],
+    "evidence_boundary": "routing-only-not-proof-of-independent-review"
+  },
+  "workflow_default_permissions": {
+    ".github/workflows/ci.yml": {
+      "contents": "read"
+    },
+    ".github/workflows/release.yml": {
+      "contents": "read"
+    },
+    ".github/workflows/publish.yml": {
+      "contents": "read"
+    },
+    ".github/workflows/native.yml": {
+      "contents": "read"
+    }
+  },
+  "workflow_controls": [
+    {
+      "id": "ghcr-staging-image",
+      "workflow": ".github/workflows/release.yml",
+      "authority_job": "validate-release-tag",
+      "mutating_job": "docker-image",
+      "environment": "production-release",
+      "authority_job_sha256": "414e44b7c4ce21af36c4955b9acc4340dd187766c3ec5c511779b1ace006ef1d",
+      "required_needs": [
+        "validate-release-tag"
+      ],
+      "allowed_write_permissions": [
+        "packages"
+      ],
+      "required_authority_commands": [
+        "python -I scripts/verify_release_state.py --root . --release-tag \"$tag\" --require-release-ready",
+        "python -I scripts/verify_pytest_exceptions.py --root .",
+        "python -I scripts/verify_production_change_control.py --root .",
+        "python -I scripts/verify_claim_evidence_ledger.py --root . --release-candidate",
+        "python -I scripts/verify_production_code_inventory.py --root .",
+        "python -I scripts/verify_production_migration_contract.py --root .",
+        "python -I scripts/verify_secret_rotation_contract.py --root .",
+        "python -I scripts/verify_tenant_quota_contract.py --root .",
+        "python -I scripts/verify_production_api_contract.py --root .",
+        "python -I scripts/verify_production_onboarding_contract.py --root .",
+        "python -I scripts/verify_production_data_boundary.py --root .",
+        "python -I scripts/verify_production_operations_contract.py --root .",
+        "python -I scripts/verify_production_qa_assurance.py --root .",
+        "python -I scripts/verify_production_runtime_contract.py --root ."
+      ],
+      "required_authority_fragments": [],
+      "required_mutating_if_terms": []
+    },
+    {
+      "id": "github-release-draft",
+      "workflow": ".github/workflows/release.yml",
+      "authority_job": "validate-release-tag",
+      "mutating_job": "release",
+      "environment": "production-release",
+      "authority_job_sha256": "414e44b7c4ce21af36c4955b9acc4340dd187766c3ec5c511779b1ace006ef1d",
+      "required_needs": [
+        "validate-release-tag",
+        "docker-image",
+        "binaries",
+        "standalone-sku-artifacts",
+        "release-runtime-sbom"
+      ],
+      "allowed_write_permissions": [
+        "contents",
+        "id-token",
+        "packages"
+      ],
+      "required_authority_commands": [
+        "python -I scripts/verify_release_state.py --root . --release-tag \"$tag\" --require-release-ready",
+        "python -I scripts/verify_pytest_exceptions.py --root .",
+        "python -I scripts/verify_production_change_control.py --root .",
+        "python -I scripts/verify_claim_evidence_ledger.py --root . --release-candidate",
+        "python -I scripts/verify_production_code_inventory.py --root .",
+        "python -I scripts/verify_production_migration_contract.py --root .",
+        "python -I scripts/verify_secret_rotation_contract.py --root .",
+        "python -I scripts/verify_tenant_quota_contract.py --root .",
+        "python -I scripts/verify_production_api_contract.py --root .",
+        "python -I scripts/verify_production_onboarding_contract.py --root .",
+        "python -I scripts/verify_production_data_boundary.py --root .",
+        "python -I scripts/verify_production_operations_contract.py --root .",
+        "python -I scripts/verify_production_qa_assurance.py --root .",
+        "python -I scripts/verify_production_runtime_contract.py --root ."
+      ],
+      "required_authority_fragments": [],
+      "required_mutating_if_terms": []
+    },
+    {
+      "id": "python-release-evidence-signing",
+      "workflow": ".github/workflows/publish.yml",
+      "authority_job": "change-control-authority",
+      "mutating_job": "sign",
+      "environment": "production-release",
+      "authority_job_sha256": "1b23f0b6998c007bafe66347f86499cceb5ae374f93bdc976fbdd9fa485f0b57",
+      "required_needs": [
+        "build",
+        "change-control-authority"
+      ],
+      "allowed_write_permissions": [
+        "contents",
+        "id-token"
+      ],
+      "required_authority_commands": [
+        "python -I scripts/verify_pytest_exceptions.py --root .",
+        "python -I scripts/verify_production_change_control.py --root ."
+      ],
+      "required_authority_fragments": [
+        "ref: ${{ github.sha }}"
+      ],
+      "required_mutating_if_terms": []
+    },
+    {
+      "id": "pypi-publication",
+      "workflow": ".github/workflows/publish.yml",
+      "authority_job": "change-control-authority",
+      "mutating_job": "publish",
+      "environment": "pypi",
+      "authority_job_sha256": "1b23f0b6998c007bafe66347f86499cceb5ae374f93bdc976fbdd9fa485f0b57",
+      "required_needs": [
+        "build",
+        "sign",
+        "finalize-release",
+        "release-authority",
+        "namespace-authority",
+        "change-control-authority"
+      ],
+      "allowed_write_permissions": [
+        "id-token"
+      ],
+      "required_authority_commands": [
+        "python -I scripts/verify_pytest_exceptions.py --root .",
+        "python -I scripts/verify_production_change_control.py --root ."
+      ],
+      "required_authority_fragments": [
+        "ref: ${{ github.sha }}"
+      ],
+      "required_mutating_if_terms": [
+        "needs.finalize-release.result == 'success'"
+      ]
+    },
+    {
+      "id": "github-release-finalization",
+      "workflow": ".github/workflows/publish.yml",
+      "authority_job": "change-control-authority",
+      "mutating_job": "finalize-release",
+      "environment": "production-release",
+      "authority_job_sha256": "1b23f0b6998c007bafe66347f86499cceb5ae374f93bdc976fbdd9fa485f0b57",
+      "required_needs": [
+        "build",
+        "sign",
+        "release-authority",
+        "change-control-authority"
+      ],
+      "allowed_write_permissions": [
+        "contents",
+        "packages"
+      ],
+      "required_authority_commands": [
+        "python -I scripts/verify_pytest_exceptions.py --root .",
+        "python -I scripts/verify_production_change_control.py --root ."
+      ],
+      "required_authority_fragments": [
+        "ref: ${{ github.sha }}"
+      ],
+      "required_mutating_if_terms": [
+        "needs.release-authority.result == 'success'",
+        "needs.change-control-authority.result == 'success'"
+      ]
+    },
+    {
+      "id": "native-pypi-publication",
+      "workflow": ".github/workflows/native.yml",
+      "authority_job": "validate-native-tag",
+      "mutating_job": "publish-pypi",
+      "environment": "pypi",
+      "authority_job_sha256": "245b038b95293e762f4769da2b18ccefc25551e037b7fa9428351b1b514e2bc9",
+      "required_needs": [
+        "core",
+        "verify-audit",
+        "python",
+        "wasm",
+        "validate-native-tag"
+      ],
+      "allowed_write_permissions": [
+        "id-token"
+      ],
+      "required_authority_commands": [
+        "python -I scripts/verify_production_change_control.py --root ."
+      ],
+      "required_authority_fragments": [],
+      "required_mutating_if_terms": [
+        "false"
+      ]
+    },
+    {
+      "id": "native-npm-publication-disabled",
+      "workflow": ".github/workflows/native.yml",
+      "authority_job": "validate-native-tag",
+      "mutating_job": "publish-npm",
+      "environment": "npm",
+      "authority_job_sha256": "245b038b95293e762f4769da2b18ccefc25551e037b7fa9428351b1b514e2bc9",
+      "required_needs": [
+        "core",
+        "verify-audit",
+        "python",
+        "wasm",
+        "validate-native-tag"
+      ],
+      "allowed_write_permissions": [],
+      "required_authority_commands": [
+        "python -I scripts/verify_production_change_control.py --root ."
+      ],
+      "required_authority_fragments": [],
+      "required_mutating_if_terms": [
+        "false"
+      ]
+    }
+  ],
+  "external_evidence_requirements": [
+    {
+      "id": "github-main-protection",
+      "provider": "github",
+      "scope": "refs/heads/main",
+      "requirements": [
+        "pull-request-required",
+        "minimum-one-independent-approval",
+        "required-checks-blocking",
+        "author-self-approval-prevented"
+      ],
+      "evidence_type": "github-ruleset-export-and-merged-pr-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "github-release-tag-protection",
+      "provider": "github",
+      "scope": "refs/tags/v*",
+      "requirements": [
+        "creation-restricted-to-authorized-release-actors",
+        "update-and-deletion-restricted"
+      ],
+      "evidence_type": "github-ruleset-export",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "github-native-tag-protection",
+      "provider": "github",
+      "scope": "refs/tags/native-v*",
+      "requirements": [
+        "creation-restricted-to-authorized-release-actors",
+        "update-and-deletion-restricted"
+      ],
+      "evidence_type": "github-ruleset-export",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "github-production-release-environment",
+      "provider": "github",
+      "scope": "environment:production-release",
+      "requirements": [
+        "required-independent-reviewer",
+        "self-review-prevented",
+        "deployment-refs-limited-to-protected-release-tags"
+      ],
+      "evidence_type": "github-environment-settings-export-and-deployment-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "github-pypi-environment",
+      "provider": "github",
+      "scope": "environment:pypi",
+      "requirements": [
+        "required-independent-reviewer",
+        "self-review-prevented",
+        "deployment-refs-limited-to-protected-release-tags"
+      ],
+      "evidence_type": "github-environment-settings-export-and-deployment-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "github-npm-environment",
+      "provider": "github",
+      "scope": "environment:npm",
+      "requirements": [
+        "required-independent-reviewer",
+        "self-review-prevented",
+        "deployment-refs-limited-to-protected-release-tags"
+      ],
+      "evidence_type": "github-environment-settings-export-and-deployment-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "postgres-tenant-rls-deployment",
+      "provider": "deployment",
+      "scope": "enterprise-single-control-plane-v1:postgres-tenant-boundary",
+      "requirements": [
+        "exact-release-migration-owner-rls-apply-report",
+        "runtime-role-nosuperuser-nobypassrls-and-nonowner",
+        "all-root-and-child-policies-enabled-and-forced",
+        "deployed-readiness-postgres-rls-verified",
+        "live-cross-tenant-read-write-adverse-report"
+      ],
+      "evidence_type": "signed-migration-deployment-and-adverse-test-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "postgres-encryption-migration",
+      "provider": "deployment",
+      "scope": "enterprise-single-control-plane-v1:postgres-encryption",
+      "requirements": [
+        "exact-release-whole-database-pre-and-post-inventory",
+        "zero-plaintext-remaining-and-strict-mode-enabled",
+        "sealed-column-manifest-and-schema-version-bound",
+        "managed-snapshot-or-pitr-marker",
+        "successful-restore-and-key-recovery-drill"
+      ],
+      "evidence_type": "signed-migration-snapshot-and-recovery-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "production-migration-qualification",
+      "provider": "deployment",
+      "scope": "enterprise-single-control-plane-v1:postgres-migration",
+      "requirements": [
+        "exact-release-and-image-bound-operation-authorization",
+        "writer-drain-and-zero-active-admission-proof",
+        "managed-backup-or-pitr-completion-and-retention-proof",
+        "representative-adjacent-predecessor-rehearsal",
+        "precommit-interruption-rollback-proof",
+        "postcommit-same-operation-reconciliation-proof",
+        "independent-full-restore-and-integrity-proof",
+        "post-migration-tls-rls-encryption-and-readiness-proof",
+        "signed-immutable-migration-report-retention"
+      ],
+      "evidence_type": "signed-production-migration-qualification-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "secret-rotation-qualification",
+      "provider": "deployment",
+      "scope": "enterprise-single-control-plane-v1:secret-rotation",
+      "requirements": [
+        "exact-release-secret-inventory-and-custody-review",
+        "provider-current-and-previous-authority-prepared",
+        "pod-recreation-and-readiness-proof",
+        "historical-decrypt-and-audit-verification",
+        "rollback-before-old-authority-revocation",
+        "old-authority-revoked-only-after-validation",
+        "signed-rotation-and-recovery-record-retained"
+      ],
+      "evidence_type": "signed-secret-rotation-drill-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "tenant-quota-capacity-qualification",
+      "provider": "deployment",
+      "scope": "enterprise-single-control-plane-v1:tenant-quota",
+      "requirements": [
+        "exact-policy-generation-and-workload-derived-limits",
+        "live-postgres-cross-process-admission-and-settlement",
+        "saturation-fairness-and-backpressure-proof",
+        "crash-expiry-orphan-and-reconciliation-proof",
+        "managed-postgres-failover-and-recovery-proof",
+        "authority-row-retention-and-capacity-plan",
+        "signed-representative-load-result-retained"
+      ],
+      "evidence_type": "signed-tenant-quota-capacity-qualification-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "production-runtime-cluster-qualification",
+      "provider": "deployment",
+      "scope": "enterprise-single-control-plane-v1:runtime-boundary",
+      "requirements": [
+        "exact-release-image-and-runtime-contract-digest",
+        "runtimeclass-cgroup-pid-file-memory-and-cpu-enforcement",
+        "read-only-root-exact-writable-mounts-and-secret-projection",
+        "dns-and-approved-dependency-egress-with-no-public-egress",
+        "live-admission-and-boundary-negative-tests",
+        "signed-runtime-qualification-record-retained"
+      ],
+      "evidence_type": "signed-runtime-cluster-qualification-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "production-data-processing-qualification",
+      "provider": "deployment-and-legal",
+      "scope": "enterprise-single-control-plane-v1:data-boundary",
+      "requirements": [
+        "actual-processors-vendors-regions-and-residency-approved",
+        "retention-deletion-and-backup-replica-schedules-approved",
+        "live-tls-at-rest-access-and-credential-revocation-evidence",
+        "tenant-erasure-and-downstream-deletion-evidence",
+        "exact-release-data-flow-inventory-reconciled",
+        "signed-data-processing-qualification-record-retained"
+      ],
+      "evidence_type": "signed-data-processing-qualification-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "production-operations-qualification",
+      "provider": "operations",
+      "scope": "enterprise-single-control-plane-v1:operations",
+      "requirements": [
+        "named-continuously-staffed-on-call-and-backup-rotation",
+        "live-page-dashboard-scrape-tls-and-black-box-monitoring-tests",
+        "witnessed-incident-halt-credential-and-restore-drills",
+        "measured-capacity-cost-baselines-and-approved-service-objectives",
+        "customer-support-status-maintenance-and-notification-routes",
+        "signed-operations-qualification-record-retained"
+      ],
+      "evidence_type": "signed-production-operations-qualification-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "production-api-qualification",
+      "provider": "release-and-deployment",
+      "scope": "enterprise-single-control-plane-v1:versioned-api",
+      "requirements": [
+        "exact-release-openapi-and-contract-digests",
+        "compatibility-deprecation-and-migration-policy-approved",
+        "live-browser-client-and-reconnect-conformance",
+        "supported-client-and-mcp-conformance-where-claimed",
+        "customer-facing-api-and-admin-documentation-reviewed",
+        "signed-api-qualification-record-retained"
+      ],
+      "evidence_type": "signed-production-api-qualification-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "production-qa-security-qualification",
+      "provider": "quality-and-security",
+      "scope": "enterprise-single-control-plane-v1:qa-assurance",
+      "requirements": [
+        "hosted-required-checks-pass-on-exact-revision",
+        "production-like-e2e-load-crash-restore-and-cross-platform-results",
+        "independent-penetration-test-and-remediation-closure",
+        "incident-vulnerability-and-disclosure-staffing-and-drills",
+        "claimed-compliance-regimes-independently-assessed",
+        "signed-qa-security-qualification-record-retained"
+      ],
+      "evidence_type": "signed-production-qa-security-qualification-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "production-onboarding-qualification",
+      "provider": "release-governance",
+      "scope": "enterprise-single-control-plane-v1:onboarding-readiness",
+      "requirements": [
+        "signed-evidence-manifest-bound-to-exact-revision-and-contract-digest",
+        "distinct-authorized-approvers-and-unexpired-observation-window",
+        "non-replayed-per-requirement-evidence-coverage",
+        "all-live-and-external-domain-gates-satisfied",
+        "immutable-onboarding-report-and-evidence-retained"
+      ],
+      "evidence_type": "signed-production-onboarding-qualification-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    },
+    {
+      "id": "claim-evidence-approval",
+      "provider": "release-governance",
+      "scope": "enterprise-single-control-plane-v1:buyer-claims",
+      "requirements": [
+        "exact-revision-document-and-evidence-digests-reviewed",
+        "two-distinct-release-and-security-approvers",
+        "unresolved-claims-remain-not-buyer-claimable",
+        "dated-external-change-control-reference",
+        "approval-valid-through-ledger-refresh-date"
+      ],
+      "evidence_type": "signed-claim-evidence-approval-record",
+      "evidence_boundary": "external-required-not-verified-by-repository"
+    }
+  ]
+}

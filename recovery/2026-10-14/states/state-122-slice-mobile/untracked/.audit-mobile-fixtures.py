@@ -1,0 +1,10 @@
+from pathlib import Path
+p=Path('apps/mobile-companion/tests/app.test.cjs')
+s=p.read_text(encoding='utf-8')
+s=s.replace("const mocks = settings =>", "const address = app => app.root.findAllByType('TextInput').find(input => input.props.accessibilityLabel === 'Dashboard address');\nconst mocks = settings =>")
+s=s.replace("app.root.findAllByType('TextInput')[0]", "address(app)")
+s=s.replace("'http://127.0.0.1:8400'", "'http://127.0.0.1:8765'")
+s=s.replace("assert.equal(app.root.findAllByType('TextInput').length, 2);", "assert.ok(address(app));\n  assert.ok(app.root.findAllByType('TextInput').find(input => input.props.accessibilityLabel === 'Access token'));")
+p.write_text(s,encoding='utf-8',newline='\n')
+p=Path('apps/mobile-companion/tests/api.test.cjs');s=p.read_text(encoding='utf-8').replace("/api/v1/goals?limit=50'", "/api/v1/goals?limit=50&offset=0&status='");p.write_text(s,encoding='utf-8',newline='\n')
+p=Path('apps/mobile-companion/tests/settings.test.cjs');s=p.read_text(encoding='utf-8').replace('const firstWrite = deferred();','const firstWrite = deferred(), enteredWrite = deferred();').replace('if (++calls === 1) await firstWrite.promise;', 'if (++calls === 1) { enteredWrite.resolve(); await firstWrite.promise; }').replace('  await Promise.resolve();\n  assert.equal(calls, 1);','  await enteredWrite.promise;\n  assert.equal(calls, 1);');p.write_text(s,encoding='utf-8',newline='\n')

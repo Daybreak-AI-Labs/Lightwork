@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Capabilities · CRA Product Security Officer{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="tag">{{ caps.mode }}</p>
+  <h1>Capability and authority matrix</h1>
+  <p>Every advertised capability is bound to an implementation and authority. This reduced SKU is <strong>unsigned local only</strong>, even when it reuses Lightwork clock-rule declarations for analysis.</p>
+</section>
+<section class="notice" aria-label="Important boundary">
+  <strong>No automatic legal decision or filing.</strong> A qualified human determines CRA applicability and reportability. The app does not contact ENISA, a CSIRT, or any regulator. It does not retain raw SBOM documents. Secret-shaped fields are rejected, but allowed text values are stored verbatim and are not secret-scanned; never enter secrets.
+</section>
+<section class="card">
+  <h2>Executable capability matrix</h2>
+  <table>
+    <thead><tr><th>Capability</th><th>Status</th><th>Implementation</th><th>Authority</th></tr></thead>
+    <tbody>
+      {% for item in caps.capabilities %}
+      <tr><td>{{ item.label }}</td><td>{{ "Included" if item.active else "Integrated Lightwork only / prohibited" }}</td><td>{{ item.implementation }}</td><td>{{ item.authority }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+<section class="grid">
+  <article class="card"><h2>Included locally</h2><ul>{% for item in caps.active %}<li>{{ item }}</li>{% endfor %}</ul></article>
+  <article class="card"><h2>Platform upsell or intentionally unavailable</h2><ul>{% for item in caps.gated %}<li>{{ item }}</li>{% endfor %}</ul></article>
+</section>
+{% endblock %}

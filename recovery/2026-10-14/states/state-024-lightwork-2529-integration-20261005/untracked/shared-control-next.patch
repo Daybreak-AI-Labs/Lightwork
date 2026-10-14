@@ -1,0 +1,123 @@
+diff --git a/packages/maverick-dashboard/maverick_dashboard/page_assets.py b/packages/maverick-dashboard/maverick_dashboard/page_assets.py
+index 22d038f9..f86036b7 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/page_assets.py
++++ b/packages/maverick-dashboard/maverick_dashboard/page_assets.py
+@@ -36,6 +36,8 @@ ASSETS = (
+     "lightwork-compliance.js",
+     "lightwork-retention-maintenance.js",
+     "lightwork-compliance-scoping.js",
++    "lightwork-compliance-questionnaire-builder.js",
++    "lightwork-plugin-practice.js",
+     "lightwork-compliance-scope-actions.js",
+     "lightwork-dsar-detail.js",
+     "lightwork-dsar-handoff.js",
+diff --git a/packages/maverick-dashboard/maverick_dashboard/product_operations.py b/packages/maverick-dashboard/maverick_dashboard/product_operations.py
+index 29f981a9..5116aa56 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/product_operations.py
++++ b/packages/maverick-dashboard/maverick_dashboard/product_operations.py
+@@ -150,6 +150,7 @@ def _adapter_modules():
+         product_operations_companion_admin,
+         product_operations_companion_conversation,
+         product_operations_compliance_mappings,
++        product_operations_compliance_questionnaires,
+         product_operations_connections,
+         product_operations_consent_jobs,
+         product_operations_conversation,
+@@ -207,6 +208,7 @@ def _adapter_modules():
+         product_operations_companion_conversation,
+         product_operations_commitments,
+         product_operations_compliance_mappings,
++        product_operations_compliance_questionnaires,
+         product_operations_tasks,
+         product_operations_task_launch,
+         product_operations_task_map,
+diff --git a/packages/maverick-dashboard/maverick_dashboard/static/lightwork-product-operations.js b/packages/maverick-dashboard/maverick_dashboard/static/lightwork-product-operations.js
+index ac55b9c6..934e953e 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/static/lightwork-product-operations.js
++++ b/packages/maverick-dashboard/maverick_dashboard/static/lightwork-product-operations.js
+@@ -124,6 +124,33 @@
+           else { var savedLink = node('a', 'Open saved learning points', savedDestination); savedLink.href = '/learning#learning-review'; }
+           return;
+         }
++        if (entry[0] === 'plugin_practice_page') {
++          var practice = entry[1], practiceStarted = generation;
++          if (!practice || Array.isArray(practice) || Object.keys(practice).sort().join(',') !== 'fingerprint,receipt' ||
++              !/^[a-f0-9]{64}$/.test(practice.fingerprint || '') || !/^[a-f0-9]{32}$/.test(practice.receipt || '')) return;
++          var practiceDestination = node('dd', undefined, list);
++          var practiceForm = window.LightworkPluginPractice;
++          if (practiceForm && typeof practiceForm.open === 'function') button('Open guided practice check', practiceDestination, async function (event) {
++            if (!active(practiceStarted) || busy) return;
++            event.currentTarget.disabled = true;
++            try {
++              var opened = await practiceForm.open(practice.fingerprint, practice.receipt);
++              if (!active(practiceStarted)) return;
++              status.textContent = opened ? 'The guided practice check is open in Plugins.' :
++                'This inspection changed or is unavailable. Read the original inspection in Plugins.';
++              if (opened) {
++                var close = document.getElementById('mv-copilot-close'); if (close) close.click();
++              }
++            } catch (_) {
++              if (active(practiceStarted)) status.textContent = 'The guided check could not be opened. Check current access in Plugins.';
++            } finally { if (active(practiceStarted)) event.currentTarget.disabled = false; }
++          });
++          else {
++            var practiceLink = node('a', 'Open guided practice checks', practiceDestination);
++            practiceLink.href = '/plugins#plugin-workbench'; practiceLink.className = 'btn btn--ghost';
++          }
++          return;
++        }
+         if (entry[0] === 'knowledge_request_page') {
+           var page = entry[1], started = generation;
+           if (!page || Array.isArray(page) || Object.keys(page).sort().join(',') !== 'cursor,view' ||
+@@ -373,6 +400,40 @@
+     });
+     launch.className = 'btn btn--primary'; launch.focus(); nativeLink(item, formHost);
+   }
++  async function openQuestionnaireForm(item, fresh, started) {
++    var selection = context(), native = window.LightworkComplianceQuestionnaire;
++    var review = await request('/prepare', Object.assign(payload(), {
++      operation: item.id, context: fresh.context, revision: item.revision, arguments: {}
++    }));
++    if (!active(started)) return;
++    var details = review.details || {};
++    if (review.read_only !== true || review.operation !== item.id || details.form_handoff !== 'compliance-questionnaire' ||
++        !/^[a-f0-9]{64}$/.test(details.context || '') || !native || typeof native.openCreate !== 'function')
++      throw new Error('The questionnaire form is unavailable. Open questionnaire design to continue.');
++    clear(formHost); node('h3', item.label, formHost); node('p', review.summary, formHost);
++    var launch = button('Choose and review questions', formHost, async function () {
++      if (busy || !active(started)) return;
++      if (JSON.stringify(context()) !== JSON.stringify(selection)) {
++        status.textContent = 'Your selection changed. Refresh current controls before opening the form.'; return;
++      }
++      lock(true);
++      try {
++        var result = await native.openCreate({host: formHost, context: details.context,
++          active: function () { return active(started) && JSON.stringify(context()) === JSON.stringify(selection); }});
++        if (!active(started)) return;
++        clear(formHost);
++        status.textContent = result && result.confirmed === true ? 'Questionnaire saved for independent approval.' :
++          result === null || result && result.status === 'cancelled' ? 'Questionnaire form closed. Check questionnaire design for any saved or pending request.' :
++          'The save is not confirmed. Check the original request in questionnaire design before trying again.';
++        node('p', status.textContent, formHost);
++        if (result && result.confirmed === true && result.result) renderData(formHost, result.result);
++        nativeLink(item, formHost);
++      } catch (_) {
++        if (active(started)) { status.textContent = 'The form result is not confirmed. Open questionnaire design to check the original request.'; nativeLink(item, formHost); }
++      } finally { lock(false); }
++    });
++    launch.className = 'btn btn--primary'; launch.focus(); nativeLink(item, formHost);
++  }
+   async function openOperation(id) {
+     if (busy) return false;
+     var started = generation; lock(true);
+@@ -389,6 +450,10 @@
+         await openConsentJobForm(item, fresh, started);
+         return true;
+       }
++      if (item.id === 'compliance.questionnaire.build') {
++        await openQuestionnaireForm(item, fresh, started);
++        return true;
++      }
+       if (['learning.workflow_refine', 'learning.rule_teach', 'learning.rule_refine'].includes(item.id)) {
+         await openTeachingForm(item, fresh, started);
+         return true;

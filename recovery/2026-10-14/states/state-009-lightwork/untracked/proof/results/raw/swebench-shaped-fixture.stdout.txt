@@ -1,0 +1,10 @@
+==============================================================================
+  MAVERICK -- SWE-BENCH-SHAPED FIXTURE CHECKS   (supplied patch)
+==============================================================================
+  [PASS]  genuine fix resolves                baseline 0.333 -> candidate 1.000, promoted=True, approver=86cac660916e818d, samples=12
+  [PASS]  test-edit cheat refused             boundary_ok=False, promoted=False -- boundary refused: patch rejected by anti-cheat boundary
+  [PASS]  regression caught                   boundary_ok=True, tests_resolved=False -- not resolved: candidate 0.333 (baseline 0.333); some FAIL/PASS_TO_PASS failing
+  [PASS]  ledger holds only the genuine fix   ledger ids = ['calc__add-1']
+==============================================================================
+  4 fixture checks passed, 0 failed   (not a SWE-bench Verified result)
+==============================================================================

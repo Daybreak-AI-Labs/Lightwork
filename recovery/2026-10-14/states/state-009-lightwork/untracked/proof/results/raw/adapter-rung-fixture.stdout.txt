@@ -1,0 +1,12 @@
+==============================================================================
+  MAVERICK -- ADAPTER-RUNG FIXTURE CHECKS   (stub trainer and scorer)
+==============================================================================
+  [PASS]  provenance boundary                 2 tenant examples kept; model_output + unknown provenance refused (distillation guard)
+  [PASS]  payload hygiene boundary            adapter dir carrying .py refused before eval; safetensors-only payload accepted
+  [PASS]  genuine uplift promotes             held-out 0.500 -> 1.000 over 22 unseen cases; signed, ledgered, Modelfile emitted
+  [PASS]  memoriser refused (overfit)         held-in 0.500->1.000 gamed; held-out flat -> OVERFIT, never reached the gate
+  [PASS]  unforgeable payload-bound approval  approver=72ff9eedd3be0465; swapped weights digest NOT authorised
+  [PASS]  one-step rollback                   previous pointer restored byte-identical; ledger marks the superseded promotion rolled_back
+==============================================================================
+  6 fixture checks passed, 0 failed   (trainer + eval scorer stubbed)
+==============================================================================

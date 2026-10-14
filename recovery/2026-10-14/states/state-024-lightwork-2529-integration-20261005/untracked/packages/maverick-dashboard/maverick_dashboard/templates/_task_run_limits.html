@@ -1,0 +1,25 @@
+<details data-task-run-limits>
+  <summary>{{ ui('Set limits for this task') }}</summary>
+  <p class="muted">{{ ui('Leave a field empty to use your workspace settings. A task can stop when it reaches one of these limits.') }}</p>
+  <label for="task-spend-limit">{{ ui('Maximum spend (USD)') }}
+    <input id="task-spend-limit" class="input" type="number" name="max_dollars"
+           min="0" max="100" step="0.01" inputmode="decimal" autocomplete="off"
+           aria-describedby="task-spend-limit-help">
+  </label>
+  <p class="muted" id="task-spend-limit-help">{{ ui('Up to $100 for one task. Your workspace may set a lower maximum.') }}</p>
+  <label for="task-time-limit">{{ ui('Time available (minutes)') }}
+    <input id="task-time-limit" class="input" type="number" name="max_wall_minutes"
+           min="1" max="1440" step="1" inputmode="numeric" autocomplete="off"
+           aria-describedby="task-time-limit-help">
+  </label>
+  <p class="muted" id="task-time-limit-help">{{ ui('Choose from 1 minute to 24 hours. Your workspace may set a shorter maximum.') }}</p>
+  <label for="task-extra-help">{{ ui('How much extra help may Lightwork use?') }}
+    <select id="task-extra-help" class="select" name="max_depth" aria-describedby="task-extra-help-note">
+      <option value="">{{ ui('Use workspace setting (up to {count} levels of help)', count=goal_max_depth) }}</option>
+      {% for depth in range(1, goal_max_depth + 1) %}
+      <option value="{{ depth }}">{% if depth == 1 %}{{ ui('Keep the work focused') }}{% elif depth == 2 %}{{ ui('Allow a small support team') }}{% elif depth == 3 %}{{ ui('Let the team bring in more help') }}{% else %}{{ ui('Wider support team ({count})', count=depth) }}{% endif %}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <p class="muted" id="task-extra-help-note">{{ ui('Higher choices let one helper ask other specialists to handle parts of the work.') }}</p>
+</details>

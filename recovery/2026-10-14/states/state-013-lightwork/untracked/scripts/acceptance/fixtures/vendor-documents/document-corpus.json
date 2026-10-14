@@ -1,0 +1,451 @@
+{
+  "schema": "lightwork.authored-vendor-document-corpus.v1",
+  "authored_noncustomer": true,
+  "profile": "legacy_page_stream_and_office_body_cells",
+  "generator": {
+    "python_docx": "1.2.0",
+    "openpyxl": "3.1.5",
+    "reportlab": "4.4.9",
+    "pillow": "12.3.0",
+    "font_sha256": "c4c45690b345435b2cba52ecabe275f05e49b389b39fe68ad03afbb551288d3d"
+  },
+  "limits": [
+    "Authored selected cases, not representative accuracy or customer acceptance.",
+    "Omitted headers/hidden cells and cached formulas must be reviewed against originals.",
+    "Text and citation matches do not prove semantic reading order, compliance or OCR quality.",
+    "Renderer/OCR acceptance is a separate explicit backend profile."
+  ],
+  "cases": [
+    {
+      "id": "word-layout",
+      "file": "corpus-word-layout.docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "categories": [
+        "word_body",
+        "word_table",
+        "word_header_omission",
+        "word_footer_omission",
+        "word_hidden_omission"
+      ],
+      "ground_truth": [
+        {
+          "text": "Model provenance is documented with provider and version.",
+          "location": {
+            "paragraph": 2
+          }
+        },
+        {
+          "text": "Customer data is deleted within 30 days.",
+          "location": {
+            "paragraph": 4
+          }
+        }
+      ],
+      "excluded": [
+        "HEADER CANARY",
+        "FOOTER CANARY",
+        "HIDDEN WORD CANARY"
+      ],
+      "baseline": {
+        "status": "available",
+        "method": "word_body_text",
+        "found": [
+          true,
+          true
+        ],
+        "cached_formula_values": false
+      },
+      "bytes": 38019,
+      "sha256": "5cb110d0602861d6cc67b31c331b7cdb0fc3bbb1d5c8035c90c9f6a070a01744"
+    },
+    {
+      "id": "word-tracked",
+      "file": "corpus-word-tracked.docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "categories": [
+        "word_tracked_change_refusal"
+      ],
+      "ground_truth": [
+        {
+          "text": "Model provenance is documented with provider and version."
+        }
+      ],
+      "excluded": [],
+      "baseline": {
+        "status": "refused",
+        "error": "tracked changes require a reviewed plain-text copy",
+        "found": [
+          false
+        ]
+      },
+      "bytes": 37938,
+      "sha256": "14cad27111ce013869e0cac83c9c3b053d6046d09a05b7c9ee99165d26f24fbd"
+    },
+    {
+      "id": "sheet-visibility",
+      "file": "corpus-sheet-visibility.xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "categories": [
+        "excel_cells",
+        "excel_hidden_row_omission",
+        "excel_hidden_column_omission",
+        "excel_hidden_sheet_omission",
+        "excel_cached_value",
+        "excel_uncached_omission"
+      ],
+      "ground_truth": [
+        {
+          "text": "Model provenance is documented with provider and version.",
+          "location": {
+            "sheet": "Visible controls",
+            "cell": "B2"
+          }
+        },
+        {
+          "text": "Customer data is deleted within 30 days.",
+          "location": {
+            "sheet": "Visible controls",
+            "cell": "B3"
+          }
+        },
+        {
+          "text": "9",
+          "location": {
+            "sheet": "Visible controls",
+            "cell": "B5"
+          }
+        }
+      ],
+      "excluded": [
+        "HIDDEN ROW CANARY",
+        "HIDDEN COLUMN CANARY",
+        "HIDDEN SHEET CANARY",
+        "100+200",
+        "1+2"
+      ],
+      "excluded_locations": [
+        {
+          "sheet": "Visible controls",
+          "cell": "B6"
+        }
+      ],
+      "baseline": {
+        "status": "available",
+        "method": "excel_visible_cell_text",
+        "found": [
+          true,
+          true,
+          true
+        ],
+        "cached_formula_values": true
+      },
+      "bytes": 5724,
+      "sha256": "3d46d1611b4631aae3d8bb5c77f37d806f55ef2b91bc1f08b3a452ceb85476af"
+    },
+    {
+      "id": "digital-reference",
+      "file": "northstar-policy.pdf",
+      "mime": "application/pdf",
+      "categories": [
+        "pdf_digital_reference",
+        "pdf_blank_middle_page"
+      ],
+      "ground_truth": [
+        {
+          "text": "Model provenance is documented with provider and version.",
+          "pages": [
+            1
+          ]
+        },
+        {
+          "text": "Retention policy requires deletion after 30 days.",
+          "pages": [
+            3
+          ]
+        }
+      ],
+      "excluded": [],
+      "baseline": {
+        "status": "available",
+        "method": "pdf_page_content_streams",
+        "found": [
+          true,
+          true
+        ],
+        "page_count": 3
+      },
+      "bytes": 1662,
+      "sha256": "be36d72b505c3078887197504754142aeb64cda3eb5f65816abc9eb8c1cdf3a4"
+    },
+    {
+      "id": "digital-pages",
+      "file": "corpus-digital-pages.pdf",
+      "mime": "application/pdf",
+      "categories": [
+        "pdf_digital_reportlab",
+        "pdf_blank_middle_page"
+      ],
+      "ground_truth": [
+        {
+          "text": "Model provenance is documented with provider and version.",
+          "pages": [
+            1
+          ]
+        },
+        {
+          "text": "Customer data is deleted within 30 days.",
+          "pages": [
+            3
+          ]
+        }
+      ],
+      "excluded": [],
+      "baseline": {
+        "status": "extraction_failed",
+        "method": "pdf_page_content_streams",
+        "found": [
+          false,
+          false
+        ]
+      },
+      "limitation": "Legacy page-stream parser cannot extract this producer/layout; no rendering or OCR result is claimed.",
+      "bytes": 2147,
+      "sha256": "12e1c13c4f443d2714681b4a133dcc7e4e69bf303933589cf60297d824dcc573"
+    },
+    {
+      "id": "multicolumn",
+      "file": "corpus-multicolumn.pdf",
+      "mime": "application/pdf",
+      "categories": [
+        "pdf_multicolumn",
+        "pdf_paint_order_not_reading_order"
+      ],
+      "ground_truth": [
+        {
+          "text": "Model provenance is documented with provider and version.",
+          "pages": [
+            1
+          ]
+        },
+        {
+          "text": "Customer data is deleted within 30 days.",
+          "pages": [
+            1
+          ]
+        },
+        {
+          "text": "RIGHT COLUMN FIRST"
+        },
+        {
+          "text": "RIGHT COLUMN SECOND"
+        }
+      ],
+      "excluded": [],
+      "baseline": {
+        "status": "extraction_failed",
+        "method": "pdf_page_content_streams",
+        "found": [
+          false,
+          false,
+          false,
+          false
+        ]
+      },
+      "limitation": "Legacy page-stream parser cannot extract this producer/layout; no rendering or OCR result is claimed.",
+      "bytes": 1605,
+      "sha256": "e46e469a4609b00545cb16c592456d842a0e0e2c54b376436d67630a23df5099"
+    },
+    {
+      "id": "fontmapped",
+      "file": "corpus-fontmapped.pdf",
+      "mime": "application/pdf",
+      "categories": [
+        "pdf_font_mapping",
+        "pdf_unicode"
+      ],
+      "ground_truth": [
+        {
+          "text": "Model provenance is documented with provider and version.",
+          "pages": [
+            1
+          ]
+        },
+        {
+          "text": "Mapped glyph canary: café, naïve, Ω.",
+          "pages": [
+            1
+          ]
+        }
+      ],
+      "excluded": [],
+      "baseline": {
+        "status": "extraction_failed",
+        "method": "pdf_page_content_streams",
+        "found": [
+          false,
+          false
+        ]
+      },
+      "limitation": "Legacy page-stream parser cannot extract this producer/layout; no rendering or OCR result is claimed.",
+      "bytes": 33979,
+      "sha256": "2b6657a20915741a72f2309920bf56ac4baa52a64aeedc15ff179913f194caec"
+    },
+    {
+      "id": "rotated",
+      "file": "corpus-rotated.pdf",
+      "mime": "application/pdf",
+      "categories": [
+        "pdf_rotated_digital"
+      ],
+      "ground_truth": [
+        {
+          "text": "Model provenance is documented with provider and version.",
+          "pages": [
+            1
+          ]
+        }
+      ],
+      "excluded": [],
+      "baseline": {
+        "status": "extraction_failed",
+        "method": "pdf_page_content_streams",
+        "found": [
+          false
+        ]
+      },
+      "limitation": "Legacy page-stream parser cannot extract this producer/layout; no rendering or OCR result is claimed.",
+      "bytes": 1402,
+      "sha256": "93086b79dced42ba2b89116f15de8db101a637adf43ab293bd1c63ac12d01bd5"
+    },
+    {
+      "id": "image-only",
+      "file": "corpus-image-only.pdf",
+      "mime": "application/pdf",
+      "categories": [
+        "pdf_image_only",
+        "ocr_not_evaluated"
+      ],
+      "ground_truth": [
+        {
+          "text": "Model provenance is documented with provider and version.",
+          "pages": [
+            1
+          ]
+        }
+      ],
+      "excluded": [],
+      "baseline": {
+        "status": "extraction_failed",
+        "method": "pdf_page_content_streams",
+        "found": [
+          false
+        ]
+      },
+      "limitation": "Legacy page-stream parser cannot extract this producer/layout; no rendering or OCR result is claimed.",
+      "bytes": 14760,
+      "sha256": "3c0d59a57de3c123913d16feac4e77261ff3d9afa46e5f6a09390db167625880"
+    },
+    {
+      "id": "lowquality",
+      "file": "corpus-lowquality.pdf",
+      "mime": "application/pdf",
+      "categories": [
+        "pdf_lowquality_scan",
+        "ocr_not_evaluated"
+      ],
+      "ground_truth": [
+        {
+          "text": "Model provenance is documented with provider and version.",
+          "pages": [
+            1
+          ]
+        }
+      ],
+      "excluded": [],
+      "baseline": {
+        "status": "extraction_failed",
+        "method": "pdf_page_content_streams",
+        "found": [
+          false
+        ]
+      },
+      "limitation": "Legacy page-stream parser cannot extract this producer/layout; no rendering or OCR result is claimed.",
+      "bytes": 4153,
+      "sha256": "71c6acebd59bed462467c34da3be62f0cc1aeef77a1a8a1c797e6f562054ff7a"
+    },
+    {
+      "id": "blank",
+      "file": "corpus-blank.pdf",
+      "mime": "application/pdf",
+      "categories": [
+        "pdf_blank"
+      ],
+      "ground_truth": [],
+      "excluded": [],
+      "baseline": {
+        "status": "extraction_failed",
+        "method": "pdf_page_content_streams",
+        "found": []
+      },
+      "limitation": "Legacy page-stream parser cannot extract this producer/layout; no rendering or OCR result is claimed.",
+      "bytes": 1307,
+      "sha256": "19c89f0c89a15e3a97eb7a1c17a18f19fcd3249c71df01fd260ee9f5c84908fa"
+    },
+    {
+      "id": "malformed",
+      "file": "corpus-malformed.pdf",
+      "mime": "application/pdf",
+      "categories": [
+        "pdf_malformed"
+      ],
+      "ground_truth": [],
+      "excluded": [],
+      "baseline": {
+        "status": "extraction_failed",
+        "method": "pdf_page_content_streams",
+        "found": []
+      },
+      "limitation": "Legacy page-stream parser cannot extract this producer/layout; no rendering or OCR result is claimed.",
+      "bytes": 77,
+      "sha256": "edc66bf781dd17c4898830b31c66a8d21a75df6996f00681c9f97ebd1df23d71"
+    },
+    {
+      "id": "pdf-oversize",
+      "file": "corpus-blank.pdf",
+      "mime": "application/pdf",
+      "categories": [
+        "pdf_oversize"
+      ],
+      "ground_truth": [],
+      "excluded": [],
+      "append_spaces_to_bytes": 16777217,
+      "baseline": {
+        "status": "refused",
+        "error": "supported byte limit",
+        "found": []
+      },
+      "bytes": 1307,
+      "sha256": "19c89f0c89a15e3a97eb7a1c17a18f19fcd3249c71df01fd260ee9f5c84908fa",
+      "derived_sha256": "5d2610e24ca049d026976346d862cd48685875b815f359764318a9d28796e88b"
+    },
+    {
+      "id": "office-oversize",
+      "file": "corpus-word-layout.docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "categories": [
+        "office_oversize"
+      ],
+      "ground_truth": [],
+      "excluded": [],
+      "append_spaces_to_bytes": 8388609,
+      "baseline": {
+        "status": "refused",
+        "error": "supported byte limit",
+        "found": []
+      },
+      "bytes": 38019,
+      "sha256": "5cb110d0602861d6cc67b31c331b7cdb0fc3bbb1d5c8035c90c9f6a070a01744",
+      "derived_sha256": "db14c7485d4d1f38db9c6f105a04176f976a518000ac0578ba787b688ab28903"
+    }
+  ]
+}

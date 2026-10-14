@@ -1,0 +1,262 @@
+# Fail-closed production overlay for the Lightwork control plane.
+#
+# This file is intentionally not installable by itself. Supply both:
+#   --set image.digest=sha256:<64-lowercase-hex-characters>
+#   --set secret.name=<pre-provisioned-secret-name>
+#   --set secret.rotationGeneration=<non-secret-monotonic-generation>
+# The chart rejects the release if either value, or any invariant below, is
+# missing or weakened.
+
+production:
+  enforce: true
+
+# Required operator inputs for the report-only onboarding evaluator. Compute
+# these pins from the independently controlled deployment configuration and
+# signed release materials; never copy them out of the observations manifest.
+# The pre-provisioned serving Secret must also contain the exact signed JSON as
+# MAVERICK_PRODUCTION_ONBOARDING_OBSERVATIONS. The init container stages that
+# key into an immutable owner-only regular file before the application starts.
+productionOnboarding:
+  enabled: true
+  deploymentId: ""
+  sourceRevision: ""
+  contractSha256: ""
+  releaseStateSha256: ""
+  authorityKeyId: ""
+  authorityPublicKey: ""
+  identityPostureSha256: ""
+  observationsKey: MAVERICK_PRODUCTION_ONBOARDING_OBSERVATIONS
+
+image:
+  digest: ""
+
+replicaCount: 1
+
+persistence:
+  enabled: true
+  size: 10Gi
+
+worldModel:
+  backend: postgres
+  postgres:
+    rls: true
+    # One control plane may use two transaction pools plus this many dedicated
+    # session-lock connections; reserve up to 3x this value in Postgres.
+    poolSize: 10
+    connectTimeoutSeconds: 10
+    statementTimeoutMs: 30000
+    lockTimeoutMs: 5000
+
+# Required release-specific inputs. Provision a separate Secret containing
+# exactly MAVERICK_PG_MIGRATION_DSN and MAVERICK_MIGRATION_AUTHORIZATION, then
+# set its name and the SHA-256 of the authorization file's exact bytes.
+migration:
+  enabled: true
+  secretName: ""
+  authorizationSha256: ""
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 3600
+  stagingSizeLimit: 64Ki
+  # Independent of serving-pod affinity so the pre-install hook cannot require
+  # a serving pod that does not exist yet.
+  affinity: {}
+  # Required operator input: exact Postgres endpoint CIDR(s) only.
+  allowedEgressCIDRs: []
+  # Must match the migration-owner DSN.
+  databasePort: 5432
+
+encryption:
+  atRest: true
+  perTenant: true
+  strict: true
+
+kms:
+  provider: vault
+  # Required operator input: authenticated Vault API endpoint. The
+  # MAVERICK_KMS_KEY_ID and VAULT_TOKEN files come from secret.name.
+  address: ""
+  mount: transit
+  dekCacheTTLSeconds: 60
+
+sandbox:
+  # The first surface admits only metadata-complete read tools and refuses all
+  # arbitrary shell/code execution. gVisor still isolates the control plane.
+  backend: disabled
+
+# Exact limits installed by the PID-1 production launcher before the dashboard
+# starts. These are intentionally fixed for the first reviewed profile; Helm
+# validation rejects an attempt to raise or otherwise drift them.
+runtimeContract:
+  pids: 256
+  openFiles: 4096
+  singleFileBytes: 8589934592
+  maxToolResultBytes: 32000
+  maxGoalWallSeconds: 1800
+  maxToolCalls: 500
+  maxAgentDepth: 3
+  maxTotalChildAgents: 32
+  maxConcurrentGoals: 8
+  maxConcurrentGoalsPerPrincipal: 2
+
+runtimeClassName: gvisor
+
+model:
+  provider: vllm
+  # Every field must exactly match one approved entry in the signed production
+  # model policy embedded in the release image.
+  name: ""
+  artifactDigest: ""
+  baseURL: ""
+  region: ""
+  retentionMode: self-hosted-no-provider-retention
+  credentialSource: mounted_file
+  maxSpendUSD: 0
+  spendPeriod: month
+
+identity:
+  # Required operator selection: oidc or trustedProxy. This repository does not
+  # select a customer's IdP or proxy trust boundary.
+  mode: ""
+  # Required secret-free runtime identity and RBAC configuration. Populate only
+  # the selected provider block; production validation rejects inactive-provider
+  # residue and any unreviewed/credential-shaped field.
+  config:
+    oidc:
+      issuer: ""
+      audience: ""
+      jwksUri: ""
+      algorithms: []
+      clientId: ""
+      redirectUri: ""
+      authorizationEndpoint: ""
+      tokenEndpoint: ""
+    trustedProxy:
+      header: ""
+      trustedProxies: []
+      trustLoopback: false
+    dashboard:
+      defaultRole: ""
+      admins: []
+      defaultSuites: []
+      groupRoles: {}
+      groupSuites: {}
+    kernel:
+      roles: {}
+      roleAssignments: {}
+
+tenancy:
+  byUser: true
+
+# Required operator inputs. policyGeneration is a positive canonical decimal
+# integer and must increase whenever any ceiling changes. Configure exactly one
+# source: limitsJSON, or all six scalar fields. Empty placeholders make the
+# production overlay deliberately unrenderable until a reviewed policy is set.
+tenantQuota:
+  enforce: true
+  policyGeneration: ""
+  limitsJSON: ""
+  limits:
+    concurrentRuns: ""
+    queuedJobs: ""
+    dailyTokens: ""
+    dailySpendDollars: ""
+    toolCalls: ""
+    storageBytes: ""
+
+indeterminateReconciliation:
+  reconcileSeconds: 900
+  escalateSeconds: 3600
+  # Required operator inputs: an incident queue/team and exact authenticated
+  # principal IDs authorized to close quarantined ambiguous-effect cases.
+  escalationTarget: ""
+  adjudicators: []
+
+secret:
+  create: false
+  name: ""
+  # Required operator input. Change this on every Secret generation even when
+  # the pre-provisioned Secret name is reused; it is a rollout trigger, not a
+  # credential, key fingerprint, or Secret resourceVersion.
+  rotationGeneration: ""
+  stagingSizeLimit: 2Mi
+
+enterprise:
+  profile: enterprise
+  required: true
+
+containerSecurityContext:
+  privileged: false
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  procMount: Default
+  capabilities:
+    drop: ["ALL"]
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+    ephemeral-storage: 256Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+    ephemeral-storage: 1Gi
+
+tmp:
+  sizeLimit: 1Gi
+
+terminationGracePeriodSeconds: 60
+
+probes:
+  enabled: true
+
+# Production assurance must be continuously scrapeable. The referenced Secret
+# must contain a random MAVERICK_METRICS_TOKEN of at least 32 bytes. During a
+# rotation, temporarily add MAVERICK_METRICS_TOKEN_PREVIOUS.
+serviceMonitor:
+  enabled: true
+  bearerTokenSecret:
+    name: ""
+    key: MAVERICK_METRICS_TOKEN
+    previousKey: MAVERICK_METRICS_TOKEN_PREVIOUS
+    scrapeKey: MAVERICK_METRICS_TOKEN
+
+autoscaling:
+  enabled: false
+
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: true
+  # Required operator inputs: the installed ingress class, exact DNS host, and
+  # a pre-provisioned TLS Secret. The chart refuses placeholders or plaintext.
+  className: ""
+  hosts:
+    - host: ""
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+networkPolicy:
+  enabled: true
+  restrictEgress: true
+  allowPublicEgress: false
+  # Required operator input: ingress-controller namespace(s) permitted to
+  # reach the ClusterIP service.
+  allowedIngressNamespaces: []
+  # Required operator input: exact kube-dns/CoreDNS service CIDR(s). DNS to
+  # any other address is blocked, closing DNS as an unbounded egress path.
+  dnsCIDRs: []
+  # Required operator input. List only the exact endpoint CIDRs needed by this
+  # deployment; 0.0.0.0/0 and ::/0 are rejected by chart validation.
+  allowedEgressCIDRs: []

@@ -1,0 +1,83 @@
+# Production-assurance reference overlay.
+#
+# This file is deliberately incomplete until image.digest is supplied at
+# install time. See README.md. It describes one control-plane replica, not an
+# HA Lightwork control plane or an enterprise-ready deployment.
+
+image:
+  repository: ghcr.io/day-ai-labs/maverick
+  digest: ""  # REQUIRED: --set-string image.digest=sha256:<64 lowercase hex>
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Activates chart render-time provenance admission. Empty digest, commit, or
+# deployment identity values below intentionally make helm lint/template fail.
+productionAssurance:
+  enabled: true
+
+persistence:
+  enabled: true
+  size: 50Gi
+  accessMode: ReadWriteOnce
+  mountPath: /home/maverick/.maverick
+
+# Strict authority makes shared, encrypted effect receipts mandatory. Select
+# Postgres for the world model, governed records, and effect ledger while the
+# residual file-backed authorities remain on the single-writer PVC. This does
+# not make the whole control plane highly available.
+worldModel:
+  backend: postgres
+  postgres:
+    rls: true
+
+# Pre-create this Secret through your secret manager. The chart must not own
+# credential lifecycle in this reference architecture.
+secret:
+  create: false
+  name: maverick-production-secrets
+  data: {}
+
+# Non-secret deployment identity. Supply the two empty values at install time.
+env:
+  MAVERICK_GIT_COMMIT: ""
+  MAVERICK_DEPLOYMENT_ID: ""
+  MAVERICK_TENANT_BY_USER: "1"
+  MAVERICK_SECURE_DEFAULT: "1"
+  MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY: "1"
+
+# Enterprise/HA admission intentionally remains off. authority_state will
+# refuse enterprise or multi-replica admission while authority stores are local.
+enterprise:
+  profile: standard
+  required: false
+
+config:
+  create: true
+  mountPath: /home/maverick/.maverick/config.toml
+  # REQUIRED: --set-file config.content=.../config.toml
+  content: ""
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+  restrictEgress: false
+
+serviceMonitor:
+  enabled: true
+
+ingress:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi

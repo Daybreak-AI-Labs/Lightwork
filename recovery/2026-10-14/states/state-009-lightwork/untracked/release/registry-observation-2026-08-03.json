@@ -1,0 +1,62 @@
+{
+  "schema": "lightwork.public-registry-observation.v1",
+  "observed_at": "2026-08-03T20:51:15Z",
+  "ownership_inference": "none",
+  "note": "HTTP 404 means no public project metadata was visible at observation time. It does not prove availability, reservation, control, or Trusted Publisher configuration.",
+  "projects": [
+    {
+      "registry": "pypi",
+      "name": "maverick-agent",
+      "url": "https://pypi.org/pypi/maverick-agent/json",
+      "http_status": 404
+    },
+    {
+      "registry": "pypi",
+      "name": "maverick-shield",
+      "url": "https://pypi.org/pypi/maverick-shield/json",
+      "http_status": 404
+    },
+    {
+      "registry": "pypi",
+      "name": "maverick-channels",
+      "url": "https://pypi.org/pypi/maverick-channels/json",
+      "http_status": 404
+    },
+    {
+      "registry": "pypi",
+      "name": "maverick-evolve",
+      "url": "https://pypi.org/pypi/maverick-evolve/json",
+      "http_status": 404
+    },
+    {
+      "registry": "pypi",
+      "name": "maverick-dashboard",
+      "url": "https://pypi.org/pypi/maverick-dashboard/json",
+      "http_status": 404
+    },
+    {
+      "registry": "pypi",
+      "name": "maverick-mcp-server",
+      "url": "https://pypi.org/pypi/maverick-mcp-server/json",
+      "http_status": 404
+    },
+    {
+      "registry": "pypi",
+      "name": "maverick-knowledge",
+      "url": "https://pypi.org/pypi/maverick-knowledge/json",
+      "http_status": 404
+    },
+    {
+      "registry": "pypi",
+      "name": "maverick-installer",
+      "url": "https://pypi.org/pypi/maverick-installer/json",
+      "http_status": 404
+    },
+    {
+      "registry": "npm",
+      "name": "@maverick/plugin-sdk",
+      "url": "https://registry.npmjs.org/%40maverick%2Fplugin-sdk",
+      "http_status": 404
+    }
+  ]
+}

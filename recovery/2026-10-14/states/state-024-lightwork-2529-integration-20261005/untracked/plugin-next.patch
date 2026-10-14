@@ -1,0 +1,373 @@
+diff --git a/packages/maverick-core/maverick/plugin_workbench.py b/packages/maverick-core/maverick/plugin_workbench.py
+index 10786def..3bfe6469 100644
+--- a/packages/maverick-core/maverick/plugin_workbench.py
++++ b/packages/maverick-core/maverick/plugin_workbench.py
+@@ -169,7 +169,7 @@ def _check_files(row, payload):
+     return files
+ 
+ 
+-def run_check(context, operation, fingerprint, sample, mode, *, authorize, expected=None):
++def run_check(context, operation, fingerprint, sample, mode, *, authorize, expected=None, input_schema_sha256=None):
+     from .budget import Budget
+     from .sandbox.research import ResearchContainerRunner, ResearchLimits
+ 
+@@ -184,13 +184,16 @@ def run_check(context, operation, fingerprint, sample, mode, *, authorize, expec
+         raise ValueError("Use an object sample smaller than 16 KiB; do not include credentials or private production data.")
+     if len(json.dumps(expected, allow_nan=False).encode()) > 16384:
+         raise ValueError("Expected sample result must be smaller than 16 KiB.")
++    if input_schema_sha256 is not None and not re.fullmatch(r"[a-f0-9]{64}", input_schema_sha256):
++        raise ValueError("Review the exact practice questions before starting this check.")
+     expected_result = hashlib.sha256(json.dumps(expected, sort_keys=True, allow_nan=False).encode()).hexdigest()
+     image = str(policy.get("workbench_image") or "")
+     if not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
+         raise ValueError("Select a locally installed, reviewed immutable Linux image in Settings. No image is downloaded and host execution is forbidden.")
+     initial = {"id": operation, "fingerprint": fingerprint, "plugin": row["name"], "distribution": row["distribution"],
+                "version": row["version"], "mode": mode, "started_at": time.time(), "state": "running_or_interrupted",
+-               "sample_sha256": _digest(sample), "expected_result_sha256": expected_result, "attempts": 0, "replay": "never", "external_outcome": "unknown"}
++               "sample_sha256": _digest(sample), "expected_result_sha256": expected_result, "input_schema_sha256": input_schema_sha256,
++               "attempts": 0, "replay": "never", "external_outcome": "unknown"}
+     def reserve(state):
+         if operation in state["checks"]:
+             raise ValueError("This operation was already recorded. Refresh its result; it will not be replayed.")
+@@ -210,7 +213,8 @@ def run_check(context, operation, fingerprint, sample, mode, *, authorize, expec
+         yield
+     try:
+         payload = {"group": row.get("group", "maverick.tools"), "entry": row["entry"], "distribution": row["distribution"], "version": row["version"],
+-                   "content_sha256": row.get("sandbox_content_sha256") or row["content_sha256"], "operation": operation, "sample": sample}
++                   "content_sha256": row.get("sandbox_content_sha256") or row["content_sha256"], "operation": operation,
++                   "sample": sample, "input_schema_sha256": input_schema_sha256}
+         files = _check_files(row, payload)
+         result = ResearchContainerRunner(image, limits=ResearchLimits(timeout_seconds=0.5 if mode == "timeout" else 15)).run(
+             files,
+diff --git a/packages/maverick-core/maverick/sandbox/plugin_contracts.py b/packages/maverick-core/maverick/sandbox/plugin_contracts.py
+index f10cb831..d7cd6bb9 100644
+--- a/packages/maverick-core/maverick/sandbox/plugin_contracts.py
++++ b/packages/maverick-core/maverick/sandbox/plugin_contracts.py
+@@ -7,7 +7,9 @@ Network denial is enforced by the container, never by a monkeypatched client.
+ from __future__ import annotations
+ 
+ import asyncio
++import hashlib
+ import inspect
++import json
+ 
+ 
+ def validator(schema):
+@@ -33,20 +35,71 @@ def validate(schema, sample):
+     validator(schema).validate(sample)
+ 
+ 
++def reviewed_schema(schema, expected):
++    if expected is not None and hashlib.sha256(json.dumps(schema, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest() != expected:
++        raise ValueError("practice questions changed since the exact inspection; no tool action was invoked")
++
++
+ def await_result(value):
+     return asyncio.run(value) if inspect.isawaitable(value) else value
+ 
+ 
+-def execute(group, target, sample, dispatch):
++def inspect_contract(group, target, name):
++    """Describe the declared input only; never invoke a tool action/lifecycle."""
++    if group == "maverick.tools":
++        tool = target()
++        validator(tool.input_schema)
++        if not callable(tool.fn):
++            raise ValueError("tool has no callable handler")
++        return [{"name": name, "input_schema": tool.input_schema}]
++    if group == "maverick.personas":
++        return [{"name": name, "input_schema": {"type": "object", "additionalProperties": False}}]
++    if group == "maverick.skills":
++        return [{"name": name, "input_schema": {"type": "object", "properties": {"goal": {"type": "string", "title": "Practice request", "minLength": 1}},
++                                                "required": ["goal"], "additionalProperties": False}}]
++    if group == "maverick.channels":
++        return [{"name": name, "input_schema": {"type": "object", "properties": {
++            "user_id": {"type": "string", "title": "Fictional person", "minLength": 1},
++            "text": {"type": "string", "title": "Practice message"}, "reply": {"type": "string", "title": "Practice reply"},
++            "startup_seconds": {"type": "number", "title": "Seconds to wait for startup", "minimum": 0, "maximum": 5}},
++            "required": ["user_id", "text", "reply"], "additionalProperties": False}}]
++    raise ValueError("unsupported plugin contract")
++
++
++def inspect_remote(payload):
++    if payload["group"] == "maverick.ts":
++        from maverick.ts_plugin_host import _close_all_children, _fetch_manifest, _PinnedCommand
++        try:
++            _protocol, manifest = _fetch_manifest(_PinnedCommand.from_command(["node", "/candidate/plugin" + payload["source_suffix"]]))
++            result = [{"name": item["name"], "input_schema": item["inputSchema"]} for item in manifest]
++        finally:
++            _close_all_children()
++    else:
++        from maverick.grpc_plugin_host import _close_all_channels, load_grpc_plugin
++        try:
++            tools = load_grpc_plugin(payload["target"], command=[payload["runtime"], "/candidate/plugin" + payload["source_suffix"]],
++                                     call_timeout=10, strict_schema=True, expected_source_sha256=payload["content_sha256"])
++            result = [{"name": item.name, "input_schema": item.input_schema} for item in tools]
++        finally:
++            _close_all_channels()
++    for item in result:
++        validator(item["input_schema"])
++    return result
++
++
++def execute(group, target, sample, dispatch, expected_schema=None):
+     if group == "maverick.tools":
+         tool = target()
+         validate(tool.input_schema, sample)
++        reviewed_schema(tool.input_schema, expected_schema)
+         if not callable(tool.fn):
+             raise ValueError("tool has no callable handler")
+         dispatch()
+         return await_result(tool.fn(sample))
+     if group == "maverick.personas":
+-        validate({"type": "object", "additionalProperties": False}, sample)
++        schema = inspect_contract(group, target, "")[0]["input_schema"]
++        validate(schema, sample)
++        reviewed_schema(schema, expected_schema)
+         if not callable(target):
+             raise ValueError("persona must be a callable renderer")
+         dispatch()
+@@ -56,8 +109,9 @@ def execute(group, target, sample, dispatch):
+         return value
+     if group == "maverick.skills":
+         from maverick.skills import Skill, _relevant_skills_lexical, render_for_prompt
+-        validate({"type": "object", "properties": {"goal": {"type": "string", "minLength": 1}},
+-                  "required": ["goal"], "additionalProperties": False}, sample)
++        schema = inspect_contract(group, target, "")[0]["input_schema"]
++        validate(schema, sample)
++        reviewed_schema(schema, expected_schema)
+         if (not isinstance(target, Skill) or not isinstance(target.name, str) or not target.name
+                 or not isinstance(target.body, str) or not target.body.strip()
+                 or not isinstance(target.triggers, list) or not target.triggers
+@@ -72,11 +126,9 @@ def execute(group, target, sample, dispatch):
+         from dataclasses import asdict
+ 
+         from maverick_channels.base import Channel, IncomingMessage, Reply
+-        schema = {"type": "object", "properties": {
+-            "user_id": {"type": "string", "minLength": 1}, "text": {"type": "string"},
+-            "reply": {"type": "string"}, "startup_seconds": {"type": "number", "minimum": 0, "maximum": 5}},
+-            "required": ["user_id", "text", "reply"], "additionalProperties": False}
++        schema = inspect_contract(group, target, "")[0]["input_schema"]
+         validate(schema, sample)
++        reviewed_schema(schema, expected_schema)
+         if not isinstance(target, type) or not issubclass(target, Channel):
+             raise ValueError("channel must be a concrete Channel subclass")
+         async def exercise():
+@@ -135,6 +187,8 @@ def execute_node(payload, dispatch):
+     try:
+         tools = load_ts_plugin(command, call_timeout=20)
+         tool = next(item for item in tools if item.name == chosen["name"])
++        validate(tool.input_schema, payload["sample"]["arguments"])
++        reviewed_schema(tool.input_schema, payload.get("input_schema_sha256"))
+         dispatch()
+         value = tool.fn(payload["sample"]["arguments"])
+         # The actual host preserves transport failure/unknown outcome as ERROR.
+@@ -159,6 +213,7 @@ def execute_grpc(payload, dispatch):
+         if tool is None:
+             raise ValueError("sample tool is absent from the actual gRPC manifest")
+         validate(tool.input_schema, payload["sample"]["arguments"])
++        reviewed_schema(tool.input_schema, payload.get("input_schema_sha256"))
+         dispatch()
+         result = tool.fn(payload["sample"]["arguments"])
+         if getattr(result, "attempt", None) is None or result.attempt.outcome_unknown or result.startswith("ERROR:"):
+diff --git a/packages/maverick-core/maverick/sandbox/plugin_probe.py b/packages/maverick-core/maverick/sandbox/plugin_probe.py
+index af16155e..4fc127c6 100644
+--- a/packages/maverick-core/maverick/sandbox/plugin_probe.py
++++ b/packages/maverick-core/maverick/sandbox/plugin_probe.py
+@@ -3,13 +3,21 @@ from __future__ import annotations
+ 
+ import hashlib
+ import importlib
++import importlib.util
+ import json
+ from pathlib import Path
+ 
+ 
+ def main():
+     payload = json.loads(Path("/candidate/sample.json").read_text(encoding="utf-8"))
+-    from plugin_contracts import execute, execute_grpc, execute_node
++    # The research runner keeps Python isolated (-I), which deliberately
++    # excludes the candidate directory from import search. Load only the
++    # controller-supplied helper at its fixed path; never widen that search.
++    spec = importlib.util.spec_from_file_location("plugin_contracts", "/candidate/plugin_contracts.py")
++    contracts = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(contracts)
++    execute, execute_node, execute_grpc = contracts.execute, contracts.execute_node, contracts.execute_grpc
++    inspect_contract, inspect_remote = contracts.inspect_contract, contracts.inspect_remote
+ 
+     def dispatch():
+         print(json.dumps({"operation": payload["operation"], "phase": "dispatch"}), flush=True)
+@@ -17,7 +25,10 @@ def main():
+         source = Path("/candidate/plugin" + payload["source_suffix"]).read_bytes()
+         if hashlib.sha256(source).hexdigest() != payload["content_sha256"]:
+             raise ValueError("Node source differs from the reviewed version")
+-        result = execute_node(payload, dispatch) if payload["group"] == "maverick.ts" else execute_grpc(payload, dispatch)
++        if payload.get("inspect_only") is True:
++            result = inspect_remote(payload)
++        else:
++            result = execute_node(payload, dispatch) if payload["group"] == "maverick.ts" else execute_grpc(payload, dispatch)
+     else:
+         from importlib.metadata import version
+ 
+@@ -28,7 +39,10 @@ def main():
+         target = importlib.import_module(module)
+         for part in attribute.split("."):
+             target = getattr(target, part)
+-        result = execute(payload["group"], target, payload["sample"], dispatch)
++        result = inspect_contract(payload["group"], target, payload["name"]) if payload.get("inspect_only") is True else execute(payload["group"], target, payload["sample"], dispatch, payload.get("input_schema_sha256"))
++    if payload.get("inspect_only") is True:
++        print(json.dumps({"operation": payload["operation"], "phase": "contract", "content_sha256": payload["content_sha256"], "contracts": result}, allow_nan=False))
++        return
+     encoded = json.dumps(result, sort_keys=True, allow_nan=False).encode()
+     print(json.dumps({"operation": payload["operation"], "phase": "result", "schema_valid": True,
+         "sample_valid": True, "completed": True, "content_sha256": payload["content_sha256"],
+diff --git a/packages/maverick-dashboard/maverick_dashboard/product_operations_plugins.py b/packages/maverick-dashboard/maverick_dashboard/product_operations_plugins.py
+index 09928d81..227ad0da 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/product_operations_plugins.py
++++ b/packages/maverick-dashboard/maverick_dashboard/product_operations_plugins.py
+@@ -2,13 +2,13 @@
+ from __future__ import annotations
+ 
+ import json
+-from typing import Literal
+ 
+ from fastapi import HTTPException
+ from maverick import plugin_workbench as workbench
+ from maverick.governed_operations import digest
+ from pydantic import Field
+ 
++from . import plugin_practice_forms_api as practice
+ from . import plugin_workbench_api as native
+ from .draft_api import context_for
+ from .product_operations import Adapter, EmptyInput, Outcome, Preview, Snapshot, StrictInput
+@@ -25,14 +25,8 @@ def snapshot(request, selection, kind="status"):
+     choices = [{"value": row["fingerprint"], "label": row["name"] + " / " + row["version"]}
+                for row in value["plugins"] if row["eligible"]]
+     fields = []
+-    if kind in {"check", "publish", "migrate"}:
++    if kind in {"check", "inspect", "publish", "migrate"}:
+         fields.append({"name": "fingerprint", "label": "Exact plugin version", "kind": "select", "choices": choices, "required": True})
+-    if kind == "check":
+-        fields.extend([
+-            {"name": "mode", "label": "Check", "kind": "select", "choices": [{"value": key, "label": label} for key, label in
+-             (("sample", "Validate and execute sample"), ("timeout", "Observe bounded timeout"), ("cancellation", "Observe cancellation"))], "required": True},
+-            {"name": "sample_json", "label": "Synthetic input JSON (no private data)", "kind": "textarea", "value": "{}", "required": True},
+-            {"name": "expected_json", "label": "Exact expected result JSON", "kind": "textarea", "value": "null", "required": True}])
+     if kind == "publish":
+         fields.append({"name": "rollback", "label": "Affected-work review and rollback plan", "kind": "textarea", "required": True})
+     if kind == "cancel":
+@@ -43,14 +37,11 @@ def snapshot(request, selection, kind="status"):
+         fields.append({"name": "pin", "label": "Stopped task or workflow pin", "kind": "select", "required": True,
+             "choices": [{"value": item["id"], "label": item["label"]} for item in value["pins"]]})
+     return Snapshot(digest(value), "Plugin qualification ledger", "Readiness is restricted-container evidence; no live capability is accepted.",
+-        details=value, fields=fields, blocked="No eligible installed plugin is available." if kind in {"check", "publish", "migrate"} and not choices else "")
++        details=value, fields=fields, blocked="No eligible installed plugin is available." if kind in {"check", "inspect", "publish", "migrate"} and not choices else "")
+ 
+ 
+ class CheckInput(StrictInput):
+     fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+-    mode: Literal["sample", "timeout", "cancellation"]
+-    sample_json: str = Field(max_length=16384)
+-    expected_json: str = Field(max_length=16384)
+ 
+ 
+ class PublishInput(StrictInput):
+@@ -137,6 +128,51 @@ def recover_check(request, selection, arguments, prepared, operation):
+     return None
+ 
+ 
++def inspect_prepare(request, selection, arguments):
++    selected = workbench.selected(arguments["fingerprint"])
++    native._authority(request)
++    return Preview("Read this exact plugin's practice questions once inside the already installed reviewed restricted image. No tool action, network, credentials, host writes or downloads are permitted. Reading questions does not qualify this plugin.",
++                   changes=[{"label": "Selected plugin", "after": selected["name"]},
++                            {"label": "Installed version", "after": selected["version"]},
++                            {"label": "Action", "after": "Read ordinary practice questions without invoking an action"}],
++                   native={"context": context_for(request)})
++
++
++def _inspection_outcome(row, fingerprint, status):
++    details = {"plugin": row["plugin"], "version": row["version"], "notice": row["notice"]}
++    if row["state"] == "ready":
++        details["plugin_practice_page"] = {"fingerprint": fingerprint, "receipt": row["receipt"]}
++    return Outcome(status if row["state"] == "ready" else "unconfirmed", row["notice"], details)
++
++
++def inspect_execute(request, selection, arguments, prepared, operation):
++    row = practice.inspect_current(request, practice.InspectIn(context=prepared["context"], fingerprint=arguments["fingerprint"],
++                                                              operation_id=operation, confirm=True))
++    return _inspection_outcome(row, arguments["fingerprint"], "confirmed")
++
++
++def inspect_recover(request, selection, arguments, prepared, operation):
++    from maverick import plugin_practice_forms
++
++    native._authority(request, prepared["context"])
++    try:
++        row = practice.project(plugin_practice_forms.read_contract(prepared["context"], operation, fingerprint=arguments["fingerprint"],
++                               authorize=lambda: native._authority(request, prepared["context"])))
++    except LookupError:
++        return None
++    except (ValueError, PermissionError) as exc:
++        raise HTTPException(409, str(exc)) from exc
++    return _inspection_outcome(row, arguments["fingerprint"], "replayed")
++
++
++def guided_prepare(request, selection, arguments):
++    row = practice.current(request, arguments["fingerprint"])
++    if row["state"] != "ready":
++        raise HTTPException(409, row["notice"] + " Choose Read a plugin's practice questions first.")
++    return Preview("Open this exact inspected plugin's ordinary questions and expected-answer controls. Complete its named fields and review the full practice answers before explicitly running a restricted check. No check starts from this handoff.",
++                   native={"plugin_practice_page": {"fingerprint": arguments["fingerprint"], "receipt": row["receipt"]}})
++
++
+ def check(request, selection, arguments, prepared, operation):
+     native._authority(request, prepared["context"])
+     recovered = recover_check(request, selection, arguments, prepared, operation)
+@@ -200,8 +236,10 @@ def entries():
+     shared = {"family": "plugins", "direct_ui": "/plugins", "pages": ("/plugins",)}
+     return (
+         Adapter("plugins.status", "Review plugin qualification", input_model=EmptyInput, snapshot=snapshot, prepare=prepare, **shared),
+-        Adapter("plugins.check", "Run a sandbox plugin check", input_model=CheckInput,
+-                snapshot=lambda r, s: snapshot(r, s, "check"), prepare=prepare, execute=check, recover=recover_check, **shared),
++        Adapter("plugins.inspect", "Read a plugin's practice questions", input_model=CheckInput,
++                snapshot=lambda r, s: snapshot(r, s, "inspect"), prepare=inspect_prepare, execute=inspect_execute, recover=inspect_recover, read_recovery=inspect_recover, **shared),
++        Adapter("plugins.check", "Open a guided plugin practice check", input_model=CheckInput,
++                snapshot=lambda r, s: snapshot(r, s, "check"), prepare=guided_prepare, **shared),
+         Adapter("plugins.publish", "Publish scoped plugin readiness", input_model=PublishInput,
+                 snapshot=lambda r, s: snapshot(r, s, "publish"), prepare=prepare, execute=publish, recover=recover_publish, **shared),
+         Adapter("plugins.migrate", "Migrate a stopped-work plugin pin", input_model=MigrateInput,
+diff --git a/packages/maverick-dashboard/maverick_dashboard/static/lightwork-plugin-workbench.js b/packages/maverick-dashboard/maverick_dashboard/static/lightwork-plugin-workbench.js
+index ddb2eee1..bb0da706 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/static/lightwork-plugin-workbench.js
++++ b/packages/maverick-dashboard/maverick_dashboard/static/lightwork-plugin-workbench.js
+@@ -46,13 +46,9 @@
+           const link=node('a','Review workflow');link.href=pin.href;label.append(link);panel.append(label);
+           const migrate=button('Review workflow version migration',()=>mutate(migrate,'/migrate-flow',{run_id:pin.run_id,fingerprint:plugin.fingerprint,previous:pin.fingerprint},'Migrate this stopped workflow to the qualified version? Review prior outcomes first. This does not resume it or replay an action.'));panel.append(migrate);
+         }
+-        const sampleLabel=node('label','Synthetic sample arguments (JSON; no credentials or private data)'),sample=node('textarea');sample.className='input';sample.value=JSON.stringify(plugin.sample_example||{},null,2);sample.maxLength=16384;sampleLabel.append(sample);panel.append(sampleLabel);
+-        const expectedLabel=node('label','Expected result (JSON; string results need quotes)'),expected=node('textarea');expected.className='input';expected.value='null';expected.maxLength=16384;expectedLabel.append(expected);panel.append(expectedLabel);
+-        const modeLabel=node('label','Check'),mode=node('select');for(const [key,label] of [['sample','Validate schema and run this sample'],['timeout','Verify bounded timeout with a deliberately slow synthetic sample'],['cancellation','Verify cancellation with a deliberately slow synthetic sample']]){const option=node('option',label);option.value=key;mode.append(option);}modeLabel.append(mode);panel.append(modeLabel);
+-        const check=button('Review sandbox check',()=>{
+-          let parsed,expectedResult;try{parsed=JSON.parse(sample.value);expectedResult=JSON.parse(expected.value);}catch(_){status.textContent='Enter valid JSON sample arguments.';sample.focus();return;}
+-          mutate(check,'/check',{fingerprint:plugin.fingerprint,operation_id:crypto.randomUUID().replace(/-/g,''),mode:mode.value,sample:parsed,expected:expectedResult},'Run this exact plugin version once in the reviewed local Linux image? Network, credentials and host writes are unavailable. No live service or write capability will be qualified.');
+-        });check.disabled=!plugin.eligible;panel.append(check);
++        const practice=node('section');practice.className='plg-practice';panel.append(practice);
++        if(plugin.eligible&&window.LightworkPluginPractice)window.LightworkPluginPractice.mount(practice,plugin,context);
++        else practice.append(node('p','Approve this installed version and its declared access before reading its ordinary practice questions. No check has started.'));
+         const rollbackLabel=node('label','Affected-work review and rollback plan'),rollback=node('textarea');rollback.className='input';rollback.maxLength=2000;rollbackLabel.append(rollback);panel.append(rollbackLabel);
+         const publish=button('Publish scoped readiness',()=>mutate(publish,'/publish',{fingerprint:plugin.fingerprint,rollback:rollback.value},'Publish sandbox-only readiness for this exact plugin version after reviewing affected work and the rollback plan? External service acceptance remains unverified.'));panel.append(publish);
+         for(const receipt of value.publications.filter(row=>row.fingerprint===plugin.fingerprint))panel.append(node('p','Published scope: '+receipt.scope+'. Check observations: '+JSON.stringify(receipt.observations||[])+'. Rollback: '+receipt.rollback));
+diff --git a/packages/maverick-dashboard/maverick_dashboard/templates/plugins.html b/packages/maverick-dashboard/maverick_dashboard/templates/plugins.html
+index 7cc3c1a5..40f64406 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/templates/plugins.html
++++ b/packages/maverick-dashboard/maverick_dashboard/templates/plugins.html
+@@ -310,6 +310,8 @@
+ {% endblock %}
+ {% block scripts_extra %}
+   <script src="/static/lightwork-plugins.js" defer></script>
++  <script>{% include "flow_designer_action_fields.js" %}</script>
++  <script src="/static/lightwork-plugin-practice.js" defer></script>
+   <script src="/static/lightwork-plugin-workbench.js" defer></script>
+   <script src="/static/lightwork-tool-ops.js" defer></script>
+ {% endblock %}

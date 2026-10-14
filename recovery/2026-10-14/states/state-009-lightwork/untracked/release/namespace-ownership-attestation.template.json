@@ -1,0 +1,233 @@
+{
+  "schema": "lightwork.namespace-ownership-attestation.v1",
+  "repository": "Daybreak-AI-Labs/Lightwork",
+  "release_version": "0.1.7",
+  "attested_at": "1970-01-01T00:00:00Z",
+  "expires_at": "1970-01-01T00:00:01Z",
+  "attestor": {
+    "identity": "lightwork-release-namespace-owner",
+    "role": "registry-owner-verifier"
+  },
+  "namespaces": [
+    {
+      "registry": "pypi",
+      "package": "maverick-agent",
+      "project_url": "https://pypi.org/project/maverick-agent/",
+      "publish_authorized": true,
+      "ownership": {
+        "verified": false,
+        "registry_account": "UNVERIFIED",
+        "evidence_reference": "UNVERIFIED"
+      },
+      "trusted_publisher": {
+        "verified": false,
+        "provider": "github-actions",
+        "repository_owner": "Daybreak-AI-Labs",
+        "repository": "Lightwork",
+        "workflow": "publish.yml",
+        "environment": "pypi",
+        "allowed_actions": ["publish"]
+      }
+    },
+    {
+      "registry": "pypi",
+      "package": "maverick-shield",
+      "project_url": "https://pypi.org/project/maverick-shield/",
+      "publish_authorized": true,
+      "ownership": {
+        "verified": false,
+        "registry_account": "UNVERIFIED",
+        "evidence_reference": "UNVERIFIED"
+      },
+      "trusted_publisher": {
+        "verified": false,
+        "provider": "github-actions",
+        "repository_owner": "Daybreak-AI-Labs",
+        "repository": "Lightwork",
+        "workflow": "publish.yml",
+        "environment": "pypi",
+        "allowed_actions": ["publish"]
+      }
+    },
+    {
+      "registry": "pypi",
+      "package": "maverick-channels",
+      "project_url": "https://pypi.org/project/maverick-channels/",
+      "publish_authorized": true,
+      "ownership": {
+        "verified": false,
+        "registry_account": "UNVERIFIED",
+        "evidence_reference": "UNVERIFIED"
+      },
+      "trusted_publisher": {
+        "verified": false,
+        "provider": "github-actions",
+        "repository_owner": "Daybreak-AI-Labs",
+        "repository": "Lightwork",
+        "workflow": "publish.yml",
+        "environment": "pypi",
+        "allowed_actions": ["publish"]
+      }
+    },
+    {
+      "registry": "pypi",
+      "package": "maverick-evolve",
+      "project_url": "https://pypi.org/project/maverick-evolve/",
+      "publish_authorized": true,
+      "ownership": {
+        "verified": false,
+        "registry_account": "UNVERIFIED",
+        "evidence_reference": "UNVERIFIED"
+      },
+      "trusted_publisher": {
+        "verified": false,
+        "provider": "github-actions",
+        "repository_owner": "Daybreak-AI-Labs",
+        "repository": "Lightwork",
+        "workflow": "publish.yml",
+        "environment": "pypi",
+        "allowed_actions": ["publish"]
+      }
+    },
+    {
+      "registry": "pypi",
+      "package": "maverick-dashboard",
+      "project_url": "https://pypi.org/project/maverick-dashboard/",
+      "publish_authorized": true,
+      "ownership": {
+        "verified": false,
+        "registry_account": "UNVERIFIED",
+        "evidence_reference": "UNVERIFIED"
+      },
+      "trusted_publisher": {
+        "verified": false,
+        "provider": "github-actions",
+        "repository_owner": "Daybreak-AI-Labs",
+        "repository": "Lightwork",
+        "workflow": "publish.yml",
+        "environment": "pypi",
+        "allowed_actions": ["publish"]
+      }
+    },
+    {
+      "registry": "pypi",
+      "package": "maverick-mcp-server",
+      "project_url": "https://pypi.org/project/maverick-mcp-server/",
+      "publish_authorized": true,
+      "ownership": {
+        "verified": false,
+        "registry_account": "UNVERIFIED",
+        "evidence_reference": "UNVERIFIED"
+      },
+      "trusted_publisher": {
+        "verified": false,
+        "provider": "github-actions",
+        "repository_owner": "Daybreak-AI-Labs",
+        "repository": "Lightwork",
+        "workflow": "publish.yml",
+        "environment": "pypi",
+        "allowed_actions": ["publish"]
+      }
+    },
+    {
+      "registry": "pypi",
+      "package": "maverick-knowledge",
+      "project_url": "https://pypi.org/project/maverick-knowledge/",
+      "publish_authorized": true,
+      "ownership": {
+        "verified": false,
+        "registry_account": "UNVERIFIED",
+        "evidence_reference": "UNVERIFIED"
+      },
+      "trusted_publisher": {
+        "verified": false,
+        "provider": "github-actions",
+        "repository_owner": "Daybreak-AI-Labs",
+        "repository": "Lightwork",
+        "workflow": "publish.yml",
+        "environment": "pypi",
+        "allowed_actions": ["publish"]
+      }
+    },
+    {
+      "registry": "pypi",
+      "package": "maverick-installer",
+      "project_url": "https://pypi.org/project/maverick-installer/",
+      "publish_authorized": true,
+      "ownership": {
+        "verified": false,
+        "registry_account": "UNVERIFIED",
+        "evidence_reference": "UNVERIFIED"
+      },
+      "trusted_publisher": {
+        "verified": false,
+        "provider": "github-actions",
+        "repository_owner": "Daybreak-AI-Labs",
+        "repository": "Lightwork",
+        "workflow": "publish.yml",
+        "environment": "pypi",
+        "allowed_actions": ["publish"]
+      }
+    },
+    {
+      "registry": "npm",
+      "package": "@maverick/plugin-sdk",
+      "project_url": "https://www.npmjs.com/package/@maverick/plugin-sdk",
+      "publish_authorized": false,
+      "ownership": {
+        "verified": false,
+        "registry_account": "UNVERIFIED",
+        "evidence_reference": "UNVERIFIED"
+      },
+      "trusted_publisher": {
+        "verified": false,
+        "provider": "github-actions",
+        "repository_owner": "Daybreak-AI-Labs",
+        "repository": "Lightwork",
+        "workflow": "publish.yml",
+        "environment": "npm",
+        "allowed_actions": []
+      }
+    },
+    {
+      "registry": "pypi",
+      "package": "maverick-native",
+      "project_url": "https://pypi.org/project/maverick-native/",
+      "publish_authorized": false,
+      "ownership": {
+        "verified": false,
+        "registry_account": "UNVERIFIED",
+        "evidence_reference": "UNVERIFIED"
+      },
+      "trusted_publisher": {
+        "verified": false,
+        "provider": "github-actions",
+        "repository_owner": "Daybreak-AI-Labs",
+        "repository": "Lightwork",
+        "workflow": "native.yml",
+        "environment": "pypi",
+        "allowed_actions": []
+      }
+    },
+    {
+      "registry": "npm",
+      "package": "mvk-scan-wasm",
+      "project_url": "https://www.npmjs.com/package/mvk-scan-wasm",
+      "publish_authorized": false,
+      "ownership": {
+        "verified": false,
+        "registry_account": "UNVERIFIED",
+        "evidence_reference": "UNVERIFIED"
+      },
+      "trusted_publisher": {
+        "verified": false,
+        "provider": "github-actions",
+        "repository_owner": "Daybreak-AI-Labs",
+        "repository": "Lightwork",
+        "workflow": "native.yml",
+        "environment": "npm",
+        "allowed_actions": []
+      }
+    }
+  ]
+}

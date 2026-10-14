@@ -1,0 +1,133 @@
+{
+  "schema": "lightwork.production-support-matrix.v1",
+  "profile_id": "enterprise-single-control-plane-v1",
+  "source_version": "0.1.7",
+  "release_eligible": false,
+  "status_definitions": {
+    "admitted": "The combination is inside the reviewed source profile; an exact release still needs its revision-bound evidence packet.",
+    "qualification_required": "The interface or dependency is required, but no exact version or managed-service offering is supported until release qualification records it.",
+    "evaluation_only": "Repository or CI coverage exists, but this combination is outside the first production profile.",
+    "excluded": "The first production profile refuses this combination."
+  },
+  "matrix": [
+    {
+      "dimension": "operating_system",
+      "selection": "linux-container",
+      "status": "admitted",
+      "constraint": "immutable OCI image; host-native execution is not admitted"
+    },
+    {
+      "dimension": "architecture",
+      "selection": "amd64",
+      "status": "admitted",
+      "constraint": "the first production image and Helm profile are qualified as one architecture"
+    },
+    {
+      "dimension": "python_runtime",
+      "selection": "CPython 3.12",
+      "status": "admitted",
+      "constraint": "release image base must be supplied by immutable OCI digest"
+    },
+    {
+      "dimension": "deployment",
+      "selection": "Kubernetes via Helm chart 0.1.2",
+      "status": "qualification_required",
+      "constraint": "record the exact Kubernetes distribution, version, Helm version, admission policy, and server-side dry-run for the release"
+    },
+    {
+      "dimension": "control_plane_topology",
+      "selection": "1 replica",
+      "status": "admitted",
+      "constraint": "autoscaling and multiple control-plane replicas are refused"
+    },
+    {
+      "dimension": "world_model",
+      "selection": "PostgreSQL 16 with forced RLS",
+      "status": "qualification_required",
+      "constraint": "major 16 is the repository live-test target; retain an exact managed offering/version, TLS, migration, RLS, backup, restore, and failover report for the release"
+    },
+    {
+      "dimension": "container_isolation",
+      "selection": "gVisor RuntimeClass named gvisor",
+      "status": "qualification_required",
+      "constraint": "record the exact runsc/runtime build and a deployed containment result; the name alone is not attestation"
+    },
+    {
+      "dimension": "model_provider",
+      "selection": "vLLM OpenAI-compatible HTTPS endpoint",
+      "status": "qualification_required",
+      "constraint": "the exact vLLM build, model artifact digest, endpoint, region, retention posture, credentials, cap, and failover chain must match the approved model policy"
+    },
+    {
+      "dimension": "key_management",
+      "selection": "Vault Transit over HTTPS",
+      "status": "qualification_required",
+      "constraint": "record the exact Vault offering/version, key identity, auth method, HA posture, recovery exercise, and rotation result"
+    },
+    {
+      "dimension": "identity",
+      "selection": "OIDC or trusted-proxy SSO",
+      "status": "qualification_required",
+      "constraint": "record the exact provider, issuer/proxy trust boundary, claims mapping, logout/revocation, and break-glass exercise"
+    },
+    {
+      "dimension": "operator_interface",
+      "selection": "manifest-filtered Lightwork CLI and dashboard REST API",
+      "status": "admitted",
+      "constraint": "unclassified CLI operations and manifest-excluded endpoints fail closed"
+    },
+    {
+      "dimension": "browser_client",
+      "selection": "dashboard browser client",
+      "status": "qualification_required",
+      "constraint": "record exact browser/version journeys and accessibility/security results for the release"
+    },
+    {
+      "dimension": "arbitrary_execution",
+      "selection": "disabled",
+      "status": "admitted",
+      "constraint": "Docker, Podman, Kubernetes, Firecracker, SSH, Modal, and local-host execution backends are outside the first production profile"
+    },
+    {
+      "dimension": "state_learning_and_extensions",
+      "selection": "self-learning, code DGM, weights DGM, plugins, MCP, connectors, channels, RAG, and attachments",
+      "status": "excluded",
+      "constraint": "source presence does not grant production authority"
+    },
+    {
+      "dimension": "host_native_distributions",
+      "selection": "Windows, macOS, and Linux standalone binaries",
+      "status": "evaluation_only",
+      "constraint": "release packaging coverage does not qualify these artifacts for the first production profile"
+    },
+    {
+      "dimension": "additional_architectures",
+      "selection": "arm64 and other architectures",
+      "status": "excluded",
+      "constraint": "not present in the first production manifest"
+    },
+    {
+      "dimension": "additional_model_providers",
+      "selection": "hosted providers, Ollama, and TGI",
+      "status": "excluded",
+      "constraint": "not present in the first production manifest"
+    },
+    {
+      "dimension": "additional_identity",
+      "selection": "static operator token, local invites, SAML, and SCIM",
+      "status": "excluded",
+      "constraint": "not present in the first production manifest"
+    }
+  ],
+  "release_qualification_required": [
+    "exact immutable production image digest and source revision",
+    "exact Kubernetes distribution and version",
+    "exact Helm version and rendered manifest digest",
+    "exact Postgres offering, version, TLS mode, migration and recovery evidence",
+    "exact gVisor/runsc build and containment evidence",
+    "exact vLLM build and approved model-policy record",
+    "exact Vault offering/version and key recovery/rotation evidence",
+    "exact identity provider/proxy and revocation evidence",
+    "exact browser versions and end-to-end journey evidence"
+  ]
+}

@@ -1,0 +1,204 @@
+{
+  "schema": "lightwork.dependency-failure-contract.v1",
+  "profile_id": "enterprise-single-control-plane-v1",
+  "source_version": "0.1.7",
+  "response_contract": {
+    "external_drills_required": true,
+    "identity_reachability_probed_by_readiness": false,
+    "liveness_is_dependency_independent": true,
+    "provider_reachability_probed_by_readiness": false,
+    "readiness_failure_http_status": 503
+  },
+  "dependencies": [
+    {
+      "id": "postgres",
+      "profile_scope": "required",
+      "startup": "fail_closed",
+      "readiness": "fail_closed",
+      "retry_contract": "idempotent_retry_after_recovery",
+      "in_flight": "New authority reads and writes fail; an effect whose remote outcome is unknown remains indeterminate and must be reconciled before retry.",
+      "operator_response": "Remove traffic, preserve operation and idempotency identifiers, restore verified-TLS Postgres and exact RLS/schema posture, then reconcile pending leases, outboxes, approvals, and effects before restoring readiness.",
+      "qualification": "live_drill_required",
+      "code_evidence": [
+        "packages/maverick-core/maverick/world_model_backends/postgres.py",
+        "packages/maverick-dashboard/maverick_dashboard/health_routes.py",
+        "packages/maverick-core/tests/test_production_observability.py"
+      ]
+    },
+    {
+      "id": "vault-kms",
+      "profile_scope": "required",
+      "startup": "fail_closed",
+      "readiness": "fail_closed",
+      "retry_contract": "idempotent_retry_after_recovery",
+      "in_flight": "Unwrap-dependent work fails after the bounded tenant-DEK cache expires; cached keys may serve only until their configured production TTL. No local-KMS downgrade is permitted.",
+      "operator_response": "Remove traffic when KMS custody readiness fails, restore authenticated Vault TLS and token/key authority, verify wrong-context denial and historical decrypt, then resume without extending the DEK-cache ceiling.",
+      "qualification": "live_drill_required",
+      "code_evidence": [
+        "packages/maverick-core/maverick/kms_backends.py",
+        "packages/maverick-core/maverick/tenant/kms.py",
+        "packages/maverick-core/tests/test_production_observability.py"
+      ]
+    },
+    {
+      "id": "vllm",
+      "profile_scope": "required",
+      "startup": "configuration_only",
+      "readiness": "not_probed",
+      "retry_contract": "external_failover_only",
+      "in_flight": "Model calls time out or fail; control denials, cost-authority failures, partial streams, and ambiguous charges are not converted into a permissive provider fallback.",
+      "operator_response": "Keep the pod ready-state limitation visible, alert from an external synthetic probe, stop new work when the qualified endpoint is unhealthy, and reconcile partial streams and spend reservations before retry.",
+      "qualification": "live_drill_required",
+      "code_evidence": [
+        "packages/maverick-core/maverick/llm.py",
+        "packages/maverick-core/maverick/provider_failover.py",
+        "packages/maverick-core/tests/test_provider_cost_cap_authority.py"
+      ]
+    },
+    {
+      "id": "dns",
+      "profile_scope": "required",
+      "startup": "not_probed",
+      "readiness": "not_probed",
+      "retry_contract": "idempotent_retry_after_recovery",
+      "in_flight": "Name resolution failure is observed as the owning dependency failing; the application does not bypass the egress allowlist with alternate destinations.",
+      "operator_response": "Use external DNS and endpoint probes, preserve the exact approved host-to-CIDR inventory, restore resolution, and retry only requests proven idempotent or reconciled.",
+      "qualification": "live_drill_required",
+      "code_evidence": [
+        "deploy/helm/maverick/templates/networkpolicy.yaml",
+        "packages/maverick-core/tests/test_helm_production_profile.py"
+      ]
+    },
+    {
+      "id": "ingress-tls",
+      "profile_scope": "required",
+      "startup": "configuration_only",
+      "readiness": "not_probed",
+      "retry_contract": "no_automatic_retry",
+      "in_flight": "The ingress owns certificate negotiation; an expired, mismatched, or unavailable certificate can make the service unreachable even while the process remains live.",
+      "operator_response": "Monitor the public certificate and endpoint externally, halt rollout on expiry or hostname drift, restore the pre-provisioned TLS Secret, and retain the prior signed deployment for rollback.",
+      "qualification": "live_drill_required",
+      "code_evidence": [
+        "deploy/helm/maverick/templates/ingress.yaml",
+        "packages/maverick-core/tests/test_helm_production_profile.py"
+      ]
+    },
+    {
+      "id": "identity-provider",
+      "profile_scope": "one_of_required",
+      "startup": "configuration_only",
+      "readiness": "not_probed",
+      "retry_contract": "no_automatic_retry",
+      "in_flight": "New OIDC login or key refresh can fail during an IdP/JWKS outage; trusted-proxy identity depends on the separately operated proxy. The app does not fall back to a shared operator token.",
+      "operator_response": "Keep existing sessions within their normal expiry policy, refuse weakened authentication, restore the selected OIDC or trusted-proxy chain, and verify revocation and exact principal/tenant attribution before reopening login.",
+      "qualification": "live_drill_required",
+      "code_evidence": [
+        "packages/maverick-core/maverick/oidc.py",
+        "packages/maverick-core/maverick/proxy_auth.py",
+        "packages/maverick-core/tests/test_production_deployment_gate.py"
+      ]
+    },
+    {
+      "id": "audit-storage",
+      "profile_scope": "required",
+      "startup": "fail_closed",
+      "readiness": "fail_closed",
+      "retry_contract": "idempotent_retry_after_recovery",
+      "in_flight": "Consequential work requiring a signed durable audit record is refused. Ordinary telemetry may fail soft but increments an explicit failure signal and grants no authority.",
+      "operator_response": "Remove traffic, preserve refused operation identifiers, repair private durable storage and signer custody, verify the chain, drain the authority-audit outbox, and retry with the original stable identity.",
+      "qualification": "live_drill_required",
+      "code_evidence": [
+        "packages/maverick-core/maverick/audit/writer.py",
+        "packages/maverick-dashboard/maverick_dashboard/authority_audit_delivery.py",
+        "packages/maverick-dashboard/tests/test_authority_audit_recovery.py"
+      ]
+    },
+    {
+      "id": "audit-anchor",
+      "profile_scope": "required",
+      "startup": "fail_closed",
+      "readiness": "fail_closed",
+      "retry_contract": "no_automatic_retry",
+      "in_flight": "A missing required anchor ledger is treated as an integrity failure; excessive anchor lag removes readiness and is not rewritten away.",
+      "operator_response": "Quarantine the affected chain, verify retained public keys and prior anchors, investigate tampering or storage loss, and restore readiness only after an evidence-preserving reconciliation.",
+      "qualification": "live_drill_required",
+      "code_evidence": [
+        "packages/maverick-core/maverick/audit/signing.py",
+        "packages/maverick-core/maverick/production_observability.py",
+        "packages/maverick-core/tests/test_production_observability.py"
+      ]
+    },
+    {
+      "id": "siem",
+      "profile_scope": "optional_operational",
+      "startup": "configuration_only",
+      "readiness": "backlog_fail_closed",
+      "retry_contract": "idempotent_retry_after_recovery",
+      "in_flight": "HTTPS delivery failure remains in the confidential durable outbox with a stable delivery identity, bounded retry/backoff, and dead-letter state; it is never reported as delivered.",
+      "operator_response": "Page on failure, backlog, or dead letters; restore the collector, drain or deliberately redrive with the same delivery identities, and retain collector ACK/reconciliation evidence.",
+      "qualification": "live_drill_required",
+      "code_evidence": [
+        "packages/maverick-core/maverick/audit/siem_outbox.py",
+        "packages/maverick-core/maverick/audit/forwarder.py",
+        "packages/maverick-core/tests/test_audit_siem_outbox.py"
+      ]
+    },
+    {
+      "id": "state-pvc",
+      "profile_scope": "required",
+      "startup": "fail_closed",
+      "readiness": "fail_closed",
+      "retry_contract": "idempotent_retry_after_recovery",
+      "in_flight": "Loss, read-only remount, or exhaustion of the state volume can refuse audit/checkpoint/policy writes. No local ephemeral substitute is authoritative.",
+      "operator_response": "Remove traffic, preserve the failed volume, restore capacity and filesystem integrity from the approved snapshot path, verify audit/checkpoint chains, and reconcile claimed work before retry.",
+      "qualification": "live_drill_required",
+      "code_evidence": [
+        "deploy/helm/maverick/templates/deployment.yaml",
+        "packages/maverick-core/maverick/production_runtime_contract.py",
+        "packages/maverick-core/tests/test_production_runtime_contract.py"
+      ]
+    },
+    {
+      "id": "vector-store",
+      "profile_scope": "excluded",
+      "startup": "not_applicable",
+      "readiness": "not_applicable",
+      "retry_contract": "not_applicable",
+      "in_flight": "Knowledge and vector retrieval are outside the first production profile, so a vector-store outage cannot be represented as supported-profile behavior.",
+      "operator_response": "Do not configure or enable vector retrieval in this profile; qualify a new manifest and outage contract before admitting it.",
+      "qualification": "excluded",
+      "code_evidence": [
+        "release/production-surface-manifest.json",
+        "packages/maverick-core/tests/test_production_feature_exclusions.py"
+      ]
+    },
+    {
+      "id": "object-store",
+      "profile_scope": "excluded",
+      "startup": "not_applicable",
+      "readiness": "not_applicable",
+      "retry_contract": "not_applicable",
+      "in_flight": "No object-store-backed application data plane is admitted; managed backup storage remains an external operator responsibility rather than an application failover claim.",
+      "operator_response": "Keep backup-object storage outside runtime credentials and prove it through the independent restore drill; qualify any future runtime object store separately.",
+      "qualification": "excluded",
+      "code_evidence": [
+        "release/production-surface-manifest.json",
+        "docs/operations.md"
+      ]
+    },
+    {
+      "id": "connectors",
+      "profile_scope": "excluded",
+      "startup": "not_applicable",
+      "readiness": "not_applicable",
+      "retry_contract": "not_applicable",
+      "in_flight": "Generated connectors, channels, webhooks, and notification egress are excluded and default-denied in the first production profile.",
+      "operator_response": "Do not configure connector authority; create a separately reviewed manifest, delivery state machine, credential-rotation plan, and outage qualification before admission.",
+      "qualification": "excluded",
+      "code_evidence": [
+        "packages/maverick-core/maverick/production_exclusions.py",
+        "packages/maverick-core/tests/test_production_feature_exclusions.py"
+      ]
+    }
+  ]
+}

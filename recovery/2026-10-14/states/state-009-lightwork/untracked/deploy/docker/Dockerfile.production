@@ -1,0 +1,200 @@
+# syntax=docker/dockerfile:1.7
+# Lightwork's deliberately narrow production control-plane image.
+#
+# Unlike the general-purpose image, this artifact installs only the packages
+# marked included by release/production-surface-manifest.json. Both the base
+# image and the manifest digest are mandatory build inputs; a release pipeline
+# cannot silently fall back to a mutable tag or a different surface inventory.
+
+ARG PYTHON_IMAGE
+FROM ${PYTHON_IMAGE} AS wheel-builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+COPY release-cohort.toml ./
+COPY release/production-surface-manifest.json ./release/production-surface-manifest.json
+COPY release/production-runtime-contract.json ./release/production-runtime-contract.json
+COPY release/production-model-policy.json ./release/production-model-policy.json
+COPY requirements/ci.txt ./requirements/ci.txt
+COPY scripts/install_release_cohort.py ./scripts/install_release_cohort.py
+COPY packages/maverick-core ./packages/maverick-core
+COPY packages/maverick-shield ./packages/maverick-shield
+COPY packages/maverick-dashboard ./packages/maverick-dashboard
+
+RUN python -m pip install --upgrade 'pip==26.1.2' \
+    && python scripts/install_release_cohort.py \
+        --target-python python \
+        --core-extra release-runtime,postgres,oidc,observability,audit-signing \
+        --production \
+        --production-manifest /build/release/production-surface-manifest.json \
+        --wheel-dir /wheelhouse
+
+ARG PYTHON_IMAGE
+FROM ${PYTHON_IMAGE} AS runtime
+
+ARG PRODUCTION_MANIFEST_SHA256
+ARG PRODUCTION_MODEL_POLICY_SHA256
+ARG PRODUCTION_ONBOARDING_CONTRACT_SHA256
+ARG PRODUCTION_RELEASE_STATE_SHA256
+ARG SOURCE_REVISION
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HOME=/home/maverick \
+    TMPDIR=/tmp \
+    MAVERICK_HOME=/home/maverick/.maverick \
+    MAVERICK_PROFILE=enterprise \
+    MAVERICK_REQUIRE_ENTERPRISE=1 \
+    MAVERICK_REQUIRE_PRODUCTION_SURFACE=1 \
+    MAVERICK_REQUIRE_PRODUCTION_RUNTIME_CONTRACT=1 \
+    MAVERICK_PRODUCTION_PROFILE_ID=enterprise-single-control-plane-v1 \
+    MAVERICK_CONTROL_PLANE_REPLICAS=1 \
+    MAVERICK_PRODUCTION_CONTAINER=1 \
+    MAVERICK_REQUIRE_CONTAINER_BACKEND=1 \
+    MAVERICK_SANDBOX_BACKEND=disabled \
+    MAVERICK_RUNTIME_PIDS=256 \
+    MAVERICK_RUNTIME_NOFILE=4096 \
+    MAVERICK_RUNTIME_FILE_SIZE_BYTES=8589934592 \
+    MAVERICK_MAX_TOOL_RESULT_BYTES=32000 \
+    MAVERICK_DEFAULT_MAX_WALL_SECONDS=1800 \
+    MAVERICK_PRODUCTION_MAX_TOOL_CALLS=500 \
+    MAVERICK_DEFAULT_MAX_DEPTH=3 \
+    MAVERICK_MAX_TOTAL_SPAWNS=32 \
+    MAVERICK_MAX_CONCURRENT_GOALS=8 \
+    MAVERICK_MAX_CONCURRENT_GOALS_PER_PRINCIPAL=2 \
+    MAVERICK_TENANT_BY_USER=1 \
+    MAVERICK_AUDIT_SIGN=1 \
+    MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY=1 \
+    MAVERICK_REQUIRE_REDACTION=1 \
+    MAVERICK_ENCRYPT_AT_REST=1 \
+    MAVERICK_ENCRYPT_PER_TENANT=1 \
+    MAVERICK_ENCRYPT_STRICT=1 \
+    MAVERICK_KMS_PROVIDER=vault \
+    MAVERICK_KMS_VAULT_MOUNT=transit \
+    MAVERICK_KMS_DEK_CACHE_TTL=60 \
+    MAVERICK_PG_POOL_SIZE=10 \
+    MAVERICK_PG_CONNECT_TIMEOUT_SECONDS=10 \
+    MAVERICK_PG_STATEMENT_TIMEOUT_MS=30000 \
+    MAVERICK_PG_LOCK_TIMEOUT_MS=5000 \
+    MAVERICK_SECRETS_REQUIRED=1 \
+    MAVERICK_SECRETS_BACKEND=file \
+    MAVERICK_SECRETS_DIR=/run/secrets/lightwork \
+    MAVERICK_DURABLE=1 \
+    MAVERICK_REQUIRE_DURABLE_CHECKPOINTS=1 \
+    MAVERICK_CHILD_ENV_ALLOWLIST_ONLY=1 \
+    MAVERICK_INDETERMINATE_RECONCILE_SECONDS=900 \
+    MAVERICK_INDETERMINATE_ESCALATE_SECONDS=3600 \
+    MAVERICK_SELF_MODIFY=0 \
+    MAVERICK_PRODUCTION_MANIFEST=/etc/lightwork/production-surface-manifest.json \
+    MAVERICK_PRODUCTION_MANIFEST_SHA256=${PRODUCTION_MANIFEST_SHA256} \
+    MAVERICK_PRODUCTION_RUNTIME_CONTRACT=/etc/lightwork/production-runtime-contract.json \
+    MAVERICK_PRODUCTION_MODEL_POLICY=/etc/lightwork/production-model-policy.json \
+    MAVERICK_PRODUCTION_MODEL_POLICY_SHA256=${PRODUCTION_MODEL_POLICY_SHA256} \
+    MAVERICK_PRODUCTION_ONBOARDING_CONTRACT=/etc/lightwork/production-onboarding-contract.json \
+    MAVERICK_PRODUCTION_ONBOARDING_CONTRACT_SHA256=${PRODUCTION_ONBOARDING_CONTRACT_SHA256} \
+    MAVERICK_PRODUCTION_RELEASE_STATE=/etc/lightwork/release-state.json \
+    MAVERICK_PRODUCTION_RELEASE_STATE_SHA256=${PRODUCTION_RELEASE_STATE_SHA256} \
+    MAVERICK_SOURCE_REVISION=${SOURCE_REVISION}
+
+LABEL org.opencontainers.image.source="https://github.com/Daybreak-AI-Labs/Lightwork" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}" \
+      org.opencontainers.image.title="Lightwork production control plane"
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1000 maverick \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /usr/sbin/nologin maverick \
+    && mkdir -p /workspace /home/maverick/.maverick /etc/lightwork \
+    && chown -R maverick:maverick /workspace /home/maverick
+
+COPY --from=wheel-builder /wheelhouse /wheelhouse
+COPY requirements/ci.txt /tmp/requirements/ci.txt
+COPY release/production-surface-manifest.json /etc/lightwork/production-surface-manifest.json
+COPY release/production-runtime-contract.json /etc/lightwork/production-runtime-contract.json
+COPY release/production-model-policy.json /etc/lightwork/production-model-policy.json
+COPY release/production-onboarding-contract.json /etc/lightwork/production-onboarding-contract.json
+COPY release/release-state.json /etc/lightwork/release-state.json
+
+RUN python - <<'PY'
+import hashlib
+import os
+import re
+from pathlib import Path
+
+expected = os.environ.get("MAVERICK_PRODUCTION_MANIFEST_SHA256", "")
+if not re.fullmatch(r"[0-9a-f]{64}", expected):
+    raise SystemExit("PRODUCTION_MANIFEST_SHA256 must be 64 lowercase hex characters")
+revision = os.environ.get("SOURCE_REVISION", "")
+if not re.fullmatch(r"[0-9a-f]{40}", revision):
+    raise SystemExit("SOURCE_REVISION must be one complete lowercase Git commit SHA")
+actual = hashlib.sha256(
+    Path("/etc/lightwork/production-surface-manifest.json").read_bytes()
+).hexdigest()
+if actual != expected:
+    raise SystemExit("production surface manifest digest mismatch")
+model_expected = os.environ.get("MAVERICK_PRODUCTION_MODEL_POLICY_SHA256", "")
+if not re.fullmatch(r"[0-9a-f]{64}", model_expected):
+    raise SystemExit(
+        "PRODUCTION_MODEL_POLICY_SHA256 must be 64 lowercase hex characters"
+    )
+model_actual = hashlib.sha256(
+    Path("/etc/lightwork/production-model-policy.json").read_bytes()
+).hexdigest()
+if model_actual != model_expected:
+    raise SystemExit("production model policy digest mismatch")
+onboarding_expected = os.environ.get(
+    "MAVERICK_PRODUCTION_ONBOARDING_CONTRACT_SHA256", ""
+)
+if not re.fullmatch(r"[0-9a-f]{64}", onboarding_expected):
+    raise SystemExit(
+        "PRODUCTION_ONBOARDING_CONTRACT_SHA256 must be 64 lowercase hex characters"
+    )
+onboarding_actual = hashlib.sha256(
+    Path("/etc/lightwork/production-onboarding-contract.json").read_bytes()
+).hexdigest()
+if onboarding_actual != onboarding_expected:
+    raise SystemExit("production onboarding contract digest mismatch")
+release_state_expected = os.environ.get(
+    "MAVERICK_PRODUCTION_RELEASE_STATE_SHA256", ""
+)
+if not re.fullmatch(r"[0-9a-f]{64}", release_state_expected):
+    raise SystemExit(
+        "PRODUCTION_RELEASE_STATE_SHA256 must be 64 lowercase hex characters"
+    )
+release_state_actual = hashlib.sha256(
+    Path("/etc/lightwork/release-state.json").read_bytes()
+).hexdigest()
+if release_state_actual != release_state_expected:
+    raise SystemExit("production release state digest mismatch")
+PY
+
+RUN python -m pip install --upgrade 'pip==26.1.2' \
+    && python -m pip install \
+        --no-index \
+        --find-links=/wheelhouse \
+        --constraint /tmp/requirements/ci.txt \
+        --requirement /wheelhouse/cohort-requirements.txt \
+    && python -m pip check \
+    && python -c "import maverick, maverick_shield, maverick_dashboard" \
+    && python -c "from maverick.production_scope import load_manifest; load_manifest()" \
+    && python -c "from maverick.production_runtime_contract import load_contract; load_contract()" \
+    && python -c "from maverick.production_onboarding import evaluate; evaluate()" \
+    && rm -rf /wheelhouse /tmp/requirements/ci.txt
+
+USER 1000:1000
+WORKDIR /workspace
+
+STOPSIGNAL SIGTERM
+
+ENTRYPOINT ["python", "-m", "maverick.production_runtime_contract"]
+CMD ["dashboard", "--host", "0.0.0.0", "--port", "8765"]

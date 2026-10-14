@@ -1,0 +1,101 @@
+{
+  "schema": "lightwork.service-objectives.v1",
+  "profile_id": "enterprise-single-control-plane-v1",
+  "source_version": "0.1.7",
+  "status": "draft",
+  "objectives": [
+    {
+      "id": "availability",
+      "unit": "percent",
+      "comparator": ">=",
+      "target": null,
+      "window": "calendar_month",
+      "sli": "valid production API requests served without a service-attributable 5xx or timeout divided by all valid production API requests",
+      "measurement_source": "",
+      "owner": "site-reliability",
+      "exclusions": []
+    },
+    {
+      "id": "api_latency_p95_ms",
+      "unit": "milliseconds",
+      "comparator": "<=",
+      "target": null,
+      "window": "rolling_28_days",
+      "sli": "p95 server duration for the explicitly enumerated synchronous production API operations",
+      "measurement_source": "",
+      "owner": "site-reliability",
+      "exclusions": []
+    },
+    {
+      "id": "recovery_time_seconds",
+      "unit": "seconds",
+      "comparator": "<=",
+      "target": null,
+      "window": "per_declared_disaster",
+      "sli": "elapsed time from declared service disaster to restoration of the supported production profile",
+      "measurement_source": "",
+      "owner": "site-reliability",
+      "exclusions": []
+    },
+    {
+      "id": "recovery_point_seconds",
+      "unit": "seconds",
+      "comparator": "<=",
+      "target": null,
+      "window": "per_declared_disaster",
+      "sli": "maximum age of committed customer state unavailable after a verified restore",
+      "measurement_source": "",
+      "owner": "data-platform",
+      "exclusions": []
+    },
+    {
+      "id": "data_durability_percent",
+      "unit": "percent",
+      "comparator": ">=",
+      "target": null,
+      "window": "rolling_12_months",
+      "sli": "durably acknowledged customer records recoverable with authenticated integrity after a verified restore",
+      "measurement_source": "",
+      "owner": "data-platform",
+      "exclusions": []
+    },
+    {
+      "id": "support_response_sev1_seconds",
+      "unit": "seconds",
+      "comparator": "<=",
+      "target": null,
+      "window": "per_accepted_sev1_incident",
+      "sli": "elapsed time from accepted severity-one support incident to qualified human acknowledgement",
+      "measurement_source": "",
+      "owner": "customer-operations",
+      "exclusions": []
+    },
+    {
+      "id": "audit_anchor_lag_seconds",
+      "unit": "seconds",
+      "comparator": "<=",
+      "target": null,
+      "window": "continuous",
+      "sli": "age of the newest independently retained authenticated audit-chain checkpoint",
+      "measurement_source": "",
+      "owner": "security-operations",
+      "exclusions": []
+    }
+  ],
+  "error_budget_policy": {
+    "evaluation_window": "calendar_month",
+    "freeze_on_exhaustion": true,
+    "incident_review_required": true,
+    "exception_authority": null
+  },
+  "approval": {
+    "approved_at": null,
+    "expires_at": null,
+    "approvers": []
+  },
+  "limitations": [
+    "No target in this draft is an availability, latency, recovery, durability, support, or audit-anchor commitment.",
+    "The single-control-plane profile is not high availability and requires measured restore and failover drills before approval.",
+    "Fixture tests, local regressions, and repository proof packs are not measurements for these service objectives."
+  ]
+}

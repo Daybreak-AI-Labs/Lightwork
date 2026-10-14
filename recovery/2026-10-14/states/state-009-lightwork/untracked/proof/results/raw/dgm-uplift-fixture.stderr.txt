@@ -1,0 +1,1 @@
+self_modify_eval: no container sandbox supplied; a candidate patch's tests will run on the HOST with no isolation. Acceptable only for a trusted single-tenant/dev box. Set [sandbox] require_container=true (or inject a container backend) to enforce isolation.

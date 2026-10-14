@@ -1,0 +1,18 @@
+{{- include "maverick.validate" . -}}
+{{- if .Values.production.enforce }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "maverick.identityConfigName" . }}
+  labels:
+    {{- include "maverick.labels" . | nindent 4 }}
+  annotations:
+    lightwork.daybreak.ai/identity-config-sha256: {{ include "maverick.identityConfigSha256" . | quote }}
+# The name is content-addressed, so a changed identity/RBAC posture creates a
+# new immutable object and a new pod template rather than hot-reloading policy
+# underneath an already-admitted process.
+immutable: true
+data:
+  config.toml: |
+    {{- include "maverick.identityConfigToml" . | nindent 4 }}
+{{- end }}

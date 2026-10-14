@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Platform, Model &amp; Product Assurance - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .assurance-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-4); }
+  .assurance-stats { display:grid; grid-template-columns:repeat(5,minmax(8rem,1fr)); gap:var(--space-3); margin:var(--space-4) 0; }
+  .assurance-stat { padding:var(--space-3); border:1px solid var(--border); border-radius:8px; background:var(--surface-2); }
+  .assurance-stat strong { display:block; font-size:var(--text-xl); }
+  .assurance-table { overflow-x:auto; }
+  .assurance-note { border-left:4px solid var(--warning); padding-left:var(--space-3); }
+  @media (max-width:900px) {
+    .assurance-grid,.assurance-stats { grid-template-columns:1fr; }
+  }
+</style>
+
+<h1 class="page-title">Platform, model &amp; product assurance</h1>
+<p class="page-subtitle">Production evidence, declared-versus-observed agent trust,
+  continuous control coverage, model-risk evidence, and CRA product-security records. Collection never
+  becomes compliance proof until a human reviews it; legal applicability and
+  regulator submission remain human decisions.</p>
+
+<p class="assurance-note"><strong>Decision boundary:</strong> Lightwork calculates
+  deterministic clocks and binds evidence packets. It does not certify the deployment,
+  make a legal determination, or autonomously file a report. When explicitly enabled,
+  the model-risk gate can refuse a DGM promotion; only a current human authorization
+  over the exact candidate payload can satisfy it.</p>
+
+<div class="assurance-stats" aria-label="Assurance program totals">
+  <div class="assurance-stat"><strong>{{ totals.evidence_nodes }}</strong><span>evidence nodes</span></div>
+  <div class="assurance-stat"><strong>{{ totals.campaigns }}</strong><span>production campaigns</span></div>
+  <div class="assurance-stat"><strong>{{ totals.trust_findings }}</strong><span>agent-trust findings</span></div>
+  <div class="assurance-stat"><strong>{{ totals.model_risk_findings }}</strong><span>model-risk findings</span></div>
+  <div class="assurance-stat"><strong>{{ totals.cra_cases }}</strong><span>CRA cases</span></div>
+</div>
+
+<div class="assurance-grid">
+  <section class="panel">
+    <h2>Continuous evidence graph</h2>
+    {% if not enabled.evidence_graph %}
+      <p>Disabled. Enable <code>[evidence_graph] enable = true</code>.</p>
+    {% else %}
+      <p class="muted">Only current, human-approved nodes count toward coverage.</p>
+      <div class="assurance-table"><table>
+        <thead><tr><th>evidence</th><th>source</th><th>review</th><th>freshness</th></tr></thead>
+        <tbody>{% for row in evidence_nodes %}<tr>
+          <td>{{ row.title }}<br><code>{{ row.id }}</code></td>
+          <td>{{ row.source }}</td><td>{{ row.status }}</td><td>{{ row.freshness }}</td>
+        </tr>{% else %}<tr><td colspan="4">No bounded evidence collected.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Production evidence factory</h2>
+    {% if not enabled.evidence_factory %}
+      <p>Disabled. Enable <code>[evidence_factory] enable = true</code>.</p>
+    {% else %}
+      <p class="muted">Campaigns bind commit, image, configuration, migrations,
+        dependencies, service objectives, collector results, and witness records.</p>
+      <div class="assurance-table"><table>
+        <thead><tr><th>campaign</th><th>status</th><th>signature</th></tr></thead>
+        <tbody>{% for row in campaigns %}<tr>
+          <td>{{ row.title }}<br><code>{{ row.id }}</code></td>
+          <td>{{ row.status }}</td><td>{{ row.get('signature_status','not finalized') }}</td>
+        </tr>{% else %}<tr><td colspan="3">No campaigns have been run.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Agent Trust Auditor</h2>
+    {% if not enabled.agent_trust_auditor %}
+      <p>Disabled. Enable <code>[agent_trust_auditor] enable = true</code>.</p>
+    {% else %}
+      <p><strong>{{ totals.trust_estate }}</strong> configured or observed assets;
+        <strong>{{ totals.trust_findings }}</strong> deterministic findings.</p>
+      <div class="assurance-table"><table>
+        <thead><tr><th>finding</th><th>severity</th><th>asset</th><th>cited observations</th></tr></thead>
+        <tbody>{% for row in trust_findings %}<tr>
+          <td>{{ row.summary }}</td><td>{{ row.severity }}</td>
+          <td><code>{{ row.entity_id }}</code></td>
+          <td>{{ row.observation_ids|length }}</td>
+        </tr>{% else %}<tr><td colspan="4">No current trust findings.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Model Risk &amp; AI Assurance Officer</h2>
+    {% if not enabled.model_risk_assurance %}
+      <p>Disabled. Enable <code>[model_risk_assurance] enable = true</code>.</p>
+    {% else %}
+      <p><strong>{{ totals.model_risk_assets }}</strong> governed AI assets,
+        <strong>{{ totals.model_risk_evidence }}</strong> evaluation records, and
+        <strong>{{ totals.model_risk_findings }}</strong> current deterministic findings.</p>
+      <p class="muted">Framework mappings are advisory. EU AI Act applicability
+        remains undetermined until a dated human assertion is reviewed.</p>
+      <div class="assurance-table"><table>
+        <thead><tr><th>finding</th><th>severity</th><th>asset</th><th>citations</th></tr></thead>
+        <tbody>{% for row in model_risk_findings %}<tr>
+          <td>{{ row.summary }}<br><code>{{ row.finding_type }}</code></td>
+          <td>{{ row.severity }}</td><td><code>{{ row.asset_id }}</code></td>
+          <td>{{ row.citations|length }}</td>
+        </tr>{% else %}<tr><td colspan="4">No current model-risk findings.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>CRA Product Security Officer</h2>
+    {% if not enabled.cra_ops %}
+      <p>Disabled. Enable <code>[cra_ops] enable = true</code>.</p>
+    {% else %}
+      <p><strong>{{ totals.cra_products }}</strong> products and
+        <strong>{{ totals.cra_cases }}</strong> governed vulnerability or incident cases.</p>
+      <div class="assurance-table"><table>
+        <thead><tr><th>case</th><th>human determination</th><th>clock state</th></tr></thead>
+        <tbody>{% for row in cra_cases %}<tr>
+          <td>{{ row.title }}<br><code>{{ row.external_id }}</code></td>
+          <td>{{ row.reportability.status }}</td>
+          <td>{% if row.clocks %}{{ row.clocks|map(attribute='state')|join(', ') }}{% else %}not started{% endif %}</td>
+        </tr>{% else %}<tr><td colspan="3">No CRA cases recorded.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    {% endif %}
+  </section>
+</div>
+
+<p><a class="btn" href="/security">Back to Security &amp; GRC</a></p>
+{% endblock %}

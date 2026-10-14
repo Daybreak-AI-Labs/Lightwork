@@ -1,0 +1,26 @@
+{
+  "artifact_name": "lightwork-cra-product-security-officer",
+  "description": "Reduced unsigned local CRA product-security operations standalone source SKU",
+  "display_name": "Lightwork CRA Product Security Officer",
+  "entrypoint": "serve_standalone.py",
+  "files": [
+    "README.md",
+    "app.py",
+    "backend.py",
+    "capabilities.py",
+    "cra_engine.py",
+    "request_limits.py",
+    "requirements.txt",
+    "run_standalone.sh",
+    "serve_standalone.py",
+    "templates/about.html",
+    "templates/base.html",
+    "templates/index.html",
+    "test_cra_product_security_officer_standalone.py"
+  ],
+  "schema_version": 1,
+  "shared_files": [
+    "LICENSE",
+    "TRADEMARK.md"
+  ]
+}

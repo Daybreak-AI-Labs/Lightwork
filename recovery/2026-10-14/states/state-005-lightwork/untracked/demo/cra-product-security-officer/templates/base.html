@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}CRA Product Security Officer{% endblock %}</title>
+  <style>
+    :root{color-scheme:dark;--ink:#eef5f2;--muted:#aebdb7;--panel:#13221e;--line:#315448;--accent:#75e0b4;--warn:#ffc96b;--bad:#ff8989}
+    *{box-sizing:border-box}body{font:16px/1.5 system-ui;margin:0;background:#08120f;color:var(--ink)}header,main{max-width:1120px;margin:auto;padding:1rem}header{display:flex;justify-content:space-between;gap:1rem;align-items:center}a{color:var(--accent)}.hero,.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.25rem;margin-bottom:1rem}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:1rem}.notice{border-left:5px solid var(--warn);padding:.75rem 1rem;background:#2b2414}.muted{color:var(--muted)}label{display:block;margin:.6rem 0}input,select,textarea,button{font:inherit;width:100%;padding:.65rem;border-radius:7px;border:1px solid #4d7466;background:#0b1713;color:var(--ink)}textarea{min-height:8rem}button{background:#196e50;border-color:#43a37e;font-weight:700;cursor:pointer}button:hover{background:#238263}table{width:100%;border-collapse:collapse}th,td{text-align:left;vertical-align:top;padding:.55rem;border-bottom:1px solid var(--line)}code{overflow-wrap:anywhere}.tag{color:var(--warn)}.result{margin-top:.7rem;padding:.5rem}.error{color:var(--bad)}.success{color:var(--accent)}:focus-visible{outline:3px solid var(--warn);outline-offset:2px}
+  </style>
+</head>
+<body>
+  <header><strong>Lightwork CRA Product Security Officer</strong><nav aria-label="Primary"><a href="/">Workspace</a> · <a href="/about">Capabilities</a></nav></header>
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

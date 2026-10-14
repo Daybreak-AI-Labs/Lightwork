@@ -1,0 +1,27 @@
+{
+  "artifact_name": "lightwork-agent-trust-auditor",
+  "description": "Reduced, read-only Agent Trust Auditor standalone source SKU",
+  "display_name": "Lightwork Agent Trust Auditor",
+  "entrypoint": "serve_standalone.py",
+  "files": [
+    "README.md",
+    "app.py",
+    "backend.py",
+    "capabilities.py",
+    "request_limits.py",
+    "requirements.txt",
+    "run_standalone.sh",
+    "serve_standalone.py",
+    "templates/about.html",
+    "templates/base.html",
+    "templates/index.html",
+    "test_agent_trust_auditor_standalone.py",
+    "trust_engine.py"
+  ],
+  "schema_version": 1,
+  "shared_files": [
+    "LICENSE",
+    "TRADEMARK.md"
+  ]
+}
+

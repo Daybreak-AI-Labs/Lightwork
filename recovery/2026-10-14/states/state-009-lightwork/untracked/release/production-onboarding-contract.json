@@ -1,0 +1,477 @@
+{
+  "boundary": {
+    "cross_evaluation_replay": "requires-external-consumption-ledger",
+    "installer_production_mode": "report-only-no-config-mutation",
+    "legal_certification": false,
+    "missing_or_expired_required_observation": "not-ready",
+    "network_calls": "none",
+    "ordinary_installer_completion": "evaluation-only-not-production-ready",
+    "ordinary_wizard_is_production_authority": false,
+    "production_completion_authority": "signed-deployment-bound-readiness-report",
+    "state_mutation": "none"
+  },
+  "checks": [
+    {
+      "evidence_requirements": [
+        "exact served-model artifact and runtime identity",
+        "approved endpoint region retention cap and failover policy",
+        "live request and failure-path qualification"
+      ],
+      "external_observation_required": true,
+      "id": "provider_model_policy",
+      "label": "Provider and model policy",
+      "minimum_evidence_items": 3,
+      "repository_contract_refs": [
+        "production_model_policy",
+        "production_support_matrix"
+      ],
+      "required": true,
+      "runtime_binding": null
+    },
+    {
+      "evidence_requirements": [
+        "exact issuer or trusted-proxy identity mapping",
+        "revocation logout and break-glass adverse exercise",
+        "cross-tenant and unauthenticated denial result"
+      ],
+      "external_observation_required": true,
+      "id": "identity_auth",
+      "label": "Identity and authentication",
+      "minimum_evidence_items": 3,
+      "repository_contract_refs": [
+        "production_identity_posture",
+        "production_runtime",
+        "production_support_matrix",
+        "dependency_failure"
+      ],
+      "required": true,
+      "runtime_binding": "identity-provider-and-posture-sha256"
+    },
+    {
+      "evidence_requirements": [
+        "exact runtime class and container image identity",
+        "deployed containment and no-host-execution adverse result",
+        "network and filesystem isolation observation"
+      ],
+      "external_observation_required": true,
+      "id": "sandbox_isolation",
+      "label": "Sandbox and isolation",
+      "minimum_evidence_items": 3,
+      "repository_contract_refs": [
+        "production_runtime",
+        "production_support_matrix"
+      ],
+      "required": true,
+      "runtime_binding": null
+    },
+    {
+      "evidence_requirements": [
+        "required Shield policy and model-output boundary",
+        "adversarial input and required-redaction failure result",
+        "consequential-action refusal observation"
+      ],
+      "external_observation_required": true,
+      "id": "shield_safety_boundary",
+      "label": "Shield and safety boundary",
+      "minimum_evidence_items": 3,
+      "repository_contract_refs": [
+        "production_runtime",
+        "production_operations"
+      ],
+      "required": true,
+      "runtime_binding": null
+    },
+    {
+      "evidence_requirements": [
+        "off-host signer custody and key identity",
+        "signed chain verification and off-host anchor",
+        "historical verification after rotation and recovery"
+      ],
+      "external_observation_required": true,
+      "id": "audit_signer_key_custody",
+      "label": "Audit signer and key custody",
+      "minimum_evidence_items": 3,
+      "repository_contract_refs": [
+        "production_runtime",
+        "production_data_boundary",
+        "secret_rotation"
+      ],
+      "required": true,
+      "runtime_binding": null
+    },
+    {
+      "evidence_requirements": [
+        "exact TLS role RLS and schema posture",
+        "adjacent migration backup restore and interruption exercise",
+        "cross-tenant denial and recovery observation"
+      ],
+      "external_observation_required": true,
+      "id": "postgres_storage_migrations",
+      "label": "Postgres storage and migrations",
+      "minimum_evidence_items": 3,
+      "repository_contract_refs": [
+        "production_data_boundary",
+        "production_migration",
+        "dependency_failure"
+      ],
+      "required": true,
+      "runtime_binding": null
+    },
+    {
+      "evidence_requirements": [
+        "exact ingress certificate DNS and proxy identity",
+        "egress allowlist and denied-destination observation",
+        "dependency timeout and recovery result"
+      ],
+      "external_observation_required": true,
+      "id": "connectivity_egress_tls",
+      "label": "Connectivity, egress, and TLS",
+      "minimum_evidence_items": 3,
+      "repository_contract_refs": [
+        "production_runtime",
+        "dependency_failure",
+        "production_support_matrix"
+      ],
+      "required": true,
+      "runtime_binding": null
+    },
+    {
+      "evidence_requirements": [
+        "exact mounted secret inventory and external custody",
+        "overlap rollback validation and old-authority revocation",
+        "pod recreation and readiness observation"
+      ],
+      "external_observation_required": true,
+      "id": "secrets_rotation",
+      "label": "Secrets and rotation",
+      "minimum_evidence_items": 3,
+      "repository_contract_refs": [
+        "production_runtime",
+        "secret_rotation"
+      ],
+      "required": true,
+      "runtime_binding": null
+    },
+    {
+      "evidence_requirements": [
+        "exact policy generation and workload-derived limits",
+        "live saturation fairness settlement and expiry result",
+        "failover reconciliation and capacity observation"
+      ],
+      "external_observation_required": true,
+      "id": "tenant_quotas",
+      "label": "Tenant quotas and backpressure",
+      "minimum_evidence_items": 3,
+      "repository_contract_refs": [
+        "tenant_quota"
+      ],
+      "required": true,
+      "runtime_binding": null
+    },
+    {
+      "evidence_requirements": [
+        "deployed scrape dashboards logs and bounded-cardinality metrics",
+        "alert delivery acknowledgement and runbook exercise",
+        "objective measurement and error-budget observation"
+      ],
+      "external_observation_required": true,
+      "id": "observability",
+      "label": "Observability and alerting",
+      "minimum_evidence_items": 3,
+      "repository_contract_refs": [
+        "production_operations",
+        "service_objectives",
+        "dependency_failure"
+      ],
+      "required": true,
+      "runtime_binding": null
+    },
+    {
+      "evidence_requirements": [
+        "signed exact-revision release governance packet",
+        "independent approvals and external qualification records",
+        "current owner escalation incident and recovery evidence"
+      ],
+      "external_observation_required": true,
+      "id": "operational_evidence",
+      "label": "Release and operational evidence",
+      "minimum_evidence_items": 3,
+      "repository_contract_refs": [
+        "production_readiness",
+        "change_control",
+        "claim_evidence",
+        "service_objectives"
+      ],
+      "required": true,
+      "runtime_binding": null
+    }
+  ],
+  "evidence_authority": {
+    "authority_custody": "out-of-band-pinned-public-key",
+    "contract_binding": "exact-byte-sha256",
+    "deployment_identity_binding": "out-of-band-pinned-deployment-id-and-config-sha256",
+    "duplicate_replay_policy": "reject-within-manifest-evidence-id-and-artifact-reuse",
+    "identity_posture_binding": "signed-check-row-to-out-of-band-provider-and-posture-sha256",
+    "manifest_schema": "lightwork.production-onboarding-evidence-manifest.v2",
+    "release_state_binding": "exact-byte-sha256-release-candidate",
+    "requirement_coverage": "exactly-once-per-contract-requirement",
+    "signature_algorithm": "Ed25519",
+    "source_revision_binding": "trusted-runtime-revision"
+  },
+  "max_observation_age_days": 31,
+  "profile_id": "enterprise-single-control-plane-v1",
+  "release_eligible": false,
+  "repository": "Daybreak-AI-Labs/Lightwork",
+  "repository_contracts": [
+    {
+      "id": "production_surface",
+      "path": "release/production-surface-manifest.json",
+      "schema": "lightwork.production-surface.v1"
+    },
+    {
+      "id": "production_runtime",
+      "path": "release/production-runtime-contract.json",
+      "schema": "lightwork.production-runtime-contract.v1"
+    },
+    {
+      "id": "production_identity_posture",
+      "path": "release/production-identity-posture-contract.json",
+      "schema": "lightwork.production-identity-posture-contract.v1"
+    },
+    {
+      "id": "production_model_policy",
+      "path": "release/production-model-policy.json",
+      "schema": "lightwork.production-model-policy.v1"
+    },
+    {
+      "id": "production_support_matrix",
+      "path": "release/production-support-matrix.json",
+      "schema": "lightwork.production-support-matrix.v1"
+    },
+    {
+      "id": "production_data_boundary",
+      "path": "release/production-data-boundary.json",
+      "schema": "lightwork.production-data-boundary.v1"
+    },
+    {
+      "id": "production_operations",
+      "path": "release/production-operations-contract.json",
+      "schema": "lightwork.production-operations-contract.v1"
+    },
+    {
+      "id": "dependency_failure",
+      "path": "release/dependency-failure-contract.json",
+      "schema": "lightwork.dependency-failure-contract.v1"
+    },
+    {
+      "id": "production_migration",
+      "path": "release/production-migration-contract.json",
+      "schema": "schema_version:1"
+    },
+    {
+      "id": "secret_rotation",
+      "path": "release/secret-rotation-contract.json",
+      "schema": "lightwork.secret-rotation-contract.v1"
+    },
+    {
+      "id": "tenant_quota",
+      "path": "release/tenant-quota-contract.json",
+      "schema": "lightwork.tenant-quota-contract.v1"
+    },
+    {
+      "id": "service_objectives",
+      "path": "release/service-objectives.json",
+      "schema": "lightwork.service-objectives.v1"
+    },
+    {
+      "id": "production_readiness",
+      "path": "release/production-readiness-evidence.json",
+      "schema": "lightwork.production-readiness-evidence.v3"
+    },
+    {
+      "id": "change_control",
+      "path": "release/production-change-control-policy.json",
+      "schema": "lightwork.production-change-control-policy.v2"
+    },
+    {
+      "id": "claim_evidence",
+      "path": "release/claim-evidence-ledger.json",
+      "schema": "lightwork.claim-evidence-ledger.v1"
+    }
+  ],
+  "schema": "lightwork.production-onboarding-contract.v2",
+  "source_bindings": [
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "apps/installer-cli/README.md",
+      "sha256": "3a925022034911fc0cb197a008ef0096f785d70fb075de71e660b44f129ca46c"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "apps/installer-cli/maverick_installer/bridge.py",
+      "sha256": "b319a671278673055a82e000918c7a6d5c2407b346b095978155e45fc8651314"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "apps/installer-cli/maverick_installer/main.py",
+      "sha256": "afbad1cf24f60cff8ca22bf90d70cc563579e443d90a16316fd2d3c51609523c"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "apps/installer-cli/maverick_installer/wizard.py",
+      "sha256": "dfebaeac2a40c80e60c028068e0d1dac22cca9460518f2ff63594e252da7f8cc"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "apps/installer-cli/tests/test_bridge_consumer_flow.py",
+      "sha256": "254f7808f4f63dc8a3cd97c888c2095e1051c23abb093796f36200b732f9b93d"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "apps/installer-cli/tests/test_entrypoint_and_abort.py",
+      "sha256": "a1858bf8ba6bdb1b578e7192e128c8a665791f592cb54c2bc9309120b8e29f12"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "apps/installer-desktop/src/App.svelte",
+      "sha256": "adfffa24c2dcc0ada03fcef5708bc5a426109a4c490a5373aa714c96c7ada9d2"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "deploy/docker/Dockerfile.production",
+      "sha256": "1a8a985a7a33be0f41e4a2706d2f315544085c50a8c91e47f73f94fb59d2b4eb"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "deploy/desktop/install.ps1",
+      "sha256": "d375c0bc7418523ff2fe060b7813e0edbfa05c02d9764bb5c5589b5e86736add"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "deploy/desktop/install.sh",
+      "sha256": "e9ab5d394d8d4a73e6ddc48af7297d2afd9485b2443fbc30e4caa6336a4de96f"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "deploy/helm/README.md",
+      "sha256": "141852dc392bafbac7dfabf5fdefdf0bb02fd42748f38f4c39c6a5be0bd29c0b"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "deploy/helm/maverick/templates/_helpers.tpl",
+      "sha256": "09582a4df2abae8c58a642ced3a5b761100e0036633837a6fe8dde8c3504bbfa"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "deploy/helm/maverick/templates/deployment.yaml",
+      "sha256": "9150836403fdf3541c9f951c3ce4f0622a46ee5ec770e749a1135a4e8c7c2f8f"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "deploy/helm/maverick/templates/identity-configmap.yaml",
+      "sha256": "31616c69af3c59915643c6c1609cb11d1545b7c54d35dad5e81019cf7cb6d6ae"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "deploy/helm/maverick/values-production.yaml",
+      "sha256": "62e2bdd0ec8674dcfcaa343d9e7dd1f3564289aa09feae0faa3588614ea55119"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "deploy/helm/maverick/values.yaml",
+      "sha256": "967e42a65705491675dc71807e3b6601ec4f8bc71da448501f96ee8ca641e9cf"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "deploy/vps/install.sh",
+      "sha256": "ec97796cff0ec9956e4c29a21f870e123d31a86809b6cdb68a83b3ad47d730f5"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "docs/operator-first-run.md",
+      "sha256": "4b16116e1cb601460bb2526808295b90be5c444c1e6183376fe578f1f6276bc7"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/maverick/cli/__init__.py",
+      "sha256": "77e5ab0b714e6b90165a43f56734bfaa9cee7f576830202f586a9167e3912d8a"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/maverick/cli/_ops_groups.py",
+      "sha256": "2fc9d8135e1ceabbee428dc1feea5265dd954e2509909d7edc5d71af667145b0"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/maverick/dashboard_rbac_policy.py",
+      "sha256": "7b4a1edbb72124a3dd1debeb6b90a767501422033582b3c4be497f3d7e170240"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/maverick/deployment.py",
+      "sha256": "23853833a161ce25fbb2909a97f3482c905f81d242f61109318eb8c4869f863b"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/maverick/oidc.py",
+      "sha256": "3825891b17c0f5930631ad5cc608429d74dc7ac083878e3a15cdd18c20ff518c"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/maverick/production_exclusions.py",
+      "sha256": "671203cad1816bcefa9af11e87377eee37c5427e4a9eb85d6c9e240cb966b065"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/maverick/production_identity.py",
+      "sha256": "d7211553c549f9edca2a2c19fc247835f04be8bf5f8c3f1985ac7190db35100e"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/maverick/production_onboarding.py",
+      "sha256": "3b931a582993623c3c1372d5cdfceea8fcbc879f0948eefd84b7c06aa501140f"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/maverick/proxy_auth.py",
+      "sha256": "a9268753ac1ee53a09a2b55139b035bb8f294a65337c6ec169acacf017fc4959"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/tests/test_helm_production_profile.py",
+      "sha256": "507a373cf32f0c23dbc2fe4dff89b18fc1cee5610714fdc9c040c843add9ab49"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/tests/test_production_identity.py",
+      "sha256": "f293b04996c9877289e3ad8e5efa332bf6340679e572ae069d77707a01b585fd"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/tests/test_production_onboarding.py",
+      "sha256": "cd6c56c6db49ceb8350937408ce096dc6ccc3a2ab5cb42aa82b55b2319678612"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-core/tests/test_proxy_auth.py",
+      "sha256": "61f4705d9ea6c1909d5f4e15ea4812fb68c73d28386bc634b4a06a0c28eaf5dd"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-dashboard/maverick_dashboard/endpoint_policy.py",
+      "sha256": "b6b66e363cb3fe4e978c331ad634efb888915804f2905f6d4628451dd45a7316"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-dashboard/maverick_dashboard/rbac.py",
+      "sha256": "7206592f1d0b5c15d74b072ab64470056d19ba5292f6d276e08ff09976fe54ed"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-dashboard/tests/test_endpoint_policy.py",
+      "sha256": "8196b17341fc8e113e2f040d3439dfc396abdbc6e2fdb8af6885834d0688f30c"
+    }
+  ],
+  "source_version": "0.1.7",
+  "status": "repository-contract-requires-live-deployment-evidence"
+}

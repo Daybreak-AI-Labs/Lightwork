@@ -1,0 +1,22 @@
+{
+  "api_version": "0.1.0",
+  "compatibility_policy": "exact-until-reviewed-version-bump",
+  "contract_version": "5.0.0",
+  "deprecation_policy": {
+    "clock_starts": "first-supported-release-containing-the-deprecation-notice",
+    "minimum_calendar_days": 90,
+    "minimum_supported_minor_releases": 2,
+    "removal_requires": [
+      "reviewed-contract-version-bump",
+      "migration-guide",
+      "release-notes",
+      "claim-evidence-ledger-refresh"
+    ]
+  },
+  "lifecycle_status": "unpublished-release-candidate",
+  "migration_guide": "docs/api.md#api-compatibility-deprecation-and-migration",
+  "openapi_version": "3.1.0",
+  "operation_count": 69,
+  "production_schema_sha256": "06de05207fde88417ee667475a29243d3a9a02c6913cfbed951e1aa8401d5d9b",
+  "schema": "lightwork.dashboard-openapi-contract.v1"
+}

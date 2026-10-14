@@ -1,0 +1,131 @@
+{
+  "execution": {
+    "arbitrary_command_execution": false,
+    "container_entrypoint_is_pid1": true,
+    "installed_package_inputs_read_only": true,
+    "operating_system": "Linux",
+    "run_as_gid": 1000,
+    "run_as_uid": 1000,
+    "sandbox_backend": "disabled",
+    "termination_grace_seconds": 60,
+    "termination_signal": "SIGTERM",
+    "untrusted_process_tree": "none"
+  },
+  "filesystem": {
+    "durable_volume_request": "10Gi",
+    "file_only_secret_environment": [
+      "MAVERICK_AUDIT_SIGNING_KEY_WRAPPED",
+      "MAVERICK_KMS_KEY_ID",
+      "MAVERICK_OIDC_CLIENT_SECRET",
+      "MAVERICK_OIDC_SESSION_SECRET",
+      "MAVERICK_PG_DSN",
+      "VAULT_TOKEN",
+      "VLLM_API_KEY"
+    ],
+    "forbidden_paths": [
+      "/home/maverick/.aws",
+      "/home/maverick/.azure",
+      "/home/maverick/.cache/huggingface",
+      "/home/maverick/.codex",
+      "/home/maverick/.config/gh",
+      "/home/maverick/.config/gcloud",
+      "/home/maverick/.config/huggingface",
+      "/home/maverick/.docker",
+      "/home/maverick/.kube",
+      "/home/maverick/.ssh",
+      "/run/containerd/containerd.sock",
+      "/run/secrets/kubernetes.io/serviceaccount",
+      "/root/.aws",
+      "/root/.azure",
+      "/root/.config/gcloud",
+      "/root/.docker",
+      "/root/.kube",
+      "/root/.ssh",
+      "/var/run/crio/crio.sock",
+      "/var/run/docker.sock",
+      "/run/secrets/lightwork-projected"
+    ],
+    "forbidden_secret_files": [
+      "ANTHROPIC_API_KEY",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+      "AZURE_CLIENT_SECRET",
+      "CODEX_HOME",
+      "DOCKER_AUTH_CONFIG",
+      "GH_TOKEN",
+      "GITHUB_TOKEN",
+      "GOOGLE_APPLICATION_CREDENTIALS",
+      "HF_TOKEN",
+      "HUGGING_FACE_HUB_TOKEN",
+      "KUBECONFIG",
+      "MAVERICK_AUDIT_SIGNING_KEY",
+      "MAVERICK_DASHBOARD_TOKEN",
+      "OPENAI_API_KEY",
+      "SSH_AUTH_SOCK"
+    ],
+    "oidc_secret_files": [
+      "MAVERICK_OIDC_CLIENT_SECRET",
+      "MAVERICK_OIDC_SESSION_SECRET"
+    ],
+    "platform_mount_points": [
+      "/etc/hostname",
+      "/etc/hosts",
+      "/etc/resolv.conf"
+    ],
+    "platform_mount_prefixes": [
+      "/dev",
+      "/proc",
+      "/sys"
+    ],
+    "projected_evidence_files": [
+      "MAVERICK_PRODUCTION_ONBOARDING_OBSERVATIONS"
+    ],
+    "projected_secret_files": [
+      "MAVERICK_AUDIT_SIGNING_KEY_WRAPPED",
+      "MAVERICK_KMS_KEY_ID",
+      "MAVERICK_PG_DSN",
+      "VAULT_TOKEN",
+      "VLLM_API_KEY"
+    ],
+    "read_only_inputs": [
+      "/app",
+      "/etc/lightwork",
+      "/run/secrets/lightwork",
+      "/workspace"
+    ],
+    "read_only_root": true,
+    "secret_staging_limit": "2Mi",
+    "tmp_size_limit": "1Gi",
+    "tool_workspace": "/workspace",
+    "writable_mounts": [
+      "/tmp",
+      "/home/maverick/.maverick"
+    ]
+  },
+  "network": {
+    "allow_public_egress": false,
+    "control": "kubernetes-networkpolicy",
+    "dns_and_approved_dependency_cidrs_only": true,
+    "live_cluster_proof_required": true
+  },
+  "profile_id": "enterprise-single-control-plane-v1",
+  "resources": {
+    "concurrent_goals": 8,
+    "concurrent_goals_per_principal": 2,
+    "cpu_limit": "2",
+    "ephemeral_storage_limit": "1Gi",
+    "goal_wall_seconds": 1800,
+    "input_tokens_per_goal": 1000000,
+    "memory_limit": "2Gi",
+    "nested_agent_depth": 3,
+    "open_files": 4096,
+    "output_tokens_per_goal": 200000,
+    "pids": 256,
+    "single_file_bytes": 8589934592,
+    "tool_calls_per_goal": 500,
+    "tool_result_bytes": 32000,
+    "total_child_agents": 32
+  },
+  "schema": "lightwork.production-runtime-contract.v1"
+}

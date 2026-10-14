@@ -1,0 +1,883 @@
+{
+  "all_commands_passed": false,
+  "environment_overrides": {
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "HOME": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lightwork-proof-results-_1wen2h9",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "MAVERICK_CLIENT_ID": "proof-fixture-local",
+    "MAVERICK_CONFIG": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lightwork-proof-results-_1wen2h9\\config.toml",
+    "MAVERICK_HOME": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lightwork-proof-results-_1wen2h9",
+    "NO_COLOR": "1",
+    "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+    "PYTHONBREAKPOINT": "0",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONIOENCODING": "utf-8",
+    "PYTHONNOUSERSITE": "1",
+    "PYTHONPATH": "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\packages\\maverick-core;C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork",
+    "PYTHONSAFEPATH": "1",
+    "PYTHONUTF8": "1",
+    "PYTHONWARNINGS": "default",
+    "TEMP": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lightwork-proof-results-_1wen2h9\\tmp",
+    "TMP": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lightwork-proof-results-_1wen2h9\\tmp",
+    "TMPDIR": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lightwork-proof-results-_1wen2h9\\tmp",
+    "TZ": "UTC",
+    "USERPROFILE": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lightwork-proof-results-_1wen2h9",
+    "XDG_CACHE_HOME": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lightwork-proof-results-_1wen2h9\\xdg-cache",
+    "XDG_CONFIG_HOME": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lightwork-proof-results-_1wen2h9\\xdg-config",
+    "XDG_DATA_HOME": "C:\\Users\\Cstep\\AppData\\Local\\Temp\\lightwork-proof-results-_1wen2h9\\xdg-data"
+  },
+  "evidence_boundary": [
+    "revision-bound local regression and prerequisite evidence only",
+    "fixture/stub/oracle/trusted-host limitations remain authoritative",
+    "not competitive capability, customer ROI, production, or release evidence",
+    "fixture children inherit only the recorded system allow-list; ambient app, provider, Python-path, and pytest injection variables are discarded"
+  ],
+  "execution_environment": {
+    "admitted_names": [
+      "COMSPEC",
+      "GIT_CONFIG_NOSYSTEM",
+      "GIT_TERMINAL_PROMPT",
+      "HOME",
+      "LANG",
+      "LC_ALL",
+      "MAVERICK_CLIENT_ID",
+      "MAVERICK_CONFIG",
+      "MAVERICK_HOME",
+      "NO_COLOR",
+      "OS",
+      "PATH",
+      "PATHEXT",
+      "PROCESSOR_ARCHITECTURE",
+      "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+      "PYTHONBREAKPOINT",
+      "PYTHONDONTWRITEBYTECODE",
+      "PYTHONHASHSEED",
+      "PYTHONIOENCODING",
+      "PYTHONNOUSERSITE",
+      "PYTHONPATH",
+      "PYTHONSAFEPATH",
+      "PYTHONUTF8",
+      "PYTHONWARNINGS",
+      "SYSTEMDRIVE",
+      "SYSTEMROOT",
+      "TEMP",
+      "TMP",
+      "TMPDIR",
+      "TZ",
+      "USERPROFILE",
+      "WINDIR",
+      "XDG_CACHE_HOME",
+      "XDG_CONFIG_HOME",
+      "XDG_DATA_HOME"
+    ],
+    "environment_digest_scope": "sorted admitted variable names plus SHA-256 of each exact value; environment values are not serialized",
+    "environment_sha256": "8ba8708e312a5c8284e2cea60cde7db6c2620c7c56f12d538145018b66e812cf",
+    "inherited_names": [
+      "COMSPEC",
+      "OS",
+      "PATH",
+      "PATHEXT",
+      "PROCESSOR_ARCHITECTURE",
+      "SYSTEMDRIVE",
+      "SYSTEMROOT",
+      "WINDIR"
+    ],
+    "policy": {
+      "discarded_prefixes": [
+        "MAVERICK_",
+        "LIGHTWORK_",
+        "PYTHON",
+        "PYTEST_"
+      ],
+      "fixed_names": [
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_TERMINAL_PROMPT",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "MAVERICK_CLIENT_ID",
+        "MAVERICK_CONFIG",
+        "MAVERICK_HOME",
+        "NO_COLOR",
+        "PYTHONDONTWRITEBYTECODE",
+        "PYTHONBREAKPOINT",
+        "PYTHONHASHSEED",
+        "PYTHONIOENCODING",
+        "PYTHONNOUSERSITE",
+        "PYTHONPATH",
+        "PYTHONSAFEPATH",
+        "PYTHONUTF8",
+        "PYTHONWARNINGS",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "TZ",
+        "USERPROFILE",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME"
+      ],
+      "id": "lightwork-proof-fixture-environment-v1",
+      "isolated_home_files": [
+        {
+          "path": ".gitconfig",
+          "sha256": "b41ca328666531755746e2cee450e1c33b93cdc08adbaa483e04cba0a4187cc5"
+        }
+      ],
+      "known_discarded_names": [
+        "ALL_PROXY",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_CREDENTIALS",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_CONFIG_FILE",
+        "AWS_DEFAULT_PROFILE",
+        "AWS_ENDPOINT_URL",
+        "AWS_PROFILE",
+        "AWS_REGION",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "AZURE_OPENAI_AD_TOKEN",
+        "AZURE_OPENAI_API_KEY",
+        "AZURE_OPENAI_API_VERSION",
+        "AZURE_OPENAI_AUTH",
+        "AZURE_OPENAI_DEPLOYMENT",
+        "AZURE_OPENAI_ENDPOINT",
+        "AZURE_OPENAI_TOKEN_SCOPE",
+        "BEDROCK_API_KEY",
+        "CLOUDSDK_CONFIG",
+        "CODEX_ACCESS_TOKEN",
+        "COHERE_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "DEEPSEEK_BASE_URL",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GROK_API_KEY",
+        "GROQ_API_KEY",
+        "HF_TOKEN",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "HUGGINGFACEHUB_API_TOKEN",
+        "MOONSHOT_API_KEY",
+        "NO_PROXY",
+        "OLLAMA_HOST",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENAI_COMPATIBLE_API_KEY",
+        "OPENAI_COMPATIBLE_BASE_URL",
+        "OPENROUTER_API_KEY",
+        "PYTEST_ADDOPTS",
+        "PYTEST_PLUGINS",
+        "TGI_API_KEY",
+        "TGI_BASE_URL",
+        "TOGETHER_API_KEY",
+        "VERTEX_LOCATION",
+        "VLLM_API_KEY",
+        "VLLM_BASE_URL",
+        "XAI_API_KEY"
+      ],
+      "parent_inherit_allowlist": [
+        "COMSPEC",
+        "OS",
+        "PATH",
+        "PATHEXT",
+        "PROCESSOR_ARCHITECTURE",
+        "SYSTEMDRIVE",
+        "SYSTEMROOT",
+        "WINDIR"
+      ],
+      "secret_values_serialized": false,
+      "unlisted_parent_variables": "discarded"
+    },
+    "policy_sha256": "43988ad7b303e09a6c3ed720b5f2f872f2a11b8ddce6fefec97b99f79c11789a",
+    "value_sha256": [
+      {
+        "name": "COMSPEC",
+        "sha256": "4590cd7e16bb833391987850683b6099842a867caf30898f2df37a27ef0b48fa"
+      },
+      {
+        "name": "GIT_CONFIG_NOSYSTEM",
+        "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+      },
+      {
+        "name": "GIT_TERMINAL_PROMPT",
+        "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+      },
+      {
+        "name": "HOME",
+        "sha256": "0e4fd01f8f22f092aed432515653da61a85ce16794caf3ee0b15700d577e64c4"
+      },
+      {
+        "name": "LANG",
+        "sha256": "99fed2d548c2eb1022f4067f97fe838a2c3ea60ee0e0f53086788505c3ababad"
+      },
+      {
+        "name": "LC_ALL",
+        "sha256": "99fed2d548c2eb1022f4067f97fe838a2c3ea60ee0e0f53086788505c3ababad"
+      },
+      {
+        "name": "MAVERICK_CLIENT_ID",
+        "sha256": "3f267990a0ecd15f632668b0c113d016d024fac4f4d28d4a98b60d8682ebfad4"
+      },
+      {
+        "name": "MAVERICK_CONFIG",
+        "sha256": "09a4468abad1549affaecc870f3ab80656a288c52b11c97cf7735b3b162a93de"
+      },
+      {
+        "name": "MAVERICK_HOME",
+        "sha256": "0e4fd01f8f22f092aed432515653da61a85ce16794caf3ee0b15700d577e64c4"
+      },
+      {
+        "name": "NO_COLOR",
+        "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+      },
+      {
+        "name": "OS",
+        "sha256": "7d33baefa2e177ba378df30df95ecd5e8d1d08b3d6d5d1d9d1d1b41f49a6e1fa"
+      },
+      {
+        "name": "PATH",
+        "sha256": "b5468ae6d634328a666c82ab1fdac04ece6a3122a93320e04db8087088159922"
+      },
+      {
+        "name": "PATHEXT",
+        "sha256": "89c1053c9c88d047157d4b2e4e815d24888e35065f16eb8b2b0db6af0bc3cc9d"
+      },
+      {
+        "name": "PROCESSOR_ARCHITECTURE",
+        "sha256": "558b624e3a60d3e4a393272854dbbd35c6fea3f18ee692235dcbe31be8370700"
+      },
+      {
+        "name": "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+        "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+      },
+      {
+        "name": "PYTHONBREAKPOINT",
+        "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+      },
+      {
+        "name": "PYTHONDONTWRITEBYTECODE",
+        "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+      },
+      {
+        "name": "PYTHONHASHSEED",
+        "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+      },
+      {
+        "name": "PYTHONIOENCODING",
+        "sha256": "5cf1fa8d836a5e82ead36fb0854a6a68a4b8f7542038a346357d2424ddb60f5e"
+      },
+      {
+        "name": "PYTHONNOUSERSITE",
+        "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+      },
+      {
+        "name": "PYTHONPATH",
+        "sha256": "9cde0b8f7fc78ae8d4d3108ccbceeb621f156b3a41058300e82c47c0c88f104e"
+      },
+      {
+        "name": "PYTHONSAFEPATH",
+        "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+      },
+      {
+        "name": "PYTHONUTF8",
+        "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+      },
+      {
+        "name": "PYTHONWARNINGS",
+        "sha256": "37a8eec1ce19687d132fe29051dca629d164e2c4958ba141d5f4133a33f0688f"
+      },
+      {
+        "name": "SYSTEMDRIVE",
+        "sha256": "82179da1705476f753fdbb9fb58fef251195a42a5d468128266e12228af7e75b"
+      },
+      {
+        "name": "SYSTEMROOT",
+        "sha256": "515f446d734b224dc16014e1f7326ebf20cd6383c1bcfa144230d4d64313ddfa"
+      },
+      {
+        "name": "TEMP",
+        "sha256": "97cfa5ef9d52a51ed62d9c099cab900242ca966210ecc21a46b1e97138a50d8a"
+      },
+      {
+        "name": "TMP",
+        "sha256": "97cfa5ef9d52a51ed62d9c099cab900242ca966210ecc21a46b1e97138a50d8a"
+      },
+      {
+        "name": "TMPDIR",
+        "sha256": "97cfa5ef9d52a51ed62d9c099cab900242ca966210ecc21a46b1e97138a50d8a"
+      },
+      {
+        "name": "TZ",
+        "sha256": "7e5f76c94a635c217e282f79db4fc7ee4bfd9b64044166714067602cc4be620c"
+      },
+      {
+        "name": "USERPROFILE",
+        "sha256": "0e4fd01f8f22f092aed432515653da61a85ce16794caf3ee0b15700d577e64c4"
+      },
+      {
+        "name": "WINDIR",
+        "sha256": "515f446d734b224dc16014e1f7326ebf20cd6383c1bcfa144230d4d64313ddfa"
+      },
+      {
+        "name": "XDG_CACHE_HOME",
+        "sha256": "b7a2fb839e07c4894877b10c782500853c748440382ca842c6942f580ab53875"
+      },
+      {
+        "name": "XDG_CONFIG_HOME",
+        "sha256": "6b364d7d9803dacde818af9ee999430ad862c6318e7d4a97191f8c29ec666f3e"
+      },
+      {
+        "name": "XDG_DATA_HOME",
+        "sha256": "442f0409aa3f543070b784af9137526b54a8ede515155e2752c9175c55381bcc"
+      }
+    ]
+  },
+  "generated_at": 1785935096.2994606,
+  "generated_at_utc": "2026-08-05T13:04:56.299461Z",
+  "generator_command": {
+    "argv": [
+      "C:\\Users\\Cstep\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+      "proof\\generate_results.py"
+    ],
+    "display": "C:\\Users\\Cstep\\AppData\\Local\\Programs\\Python\\Python312\\python.exe proof\\generate_results.py"
+  },
+  "kind": "lightwork-revision-bound-fixture-results",
+  "runs": [
+    {
+      "command": {
+        "argv": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\proof\\run_proof.py"
+        ],
+        "display": "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\proof\\run_proof.py"
+      },
+      "completed_at": 1785935098.840449,
+      "completed_at_utc": "2026-08-05T13:04:58.840449Z",
+      "duration_seconds": 2.5372989177703857,
+      "exit_code": 0,
+      "id": "platform-source-invariants",
+      "limitations": [
+        "Exercises named catalog and enforcement-code invariants with local fixtures.",
+        "Does not call a live connector or qualify a deployment."
+      ],
+      "prerequisites": [
+        "Python 3.10-3.12 and the source checkout's core package"
+      ],
+      "raw_output_digest_scope": "exit code plus exact stdout/stderr byte digests",
+      "raw_output_sha256": "191980d05a403ae0fcbd625d0d5012bd1325a770683d92b32d1ea5f5335a5173",
+      "started_at": 1785935096.3031502,
+      "started_at_utc": "2026-08-05T13:04:56.303150Z",
+      "stderr": {
+        "bytes": 551,
+        "path": "proof/results/raw/platform-source-invariants.stderr.txt",
+        "sha256": "54b1284a884f4159059594e0aae5388d8ae66d6330ce985bc468c29fb401bda1"
+      },
+      "stdout": {
+        "bytes": 1479,
+        "path": "proof/results/raw/platform-source-invariants.stdout.txt",
+        "sha256": "6ad934b7f04e5d1609d9c6d8879a5ea84a3a102786a89007696324588ffcace6"
+      },
+      "title": "Platform source-invariant scoreboard"
+    },
+    {
+      "command": {
+        "argv": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\proof\\self_harness_proof.py"
+        ],
+        "display": "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\proof\\self_harness_proof.py"
+      },
+      "completed_at": 1785935102.8434594,
+      "completed_at_utc": "2026-08-05T13:05:02.843459Z",
+      "duration_seconds": 3.999500274658203,
+      "exit_code": 0,
+      "id": "self-learning-fixture",
+      "limitations": [
+        "Uses fixed seeded inputs and an injected scorer.",
+        "Does not prove useful learning or robustness to real-world outcome manipulation."
+      ],
+      "prerequisites": [
+        "Python 3.10-3.12 and writable temporary storage"
+      ],
+      "raw_output_digest_scope": "exit code plus exact stdout/stderr byte digests",
+      "raw_output_sha256": "1218d7961c08faffa2c073a6a02e9f563554ee395dba1d53f17b186dbd87bcdf",
+      "started_at": 1785935098.843959,
+      "started_at_utc": "2026-08-05T13:04:58.843959Z",
+      "stderr": {
+        "bytes": 1030,
+        "path": "proof/results/raw/self-learning-fixture.stderr.txt",
+        "sha256": "593619881cfa5abde28d6e38addde902bf0a6a74134059b926f8979a7f167bd8"
+      },
+      "stdout": {
+        "bytes": 1472,
+        "path": "proof/results/raw/self-learning-fixture.stdout.txt",
+        "sha256": "e4c80fe9bb2c5a74a549c5114c6e47c2bc41ea852c26e4e1480d385dd99c6d56"
+      },
+      "title": "Self-learning fixture checks"
+    },
+    {
+      "command": {
+        "argv": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\proof\\dgm_code_rung_proof.py"
+        ],
+        "display": "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\proof\\dgm_code_rung_proof.py"
+      },
+      "completed_at": 1785935103.2998333,
+      "completed_at_utc": "2026-08-05T13:05:03.299833Z",
+      "duration_seconds": 0.45186352729797363,
+      "exit_code": 1,
+      "id": "dgm-code-rung-fixture",
+      "limitations": [
+        "The patch proposer is stubbed with a supplied diff.",
+        "A configured evaluator result would still be local regression evidence, not autonomous-improvement or production-safe-promotion proof."
+      ],
+      "prerequisites": [
+        "Python 3.10-3.12 and cryptography for Ed25519 checks.",
+        "A configured non-host, no-egress, bounded evaluator that returns the controller-authenticated evidence contract; no bundled backend currently satisfies that production-relevant evaluator prerequisite."
+      ],
+      "raw_output_digest_scope": "exit code plus exact stdout/stderr byte digests",
+      "raw_output_sha256": "477c282261eefb1445a0b1d5baed0290486a681815c6bfb25e5bb5da5fd72a29",
+      "started_at": 1785935102.8479698,
+      "started_at_utc": "2026-08-05T13:05:02.847970Z",
+      "stderr": {
+        "bytes": 877,
+        "path": "proof/results/raw/dgm-code-rung-fixture.stderr.txt",
+        "sha256": "8c3668d6769c59dafcb2de5587153ab623a94f3a9b9aa0293f996db223627b96"
+      },
+      "stdout": {
+        "bytes": 2527,
+        "path": "proof/results/raw/dgm-code-rung-fixture.stdout.txt",
+        "sha256": "cda0ab18bcf43347f60c44d4be3729e161ad75d7e1870b24be13a35515080626"
+      },
+      "title": "Governed DGM code-rung fixture"
+    },
+    {
+      "command": {
+        "argv": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\proof\\swebench_governed_proof.py"
+        ],
+        "display": "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\proof\\swebench_governed_proof.py"
+      },
+      "completed_at": 1785935106.469289,
+      "completed_at_utc": "2026-08-05T13:05:06.469289Z",
+      "duration_seconds": 3.1674540042877197,
+      "exit_code": 0,
+      "id": "swebench-shaped-fixture",
+      "limitations": [
+        "Uses a self-seeded toy repository, an oracle patch, and trusted host execution.",
+        "Does not run SWE-bench Verified or produce an agent capability score."
+      ],
+      "prerequisites": [
+        "Python 3.10-3.12 and cryptography for local signatures"
+      ],
+      "raw_output_digest_scope": "exit code plus exact stdout/stderr byte digests",
+      "raw_output_sha256": "6b7214ac983345c474de816b74895dd2bc5cc4ed6bee8441339a8e509864ab3b",
+      "started_at": 1785935103.301835,
+      "started_at_utc": "2026-08-05T13:05:03.301835Z",
+      "stderr": {
+        "bytes": 260,
+        "path": "proof/results/raw/swebench-shaped-fixture.stderr.txt",
+        "sha256": "69646c7320af3a3dcc7a6b064d41ca727d44c3512c56fb7512786c7c15ff684e"
+      },
+      "stdout": {
+        "bytes": 978,
+        "path": "proof/results/raw/swebench-shaped-fixture.stdout.txt",
+        "sha256": "922cb9178e5626981d142999742b407bc8c9c6ef5e0b333086e8bcc135a4c20c"
+      },
+      "title": "SWE-bench-shaped governance fixture"
+    },
+    {
+      "command": {
+        "argv": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\proof\\dgm_uplift_proof.py"
+        ],
+        "display": "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\proof\\dgm_uplift_proof.py"
+      },
+      "completed_at": 1785935199.6060894,
+      "completed_at_utc": "2026-08-05T13:06:39.606089Z",
+      "duration_seconds": 93.13380098342896,
+      "exit_code": 0,
+      "id": "dgm-uplift-fixture",
+      "limitations": [
+        "Uses a toy solver, self-seeded instances, oracle-authored patches, and host pytest.",
+        "Does not establish autonomous improvement or external-task generalization."
+      ],
+      "prerequisites": [
+        "Python 3.10-3.12, cryptography, pytest, and writable temporary storage"
+      ],
+      "raw_output_digest_scope": "exit code plus exact stdout/stderr byte digests",
+      "raw_output_sha256": "64e7400542c255454fe083cfe0473f48dfc33403b97fd0263b08829c5d76400c",
+      "started_at": 1785935106.4722884,
+      "started_at_utc": "2026-08-05T13:05:06.472288Z",
+      "stderr": {
+        "bytes": 260,
+        "path": "proof/results/raw/dgm-uplift-fixture.stderr.txt",
+        "sha256": "69646c7320af3a3dcc7a6b064d41ca727d44c3512c56fb7512786c7c15ff684e"
+      },
+      "stdout": {
+        "bytes": 1246,
+        "path": "proof/results/raw/dgm-uplift-fixture.stdout.txt",
+        "sha256": "33817ed54784af57589a21ae086d1316f4f3ad5b320436e391614b1bdf7e3a27"
+      },
+      "title": "Governed DGM-uplift fixture"
+    },
+    {
+      "command": {
+        "argv": [
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe",
+          "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\proof\\adapter_rung_proof.py"
+        ],
+        "display": "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\proof\\adapter_rung_proof.py"
+      },
+      "completed_at": 1785935200.401328,
+      "completed_at_utc": "2026-08-05T13:06:40.401328Z",
+      "duration_seconds": 0.7932348251342773,
+      "exit_code": 0,
+      "id": "adapter-rung-fixture",
+      "limitations": [
+        "The trainer writes a deterministic LoRA-shaped artifact and the evaluator is a deterministic stub.",
+        "The locally generated signer and trust root are co-located fixture material, not independent approval or production key custody.",
+        "Does not establish training quality, model uplift, tenant-data safety, or serving behavior."
+      ],
+      "prerequisites": [
+        "Python 3.10-3.12 and cryptography for local signatures.",
+        "The fixture's generated public key is temporarily installed through the process-level deployment trust registry for each promotion transaction."
+      ],
+      "raw_output_digest_scope": "exit code plus exact stdout/stderr byte digests",
+      "raw_output_sha256": "1820c668b9b9b237dbb75c777c97d791f631b54571c7b01105117947ea8ad56a",
+      "started_at": 1785935199.6080933,
+      "started_at_utc": "2026-08-05T13:06:39.608093Z",
+      "stderr": {
+        "bytes": 0,
+        "path": "proof/results/raw/adapter-rung-fixture.stderr.txt",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stdout": {
+        "bytes": 1227,
+        "path": "proof/results/raw/adapter-rung-fixture.stdout.txt",
+        "sha256": "bf1684bf92e14a2f863ed6753558941e7529e4e2242f9095aba29ad397f6b0a9"
+      },
+      "title": "Governed adapter-rung fixture"
+    }
+  ],
+  "runtime": {
+    "dependencies": [
+      {
+        "name": "annotated-doc",
+        "version": "0.0.4"
+      },
+      {
+        "name": "annotated-types",
+        "version": "0.8.0"
+      },
+      {
+        "name": "anthropic",
+        "version": "0.120.0"
+      },
+      {
+        "name": "anyio",
+        "version": "4.14.2"
+      },
+      {
+        "name": "certifi",
+        "version": "2026.7.22"
+      },
+      {
+        "name": "cffi",
+        "version": "2.1.0"
+      },
+      {
+        "name": "charset-normalizer",
+        "version": "3.4.4"
+      },
+      {
+        "name": "click",
+        "version": "8.4.2"
+      },
+      {
+        "name": "colorama",
+        "version": "0.4.6"
+      },
+      {
+        "name": "cryptography",
+        "version": "49.0.0"
+      },
+      {
+        "name": "distro",
+        "version": "1.9.0"
+      },
+      {
+        "name": "docstring_parser",
+        "version": "0.18.0"
+      },
+      {
+        "name": "fastapi",
+        "version": "0.140.7"
+      },
+      {
+        "name": "h11",
+        "version": "0.16.0"
+      },
+      {
+        "name": "httpcore",
+        "version": "1.0.9"
+      },
+      {
+        "name": "httpx",
+        "version": "0.28.1"
+      },
+      {
+        "name": "idna",
+        "version": "3.18"
+      },
+      {
+        "name": "iniconfig",
+        "version": "2.3.0"
+      },
+      {
+        "name": "Jinja2",
+        "version": "3.1.6"
+      },
+      {
+        "name": "jiter",
+        "version": "0.16.0"
+      },
+      {
+        "name": "markdown-it-py",
+        "version": "4.2.0"
+      },
+      {
+        "name": "MarkupSafe",
+        "version": "3.0.3"
+      },
+      {
+        "name": "maverick-agent",
+        "version": "0.1.7"
+      },
+      {
+        "name": "maverick-agent",
+        "version": "0.1.7"
+      },
+      {
+        "name": "maverick-channels",
+        "version": "0.1.7"
+      },
+      {
+        "name": "maverick-dashboard",
+        "version": "0.1.7"
+      },
+      {
+        "name": "maverick-evolve",
+        "version": "0.1.7"
+      },
+      {
+        "name": "maverick-installer",
+        "version": "0.1.7"
+      },
+      {
+        "name": "maverick-knowledge",
+        "version": "0.1.7"
+      },
+      {
+        "name": "maverick-mcp-server",
+        "version": "0.1.7"
+      },
+      {
+        "name": "maverick-shield",
+        "version": "0.1.7"
+      },
+      {
+        "name": "mdurl",
+        "version": "0.1.2"
+      },
+      {
+        "name": "numpy",
+        "version": "2.2.6"
+      },
+      {
+        "name": "packaging",
+        "version": "26.2"
+      },
+      {
+        "name": "pip",
+        "version": "26.1.2"
+      },
+      {
+        "name": "platformdirs",
+        "version": "4.11.0"
+      },
+      {
+        "name": "pluggy",
+        "version": "1.6.0"
+      },
+      {
+        "name": "prompt_toolkit",
+        "version": "3.0.53"
+      },
+      {
+        "name": "pycparser",
+        "version": "3.0"
+      },
+      {
+        "name": "pydantic",
+        "version": "2.13.4"
+      },
+      {
+        "name": "pydantic_core",
+        "version": "2.46.4"
+      },
+      {
+        "name": "Pygments",
+        "version": "2.20.0"
+      },
+      {
+        "name": "PyJWT",
+        "version": "2.13.0"
+      },
+      {
+        "name": "pytest",
+        "version": "9.1.1"
+      },
+      {
+        "name": "pytest-asyncio",
+        "version": "1.4.0"
+      },
+      {
+        "name": "pytest-timeout",
+        "version": "2.4.0"
+      },
+      {
+        "name": "python-multipart",
+        "version": "0.0.32"
+      },
+      {
+        "name": "pywhispercpp",
+        "version": "1.5.0"
+      },
+      {
+        "name": "PyYAML",
+        "version": "6.0.3"
+      },
+      {
+        "name": "questionary",
+        "version": "2.1.1"
+      },
+      {
+        "name": "requests",
+        "version": "2.34.2"
+      },
+      {
+        "name": "rich",
+        "version": "15.0.0"
+      },
+      {
+        "name": "setuptools",
+        "version": "83.0.0"
+      },
+      {
+        "name": "sniffio",
+        "version": "1.3.1"
+      },
+      {
+        "name": "starlette",
+        "version": "1.3.1"
+      },
+      {
+        "name": "tqdm",
+        "version": "4.67.1"
+      },
+      {
+        "name": "typing-inspection",
+        "version": "0.4.2"
+      },
+      {
+        "name": "typing_extensions",
+        "version": "4.16.0"
+      },
+      {
+        "name": "tzdata",
+        "version": "2026.3"
+      },
+      {
+        "name": "urllib3",
+        "version": "2.7.0"
+      },
+      {
+        "name": "uvicorn",
+        "version": "0.51.0"
+      },
+      {
+        "name": "wcwidth",
+        "version": "0.8.2"
+      },
+      {
+        "name": "wheel",
+        "version": "0.47.0"
+      }
+    ],
+    "dependencies_sha256": "c83aecb0d9228a31825cb5dab10e1701d32a48d7ff8484c4090da3d02b563dc9",
+    "dependency_count": 63,
+    "dependency_digest_scope": "all distributions visible to importlib.metadata",
+    "machine": "AMD64",
+    "platform": "Windows-11-10.0.26100-SP0",
+    "python_build": [
+      "tags/v3.12.10:0cc8128",
+      "Apr  8 2025 12:21:36"
+    ],
+    "python_executable": "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork\\work\\ffenv\\Scripts\\python.exe",
+    "python_implementation": "CPython",
+    "python_version": "3.12.10"
+  },
+  "source": {
+    "available": true,
+    "digest_algorithm": "sha256",
+    "digest_scope": "HEAD binary diff plus non-ignored untracked path/content records",
+    "dirty": true,
+    "excluded_paths": [
+      "proof/RESULTS.md",
+      "proof/results",
+      "release/claim-evidence-ledger.json",
+      "release/production-code-inventory.json",
+      "release/release-state.json"
+    ],
+    "repository_root": "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork",
+    "revision": "7f9cf22ebc77ba999cc3f9459e8a64318a249862",
+    "tracked_diff_bytes": 3577899,
+    "tracked_diff_sha256": "38d865a4a3e7e700bac681757d9e849d3c019418bdea2faf1b06c28b746d3e80",
+    "untracked_file_count": 1342,
+    "untracked_files_sha256": "fc98e1ffaa70a084b8cbf2c1de311a3296b9a68501f0939763aecea5ed2290a9",
+    "worktree_state_sha256": "520a82a5293c335d56586511cdedfa09365d75698374fea920c4ba76f654c800"
+  },
+  "source_at_completion": {
+    "available": true,
+    "digest_algorithm": "sha256",
+    "digest_scope": "HEAD binary diff plus non-ignored untracked path/content records",
+    "dirty": true,
+    "excluded_paths": [
+      "proof/RESULTS.md",
+      "proof/results",
+      "release/claim-evidence-ledger.json",
+      "release/production-code-inventory.json",
+      "release/release-state.json"
+    ],
+    "repository_root": "C:\\Users\\Cstep\\Documents\\Codex\\2026-08-03\\github-plugin-github-openai-curated-remote\\work\\lightwork",
+    "revision": "7f9cf22ebc77ba999cc3f9459e8a64318a249862",
+    "tracked_diff_bytes": 3577899,
+    "tracked_diff_sha256": "38d865a4a3e7e700bac681757d9e849d3c019418bdea2faf1b06c28b746d3e80",
+    "untracked_file_count": 1342,
+    "untracked_files_sha256": "fc98e1ffaa70a084b8cbf2c1de311a3296b9a68501f0939763aecea5ed2290a9",
+    "worktree_state_sha256": "520a82a5293c335d56586511cdedfa09365d75698374fea920c4ba76f654c800"
+  },
+  "source_stable": true,
+  "version": 1
+}

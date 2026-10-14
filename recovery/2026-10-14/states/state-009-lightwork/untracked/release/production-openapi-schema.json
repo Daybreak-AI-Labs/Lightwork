@@ -1,0 +1,3227 @@
+{
+  "components": {
+    "schemas": {
+      "AnswerIn": {
+        "properties": {
+          "answer": {
+            "maxLength": 64000,
+            "minLength": 1,
+            "title": "Answer",
+            "type": "string"
+          },
+          "question_id": {
+            "minimum": 1.0,
+            "title": "Question Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "question_id",
+          "answer"
+        ],
+        "title": "AnswerIn",
+        "type": "object"
+      },
+      "Body_chat_send_chat_send_post": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "idempotency_key": {
+            "default": "",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "Body_chat_send_chat_send_post",
+        "type": "object"
+      },
+      "ChildIn": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "ChildIn",
+        "type": "object"
+      },
+      "ComposeIn": {
+        "properties": {
+          "budget_dollars": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Dollars"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "ComposeIn",
+        "type": "object"
+      },
+      "GoalEventOut": {
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "agent",
+          "kind",
+          "content",
+          "ts"
+        ],
+        "title": "GoalEventOut",
+        "type": "object"
+      },
+      "GoalEventsResponse": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/GoalEventOut"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "execution_state": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution State"
+          },
+          "next_id": {
+            "title": "Next Id",
+            "type": "integer"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "result",
+          "next_id",
+          "events"
+        ],
+        "title": "GoalEventsResponse",
+        "type": "object"
+      },
+      "GoalIn": {
+        "properties": {
+          "description": {
+            "default": "",
+            "maxLength": 16000,
+            "title": "Description",
+            "type": "string"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "max_depth": {
+            "default": 3,
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Max Depth",
+            "type": "integer"
+          },
+          "max_dollars": {
+            "default": 5.0,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Max Dollars",
+            "type": "number"
+          },
+          "max_wall_seconds": {
+            "default": 3600.0,
+            "maximum": 86400.0,
+            "minimum": 1.0,
+            "title": "Max Wall Seconds",
+            "type": "number"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          },
+          "title": {
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "GoalIn",
+        "type": "object"
+      },
+      "GoalOut": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "execution_state": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution State"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "title"
+        ],
+        "title": "GoalOut",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "SignoffIn": {
+        "description": "A human's sign-off on a finished, gated deliverable -- the certify/reject\ndecision the pack's output gate calls for, bound to the version the client\nactually rendered, with an optional review note.",
+        "properties": {
+          "decision": {
+            "pattern": "^(approved|rejected)$",
+            "title": "Decision",
+            "type": "string"
+          },
+          "expected_updated_at": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Updated At",
+            "type": "number"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "decision",
+          "expected_updated_at"
+        ],
+        "title": "SignoffIn",
+        "type": "object"
+      },
+      "TenantOut": {
+        "description": "A provisioned tenant. ``config_path`` is where to drop this tenant's own\nconfig.toml (its provider keys / model choices / budget overlay).",
+        "properties": {
+          "config_path": {
+            "title": "Config Path",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "max_daily_dollars": {
+            "title": "Max Daily Dollars",
+            "type": "number"
+          },
+          "plan": {
+            "title": "Plan",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "plan",
+          "display_name",
+          "max_daily_dollars",
+          "created_at",
+          "updated_at",
+          "config_path"
+        ],
+        "title": "TenantOut",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Local browser UI plus REST API for programmatic access.",
+    "title": "Lightwork Dashboard + REST API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "home__get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Home"
+      }
+    },
+    "/api/goal/{goal_id}": {
+      "get": {
+        "operationId": "api_goal_legacy_api_goal__goal_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Goal Legacy Api Goal  Goal Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Goal Legacy"
+      }
+    },
+    "/api/goal/{goal_id}/events": {
+      "get": {
+        "operationId": "api_goal_events_legacy_api_goal__goal_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Since",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Goal Events Legacy Api Goal  Goal Id  Events Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Goal Events Legacy"
+      }
+    },
+    "/api/goal/{goal_id}/events/stream": {
+      "get": {
+        "description": "Server-Sent Events stream of new goal events.\n\nCouncil perf-seat fix: client polled this route every 2s (visible\ntab) / 5s (hidden tab) over the lifetime of every open goal page,\nburning 30 req/min/tab idle on a goal that finished an hour ago.\nSSE holds one TCP connection open, server polls SQLite at 0.5s\ncadence, yields ``data: {json}\\n\\n`` only when there's something\nnew. EventSource on the client reconnects automatically and goes\nsilent the moment status flips to done/cancelled/failed.\n\nTerminal statuses close the stream with a final event so the\nclient knows it can stop listening (EventSource normally retries\nforever).",
+        "operationId": "api_goal_events_stream_api_goal__goal_id__events_stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Since",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Goal Events Stream"
+      }
+    },
+    "/api/v1/admin/tenants": {
+      "get": {
+        "operationId": "list_tenants_api_v1_admin_tenants_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TenantOut"
+                  },
+                  "title": "Response List Tenants Api V1 Admin Tenants Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Tenants",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/admin/tenants/{tenant_id}": {
+      "get": {
+        "operationId": "get_tenant_api_v1_admin_tenants__tenant_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Tenant",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/admin/tenants/{tenant_id}/roles": {
+      "get": {
+        "operationId": "list_tenant_roles_api_v1_admin_tenants__tenant_id__roles_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response List Tenant Roles Api V1 Admin Tenants  Tenant Id  Roles Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tenant Roles",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/approvals": {
+      "get": {
+        "description": "Pending high-risk actions parked by safety.consent (dashboard mode).\n\nThis is the operators' collaborative supervision queue (an approval has no\nper-user owner and may carry another user's goal content in ``detail``), so\nlisting it requires the ``operate`` permission \u2014 the same gate as\napprove/deny/claim. Previously any authenticated caller, including a\nview-only user, could read every parked action.",
+        "operationId": "list_approvals_api_v1_approvals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Approvals Api V1 Approvals Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Approvals",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/approvals/{approval_id}/approve": {
+      "post": {
+        "description": "Record an approval vote; once the required quorum of distinct approvers is\nmet the polling consent path proceeds (N-of-M dual control).",
+        "operationId": "approve_approval_api_v1_approvals__approval_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "title": "Approval Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Vote accepted durably; approval remains non-effective while signed audit delivery is pending"
+          },
+          "204": {
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "A competing final vote is awaiting audit delivery"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Database commit outcome could not be reconciled; retrying the returned decision id is safe"
+          }
+        },
+        "summary": "Approve Approval",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/approvals/{approval_id}/deny": {
+      "post": {
+        "description": "Deny a parked action (a single deny rejects it); the polling consent path\nthen refuses it.",
+        "operationId": "deny_approval_api_v1_approvals__approval_id__deny_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "title": "Approval Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Vote accepted durably; denial remains non-effective while signed audit delivery is pending"
+          },
+          "204": {
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "A competing final vote is awaiting audit delivery"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Database commit outcome could not be reconciled; retrying the returned decision id is safe"
+          }
+        },
+        "summary": "Deny Approval",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/approvals/{approval_id}/state": {
+      "get": {
+        "description": "N-of-M quorum progress for an approval (status, approvers so far vs.\nrequired) \u2014 the operator view of an in-flight multi-party decision.",
+        "operationId": "approval_state_api_v1_approvals__approval_id__state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "title": "Approval Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approval State Api V1 Approvals  Approval Id  State Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approval State",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/audit/binder": {
+      "get": {
+        "description": "The evidence pack as JSON -- the machine-readable twin of the\n/audit/binder page. Audit-gated like the log it summarizes.",
+        "operationId": "audit_binder_api_v1_audit_binder_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 90,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Audit Binder Api V1 Audit Binder Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Binder",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/audit/grep": {
+      "get": {
+        "description": "Search recent audit events for the given literal pattern.\n\nAudit-gated (see :func:`audit_tail`). Intentionally uses bounded, literal\n(case-insensitive) matching rather than a user-supplied regex: a regex over\nthe HTTP surface invites catastrophic-backtracking ReDoS that blocks the\ndashboard event loop. Bounds the scan to the most recent 1000 events and\ncaps results at 200.",
+        "operationId": "audit_grep_api_v1_audit_grep_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "pattern",
+            "required": true,
+            "schema": {
+              "title": "Pattern",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Day"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Audit Grep Api V1 Audit Grep Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Grep",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/audit/tail": {
+      "get": {
+        "description": "Tail the audit log (NDJSON at ~/.maverick/audit/YYYY-MM-DD.ndjson).\n\nAudit-gated: the audit trail is the who-did-what-when record (it can name\nprincipals, tool inputs, costs), so reading it requires the \"audit\"\npermission -- held by the admin role and the dedicated read-only \"auditor\"\nrole (separation of duties), never by operator/viewer. It is not an\nunauthenticated/operator surface.",
+        "operationId": "audit_tail_api_v1_audit_tail_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "n",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "N",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Day"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Audit Tail Api V1 Audit Tail Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Tail",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/flows": {
+      "get": {
+        "description": "The saved flow definitions (a summary per flow).",
+        "operationId": "list_flows_endpoint_api_v1_flows_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Flows Endpoint Api V1 Flows Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Flows Endpoint",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/flows/runs": {
+      "get": {
+        "description": "Recent flow runs (owner-scoped). Defined before ``/flows/{flow_id}`` so the\nliteral ``runs`` path isn't captured as a flow id.",
+        "operationId": "list_flow_runs_endpoint_api_v1_flows_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "flow_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Flow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Flow Runs Endpoint Api V1 Flows Runs Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Flow Runs Endpoint",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/flows/runs/{run_id}": {
+      "get": {
+        "operationId": "get_flow_run_endpoint_api_v1_flows_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Flow Run Endpoint Api V1 Flows Runs  Run Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Flow Run Endpoint",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/flows/runs/{run_id}/events": {
+      "get": {
+        "description": "Server-Sent Events stream of a flow run's live state: one snapshot per\nchange (keyed on the run's ``updated`` stamp), ending with a terminal event\nwhen the run completes/fails/rejects or parks on a human/event pause. The\ncanvas overlay and the run viewer prefer this over polling; both fall back\nto polling when SSE is unavailable. Same slot cap + lifetime bound as the\ngoal-events stream, so open tabs can't exhaust the event loop.",
+        "operationId": "flow_run_events_stream_api_v1_flows_runs__run_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Flow Run Events Stream",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/flows/tools": {
+      "get": {
+        "description": "The connector/action catalog for the designer's categorized, searchable\ntool picker: name, description, param names, and a coarse ``category``.\n\n- no ``q``, no ``category``: the curated starter set.\n- ``category`` (no ``q``): every live tool in that bucket (built-ins + every\n  enabled connector), so a user can browse one area instead of a 3k-name list.\n- ``q``: a substring search over the FULL live registry, optionally narrowed\n  to ``category``.\n\nEvery response also carries ``categories`` (the display-ordered bucket names)\nso the picker can offer the filter without a second round-trip. Declared\nbefore ``/flows/{flow_id}`` so the literal ``tools`` path isn't captured as a\nflow id.",
+        "operationId": "flow_tools_endpoint_api_v1_flows_tools_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Category",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Flow Tools Endpoint Api V1 Flows Tools Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Flow Tools Endpoint",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/flows/{flow_id}": {
+      "get": {
+        "operationId": "get_flow_endpoint_api_v1_flows__flow_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "flow_id",
+            "required": true,
+            "schema": {
+              "title": "Flow Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Flow Endpoint Api V1 Flows  Flow Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Flow Endpoint",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/flows/{flow_id}/schema": {
+      "get": {
+        "description": "The learned output-key shapes for a flow (from real runs): per key, its\nvalue type and, for objects/arrays-of-objects, the field names -- so the\ndesigner's data pills can offer nested keys like ``order.total``. Field\nnames + types only; no values are ever stored or returned.",
+        "operationId": "flow_schema_endpoint_api_v1_flows__flow_id__schema_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "flow_id",
+            "required": true,
+            "schema": {
+              "title": "Flow Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Flow Schema Endpoint Api V1 Flows  Flow Id  Schema Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Flow Schema Endpoint",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/flows/{flow_id}/versions": {
+      "get": {
+        "description": "Every stored version of a flow (newest first), each with a per-kind node\ncount -- so the designer can show history and offer a rollback.",
+        "operationId": "flow_versions_endpoint_api_v1_flows__flow_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "flow_id",
+            "required": true,
+            "schema": {
+              "title": "Flow Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Flow Versions Endpoint Api V1 Flows  Flow Id  Versions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Flow Versions Endpoint",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals": {
+      "get": {
+        "description": "List goals (newest first), paginated.\n\nCouncil perf fix: previous version pulled every goal ever into\nPython via ``list_goals()``, then sliced. Now the LIMIT/OFFSET are\npushed to SQL.\n\nOwner-scoped: a non-admin authenticated caller sees only their own goals;\nauth-off and admin callers see all (``goal_owner_filter`` returns None).",
+        "operationId": "list_goals_api_v1_goals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GoalOut"
+                  },
+                  "title": "Response List Goals Api V1 Goals Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "A page of goals, newest first",
+            "headers": {
+              "Pagination-Has-More": {
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "Pagination-Limit": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Pagination-Next-Offset": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Pagination-Offset": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Goals",
+        "tags": [
+          "v1"
+        ]
+      },
+      "post": {
+        "operationId": "create_goal_api_v1_goals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoalIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalOut"
+                }
+              }
+            },
+            "description": "Goal accepted, or the original goal replayed",
+            "headers": {
+              "Idempotency-Key-Expires-At": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency key conflicts or has expired"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Idempotency state is temporarily indeterminate",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create Goal",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals/compose": {
+      "post": {
+        "description": "Goal-builder submit: blocks -> structured brief -> create + run.\n\nThe goals table has no metadata columns (see ``WorldModel.create_goal``),\nso the budget/channel/priority blocks are folded into the description the\nagent reads; the budget block additionally becomes the run's real\n``max_dollars`` cap. Steps become a markdown checklist.",
+        "operationId": "compose_goal_api_v1_goals_compose_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComposeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalOut"
+                }
+              }
+            },
+            "description": "Goal accepted, or the original goal replayed",
+            "headers": {
+              "Idempotency-Key-Expires-At": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency key conflicts or has expired"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compose Goal",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals/search": {
+      "get": {
+        "description": "Search across runs (goals) by text in title / description / result.\n\nOwner-scoped: a non-admin authenticated caller searches only their own\ngoals; auth-off and admin callers search all. Declared before\n``/goals/{goal_id}`` so the literal ``search`` path wins over the int param.",
+        "operationId": "search_goals_api_v1_goals_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GoalOut"
+                  },
+                  "title": "Response Search Goals Api V1 Goals Search Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Goals",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals/{goal_id}": {
+      "get": {
+        "operationId": "get_goal_api_v1_goals__goal_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Goal",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals/{goal_id}/answer": {
+      "post": {
+        "operationId": "answer_question_api_v1_goals__goal_id__answer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer Question",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals/{goal_id}/artifacts": {
+      "get": {
+        "description": "The goal's latest artifacts -- the newest version of each titled output\n(markdown / code / table / text) it produced, with a per-title version\ncount. Goal-access gated; content is decrypted for the owner.",
+        "operationId": "list_goal_artifacts_api_v1_goals__goal_id__artifacts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Goal Artifacts Api V1 Goals  Goal Id  Artifacts Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Goal Artifacts",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals/{goal_id}/artifacts/history": {
+      "get": {
+        "description": "Every version of one titled artifact, oldest -> newest, each with a unified\ndiff against the previous version. Powers the version/diff viewer.",
+        "operationId": "goal_artifact_history_api_v1_goals__goal_id__artifacts_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "title",
+            "required": true,
+            "schema": {
+              "title": "Title",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Goal Artifact History Api V1 Goals  Goal Id  Artifacts History Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Goal Artifact History",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals/{goal_id}/children": {
+      "post": {
+        "description": "Create a child goal under ``goal_id`` (graph editor \"add child\").\n\nStructural only: the child is created ``pending`` and is NOT queued to\nrun \u2014 start it later via chat or POST /api/v1/goals. It inherits the\nparent's owner so the subtree stays visible to the same principal.",
+        "operationId": "create_child_goal_api_v1_goals__goal_id__children_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChildIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalOut"
+                }
+              }
+            },
+            "description": "Child created, or the original child replayed",
+            "headers": {
+              "Idempotency-Key-Expires-At": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency key conflicts or has expired"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Child Goal",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals/{goal_id}/cost-breakdown": {
+      "get": {
+        "description": "'Why this cost' drill-down: a run's spend split by agent role/outcome.\n\nBuckets the goal's episodes (cost, tokens, count) so the dollar figure on\nthe dashboard decomposes into who spent it and on what.",
+        "operationId": "goal_cost_breakdown_api_v1_goals__goal_id__cost_breakdown_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Goal Cost Breakdown"
+      }
+    },
+    "/api/v1/goals/{goal_id}/cost-preview": {
+      "get": {
+        "description": "Inline cost preview: project a pending goal's cost before running it.\n\nTreats the goal description as one step per non-empty line (or the whole\ntext as one step), projects tokens/dollars via maverick.cost.projection,\nand reports the OK/TIGHT/OVER verdict against the configured default\nbudget.",
+        "operationId": "goal_cost_preview_api_v1_goals__goal_id__cost_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "iterations",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Iterations",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Goal Cost Preview"
+      }
+    },
+    "/api/v1/goals/{goal_id}/deliverable.csv": {
+      "get": {
+        "description": "Export a goal's deliverable as CSV -- the mechanical hand-off so an\napproved forecast/table can be loaded into a downstream system instead of\nre-keyed. 404 when the result carries no tabular deliverable.",
+        "operationId": "export_deliverable_csv_api_v1_goals__goal_id__deliverable_csv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Deliverable Csv",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals/{goal_id}/events": {
+      "get": {
+        "operationId": "goal_events_api_v1_goals__goal_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Since",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalEventsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Goal Events",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals/{goal_id}/events/stream": {
+      "get": {
+        "description": "Real-time **SSE** stream of a goal's events (`text/event-stream`).\n\nTails the durable `goal_events` log (so it works across the worker/dashboard\nprocess split, unlike an in-process bus): emits each new event as it lands,\nends when the goal reaches a terminal status with no more events, or on\nclient disconnect. ``limit`` (>0) closes after N events \u2014 used by tests and\nbounded consumers. ``poll`` is accepted for compatibility but ignored; the\nserver controls polling cadence and idle backoff.",
+        "operationId": "goal_events_stream_api_v1_goals__goal_id__events_stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Since",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "poll",
+            "required": false,
+            "schema": {
+              "default": 1.0,
+              "title": "Poll",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Goal Events Stream",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals/{goal_id}/open_questions": {
+      "get": {
+        "description": "List unanswered questions an agent has parked for this goal.",
+        "operationId": "goal_open_questions_api_v1_goals__goal_id__open_questions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Goal Open Questions Api V1 Goals  Goal Id  Open Questions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Goal Open Questions",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/goals/{goal_id}/signoff": {
+      "get": {
+        "description": "The current sign-off on a goal's deliverable, plus the gate its pack\ndeclares (so the UI knows whether a sign-off is even called for).",
+        "operationId": "get_signoff_api_v1_goals__goal_id__signoff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Signoff Api V1 Goals  Goal Id  Signoff Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Signoff",
+        "tags": [
+          "v1"
+        ]
+      },
+      "post": {
+        "description": "Record a human's certify/reject decision on a finished deliverable -- the\ngoverned hand-off step (agents draft; humans certify). 400 if the pack\ndeclares no gate (there is nothing to sign off).",
+        "operationId": "post_signoff_api_v1_goals__goal_id__signoff_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignoffIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Signoff Api V1 Goals  Goal Id  Signoff Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The exact audited sign-off result, or its exact replay",
+            "headers": {
+              "Idempotency-Key-Expires-At": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "X-Lightwork-Decision-Id": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Lightwork-Signoff-Audit": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict/expiry or the reviewed deliverable was superseded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "description": "Idempotency-Key is required in production"
+          },
+          "503": {
+            "description": "The decision is durable but remains non-effective until signed audit delivery can be proven",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Post Signoff",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/halt": {
+      "get": {
+        "description": "Return force-refreshed fleet stop authority, never a guessed clear.",
+        "operationId": "halt_status_api_v1_halt_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Halt Status Api V1 Halt Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Halt Status",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/api/v1/tenants/overview": {
+      "get": {
+        "description": "JSON face of the multi-tenant view. Admin-only like ``/tenants`` (the\nRBAC \"admin\" permission, so store-assigned admins count too).",
+        "operationId": "tenants_overview_api_api_v1_tenants_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Tenants Overview Api"
+      }
+    },
+    "/approvals": {
+      "get": {
+        "description": "Pending high-risk actions awaiting approve/deny.\n\nPopulated when an agent runs with ``MAVERICK_CONSENT_MODE=dashboard``:\n``safety.consent.require_consent`` parks each gated action here and\npolls for the decision this page writes back. Governance ``REQUIRE_HUMAN``\nholds (EU AI Act Art 14) arrive with trusted provenance metadata;\n``_approval_source`` labels them so an operator can distinguish a policy\nhold from a plain consent one without trusting free-form detail text.\n\nGated on ``operate`` to match the ``/api/v1/approvals`` twin: the queue has\nno per-user owner and may carry another user's goal content in ``detail``,\nso a view-only caller must not read it via the HTML page either.",
+        "operationId": "approvals_page_approvals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Approvals Page"
+      }
+    },
+    "/audit": {
+      "get": {
+        "description": "Tail of the local audit log.",
+        "operationId": "audit_page_audit_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Audit Page"
+      }
+    },
+    "/audit/binder": {
+      "get": {
+        "description": "The audit binder: a print-friendly, regulator-grade evidence pack --\nsigned-chain verification, approvals with identity and quorum, the\nassessment register with revisions and decisions, the privacy registers,\nand the acceptance-learning KPIs. Audit-gated like /audit; the product\ngenerates its own workpapers.",
+        "operationId": "audit_binder_page_audit_binder_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 90,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Binder Page"
+      }
+    },
+    "/auth/callback": {
+      "get": {
+        "description": "Handle the IdP redirect: verify state, exchange the code, set the session.\n\nOrder of checks (fail-closed at each step, clearing cookies on failure):\n  1. tx cookie present + valid;\n  2. ``state`` query param == tx-cookie state (CSRF) \u2014 else 400, NO token\n     exchange;\n  3. token endpoint is https; exchange the ``code`` with the PKCE verifier;\n  4. verify the returned ``id_token`` via\n     :func:`maverick.oidc.verify_oidc_token`;\n  5. set the signed session cookie and redirect to the (sanitized)\n     ``return_to``.",
+        "operationId": "auth_callback_auth_callback_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Callback",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/error": {
+      "get": {
+        "description": "Generic login-failure landing page (no detail that aids an attacker).",
+        "operationId": "auth_error_auth_error_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Error",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/login": {
+      "get": {
+        "description": "Begin the authorization-code flow: redirect the browser to the IdP.\n\nMints ``state`` + a PKCE ``code_verifier``, stashes them (plus a sanitized\n``return_to``) in a short-TTL signed transaction cookie, and 302s to the\nauthorization endpoint with the S256 ``code_challenge``.",
+        "operationId": "auth_login_auth_login_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/logout": {
+      "get": {
+        "description": "Clear the session cookie and return to ``/``.\n\n``?all=1`` (log out everywhere) additionally bumps the principal's revocation\nepoch, immediately invalidating every other session/bearer that principal\nholds -- not just the cookie in this browser. The ``all`` side effect is\ngated on a same-origin Origin/Referer so a cross-site page cannot force a\nglobal sign-out (session-revocation CSRF); the local cookie is always\ncleared regardless.",
+        "operationId": "auth_logout_auth_logout_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/chat": {
+      "get": {
+        "operationId": "chat_page_chat_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Chat Page"
+      }
+    },
+    "/chat/goal/{goal_id}": {
+      "get": {
+        "operationId": "chat_goal_chat_goal__goal_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat Goal"
+      }
+    },
+    "/chat/send": {
+      "post": {
+        "operationId": "chat_send_chat_send_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_chat_send_chat_send_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat Send"
+      }
+    },
+    "/flows/designer": {
+      "get": {
+        "description": "The visual flow designer -- a canvas node editor + the natural-language\ndrafter + the copilot chat. Talks to the /api/v1/flows endpoints; the\nflow-engine gate is enforced there, so the page renders even when flows are\noff (empty canvas).\n\n``?from_template=<name>`` opens a saved TEMPLATE as its equivalent\nsingle-agent flow (the IR's degenerate case) -- the bridge from the text\nworkflow builder into the graph designer: start from what you had, then add\nbranches/approvals/loops around it.",
+        "operationId": "flow_designer_page_flows_designer_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "flow_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Flow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from_template",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "From Template",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Flow Designer Page"
+      }
+    },
+    "/flows/designer/{flow_id}": {
+      "get": {
+        "description": "The visual flow designer -- a canvas node editor + the natural-language\ndrafter + the copilot chat. Talks to the /api/v1/flows endpoints; the\nflow-engine gate is enforced there, so the page renders even when flows are\noff (empty canvas).\n\n``?from_template=<name>`` opens a saved TEMPLATE as its equivalent\nsingle-agent flow (the IR's degenerate case) -- the bridge from the text\nworkflow builder into the graph designer: start from what you had, then add\nbranches/approvals/loops around it.",
+        "operationId": "flow_designer_page_flows_designer__flow_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "flow_id",
+            "required": true,
+            "schema": {
+              "title": "Flow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from_template",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "From Template",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Flow Designer Page"
+      }
+    },
+    "/flows/{flow_id}/runs/{run_id}": {
+      "get": {
+        "description": "The run viewer: one flow run's node-by-node timeline, inputs/outputs\n(redacted), and the recovery actions (approve/reject, retry, retry from the\nfailed step). Data comes from /api/v1/flows/runs/{run_id} client-side, so\nowner-scoping and the flow-engine gate are enforced by the API.",
+        "operationId": "flow_run_page_flows__flow_id__runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "flow_id",
+            "required": true,
+            "schema": {
+              "title": "Flow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Flow Run Page"
+      }
+    },
+    "/goal-builder": {
+      "get": {
+        "description": "Drag-and-drop goal builder: compose a brief from blocks, then run it.",
+        "operationId": "goal_builder_page_goal_builder_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Goal Builder Page"
+      }
+    },
+    "/goals": {
+      "get": {
+        "operationId": "goals_page_goals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Goals Page"
+      }
+    },
+    "/goals/{goal_id}/errors": {
+      "get": {
+        "description": "Error inspector: every failed turn for a goal, with full content.",
+        "operationId": "errors_page_goals__goal_id__errors_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Errors Page"
+      }
+    },
+    "/goals/{goal_id}/plan": {
+      "get": {
+        "description": "HTML plan-tree visualization.",
+        "operationId": "plan_tree_page_goals__goal_id__plan_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Plan Tree Page"
+      }
+    },
+    "/goals/{goal_id}/trajectory": {
+      "get": {
+        "description": "Trajectory replay: timeline of every event with a scrubber.",
+        "operationId": "trajectory_page_goals__goal_id__trajectory_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trajectory Page"
+      }
+    },
+    "/healthz": {
+      "get": {
+        "description": "Deep health: DB writable, LLM provider key present, runner alive.",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Healthz"
+      }
+    },
+    "/livez": {
+      "get": {
+        "description": "Process is alive (TCP-accept liveness only).",
+        "operationId": "livez_livez_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Livez Livez Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Livez"
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "Prometheus text format. Gated by the same bearer as /api/v1.",
+        "operationId": "metrics_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Metrics"
+      }
+    },
+    "/readyz": {
+      "get": {
+        "description": "Ready to serve traffic: the /healthz checks PLUS the deep readiness\nchecks (client binding, shield-required, agent-trust registry) so a\nk8s/LB never routes to a pod that is up but configured to refuse all work.",
+        "operationId": "readyz_readyz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readyz"
+      }
+    },
+    "/static/daybreak-logo.jpg": {
+      "get": {
+        "description": "The Daybreak Labs brand logo, served same-origin for the sidebar brand,\nthe favicon, and the public share view. Auth-exempt by nature (a brand\nimage), cached a day.",
+        "operationId": "brand_logo_static_daybreak_logo_jpg_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Brand Logo"
+      }
+    },
+    "/static/lightwork-ui.js": {
+      "get": {
+        "description": "The shell behaviors (mvToast/mvConfirm/mvForm primitives, halt pill,\nsidebar + preferences) extracted from base.html; loaded at the end of\n<body> on every page.",
+        "operationId": "shell_behaviors_js_static_lightwork_ui_js_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Shell Behaviors Js"
+      }
+    },
+    "/static/lightwork.css": {
+      "get": {
+        "description": "The dashboard shell's design system, extracted from base.html so the\ntemplate stays markup. Short-lived cache: the browser revalidates cheaply\nbut a dashboard upgrade restyles without a hard refresh.",
+        "operationId": "shell_stylesheet_static_lightwork_css_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Shell Stylesheet"
+      }
+    },
+    "/tenants": {
+      "get": {
+        "description": "Operator console: the provisioned-tenant roster (status / plan / quota).\n\nCross-tenant control-plane data, so it is admin-only: the RBAC \"admin\"\npermission gates the route outright (matching the page's visibility floor),\nand a store-assigned admin role counts the same as a config-pinned\nbootstrap admin. Fail-soft to an empty roster so a missing registry never\n500s the console.",
+        "operationId": "tenants_page_tenants_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Tenants Page"
+      }
+    },
+    "/tenants/overview": {
+      "get": {
+        "description": "Multi-tenant view: per-tenant goal/spend rollup for the operator.\n\nAdmin-only exactly like ``/tenants`` (cross-tenant control-plane data):\nthe RBAC \"admin\" permission gates the route outright. Fail-soft to an\nempty roster so a missing registry never 500s the console.",
+        "operationId": "tenants_overview_page_tenants_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Tenants Overview Page"
+      }
+    },
+    "/users": {
+      "get": {
+        "description": "Admin: manage dashboard user roles (admin / operator / auditor / viewer).",
+        "operationId": "users_page_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Users Page"
+      }
+    }
+  }
+}

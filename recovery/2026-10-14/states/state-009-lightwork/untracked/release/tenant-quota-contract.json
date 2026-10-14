@@ -1,0 +1,173 @@
+{
+  "schema": "lightwork.tenant-quota-contract.v1",
+  "profile_id": "enterprise-single-control-plane-v1",
+  "source_version": "0.1.7",
+  "deployment": {
+    "chart_path": "deploy/helm/maverick",
+    "enforcement_env": "MAVERICK_TENANT_QUOTA_ENFORCE",
+    "enforcement_value": "1",
+    "helm_values_root": "tenantQuota",
+    "policy_source_rule": "exactly_one",
+    "production_required": true
+  },
+  "generation": {
+    "change_rule": "strictly_increase_for_every_policy_change",
+    "environment": "MAVERICK_TENANT_QUOTA_POLICY_GENERATION",
+    "helm_value": "tenantQuota.policyGeneration",
+    "maximum": 999999999,
+    "minimum": 1,
+    "production_grammar": "^[1-9][0-9]{0,8}$",
+    "same_generation_drift": "refuse",
+    "stale_generation": "refuse"
+  },
+  "policy_sources": {
+    "json": {
+      "environment": "MAVERICK_TENANT_QUOTA_LIMITS_JSON",
+      "helm_value": "tenantQuota.limitsJSON",
+      "helm_environment_maximum_bytes": 65536,
+      "helm_integer_maximum": 9007199254740991,
+      "helm_numeric_values_required": true,
+      "helm_spend_maximum": 999999999.999999,
+      "maximum_depth": 32,
+      "maximum_nodes": 20000,
+      "maximum_tenants": 4096,
+      "production_top_level_fields": [
+        "default",
+        "tenants"
+      ],
+      "requires_complete_default": true,
+      "runtime_maximum_bytes": 262144,
+      "runtime_schema": "lightwork.tenant-quota-policy.v2",
+      "strict_json": true
+    },
+    "scalars": {
+      "complete_set_required": true,
+      "helm_values_root": "tenantQuota.limits",
+      "json_conflict": "refuse"
+    }
+  },
+  "authority": {
+    "backend": "postgres",
+    "fallback": "none",
+    "policy_fence_table": "tenant_quota_usage",
+    "reservation_table": "tenant_quota_reservations",
+    "row_level_security": "forced",
+    "same_transaction_admission": true,
+    "maximum_reservation_ttl_seconds": 604800,
+    "expiry_semantics": "charge_projected_cumulative_usage_once_and_release_occupancy",
+    "settlement_semantics": "actual_must_not_exceed_projection",
+    "replay_semantics": "same_identity_returns_original_different_identity_refuses"
+  },
+  "resources": [
+    {
+      "id": "concurrent_runs",
+      "aggregation": "active_occupancy",
+      "helm_value": "concurrentRuns",
+      "scalar_environment": "MAVERICK_TENANT_QUOTA_MAX_CONCURRENT_RUNS",
+      "production_grammar": "^(0|[1-9][0-9]{0,5})$",
+      "value_type": "integer",
+      "maximum": 999999,
+      "coverage": "governed_goal_runs",
+      "limitation": "occupancy is released on settlement or release; an expired crash hold is reconciled conservatively"
+    },
+    {
+      "id": "queued_jobs",
+      "aggregation": "active_durable_occupancy",
+      "helm_value": "queuedJobs",
+      "scalar_environment": "MAVERICK_TENANT_QUOTA_MAX_QUEUED_JOBS",
+      "production_grammar": "^(0|[1-9][0-9]{0,8})$",
+      "value_type": "integer",
+      "maximum": 999999999,
+      "coverage": "durable_local_job_queue",
+      "limitation": "network ARQ and Redis dispatch are excluded from the first production profile"
+    },
+    {
+      "id": "daily_tokens",
+      "aggregation": "utc_day_cumulative",
+      "helm_value": "dailyTokens",
+      "scalar_environment": "MAVERICK_TENANT_QUOTA_MAX_DAILY_TOKENS",
+      "production_grammar": "^(0|[1-9][0-9]{0,17})$",
+      "value_type": "integer",
+      "maximum": 999999999999999999,
+      "coverage": "governed_run_uncached_input_plus_output_tokens",
+      "limitation": "provider cache token buckets are spend-accounted but are not part of the predictable token reservation"
+    },
+    {
+      "id": "daily_spend_dollars",
+      "aggregation": "utc_day_cumulative",
+      "helm_value": "dailySpendDollars",
+      "scalar_environment": "MAVERICK_TENANT_QUOTA_MAX_DAILY_SPEND_DOLLARS",
+      "production_grammar": "^(0|[1-9][0-9]{0,8})([.][0-9]{1,6})?$",
+      "value_type": "decimal",
+      "maximum": 999999999.999999,
+      "coverage": "governed_run_provider_spend",
+      "limitation": "final settlement is bounded by the amount projected before dispatch"
+    },
+    {
+      "id": "tool_calls",
+      "aggregation": "utc_day_cumulative",
+      "helm_value": "toolCalls",
+      "scalar_environment": "MAVERICK_TENANT_QUOTA_MAX_TOOL_CALLS",
+      "production_grammar": "^(0|[1-9][0-9]{0,17})$",
+      "value_type": "integer",
+      "maximum": 999999999999999999,
+      "coverage": "governed_run_and_direct_flow_action_calls",
+      "limitation": "only admitted governed tool paths are claimed"
+    },
+    {
+      "id": "storage_bytes",
+      "aggregation": "cumulative",
+      "helm_value": "storageBytes",
+      "scalar_environment": "MAVERICK_TENANT_QUOTA_MAX_STORAGE_BYTES",
+      "production_grammar": "^(0|[1-9][0-9]{0,17})$",
+      "value_type": "integer",
+      "maximum": 999999999999999999,
+      "coverage": "structured_deliverable_artifact_utf8_bytes",
+      "limitation": "attachments and other storage surfaces are excluded and are not counted"
+    }
+  ],
+  "unavailable_resources": [
+    "connector_calls",
+    "vector_store_bytes",
+    "attachment_storage_bytes"
+  ],
+  "readiness": {
+    "base_policy_checked_before_first_tenant": true,
+    "complete_vector_required": true,
+    "mutable_policy_overage": "not_ready",
+    "policy_or_authority_error": "not_ready",
+    "tenant_labels": "sha256_prefix_not_raw_identifier"
+  },
+  "qualification": {
+    "repository_contract": "implemented_and_locally_tested",
+    "live_postgres_concurrency_and_failover": "required_before_release",
+    "target_cluster_helm_render_and_admission": "required_before_release",
+    "release_ready_claimed": false
+  },
+  "source_bindings": {
+    "packages/maverick-core/maverick/tenant_quota_authority.py": "21f96bb896139f405d033930f302bb25c34159566acddb9124f2fe4f209d3e15",
+    "packages/maverick-core/maverick/world_model.py": "2549d4ddc20fb88aae7a8eca07a71150e6f6b1b447c8fcf9db341f082875e4b3",
+    "packages/maverick-core/maverick/world_model_backends/postgres.py": "19698ebb27bacdda2fcdbe234d155ae28a91910dcdbdc4785773a9e7f5e6fd25",
+    "packages/maverick-core/maverick/job_queue.py": "4aea48170b457958680031ea6334393c66e1bd699f6599d656002b72685c5b6c",
+    "packages/maverick-core/maverick/orchestrator.py": "30259f337a6c6860390035f0bf1428fb5ec11ae8f9074ec09b019ebb1c19cbbb",
+    "packages/maverick-core/maverick/flow/execution.py": "c7b477bc2eb752fa1204eea0e5f6bf985e6248e6bd718761e5a058b3c9b22da2",
+    "packages/maverick-dashboard/maverick_dashboard/tenant_quota_health.py": "40bb4c21de7f6d37fc9cec548bfbaa4640f6ef8e77c0845f5e8e63e589a18a05",
+    "deploy/helm/maverick/values.yaml": "967e42a65705491675dc71807e3b6601ec4f8bc71da448501f96ee8ca641e9cf",
+    "deploy/helm/maverick/values-production.yaml": "62e2bdd0ec8674dcfcaa343d9e7dd1f3564289aa09feae0faa3588614ea55119",
+    "deploy/helm/maverick/templates/_helpers.tpl": "09582a4df2abae8c58a642ced3a5b761100e0036633837a6fe8dde8c3504bbfa",
+    "deploy/helm/maverick/templates/deployment.yaml": "9150836403fdf3541c9f951c3ce4f0622a46ee5ec770e749a1135a4e8c7c2f8f",
+    "scripts/verify_tenant_quota_contract.py": "34848d874d4e1f33a7c0a8f147aa71e63ad7801ca05db5329b3f2c766c7468d4"
+  },
+  "code_evidence": [
+    "packages/maverick-core/maverick/tenant_quota_authority.py",
+    "packages/maverick-core/maverick/world_model.py",
+    "packages/maverick-core/maverick/world_model_backends/postgres.py",
+    "packages/maverick-core/maverick/job_queue.py",
+    "packages/maverick-core/maverick/orchestrator.py",
+    "packages/maverick-core/maverick/flow/execution.py",
+    "packages/maverick-dashboard/maverick_dashboard/tenant_quota_health.py",
+    "packages/maverick-core/tests/test_tenant_quota_authority.py",
+    "packages/maverick-core/tests/test_flow_action_tenant_quota.py",
+    "packages/maverick-dashboard/tests/test_tenant_quota_health.py"
+  ]
+}

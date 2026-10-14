@@ -1,0 +1,69 @@
+{
+  "credential_fields_excluded": [
+    "MAVERICK_OIDC_CLIENT_SECRET",
+    "MAVERICK_OIDC_SESSION_SECRET",
+    "auth.oidc.client_secret",
+    "auth.oidc.session_secret"
+  ],
+  "digest": {
+    "algorithm": "sha256",
+    "canonicalization": "sorted-key-compact-ascii-json",
+    "covers": [
+      "selected_provider",
+      "identity_mapping",
+      "canonical_rbac_policy_bytes"
+    ]
+  },
+  "identity_mapping_fields": {
+    "oidc": [
+      "issuer",
+      "audience",
+      "jwks_uri",
+      "algorithms",
+      "client_id",
+      "redirect_uri",
+      "authorization_endpoint",
+      "token_endpoint",
+      "claim_mapping"
+    ],
+    "trusted_proxy_sso": [
+      "header",
+      "trusted_proxies",
+      "trust_loopback",
+      "claim_mapping"
+    ]
+  },
+  "mutable_authorization_state": {
+    "included_in_digest": false,
+    "paths": [
+      "dashboard-users.json",
+      "dashboard-tenant-roles.json",
+      "dashboard-user-suites.json",
+      "dashboard-tenant-suites.json"
+    ],
+    "requirement": "live evidence and authorized-change requalification"
+  },
+  "posture_schema": "lightwork.production-identity-rbac-posture.v1",
+  "profile_id": "enterprise-single-control-plane-v1",
+  "rbac_policy_inputs": [
+    "dashboard.role_permissions",
+    "dashboard.default_role",
+    "dashboard.bootstrap_admins",
+    "dashboard.default_suites",
+    "dashboard.group_roles",
+    "dashboard.group_suites",
+    "kernel.roles",
+    "kernel.role_assignments"
+  ],
+  "rbac_production_requirements": {
+    "bootstrap_admins": "one_or_more_exact_user_principals",
+    "dashboard_default_role": "viewer",
+    "mutable_roster_assignments": "live_evidence_and_authorized_change_requalification"
+  },
+  "schema": "lightwork.production-identity-posture-contract.v1",
+  "selection_cardinality": "exactly_one",
+  "supported_providers": [
+    "oidc",
+    "trusted_proxy_sso"
+  ]
+}

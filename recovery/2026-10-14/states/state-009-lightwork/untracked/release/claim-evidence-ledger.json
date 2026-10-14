@@ -1,0 +1,2395 @@
+{
+  "schema": "lightwork.claim-evidence-ledger.v1",
+  "profile_id": "enterprise-single-control-plane-v1",
+  "source_version": "0.1.7",
+  "status": "draft",
+  "reviewed_at": "2026-08-03",
+  "refresh_by": "2026-09-02",
+  "approval": {
+    "status": "draft",
+    "approved_at": null,
+    "approvers": [],
+    "external_reference": null
+  },
+  "status_definitions": {
+    "repository_verified": "A narrowly worded repository fact is supported by exact checked-in evidence.",
+    "source_inventory_only": "A deterministic source inventory fact is allowed only with an explicit non-production limitation.",
+    "deployment_evidence_required": "Code or a runbook exists, but the claim requires evidence from the exact deployment.",
+    "external_evidence_required": "The claim requires an external system, assessor, customer, registry, or release record.",
+    "historical_only": "The evidence is historical or not bound to the candidate revision and cannot qualify a release.",
+    "not_claimed": "The repository explicitly does not make this claim.",
+    "draft": "The policy or objective is incomplete and cannot be represented as approved."
+  },
+  "claims": [
+    {
+      "id": "release-unavailable",
+      "category": "release",
+      "statement": "Source version 0.1.7 is unreleased and no supported production release exists.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "strict manifest verification",
+      "validation_environment": "repository checkout",
+      "limitations": "This states repository release status only and is not a future release commitment.",
+      "owner": "release-governance",
+      "evidence": [
+        {
+          "path": "release/production-surface-manifest.json",
+          "sha256": "0ba3ca2055ab1395c162d3a6ef944581014de55a4169fccc6fcade7c3d0c50c8",
+          "kind": "manifest"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "first-profile-boundary",
+      "category": "support-scope",
+      "statement": "The reviewed first production profile is a narrow, single-control-plane Linux/amd64 Kubernetes profile.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "cross-file exact-contract verification",
+      "validation_environment": "repository checkout",
+      "limitations": "Admission in source still requires exact release and live qualification evidence.",
+      "owner": "release-governance",
+      "evidence": [
+        {
+          "path": "release/production-surface-manifest.json",
+          "sha256": "0ba3ca2055ab1395c162d3a6ef944581014de55a4169fccc6fcade7c3d0c50c8",
+          "kind": "manifest"
+        },
+        {
+          "path": "release/production-support-matrix.json",
+          "sha256": "0030400372dcb241072d379c3639a2221de41d87fd8e924eff61805abf02df06",
+          "kind": "contract"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "production-package-inventory",
+      "category": "source-inventory",
+      "statement": "Three workspace packages are admitted by the first-profile source manifest.",
+      "status": "source_inventory_only",
+      "buyer_claim_allowed": true,
+      "validation_method": "deterministic source inventory",
+      "validation_environment": "repository checkout",
+      "limitations": "Package admission is not release availability or deployed service qualification.",
+      "owner": "release-governance",
+      "evidence": [
+        {
+          "path": "release/production-code-inventory.json",
+          "sha256": "891789be05098c29e77a4401660e9c060408197dc3cef02560b44e835f6ca295",
+          "kind": "generated-inventory"
+        },
+        {
+          "path": "release/production-surface-manifest.json",
+          "sha256": "0ba3ca2055ab1395c162d3a6ef944581014de55a4169fccc6fcade7c3d0c50c8",
+          "kind": "manifest"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "dashboard-route-inventory",
+      "category": "source-inventory",
+      "statement": "The dashboard route and policy-class inventory is generated from the constructed application.",
+      "status": "source_inventory_only",
+      "buyer_claim_allowed": true,
+      "validation_method": "isolated application construction and route enumeration",
+      "validation_environment": "repository checkout",
+      "limitations": "Inventory does not prove deployed authorization, availability, or useful behavior.",
+      "owner": "application-security",
+      "evidence": [
+        {
+          "path": "release/production-code-inventory.json",
+          "sha256": "891789be05098c29e77a4401660e9c060408197dc3cef02560b44e835f6ca295",
+          "kind": "generated-inventory"
+        },
+        {
+          "path": "packages/maverick-dashboard/maverick_dashboard/endpoint_policy.py",
+          "sha256": "b6b66e363cb3fe4e978c331ad634efb888915804f2905f6d4628451dd45a7316",
+          "kind": "source"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "operator-tool-set",
+      "category": "operator-interface",
+      "statement": "The first profile admits exactly nine read-only operator tools and denies unclassified commands.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "exact contract and adverse command classification tests",
+      "validation_environment": "local repository test environment",
+      "limitations": "This does not qualify every API response or a deployed operator journey.",
+      "owner": "platform-security",
+      "evidence": [
+        {
+          "path": "packages/maverick-core/maverick/operator_contract.py",
+          "sha256": "81ffc873e116702c5475c55bed2b297c87e5711e4e2235efbdf9dc5e6c010a6f",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_operator_contract.py",
+          "sha256": "155ab6f2c9c87c3d4e036be8988af72e21d736e3dbf3e37878e4b8a86db5c5a8",
+          "kind": "regression"
+        },
+        {
+          "path": "release/production-surface-manifest.json",
+          "sha256": "0ba3ca2055ab1395c162d3a6ef944581014de55a4169fccc6fcade7c3d0c50c8",
+          "kind": "manifest"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "single-control-plane-no-ha",
+      "category": "availability",
+      "statement": "The first profile permits one control-plane replica and makes no high-availability claim.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "manifest and Helm profile consistency verification",
+      "validation_environment": "repository checkout",
+      "limitations": "Dependency availability and customer recovery objectives still require live evidence.",
+      "owner": "platform-operations",
+      "evidence": [
+        {
+          "path": "release/production-support-matrix.json",
+          "sha256": "0030400372dcb241072d379c3639a2221de41d87fd8e924eff61805abf02df06",
+          "kind": "contract"
+        },
+        {
+          "path": "deploy/helm/maverick/values-production.yaml",
+          "sha256": "62e2bdd0ec8674dcfcaa343d9e7dd1f3564289aa09feae0faa3588614ea55119",
+          "kind": "deployment-source"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "postgres-tenant-controls-source",
+      "category": "tenant-isolation",
+      "statement": "The source implements exact PostgreSQL runtime principals, tenant context, and forced-RLS checks for the first profile.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "unit and opt-in PostgreSQL contract tests",
+      "validation_environment": "local repository test environment",
+      "limitations": "Code evidence does not prove isolation in a customer's PostgreSQL service.",
+      "owner": "data-security",
+      "evidence": [
+        {
+          "path": "packages/maverick-core/maverick/world_model_backends/postgres.py",
+          "sha256": "fba21888c040718d7a5132ac86371e728a024a4efd7706ae7563c5dc4f766999",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_postgres_production_posture.py",
+          "sha256": "5e7d5bfeea43641edc537b57339bbb4c5ad67aefe9d6b0f2fa97b57f51326af3",
+          "kind": "regression"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_pg_rls.py",
+          "sha256": "95e792d44b7c7f035d40a112bc509ea74c79ef62dae347eeaf5349ad2cf1f9ba",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "postgres-tenant-isolation-live",
+      "category": "tenant-isolation",
+      "statement": "Cross-tenant isolation is qualified on the exact production PostgreSQL deployment.",
+      "status": "deployment_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "live forced-RLS and wrong-principal exercise",
+      "validation_environment": "exact candidate deployment",
+      "limitations": "No revision-bound live PostgreSQL qualification packet exists yet.",
+      "owner": "data-security",
+      "evidence": [
+        {
+          "path": "release/production-support-matrix.json",
+          "sha256": "0030400372dcb241072d379c3639a2221de41d87fd8e924eff61805abf02df06",
+          "kind": "qualification-contract"
+        },
+        {
+          "path": "docs/enterprise/deployment-playbook.md",
+          "sha256": "e2ba57e76eda00a521489896e09daf0dc4f4ce68d150d408506721c90c5057fc",
+          "kind": "runbook"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "encryption-controls-source",
+      "category": "encryption",
+      "statement": "The source contains authenticated encryption and Vault-backed key-management controls for admitted state paths.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "cryptographic round-trip and failure-path tests",
+      "validation_environment": "local repository test environment",
+      "limitations": "This is not proof of live Vault custody, rotation, backup, or plaintext eradication.",
+      "owner": "data-security",
+      "evidence": [
+        {
+          "path": "packages/maverick-core/maverick/crypto_at_rest.py",
+          "sha256": "21d2661f2d12829d9b192dc8f30951a1c8813e127ee2501a41c081b9fa7cad23",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-core/maverick/kms_backends.py",
+          "sha256": "c775a254fac0ba9ad01edf56355a150fe82ea625eb60e534301384f2e19bb154",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_crypto_at_rest.py",
+          "sha256": "572a84e6710fe6e9777bda68fbe5eb1b27db0870473927bf1d3f45d66a447f32",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "audit-signing-source",
+      "category": "audit",
+      "statement": "The source implements signed hash-chained audit records and chain verification.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "signing, verification, and key-injection tests",
+      "validation_environment": "local repository test environment",
+      "limitations": "A host-local chain alone cannot prove resistance to host compromise or deletion.",
+      "owner": "security-operations",
+      "evidence": [
+        {
+          "path": "packages/maverick-core/maverick/audit/signing.py",
+          "sha256": "0f4e66eb3e6bb04664715202817da7a6cafe33addf1f9a0e0a333a6cd1e143fe",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_audit_signing_key_injection.py",
+          "sha256": "68397622af805677650d6444820b7f235950075f7018e3db06f8ada4ae364be5",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "audit-tamper-evidence-live",
+      "category": "audit",
+      "statement": "The deployed audit trail is tamper-evident under off-host custody and retained checkpoints.",
+      "status": "deployment_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "off-host custody, deletion, delivery, and historical verification drill",
+      "validation_environment": "exact candidate deployment",
+      "limitations": "No revision-bound off-host audit-custody and deletion-resistance evidence exists yet.",
+      "owner": "security-operations",
+      "evidence": [
+        {
+          "path": "release/secret-rotation-contract.json",
+          "sha256": "703f3c3a4a9c754bc1929b4b931e4a1fa22380007f515220ed2f15abff623829",
+          "kind": "custody-contract"
+        },
+        {
+          "path": "docs/enterprise/deployment-playbook.md",
+          "sha256": "e2ba57e76eda00a521489896e09daf0dc4f4ce68d150d408506721c90c5057fc",
+          "kind": "runbook"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "application-egress-controls-source",
+      "category": "network-security",
+      "statement": "The source applies fail-closed checks to governed model dispatch and supported HTTP client paths.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "application-layer denial and redirect-path tests",
+      "validation_environment": "local repository test environment",
+      "limitations": "These controls are not a packet firewall and cannot contain arbitrary in-process code.",
+      "owner": "application-security",
+      "evidence": [
+        {
+          "path": "packages/maverick-core/maverick/enterprise.py",
+          "sha256": "5419b497b3a98de6f0cf28bc6cb96bee219044c28549696f26268582e18b6ba6",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-core/maverick/deployment.py",
+          "sha256": "5fcdcf7703fa06e1c1cf4c03044b3a26265803fa30b90a3ed172ba2e85b1fa32",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_deployment.py",
+          "sha256": "c54dbe17235cb3b5075f2624a4ce40d025c0daf531cb9b5ac5283ccc9634a46a",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "network-no-egress-live",
+      "category": "network-security",
+      "statement": "The exact deployment prevents all unauthorized network egress.",
+      "status": "deployment_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "live namespace, raw-socket, DNS, redirect, and subprocess escape exercise",
+      "validation_environment": "exact candidate cluster",
+      "limitations": "No revision-bound cluster-level containment result exists yet.",
+      "owner": "platform-security",
+      "evidence": [
+        {
+          "path": "deploy/helm/maverick/templates/networkpolicy.yaml",
+          "sha256": "b50e58f5b68b8160c4d25685420f7e6c0b166de95eaf7464aeed03f8812711fa",
+          "kind": "deployment-source"
+        },
+        {
+          "path": "docs/enterprise/deployment-playbook.md",
+          "sha256": "e2ba57e76eda00a521489896e09daf0dc4f4ce68d150d408506721c90c5057fc",
+          "kind": "runbook"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "arbitrary-execution-disabled",
+      "category": "sandbox",
+      "statement": "The first profile disables arbitrary command-execution backends.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "backend selection and direct-invocation adverse tests",
+      "validation_environment": "local repository test environment",
+      "limitations": "This does not qualify optional sandbox backends, which remain excluded.",
+      "owner": "platform-security",
+      "evidence": [
+        {
+          "path": "packages/maverick-core/maverick/sandbox/disabled.py",
+          "sha256": "b38857495b13e748ced6c8e364c5b74ff41cc18b762955844c83e9cb361cbb1d",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_production_sandbox_disabled.py",
+          "sha256": "87bd6a8745cdac30c5ab330e4dd1d32745e33e5fde2582b2ef2593c227ae5d7b",
+          "kind": "regression"
+        },
+        {
+          "path": "release/production-surface-manifest.json",
+          "sha256": "0ba3ca2055ab1395c162d3a6ef944581014de55a4169fccc6fcade7c3d0c50c8",
+          "kind": "manifest"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "integrations-excluded",
+      "category": "support-scope",
+      "statement": "Channels, connectors, MCP interfaces, plugins, and attachments are excluded from the first profile.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "surface-manifest and direct-invocation exclusion tests",
+      "validation_environment": "local repository test environment",
+      "limitations": "Excluded source may exist but is not a supported production capability.",
+      "owner": "release-governance",
+      "evidence": [
+        {
+          "path": "release/production-surface-manifest.json",
+          "sha256": "0ba3ca2055ab1395c162d3a6ef944581014de55a4169fccc6fcade7c3d0c50c8",
+          "kind": "manifest"
+        },
+        {
+          "path": "release/production-code-inventory.json",
+          "sha256": "891789be05098c29e77a4401660e9c060408197dc3cef02560b44e835f6ca295",
+          "kind": "generated-inventory"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_production_feature_exclusions.py",
+          "sha256": "a00ad21d7c86436accda6e95bc40a0fc571b4e964bd9f76e7f40aa0d3a3143cc",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "adaptive-systems-research-only",
+      "category": "adaptive-systems",
+      "statement": "Self-learning, code DGM, weights DGM, and automatic flow promotion are not admitted production authority.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "surface exclusion and direct-invocation tests",
+      "validation_environment": "local repository test environment",
+      "limitations": "Research source and fixtures do not establish safe or useful improvement.",
+      "owner": "ml-governance",
+      "evidence": [
+        {
+          "path": "release/production-surface-manifest.json",
+          "sha256": "0ba3ca2055ab1395c162d3a6ef944581014de55a4169fccc6fcade7c3d0c50c8",
+          "kind": "manifest"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_production_feature_exclusions.py",
+          "sha256": "a00ad21d7c86436accda6e95bc40a0fc571b4e964bd9f76e7f40aa0d3a3143cc",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "adaptive-improvement",
+      "category": "adaptive-systems",
+      "statement": "Adaptive systems produce useful, safe, customer-relevant improvement.",
+      "status": "not_claimed",
+      "buyer_claim_allowed": false,
+      "validation_method": "held-out customer evaluation with governed promotion and rollback",
+      "validation_environment": "representative customer workload",
+      "limitations": "No customer-bound comparative evidence establishes this claim.",
+      "owner": "ml-governance",
+      "evidence": [
+        {
+          "path": "proof/RESULTS.md",
+          "sha256": "0562761c5cd6582abfda4173c0db4261c91800821843abbfe074a2e4a535aa7a",
+          "kind": "historical-proof-notice"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "proof-harness-results",
+      "category": "proof",
+      "statement": "Checked-in proof-harness results qualify the current production release.",
+      "status": "historical_only",
+      "buyer_claim_allowed": false,
+      "validation_method": "revision-bound rerun in the release evidence packet",
+      "validation_environment": "exact release candidate",
+      "limitations": "The checked-in results lack a current source revision and production qualification context.",
+      "owner": "release-governance",
+      "evidence": [
+        {
+          "path": "proof/RESULTS.md",
+          "sha256": "0562761c5cd6582abfda4173c0db4261c91800821843abbfe074a2e4a535aa7a",
+          "kind": "historical-result"
+        },
+        {
+          "path": "release/production-code-inventory.json",
+          "sha256": "891789be05098c29e77a4401660e9c060408197dc3cef02560b44e835f6ca295",
+          "kind": "generated-inventory"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "compliance-certification",
+      "category": "compliance",
+      "statement": "Lightwork is certified or independently attested for a regulated framework.",
+      "status": "external_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "independent audit or certification with exact scope and period",
+      "validation_environment": "external assessor",
+      "limitations": "Repository self-checks and framework mappings are not certification.",
+      "owner": "compliance",
+      "evidence": [
+        {
+          "path": "SECURITY.md",
+          "sha256": "3eda47055bb848c87ec3f099b3ea9f8137d94eeaeac7c83c8b84b99643e3544b",
+          "kind": "security-disclosure"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "performance-slo",
+      "category": "performance",
+      "statement": "The production service meets a measured availability, latency, throughput, or recovery objective.",
+      "status": "draft",
+      "buyer_claim_allowed": false,
+      "validation_method": "revision-bound load, soak, outage, backup, and restore runs",
+      "validation_environment": "exact candidate deployment",
+      "limitations": "Objectives are draft; there is no representative live result packet.",
+      "owner": "site-reliability",
+      "evidence": [
+        {
+          "path": "release/service-objectives.json",
+          "sha256": "7501adc92ea2c57fd558dd4c0876aef20291becd0d2ffe4e30111dbce0d9c239",
+          "kind": "draft-objectives"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "customer-roi",
+      "category": "business-outcome",
+      "statement": "Lightwork produces a quantified customer ROI or labor-saving outcome.",
+      "status": "not_claimed",
+      "buyer_claim_allowed": false,
+      "validation_method": "customer-owned baseline and controlled outcome measurement",
+      "validation_environment": "representative customer deployment",
+      "limitations": "No customer-bound ROI study exists in the repository.",
+      "owner": "product",
+      "evidence": [
+        {
+          "path": "docs/enterprise/diligence.md",
+          "sha256": "017f2e7ef5f6fb164ecf2137f2b14420055c1872420110767e930e9734791b08",
+          "kind": "buyer-disclosure"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "model-policy-approved",
+      "category": "model-provider",
+      "statement": "A production model artifact and vLLM endpoint are approved for release.",
+      "status": "draft",
+      "buyer_claim_allowed": false,
+      "validation_method": "model, endpoint, retention, region, credential, cap, and failover approval",
+      "validation_environment": "exact candidate deployment",
+      "limitations": "The checked-in model policy is draft and contains no approved model.",
+      "owner": "ml-governance",
+      "evidence": [
+        {
+          "path": "release/production-model-policy.json",
+          "sha256": "2fb23b99007d357393f5ae94a4f97684071c32fd7136aa9b6b83a2fc30314b52",
+          "kind": "draft-policy"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "identity-qualified-live",
+      "category": "identity",
+      "statement": "OIDC or trusted-proxy identity is qualified against the exact production provider.",
+      "status": "deployment_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "live login, claim mapping, logout, revocation, replay, and break-glass exercise",
+      "validation_environment": "exact candidate identity provider",
+      "limitations": "Local token fixtures do not qualify a live identity provider.",
+      "owner": "identity-security",
+      "evidence": [
+        {
+          "path": "release/production-support-matrix.json",
+          "sha256": "0030400372dcb241072d379c3639a2221de41d87fd8e924eff61805abf02df06",
+          "kind": "qualification-contract"
+        },
+        {
+          "path": "packages/maverick-dashboard/tests/test_exact_principal_identity.py",
+          "sha256": "194ffc1ede8999a922252215c5fccccd3c886f0fa2fd91659d9215adce3538f9",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "dependency-failure-drills-live",
+      "category": "resilience",
+      "statement": "PostgreSQL, Vault, vLLM, identity, and audit dependency failures meet the production failure contract.",
+      "status": "deployment_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "live dependency outage and recovery drills",
+      "validation_environment": "exact candidate deployment",
+      "limitations": "Repository fault tests do not establish managed-service outage behavior.",
+      "owner": "site-reliability",
+      "evidence": [
+        {
+          "path": "release/dependency-failure-contract.json",
+          "sha256": "d24e14d374d67c083f41ee98cc9e3d0e9c84193dfa8f1f40a444db235b5cd342",
+          "kind": "contract"
+        },
+        {
+          "path": "docs/enterprise/dependency-failure-contract.md",
+          "sha256": "8509814df8fbcded5f2a08cfd6deaec5d339614e7c83b6973d54ed6eccfdfade",
+          "kind": "runbook"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "secret-rotation-source",
+      "category": "secret-management",
+      "statement": "The repository defines fail-closed rotation phases and per-secret ownership for the first profile.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "strict cross-file contract verification",
+      "validation_environment": "local repository test environment",
+      "limitations": "The contract does not prove a successful rotation in customer infrastructure.",
+      "owner": "platform-security",
+      "evidence": [
+        {
+          "path": "release/secret-rotation-contract.json",
+          "sha256": "703f3c3a4a9c754bc1929b4b931e4a1fa22380007f515220ed2f15abff623829",
+          "kind": "contract"
+        },
+        {
+          "path": "scripts/verify_secret_rotation_contract.py",
+          "sha256": "8a18f1563129d8579a201d27a19e22977160709cb7c85eb3554a91f9ae94b396",
+          "kind": "verifier"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_secret_rotation_contract.py",
+          "sha256": "4b6ab4c13b9848bd9bd28ef9c6e9dfd0aad560ce856685ecf333d816b72188da",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "secret-rotation-live",
+      "category": "secret-management",
+      "statement": "Every required production secret has completed a rollback-safe rotation drill.",
+      "status": "deployment_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "provider-specific rotation, historical-read, rollback, and revocation drill",
+      "validation_environment": "exact candidate deployment",
+      "limitations": "No revision-bound live rotation packet exists yet.",
+      "owner": "platform-security",
+      "evidence": [
+        {
+          "path": "release/secret-rotation-contract.json",
+          "sha256": "703f3c3a4a9c754bc1929b4b931e4a1fa22380007f515220ed2f15abff623829",
+          "kind": "drill-contract"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "support-bundle-source",
+      "category": "supportability",
+      "statement": "The source implements redacted, encrypted support bundles with explicit preview and consent.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "parser, redaction, encryption, consent, and adverse output tests",
+      "validation_environment": "local repository test environment",
+      "limitations": "Operational key custody and recipient workflows still require live qualification.",
+      "owner": "support-security",
+      "evidence": [
+        {
+          "path": "packages/maverick-core/maverick/support_bundle.py",
+          "sha256": "021e4d010c0be1d625d5b0fa044b27d200ec13a2cfbfe1a46744a6fbf410d3aa",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_support_bundle_security.py",
+          "sha256": "cd379b4615006bc3f7913863a3ff1c2fe3931ce8805560562e550641d5c91104",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "support-bundle-custody-live",
+      "category": "supportability",
+      "statement": "Production support recipients and decryption keys are provisioned under approved custody.",
+      "status": "deployment_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "support-recipient provisioning and access-review exercise",
+      "validation_environment": "production support organization",
+      "limitations": "No production recipient-key or access-review evidence exists yet.",
+      "owner": "support-security",
+      "evidence": [
+        {
+          "path": "docs/enterprise/product-operations.md",
+          "sha256": "44e53388c3d1c3fcdc793929dde0085549f39a6e29b20b8a1db1dab7ffa3fe65",
+          "kind": "operations-runbook"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "registry-and-release-published",
+      "category": "release",
+      "statement": "A signed immutable production image and complete release evidence packet are published.",
+      "status": "external_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "registry digest, signature, provenance, release-asset, and revision verification",
+      "validation_environment": "GitHub release and production OCI registry",
+      "limitations": "No current revision-bound production release is published.",
+      "owner": "release-governance",
+      "evidence": [
+        {
+          "path": "release/release-state.json",
+          "sha256": "0af84dd5f4d7ffa90ac018baed6d7d6ac3dc166e6e97cb517b08c322a9b324a5",
+          "kind": "draft-release-state"
+        },
+        {
+          "path": "release/registry-observation-2026-08-03.json",
+          "sha256": "c3050b51e0b7e87a8094498712f8bce9f86327d9c2009e5501434c5cb36fd7f1",
+          "kind": "registry-observation"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "durability-controls-source",
+      "category": "durability",
+      "statement": "The source implements idempotency, durable authority, reconciliation, and resume controls for admitted execution paths.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "duplicate, crash-window, replay, and reconciliation regressions",
+      "validation_environment": "local repository test environment",
+      "limitations": "Repository tests do not establish service recovery objectives under real outages.",
+      "owner": "platform-reliability",
+      "evidence": [
+        {
+          "path": "packages/maverick-core/maverick/api_idempotency.py",
+          "sha256": "9f4e183deadb82263bbea9035fa11618e6c9274ee6a1ed6a03918a421cd9c858",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-core/maverick/flow/postgres_authority.py",
+          "sha256": "b20a450dbe888c2a1df3f3b78bfddb64ad78c722e1eb03a70e2f04c6d3f46d24",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-dashboard/tests/test_idempotency_delivery_recovery.py",
+          "sha256": "eefed8891d9ab0c3497676045af9e2827556486140e6cd6ca7d3ab992b536286",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "durability-recovery-live",
+      "category": "durability",
+      "statement": "The exact deployment meets declared resume, recovery, and data-loss objectives.",
+      "status": "deployment_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "live outage, process-loss, duplicate-delivery, backup, and restore exercise",
+      "validation_environment": "exact candidate deployment",
+      "limitations": "No revision-bound representative recovery result exists yet.",
+      "owner": "site-reliability",
+      "evidence": [
+        {
+          "path": "release/service-objectives.json",
+          "sha256": "7501adc92ea2c57fd558dd4c0876aef20291becd0d2ffe4e30111dbce0d9c239",
+          "kind": "draft-objectives"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "tenant-quota-source",
+      "category": "capacity-governance",
+      "statement": "The source implements generation-fenced tenant quota admission, reservations, and settlement for admitted resource paths.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "admission, stale-policy, reservation, expiry, and settlement tests",
+      "validation_environment": "local repository test environment",
+      "limitations": "Attachment, vector, and connector storage are excluded; live capacity is unqualified.",
+      "owner": "platform-reliability",
+      "evidence": [
+        {
+          "path": "release/tenant-quota-contract.json",
+          "sha256": "d498b3121ace1d03d9fb426be25725692e1f7ff32f2b2f83a874acf4dce66ddf",
+          "kind": "contract"
+        },
+        {
+          "path": "packages/maverick-core/maverick/tenant_quota_authority.py",
+          "sha256": "21f96bb896139f405d033930f302bb25c34159566acddb9124f2fe4f209d3e15",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_tenant_quota_authority.py",
+          "sha256": "24d991b8be22814ebe5be9494f07a32ee1823debc700a6085ed0e232e678f3ee",
+          "kind": "regression"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_flow_action_tenant_quota.py",
+          "sha256": "83008c315c8727a36ea66d3f52fdb612ddf84db2cd4fdb7870360381ac2435e6",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "tenant-capacity-live",
+      "category": "capacity-governance",
+      "statement": "Tenant ceilings and backpressure protect the exact production deployment at representative load.",
+      "status": "deployment_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "representative saturation, fairness, expiry, crash, and recovery load test",
+      "validation_environment": "exact candidate deployment",
+      "limitations": "No workload-derived limits or live saturation evidence exists yet.",
+      "owner": "site-reliability",
+      "evidence": [
+        {
+          "path": "release/tenant-quota-contract.json",
+          "sha256": "d498b3121ace1d03d9fb426be25725692e1f7ff32f2b2f83a874acf4dce66ddf",
+          "kind": "qualification-contract"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "migration-safety-source",
+      "category": "database-migration",
+      "statement": "The repository defines authorized, adjacent, checksum-locked production migration semantics.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "exact contract, authorization, checksum, and failure-path tests",
+      "validation_environment": "local repository test environment",
+      "limitations": "This does not prove a safe migration against a customer's database and data volume.",
+      "owner": "data-operations",
+      "evidence": [
+        {
+          "path": "release/production-migration-contract.json",
+          "sha256": "7bf3138452f9bbb6044d9154476c1ee51e66f61656ffca6a1a3301d3f0515469",
+          "kind": "contract"
+        },
+        {
+          "path": "packages/maverick-core/maverick/production_migration.py",
+          "sha256": "c1861f331692fe23aa94eb763e46e0a839315c2255accec242792a78657ef28e",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-core/tests/test_production_migration.py",
+          "sha256": "e10cc2d2920fb611c2cf92eb6cc87052d007f253f63d065ca360c5b34a6796ba",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "migration-drill-live",
+      "category": "database-migration",
+      "statement": "The exact release migration completed backup, restore, rollback, and representative-data qualification.",
+      "status": "deployment_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "preflight, backup, adjacent migration, verification, and restore drill",
+      "validation_environment": "exact candidate PostgreSQL deployment",
+      "limitations": "No revision-bound live migration packet exists yet.",
+      "owner": "data-operations",
+      "evidence": [
+        {
+          "path": "release/production-migration-contract.json",
+          "sha256": "7bf3138452f9bbb6044d9154476c1ee51e66f61656ffca6a1a3301d3f0515469",
+          "kind": "drill-contract"
+        },
+        {
+          "path": "docs/enterprise/production-migration-safety.md",
+          "sha256": "f3898394b738adedecd853fb83ac0178e574eb6bf2bbb9bcb2c612fcfb8da845",
+          "kind": "runbook"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "versioned-api-contract-source",
+      "category": "api-contract",
+      "statement": "The first-profile source has an exact versioned OpenAPI digest, lifecycle policy, and startup drift refusal.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "exact generated-schema digest comparison and adverse drift regression",
+      "validation_environment": "local repository test environment",
+      "limitations": "This is an unpublished repository contract, not a released client-support or availability commitment.",
+      "owner": "application-security",
+      "evidence": [
+        {
+          "path": "packages/maverick-dashboard/maverick_dashboard/openapi_contract.py",
+          "sha256": "e82785f68a57116de4c90254de8c52455bdbbe580edc8d23d1008542695e415a",
+          "kind": "source"
+        },
+        {
+          "path": "packages/maverick-dashboard/maverick_dashboard/contracts/openapi-production-v1.json",
+          "sha256": "8685d043a53cc08019daccaba882e3dfd83513951b40957977f4727d755d894f",
+          "kind": "contract"
+        },
+        {
+          "path": "packages/maverick-dashboard/tests/test_production_api_boundary.py",
+          "sha256": "0db7f80effe2f0e5fd7ddfddd6241e60f6a00be9a57d97114daac5350c1e1e3d",
+          "kind": "regression"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "strategy-documents-source-only",
+      "category": "public-claims",
+      "statement": "Every document under docs/strategy is recursively inventoried and explicitly classifies repository observations as source-only.",
+      "status": "source_inventory_only",
+      "buyer_claim_allowed": true,
+      "validation_method": "exact recursive inventory, status marker, dynamic-total refusal, and whole-document hash binding",
+      "validation_environment": "repository checkout",
+      "limitations": "Source presence does not establish release support, deployment qualification, compatibility, performance, control effectiveness, or customer value.",
+      "owner": "product-governance",
+      "evidence": [
+        {
+          "path": "docs/strategy/README.md",
+          "sha256": "7c4a72756b2c5a2255e386e3cfaeb441c420cc1d44103965eb650739ed3629d3",
+          "kind": "strategy-status-policy"
+        },
+        {
+          "path": "release/production-surface-manifest.json",
+          "sha256": "0ba3ca2055ab1395c162d3a6ef944581014de55a4169fccc6fcade7c3d0c50c8",
+          "kind": "production-authority"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "strategy-documents-historical-only",
+      "category": "public-claims",
+      "statement": "Measurements, market comparisons, build logs, reviews, and past outcomes in strategy documents are historical rather than current-release evidence.",
+      "status": "historical_only",
+      "buyer_claim_allowed": false,
+      "validation_method": "status boundary plus exact whole-document binding",
+      "validation_environment": "historical local observation",
+      "limitations": "Historical statements may be stale, locally scoped, self-authored, or unbound to the candidate revision and require fresh evidence before external use.",
+      "owner": "product-governance",
+      "evidence": [
+        {
+          "path": "docs/strategy/README.md",
+          "sha256": "7c4a72756b2c5a2255e386e3cfaeb441c420cc1d44103965eb650739ed3629d3",
+          "kind": "strategy-status-policy"
+        },
+        {
+          "path": "proof/RESULTS.md",
+          "sha256": "0562761c5cd6582abfda4173c0db4261c91800821843abbfe074a2e4a535aa7a",
+          "kind": "historical-local-results-boundary"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "strategy-documents-proposal-only",
+      "category": "public-claims",
+      "statement": "Strategy targets, timelines, valuations, positioning, demos, customer outcomes, and future capabilities are unapproved proposals.",
+      "status": "draft",
+      "buyer_claim_allowed": false,
+      "validation_method": "explicit proposal boundary and whole-document hash binding",
+      "validation_environment": "repository checkout",
+      "limitations": "No commitment, customer fact, return on investment, valuation, vendor intent, legal conclusion, service level, or production status is established.",
+      "owner": "product-governance",
+      "evidence": [
+        {
+          "path": "docs/strategy/README.md",
+          "sha256": "7c4a72756b2c5a2255e386e3cfaeb441c420cc1d44103965eb650739ed3629d3",
+          "kind": "strategy-status-policy"
+        },
+        {
+          "path": "docs/ROADMAP.md",
+          "sha256": "fc83743bf4556ec22fe32418614817f5b26676ebe69d04fadfee6764d6dbec01",
+          "kind": "roadmap"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "program-documents-proposal-only",
+      "category": "public-claims",
+      "statement": "Every document under docs/programs is explicitly a roadmap proposal rather than an operating program or product-status claim.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "exact program-document inventory, disclaimer, and whole-document hash binding",
+      "validation_environment": "repository checkout",
+      "limitations": "Future operation, approval, compatibility, staffing, funding, legal terms, and external use require separate evidence.",
+      "owner": "product-governance",
+      "evidence": [
+        {
+          "path": "docs/programs/README.md",
+          "sha256": "0088dbcdd93e0abd4904fc644cc06a468b6e83d25485d11937ffa6417eebebdc",
+          "kind": "policy"
+        },
+        {
+          "path": "docs/ROADMAP.md",
+          "sha256": "fc83743bf4556ec22fe32418614817f5b26676ebe69d04fadfee6764d6dbec01",
+          "kind": "roadmap"
+        },
+        {
+          "path": "release/production-surface-manifest.json",
+          "sha256": "0ba3ca2055ab1395c162d3a6ef944581014de55a4169fccc6fcade7c3d0c50c8",
+          "kind": "production-authority"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "legal-materials-template-only",
+      "category": "legal-procurement",
+      "statement": "The enterprise legal pack is expressly a set of deployment-specific templates requiring counsel and named-owner approval.",
+      "status": "repository_verified",
+      "buyer_claim_allowed": true,
+      "validation_method": "exact legal-template inventory, disclaimer, and whole-document hash binding",
+      "validation_environment": "repository checkout",
+      "limitations": "No customer agreement, legal conclusion, privacy compliance, accessibility conformance, SLA, or certification is established.",
+      "owner": "legal-and-procurement",
+      "evidence": [
+        {
+          "path": "docs/enterprise/legal/README.md",
+          "sha256": "47e2dc54765aeae7b42544d0cc99cd134ccca8a7f8b1cc23e5f4ad65259c06dc",
+          "kind": "scope-policy"
+        },
+        {
+          "path": "docs/enterprise/legal/procurement-scope.md",
+          "sha256": "9f2e1b473a3e24ed50d1248b78705bf13f73bd1a6a4ec3696771840eeb567bc3",
+          "kind": "status-register"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "e3fa472edc04baeb0a0aeb85c2b0d42e00f9ee2c5e9e48f2813052fcc5cf68c1",
+          "kind": "source-license"
+        },
+        {
+          "path": "THIRD-PARTY-NOTICES.md",
+          "sha256": "343dc7c597251bf307b1f2013454e05a309f2bf948c9a0f14010bd3b059a0c7d",
+          "kind": "declared-dependency-notice-aid"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "compliance-documents-source-only",
+      "category": "compliance-governance",
+      "statement": "The repository contains 44 status-classified compliance documents as draft, source mapping, deployment reference, template, sample register, historical snapshot, or boundary material.",
+      "status": "source_inventory_only",
+      "buyer_claim_allowed": true,
+      "validation_method": "exact recursive document inventory, status marker, and whole-document hash binding",
+      "validation_environment": "repository checkout",
+      "limitations": "Source control and repository regressions do not establish organizational approval, live operation, legal compliance, control effectiveness, or certification.",
+      "owner": "compliance-governance",
+      "evidence": [
+        {
+          "path": "docs/compliance/status-boundary.md",
+          "sha256": "72f77e273e0f50e06a46a6fa864c30824d554108327efe95b1085e909d27fcbf",
+          "kind": "status-policy"
+        },
+        {
+          "path": "docs/compliance/README.md",
+          "sha256": "65aecf92d5c8cb390811ad7352c93082057eefc44417030b83e4c37a296c1c85",
+          "kind": "scope-index"
+        },
+        {
+          "path": "docs/compliance/control-crosswalk.md",
+          "sha256": "05f81903f347a5cf8b9edd7ae4d8c710842953d982af64d78eb67b4683cf8b9f",
+          "kind": "source-mapping"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "compliance-operation-and-assessment-live",
+      "category": "compliance-governance",
+      "statement": "The compliance pack is approved and operated by a staffed organization and has current independent assessment evidence.",
+      "status": "external_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "named-owner approvals, operating-window records, exact-deployment evidence, and independent assessment",
+      "validation_environment": "operating organization and exact release deployment",
+      "limitations": "No staffed operation, observation window, independent assessment, attestation, certification, or legal-compliance conclusion is established.",
+      "owner": "compliance-governance",
+      "evidence": [
+        {
+          "path": "docs/compliance/status-boundary.md",
+          "sha256": "72f77e273e0f50e06a46a6fa864c30824d554108327efe95b1085e909d27fcbf",
+          "kind": "status-policy"
+        },
+        {
+          "path": "docs/compliance/README.md",
+          "sha256": "65aecf92d5c8cb390811ad7352c93082057eefc44417030b83e4c37a296c1c85",
+          "kind": "program-boundary"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "compliance-snapshots-historical-only",
+      "category": "compliance-governance",
+      "statement": "The two dated 2026 compliance records are self-authored historical local snapshots and cannot qualify the current source or a release.",
+      "status": "historical_only",
+      "buyer_claim_allowed": false,
+      "validation_method": "status boundary plus exact whole-document binding",
+      "validation_environment": "historical local observation",
+      "limitations": "Immutable revision, raw-output provenance, independence, current environment, and external assessment are not established.",
+      "owner": "compliance-governance",
+      "evidence": [
+        {
+          "path": "docs/compliance/evidence/2026-Q2-internal-audit-report.md",
+          "sha256": "3611b0136e61a374e4a93cbc4dac8ab9256e02bd0d77268285d20f508671d2ef",
+          "kind": "historical-local-review"
+        },
+        {
+          "path": "docs/compliance/evidence/2026-06-24-management-review.md",
+          "sha256": "46cb872938b3e1b2f4fb156f32ac52c11eed2b7c4e7fb1ed3123254eaf3a6793",
+          "kind": "historical-self-record"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "incident-response-materials-source-only",
+      "category": "security-response",
+      "statement": "The repository contains draft incident-response and vulnerability-management materials plus candidate containment and audit source.",
+      "status": "source_inventory_only",
+      "buyer_claim_allowed": true,
+      "validation_method": "exact source and document review with whole-document binding",
+      "validation_environment": "repository checkout",
+      "limitations": "This is not a monitored intake, staffed response, supported version, live containment exercise, or forensic-evidence operation.",
+      "owner": "security-response",
+      "evidence": [
+        {
+          "path": "SECURITY.md",
+          "sha256": "3eda47055bb848c87ec3f099b3ea9f8137d94eeaeac7c83c8b84b99643e3544b",
+          "kind": "draft-public-policy"
+        },
+        {
+          "path": "docs/compliance/procedures/incident-response-runbook.md",
+          "sha256": "d7f902385e735c643c3edee0898ca335c31dcca52cd291197ac5afca47c1515b",
+          "kind": "draft-runbook"
+        },
+        {
+          "path": "docs/compliance/procedures/vulnerability-management-procedure.md",
+          "sha256": "80978fe7695ba24f5db9ee8610e7e0d39fef7ecbab98c06761f22ade330cc30d",
+          "kind": "draft-procedure"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "incident-response-operation-live",
+      "category": "security-response",
+      "statement": "A staffed security organization monitors intake, meets response and notification targets, exercises containment/recovery, and retains complete live forensic evidence.",
+      "status": "external_evidence_required",
+      "buyer_claim_allowed": false,
+      "validation_method": "staffing/on-call records, monitored intake, tabletop/live exercises, notification records, and complete evidence-custody proof",
+      "validation_environment": "operating organization and exact deployment",
+      "limitations": "No supported release, staffed response, exercised SLA, customer-notification operation, retained complete forensics, penetration test, or independent assessment is established.",
+      "owner": "security-response",
+      "evidence": [
+        {
+          "path": "SECURITY.md",
+          "sha256": "3eda47055bb848c87ec3f099b3ea9f8137d94eeaeac7c83c8b84b99643e3544b",
+          "kind": "current-response-boundary"
+        },
+        {
+          "path": "docs/compliance/policies/incident-response-policy.md",
+          "sha256": "f3f81a0a92cce74b7d07ba385c0deb103334c9c8a009ac891bd102c41ea43991",
+          "kind": "draft-policy"
+        },
+        {
+          "path": "docs/compliance/procedures/incident-response-runbook.md",
+          "sha256": "d7f902385e735c643c3edee0898ca335c31dcca52cd291197ac5afca47c1515b",
+          "kind": "draft-runbook"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    },
+    {
+      "id": "production-ready-overall",
+      "category": "release",
+      "statement": "Lightwork is production-ready for customer deployment.",
+      "status": "not_claimed",
+      "buyer_claim_allowed": false,
+      "validation_method": "all code, deployment, external, and release gates approved for one immutable revision",
+      "validation_environment": "exact release candidate and production-like environment",
+      "limitations": "Code hardening is substantial, but live qualification, independent evidence, and a signed release remain open.",
+      "owner": "release-governance",
+      "evidence": [
+        {
+          "path": "release/production-readiness-evidence.json",
+          "sha256": "3eb81e57a6a8ab923d1f23ec22d27c501621202473243b4b76bccecec9be2300",
+          "kind": "draft-readiness-evidence"
+        },
+        {
+          "path": "release/release-state.json",
+          "sha256": "0af84dd5f4d7ffa90ac018baed6d7d6ac3dc166e6e97cb517b08c322a9b324a5",
+          "kind": "draft-release-state"
+        }
+      ],
+      "refresh_by": "2026-09-02"
+    }
+  ],
+  "buyer_documents": [
+    {
+      "path": "README.md",
+      "sha256": "a731bfab3925524f0ee6d02ce5554874177a43706f9196acdb9f462fa9fa3327",
+      "claim_ids": [
+        "release-unavailable",
+        "first-profile-boundary",
+        "integrations-excluded",
+        "adaptive-systems-research-only",
+        "adaptive-improvement",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "SECURITY.md",
+      "sha256": "3eda47055bb848c87ec3f099b3ea9f8137d94eeaeac7c83c8b84b99643e3544b",
+      "claim_ids": [
+        "release-unavailable",
+        "audit-signing-source",
+        "compliance-certification",
+        "incident-response-materials-source-only",
+        "incident-response-operation-live",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/DISTRIBUTION.md",
+      "sha256": "9a144fc71e87bf3fe42cb960d2b2f503d2ea89bd8b8a5ed3db0ba61125fa7715",
+      "claim_ids": [
+        "release-unavailable",
+        "registry-and-release-published",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/FEATURES.md",
+      "sha256": "3904432a72333561c14a92e5d5e015e73b7bce544995e31e52a5c72a979bc88d",
+      "claim_ids": [
+        "first-profile-boundary",
+        "integrations-excluded",
+        "adaptive-systems-research-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/api.md",
+      "sha256": "03bc90fb19a284f60f63829cb87d795e80b4b21499dee987ffa0784d3553f325",
+      "claim_ids": [
+        "release-unavailable",
+        "first-profile-boundary",
+        "versioned-api-contract-source",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/comparison.md",
+      "sha256": "70ecd5b423b8ed5312a937aeb6051b19792cf7bd73717be4ba3106f3ba1484fa",
+      "claim_ids": [
+        "release-unavailable",
+        "first-profile-boundary",
+        "integrations-excluded",
+        "adaptive-systems-research-only",
+        "compliance-certification",
+        "performance-slo",
+        "customer-roi",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/README.md",
+      "sha256": "65aecf92d5c8cb390811ad7352c93082057eefc44417030b83e4c37a296c1c85",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/control-crosswalk.md",
+      "sha256": "05f81903f347a5cf8b9edd7ae4d8c710842953d982af64d78eb67b4683cf8b9f",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/deployment/hardening-checklist.md",
+      "sha256": "f9e9eebd8ba2b239e16a57c3e0e8f9e691fab1c8bbb6e5ddcdc5374c8a5a37d4",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/evidence/2026-06-24-management-review.md",
+      "sha256": "46cb872938b3e1b2f4fb156f32ac52c11eed2b7c4e7fb1ed3123254eaf3a6793",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall",
+        "compliance-snapshots-historical-only"
+      ]
+    },
+    {
+      "path": "docs/compliance/evidence/2026-Q2-internal-audit-report.md",
+      "sha256": "3611b0136e61a374e4a93cbc4dac8ab9256e02bd0d77268285d20f508671d2ef",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall",
+        "compliance-snapshots-historical-only"
+      ]
+    },
+    {
+      "path": "docs/compliance/evidence/README.md",
+      "sha256": "a229847fae9f649393dbf79b301bb5c68d51fc24ffa585aa022ed3e003d87176",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall",
+        "compliance-snapshots-historical-only"
+      ]
+    },
+    {
+      "path": "docs/compliance/iso-27001/README.md",
+      "sha256": "8fea605f97b6472cadb571196cb8d0d49b8bd733d27a78169ba42ec0f0b3bada",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/iso-27001/statement-of-applicability.md",
+      "sha256": "d5bfe1d952f0cd6ed2578e8ec72c0cee0e656992d7e4b9246584bde69a10685c",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/iso-42001/README.md",
+      "sha256": "4a84d69de519f7277c6727851fe7176071a9a53bbea00a4aa68fe77fa4c22a1b",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/iso-42001/statement-of-applicability.md",
+      "sha256": "dad2d00e5f165d176f4f3f683d8ba95233ecb9c8cf0e7a95f47a30702a11c582",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/policies/access-control-policy.md",
+      "sha256": "d712eeade8596041b94e2f872f747cf6e47ec58b2977e9e9f8db50971dad5a72",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/policies/ai-management-policy.md",
+      "sha256": "c446b7fb3c2a91b8219aadb7a9205f26f505af936dda350101ad7307081d734b",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/policies/business-continuity-policy.md",
+      "sha256": "0f6a3a4921a9bc34768bfd8f81f62ac2b3d4a524e26f0ef33b5f6d70ef1198d0",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/policies/change-management-policy.md",
+      "sha256": "59079643f6e1bc4490b87e72a93a544fdf458fe43550861fca630ba02937b78a",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/policies/cryptography-policy.md",
+      "sha256": "0c9653c2cda77ca724786c5c6370c25602663c6982803980fb8fd21b2531bd5c",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/policies/data-protection-and-retention-policy.md",
+      "sha256": "b4bd7fbd42e42bf9f4957868e2b31d3f9aaf16db786c9399a67357e8e0f1024a",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/policies/human-resources-security-policy.md",
+      "sha256": "a9a6a7c043108f3f788a998522a93aa87636db5c814fe3f8ae88ee51398bbd09",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/policies/incident-response-policy.md",
+      "sha256": "f3f81a0a92cce74b7d07ba385c0deb103334c9c8a009ac891bd102c41ea43991",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall",
+        "incident-response-materials-source-only",
+        "incident-response-operation-live"
+      ]
+    },
+    {
+      "path": "docs/compliance/policies/information-security-policy.md",
+      "sha256": "9ed7337bcbac04dbadd2d957bb7bc66909c995be2cfe78c86a4cbc6d64daa121",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/policies/risk-management-policy.md",
+      "sha256": "15a51d28c363edadc4b4a69a10604d2213c2a069172f85b87b6b6cbef1e1b645",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/policies/secure-development-policy.md",
+      "sha256": "ac3ffa4db69adab004f0faee2f331ad8a584d67110d47c6f9082d15c9eca1a0e",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/policies/supplier-security-policy.md",
+      "sha256": "cfa3920a8753939b6302c6375d5384ccc95924dcdd1985ad1f60564ea89b3dfe",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/procedures/README.md",
+      "sha256": "2eea301f38fe31de8034e7a7ea468bee5f45ef7077619beca22f8c10d090ab73",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/procedures/change-management-procedure.md",
+      "sha256": "cb6659b32be711a155f143a0d1f971e153aa82584d0dbdc471ce8bd3d745e2f2",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/procedures/hr-security-procedures.md",
+      "sha256": "b7d556b2d34a9146a5ce315a7e4781e1fc60530ede9fbeb82858145486047d34",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/procedures/incident-response-runbook.md",
+      "sha256": "d7f902385e735c643c3edee0898ca335c31dcca52cd291197ac5afca47c1515b",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall",
+        "incident-response-materials-source-only",
+        "incident-response-operation-live"
+      ]
+    },
+    {
+      "path": "docs/compliance/procedures/internal-audit-plan.md",
+      "sha256": "f6a0015aa2fb0844f573f85e2cff71699ab834ff651f50319b8d6fe1d654fe45",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/procedures/risk-assessment-and-review-procedure.md",
+      "sha256": "ba27fa87aae458e7b0f611b10ccf3fe54cb5c6f8525076af694a0a8fd50221da",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/procedures/vendor-management-procedure.md",
+      "sha256": "22fa19a8c3a33a6cc54aa461abf9e86254e2ce0be465bea53f97a3b9cb47e3d0",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/procedures/vulnerability-management-procedure.md",
+      "sha256": "80978fe7695ba24f5db9ee8610e7e0d39fef7ecbab98c06761f22ade330cc30d",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall",
+        "incident-response-materials-source-only",
+        "incident-response-operation-live"
+      ]
+    },
+    {
+      "path": "docs/compliance/registers/asset-inventory.md",
+      "sha256": "2af60525155fbd7d55a7de788682dea237869de468e08ca11153710105d8fdc8",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/registers/corrective-action-log.md",
+      "sha256": "0e6b5a1f4ac3de3293b202ece6f768dc226ba52dfe53d926df1440282b028a00",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/registers/remediation-tracker.md",
+      "sha256": "e9c9632065ecdcedf1d3160939ca3d16414f3a3631f1ad71a90bdc182584b856",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/registers/subprocessor-register.md",
+      "sha256": "0e8875ad9ce301d9e300064ec5a2c685b83daee85230ccf979036d6ea03d3ad7",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/registers/vendor-register.md",
+      "sha256": "d6a6a11731e1f1f4287285f806a3e12d0880f23a812988c0d8b365b961deb5c3",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/risk-management-methodology.md",
+      "sha256": "8877c18757f0440ba6d5a07da4ca02eea885ba7c5f537596c4fc1e087a636e48",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/risk-register.md",
+      "sha256": "c17b962f636404e82d39e7bffd50dcb1b5d218898e3f31076aa03237dbcd1318",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/soc2-controls.md",
+      "sha256": "4c224d72fe615f3694ae6b1560a099c5961a6e02d4ee77e6446cf72baff3536c",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/soc2/README.md",
+      "sha256": "933f46c13d7ad7614a5b6462f6e6e7c21505e89fbeaea36707269d24a6e1d9e8",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/status-boundary.md",
+      "sha256": "72f77e273e0f50e06a46a6fa864c30824d554108327efe95b1085e909d27fcbf",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/templates/acceptable-use-policy.md",
+      "sha256": "fdccfd90d512ae88e67a90de7a17287af0ceb977e229293bc2183aa8c6b7cfa0",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/templates/incident-report-template.md",
+      "sha256": "c5b5d71fd06319fe464c8bcd2f2029b211fe511556d149d7304505ef2aca733f",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall",
+        "incident-response-materials-source-only",
+        "incident-response-operation-live"
+      ]
+    },
+    {
+      "path": "docs/compliance/templates/management-review-minutes-template.md",
+      "sha256": "49e04738702b1eadb4e99f4cd68d02147a3f3a498a9acb63147b30b6d6dd95e2",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/compliance/templates/vendor-security-questionnaire.md",
+      "sha256": "f1b9438c2beda69c61c4af35a37639d91b0352a9dbf48a03b14d0d20e681c0ff",
+      "claim_ids": [
+        "compliance-documents-source-only",
+        "compliance-operation-and-assessment-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/connectors.md",
+      "sha256": "763cecb58450cd6a2b447f91c229a50f7f03d84cb0649fead6b366b503fa1f6b",
+      "claim_ids": [
+        "integrations-excluded"
+      ]
+    },
+    {
+      "path": "docs/enterprise/architecture.md",
+      "sha256": "f585de8dd6f7d54401727af14f9a638bc4ca6d422d5da83de6a1044c1ef02ae1",
+      "claim_ids": [
+        "first-profile-boundary",
+        "postgres-tenant-controls-source",
+        "arbitrary-execution-disabled",
+        "durability-controls-source"
+      ]
+    },
+    {
+      "path": "docs/enterprise/client-access-rollout.md",
+      "sha256": "4ab1cb3a417c1bfcdbb06cb5683f25371339c0fa1052a5fbbfb202a3a52e35b3",
+      "claim_ids": [
+        "identity-qualified-live",
+        "support-bundle-custody-live",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/dependency-failure-contract.md",
+      "sha256": "8509814df8fbcded5f2a08cfd6deaec5d339614e7c83b6973d54ed6eccfdfade",
+      "claim_ids": [
+        "dependency-failure-drills-live",
+        "durability-recovery-live"
+      ]
+    },
+    {
+      "path": "docs/enterprise/deployment-playbook.md",
+      "sha256": "e2ba57e76eda00a521489896e09daf0dc4f4ce68d150d408506721c90c5057fc",
+      "claim_ids": [
+        "first-profile-boundary",
+        "postgres-tenant-isolation-live",
+        "network-no-egress-live",
+        "secret-rotation-live",
+        "migration-drill-live"
+      ]
+    },
+    {
+      "path": "docs/enterprise/diligence.md",
+      "sha256": "017f2e7ef5f6fb164ecf2137f2b14420055c1872420110767e930e9734791b08",
+      "claim_ids": [
+        "release-unavailable",
+        "first-profile-boundary",
+        "compliance-certification",
+        "performance-slo",
+        "customer-roi",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/editions.md",
+      "sha256": "8fad57139e95c558ed2509dcff32b8ba295a8c8dbbf55f22bec955f12ca447dc",
+      "claim_ids": [
+        "first-profile-boundary",
+        "integrations-excluded",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/legal/README.md",
+      "sha256": "47e2dc54765aeae7b42544d0cc99cd134ccca8a7f8b1cc23e5f4ad65259c06dc",
+      "claim_ids": [
+        "release-unavailable",
+        "legal-materials-template-only",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/legal/accessibility-statement-template.md",
+      "sha256": "25c05d328557b377926d3ffd60278ee30151ceef1461042692bc6d7d128268d4",
+      "claim_ids": [
+        "release-unavailable",
+        "legal-materials-template-only",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/legal/commercial-agreement-checklist.md",
+      "sha256": "b6f5713eb554b89e050945f1f356184a4c07a874012809820df8325dfb5634e9",
+      "claim_ids": [
+        "release-unavailable",
+        "legal-materials-template-only",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/legal/dpa-template.md",
+      "sha256": "42e663409d17bf8bb1e960dae6d14ea961688ee6ad386673401c9940eb7cb34a",
+      "claim_ids": [
+        "release-unavailable",
+        "legal-materials-template-only",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/legal/privacy-notice-template.md",
+      "sha256": "ba48012a71aa37ffe2bb448c1c8f8d90e26e832f37c2bfa7ae5839fdf7f474e4",
+      "claim_ids": [
+        "release-unavailable",
+        "legal-materials-template-only",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/legal/procurement-scope.md",
+      "sha256": "9f2e1b473a3e24ed50d1248b78705bf13f73bd1a6a4ec3696771840eeb567bc3",
+      "claim_ids": [
+        "release-unavailable",
+        "legal-materials-template-only",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/legal/sla-template.md",
+      "sha256": "e473831530f6f6d3db11ca7fd6ed223982035d436a396a2a1fdd0650c19faf42",
+      "claim_ids": [
+        "release-unavailable",
+        "legal-materials-template-only",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/legal/subprocessors.md",
+      "sha256": "5255090565663051e20f29dc308b83c6b6ee58332fce9c572ad255df252f7617",
+      "claim_ids": [
+        "release-unavailable",
+        "legal-materials-template-only",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/operator-cli-contract.md",
+      "sha256": "d4639291ea341718632326fa5c40bb79d0cc3454d6b1d579ed1e75a71ae2fccd",
+      "claim_ids": [
+        "operator-tool-set"
+      ]
+    },
+    {
+      "path": "docs/enterprise/product-operations.md",
+      "sha256": "44e53388c3d1c3fcdc793929dde0085549f39a6e29b20b8a1db1dab7ffa3fe65",
+      "claim_ids": [
+        "support-bundle-source",
+        "support-bundle-custody-live",
+        "secret-rotation-live",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/production-data-boundary.md",
+      "sha256": "4131f35021323bb3c6795b65770255376dc6eb393e375a2e7ef6e63891aa016f",
+      "claim_ids": [
+        "first-profile-boundary",
+        "postgres-tenant-controls-source",
+        "encryption-controls-source",
+        "application-egress-controls-source",
+        "integrations-excluded",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/production-migration-safety.md",
+      "sha256": "f3898394b738adedecd853fb83ac0178e574eb6bf2bbb9bcb2c612fcfb8da845",
+      "claim_ids": [
+        "migration-safety-source",
+        "migration-drill-live"
+      ]
+    },
+    {
+      "path": "docs/enterprise/production-operations-runbook.md",
+      "sha256": "bfb03d755574cea9026651611c4dbfc5029efd532832f4571e260012320e0b2f",
+      "claim_ids": [
+        "operator-tool-set",
+        "audit-signing-source",
+        "support-bundle-source",
+        "performance-slo",
+        "durability-controls-source",
+        "durability-recovery-live",
+        "incident-response-materials-source-only",
+        "incident-response-operation-live",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/production-runtime-contract.md",
+      "sha256": "6f4479f821378cf575eff710b5f7ef66f73b496977296d236559d437006c2d27",
+      "claim_ids": [
+        "first-profile-boundary",
+        "single-control-plane-no-ha",
+        "arbitrary-execution-disabled",
+        "tenant-quota-source",
+        "tenant-capacity-live",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/production-support-matrix.md",
+      "sha256": "aeff603b25d626a7e1d08bcb07148a92f8b93cb4e774d7fb23b45cdb341480a8",
+      "claim_ids": [
+        "first-profile-boundary",
+        "integrations-excluded",
+        "identity-qualified-live",
+        "model-policy-approved",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/secret-rotation-contract.md",
+      "sha256": "d4b1e9cf5e90ac82f1167d0a7d9c89ecabe3926c3612393983bd75d33370aee6",
+      "claim_ids": [
+        "secret-rotation-source",
+        "secret-rotation-live"
+      ]
+    },
+    {
+      "path": "docs/enterprise/security-overview.md",
+      "sha256": "bffd1f49ce03f5b8a201850a59a6507b17fb8dc3e1a3bf45913a6ef15e8e8861",
+      "claim_ids": [
+        "release-unavailable",
+        "first-profile-boundary",
+        "postgres-tenant-controls-source",
+        "encryption-controls-source",
+        "audit-signing-source",
+        "audit-tamper-evidence-live",
+        "application-egress-controls-source",
+        "network-no-egress-live",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/service-objectives.md",
+      "sha256": "f534e556329e285261013c8c1db98a01e309c9f1ae2bef398650f7fd1be2f936",
+      "claim_ids": [
+        "performance-slo",
+        "durability-recovery-live",
+        "dependency-failure-drills-live"
+      ]
+    },
+    {
+      "path": "docs/enterprise/single-client-deployment.md",
+      "sha256": "6fb0ba9c9d6d575b6930051c8bb8d94e9f763cf898dbe7d17080ed524a72986c",
+      "claim_ids": [
+        "first-profile-boundary",
+        "single-control-plane-no-ha",
+        "identity-qualified-live",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/enterprise/tenant-quota-contract.md",
+      "sha256": "5cba27ca8a141c6bcb3efc995738743d26d86299b52c57310100008b4ec4dcb5",
+      "claim_ids": [
+        "tenant-quota-source",
+        "tenant-capacity-live"
+      ]
+    },
+    {
+      "path": "docs/handbook.md",
+      "sha256": "bb87b7c03aded039b7abeec7ce92083948bb09960eb726b85653acb671ceef68",
+      "claim_ids": [
+        "release-unavailable",
+        "first-profile-boundary",
+        "integrations-excluded",
+        "adaptive-systems-research-only",
+        "compliance-certification",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/index.md",
+      "sha256": "2ae7adfcc27a634ebbfd7181936f758d947b0d8e109ca598b8646049e10a1f46",
+      "claim_ids": [
+        "release-unavailable",
+        "first-profile-boundary",
+        "integrations-excluded",
+        "adaptive-improvement",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/press-kit.md",
+      "sha256": "e016599e9d5e242e8ecd54434fbef682ee8bc0c328ea0bc4a7eb03571866f288",
+      "claim_ids": [
+        "release-unavailable",
+        "first-profile-boundary",
+        "production-package-inventory",
+        "dashboard-route-inventory",
+        "integrations-excluded",
+        "audit-tamper-evidence-live",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/product-portfolio.md",
+      "sha256": "fe4067843312e4e9cde406c1dd07c8111691416f3a628cecd0a4b031202cc22c",
+      "claim_ids": [
+        "first-profile-boundary",
+        "integrations-excluded",
+        "adaptive-systems-research-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/README.md",
+      "sha256": "0088dbcdd93e0abd4904fc644cc06a468b6e83d25485d11937ffa6417eebebdc",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/ambassadors.md",
+      "sha256": "955098015a9126b86c70a0673bb0b35af7bf4c1c79c0f139884fdc5ab53446ba",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/badge-program.md",
+      "sha256": "2e81c8f247a1e533af9064894fb41c82a71c37a21d8a7b100bfef32f45619545",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/certification.md",
+      "sha256": "f099353faa65282cef13dd9f34430fafadbcdd32a4c06662caa527a7aebe7ac3",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/community-grants.md",
+      "sha256": "e3d69411b96d125a1a8b9009ddbb216a349cdebd4e1a922fdea59d3f383dbaa3",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/community-survey.md",
+      "sha256": "03201688b505732421f381c00d883a80ae72f285cd831ad6bda963ec6b021fcd",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/conference-booth.md",
+      "sha256": "d930be516470db3842ad9fc782286a2b18b989f24222d648a94563db8b149e52",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/conference-v3.md",
+      "sha256": "7a576949de2118f6d506d209fdd7290480be3790a3baf0894a6e15416d8721c2",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/curriculum-kit.md",
+      "sha256": "cd13cbe323a8871a44de058080cf7645f71e33422f63ae7b2ee722213a206b52",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/foundation-exploration.md",
+      "sha256": "38b9c12fb71f9799d89215ecd76185ae674678af33be2ee1563d66f0f517d536",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/github-stars-campaign.md",
+      "sha256": "de58627e3f938dd687265fc6650087fae80a99efa636f32373ec207ac518736b",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/hackathons.md",
+      "sha256": "69bbb4f2d22b27d086cf7c92293f7974421ef3e22a875877f4ed7edf3ed4f2d7",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/integration-partnerships.md",
+      "sha256": "6dd7a5b7e0a5d64bda6e006b9013609f0fb0c941069fae0faa8ba75d9f21af29",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/localized-communities.md",
+      "sha256": "fe95c81a4d6344704347cbbd6fea59de6fc50edb8d77b7c964802ac23307ec32",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/meetups.md",
+      "sha256": "b5ac57896588efa0d1ed92d74809418e5aea0e6d0302228ff6089eb1a4999aa7",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/office-hours.md",
+      "sha256": "810f3f4c867dbc00c9a5da701920a0eb5604031bbdaecf68317f398d19a18443",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/press-and-case-studies.md",
+      "sha256": "a19ad0424bccf020b9eca3b7014ab306488c3d66fa316bcf945f1536b81d8f32",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/roadmap-voting.md",
+      "sha256": "791fbc959ae2827897b5c88247078eebfe27f6ec8933f67d533f0a7dcc9fd5e4",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/skill-of-the-year.md",
+      "sha256": "07bc757e9cfb30d1b8714c1ef5f5a1d3876c18a9980940f86e43a9778d72129c",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/sponsorship-tiers.md",
+      "sha256": "3ec19d16da37b7ee30ca61996003b0c0d4c385429f2e1281ad3f5e24b9d3cf8d",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/summit-v1-virtual.md",
+      "sha256": "301aec07e5d9d8bad37ba776dbfac0ae07aca36312f4298cfc1f5e4bf7be7dbb",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/summit-v2-hybrid.md",
+      "sha256": "5a8fb46c7f451c018569ee1ef91960582e030b4688b59ee16c2118f7994c1d49",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/swag.md",
+      "sha256": "ab4d8bbdd7a4e7dee0ae88e2b51cfff3654f6debf53cda24e2fbf38351e5262d",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/tutorial-videos.md",
+      "sha256": "d84d378f582e7ee0af1aeb401c35e8d7eac51c7a218dfedf851187a72d3470be",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/programs/university-outreach.md",
+      "sha256": "4552aa68dd747888541599826feaea4fdb89c730d085be90b16091cdf7297692",
+      "claim_ids": [
+        "release-unavailable",
+        "program-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/strategy/README.md",
+      "sha256": "7c4a72756b2c5a2255e386e3cfaeb441c420cc1d44103965eb650739ed3629d3",
+      "claim_ids": [
+        "release-unavailable",
+        "strategy-documents-source-only",
+        "strategy-documents-historical-only",
+        "strategy-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/strategy/benchmark-plan.md",
+      "sha256": "9b50603a2aefacd7b3b9c98542cf9e5fdbc12e6261d115175914e8861fe9ab4b",
+      "claim_ids": [
+        "release-unavailable",
+        "strategy-documents-source-only",
+        "strategy-documents-historical-only",
+        "strategy-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/strategy/competitive-landscape.md",
+      "sha256": "cc3bfc5d7a7e5a5f4b6fc1d6ddb87fe4c7255aa46340c5bbf6e969be369c85ac",
+      "claim_ids": [
+        "release-unavailable",
+        "strategy-documents-source-only",
+        "strategy-documents-historical-only",
+        "strategy-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/strategy/counterfactual-promotion.md",
+      "sha256": "eccde5f42954cc69896220d77f07b3c176673c021758cdf6ea3139381dd684fe",
+      "claim_ids": [
+        "release-unavailable",
+        "strategy-documents-source-only",
+        "strategy-documents-historical-only",
+        "strategy-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/strategy/design-partner-scorecard.md",
+      "sha256": "0a13584188a7b53f42a538ee998a3bedaa671c16f82bbf629d3c7f8282603d3f",
+      "claim_ids": [
+        "release-unavailable",
+        "strategy-documents-source-only",
+        "strategy-documents-historical-only",
+        "strategy-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/strategy/flagship-demo-script.md",
+      "sha256": "17e436eda10d7d95966e981a18e87e49bfbac348e3b99242fdf3827b9082e9b9",
+      "claim_ids": [
+        "release-unavailable",
+        "strategy-documents-source-only",
+        "strategy-documents-historical-only",
+        "strategy-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/strategy/investor-narrative.md",
+      "sha256": "b6ce28674c2a09bc1126d1d3c4501a05910d4a93cb239cab39b5d4d0b8d978af",
+      "claim_ids": [
+        "release-unavailable",
+        "strategy-documents-source-only",
+        "strategy-documents-historical-only",
+        "strategy-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/strategy/moat-and-acquisition.md",
+      "sha256": "b8b87d0e75b00ed08eb73b38762720be04f22c1591f06822a8ff99ecc5cbeb2b",
+      "claim_ids": [
+        "release-unavailable",
+        "strategy-documents-source-only",
+        "strategy-documents-historical-only",
+        "strategy-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/strategy/moonshot-bets.md",
+      "sha256": "53cdc855f0b7d78b8a9fed265a3a9a3283a4072967fa392f367dd82c5c37bbc2",
+      "claim_ids": [
+        "release-unavailable",
+        "strategy-documents-source-only",
+        "strategy-documents-historical-only",
+        "strategy-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/strategy/pitch-deck-outline.md",
+      "sha256": "ffd25527cee59bd94dd11192497c2f15f8c8327f2eeaf92a05b459766c3d3baf",
+      "claim_ids": [
+        "release-unavailable",
+        "strategy-documents-source-only",
+        "strategy-documents-historical-only",
+        "strategy-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "docs/strategy/vision-2031.md",
+      "sha256": "c8aeec08ebc22f211b9abd3b7c08716771cad26f6625bd108a3b317a8b1ce257",
+      "claim_ids": [
+        "release-unavailable",
+        "strategy-documents-source-only",
+        "strategy-documents-historical-only",
+        "strategy-documents-proposal-only",
+        "production-ready-overall"
+      ]
+    },
+    {
+      "path": "proof/RESULTS.md",
+      "sha256": "0562761c5cd6582abfda4173c0db4261c91800821843abbfe074a2e4a535aa7a",
+      "claim_ids": [
+        "proof-harness-results",
+        "adaptive-improvement"
+      ]
+    },
+    {
+      "path": "release/README.md",
+      "sha256": "50b1f1c920e905e4f101a361ec442ba3484ac6ff9facf9fe691192aa197b5b80",
+      "claim_ids": [
+        "release-unavailable",
+        "first-profile-boundary",
+        "registry-and-release-published",
+        "production-ready-overall"
+      ]
+    }
+  ]
+}

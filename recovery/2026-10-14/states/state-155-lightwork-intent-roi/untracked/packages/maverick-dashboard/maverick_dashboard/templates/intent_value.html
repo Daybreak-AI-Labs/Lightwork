@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Intent & value · Lightwork{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ asset('intent-value.css') }}">{% endblock %}
+{% block content %}
+<div id="intent-value">
+  {% from "_hero.html" import hero %}
+  {% call hero('Value & spend', 'Intent & value', subtitle='Understand the work. Follow its value.', lede='See the work people need help with, the work Lightwork performs, and the assumptions behind its estimated value.') %}
+    <p class="muted">Labor value estimates capacity, not proven cash savings. Audit records establish performed activity; benchmarks estimate the human effort it represents.</p>
+  {% endcall %}
+  <noscript><p role="alert">Turn on JavaScript to load your authorized work and value estimates.</p></noscript>
+  <form id="iv-filters" class="panel iv-form" aria-label="Report filters">
+    <div class="iv-field"><label for="iv-period">Period</label><select class="select" id="iv-period"><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="180">Last 6 months</option><option value="365">Last year</option></select></div>
+    <div class="iv-field"><label for="iv-scope">View</label><select class="select" id="iv-scope"><option value="platform">All authorized Lightwork work</option><option value="specialist">Specialist</option><option value="agent">Agent</option><option value="process">Process</option></select></div>
+    <div class="iv-field" id="iv-entity-field" hidden><label for="iv-entity">Choose work</label><select class="select" id="iv-entity"></select></div>
+    <div class="iv-field"><label for="iv-intent-filter">Type of work</label><select class="select" id="iv-intent-filter"><option value="">All types</option></select></div>
+    <button class="btn btn--primary" type="submit">Update report</button>
+  </form>
+  <div class="iv-toolbar"><p id="iv-status" role="status" aria-live="polite">Loading your authorized work…</p><button class="btn btn--ghost" id="iv-refresh" type="button">Refresh</button></div>
+  <p class="muted" id="iv-period-note"></p>
+  <div id="iv-content" hidden>
+    <div class="iv-metrics" id="iv-metrics" aria-label="Value estimates"></div>
+    <p class="muted" id="iv-coverage"></p>
+    <section class="panel iv-section" aria-labelledby="iv-work-heading">
+      <div class="iv-toolbar"><h2 id="iv-work-heading">Contributing work</h2><button type="button" class="btn btn--ghost" id="iv-show-all">Show all work</button></div>
+      <p id="iv-work-note" class="muted">Choose a number above or a task below to inspect its evidence and assumptions.</p>
+      <div id="iv-tasks" class="iv-task-list"></div>
+    </section>
+    <section class="panel iv-section" aria-labelledby="iv-history-heading"><h2 id="iv-history-heading">Changes over time</h2><p class="muted">Intent corrections, benchmark edits and task continuity remain in the history. Opportunity and execution are complementary views of the same work; do not add them together.</p><ul id="iv-history" class="iv-history"></ul></section>
+    <details class="panel iv-section" id="iv-assumptions"><summary>Human-effort benchmarks</summary>
+      <p class="muted">Starting estimates are supplied by Lightwork for onboarding. They are planning assumptions, not independently measured industry standards. Adjust them to your company’s process. Every estimate includes its range, source and version.</p>
+      <p id="iv-benchmark-permission" class="muted"></p>
+      <form id="iv-benchmark-form" class="iv-form">
+        <div class="iv-field"><label for="iv-benchmark-intent">Type of work</label><select id="iv-benchmark-intent" class="select" required></select></div>
+        <div class="iv-field"><label for="iv-minutes-low">Low estimate (minutes)</label><input class="input" id="iv-minutes-low" type="number" min="0" step="0.1" required></div>
+        <div class="iv-field"><label for="iv-minutes">Typical estimate (minutes)</label><input class="input" id="iv-minutes" type="number" min="0" step="0.1" required></div>
+        <div class="iv-field"><label for="iv-minutes-high">High estimate (minutes)</label><input class="input" id="iv-minutes-high" type="number" min="0" step="0.1" required></div>
+        <div class="iv-field"><label for="iv-rate">Loaded labor cost per hour (USD)</label><input class="input" id="iv-rate" type="number" min="0" step="0.01" required></div>
+        <div class="iv-field iv-span"><label for="iv-benchmark-reason">Source or reason for this change</label><textarea class="input" id="iv-benchmark-reason" rows="2" maxlength="1000" required placeholder="For example, our team’s review of recent RFP work"></textarea></div>
+        <p id="iv-benchmark-source" class="muted iv-span"></p>
+        <div class="iv-span"><button class="btn btn--primary" type="submit">Save benchmark and recalculate</button><button class="btn btn--ghost" id="iv-benchmark-reload" type="button" hidden>Review latest benchmark</button><p id="iv-benchmark-status" role="status" aria-live="polite"></p></div>
+      </form>
+    </details>
+    <details class="panel iv-section"><summary>Value reporting settings</summary>
+      <p class="muted">Completion confirmation is optional and off by default. Confirming completion never substitutes for audit evidence of Lightwork’s work.</p>
+      <p id="iv-settings-permission" class="muted"></p>
+      <form id="iv-settings-form">
+        <p><label><input id="iv-enabled" type="checkbox"> Enable intent and value reporting</label></p>
+        <p><label><input id="iv-confirmation" type="checkbox"> Offer an optional completion confirmation control</label></p>
+        <div class="iv-field"><label for="iv-settings-reason">Reason for this change</label><input class="input" id="iv-settings-reason" maxlength="1000" required></div>
+        <p><button class="btn btn--primary" type="submit">Save reporting settings</button><button class="btn btn--ghost" id="iv-settings-reload" type="button" hidden>Review latest settings</button></p>
+        <p id="iv-settings-status" role="status" aria-live="polite"></p>
+      </form>
+    </details>
+  </div>
+  <p><a href="/savings">Process-level savings</a> · <a href="/spend">Recorded spend</a></p>
+</div>
+<dialog id="iv-detail" class="iv-dialog panel" aria-labelledby="iv-detail-title">
+  <div class="iv-toolbar"><h2 id="iv-detail-title" tabindex="-1">Work and evidence</h2><button id="iv-close" type="button" class="btn btn--ghost">Close</button></div>
+  <p id="iv-detail-status" role="status" aria-live="polite"></p>
+  <div id="iv-detail-content" hidden>
+    <div id="iv-detail-summary"></div>
+    <section aria-labelledby="iv-evidence-heading"><h3 id="iv-evidence-heading">Activity, attribution and costs</h3><div id="iv-evidence"></div></section>
+    <section aria-labelledby="iv-task-benchmark-heading"><h3 id="iv-task-benchmark-heading">Estimate explained</h3><div id="iv-task-benchmark"></div></section>
+    <section aria-labelledby="iv-discovery-heading"><h3 id="iv-discovery-heading">Put this opportunity to work</h3><p class="muted">Review a relevant specialist or process through its normal workflow. Opening a recommendation does not start work or approve execution.</p><div id="iv-discovery"></div><button id="iv-discovery-retry" class="btn btn--ghost" type="button" hidden>Retry recommendations</button></section>
+    <details class="iv-section" id="iv-correction"><summary>Correct the type or size of this work</summary><form id="iv-correction-form" class="iv-form">
+      <div class="iv-field"><label for="iv-correct-intent">Type of work</label><select id="iv-correct-intent" class="select" required></select></div>
+      <div class="iv-field"><label for="iv-size">Task size</label><select id="iv-size" class="select"><option value="small">Small</option><option value="standard">Typical</option><option value="large">Large</option></select></div>
+      <div class="iv-field iv-span"><label for="iv-correct-reason">Why is this a better description?</label><textarea id="iv-correct-reason" class="input" rows="2" maxlength="1000" required></textarea></div>
+      <p id="iv-confirmation-field" class="iv-span" hidden><label><input id="iv-confirmed" type="checkbox"> I consider this work complete</label></p>
+      <div class="iv-span"><button type="submit" class="btn btn--primary">Save correction and recalculate</button><p id="iv-correction-status" role="status" aria-live="polite"></p></div>
+    </form></details>
+    <details class="iv-section" id="iv-continuity"><summary>This is a follow-up or rework of another task</summary><p class="muted">Keep related work together so its full baseline is counted once. Earlier activity and costs remain attached to the same work.</p><form id="iv-continuity-form" class="iv-form">
+      <div class="iv-field iv-span"><label for="iv-related-task">Original task</label><select id="iv-related-task" class="select" required></select></div>
+      <div class="iv-field iv-span"><label for="iv-continuity-reason">How is the work related?</label><textarea id="iv-continuity-reason" class="input" rows="2" maxlength="1000" required></textarea></div>
+      <div class="iv-span"><button type="submit" class="btn btn--primary">Link related work</button><p id="iv-continuity-status" role="status" aria-live="polite"></p></div>
+    </form></details>
+    <p id="iv-detail-permission" class="muted"></p>
+    <button id="iv-detail-reload" class="btn btn--ghost" type="button" hidden>Review latest task; keep my edits</button>
+    <section aria-labelledby="iv-task-history-heading"><h3 id="iv-task-history-heading">Task history</h3><ul id="iv-task-history" class="iv-history"></ul></section>
+  </div>
+</dialog>
+<script src="{{ asset('intent-value.js') }}" defer></script>
+{% endblock %}

@@ -1,0 +1,252 @@
+diff --git a/deploy/aws/EXECUTOR.md b/deploy/aws/EXECUTOR.md
+index ad7910c7b8c0286eeb104979f167e9add9c92d0e..2af5c950af4530997cdfb7b0480523a985eaab49 100644
+--- a/deploy/aws/EXECUTOR.md
++++ b/deploy/aws/EXECUTOR.md
+@@ -66,3 +66,64 @@ Secrets Manager, rotate credentials or apply an AWS deployment automatically.
+ Deployment is incomplete until those external steps and acceptance checks pass.
+ The local Firecracker scaffold remains unsupported; selecting it does not satisfy
+ this executor contract.
++
++## Managed credential refresh (deployment opt-in)
++
++The AWS operator may set `executor_managed_credentials = true` after qualifying
++the separate token publisher. This deployment option is disabled by default.
++The local installer keeps its existing inline kubeconfig path; it must not offer
++customer-editable access to production secret ARNs or controller identities.
++This is credential maintenance for an existing backend, not a new user-selected
++sandbox. Existing inline-token and inline-certificate deployments are unchanged.
++
++The managed contract is intentionally restricted to the reviewed Ohio production
++deployment: account `589997396906`, region `us-east-2`, namespace
++`lightwork-execution`, service account `lightwork-controller`, and the exact
++Secrets Manager ARN for `lightwork-prod/executor-kubeconfig`. Terraform exposes
++that ARN as `MAVERICK_EXECUTOR_KUBECONFIG_SECRET_ARN` and grants the application
++task role only `GetSecretValue` for that ARN with `VersionStage=AWSCURRENT`.
++The existing task execution role still injects
++`MAVERICK_EXECUTOR_KUBECONFIG_SECRET` at startup. That injected JSON remains an
++immutable cluster/service-account identity pin, even after its initial token
++expires. The reader never rewrites that environment value or its old file.
++
++The publisher must supply exactly one flattened JSON context with an inline
++TokenRequest bearer token, matching cluster server, CA, TLS settings, context,
++namespace, controller service-account UID, issuer and audience. No kubeconfig
++extensions, command plugins, proxy, local file references or alternate contexts
++are accepted. Tokens must bind to one of
++`lightwork-prod-controller-binding-a`, `-b` or `-c` with a well-formed object UID.
++The Kubernetes API verifies signatures and object binding; local JWT decoding
++alone is not proof of authentication. The publisher must leave an earlier bound
++Secret intact until all tokens issued against it have expired, and must never
++delete/revoke a token while a command may still need its export/recovery window.
++
++Before every remote kubectl operation, the application checks token lifetime
++against the operation timeout plus 60 seconds. Before starting a command it also
++reserves the export timeout. It checks AWSCURRENT at least once per 30 seconds
++of active use, using the standard verified AWS HTTPS endpoint, two-second
++connect and three-second read timeouts, and one total SDK attempt. Successful
++refresh does not restart ECS or interrupt an existing kubectl stream.
++
++Identity drift, malformed tokens, an older credential version, insufficient
++lifetime or AWS refresh failure pauses new operations without falling back to
++the original injected token or a stale cached credential. Error messages do not
++include token contents or AWS response bodies. A private atomic credential file
++is separate from the original inline file. A private, nonsecret high-water
++record prevents version rollback across backend reconstruction and process
++restart. The record is part of protected control-plane state: restoring an old
++data root must not restore older authority without reconciliation.
++
++The process cache has a thread lock and the files use the existing strict
++cross-process lock. This does not establish distributed exclusion on EFS or
++replace the production singleton/all-writer controls. NFS behavior and actual
++service-account claims must be qualified on the target before activation.
++
++Required additional acceptance: issue two real bound-token versions, verify
++active commands continue while later calls use the replacement without ECS
++restart, reject rollback/identity changes, simulate refresh failure and expired
++tokens, verify a failed export remains recoverable, and check worker-side
++denials. Initial configuration and issuer/CA/service-account changes remain
++separately reviewed deployment changes. This module neither creates nor runs
++the publisher, issues tokens, modifies their RBAC or qualifies their rotation
++schedule automatically.
+diff --git a/deploy/aws/terraform/ecs.tf b/deploy/aws/terraform/ecs.tf
+index 51cc0d6a2daafbcf554cfa6ab9fe64a723fc43b5..9bfd82d718333d8a1be3c85834237f08278db53e 100644
+--- a/deploy/aws/terraform/ecs.tf
++++ b/deploy/aws/terraform/ecs.tf
+@@ -56,6 +56,9 @@ resource "aws_ecs_task_definition" "app" {
+           # at-rest key ever rotates. The value is a one-way hash, not the key.
+           { name = "MAVERICK_ENCRYPTION_KEY_DIGEST", value = "sha256:08e3a482c52e752bb7a1765bcc622508e8decafca4c1a8d5a01c2d5d0630b156" },
+         ],
++        var.executor_managed_credentials ? [
++          { name = "MAVERICK_EXECUTOR_KUBECONFIG_SECRET_ARN", value = var.executor_kubeconfig_secret_arn },
++        ] : [],
+         # Browser login via Auth0 (OIDC). Added only when an issuer is set, so
+         # an unconfigured stack stays on static-token auth. redirect_uri and
+         # audience are derived so there is one place to configure this.
+@@ -147,6 +150,15 @@ resource "aws_ecs_task_definition" "app" {
+   skip_destroy = true
+ 
+   lifecycle {
++    precondition {
++      condition = !var.executor_managed_credentials || (
++        data.aws_caller_identity.current.account_id == "589997396906" &&
++        data.aws_region.current.name == "us-east-2" &&
++        var.executor_namespace == "lightwork-execution" &&
++        can(regex("^arn:aws:secretsmanager:us-east-2:589997396906:secret:lightwork-prod/executor-kubeconfig-[A-Za-z0-9]{6}$", var.executor_kubeconfig_secret_arn))
++      )
++      error_message = "Managed credential refresh is restricted to the qualified Ohio production executor identity. See deploy/aws/EXECUTOR.md."
++    }
+     precondition {
+       condition     = var.executor_kubeconfig_secret_arn != "" && can(regex("@sha256:[a-f0-9]{64}$", var.executor_image))
+       error_message = "Provision and qualify the separate Kubernetes executor first: set executor_kubeconfig_secret_arn and a digest-pinned executor_image. See deploy/aws/EXECUTOR.md."
+diff --git a/deploy/aws/terraform/iam.tf b/deploy/aws/terraform/iam.tf
+index 88dd80d581667beb2b1fe053080e62445210381e..33dd669d3985982c6ac9a0f056ea7702478a326a 100644
+--- a/deploy/aws/terraform/iam.tf
++++ b/deploy/aws/terraform/iam.tf
+@@ -56,6 +56,28 @@ resource "aws_iam_role" "task" {
+   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
+ }
+ 
++# Unlike startup-only ECS injection, managed renewal reads one exact secret at
++# runtime. No DescribeSecret, write, listing or other existing app-secret access.
++data "aws_iam_policy_document" "executor_managed_read" {
++  count = var.executor_managed_credentials ? 1 : 0
++  statement {
++    actions   = ["secretsmanager:GetSecretValue"]
++    resources = [var.executor_kubeconfig_secret_arn]
++    condition {
++      test     = "StringEquals"
++      variable = "secretsmanager:VersionStage"
++      values   = ["AWSCURRENT"]
++    }
++  }
++}
++
++resource "aws_iam_role_policy" "executor_managed_read" {
++  count  = var.executor_managed_credentials ? 1 : 0
++  name   = "executor-managed-read-current"
++  role   = aws_iam_role.task.id
++  policy = data.aws_iam_policy_document.executor_managed_read[0].json
++}
++
+ # The app sends platform email (invite links) through the Amazon SES API using
+ # this task role — no stored SMTP credential. Send-only; the verified identity
+ # (daybreakailabs.com) is enforced by SES itself.
+diff --git a/deploy/aws/terraform/variables.tf b/deploy/aws/terraform/variables.tf
+index 7fe99e04ea6d0b1c79d72146c69bc643f49155f5..269a3737a4515c63986f90910415b16af72f80e0 100644
+--- a/deploy/aws/terraform/variables.tf
++++ b/deploy/aws/terraform/variables.tf
+@@ -179,6 +179,12 @@ variable "db_allocated_storage" {
+   default     = 20
+ }
+ 
++variable "executor_managed_credentials" {
++  description = "Refresh the qualified production executor token without restarting ECS. Requires the managed-reader application release and an independently qualified publisher."
++  type        = bool
++  default     = false
++}
++
+ variable "db_name" {
+   description = "Initial Postgres database name."
+   type        = string
+diff --git a/packages/maverick-core/maverick/sandbox/kubernetes.py b/packages/maverick-core/maverick/sandbox/kubernetes.py
+index 6199d25d7672fd10e294aab4d2bf7c5e117381e0..7603e796592790e36152dd78449175fbe63fa728 100644
+--- a/packages/maverick-core/maverick/sandbox/kubernetes.py
++++ b/packages/maverick-core/maverick/sandbox/kubernetes.py
+@@ -224,10 +224,12 @@ class KubernetesBackend:
+             }
+         }
+ 
+-    def _kubectl_prefix(self) -> list[str]:
++    def _kubectl_prefix(self, remaining_seconds: float = 15) -> list[str]:
++        from .managed_executor_credentials import backend_path, enabled
++        kubeconfig = backend_path(self, remaining_seconds) if enabled() else self.kubeconfig
+         args = ["kubectl"]
+-        if self.kubeconfig:
+-            args.extend(["--kubeconfig", self.kubeconfig])
++        if kubeconfig:
++            args.extend(["--kubeconfig", kubeconfig])
+         if self.context:
+             args.extend(["--context", self.context])
+         args.extend(["-n", self.namespace])
+@@ -257,7 +259,7 @@ class KubernetesBackend:
+         """
+         try:
+             subprocess.run(
+-                [*self._kubectl_prefix(), "delete", "pod", pod_name,
++                [*self._kubectl_prefix(10), "delete", "pod", pod_name,
+                  "--ignore-not-found=true", "--grace-period=0", "--force"],
+                 capture_output=True, timeout=10, env=scrub_env(),
+             )
+@@ -285,7 +287,7 @@ class KubernetesBackend:
+         overrides["spec"]["activeDeadlineSeconds"] = sleep_budget + int(self.pod_ready_timeout)
+         overrides["spec"]["volumes"][0]["emptyDir"]["sizeLimit"] = str(workspace_transfer.MAX_TOTAL_BYTES)
+         run_args = [
+-            *self._kubectl_prefix(),
++            *self._kubectl_prefix(self.pod_ready_timeout),
+             "run", pod_name,
+             "--restart=Never", "--quiet",
+             f"--image={self.image}",
+@@ -313,7 +315,7 @@ class KubernetesBackend:
+             )
+ 
+         wait_args = [
+-            *self._kubectl_prefix(), "wait", f"pod/{pod_name}",
++            *self._kubectl_prefix(self.pod_ready_timeout + 5), "wait", f"pod/{pod_name}",
+             "--for=condition=Ready", f"--timeout={int(self.pod_ready_timeout)}s",
+         ]
+         try:
+@@ -346,7 +348,6 @@ class KubernetesBackend:
+         # local operand plus an explicit subprocess cwd works on every host.
+         src = "./."
+         dest = f"{self.namespace}/{pod_name}:{_POD_WORKDIR}"
+-        args = [*self._kubectl_prefix(), "cp", src, dest]
+         try:
+             # kubectl archives an empty source as the destination directory
+             # itself. Restoring that header can chmod the root-owned emptyDir
+@@ -354,6 +355,7 @@ class KubernetesBackend:
+             # transfer on a first run; retain the volume's kubelet permissions.
+             if not any((source or self.workdir).iterdir()):
+                 return None
++            args = [*self._kubectl_prefix(self.transfer_timeout), "cp", src, dest]
+             proc = subprocess.run(
+                 args, capture_output=True, text=True,
+                 timeout=self.transfer_timeout, env=scrub_env(), cwd=source or self.workdir,
+@@ -379,7 +381,7 @@ class KubernetesBackend:
+         wrapped = ('(umask 077; mkdir "$1") || exit 74; cd "$2" || exit 74; '
+                    'TMPDIR="$1"; export TMPDIR; sh -c "$3"; status=$?; '
+                    'rmdir "$1" 2>/dev/null || :; exit "$status"')
+-        args = [*self._kubectl_prefix(), "exec", pod_name, "--", "sh", "-c", wrapped,
++        args = [*self._kubectl_prefix(effective + self.transfer_timeout), "exec", pod_name, "--", "sh", "-c", wrapped,
+                 "workspace-command", scratch, _POD_WORKDIR, cmd]
+         try:
+             result = subprocess.run(
+@@ -411,10 +413,10 @@ class KubernetesBackend:
+         # PID namespace (not PID 1 or this shell). Freeze leftover/background
+         # writers before tar; an empty process set may return ESRCH. The shell
+         # then becomes the exporter. No host PID namespace is requested.
+-        args = [*self._kubectl_prefix(), "exec", pod_name, "--", "sh", "-c",
+-                'kill -s STOP -1 2>/dev/null || :; exec "$@"', "workspace-export",
+-                "tar", "-C", _POD_WORKDIR, "-cf", "-", "."]
+         try:
++            args = [*self._kubectl_prefix(self.transfer_timeout), "exec", pod_name, "--", "sh", "-c",
++                    'kill -s STOP -1 2>/dev/null || :; exec "$@"', "workspace-export",
++                    "tar", "-C", _POD_WORKDIR, "-cf", "-", "."]
+             archive = recovery / "export.tar"
+             if workspace_transfer.capture_archive(args, archive, self.transfer_timeout) != 0:
+                 return "; workspace export failed; pod retained for recovery"
+diff --git a/packages/maverick-core/maverick/sandbox/kubernetes_authority.py b/packages/maverick-core/maverick/sandbox/kubernetes_authority.py
+index 15865002385869365f7b25a90f4fdd0b983a7856..d274a1e6d5c25bb30402009032e17dff828aef36 100644
+--- a/packages/maverick-core/maverick/sandbox/kubernetes_authority.py
++++ b/packages/maverick-core/maverick/sandbox/kubernetes_authority.py
+@@ -84,7 +84,11 @@ def deployment_kubernetes_config() -> dict | None:
+     raw = os.environ.get("MAVERICK_EXECUTOR_KUBECONFIG_SECRET", "")
+     if not raw:
+         raise ValueError("Production executor credential is missing; provision the Kubernetes executor before accepting client work")
++    from .managed_executor_credentials import enabled, managed_path
++    # In managed mode this environment value is an immutable identity pin. Never
++    # overwrite the rotating file with the original, potentially expired token.
++    credential_path = managed_path(namespace) if enabled() else _kubeconfig(raw)
+     return {"backend": "kubernetes", "require_container": True, "namespace": namespace,
+-            "image": image, "kubeconfig": _kubeconfig(raw), "context": None,
++            "image": image, "kubeconfig": credential_path, "context": None,
+             "allow_network": False, "extra_kubectl_args": [], "run_as_user": 1000,
+             "memory": "4g", "cpus": "2"}

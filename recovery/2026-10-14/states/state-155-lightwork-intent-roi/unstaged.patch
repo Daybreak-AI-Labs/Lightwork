@@ -1,0 +1,668 @@
+diff --git a/apps/installer-cli/maverick_installer/wizard.py b/apps/installer-cli/maverick_installer/wizard.py
+index 4f7a3f15dba7bd882b0c669e91c028040a6de84c..98143fba834ebf6763ecf6f42f204a4f06c4dbd5 100644
+--- a/apps/installer-cli/maverick_installer/wizard.py
++++ b/apps/installer-cli/maverick_installer/wizard.py
+@@ -300,6 +300,7 @@ STEPS: list[tuple[str, str]] = [
+     ("journal", "Workspace journal"),
+     ("finance", "Finance suite"),
+     ("value", "Savings assumptions"),
++    ("intent_value", "Work value and opportunities"),
+     ("assessments", "Assessment assists"),
+     ("security_suite", "Security & GRC"),
+     ("advanced", "Advanced reasoning"),
+@@ -4230,6 +4231,27 @@ def pick_security_suite() -> dict[str, Any]:
+     return result
+ 
+ 
++def pick_intent_value() -> dict[str, Any]:
++    """Enable intent reporting without requiring company benchmark setup."""
++    console.print()
++    console.print(
++        "[dim]Work value: see opportunities in observed work and estimated "
++        "labor value for work Lightwork performs, backed by its audit records. "
++        "Starter effort ranges are editable estimates, not proven cash savings. "
++        "You can adjust your company's benchmarks in the Work value page; "
++        "setup is optional.[/dim]"
++    )
++    enabled = _q_confirm("Enable work value and opportunity reporting?", default=True)
++    confirmation_required = False
++    if enabled:
++        confirmation_required = _q_confirm(
++            "  Ask for completion confirmation before counting audited work value? "
++            "Confirmation does not replace execution evidence.",
++            default=False,
++        )
++    return {"enable": enabled, "confirmation_required": confirmation_required}
++
++
+ def pick_value() -> dict[str, Any]:
+     """The savings (ROI) report's cost/value assumptions -- the CLIENT's own
+     numbers, editable later on the dashboard Savings page.
+@@ -8672,6 +8694,18 @@ def _cfg_security_suite(
+     return lines
+ 
+ 
++def _cfg_intent_value(intent_value: dict[str, Any] | None) -> list[str]:
++    # Every setup mode persists the same defaults without asking for baselines.
++    chosen = intent_value if intent_value is not None else {}
++    lines = ["", "[intent_value]"]
++    for key, default in (("enable", True), ("confirmation_required", False)):
++        setting = chosen.get(key, default)
++        if not isinstance(setting, bool):
++            raise ValueError(f"intent_value.{key} must be boolean")
++        _emit_kv(lines, key, setting)
++    return lines
++
++
+ def _cfg_value(value: dict[str, Any] | None) -> list[str]:
+     if not value:
+         return []
+@@ -10311,6 +10345,7 @@ def write_config(
+     workspace: dict[str, Any] | None = None,
+     finance: dict[str, Any] | None = None,
+     value: dict[str, Any] | None = None,
++    intent_value: dict[str, Any] | None = None,
+     assessments: dict[str, Any] | None = None,
+     security_suite: dict[str, Any] | None = None,
+     deployment: str | None = None,
+@@ -10430,6 +10465,7 @@ def write_config(
+     lines += _cfg_workspace(workspace)
+     lines += _cfg_finance(finance)
+     lines += _cfg_value(value)
++    lines += _cfg_intent_value(intent_value)
+     lines += _cfg_assessments(assessments)
+     lines += _cfg_security_suite(
+         security_suite, governed_pg_pool=bool(advanced.get("governed_pg_pool")),
+@@ -11519,6 +11555,13 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
+         state["value"] = value
+         _save_partial(state)
+ 
++    _announce()
++    intent_value = state.get("intent_value")
++    if intent_value is None:
++        intent_value = pick_intent_value()
++        state["intent_value"] = intent_value
++        _save_partial(state)
++
+     # `is None` sentinel: keeping both defaults legitimately returns {}.
+     _announce()
+     assessments = state.get("assessments")
+@@ -11569,6 +11612,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
+         "workspace": workspace,
+         "finance": finance,
+         "value": value,
++        "intent_value": intent_value,
+         "assessments": assessments,
+         "security_suite": security_suite,
+         "advanced": advanced,
+@@ -11791,6 +11835,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
+     workspace = _simple["workspace"]
+     finance = _simple["finance"]
+     value = _simple["value"]
++    intent_value = _simple["intent_value"]
+     assessments = _simple["assessments"]
+     security_suite = _simple["security_suite"]
+     advanced = _simple["advanced"]
+@@ -11944,6 +11989,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
+         workspace=workspace if workspace.get("journal") else None,
+         finance=finance if finance.get("enable") else None,
+         value=value or None,
++        intent_value=intent_value,
+         assessments=assessments or None,
+         security_suite=security_suite,
+         approval=approval,
+diff --git a/apps/installer-cli/tests/test_wizard_progress.py b/apps/installer-cli/tests/test_wizard_progress.py
+index 2be4a6453790d5b2f948d5c179c25894974c882c..b506ce7f9ae71f878706383d2eea4b54b7a7cea8 100644
+--- a/apps/installer-cli/tests/test_wizard_progress.py
++++ b/apps/installer-cli/tests/test_wizard_progress.py
+@@ -6,7 +6,7 @@ from __future__ import annotations
+ 
+ def test_steps_list_is_ordered_and_unique():
+     from maverick_installer import wizard
+-    assert len(wizard.STEPS) == 42
++    assert len(wizard.STEPS) == 43
+     keys = [k for k, _ in wizard.STEPS]
+     assert keys[0] == "deployment"
+     assert keys[-1] == "a2a"
+@@ -14,7 +14,8 @@ def test_steps_list_is_ordered_and_unique():
+     assert keys[9] == "research_execution"
+     assert keys[10] == "candidate_promotion"
+     assert keys[11] == "knowledge_access"
+-    assert keys[25:28] == ["assessments", "security_suite", "advanced"]
++    assert keys[25] == "intent_value"
++    assert keys[26:29] == ["assessments", "security_suite", "advanced"]
+     assert len(set(keys)) == len(keys)  # no dupes
+ 
+ 
+@@ -23,14 +24,14 @@ def test_steps_list_is_ordered_and_unique():
+ def test_step_indicator_formats_step_n_of_m():
+     from maverick_installer import wizard
+     out = wizard._step_indicator(3)
+-    assert "Step 3/42" in out
++    assert "Step 3/43" in out
+     assert wizard.STEPS[2][1] in out  # the label
+ 
+ 
+ def test_step_indicator_includes_breadcrumb_of_done_labels():
+     from maverick_installer import wizard
+     out = wizard._step_indicator(3, done=["Deployment", "Providers"])
+-    assert "Step 3/42" in out
++    assert "Step 3/43" in out
+     assert "Deployment" in out
+     assert "Providers" in out
+ 
+@@ -38,7 +39,7 @@ def test_step_indicator_includes_breadcrumb_of_done_labels():
+ def test_step_indicator_no_breadcrumb_when_done_empty():
+     from maverick_installer import wizard
+     out = wizard._step_indicator(1, done=[])
+-    assert "Step 1/42" in out
++    assert "Step 1/43" in out
+     assert "›" not in out
+ 
+ 
+@@ -119,9 +120,9 @@ def test_run_prints_step_indicators(monkeypatch, tmp_path):
+     assert rc == 0
+ 
+     out = wizard.console.file.getvalue()
+-    assert "Step 1/42" in out
+-    assert "Step 3/42" in out
+-    assert "Step 27/42 Security & GRC" in out
+-    assert "Step 42/42" in out
++    assert "Step 1/43" in out
++    assert "Step 3/43" in out
++    assert "Step 28/43 Security & GRC" in out
++    assert "Step 43/43" in out
+     # Breadcrumb of earlier answers trails later steps.
+     assert "Deployment" in out
+diff --git a/docs/FEATURES.md b/docs/FEATURES.md
+index b8c9586d4143123c53fccce2b9a4d052d508dd28..e611fb2eb98fc7f41daad88e9d14f2086d5a6f9d 100644
+--- a/docs/FEATURES.md
++++ b/docs/FEATURES.md
+@@ -1761,6 +1761,19 @@ limits are recorded in the [operation coverage register](post-install-operation-
+   dashboard overlay. Savings = human cost − actual agent spend, plus ROI
+   and hours given back. Read-only over the same episode ledger as Spend;
+   zeros (never invented numbers) until goals have run.
++- **Work intent and estimated value** (dashboard `/intent-value`,
++  `/api/v1/intent-value`, and authorized Copilot answers) - separates observed
++  opportunity from audit-backed Lightwork execution. A broad work taxonomy,
++  editable tenant effort ranges, task continuity, recorded costs and audited
++  intent corrections explain estimated gross labor value and net benefit at
++  task, specialist, agent, process and workspace scope. Metrics drill into
++  contributing work and evidence; relevant existing specialists/processes open
++  through their native execution journey. Unknown costs and uncertain intent
++  remain visible. Starter benchmarks are product heuristics, not measured
++  industry standards or proven cash savings. `[intent_value] enable` defaults
++  on; optional completion confirmation defaults off and cannot prove execution.
++  See [work intent and value](intent-value.md) for assumptions, privacy,
++  configuration, coverage and qualification limits.
+ - **Outcome and delivered-cost evidence** (`outcome_accounting.py`,
+   `outcome_value_reporting.py`, dashboard `/outcome-pilots` +
+   `/api/v1/outcome-accounting`) — keeps every admitted pilot case in the
+diff --git a/packages/maverick-core/maverick/audit/events.py b/packages/maverick-core/maverick/audit/events.py
+index 4b2ca4e940740324a61f7b9ea8bb66f38157f8ec..31a683ef4dc9011fd83dfd848ba7fd1ee4ac9b76 100644
+--- a/packages/maverick-core/maverick/audit/events.py
++++ b/packages/maverick-core/maverick/audit/events.py
+@@ -11,6 +11,10 @@ Payload shapes (kind -> required fields, all events also carry
+ 
+   goal_start:        title:str, description:str|None
+   goal_end:          status:str (succeeded|failed|cancelled), result:str|None
++  flow_execution:    flow_id:str, flow_run_id:str, definition_revision:str,
++                     status:str, dry_run:bool, native_goal_ids:list[int],
++                     native_action_call_ids:list[str]; lifecycle receipt only,
++                     native goal/tool receipts corroborate performed work
+   episode_start:     attempt:int, model:str
+   episode_end:       outcome:str, cost_dollars:float, in_tok:int, out_tok:int
+   tool_call:         name:str, call_id:str, call_commitment:str,
+@@ -247,6 +251,7 @@ class EventKind:
+     # inputs/outputs are deliberately absent from this decision event.
+     FLOW_LEARNED_OPERATOR_DECISION = "flow_learned_operator_decision"
+     FLOW_ACTION_RECIPE_DECISION = "flow_action_recipe_decision"
++    FLOW_EXECUTION = "flow_execution"
+     # Agent Trust Plane: an external agent was refused an inbound action or an
+     # outbound dial because it is absent from the [agent_trust] registry, its
+     # direction forbade the interaction, or it exceeded its tool/risk ceiling.
+diff --git a/packages/maverick-core/maverick/config.py b/packages/maverick-core/maverick/config.py
+index 2019423abd67ef136f58e8832373f61b4201ee20..d935178f1ba2be27b62487ead136717133d0f9d7 100644
+--- a/packages/maverick-core/maverick/config.py
++++ b/packages/maverick-core/maverick/config.py
+@@ -3729,6 +3729,22 @@ def get_assessments() -> dict:
+     }
+ 
+ 
++def get_intent_value(*, config: dict | None = None) -> dict:
++    """Return installation defaults for intent-based work value reporting.
++
++    Company benchmarks and their history belong to the tenant's value ledger,
++    not the deployment-wide savings assumptions. Completion confirmation is
++    optional and never substitutes for audited Lightwork execution evidence.
++    """
++    cfg = (load_config() if config is None else config).get("intent_value", {})
++    if not isinstance(cfg, dict):
++        return {"enable": False, "confirmation_required": False}
++    return {
++        "enable": _strict_config_bool(cfg, "enable", True),
++        "confirmation_required": _strict_config_bool(cfg, "confirmation_required", False),
++    }
++
++
+ def get_value(*, config: dict | None = None) -> dict:
+     """Return the ``[value]`` section: the client's own cost/value assumptions
+     for the savings (ROI) report.
+diff --git a/packages/maverick-core/maverick/config_lint.py b/packages/maverick-core/maverick/config_lint.py
+index 5c38cde8068cf3e6f24c5ccb6d846b5b0b5ddbb8..31395581b9d8fbc9e3c397b2cf9fd953cc87f512 100644
+--- a/packages/maverick-core/maverick/config_lint.py
++++ b/packages/maverick-core/maverick/config_lint.py
+@@ -247,6 +247,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
+     "practice": {"enable", "daily_spend_cap"},
+     "collaboration": {"comments", "suggestions", "ai_suggestions"},
+     "first_outcome": {"department", "sample_workspace_created"},
++    "intent_value": {"enable", "confirmation_required"},
+     # Work discovery is a high-trust client-controlled sensor.  Keep this
+     # section fixed-key so misspelled retention/privacy knobs do not silently
+     # fall back to defaults.
+@@ -705,6 +706,7 @@ _INTEGER_KEYS: dict[str, set[str]] = {
+ # ``enabled``/``enable`` toggle, handled separately for every known section.
+ _BOOL_KEYS: dict[str, set[str]] = {
+     "first_outcome": {"sample_workspace_created"},
++    "intent_value": {"confirmation_required"},
+     "safety": {"scan_input", "scan_tool_calls", "scan_output", "compartments"},
+     "features": {"skills", "world_model", "streaming"},
+     "capabilities": {
+diff --git a/packages/maverick-core/maverick/flow/execution.py b/packages/maverick-core/maverick/flow/execution.py
+index ecf110357d4750c9551b6a586a95ef87edc7b21e..0a103f588a2340b9a8537662d22bff7cb67328ee 100644
+--- a/packages/maverick-core/maverick/flow/execution.py
++++ b/packages/maverick-core/maverick/flow/execution.py
+@@ -15,6 +15,7 @@ from __future__ import annotations
+ import contextvars
+ import copy
+ import inspect
++import logging
+ import time
+ from collections.abc import Callable
+ from functools import wraps
+@@ -156,6 +157,54 @@ def _spend_tracked(agent_runner: AgentRunner, per_call: float, spent: list) -> A
+ # value is always the right node.
+ _active_node: contextvars.ContextVar[tuple[str, str, str, str]] = contextvars.ContextVar(
+     "_flow_active_node", default=("", "", "", ""))
++# Keep the long-standing node tuple contract intact. A run, rather than each
++# agent node or retry, is the unit of process work in intent-value reporting.
++_active_run: contextvars.ContextVar[str] = contextvars.ContextVar(
++    "_flow_active_run", default="")
++_native_evidence_sink: contextvars.ContextVar[Callable | None] = contextvars.ContextVar(
++    "_flow_native_evidence_sink", default=None)
++
++
++def _record_native_evidence(kind: str, reference: int | str) -> None:
++    sink = _native_evidence_sink.get()
++    if sink is not None:
++        sink(kind, reference)
++
++
++def _publish_execution_receipt(run: store.FlowRun) -> None:
++    """Publish content-free lifecycle evidence, never a claim of economic value.
++
++    Each reference still requires its native goal or tool audit evidence when
++    reporting value. Injected runners and dry runs have no native references.
++    A receipt failure cannot retroactively fail completed customer work.
++    """
++    if run.dry_run:
++        return
++    goal_ids = sorted({gid for node in run.nodes.values() for gid in node.get("native_goal_ids", [])})
++    call_ids = sorted({cid for node in run.nodes.values() for cid in node.get("native_action_call_ids", [])})
++    if not goal_ids and not call_ids:
++        return
++    try:
++        from ..audit import EventKind, audit_event
++        from ..config import get_intent_value
++
++        if not get_intent_value().get("enable", True):
++            return
++        recorded = audit_event(
++            EventKind.FLOW_EXECUTION,
++            agent="flow:execution",
++            flow_id=run.flow_id,
++            flow_run_id=run.run_id,
++            definition_revision=run.definition_revision,
++            status=run.status,
++            dry_run=False,
++            native_goal_ids=goal_ids,
++            native_action_call_ids=call_ids,
++        )
++        if recorded is not True:
++            logging.getLogger(__name__).warning("Flow execution receipt was not recorded")
++    except Exception as exc:
++        logging.getLogger(__name__).warning("Flow execution receipt unavailable: %s", type(exc).__name__)
+ 
+ 
+ def _runner_accepts_wall(runner: AgentRunner) -> bool:
+@@ -180,7 +229,8 @@ def _runner_accepts_wall(runner: AgentRunner) -> bool:
+ 
+ def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float,
+                 flow_id: str = "", node_id: str = "", revision: str = "",
+-                cohort: str = "") -> tuple:
++                cohort: str = "", flow_run_id: str = "",
++                evidence_sink: Callable | None = None) -> tuple:
+     """Invoke an agent runner, bounding its wall-clock to a node ``timeout`` when
+     set so a timed-out node's underlying goal self-terminates near the point the
+     flow gives up waiting -- instead of running on to its default cap, still
+@@ -188,11 +238,15 @@ def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float,
+     don't accept ``wall`` are called plainly. Publishes the current node id on a
+     ContextVar so the production runner can attribute its goal's tools to it."""
+     token = _active_node.set((flow_id, node_id, revision, cohort))
++    run_token = _active_run.set(flow_run_id)
++    evidence_token = _native_evidence_sink.set(evidence_sink)
+     try:
+         if wall and wall > 0 and _runner_accepts_wall(runner):
+             return runner(brief, data, wall=wall)
+         return runner(brief, data)
+     finally:
++        _native_evidence_sink.reset(evidence_token)
++        _active_run.reset(run_token)
+         _active_node.reset(token)
+ 
+ 
+@@ -487,6 +541,15 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
+     import threading as _threading
+     trace_lock = _threading.Lock()
+ 
++    def _native_evidence(node_id: str, kind: str, reference: int | str) -> None:
++        if not record_outcomes:
++            return
++        with trace_lock:
++            entry = node_states.setdefault(node_id, {})
++            refs = entry.setdefault(kind, [])
++            if reference not in refs:
++                refs.append(reference)
++
+     def _timed(node_id: str, fn, *args):
+         import time as _time
+         t0 = _time.perf_counter()
+@@ -501,7 +564,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
+         if execution_guard is not None:
+             execution_guard()
+         with trace_lock:
+-            entry: dict = {"status": status, "outcome": outcome}
++            entry: dict = {**node_states.get(node.id, {}), "status": status, "outcome": outcome}
+             if node.id in durations:
+                 entry["seconds"] = round(durations[node.id], 3)
+             node_states[node.id] = entry
+@@ -642,8 +705,16 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
+     def _run_action(node: FlowNode, params: dict, action_data: dict):
+         from ..plugin_execution_pins import flow_scope
+ 
+-        with action_capture_scope(episode_capture, node), flow_scope(rid, owner, definition_revision or flow.revision):
+-            return _dispatch_action(node, params, action_data)
++        token = _active_node.set((flow.id, node.id, definition_revision or flow.revision, evidence_cohort))
++        run_token = _active_run.set(rid)
++        evidence_token = _native_evidence_sink.set(lambda kind, ref: _native_evidence(node.id, kind, ref))
++        try:
++            with action_capture_scope(episode_capture, node), flow_scope(rid, owner, definition_revision or flow.revision):
++                return _dispatch_action(node, params, action_data)
++        finally:
++            _native_evidence_sink.reset(evidence_token)
++            _active_run.reset(run_token)
++            _active_node.reset(token)
+ 
+     res = run_flow(
+         flow,
+@@ -657,6 +728,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
+             node_id=node.id,
+             revision=definition_revision or flow.revision,
+             cohort=evidence_cohort,
++            flow_run_id=rid,
++            evidence_sink=lambda kind, ref: _native_evidence(node.id, kind, ref),
+         )),
+         action_fn=lambda node, params, d: _timed(
+             node.id, lambda: _run_action(node, params, d)
+@@ -802,6 +875,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
+         allowed_suites=allowed_suites,
+     )
+     store.save_run(run)
++    if record_outcomes:
++        _publish_execution_receipt(run)
+     finish_capture(episode_capture, run)
+     # Learn the shape of this flow's output keys from a REAL run's data (never a
+     # dry run -- mock executors produce placeholder shapes), so the designer's
+@@ -839,6 +914,17 @@ def default_agent_runner(
+         from ..runner import clamp_task_limit, configured_max_dollars, configured_max_wall_seconds
+ 
+         gid = world.create_goal(str(brief)[:200], str(brief)[:8000], owner=owner)
++        run_id = _active_run.get()
++        if run_id:
++            try:
++                # Exact durable linkage makes every child goal and retry part
++                # of one process run; never infer it from names or timestamps.
++                world.record_goal_origin(gid, "flow", run_id)
++                _record_native_evidence("native_goal_ids", gid)
++            except Exception:
++                # Attribution availability must not change dispatch authority,
++                # budgets, or whether the customer's work can execute.
++                logging.getLogger(__name__).warning("Flow goal attribution could not be recorded", exc_info=True)
+         # A per-node timeout bounds this goal's wall so a timed-out node's goal
+         # self-terminates instead of running to the default cap after the flow
+         # gave up on it (kernel rule 3 still holds -- this only ever lowers it).
+@@ -953,6 +1039,7 @@ def default_action_runner(
+         ) -> bool:
+             from ..audit import EventKind, audit_event
+ 
++            fid, nid, revision, _cohort = _active_node.get()
+             return audit_event(
+                 EventKind.TOOL_RESULT,
+                 agent="flow:action",
+@@ -964,6 +1051,10 @@ def default_action_runner(
+                 call_commitment_algorithm=TOOL_CALL_COMMITMENT_ALGORITHM,
+                 status=status,
+                 disposition=disposition,
++                flow_id=fid,
++                flow_run_id=_active_run.get(),
++                flow_node_id=nid,
++                definition_revision=revision,
+                 # Connector output can echo request credentials under an
+                 # innocent key, defeating pattern-only redaction. Keep the
+                 # signed receipt content-free; status/disposition and the
+@@ -1097,6 +1188,8 @@ def default_action_runner(
+                     0.0,
+                 )
+             native_completed(observation, result, terminal_recorded=(result_recorded is True and ok))
++            if result_recorded is True:
++                _record_native_evidence("native_action_call_ids", call_id)
+         return (result, 1.0 if ok else 0.0)
+     return run
+ 
+diff --git a/packages/maverick-core/maverick/migrate.py b/packages/maverick-core/maverick/migrate.py
+index 33124ca9d9f8f31207bed20bde7f492044dc18e1..ee0600ae9a16d687a04975f52ef1d808c6284144 100644
+--- a/packages/maverick-core/maverick/migrate.py
++++ b/packages/maverick-core/maverick/migrate.py
+@@ -52,6 +52,8 @@ KNOWN_SECTIONS = frozenset({
+     # [first_outcome] department / sample_workspace_created: the department
+     # first task picked at setup (maverick.sample_outcomes).
+     "first_outcome",
++    # Intent-based value reporting; tenant benchmarks stay in the value ledger.
++    "intent_value",
+     # [practice] enable: offer practice mode (maverick.practice), written by
+     # the installer's capabilities step and changeable on All settings.
+     "practice",
+diff --git a/packages/maverick-dashboard/maverick_dashboard/api.py b/packages/maverick-dashboard/maverick_dashboard/api.py
+index 024e010eb1a090b3b86a48adcf6b9417791e6cdd..2ef897bf082514642d513c1a8ade682c289b297d 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/api.py
++++ b/packages/maverick-dashboard/maverick_dashboard/api.py
+@@ -13935,6 +13935,15 @@ async def copilot_endpoint(request: Request, payload: CopilotIn, response: Respo
+             result["conversation_context_status"] = "unavailable"
+         return result
+ 
++    from .intent_value_copilot import answer as value_answer
++    from .intent_value_copilot import intent as value_intent
++
++    if value_intent(msg):
++        selection = payload.metric_selection.model_dump(exclude_none=True) if payload.metric_selection else None
++        live = await run_in_threadpool(value_answer, request, msg, payload.page,
++                                       payload.selected_goal_id, selection)
++        return {**live, "page_context": public_context(context, permissions)}
++
+     if is_detail_page and not is_action_request(msg):
+         # A detail URL identifies one current record. Keep its authorized
+         # name, status, and stop explanation out of external model prompts and
+diff --git a/packages/maverick-dashboard/maverick_dashboard/api_schemas.py b/packages/maverick-dashboard/maverick_dashboard/api_schemas.py
+index 5613c28f2e0a47cd728dc26302fca5f475d5f5fa..deff7faf5cebb32416d87f5b14192718dea87291 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/api_schemas.py
++++ b/packages/maverick-dashboard/maverick_dashboard/api_schemas.py
+@@ -1796,6 +1796,17 @@ class CopilotHistoryItem(BaseModel):
+     content: str = Field(min_length=1, max_length=2_000)
+ 
+ 
++class CopilotMetricSelection(BaseModel):
++    """A bounded selection hint, never an authorization or stored result."""
++
++    model_config = ConfigDict(extra="forbid", strict=True)
++    kind: Literal["intent_value"] = "intent_value"
++    scope: Literal["platform", "specialist", "agent", "process"] = "platform"
++    scope_id: str | None = Field(default=None, max_length=200)
++    task_id: str | None = Field(default=None, max_length=200)
++    days: int = Field(default=30, ge=1, le=730)
++
++
+ class CopilotIn(BaseModel):
+     """One page-bound turn of the platform Copilot."""
+ 
+@@ -1804,6 +1815,7 @@ class CopilotIn(BaseModel):
+     message: str = Field(min_length=1, max_length=2_000)
+     page: str = Field(default="", max_length=200)
+     selected_goal_id: int | None = Field(default=None, ge=1, le=2**63 - 1)
++    metric_selection: CopilotMetricSelection | None = None
+     history: list[CopilotHistoryItem] = Field(default_factory=list, max_length=6)
+     conversation_token: str | None = Field(default=None, min_length=10, max_length=24_000)
+ 
+diff --git a/packages/maverick-dashboard/maverick_dashboard/app.py b/packages/maverick-dashboard/maverick_dashboard/app.py
+index 1cb14a801475e59a79ca04d9230948d815fa0a3f..53ac51070d6ae30d4782477f4c1d5b9b4eebb5f5 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/app.py
++++ b/packages/maverick-dashboard/maverick_dashboard/app.py
+@@ -128,6 +128,7 @@ from .health_routes import (
+ )
+ from .i18n_journeys import region as _journey_region
+ from .i18n_journeys import text as _journey_text
++from .intent_value_api import router as intent_value_router
+ from .model_tests_api import router as model_tests_router
+ from .my_work_api import router as my_work_router
+ from .navigation_api import GO_TO_KEYS, area_context, command_list, personal_view
+@@ -1620,6 +1621,7 @@ install_shared_governance_inventory_composition(app)
+ attach_unified_audit_scheduler(app)
+ app.include_router(api_router)
+ app.include_router(api_documentation_router)
++app.include_router(intent_value_router, prefix="/api/v1")
+ app.include_router(capability_assessment_controls_api.router, prefix="/api/v1")
+ app.include_router(runtime_policy_recovery_api.router, prefix="/api/v1")
+ app.include_router(learning_acquisition_api.router, prefix="/api/v1")
+@@ -6969,6 +6971,16 @@ async def finance_page(request: Request) -> HTMLResponse:
+     return templates.TemplateResponse(request, "finance.html", context)
+ 
+ 
++@app.get("/intent-value", response_class=HTMLResponse)
++def intent_value_page(request: Request) -> HTMLResponse:
++    """Intent, evidence, estimated value and optional automation opportunities."""
++    require_permission(request, "view")
++    require_unscoped_board(request)
++    response = templates.TemplateResponse(request, "intent_value.html", {})
++    response.headers["Cache-Control"] = "private, no-store"
++    return response
++
++
+ @app.get("/savings", response_class=HTMLResponse)
+ def savings_page(request: Request, days: int = 90) -> HTMLResponse:
+     """The value dashboard: money saved vs the typical human cost, computed
+diff --git a/packages/maverick-dashboard/maverick_dashboard/copilot_context.py b/packages/maverick-dashboard/maverick_dashboard/copilot_context.py
+index 979daafcf30a950a57d7acf30ae185abf0f8100d..f212e251b5bd20bbdd2d6dc0abc12eddf643950e 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/copilot_context.py
++++ b/packages/maverick-dashboard/maverick_dashboard/copilot_context.py
+@@ -241,6 +241,11 @@ _OPERATIONAL_GUIDES = (
+      "Check Your numbers, then Save and recalculate before interpreting a savings chart.",
+      "Savings depend on entered assumptions; an estimate is not a verified financial result.",
+      "What assumptions drive this estimate?", "How can I measure a real outcome?"),
++    ("/intent-value", "Work value", "Understand work intent, remaining opportunities and audit-backed Lightwork execution.",
++     "Read actual authorized platform, specialist, agent or process metrics; inspect evidence and review intent corrections or benchmark changes.",
++     "Choose a period and scope, open a contributing task, then inspect its evidence and find authorized work that can help.",
++     "Audits establish performed activity. Human effort and economic benefit are estimates, unknown costs keep net benefit unknown, and private task content needs its existing access.",
++     "What is the platform ROI benefit in the last 30 days?", "What is the ROI benefit of this specialist?"),
+     ("/shoring", "Autonomous shoring", "Track business areas, service targets, estimated savings and work waiting for a person.",
+      "Add a business area, set optional service targets and review its waiting items.",
+      "Open Book of Work, choose Add a business area and set the targets you will measure.",
+diff --git a/packages/maverick-dashboard/maverick_dashboard/product_operations.py b/packages/maverick-dashboard/maverick_dashboard/product_operations.py
+index 65a5f4c49e4b6fa2bf4b0ec1f384c6eb215a4398..41cf319f9d6799c64c808fbaa6166237313c1e42 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/product_operations.py
++++ b/packages/maverick-dashboard/maverick_dashboard/product_operations.py
+@@ -178,6 +178,7 @@ def _adapter_modules():
+         product_operations_audit_checkpoints,
+         product_operations_automation_imports,
+         product_operations_budget,
++        product_operations_intent_value,
+         product_operations_capability_assessments,
+         product_operations_channel_people,
+         product_operations_channel_tests,
+@@ -340,6 +341,7 @@ def _adapter_modules():
+         product_operations_department_teams,
+         product_operations_outcome_pilots,
+         product_operations_budget,
++        product_operations_intent_value,
+         product_operations_model_answer_scoring,
+         product_operations_models,
+         product_operations_diagnostics,
+diff --git a/packages/maverick-dashboard/maverick_dashboard/static/lightwork-copilot.js b/packages/maverick-dashboard/maverick_dashboard/static/lightwork-copilot.js
+index 84015dd421d57b92fc2d712685fc636f63ba8db4..8b4546b8e8e17324eb9fe513667570ac0f303315 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/static/lightwork-copilot.js
++++ b/packages/maverick-dashboard/maverick_dashboard/static/lightwork-copilot.js
+@@ -30,7 +30,7 @@
+   var recentTimer = null;
+   var clientScope = null, failedMessage = null;
+   var opener = null;
+-  var generation = 0, sending = false, catalog = null, actionBusy = false, selectedGoalId = null;
++  var generation = 0, sending = false, catalog = null, actionBusy = false, selectedGoalId = null, metricSelection = null;
+   var operations = document.getElementById('mv-copilot-operations');
+   var operationStatus = document.getElementById('mv-copilot-operation-status');
+   var operationButtons = document.getElementById('mv-copilot-operation-buttons');
+@@ -407,12 +407,26 @@
+     var value = detail && detail.selection;
+     var id = value && value.kind === 'goal' && (value.goal_id || value.id);
+     selectedGoalId = Number.isSafeInteger(id) && id > 0 ? id : null;
++    metricSelection = null;
++    if (value && value.kind === 'intent_value') {
++      var scope = value.scope || 'platform';
++      if (!['platform', 'specialist', 'agent', 'process'].includes(scope)) return;
++      metricSelection = {kind: 'intent_value', scope: scope};
++      ['scope_id', 'task_id'].forEach(function (key) {
++        if (typeof value[key] === 'string' && value[key].length <= 200) metricSelection[key] = value[key];
++      });
++      if (Number.isSafeInteger(value.days) && value.days >= 1 && value.days <= 730) metricSelection.days = value.days;
++    }
+   }
+   document.addEventListener('lightwork:copilot-selection', function (event) { selectFrom(event.detail); });
+   // Loaded after the page (lightwork-ui.js): start from a selection the page made meanwhile.
+   if (window.LightworkCopilotEarlySelection) selectFrom(window.LightworkCopilotEarlySelection);
+   function liveReadQuestion(message) {
+     var normalized = message.toLowerCase().trim().replace(/[?!. ]+$/, '').replace(/\s+/g, ' ');
++    // Same bounded read family as intent_value_copilot.intent: do not ask an AI
++    // operation proposer to interpret a question about authorized live metrics.
++    if (/\b(?:roi|return on investment|savings|net benefit|gross (?:labor )?value|labor value|execution costs?|work value|opportunit(?:y|ies))\b/.test(normalized) &&
++        !/\b(?:change|set|save|correct|update|delete|remove|start|run|approve|confirm|enable|disable)\b/.test(normalized)) return true;
+     return /^(?:what (?:needs|requires) (?:my |your )?approval|(?:show(?: me)?|list) (?:my )?(?:pending )?approvals|do i have (?:any )?(?:pending )?approvals)(?: please)?$/.test(normalized) ||
+       /^(?:(?:show(?: me)?|list) my (?:running|active|in.progress) tasks|(?:what|which) (?:of my )?tasks are (?:running|active|in.progress))(?: please)?$/.test(normalized) ||
+       /^why (?:did|has|is) (?:my|this|the|goal|task|run|goal \d+|task \d+|run \d+) (?:goal |task |run )?(?:fail|failed|stop|stopped|blocked)(?: please)?$/.test(normalized) ||
+@@ -559,7 +573,7 @@
+           message: message,
+           page: window.location.pathname,
+           conversation_token: conversationToken
+-        }, selectedGoalId ? {selected_goal_id: selectedGoalId} : {}))
++        }, selectedGoalId ? {selected_goal_id: selectedGoalId} : {}, metricSelection ? {metric_selection: metricSelection} : {}))
+       });
+       var payload;
+       try { payload = await response.json(); }
+diff --git a/packages/maverick-dashboard/maverick_dashboard/templates/savings.html b/packages/maverick-dashboard/maverick_dashboard/templates/savings.html
+index 84cb4c55bf10aee2bd543d1ed9be2067175d5f7e..06274d393d83f0d992331a63cfd027339aaed3f9 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/templates/savings.html
++++ b/packages/maverick-dashboard/maverick_dashboard/templates/savings.html
+@@ -34,6 +34,7 @@
+              copy='A directional estimate: it changes with the numbers below. For measured
+                    results, run a workflow pilot.') }}
+   {% endcall %}
++  <p><a class="btn btn--primary" href="/intent-value">Explore intent, opportunities and audited value</a></p>
+   {% from "_spend_freshness.html" import spend_freshness %}
+   {{ spend_freshness(spend_recorded_at) }}
+   {% include "_practice_cost.html" %}

@@ -1,0 +1,13 @@
+==============================================================================
+  MAVERICK -- SOURCE-INVARIANT SCOREBOARD
+==============================================================================
+  [PASS]  Least privilege by construction   finance_ap runs at max_risk='medium' (parent=high): reads AP, no shell, no payments
+  [PASS]  No money without a human          no money/posting tool is permitted by any of 70 finance packs
+  [PASS]  Delegation-of-authority $ gate    $4k release auto, $6k release -> REQUIRE_HUMAN, $60k wire -> DENY (rule=deny_above)
+  [PASS]  Generated connector read/write policy  the generated Bill.com adapter definition exposes a GET-only read seat; its write seat is refused and capability-denied (no live vendor call)
+  [PASS]  Segregation of duties clean       all 70 finance packs SoD-clean (no compartment unions incompatible duties)
+  [PASS]  Verified peer handoffs            authentic handoff verifies (rule=ok); tampered copy rejected (rule=tampered)
+  [PASS]  Audit ledger integrity (co-located key)  2-row signed chain verifies clean; altering an amount is caught (bad_hash) -- co-located key: detects non-privileged edits only, NOT tamper-evidence vs a same-uid actor (set MAVERICK_AUDIT_SIGNING_KEY for off-host key custody)
+==============================================================================
+  7 source invariants held, 0 failed
+==============================================================================

@@ -1,0 +1,45 @@
+const {chromium,expect}=require('C:/Users/Cstep/Documents/Codex/2026-09-10/new-chat/work/lightwork-pr2519-layer-20260928/packages/maverick-dashboard/tests/browser/node_modules/@playwright/test');
+const fs=require('fs'),API='/api/v1/learning/portable-rules';
+(async()=>{
+  const browser=await chromium.launch({headless:true}),errors=[],surfaces=[];
+  for(const [baseURL,actor] of [['http://127.0.0.1:8915','browser-reviewer'],['http://127.0.0.1:8916','browser-learning-reviewer']]){
+    const context=await browser.newContext({baseURL,viewport:{width:320,height:900},extraHTTPHeaders:{Origin:baseURL,'X-Browser-Principal':actor}});
+    await context.route('**/*',route=>new URL(route.request().url()).origin===baseURL?route.continue():route.abort('blockedbyclient'));
+    context.on('page',page=>page.on('pageerror',error=>errors.push(error.stack)));
+    surfaces.push({context,page:await context.newPage(),initial:await(await context.request.get('/__browser_fixture/portable/state')).json()});
+  }
+  const [source,target]=surfaces,sourceFixture=source.initial.fixtures['private-source'],targetFixture=target.initial.fixtures['local-target'];
+  expect(Object.keys(source.initial.fixtures)).toEqual(['private-source']);expect(Object.keys(target.initial.fixtures)).toEqual(['local-target']);
+  const sourceOriginal=source.initial.originals.find(row=>row.kind==='share'),targetOriginal=target.initial.originals.find(row=>row.kind==='qualify');
+  expect(Boolean(sourceOriginal&&targetOriginal)).toBe(true);
+  const raw=await(await source.context.request.get(API+'/download/'+sourceOriginal.id)).text(),exported=JSON.parse(raw);
+  const qualified=await(await target.context.request.get(API+'/original/'+targetOriginal.id)).json();
+  expect(qualified.result.qualified).toBe(true);expect(qualified.result.ordinary_comparison_matched).toBe(true);expect(qualified.result.domain_points).toBe(3);
+  expect(qualified.result.cases.every(row=>row.agreement&&row.complete&&typeof row.expected==='string'&&row.actual===row.expected)).toBe(true);
+  expect(source.initial.calls.length).toBe(0);expect(target.initial.calls.length).toBe(2);
+  for(const privateValue of ['private_amount','private-source','1000000000000','999999999998',...sourceFixture.runs])expect(raw).not.toContain(privateValue);
+  const otherInstallation=await(await source.context.request.get(API+'/original/'+targetOriginal.id)).json();
+  expect(otherInstallation.confirmed).toBe(false);expect(otherInstallation.result).toBeUndefined();
+  const qualifyReview={operation:targetOriginal.id},shareReview={operation:sourceOriginal.id},before=target.initial,after=target.initial;
+  await target.page.goto('/learning/portable-rules?view=qualify&flow=local-target');
+  await expect(target.page.locator('#pc-history')).toBeEnabled();
+  await target.page.locator('#pc-history').selectOption(targetOriginal.id);await target.page.locator('#pc-read').click();
+  await expect(target.page.locator('#pc-result')).toContainText('Qualified within these finite local input bounds');
+  await target.page.locator('#pc-inputs [data-input]').fill('999999999998');await target.page.locator('#pc-run-review').click();
+  await expect(target.page.locator('#pc-preview')).toContainText('Complete named input values');await target.page.locator('#pc-preview input[type=checkbox]').check();
+  await target.page.locator('#pc-preview [data-confirm]').click();const nativeAnswer=(999999999998n*999999999999n).toString();
+  await expect(target.page.locator('#pc-result')).toContainText('Local rule answer: '+nativeAnswer);
+  await target.page.locator('#pc-result').scrollIntoViewIfNeeded();await target.page.screenshot({path:'.browser-runtime/portable-independent-native-phone.png'});
+  expect(await target.page.evaluate(()=>document.documentElement.scrollWidth)).toBe(320);
+  await target.page.locator('#pc-history').selectOption(qualifyReview.operation);await target.page.locator('#pc-read').click();await expect(target.page.locator('#pc-run')).toBeVisible();
+  await target.page.locator('#mv-copilot-fab').click();await target.page.locator('#mv-product-operation-buttons').getByRole('button',{name:'Run a qualified local rule',exact:true}).click();
+  const copilot=target.page.locator('#mv-product-operation-form');await expect(copilot).toContainText('local amount');
+  await copilot.getByLabel('local amount',{exact:false}).fill('999999999997');await copilot.getByRole('button',{name:'Review change',exact:true}).click();
+  await expect(copilot).toContainText('Complete named input values');await copilot.locator('input[type=checkbox]').last().check();
+  await copilot.getByRole('button',{name:'Apply reviewed change',exact:true}).click();const copilotAnswer=(999999999997n*999999999999n).toString();
+  await expect(copilot).toContainText('Local rule answer');await expect(copilot).toContainText(copilotAnswer);await target.page.screenshot({path:'.browser-runtime/portable-independent-copilot-phone.png'});
+  expect(await target.page.evaluate(()=>document.documentElement.scrollWidth)).toBe(320);expect(errors).toEqual([]);
+  const final=await(await target.context.request.get('/__browser_fixture/portable/state')).json();expect(final.provider_calls).toBe(0);
+  fs.writeFileSync('.browser-runtime/portable-independent-installations-evidence.json',JSON.stringify({installations:surfaces.map(row=>row.initial),exported,shareReview,qualifyReview,qualified,before,after,final,lost_reply_recovered:true,continuation_note:"Initial ordinary source share, file chooser, exact expected answers, qualification, dropped reply, reload and zero-native-repeat retry passed; a fixture assertion incorrectly expected missing originals to return404 instead of the actual private unknown200. This continuation checked absence of private results and completed ordinary/Copilot runs without repeating qualification.",exact_replay_native_runs:0,nativeAnswer,copilotAnswer,errors},null,2));
+  await browser.close();
+})().catch(error=>{console.error(error);process.exit(1)});

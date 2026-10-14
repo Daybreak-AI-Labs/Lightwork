@@ -1,0 +1,197 @@
+{
+  "observed_at": "2026-10-14T20:24:46.797284+00:00",
+  "remote_only_repository": true,
+  "object_alternates_present": false,
+  "remote_source": "https://github.com/Daybreak-AI-Labs/Lightwork.git",
+  "remote_pr_heads_fetched": 2462,
+  "bundle_verify_exit": 0,
+  "bundle_import_exit": 0,
+  "exact_preservation_refs_verified": 110,
+  "archive_base_commits_verified": 118,
+  "nonempty_patch_states_validated": 26,
+  "patch_checks": [
+    {
+      "state": "state-002-lightwork-review",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-003-lightwork",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-005-lightwork",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-009-lightwork",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-011-lightwork-computer-use-build",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-013-lightwork",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-017-client-gaps-governance-benchmark",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-018-client-gaps-governance-final-benchmark",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-019-client-gaps-governance-package-benchmark",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-020-client-gaps-overhead-benchmark",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-021-client-gaps-overhead-final-benchmark",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-022-client-gaps-overhead-package-benchmark",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-023-lightwork",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-024-lightwork-2529-integration-20261005",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-025-lightwork-2538-local-integration-20261008",
+      "patches_applied": [
+        "staged",
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-026-lightwork-benchmark-frontier",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-027-lightwork-benchmark-overhead",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-036-lightwork-customer-readiness",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-042-lightwork-pr2506-final-frontier",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-043-lightwork-pr2506-final-overhead",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-044-lightwork-pr2506-frontier",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-045-lightwork-pr2506-overhead",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-049-lightwork-refactor-implementation-20260922",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-097-slice-conversation",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-155-lightwork-intent-roi",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    },
+    {
+      "state": "state-159-lightwork-credential-refresh",
+      "patches_applied": [
+        "unstaged"
+      ],
+      "validated": true
+    }
+  ]
+}

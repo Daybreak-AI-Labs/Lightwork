@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <p class="tag">Unsigned local product-security workspace</p>
+  <h1>Move from product inventory to review-ready CRA packets</h1>
+  <p>Normalize a minimal CycloneDX or SPDX SBOM, record human applicability and reportability decisions, project Article 14 clocks, and bind human approval to the exact report digest.</p>
+</section>
+<section class="notice">
+  <strong>Human and external action required.</strong> Calculated deadlines are operational aids, not legal advice. No legal determination or regulator submission occurs automatically. A recorded receipt is a local user attestation only; a severe-incident final clock remains unanchored until the receipt for an approved full-notification packet records its external submission time.
+</section>
+<section class="grid">
+  <form class="card workflow-form" id="product-form" data-endpoint="/api/products">
+    <h2>1. Register product</h2>
+    <label>Product name<input name="name" maxlength="300" required></label>
+    <label>Manufacturer<input name="manufacturer" maxlength="300" required></label>
+    <label>Support ends<input name="support_end_date" type="date" required></label>
+    <button type="submit">Save product</button><div class="result" aria-live="polite" tabindex="-1"></div>
+  </form>
+  <form class="card workflow-form" id="release-form" data-endpoint="/api/releases">
+    <h2>2. Register release and SBOM</h2>
+    <label>Product<select name="product_id" required><option value="">Choose</option>{% for item in products %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}</select></label>
+    <label>Version<input name="version" maxlength="160" required></label>
+    <label>Release timestamp<input name="released_at" placeholder="2026-07-19T12:00:00Z" required></label>
+    <label>SBOM JSON<textarea name="sbom" required>{"bomFormat":"CycloneDX","specVersion":"1.6","components":[],"dependencies":[]}</textarea></label>
+    <button type="submit">Normalize and save release</button><div class="result" aria-live="polite" tabindex="-1"></div>
+  </form>
+  <form class="card workflow-form" id="case-form" data-endpoint="/api/cases">
+    <h2>3. Open potential reportable case</h2>
+    <label>Product<select name="product_id" required><option value="">Choose</option>{% for item in products %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}</select></label>
+    <label>Release<select name="release_id" required><option value="">Choose</option>{% for item in releases %}<option value="{{ item.id }}">{{ item.version }}</option>{% endfor %}</select></label>
+    <label>Case type<select name="case_type"><option value="actively_exploited_vulnerability">Actively exploited vulnerability</option><option value="severe_incident">Severe incident</option></select></label>
+    <label>Awareness timestamp<input name="awareness_at" placeholder="2026-07-19T12:00:00Z" required></label>
+    <label>Title<input name="title" maxlength="500" required></label>
+    <button type="submit">Open pending human review</button><div class="result" aria-live="polite" tabindex="-1"></div>
+  </form>
+</section>
+<section class="card">
+  <h2>Human review queue</h2>
+  <p class="muted">These controls record local human judgments. They do not make or certify the legal conclusion.</p>
+  <div class="grid">
+    {% for item in products if item.cra_applicability.status == "pending_human_decision" %}
+    <form class="card workflow-form" data-endpoint="/api/products/{{ item.id }}/applicability">
+      <h3>{{ item.name }} applicability</h3><label>Decision<select name="decision"><option value="applicable">Applicable</option><option value="not_applicable">Not applicable</option></select></label><label>Reviewer<input name="reviewer" required></label><label>Rationale<textarea name="rationale" required></textarea></label><button>Record human decision</button><div class="result" aria-live="polite"></div>
+    </form>
+    {% endfor %}
+    {% for item in cases if item.reportability.status == "pending_human_decision" %}
+    <form class="card workflow-form" data-endpoint="/api/cases/{{ item.id }}/reportability">
+      <h3>{{ item.title }} reportability</h3><label>Decision<select name="decision"><option value="reportable">Reportable</option><option value="not_reportable">Not reportable</option></select></label><label>Reviewer<input name="reviewer" required></label><label>Rationale<textarea name="rationale" required></textarea></label><button>Record human decision</button><div class="result" aria-live="polite"></div>
+    </form>
+    {% endfor %}
+  </div>
+</section>
+<section class="card">
+  <h2>Article 14 projections</h2>
+  <table><thead><tr><th>Case</th><th>24-hour early warning</th><th>72-hour full notification</th><th>Final report</th><th>Human gate</th></tr></thead><tbody>
+  {% for item in cases %}<tr><td>{{ item.title }}</td>{% if item.reportability.status == "reportable" and item.clocks %}<td>{{ item.clocks.early_warning.due_at }}</td><td>{{ item.clocks.full_notification.due_at }}</td><td>{{ item.clocks.final_report.due_at or ("Awaiting " ~ item.clocks.final_report.anchor) }}</td>{% elif item.reportability.status == "pending_human_decision" %}<td colspan="3">Not active — pending human reportability decision</td>{% else %}<td colspan="3">Not active — case marked not reportable</td>{% endif %}<td>{{ item.reportability.status }}</td></tr>{% else %}<tr><td colspan="5">No cases yet.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+<section class="card">
+  <h2>Recent local records</h2>
+  <table><thead><tr><th>Type</th><th>Identity</th><th>Status</th><th>Revision</th></tr></thead><tbody id="records">
+  {% for item in records|reverse %}<tr><td>{{ item.type }}</td><td><code>{{ item.id }}</code></td><td>{{ item.get("status") or item.get("workflow_status") or (item.get("reportability") or {}).get("status") or (item.get("cra_applicability") or {}).get("status") or "saved" }}</td><td>{{ item.revision }}</td></tr>{% else %}<tr><td colspan="4">No records yet.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+<div id="workspace" data-revision="{{ revision }}" hidden></div>
+<script>
+(() => {
+  "use strict";
+  let revision = Number(document.getElementById("workspace").dataset.revision || 0);
+  for (const form of document.querySelectorAll(".workflow-form")) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const output = form.querySelector(".result");
+      const payload = {expected_revision: revision};
+      for (const [key, value] of new FormData(form).entries()) payload[key] = value;
+      if (payload.sbom) {
+        try { payload.sbom = JSON.parse(payload.sbom); }
+        catch (_) { output.textContent = "SBOM must be valid JSON."; output.className = "result error"; return; }
+      }
+      try {
+        const response = await fetch(form.dataset.endpoint, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
+        revision = data.revision;
+        output.textContent = `Saved ${data.type} ${data.id} at revision ${data.revision}. Refresh to continue the next gated step.`;
+        output.className = "result success";
+      } catch (error) {
+        output.textContent = error instanceof Error ? error.message : "Request failed";
+        output.className = "result error";
+      }
+      output.focus({preventScroll:true});
+    });
+  }
+})();
+</script>
+{% endblock %}

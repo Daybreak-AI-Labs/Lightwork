@@ -1,0 +1,176 @@
+{
+  "admitted_backend": "postgres",
+  "artifact_status": "repository-contract-not-live-qualification-evidence",
+  "authorization": {
+    "drain_marker_required_for_every_mode": true,
+    "format": "strict-duplicate-free-finite-json",
+    "helm_binds_raw_sha256": true,
+    "marker_limit": "identifiers-and-digests-are-validated-references; the runner-does-not-authenticate-approver-identities-independently-query-the-backup-provider-or-perform-a-restore",
+    "max_bytes": 16384,
+    "maximum_backup_age_seconds": 86400,
+    "maximum_drain_age_seconds": 3600,
+    "maximum_lifetime_seconds": 86400,
+    "maximum_restore_drill_age_seconds": 7776000,
+    "release_binding": [
+      "profile_id",
+      "release_version",
+      "image_digest",
+      "migration_lock_sha256",
+      "source_head",
+      "target_head"
+    ],
+    "restore_drill_marker_required_for_every_mode": true,
+    "two_distinct_approval_identifiers_required": true,
+    "upgrade_backup_marker_kinds": [
+      "continuous-pitr",
+      "managed-snapshot"
+    ]
+  },
+  "backend_matrix": [
+    {
+      "backend": "postgres",
+      "backup_semantics": "managed-snapshot-or-pitr-marker-required-for-upgrade",
+      "migration_path": "separate-drained-migration-owner-job",
+      "production_admitted": true
+    },
+    {
+      "backend": "sqlite",
+      "backup_semantics": "best-effort-local-copy-is-not-production-evidence",
+      "migration_path": "evaluation-open-time-forward-migration-only",
+      "production_admitted": false
+    }
+  ],
+  "compatibility": {
+    "adjacent_predecessor_head": 41,
+    "catalog_query_sha256": "8ab1b7edae5c0a2fc194e30a10b719f11cf95fb66bdcb71324197c2e4f62a859",
+    "catalog_reference": "PostgreSQL-16.14",
+    "live_catalog_sha256": {
+      "41": "feb215cb99a31cc7501177e8a615988e2388554d98257babdef3088ed492ee1c",
+      "42": "821e82bff61f16a930eac52cb48843041d74c6688accc363d90ce551fabfed25",
+      "empty": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "migration_lock_sha256": "6565d67546d4b61eeb9780b42fc3cd92cdea07deec45af4b425b04fa495fe4f1",
+    "policy": "bootstrap-or-adjacent-predecessor-only",
+    "states": [
+      {
+        "authorization_mode": "bootstrap",
+        "database_state": "empty-dedicated-public-schema",
+        "outcome": "apply-full-reviewed-ladder"
+      },
+      {
+        "authorization_mode": "upgrade",
+        "database_state": "exact-adjacent-predecessor-prefix",
+        "outcome": "apply-one-new-version"
+      },
+      {
+        "authorization_mode": "verify",
+        "database_state": "exact-current-ladder",
+        "outcome": "verify-and-reconcile-rls"
+      },
+      {
+        "authorization_mode": "bootstrap-or-upgrade-same-authorization-sha256",
+        "database_state": "exact-current-ladder-after-ambiguous-report",
+        "outcome": "idempotent-verify-and-reconcile-rls"
+      },
+      {
+        "authorization_mode": "any",
+        "database_state": "newer-gapped-duplicated-out-of-order-or-older-prefix",
+        "outcome": "refuse-without-ddl"
+      }
+    ],
+    "target_head": 42,
+    "target_versions": [
+      1,
+      10,
+      11,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42
+    ]
+  },
+  "execution": {
+    "admission_lock": "transaction-scoped-postgres-advisory-lock",
+    "catalog_inventory": "exact-live-columns-constraints-indexes-sequences-functions-triggers-and-object-set",
+    "connection": "tcp-tls-verify-full-with-trusted-ca",
+    "helm_job": "deploy/helm/maverick/templates/migration-job.yaml",
+    "job_cleanup": "ttl-delete-completed-job-and-pod-after-3600-seconds",
+    "migration_dsn_custody": "private-staged-file-not-serving-pod",
+    "network_egress": "dns-plus-exact-database-cidrs-and-tcp-port-only",
+    "network_policy_cleanup": "explicit-delete-after-terminal-evidence-capture",
+    "rls_failure": "serving-remains-drained-and-runtime-startup-refuses",
+    "rls_transaction": "separate-idempotent-exact-policy-install-after-schema-commit",
+    "role": "separate-owner-nosuperuser-nobypassrls",
+    "schema_authority": "migration-role-owned-no-foreign-create-grants",
+    "runner": "python -m maverick.production_migration apply",
+    "schema_metadata_lock": "access-exclusive",
+    "schema_transaction": "all-pending-ddl-and-version-ledger-atomic",
+    "search_path": "transaction-local-public-only",
+    "scheduling_affinity": "migration-specific-not-serving-pod-affinity",
+    "serving_runtime_migrates": false,
+    "table_inventory": "exact-reviewed-public-ordinary-table-set-and-owner"
+  },
+  "external_qualification_required": [
+    "exact-managed-postgres-offering-and-version",
+    "target-cluster-cni-runtimeclass-scheduler-and-hook-ttl-cleanup-proof",
+    "predecessor-to-target-rehearsal-on-representative-data-volume",
+    "writer-drain-and-zero-active-admission-proof",
+    "backup-provider-snapshot-or-pitr-completion-and-retention-proof",
+    "whole-database-zero-plaintext-inventory-and-rewrite-proof",
+    "independent-full-restore-and-integrity-drill",
+    "migration-interruption-before-commit-rollback-drill",
+    "commit-before-report-loss-idempotent-reconciliation-drill",
+    "post-migration-runtime-rls-tls-encryption-and-readiness-proof",
+    "operator-log-collection-signing-and-long-term-retention",
+    "authorization-authenticity-through-external-gitops-rbac-and-change-control"
+  ],
+  "failure_and_recovery": {
+    "incompatible_application_after_commit": "keep-serving-drained-then-forward-fix-or-full-managed-restore",
+    "older_binary_on_newer_schema": "refused",
+    "partial_restore_or-version-ledger-repair": "forbidden",
+    "postcommit_pre_report_ambiguity": "retry-same-authorization-bytes",
+    "precommit_failure": "postgres-transaction-rollback",
+    "required_failure_policy": "rollback-transaction-then-forward-fix-or-full-restore",
+    "sql_down_migrations": "forbidden"
+  },
+  "profile_id": "enterprise-single-control-plane-v1",
+  "report": {
+    "contains_role_only_as_sha256": true,
+    "contains_secrets_or_dsn": false,
+    "destination": "canonical-value-free-json-on-stdout",
+    "report_is_live_restore_proof": false,
+    "signed_retention": "external-release-evidence-system-required"
+  },
+  "repository_source_sha256": {
+    "deploy/helm/maverick/templates/_helpers.tpl": "09582a4df2abae8c58a642ced3a5b761100e0036633837a6fe8dde8c3504bbfa",
+    "deploy/helm/maverick/templates/migration-job.yaml": "146ad71a9227a8043c8318829ccd3fe744e64932121101c907b0a58aee4da7d7",
+    "deploy/helm/maverick/values-production.yaml": "62e2bdd0ec8674dcfcaa343d9e7dd1f3564289aa09feae0faa3588614ea55119",
+    "deploy/helm/maverick/values.yaml": "967e42a65705491675dc71807e3b6601ec4f8bc71da448501f96ee8ca641e9cf"
+  },
+  "schema_version": 1
+}

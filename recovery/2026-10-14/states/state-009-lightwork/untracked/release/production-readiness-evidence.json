@@ -1,0 +1,3042 @@
+{
+  "schema": "lightwork.production-readiness-evidence.v3",
+  "profile_id": "enterprise-single-control-plane-v1",
+  "source_version": "0.1.7",
+  "production_surface_sha256": "0ba3ca2055ab1395c162d3a6ef944581014de55a4169fccc6fcade7c3d0c50c8",
+  "production_surface_digest_mode": "utf8-lf-sha256",
+  "assessed_source_content": null,
+  "assessed_source_revision": null,
+  "status": "draft",
+  "updated_at": "2026-08-05T00:00:00Z",
+  "approval": null,
+  "evidence_sets": {
+    "production-scope": {
+      "implementation": [
+        "release/production-surface-manifest.json",
+        "packages/maverick-core/maverick/production_scope.py",
+        "packages/maverick-core/maverick/deployment.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_scope.py",
+        "packages/maverick-core/tests/test_production_deployment_gate.py"
+      ],
+      "adverse_result": "Malformed, mismatched, ineligible, and unsupported profile combinations were refused by focused local tests on 2026-08-03.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "excluded-surfaces": {
+      "implementation": [
+        "packages/maverick-core/maverick/production_exclusions.py",
+        "packages/maverick-dashboard/maverick_dashboard/production_visibility.py",
+        "deploy/docker/Dockerfile.production"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_feature_exclusions.py",
+        "packages/maverick-dashboard/tests/test_production_feature_visibility.py",
+        "packages/maverick-core/tests/test_release_packaging.py"
+      ],
+      "adverse_result": "Production opt-in, direct invocation, discovery, UI, API, OpenAPI, and packaging negatives passed locally; the broad exclusion batch reported 396 passed and 2 environment skips. A focused 2026-08-04 contract batch reported 190 passed, including GET/POST signed-link 404 responses with no capability-token reflection.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "shield-fail-closed": {
+      "implementation": [
+        "packages/maverick-shield/maverick_shield/guard.py",
+        "packages/maverick-core/maverick/shield_policy.py"
+      ],
+      "regressions": [
+        "packages/maverick-shield/tests/test_shield_failure_paths.py",
+        "packages/maverick-core/tests/test_shield_policy.py"
+      ],
+      "adverse_result": "Detector exception, timeout, missing asset, malformed response, partial failure, and required call-site negatives passed locally on 2026-08-03.",
+      "runbook": "deploy/observability/runbook.md"
+    },
+    "knowledge-ingestion-integrity": {
+      "implementation": [
+        "packages/maverick-core/maverick/config.py",
+        "packages/maverick-core/maverick/knowledge_factory.py",
+        "packages/maverick-core/maverick/knowledge_admin.py",
+        "packages/maverick-core/maverick/intake.py",
+        "packages/maverick-core/maverick/orchestrator.py",
+        "packages/maverick-core/maverick/assessment_memory.py",
+        "packages/maverick-core/maverick/semantic_recall.py",
+        "packages/maverick-core/maverick/crypto_at_rest.py",
+        "packages/maverick-knowledge/maverick_knowledge/base.py",
+        "packages/maverick-knowledge/maverick_knowledge/embed.py",
+        "packages/maverick-knowledge/maverick_knowledge/image.py",
+        "packages/maverick-knowledge/maverick_knowledge/store.py",
+        "packages/maverick-knowledge/maverick_knowledge/quarantine.py"
+      ],
+      "regressions": [
+        "packages/maverick-knowledge/tests/test_production_integrity.py",
+        "packages/maverick-knowledge/tests/test_knowledge.py",
+        "packages/maverick-core/tests/test_knowledge_factory.py",
+        "packages/maverick-core/tests/test_knowledge_admin.py",
+        "packages/maverick-core/tests/test_erasure_receipts.py",
+        "packages/maverick-core/tests/test_orchestrator_output_scan.py",
+        "packages/maverick-core/tests/test_intake.py",
+        "packages/maverick-core/tests/test_assessment_memory.py",
+        "packages/maverick-core/tests/test_semantic_recall.py",
+        "packages/maverick-core/tests/test_chroma_store.py",
+        "packages/maverick-core/tests/test_pgvector_store.py",
+        "packages/maverick-core/tests/test_qdrant_store.py",
+        "packages/maverick-core/tests/test_weaviate_store.py"
+      ],
+      "adverse_result": "Frozen-source local validation passed 384 checks with four optional dependency/service skips across the combined knowledge, vector, and at-rest surface; the DATA-21-relevant secure-default surface passed 326 checks with two optional service skips. An independent hostile subset passed 158 checks with two skips in both modes and found no remaining narrow bypass. Required construction now binds active Shield and OCR/describer propagation, authenticated principals, bounded pre-parser admission, exact source snapshots, full-document and per-chunk scanning, zero-store quarantine on malformed, contradictory, explicit, or exception scanner failure, current-policy and exact allowed-verdict HMAC validation, vector integrity, rotation-aware durable quarantine, and deterministic owned-resource cleanup. This is local source/mocked evidence only. Knowledge/RAG remains excluded from the first profile and is not qualified for customer data, live providers, shared Postgres/vector services, parser resource isolation, confidentiality, retention, write authorization, multi-tenant service isolation, disaster recovery, or grounded-answer claims.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "audit-effect-boundary": {
+      "implementation": [
+        "packages/maverick-core/maverick/audit_contract.py",
+        "packages/maverick-core/maverick/governed_tools.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_audit_refusal_reaches_caller.py",
+        "packages/maverick-core/tests/test_audit_refusal_durable_stores.py"
+      ],
+      "adverse_result": "Signer, serialization, disk, database, and completion-persistence refusal paths passed focused local tests on 2026-08-03.",
+      "runbook": "docs/security/audit-readiness.md"
+    },
+    "finance-authorization": {
+      "implementation": [
+        "packages/maverick-dashboard/maverick_dashboard/api.py",
+        "packages/maverick-core/maverick/suite_grants.py"
+      ],
+      "regressions": [
+        "packages/maverick-dashboard/tests/test_finance_workspace.py",
+        "packages/maverick-core/tests/test_suite_grants.py"
+      ],
+      "adverse_result": "Cross-tenant, cross-suite, cross-record, and unauthorized decision/follow-up requests were denied in focused local tests on 2026-08-03.",
+      "runbook": "docs/security-hardening.md"
+    },
+    "production-identity": {
+      "implementation": [
+        "packages/maverick-core/maverick/production_identity.py",
+        "packages/maverick-core/maverick/dashboard_rbac_policy.py",
+        "packages/maverick-core/maverick/deployment.py",
+        "packages/maverick-core/maverick/production_onboarding.py",
+        "packages/maverick-dashboard/maverick_dashboard/auth.py",
+        "packages/maverick-dashboard/maverick_dashboard/invites.py",
+        "packages/maverick-dashboard/maverick_dashboard/endpoint_policy.py",
+        "packages/maverick-dashboard/maverick_dashboard/rbac.py",
+        "deploy/helm/maverick/templates/identity-configmap.yaml",
+        "deploy/helm/maverick/templates/deployment.yaml",
+        "deploy/helm/maverick/templates/_helpers.tpl",
+        "deploy/helm/maverick/values.yaml",
+        "deploy/helm/maverick/values-production.yaml",
+        "release/production-identity-posture-contract.json"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_identity.py",
+        "packages/maverick-core/tests/test_production_onboarding.py",
+        "packages/maverick-core/tests/test_deployment.py",
+        "packages/maverick-dashboard/tests/test_proxy_auth_gate.py",
+        "packages/maverick-dashboard/tests/test_invites.py",
+        "packages/maverick-dashboard/tests/test_rbac.py",
+        "packages/maverick-dashboard/tests/test_endpoint_policy.py",
+        "packages/maverick-core/tests/test_helm_production_profile.py"
+      ],
+      "adverse_result": "One hundred fifty-eight focused local checks require exactly one configured production identity provider (OIDC or trusted-proxy SSO), reject zero-provider, dual-provider, SAML, shared-token, local-invite, malformed mapping, same-provider issuer/RBAC drift, provider-pin, signed-onboarding, secret-shaped Helm values, inactive-provider residue, unsafe proxy/default-role/admin inputs, and arbitrary posture-digest cases. Every production auth decision and the app-wide authorization boundary recompute the canonical posture. Both rendered Helm modes parse and validate with exact derived pins from an immutable content-addressed read-only ConfigMap, while client/session credentials remain only in the exact Secret projection. Secret values and mutable live rosters are deliberately outside the source digest. This is source and local-test evidence only; it does not assert that any customer IdP/proxy, live session, SCIM/revocation path, break-glass exercise, or deployed role assignment has been qualified.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "sealed-output": {
+      "implementation": [
+        "packages/maverick-core/maverick/tools/spawn.py",
+        "packages/maverick-core/maverick/agent.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_agent_required_output_safety.py",
+        "packages/maverick-core/tests/test_tier0_security.py"
+      ],
+      "adverse_result": "Single and parallel child output withholding plus redactor-failure paths passed focused local tests on 2026-08-03.",
+      "runbook": "docs/security-hardening.md"
+    },
+    "secret-custody": {
+      "implementation": [
+        "packages/maverick-core/maverick/secret_provider.py",
+        "packages/maverick-core/maverick/tenant/kms.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_secret_provider.py",
+        "packages/maverick-core/tests/test_tenant_kms_fleet.py"
+      ],
+      "adverse_result": "Unknown provider, missing/unreadable mounted secret, malformed BYOK overlay, and forbidden fallback paths passed local tests on 2026-08-03.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "postgres-tenant-rls": {
+      "implementation": [
+        "packages/maverick-core/maverick/world_model_backends/postgres.py",
+        "packages/maverick-core/maverick/world_model_backends/pg_rls.py",
+        "packages/maverick-core/maverick/production_observability.py",
+        "packages/maverick-dashboard/maverick_dashboard/health_routes.py",
+        "packages/maverick-core/maverick/tenant/registry.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_postgres_rls_unit.py",
+        "packages/maverick-core/tests/test_pg_rls.py",
+        "packages/maverick-core/tests/test_tenant_rls_cli.py",
+        "packages/maverick-core/tests/test_postgres_production_posture.py",
+        "packages/maverick-core/tests/test_production_observability.py",
+        "packages/maverick-dashboard/tests/test_dashboard_production_assurance.py",
+        "packages/maverick-core/tests/test_tenant_registry.py"
+      ],
+      "adverse_result": "A combined 235-test repository-local DATA-09/DATA-17 batch passed on 2026-08-03, exercising least-privilege role refusal, direct and parent-derived child-table policy SQL, missing/permissive policy refusal, atomic migration-owner rls-apply admission, continuous readiness failure, and refusal of local tenant purge when shared Postgres is configured. No live Postgres migration or deployed policy report was produced by this worktree.",
+      "runbook": "deploy/postgres/README.md"
+    },
+    "postgres-encryption-migration": {
+      "implementation": [
+        "packages/maverick-core/maverick/postgres_encryption_migrate.py",
+        "packages/maverick-core/maverick/world_model_backends/postgres.py",
+        "packages/maverick-core/maverick/deployment.py",
+        "deploy/docker/Dockerfile.production",
+        "packages/maverick-core/maverick/tenant/registry.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_postgres_encryption_migrate.py",
+        "packages/maverick-core/tests/test_encryption_ops_cli.py",
+        "packages/maverick-core/tests/test_postgres_production_posture.py",
+        "packages/maverick-core/tests/test_production_deployment_gate.py",
+        "packages/maverick-core/tests/test_tenant_registry.py"
+      ],
+      "adverse_result": "A combined 235-test repository-local DATA-09/DATA-17 batch passed on 2026-08-03, exercising whole-database sealed-column inventory and rewrite, tenant-context authentication, tampered/unscoped/plaintext refusal, migration-owner/schema/RLS admission, rollback, strict startup, and refusal to claim local purge covers shared Postgres. No exact-release live inventory/rewrite, snapshot restore, or key-recovery drill was performed by this worktree.",
+      "runbook": "docs/encryption.md"
+    },
+    "audit-redaction": {
+      "implementation": [
+        "packages/maverick-core/maverick/audit/writer.py",
+        "packages/maverick-core/maverick/audit/errors.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_audit_redaction_fixes.py",
+        "packages/maverick-core/tests/test_audit_redaction.py"
+      ],
+      "adverse_result": "Redactor exceptions were refused or reduced to bounded metadata without persisting the source payload in local tests on 2026-08-03.",
+      "runbook": "docs/security/audit-readiness.md"
+    },
+    "sandbox-network-boundary": {
+      "implementation": [
+        "packages/maverick-core/maverick/sandbox/disabled.py",
+        "deploy/helm/maverick/templates/networkpolicy.yaml",
+        "deploy/helm/maverick/values-production.yaml"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_sandbox_disabled.py",
+        "packages/maverick-core/tests/test_helm_production_profile.py"
+      ],
+      "adverse_result": "Host/code execution, broad egress, missing DNS/ingress CIDRs, mutable image, root/privileged, and unbounded-resource configurations were refused by local static/profile tests; Helm render awaits an installed Helm binary.",
+      "runbook": "deploy/helm/README.md"
+    },
+    "production-tool-contract": {
+      "implementation": [
+        "packages/maverick-core/maverick/production_tools.py",
+        "packages/maverick-core/maverick/tools/__init__.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_tool_contract.py"
+      ],
+      "adverse_result": "Missing metadata, unknown tools, forbidden imports, mutation admission, tenant/principal, resource extraction, and result substitution negatives passed; focused receipt/tool tests reported 34 passed.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "approval-resume": {
+      "implementation": [
+        "packages/maverick-core/maverick/flow/execution.py",
+        "packages/maverick-core/maverick/flow/store.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_flow_execution_hardening.py"
+      ],
+      "adverse_result": "Independent spawned processes raced the same approved run; exactly one effect and one completed authoritative run were observed locally on 2026-08-03.",
+      "runbook": "docs/operations.md"
+    },
+    "control-plane-topology": {
+      "implementation": [
+        "packages/maverick-core/maverick/control_plane_lease.py",
+        "deploy/helm/maverick/templates/_helpers.tpl"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_control_plane_lease.py",
+        "packages/maverick-core/tests/test_helm_production_profile.py"
+      ],
+      "adverse_result": "Second-writer, replica-count, autoscaling, unavailable-lock, and stale-ownership paths were refused in focused local tests on 2026-08-03.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "typed-receipts": {
+      "implementation": [
+        "packages/maverick-core/maverick/consequential_receipts.py",
+        "packages/maverick-core/maverick/governed_tools.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_consequential_receipts.py",
+        "packages/maverick-core/tests/test_production_tool_contract.py"
+      ],
+      "adverse_result": "Replay, cross-tenant/principal/tool/action/target/key substitution, unsigned provider result, stale receipt, and predecessor mismatch negatives passed for the model-visible tool contract; model-visible production mutations remain disabled. This evidence does not claim that every supported operator CLI mutation returns a typed receipt.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "dgm-exclusion": {
+      "implementation": [
+        "packages/maverick-core/maverick/production_exclusions.py",
+        "packages/maverick-core/maverick/self_modify.py",
+        "packages/maverick-core/maverick/adapter_rung.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_feature_exclusions.py"
+      ],
+      "adverse_result": "Code/weights evaluation, apply, promotion, training, serving, recovery, and flow auto-evolution entrypoints were blocked in production-mode local tests on 2026-08-03.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "assurance-observability": {
+      "implementation": [
+        "packages/maverick-core/maverick/production_observability.py",
+        "deploy/observability/prometheus-rules.yaml"
+      ],
+      "regressions": [
+        "packages/maverick-dashboard/tests/test_dashboard_production_assurance.py",
+        "packages/maverick-core/tests/test_production_observability.py"
+      ],
+      "adverse_result": "Assurance and endpoint-policy tests reported 48 passed; broader related regressions reported 161 passed; seven Prometheus groups and 23 alerts parsed as valid YAML.",
+      "runbook": "deploy/observability/runbook.md"
+    },
+    "endpoint-inventory": {
+      "implementation": [
+        "packages/maverick-dashboard/maverick_dashboard/endpoint_policy.py",
+        "packages/maverick-dashboard/maverick_dashboard/app.py"
+      ],
+      "regressions": [
+        "packages/maverick-dashboard/tests/test_endpoint_policy.py"
+      ],
+      "adverse_result": "All 606 exact routes matched the pinned inventory fingerprint; the 78-operation production registry matched its reviewed fingerprint, and a focused endpoint/sign-off/exclusion/OpenAPI batch reported 190 passed locally on 2026-08-04.",
+      "runbook": "docs/security-hardening.md"
+    },
+    "release-truth": {
+      "implementation": [
+        "release/release-state.json",
+        "scripts/verify_release_state.py",
+        ".github/workflows/release.yml"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_release_integrity.py",
+        "packages/maverick-core/tests/test_release_policy.py"
+      ],
+      "adverse_result": "The local release-policy suite and a full 138-asset, 33-upstream adversarial cohort verify exact checksums, signatures, inventory, ordering, and byte equality for all 22 governance assets copied from the tag. Checksum-recomputed semantic substitutions, stale draft bytes, disabled authority, and registry-before-public-verification ordering are refused. GitHub immutable-release settings, restricted asset administrators, independent reviewers, and the draft-to-public transition remain external controls.",
+      "runbook": "release/README.md"
+    },
+    "namespace-ownership-blocker": {
+      "implementation": [
+        "release/namespace-ownership-attestation.template.json",
+        "scripts/verify_namespace_ownership.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_release_integrity.py"
+      ],
+      "adverse_result": "Unsigned, stale, mismatched, and incomplete ownership attestations are refused; live registry observations returned not-found and therefore do not prove ownership.",
+      "runbook": "release/README.md"
+    },
+    "pytest-exception-governance": {
+      "implementation": [
+        "qa/pytest-exceptions.json",
+        "scripts/verify_pytest_exceptions.py",
+        ".github/workflows/ci.yml"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_pytest_exception_policy.py",
+        "packages/maverick-core/tests/test_release_integrity.py",
+        "packages/maverick-core/tests/test_release_policy.py"
+      ],
+      "adverse_result": "Nine focused policy tests passed locally on 2026-08-03, including unreviewed-skip, changed-source, non-strict/expired-xfail, missing-lane, and lane-drift refusals. The current local verifier bound 416 exceptions, 205 production-critical records, 151 enforced dependency records, and two strict temporary xfails; hosted CI has not been run for this worktree.",
+      "runbook": "docs/test-exception-policy.md"
+    },
+    "claims-support-contract": {
+      "implementation": [
+        "release/production-support-matrix.json",
+        "release/production-code-inventory.json",
+        "release/claim-evidence-ledger.json",
+        "scripts/verify_production_support_matrix.py",
+        "scripts/verify_production_code_inventory.py",
+        "scripts/verify_claim_evidence_ledger.py",
+        "docs/specs/external-effect-semantics.md"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_connector_support_tiers.py",
+        "packages/maverick-core/tests/test_execution_guarantee_claims.py",
+        "packages/maverick-core/tests/test_production_support_matrix.py",
+        "packages/maverick-core/tests/test_production_code_inventory.py",
+        "packages/maverick-core/tests/test_claim_evidence_ledger.py"
+      ],
+      "adverse_result": "Strict local verifiers now reconcile 47 claims across 119 buyer documents with 24 buyer-allowed source claims, plus code-derived tests, packages, routes, channels, MCP tools, connectors, ports, installer questions, feature status, and historical proof freshness. Added or changed buyer documents, numeric aggregate claims, unsupported support tiers, evidence hashes, and inventory drift are refused until deterministic regeneration.",
+      "runbook": "docs/enterprise/claim-evidence-ledger.md"
+    },
+    "change-control-contract": {
+      "implementation": [
+        "release/production-change-control-policy.json",
+        "scripts/verify_production_change_control.py",
+        ".github/CODEOWNERS",
+        ".github/workflows/release.yml",
+        "release/release-state.json"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_release_integrity.py",
+        "packages/maverick-core/tests/test_release_policy.py"
+      ],
+      "adverse_result": "Repository tests exercise missing ownership, workflow-permission expansion, bypass, staging, checksum, signature, upload-order, and manifest-drift refusals. This is source change-control evidence only; protected-branch, environment-approval, and independent-review state remain external release evidence.",
+      "runbook": "release/README.md"
+    },
+    "inter-agent-trust": {
+      "implementation": [
+        "packages/maverick-core/maverick/agent_bus.py",
+        "packages/maverick-core/maverick/a2a.py",
+        "packages/maverick-core/maverick/handoff.py",
+        "packages/maverick-core/maverick/tools/agent_bus_tool.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_agent_bus_security.py",
+        "packages/maverick-core/tests/test_bus_handoff.py",
+        "packages/maverick-core/tests/test_handoff.py"
+      ],
+      "adverse_result": "A 2026-08-04 local security/runtime batch reported 197 passed and 10 platform-scoped skips. Agent-bus tests reject authority lookalikes, forged or replayed handoffs, recipient and roster substitution, unbounded payloads, scanner failure, audit refusal, and silent downgrade from signed delegation.",
+      "runbook": "docs/security-hardening.md"
+    },
+    "session-lifecycle": {
+      "implementation": [
+        "packages/maverick-dashboard/maverick_dashboard/auth.py",
+        "packages/maverick-dashboard/maverick_dashboard/invites.py",
+        "packages/maverick-dashboard/maverick_dashboard/oidc_login.py"
+      ],
+      "regressions": [
+        "packages/maverick-dashboard/tests/test_invites.py",
+        "packages/maverick-dashboard/tests/test_oidc_login.py",
+        "packages/maverick-dashboard/tests/test_proxy_auth_gate.py",
+        "packages/maverick-dashboard/tests/test_rbac.py"
+      ],
+      "adverse_result": "Local tests cover secure cookie posture, same-origin state changes, PKCE/state replay, bounded and revoked sessions, logout-all, invite expiry/single-use/revocation, disabled identities, role removal, and proxy/session precedence. Exact live IdP and attribution evidence is not asserted.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "hook-redaction-boundary": {
+      "implementation": [
+        "packages/maverick-core/maverick/hooks.py",
+        "packages/maverick-core/maverick/support_bundle.py",
+        "packages/maverick-core/maverick/audit/writer.py",
+        "packages/maverick-core/maverick/production_exclusions.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_hook_data_boundaries.py",
+        "packages/maverick-core/tests/test_support_bundle_security.py",
+        "packages/maverick-core/tests/test_audit_redaction_fixes.py",
+        "packages/maverick-core/tests/test_worker_tenant_context.py"
+      ],
+      "adverse_result": "Focused local tests reject unknown hook privileges, oversized projections, sealed or credential-bearing fields, redactor/classifier/verifier failure, unverified support intake, and secret-bearing durable errors. Voice, attachment, connector, channel, and plugin egress are excluded from the first profile.",
+      "runbook": "docs/security-hardening.md"
+    },
+    "secure-path-custody": {
+      "implementation": [
+        "packages/maverick-core/maverick/file_lock.py",
+        "packages/maverick-core/maverick/secret_provider.py",
+        "packages/maverick-core/maverick/secret_staging.py",
+        "packages/maverick-core/maverick/support_bundle.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_file_lock.py",
+        "packages/maverick-core/tests/test_secret_provider.py",
+        "packages/maverick-core/tests/test_secret_staging.py",
+        "packages/maverick-core/tests/test_support_bundle_security.py"
+      ],
+      "adverse_result": "The 2026-08-04 security/runtime batch exercised handle-bound custody, ancestor and final symlink/reparse refusal, hard-link and path-alias refusal, ABA replacement, ownership and mode checks, and no-overwrite publication. It reported 197 passed with 10 platform-scoped skips across the broader batch.",
+      "runbook": "docs/enterprise/secret-rotation-contract.md"
+    },
+    "production-runtime-contract": {
+      "implementation": [
+        "release/production-runtime-contract.json",
+        "packages/maverick-core/maverick/production_runtime_contract.py",
+        "packages/maverick-core/maverick/sandbox/disabled.py",
+        "packages/maverick-core/maverick/sandbox/image_policy.py",
+        "deploy/docker/Dockerfile.production",
+        "deploy/helm/maverick/values-production.yaml"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_runtime_contract.py",
+        "packages/maverick-core/tests/test_production_child_environment.py",
+        "packages/maverick-core/tests/test_production_sandbox_disabled.py",
+        "packages/maverick-core/tests/test_sandbox_image_attestation.py",
+        "packages/maverick-core/tests/test_helm_production_profile.py"
+      ],
+      "adverse_result": "Local contract tests reject non-Linux execution, wrong UID/GID identity, a non-PID-1 launcher, injected mounts, writable installed-package or root inputs, unexpected secret custody, ambient credentials, raised process/budget/depth ceilings, mutable or unattested sandbox images, local-host fallback, root/privileged workloads, and weakened Helm values. Target-cluster render, admission, CNI, and runtime containment remain deployment evidence.",
+      "runbook": "docs/enterprise/production-runtime-contract.md"
+    },
+    "approval-dispatch-contract": {
+      "implementation": [
+        "packages/maverick-core/maverick/approval_signing.py",
+        "packages/maverick-core/maverick/tool_authz.py",
+        "packages/maverick-core/maverick/governed_tools.py",
+        "packages/maverick-core/maverick/signoff_authority.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_flow_approvals.py",
+        "packages/maverick-core/tests/test_tool_authz.py",
+        "packages/maverick-core/tests/test_signoff_authority.py",
+        "packages/maverick-dashboard/tests/test_production_signoff_authority.py"
+      ],
+      "adverse_result": "Local tests reject body, tool, parameter, tenant, principal, destination, scope, expiry, idempotency, revision, and competing-decision substitution; unclassified dispatch sites and required-audit failure fail closed before effect publication.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "dek-cache-lifecycle": {
+      "implementation": [
+        "packages/maverick-core/maverick/tenant/kms.py",
+        "packages/maverick-core/maverick/tenant/kms_fleet.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_tenant_kms_fleet.py"
+      ],
+      "adverse_result": "Focused tests require a finite production TTL, re-check tenant state under the cache lock, zero cached DEKs on suspension/delete/rotation, and refuse unavailable or malformed custody rather than reuse stale authority. The broader 2026-08-04 data batch reported 180 passed and one live-Postgres skip.",
+      "runbook": "docs/encryption.md"
+    },
+    "async-tenant-authority": {
+      "implementation": [
+        "packages/maverick-core/maverick/job_queue.py",
+        "packages/maverick-core/maverick/child_checkpoint.py",
+        "packages/maverick-core/maverick/worker.py",
+        "packages/maverick-dashboard/maverick_dashboard/automation_queue.py",
+        "packages/maverick-dashboard/maverick_dashboard/task_dispatch.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_worker_tenant_context.py",
+        "packages/maverick-core/tests/test_production_job_authority.py",
+        "packages/maverick-core/tests/test_durable_child_checkpoint.py",
+        "packages/maverick-dashboard/tests/test_production_task_lifecycle.py"
+      ],
+      "adverse_result": "Local tests preserve exact tenant, principal, grant, suite, budget, and child identity across enqueue, claim, retry, cron successor, resume, process crash, and worker recreation; legacy, ownerless, tampered, suspended, or revoked authority is quarantined before work.",
+      "runbook": "docs/operations.md"
+    },
+    "retention-erasure-contract": {
+      "implementation": [
+        "packages/maverick-core/maverick/audit/retention.py",
+        "packages/maverick-core/maverick/audit/erase.py",
+        "packages/maverick-core/maverick/erasure_receipts.py",
+        "packages/maverick-core/maverick/postgres_tenant_lifecycle.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_erasure_receipts.py",
+        "packages/maverick-core/tests/test_client_erase.py",
+        "packages/maverick-core/tests/test_postgres_tenant_lifecycle.py"
+      ],
+      "adverse_result": "Repository-local tests exercise subject-free signed receipts, closure drift, concurrent mutation, residual detection, incomplete shared-Postgres refusal, tenant-scoped export/purge, and tamper/retention checks. Exact deployed backup, vector, object-store, and restore lifecycle evidence remains unavailable.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "tenant-quota-contract": {
+      "implementation": [
+        "release/tenant-quota-contract.json",
+        "scripts/verify_tenant_quota_contract.py",
+        "packages/maverick-core/maverick/tenant_quota_authority.py",
+        "packages/maverick-core/maverick/job_queue.py",
+        "packages/maverick-core/maverick/orchestrator.py",
+        "packages/maverick-core/maverick/flow/execution.py",
+        "packages/maverick-dashboard/maverick_dashboard/tenant_quota_health.py",
+        "deploy/helm/maverick/values-production.yaml"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_tenant_quota_authority.py",
+        "packages/maverick-core/tests/test_flow_action_tenant_quota.py",
+        "packages/maverick-core/tests/test_tenant_quota_contract.py",
+        "packages/maverick-dashboard/tests/test_tenant_quota_health.py",
+        "packages/maverick-dashboard/tests/test_production_task_lifecycle.py",
+        "packages/maverick-dashboard/tests/test_idempotency_delivery_recovery.py"
+      ],
+      "adverse_result": "A focused quota/runtime/Helm batch reported 92 passed and 16 expected environment skips; the repaired production lifecycle suites separately reported 48 passed. Generation and same-generation hash drift, stale replicas, overshoot, lease expiry/reclaim, queue saturation, direct flow actions, final settlement, and authority outage fail closed. Live Postgres concurrency/load and target-cluster admission are not proven.",
+      "runbook": "docs/enterprise/tenant-quota-contract.md"
+    },
+    "siem-outbox": {
+      "implementation": [
+        "packages/maverick-core/maverick/audit/siem_outbox.py",
+        "packages/maverick-core/maverick/audit/forwarder.py",
+        "packages/maverick-core/maverick/production_observability.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_audit_siem_outbox.py",
+        "packages/maverick-core/tests/test_production_observability.py"
+      ],
+      "adverse_result": "Local tests cover authenticated ciphertext-only spooling, HTTPS and secret-provider enforcement, bounded capacity, acknowledgment, stable idempotency, retry/backoff, expired-lease recovery, dead-letter and audited redrive, destination substitution, and backlog metrics.",
+      "runbook": "deploy/observability/runbook.md"
+    },
+    "effect-lifecycle": {
+      "implementation": [
+        "packages/maverick-core/maverick/api_idempotency.py",
+        "packages/maverick-core/maverick/consequential_receipts.py",
+        "packages/maverick-core/maverick/flow/reconciliation.py",
+        "packages/maverick-core/maverick/flow/execution.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_api_idempotency.py",
+        "packages/maverick-core/tests/test_api_idempotency_retirement.py",
+        "packages/maverick-core/tests/test_consequential_receipts.py",
+        "packages/maverick-core/tests/test_flow_indeterminate_reconciliation.py",
+        "packages/maverick-core/tests/test_flow_limits.py",
+        "packages/maverick-dashboard/tests/test_flow_operation_idempotency.py",
+        "packages/maverick-dashboard/tests/test_idempotency_delivery_recovery.py"
+      ],
+      "adverse_result": "The 2026-08-04 durability batch reported 220 passed. It covers exact replay, mismatched reuse, tombstones, post-commit lost acknowledgment, transactional outbox repair, immutable audited adjudication, competing authority, tampered receipts, and no blind retry of ambiguous effects.",
+      "runbook": "docs/specs/external-effect-semantics.md"
+    },
+    "durable-worker-authority": {
+      "implementation": [
+        "packages/maverick-core/maverick/child_checkpoint.py",
+        "packages/maverick-core/maverick/job_queue.py",
+        "packages/maverick-dashboard/maverick_dashboard/task_dispatch.py",
+        "packages/maverick-dashboard/maverick_dashboard/stream_cursor.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_durable_child_checkpoint.py",
+        "packages/maverick-core/tests/test_job_queue_dedup.py",
+        "packages/maverick-core/tests/test_production_job_authority.py",
+        "packages/maverick-dashboard/tests/test_production_task_lifecycle.py"
+      ],
+      "adverse_result": "The 2026-08-04 durability batch reported 220 passed across child reconstruction, budget reservation, live-key deduplication, cross-process races, lease/worker loss, dead-letter state, exact authority restoration, durable dispatch before acknowledgment, restart repair, and monotonic reconnect cursors.",
+      "runbook": "docs/specs/durable-execution.md"
+    },
+    "coordinated-runtime-drain": {
+      "implementation": [
+        "packages/maverick-core/maverick/runner.py",
+        "packages/maverick-core/maverick/worker.py",
+        "packages/maverick-core/maverick/server.py",
+        "packages/maverick-dashboard/maverick_dashboard/app.py",
+        "packages/maverick-dashboard/maverick_dashboard/task_dispatch.py",
+        "packages/maverick-dashboard/maverick_dashboard/health_routes.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_runner_drain.py",
+        "packages/maverick-dashboard/tests/test_coordinated_shutdown.py"
+      ],
+      "adverse_result": "Fourteen focused shutdown checks passed locally. They prove atomic admission closure, counted re-entrant work without stale copied-context bypass, drain through sandbox/world/quota/audit cleanup and fenced job settlement, immediate readiness withdrawal, refusal before durable enqueue, retryable idempotent outboxes, and duplicate-safe restart. Related core suites reported 119 passed and one optional skip; related dashboard lifecycle suites reported 128 passed. No deployed SIGTERM or rolling-cluster exercise is asserted.",
+      "runbook": "docs/specs/durable-execution.md"
+    },
+    "failure-checkpoint-contract": {
+      "implementation": [
+        "packages/maverick-core/maverick/failure_taxonomy.py",
+        "packages/maverick-core/maverick/checkpoint.py",
+        "packages/maverick-core/maverick/goal_lifecycle.py",
+        "packages/maverick-dashboard/maverick_dashboard/api.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_failure_taxonomy.py",
+        "packages/maverick-core/tests/test_durable_checkpoint.py",
+        "packages/maverick-dashboard/tests/test_failure_taxonomy_api.py",
+        "packages/maverick-dashboard/tests/test_production_task_lifecycle.py"
+      ],
+      "adverse_result": "The 2026-08-04 durability batch reported 220 passed. Typed provider, policy, budget, cancellation, human-wait, verifier, deterministic-tool, durability, and ambiguous-effect states survive runtime, flow, API, audit, and telemetry; corrupt or refused required checkpoints stop progress visibly.",
+      "runbook": "docs/specs/durable-execution.md"
+    },
+    "flow-postgres-authority": {
+      "implementation": [
+        "packages/maverick-core/maverick/flow/postgres_authority.py",
+        "packages/maverick-core/maverick/flow/store.py",
+        "packages/maverick-core/maverick/world_model_backends/postgres.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_flow_postgres_authority.py",
+        "packages/maverick-core/tests/test_flow_execution_hardening.py",
+        "packages/maverick-dashboard/tests/test_flow_operation_idempotency.py"
+      ],
+      "adverse_result": "Local tests route definitions, history, runs, approvals, claims, locks, snapshots, receipts, and cursors to one tenant-scoped transactional authority; local fallback, stale reads, partial writes, CAS loss, RLS absence, driver loss, and lock cleanup failure are refused. Live Postgres qualification remains separate.",
+      "runbook": "deploy/postgres/README.md"
+    },
+    "fleet-killswitch": {
+      "implementation": [
+        "packages/maverick-core/maverick/killswitch.py",
+        "packages/maverick-core/maverick/worker.py",
+        "packages/maverick-core/maverick/flow/execution.py",
+        "packages/maverick-core/maverick/governed_tools.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_killswitch_authority.py",
+        "packages/maverick-core/tests/test_cluster_killswitch.py",
+        "packages/maverick-dashboard/tests/test_production_task_lifecycle.py"
+      ],
+      "adverse_result": "The local adverse suite exercises shared generation fencing, local emergency fallback, audited arm/clear, authority and audit outage, concurrent re-arm, tool/connector/retry/queue/worker/flow admission, and typed terminal shutdown behavior.",
+      "runbook": "deploy/observability/runbook.md"
+    },
+    "provider-cost-authority": {
+      "implementation": [
+        "packages/maverick-core/maverick/provider_cost_cap.py",
+        "packages/maverick-core/maverick/llm.py",
+        "packages/maverick-core/maverick/world_model_backends/postgres.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_provider_cost_cap_authority.py",
+        "packages/maverick-core/tests/test_quota_enforcement.py"
+      ],
+      "adverse_result": "Local tests cover atomic concurrent reservation, corrupt ledger and authority outage, non-finite or zero projections, pre-provider release, ambiguous charge settlement, monotonic completion, and Postgres transaction ordering. Exact provider billing reconciliation and multi-replica load remain live evidence.",
+      "runbook": "docs/operations.md"
+    },
+    "dependency-failure-contract": {
+      "implementation": [
+        "release/dependency-failure-contract.json",
+        "scripts/verify_dependency_failure_contract.py",
+        "packages/maverick-core/maverick/production_observability.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_dependency_failure_contract.py",
+        "packages/maverick-core/tests/test_production_observability.py",
+        "packages/maverick-dashboard/tests/test_dashboard_production_assurance.py"
+      ],
+      "adverse_result": "The exact source contract refuses missing dependencies, readiness or qualification overclaim, and excluded-runtime claims; local health tests map each required dependency to a fail-closed readiness signal. Target-environment outage and restore drills remain unperformed.",
+      "runbook": "docs/enterprise/dependency-failure-contract.md"
+    },
+    "operator-contract": {
+      "implementation": [
+        "packages/maverick-core/maverick/operator_contract.py",
+        "packages/maverick-core/maverick/cli/__init__.py",
+        "docs/enterprise/operator-cli-contract.md"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_operator_contract.py"
+      ],
+      "adverse_result": "Focused tests verify deterministic machine-readable output, stable exit semantics, dry-run and confirmation controls, exact option and command inventory, default denial of unclassified commands, and refusal of unsupported destructive automation.",
+      "runbook": "docs/enterprise/operator-cli-contract.md"
+    },
+    "support-bundle-contract": {
+      "implementation": [
+        "packages/maverick-core/maverick/support_bundle.py",
+        "packages/maverick-core/maverick/cli/_ops_groups.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_support_bundle_security.py"
+      ],
+      "adverse_result": "Focused tests cover two-step preview and digest-bound consent, strict schema and bounds, classifier/redactor/verifier/audit failure, X25519 envelope encryption, recipient-key substitution, tampering, unsafe files and aliases, ciphertext-only output, and verified intake.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "production-api-contract": {
+      "implementation": [
+        "packages/maverick-dashboard/maverick_dashboard/api_boundary.py",
+        "packages/maverick-dashboard/maverick_dashboard/openapi_contract.py",
+        "packages/maverick-dashboard/maverick_dashboard/contracts/openapi-production-v1.json",
+        "packages/maverick-dashboard/maverick_dashboard/task_dispatch.py",
+        "packages/maverick-dashboard/maverick_dashboard/stream_cursor.py"
+      ],
+      "regressions": [
+        "packages/maverick-dashboard/tests/test_production_api_boundary.py",
+        "packages/maverick-dashboard/tests/test_production_task_lifecycle.py",
+        "packages/maverick-dashboard/tests/test_idempotency_delivery_recovery.py",
+        "packages/maverick-dashboard/tests/test_endpoint_policy.py"
+      ],
+      "adverse_result": "Focused API checks cover exact OpenAPI drift, body, query, rate and concurrency limits, safe errors, credential rejection, idempotency, server-side entitlements, durable tasks, restart repair, and reconnect cursors. The release verifier also refuses a self-consistent but checksum-recomputed API and OpenAPI substitution because the public assets must equal the exact tagged-source bytes.",
+      "runbook": "docs/api.md"
+    },
+    "parser-state-properties": {
+      "implementation": [
+        "packages/maverick-core/maverick/production_scope.py",
+        "packages/maverick-core/maverick/api_idempotency.py",
+        "packages/maverick-dashboard/maverick_dashboard/stream_cursor.py",
+        "scripts/verify_claim_evidence_ledger.py",
+        "scripts/verify_production_code_inventory.py"
+      ],
+      "regressions": [
+        "packages/maverick-dashboard/tests/test_production_boundary_fuzz.py",
+        "packages/maverick-core/tests/test_capability_attenuation_fuzz.py",
+        "packages/maverick-core/tests/test_parser_fuzz.py",
+        "packages/maverick-core/tests/test_path_tools_fuzz.py",
+        "packages/maverick-core/tests/test_claim_evidence_ledger.py",
+        "packages/maverick-core/tests/test_production_code_inventory.py"
+      ],
+      "adverse_result": "Deterministic property corpora exercise production manifests, status vocabularies, cursors, replay records, capabilities, paths, and strict JSON depth/size/duplicate/non-finite handling. Excluded plugin, MCP, connector, upload, archive, and knowledge parsers are not admitted by the first profile.",
+      "runbook": "docs/test-exception-policy.md"
+    },
+    "secret-rotation-contract": {
+      "implementation": [
+        "release/secret-rotation-contract.json",
+        "scripts/verify_secret_rotation_contract.py",
+        "packages/maverick-core/maverick/secret_staging.py",
+        "deploy/helm/maverick/templates/deployment.yaml"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_secret_rotation_contract.py",
+        "packages/maverick-core/tests/test_secret_staging.py",
+        "packages/maverick-core/tests/test_helm_production_profile.py"
+      ],
+      "adverse_result": "Local tests reject missing secret owners, zero-downtime overclaim, runtime projection drift, absent rollout generation, unsafe staging names, raw private-key projection, and weakened Helm rotation wiring. Live Vault rotation, overlap, revocation, and restart-window evidence remains unavailable.",
+      "runbook": "docs/enterprise/secret-rotation-contract.md"
+    },
+    "model-policy-draft": {
+      "implementation": [
+        "release/production-model-policy.json",
+        "packages/maverick-core/maverick/production_model_policy.py",
+        "scripts/verify_production_model_policy.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_model_policy.py"
+      ],
+      "adverse_result": "Local tests reject unapproved or unlisted models, policy-digest and runtime substitution, endpoint or mounted-credential drift, spend expansion, unsafe failover, expired approval, and provider-retry laundering. The checked-in policy remains deliberately unapproved and cannot qualify a release.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "service-objectives-draft": {
+      "implementation": [
+        "release/service-objectives.json",
+        "scripts/verify_service_objectives.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_service_objectives.py"
+      ],
+      "adverse_result": "Local tests require all objective dimensions, complete measured targets, distinct time-bounded approvals, exact profile binding, and fail-closed release-candidate validation. The checked-in targets and measurement sources remain empty, so no SLO or error-budget claim is approved.",
+      "runbook": "docs/enterprise/service-objectives.md"
+    },
+    "production-migration-contract": {
+      "implementation": [
+        "release/production-migration-contract.json",
+        "scripts/verify_production_migration_contract.py",
+        "packages/maverick-core/maverick/production_migration.py",
+        "packages/maverick-core/maverick/postgres_encryption_migrate.py",
+        "packages/maverick-core/maverick/world_model.py",
+        "packages/maverick-core/maverick/world_model_backends/postgres.py",
+        "packages/maverick-core/maverick/migrations.lock.json",
+        "deploy/helm/maverick/templates/migration-job.yaml",
+        "deploy/helm/maverick/values-production.yaml"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_migration.py",
+        "packages/maverick-core/tests/test_production_migration_contract.py",
+        "packages/maverick-core/tests/test_postgres_encryption_migrate.py",
+        "packages/maverick-core/tests/test_encryption_ops_cli.py",
+        "packages/maverick-core/tests/test_postgres_production_posture.py",
+        "packages/maverick-core/tests/test_postgres_tenant_migrations.py",
+        "packages/maverick-core/tests/test_world_model_migrations.py",
+        "packages/maverick-core/tests/test_helm_production_profile.py"
+      ],
+      "adverse_result": "A 302-test migration and Helm batch passed locally with checksum-verified Helm 3.17.3 renders. Repository controls cover exact predecessor-to-target plans, writer drain fencing, snapshot/PITR markers, encryption inventory and rewrite, rollback, commit-report-loss reconciliation, live-proof inputs, signed logs, and authorization bindings. RUN-14 remains pending until all twelve target Postgres, cluster, restore, interruption, reconciliation, live-policy, retention, and external-authorization requirements are exercised against the exact release.",
+      "runbook": "docs/enterprise/production-migration-safety.md"
+    },
+    "flow-transition-ledger": {
+      "implementation": [
+        "packages/maverick-core/maverick/flow/store.py",
+        "packages/maverick-core/maverick/flow/runner.py",
+        "packages/maverick-core/maverick/flow/execution.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_flow_execution_hardening.py",
+        "packages/maverick-core/tests/test_flow_postgres_authority.py"
+      ],
+      "adverse_result": "The immutable transition chain binds release and flow identity, pre-dispatch input, node status, typed receipt, output and post-data digests, next cursor, and its predecessor. Focused tests refuse missing, middle, recomputed, extra-tail, forged-receipt, cross-tenant, and ambiguous-effect transitions; the production Postgres authority commits the transition and run projection atomically under the run lock. Live provider reconciliation and failover remain deployment evidence.",
+      "runbook": "docs/specs/flow-node-transition-ledger.md"
+    },
+    "production-data-boundary": {
+      "implementation": [
+        "release/production-data-boundary.json",
+        "scripts/verify_production_data_boundary.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_data_boundary.py"
+      ],
+      "adverse_result": "The exact source contract inventories nine admitted flows and six processors through 25 source bindings and refuses semantic substitution, source drift, duplicate or non-finite JSON, and documentation-for-code substitution. Live regions, subprocessors, retention execution, provider settings, backup expiry, and customer-specific data inventories remain unqualified.",
+      "runbook": "docs/enterprise/production-data-boundary.md"
+    },
+    "production-operations-contract": {
+      "implementation": [
+        "release/production-operations-contract.json",
+        "scripts/verify_production_operations_contract.py",
+        "packages/maverick-core/maverick/audit/evidence.py",
+        "packages/maverick-core/maverick/audit_evidence_verify.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_operations_contract.py",
+        "packages/maverick-core/tests/test_audit_evidence.py"
+      ],
+      "adverse_result": "The source contract binds 26 alert rules, 12 dashboard panels, nine incident scenarios, verifier refusal behavior, redacted correlation, capacity controls, telemetry self-monitoring, and tenant-bound signed audit evidence export. It refuses inert PromQL, metadata or duration drift, source substitution, untrusted keys, broken chains, and selector mismatch. Live scrapes, routes, pages, staffing, drills, baselines, and customer commitments remain external.",
+      "runbook": "docs/enterprise/production-operations-runbook.md"
+    },
+    "production-onboarding-contract": {
+      "implementation": [
+        "release/production-onboarding-contract.json",
+        "packages/maverick-core/maverick/production_onboarding.py",
+        "scripts/verify_production_onboarding_contract.py",
+        "apps/installer-cli/maverick_installer/main.py",
+        "apps/installer-cli/maverick_installer/bridge.py",
+        "deploy/helm/maverick/templates/deployment.yaml"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_onboarding.py",
+        "apps/installer-cli/tests/test_entrypoint_and_abort.py",
+        "apps/installer-cli/tests/test_bridge_consumer_flow.py",
+        "packages/maverick-core/tests/test_helm_production_profile.py"
+      ],
+      "adverse_result": "Production installer mode is report-only and cannot write an evaluation configuration. All 11 required domains consume a trusted-authority-signed manifest bound to deployment ID, rendered configuration digest, source revision, exact onboarding contract, and exact release state. Missing, expired, duplicate, forged, dangling, cross-deployment, and same-ID/different-config evidence is refused; live observations and the external replay-consumption ledger remain operator evidence.",
+      "runbook": "docs/operator-first-run.md"
+    },
+    "production-qa-assurance": {
+      "implementation": [
+        "release/production-qa-assurance.json",
+        "scripts/verify_production_qa_assurance.py",
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yml",
+        ".github/workflows/publish.yml"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_qa_assurance.py",
+        "packages/maverick-core/tests/test_release_policy.py"
+      ],
+      "adverse_result": "The exact contract maps 16 admitted parser, protocol, state-machine, durability, and crash-recovery boundaries plus 11 supply-chain controls through 99 exact source bindings, 108 exact test functions, and 104 pinned actions. It covers governed-flow documents and transitions, vLLM tool-call JSON, tenant/workspace path normalization, the automation-safe operator CLI, erasure/retention state, torn logs, required checkpoints, child-process recovery, stale worker leases, queue recreation, flow-resume crash windows, transactional outbox repair, Postgres lock cleanup, process-wide admission draining, readiness withdrawal, and duplicate-safe restart. Reviewed source-byte and workflow-semantic pins refuse trigger removal, dead prerequisite chains, zero-job matrices, runner/container substitution, inherited failure-swallowing shells, environment or predecessor-step poisoning, duplicate/coerced/merged/anchored YAML, alternate pytest configuration, local pytest plugins, ancestor collection hooks, dynamic skip/xfail suppression, unpinned actions, erased mappings, and checksum-recomputed governance substitutions. Hosted exact-node execution, live provider/environment qualification, external assessment, staffed response, and live drills remain explicit limitations.",
+      "runbook": "docs/test-exception-policy.md"
+    },
+    "p0-adverse-regressions": {
+      "implementation": [
+        "packages/maverick-core/maverick/deployment.py",
+        "packages/maverick-dashboard/maverick_dashboard/endpoint_policy.py"
+      ],
+      "regressions": [
+        "packages/maverick-shield/tests/test_shield_failure_paths.py",
+        "packages/maverick-core/tests/test_audit_refusal_reaches_caller.py",
+        "packages/maverick-dashboard/tests/test_finance_workspace.py",
+        "packages/maverick-dashboard/tests/test_proxy_auth_gate.py",
+        "packages/maverick-core/tests/test_agent_required_output_safety.py",
+        "packages/maverick-core/tests/test_tenant_kms_fleet.py",
+        "packages/maverick-core/tests/test_control_plane_lease.py",
+        "packages/maverick-core/tests/test_flow_execution_hardening.py"
+      ],
+      "adverse_result": "Every confirmed source-addressable P0 blocker has a named adverse-path regression. The combined current-worktree refusal, authentication, tenant-isolation, lease-fencing, flow-recovery, and output-safety run passed 175 tests locally on 2026-08-04; live and externally administered P0 gates remain unresolved.",
+      "runbook": "docs/enterprise/deployment-playbook.md"
+    },
+    "unresolved-gate-register": {
+      "implementation": [
+        "scripts/verify_production_readiness.py",
+        "release/production-readiness-evidence.json",
+        "release/production-readiness-trust.json"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_readiness_evidence.py"
+      ],
+      "adverse_result": "This set proves only that every unresolved P0/P1 gate is explicitly recorded and cannot disappear behind an omitted-entry default. A ready packet must carry a committed Ed25519 signature over its exact source, revision, surface, timestamp, and gate semantics from a key pinned by the assessed source; no production readiness key is configured in this repository. It is not implementation, test, deployment, live-service, CI, or release evidence for any gate that cites it.",
+      "runbook": "release/README.md"
+    },
+    "proof-claim-hygiene": {
+      "implementation": [
+        "proof/RESULTS.md",
+        "proof/generate_results.py",
+        "proof/results/manifest.json",
+        "proof/run_proof.py",
+        "proof/self_harness_proof.py",
+        "proof/dgm_code_rung_proof.py",
+        "proof/swebench_governed_proof.py",
+        "proof/dgm_uplift_proof.py",
+        "proof/adapter_rung_proof.py",
+        "benchmarks/MOAT_RIGOROUS_RESULTS.md",
+        "packages/maverick-core/maverick/proof_guarantees.py",
+        "packages/maverick-core/maverick/proof_provenance.py",
+        "packages/maverick-core/maverick/proof_pack.py",
+        "scripts/verify_production_code_inventory.py"
+      ],
+      "regressions": [
+        "packages/maverick-core/tests/test_production_readiness_evidence.py",
+        "packages/maverick-core/tests/test_proof.py",
+        "packages/maverick-core/tests/test_proof_pack.py",
+        "packages/maverick-core/tests/test_proof_provenance.py",
+        "packages/maverick-core/tests/test_proof_results_generator.py",
+        "packages/maverick-core/tests/test_production_code_inventory.py"
+      ],
+      "adverse_result": "The local generator records the exact revision, dirty-worktree digest, source-stability check, argv, timestamps, runtime/dependency inventory, sanitized hermetic fixture environment, and retained raw-output digests. It fails the artifact when source changes during execution. Adapter fixtures pass locally; the code-DGM rung deliberately retains its unmet external authenticated-evaluator prerequisite. The packet remains self-authored local fixture evidence and is explicitly barred from production-release, competitive-capability, customer-ROI, compliance, and penetration-test claims.",
+      "runbook": "release/README.md"
+    }
+  },
+  "gates": [
+    {
+      "id": "SCOPE-01",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "release-engineering",
+      "rationale": "The first profile is an exact default-deny manifest and startup admission gate.",
+      "evidence_refs": [
+        "production-scope"
+      ]
+    },
+    {
+      "id": "SCOPE-02",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "model-risk",
+      "rationale": "Code and weights DGM remain research-only and every production execution/promotion path is refused.",
+      "evidence_refs": [
+        "dgm-exclusion",
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "SCOPE-03",
+      "priority": "P0",
+      "disposition": "excluded",
+      "owner": "product-security",
+      "rationale": "Unfinished clients, runtimes, and optional distributions are omitted and hidden from the first profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "SCOPE-04",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "product-governance",
+      "rationale": "Every discovered connector has an explicit non-production support tier, and the first profile admits none; catalog counts cannot be represented as live support.",
+      "evidence_refs": [
+        "claims-support-contract",
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "SCOPE-05",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "product-governance",
+      "rationale": "The checked-in external-effect contract defines PREPARED, COMMITTED, REFUSED, and INDETERMINATE semantics and regression checks prohibit universal exactly-once wording.",
+      "evidence_refs": [
+        "claims-support-contract",
+        "effect-lifecycle"
+      ]
+    },
+    {
+      "id": "SCOPE-06",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "product-governance",
+      "rationale": "The repository now has a fail-closed service-objective schema and approval contract, but every target, measurement source, evidence reference, and approval remains intentionally empty. Product, reliability, security, recovery, and support owners must approve measured objectives before this gate can close.",
+      "evidence_refs": [
+        "service-objectives-draft",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "SCOPE-07",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "product-governance",
+      "rationale": "One source policy binds production paths, owners, workflow authority, artifact staging, rollback/provenance checks, and release-state manifests. External branch and environment enforcement remains tracked under DEP-17 and the release gates.",
+      "evidence_refs": [
+        "change-control-contract",
+        "release-truth"
+      ]
+    },
+    {
+      "id": "SCOPE-08",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "product-governance",
+      "rationale": "Buyer documents are hash-bound to a conservative claim ledger that distinguishes repository facts, source inventory, draft policy, historical evidence, and deployment/external evidence requirements.",
+      "evidence_refs": [
+        "claims-support-contract",
+        "proof-claim-hygiene"
+      ]
+    },
+    {
+      "id": "SEC-01",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "product-security",
+      "rationale": "Required Shield composition distinguishes detector failure and blocks.",
+      "evidence_refs": [
+        "shield-fail-closed"
+      ]
+    },
+    {
+      "id": "SEC-02",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "product-security",
+      "rationale": "Real Shield failure paths and required call sites have adverse regressions.",
+      "evidence_refs": [
+        "shield-fail-closed"
+      ]
+    },
+    {
+      "id": "SEC-03",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "Consequential effects require durable audit preparation and honest completion state.",
+      "evidence_refs": [
+        "audit-effect-boundary"
+      ]
+    },
+    {
+      "id": "SEC-04",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "application-security",
+      "rationale": "Finance assessment APIs enforce tenant, suite, record, and action authority.",
+      "evidence_refs": [
+        "finance-authorization"
+      ]
+    },
+    {
+      "id": "SEC-05",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "identity-engineering",
+      "rationale": "Proxy SSO identity cannot be bypassed by an invite session.",
+      "evidence_refs": [
+        "production-identity"
+      ]
+    },
+    {
+      "id": "SEC-06",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "runtime-security",
+      "rationale": "Sealed child output is withheld before hooks, traces, and callbacks.",
+      "evidence_refs": [
+        "sealed-output"
+      ]
+    },
+    {
+      "id": "SEC-07",
+      "priority": "P0",
+      "disposition": "pending",
+      "owner": "identity-engineering",
+      "rationale": "The source now requires exactly one production identity provider, recomputes a secret-free provider/RBAC posture digest at every authentication decision and app-wide authorization boundary, default-denies unsupported SAML/shared-token/local-invite modes, binds the posture into signed onboarding evidence, and delivers exact non-secret Helm inputs through an immutable content-addressed ConfigMap while keeping credentials in the Secret projection. The gate remains pending because no exact-release live IdP/proxy, session, SCIM/revocation, role-assignment, break-glass, or end-to-end attribution evidence is recorded; mutable customer rosters also remain live change-controlled evidence rather than source-bound inputs.",
+      "evidence_refs": [
+        "production-identity",
+        "endpoint-inventory",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "SEC-08",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "The exact endpoint registry, reviewed background-job kinds, production tool registry, and supported operator command set are default-deny and fingerprint/contract checked; MCP, plugins, connectors, and callbacks are excluded.",
+      "evidence_refs": [
+        "endpoint-inventory",
+        "production-tool-contract",
+        "async-tenant-authority",
+        "operator-contract",
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "SEC-09",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "Plain bus data is structurally non-authoritative; capability changes require signed audience-bound delegation with finite expiry, replay protection, roster checks, and no downgrade on verification failure.",
+      "evidence_refs": [
+        "inter-agent-trust"
+      ]
+    },
+    {
+      "id": "SEC-10",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "Untrusted bus records retain provenance, are bounded and detached, pass required fail-closed Shield screening, are withheld on detector error, and cannot be reinterpreted as instruction authority.",
+      "evidence_refs": [
+        "inter-agent-trust",
+        "shield-fail-closed"
+      ]
+    },
+    {
+      "id": "SEC-11",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "Admitted audit, hook, exception, durable-job, trace, and support paths quarantine or emit bounded metadata on redaction/classification failure; voice, attachment, connector, channel, and plugin egress are absent from the profile.",
+      "evidence_refs": [
+        "hook-redaction-boundary",
+        "audit-redaction",
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "SEC-12",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "Session and invitation code enforces secure cookie posture, origin/CSRF rules, state replay protection, bounded lifetime, logout/revocation, invite single use, role/identity revocation, and exact principal attribution. Live IdP qualification remains SEC-07.",
+      "evidence_refs": [
+        "session-lifecycle",
+        "production-identity"
+      ]
+    },
+    {
+      "id": "SEC-13",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "The first profile admits no third-party plugin package, discovery path, runtime overlay, manifest, or tool; preflight and direct-invocation tests refuse plugin enablement before import.",
+      "evidence_refs": [
+        "excluded-surfaces",
+        "production-tool-contract"
+      ]
+    },
+    {
+      "id": "SEC-14",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "Vendor-console code, connected entitlement polling, root entitlement authority, credentials, routes, and packages are absent from and refused by the customer production artifact.",
+      "evidence_refs": [
+        "excluded-surfaces",
+        "production-scope"
+      ]
+    },
+    {
+      "id": "SEC-15",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "Dashboard query credentials are rejected before routing, signed-link routes are absent from the production registry and return 404 without token reflection, and deployment guidance uses authorization headers rather than URL credentials.",
+      "evidence_refs": [
+        "production-api-contract",
+        "endpoint-inventory",
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "SEC-16",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "Sensitive reads and publications use handle-bound custody with ownership/mode checks and refuse ancestor/final symlinks, reparse points, hard links, aliasing, and path-swap/ABA races on supported filesystem seams.",
+      "evidence_refs": [
+        "secure-path-custody"
+      ]
+    },
+    {
+      "id": "SEC-17",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "security-engineering",
+      "rationale": "Repository security regressions do not substitute for an independent scoped penetration test against the exact candidate deployment. No external assessor report, remediation record, retest, scope, or expiry is available.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "SEC-18",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "Configured secret custody never falls back to ambient environment authority.",
+      "evidence_refs": [
+        "secret-custody"
+      ]
+    },
+    {
+      "id": "SEC-19",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "Audit redaction failure cannot persist the original plaintext payload.",
+      "evidence_refs": [
+        "audit-redaction"
+      ]
+    },
+    {
+      "id": "SEC-20",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "security-engineering",
+      "rationale": "Hooks declare explicit privileges and classifications, receive bounded projections, cannot access sealed data, credentials, raw reasoning, or unredacted output by default, and fail with audited semantics.",
+      "evidence_refs": [
+        "hook-redaction-boundary"
+      ]
+    },
+    {
+      "id": "SBOX-01",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "platform-security",
+      "rationale": "Arbitrary command/code execution is disabled; no local-host fallback exists in the profile.",
+      "evidence_refs": [
+        "sandbox-network-boundary"
+      ]
+    },
+    {
+      "id": "SBOX-02",
+      "priority": "P0",
+      "disposition": "pending",
+      "owner": "platform-security",
+      "rationale": "A default-deny NetworkPolicy template exists, but no exact-release cluster/CNI egress-denial result or rendered live policy is recorded.",
+      "evidence_refs": [
+        "sandbox-network-boundary",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "SBOX-03",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "platform-security",
+      "rationale": "Production startup admits a read-only image/root plus only the exact workspace, state, temporary, configuration, and staged-secret mounts. It refuses host credentials, runtime sockets, control-plane paths, unexpected read-only mounts, aliases, and cross-tenant path custody before serving.",
+      "evidence_refs": [
+        "production-runtime-contract",
+        "secure-path-custody"
+      ]
+    },
+    {
+      "id": "SBOX-04",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-security",
+      "rationale": "Code and Helm contracts bound CPU, memory, PIDs, open files, single-file and temporary storage, output, tokens, wall time, tool calls, concurrency, and nested agents. The gate remains pending until the exact cluster proves cgroup/storage/network enforcement and whole-process-tree termination under exhaustion.",
+      "evidence_refs": [
+        "production-runtime-contract",
+        "tenant-quota-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "SBOX-05",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-security",
+      "rationale": "The production Dockerfile and Helm profile declare an unprivileged user, non-root security context, dropped capabilities, seccomp, and read-only root. No exact image inspection plus target-cluster admission/runtime result proves every shipped production image actually runs non-root.",
+      "evidence_refs": [
+        "production-runtime-contract",
+        "sandbox-network-boundary",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "SBOX-06",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "platform-security",
+      "rationale": "Every admitted model-visible tool and direct or flow dispatch is classified by a default-deny contract that binds capability, tenant, principal, resources, approval, Shield, sandbox, and required audit policy. Unclassified paths refuse, while MCP, plugins, connectors, callbacks, and consequential tools are excluded from this profile.",
+      "evidence_refs": [
+        "production-tool-contract",
+        "approval-dispatch-contract",
+        "endpoint-inventory",
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "SBOX-07",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "platform-security",
+      "rationale": "Approval preparation and commit bind the normalized tool, parameters, tenant, principal, destination, data scope, expiry, idempotency identity, and action revision; mutation, replay, competing decisions, and required-audit failure refuse publication.",
+      "evidence_refs": [
+        "approval-dispatch-contract",
+        "effect-lifecycle"
+      ]
+    },
+    {
+      "id": "SBOX-08",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-security",
+      "rationale": "Arbitrary/model-generated command execution is disabled and local fallback is refused, reducing the first-profile attack surface. The non-conditional gate still lacks exact-cluster adversarial escape, path, process-flood, DNS/loopback/metadata, and credential-discovery results for the runtime boundary.",
+      "evidence_refs": [
+        "production-runtime-contract",
+        "sandbox-network-boundary",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "SBOX-09",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "platform-security",
+      "rationale": "Firecracker is not an admitted production runtime or package surface.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "SBOX-10",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-security",
+      "rationale": "A strict model-policy verifier rejects model, endpoint, credential, region, retention, spend, failover, approval, and digest drift, but the checked-in policy is deliberately unapproved and names no exact model artifact or qualified vLLM deployment.",
+      "evidence_refs": [
+        "model-policy-draft",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "SBOX-11",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "runtime-security",
+      "rationale": "Every admitted tool carries and validates the complete production policy contract.",
+      "evidence_refs": [
+        "production-tool-contract"
+      ]
+    },
+    {
+      "id": "SBOX-12",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "platform-security",
+      "rationale": "Production child processes are constructed from an explicit minimal environment allowlist, then reject ambient provider, cloud, CI, proxy, SSH, key-agent, container, Kubernetes, and file-custody secret variables rather than inheriting and pattern-scrubbing the controller environment.",
+      "evidence_refs": [
+        "production-runtime-contract"
+      ]
+    },
+    {
+      "id": "SBOX-13",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-security",
+      "rationale": "Production refuses mutable or unattested sandbox image references and admits no sandbox execution backend. No approved sandbox image digest, verified signature, SBOM, vulnerability result, or toolchain allowlist exists for a future admitted sandbox image.",
+      "evidence_refs": [
+        "production-runtime-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "SBOX-14",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-security",
+      "rationale": "The first profile refuses every arbitrary-execution workload, so no weaker backend can be selected today. A future-facing risk classification and approved mapping to ordinary containers, gVisor, microVM, or remote isolation has not been approved or qualified.",
+      "evidence_refs": [
+        "production-runtime-contract",
+        "model-policy-draft",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DATA-01",
+      "priority": "P0",
+      "disposition": "excluded",
+      "owner": "data-security",
+      "rationale": "Knowledge/RAG is disabled and its distribution is omitted from production packaging.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "DATA-02",
+      "priority": "P0",
+      "disposition": "excluded",
+      "owner": "data-security",
+      "rationale": "Document retrieval is absent because knowledge/RAG is outside the profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "DATA-03",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "data-security",
+      "rationale": "Malformed or unavailable tenant BYOK overlays fail closed without global/local fallback.",
+      "evidence_refs": [
+        "secret-custody"
+      ]
+    },
+    {
+      "id": "DATA-04",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "data-security",
+      "rationale": "Production DEK caching has a finite immutable TTL, revalidates tenant authority under the cache lock, zeroes cached material on suspension, deletion, or rotation, and refuses unavailable or malformed custody instead of extending stale authority. Python cannot guarantee physical memory erasure beyond best-effort buffer zeroing, which is stated explicitly.",
+      "evidence_refs": [
+        "dek-cache-lifecycle",
+        "secret-custody"
+      ]
+    },
+    {
+      "id": "DATA-05",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "Production code requires remote Vault custody, mounted wrapped audit-key material, and no ambient/local fallback. The exact Vault offering, key identities, HA/auth posture, wrong-context denial, outage, recovery, rotation, and separation from application/data-plane administration remain live external evidence.",
+      "evidence_refs": [
+        "secret-custody",
+        "dek-cache-lifecycle",
+        "secret-rotation-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DATA-06",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "The repository implements signed hash chains, anchor verification, lag probes, and refusal on required persistence failure. No exact-release off-host anchor destination, independent custody, deletion-resistance exercise, retained public-key history, or delivery reconciliation record exists.",
+      "evidence_refs": [
+        "assurance-observability",
+        "audit-effect-boundary",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DATA-07",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "Completeness/backlog, refusal, forwarding, anchor-age, and integrity signals plus alert rules exist in source. The exact deployment has not proved end-to-end scrape, expected-event reconciliation, dropped-event detection, firing/routing, and operator acknowledgment.",
+      "evidence_refs": [
+        "assurance-observability",
+        "siem-outbox",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DATA-08",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "Startup and migration contracts require Postgres, reject unsafe TLS/role/RLS posture, and expose dependency-aware readiness. No exact managed Postgres offering, CA/server identity, live handshake, failover, connection-pool, or deployed readiness packet is retained.",
+      "evidence_refs": [
+        "postgres-tenant-rls",
+        "production-migration-contract",
+        "dependency-failure-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DATA-09",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "Repository implementation and local adverse checks cover least-privilege runtime roles, direct and child-table forced RLS, migration-owner apply, continuous readiness verification, and refusal of an incomplete local Postgres tenant purge. The gate remains pending until an exact approved release has a retained live apply report, deployed-policy/readiness evidence, and live cross-tenant read/write results.",
+      "evidence_refs": [
+        "postgres-tenant-rls"
+      ]
+    },
+    {
+      "id": "DATA-10",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "data-security",
+      "rationale": "The admitted queue, claim, retry, cron, resume, flow-action, checkpoint, and child-agent paths durably bind and restore the exact tenant, principal, grant, suite, budget, and child identities; ownerless, legacy, tampered, suspended, or revoked authority is quarantined before work.",
+      "evidence_refs": [
+        "async-tenant-authority",
+        "durable-worker-authority"
+      ]
+    },
+    {
+      "id": "DATA-11",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "Knowledge/vector retrieval is excluded from the first profile, but the broader non-conditional gate is not closed: pgvector isolation is environment-conditional, Redis coverage is offline/fake-client, and no accepted external-store credential, namespace, enumeration, TLS, deletion, or backup packet exists.",
+      "evidence_refs": [
+        "excluded-surfaces",
+        "dependency-failure-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DATA-12",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "Local lifecycle tests cover tenant-scoped world/flow rows, files, caches, exports, signed value-free receipts, concurrent mutation, and residual refusal. Exact deployed backups, managed retention expiry, object/vector stores, traces, support intake, immutable-audit exceptions, and independent restore verification remain unproven.",
+      "evidence_refs": [
+        "retention-erasure-contract",
+        "postgres-encryption-migration",
+        "support-bundle-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DATA-13",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "The shared quota authority binds storage, vector, concurrent-run, queue, token, spend, tool, and connector ceilings with generation fencing, leases, settlement, readiness, and metrics. Live Postgres concurrency/failover plus target-load no-overshoot, fairness, and operator-approved limit evidence is still required.",
+      "evidence_refs": [
+        "tenant-quota-contract",
+        "provider-cost-authority",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DATA-14",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "The source contract now maps nine admitted data flows, six processors, classifications, purpose, access, encryption, retention, residency, and exact evidence bindings. It cannot establish the actual customer inventory, managed-provider regions and subprocessors, configured retention and erasure execution, backup expiry, or deployment access review, so live qualification remains open.",
+      "evidence_refs": [
+        "production-data-boundary",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DATA-17",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "Repository implementation and local adverse checks cover the whole-database Postgres sealed-field inventory/rewrite, strict startup, rollback, and incomplete-purge refusal. The gate remains pending until the exact approved release records a live zero-plaintext migration, strict-mode deployment, managed snapshot/PITR marker, restore, and key-recovery drill.",
+      "evidence_refs": [
+        "postgres-encryption-migration"
+      ]
+    },
+    {
+      "id": "DATA-18",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "Application sealing, sensitive-field inventory/rewrite, strict reads, rotation hooks, rollback, and refusal paths exist. The design is not production-qualified until the exact release proves whole-database migration, managed snapshot, independent restore, historical decrypt/key recovery, and rollback against live Postgres.",
+      "evidence_refs": [
+        "postgres-encryption-migration",
+        "production-migration-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DATA-19",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "Runbooks require separate Vault/key-recovery custody and refuse treating a ciphertext-only archive as recoverable. Separate accounts, credentials, operators, access logs, retention, and an isolated combined data-and-key recovery drill are external deployment evidence and are absent.",
+      "evidence_refs": [
+        "secret-custody",
+        "production-migration-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DATA-20",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "data-security",
+      "rationale": "The encrypted bounded outbox implements authenticated HTTPS/secret enforcement, acknowledgment, stable idempotency, leases, retry/backoff, dead-letter/redrive, reconciliation, and backlog metrics. The live collector TLS identity, always-on drain schedule, ACK/replay drill, deployed alerts, and operator response remain unproven.",
+      "evidence_refs": [
+        "siem-outbox",
+        "assurance-observability",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DATA-21",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "data-security",
+      "rationale": "The supported construction and public ingestion paths now propagate the active Shield and OCR/describer, validate bounded authority and provenance before parser/OCR work, hash the exact processed snapshot, scan the full document and every chunk, and durably quarantine complete bounded uploader/source/parser/digest/policy/verdict provenance while storing zero chunks for malformed, contradictory, explicit, or exception scanner failure. Required startup and recall accept only HMAC-valid records carrying the current policy and exact allowed verdict, and owned stores are deterministically closed. Knowledge/RAG remains excluded from the first profile: this source-local closure does not qualify plaintext storage, write authorization, retention or physical erasure, parser isolation, tenant-domain-separated keys, database-enforced isolation, live providers, external checkpoint custody, disaster recovery, retrieval quality, or grounded answers.",
+      "evidence_refs": [
+        "shield-fail-closed",
+        "knowledge-ingestion-integrity",
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "RUN-01",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "Both dashboard and serve entrypoints acquire the same writer lease.",
+      "evidence_refs": [
+        "control-plane-topology"
+      ]
+    },
+    {
+      "id": "RUN-02",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "platform-engineering",
+      "rationale": "Startup and Helm enforce exactly one control-plane replica and no autoscaling.",
+      "evidence_refs": [
+        "control-plane-topology",
+        "production-scope"
+      ]
+    },
+    {
+      "id": "RUN-03",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "A strict cross-process run lock spans approval load, effect, and final save.",
+      "evidence_refs": [
+        "approval-resume"
+      ]
+    },
+    {
+      "id": "RUN-04",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "Every admitted consequential boundary either durably binds an idempotency identity and exact replay result or stops in typed INDETERMINATE state after an ambiguous dispatch. Blind retry, mismatched reuse, expired-key resurrection, and success from unauthenticated provider text are refused; model-visible external mutations and connectors are currently excluded.",
+      "evidence_refs": [
+        "effect-lifecycle",
+        "typed-receipts",
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "RUN-05",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "The flow API exposes bounded evidence, reconciliation and escalation deadlines, permitted actions, and an escalation target. Only configured adjudicators can publish one immutable audited resolution containing authoritative evidence, disposition, compensating action, and permanent replacement authority.",
+      "evidence_refs": [
+        "effect-lifecycle",
+        "operator-contract"
+      ]
+    },
+    {
+      "id": "RUN-06",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "A timed-out action thread is awaited to its real terminal state before downstream work and is never retried concurrently or reported cancelled. Ambiguous provider timeout or connection loss remains INDETERMINATE unless authenticated provider evidence proves otherwise.",
+      "evidence_refs": [
+        "effect-lifecycle",
+        "failure-checkpoint-contract"
+      ]
+    },
+    {
+      "id": "RUN-07",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "The required child ledger durably binds stable child identity and authority, committed messages, next step, pending boundary status, budget and spawn reservations, result, operation membership, and join state. Crash reconstruction, omitted work, authority drift, duplicate execution, and ambiguous tool/model boundaries fail closed.",
+      "evidence_refs": [
+        "durable-worker-authority"
+      ]
+    },
+    {
+      "id": "RUN-08",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "Production jobs persist attempts, tenant/principal authority, deadlines, idempotency identity, leases, heartbeats, typed retry class, dispatch intent, and dead-letter state in the shared authority. Cross-process claims, worker loss, expiry, recovery, and final acknowledgment have adverse regressions.",
+      "evidence_refs": [
+        "durable-worker-authority",
+        "async-tenant-authority"
+      ]
+    },
+    {
+      "id": "RUN-09",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "runtime-engineering",
+      "rationale": "Cross-process A2A and worker-dispatch interfaces are excluded from the single-process production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "RUN-10",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "Production, code, tool-bound, and consequential outputs now refuse and withhold after a second general-verifier rejection. Only development informational output may retain a bounded uncertainty note, and unknown policy values fail closed.",
+      "evidence_refs": [
+        "production-operations-contract"
+      ]
+    },
+    {
+      "id": "RUN-11",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "The first profile admits no flow-learning signals, self-learning adoption, reward-model updates, code/weights evaluation, or automatic promotion. Production entrypoints refuse learning outcomes before any unauthenticated, replayed, cross-tenant, or self-awarded signal can become authority.",
+      "evidence_refs": [
+        "dgm-exclusion",
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "RUN-12",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "runtime-engineering",
+      "rationale": "Shared Postgres authorities durably reserve, settle, reconcile, and recover tenant resource and provider-cost ceilings, and fail closed on corrupt or unavailable authority. Exact provider billing reconciliation and multi-replica concurrency/failover/load proof are still required to establish deployment-wide no-overshoot.",
+      "evidence_refs": [
+        "tenant-quota-contract",
+        "provider-cost-authority",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "RUN-13",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "runtime-engineering",
+      "rationale": "The repository now atomically closes process-wide admission before producer teardown, counts dispatches, semaphore waiters, running goals, and claimed jobs through durable settlement, withdraws readiness immediately, flushes authority audits after quiescence, retains the control-plane lease unless zero drain is proven, and leaves interrupted idempotent outboxes retryable. Local regressions cover stale copied-context bypass and duplicate-safe restart. The gate remains pending because no exact deployed SIGTERM, rolling-container, queue/Postgres/provider traffic, termination-grace, or forced-kill exercise has retained evidence.",
+      "evidence_refs": [
+        "coordinated-runtime-drain",
+        "durable-worker-authority",
+        "failure-checkpoint-contract",
+        "effect-lifecycle",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "RUN-14",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "runtime-engineering",
+      "rationale": "Versioned predecessor-to-target plans, lock digests, migration-owner fencing, writer drain, backup/PITR markers, encryption rewrite, rollback, reconciliation, live-proof inputs, signed logs, and Helm hook controls pass 292 local checks. The gate remains pending until the exact release completes all twelve managed-Postgres, target-cluster, rehearsal, restore, interruption, live-policy, retention, and external-authorization requirements.",
+      "evidence_refs": [
+        "production-migration-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "RUN-15",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "runtime-engineering",
+      "rationale": "Runtime, API, flow, queue, provider-cost, and tenant-quota contracts impose bounded concurrency, resources, queue depth, reservations, and refusal/backpressure locally. Live target-load evidence is still required for provider, Postgres, storage, stream, worker, and tenant fairness at operator-approved ceilings.",
+      "evidence_refs": [
+        "production-runtime-contract",
+        "tenant-quota-contract",
+        "provider-cost-authority",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "RUN-16",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "A shared generation-fenced kill-switch authority gates admission, active runs, schedules, queues, workers, flows, tool and connector dispatch, retries, and learning seams; authority or audit failure blocks, concurrent re-arm wins, and terminal shutdown state is typed and recorded.",
+      "evidence_refs": [
+        "fleet-killswitch"
+      ]
+    },
+    {
+      "id": "RUN-17",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "runtime-engineering",
+      "rationale": "Policy and failure-taxonomy code rejects unapproved failover, ambiguous effects, and error laundering. No approved exact provider/model pair has retained timeout, partial-stream, duplicate-charge, quota, rotation, regional-outage, policy-refusal, or response-drift qualification evidence.",
+      "evidence_refs": [
+        "model-policy-draft",
+        "failure-checkpoint-contract",
+        "provider-cost-authority",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "RUN-19",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "runtime-security",
+      "rationale": "The typed signed receipt contract covers any model-visible consequential tool admitted to the production registry, and model-visible mutations are currently disabled. This does not claim typed-receipt coverage for supported operator CLI administration.",
+      "evidence_refs": [
+        "typed-receipts",
+        "production-tool-contract"
+      ]
+    },
+    {
+      "id": "RUN-20",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "Required checkpoint refusal, corruption, staleness, partial state, or persistence failure produces a typed durability_failed state and stops before the next consequential boundary instead of silently restarting from a fresh run.",
+      "evidence_refs": [
+        "failure-checkpoint-contract",
+        "durable-worker-authority"
+      ]
+    },
+    {
+      "id": "RUN-21",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "Provider failure, policy refusal, budget exhaustion, cancellation, human wait, verifier rejection, deterministic tool failure, durability failure, and ambiguous effect remain distinct typed states through runtime, flow persistence, API responses, audit records, and telemetry.",
+      "evidence_refs": [
+        "failure-checkpoint-contract"
+      ]
+    },
+    {
+      "id": "RUN-22",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "Production definitions, immutable releases, runs, approvals, idempotency claims, reconciliation records, and locks route to one tenant-scoped transactional Postgres authority. Local fallback, stale reads, partial writes, CAS loss, RLS absence, driver loss, and lock cleanup failure are refused.",
+      "evidence_refs": [
+        "flow-postgres-authority"
+      ]
+    },
+    {
+      "id": "RUN-23",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "runtime-engineering",
+      "rationale": "Every agent or action occurrence now appends an immutable chained transition binding release and definition identity, pre-dispatch input, status, typed receipt, output and post-data digests, next cursor, and predecessor. The production Postgres authority commits that transition and the run projection atomically under the run lock; malformed, missing, forged, contradictory, and ambiguous-effect paths refuse advancement.",
+      "evidence_refs": [
+        "effect-lifecycle",
+        "flow-postgres-authority",
+        "flow-transition-ledger"
+      ]
+    },
+    {
+      "id": "RUN-24",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "runtime-engineering",
+      "rationale": "Typed failures, cost authority, and strict model policy provide repository seams, but no supported exact provider/model version has passed one retained conformance matrix for tools/results, continuity, streaming, usage, cancellation, timeout, malformed responses, limits, and error classification.",
+      "evidence_refs": [
+        "failure-checkpoint-contract",
+        "provider-cost-authority",
+        "model-policy-draft",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DGM-01",
+      "priority": "P0",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Production code-candidate execution is disabled.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DGM-02",
+      "priority": "P0",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Production DGM evidence admission is absent because DGM execution/promotion is disabled.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DGM-03",
+      "priority": "P0",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Production candidates cannot execute, so candidate egress and output paths are absent.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DGM-04",
+      "priority": "P0",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Production promotion is disabled; no approval-key registry grants DGM authority.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DGM-05",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Code/weights DGM, self-learning adoption, and maverick-evolve deployment are excluded from the supported production profile.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DGM-06",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Code/weights DGM, self-learning adoption, and maverick-evolve deployment are excluded from the supported production profile.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DGM-07",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Code/weights DGM, self-learning adoption, and maverick-evolve deployment are excluded from the supported production profile.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DGM-08",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Code/weights DGM, self-learning adoption, and maverick-evolve deployment are excluded from the supported production profile.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DGM-09",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Code/weights DGM, self-learning adoption, and maverick-evolve deployment are excluded from the supported production profile.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DGM-10",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Code/weights DGM, self-learning adoption, and maverick-evolve deployment are excluded from the supported production profile.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DGM-11",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "model-risk",
+      "rationale": "A deterministic local generator now binds fixture results to the exact revision and dirty-worktree digest, verifies source stability across execution, records exact commands, timestamps, runtime dependencies, sanitized fixture-environment hashes, and retained raw-output digests, and preserves unmet prerequisites and limitations. Final packet generation is sequenced after all source changes. This source closure does not qualify a release or establish competitive capability, customer ROI, compliance, live-service behavior, or an externally authenticated DGM evaluator.",
+      "evidence_refs": [
+        "proof-claim-hygiene"
+      ]
+    },
+    {
+      "id": "DGM-12",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "model-risk",
+      "rationale": "Invalid MOAT numbers are retained only as a non-citable failure record, while fixture/oracle/stub proof outputs are explicitly barred from production, competitive-capability, ROI, and release claims.",
+      "evidence_refs": [
+        "proof-claim-hygiene"
+      ]
+    },
+    {
+      "id": "DGM-14",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Code/weights DGM, self-learning adoption, and maverick-evolve deployment are excluded from the supported production profile.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DGM-15",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Code/weights DGM, self-learning adoption, and maverick-evolve deployment are excluded from the supported production profile.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DGM-16",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "model-risk",
+      "rationale": "Code/weights DGM, self-learning adoption, and maverick-evolve deployment are excluded from the supported production profile.",
+      "evidence_refs": [
+        "dgm-exclusion"
+      ]
+    },
+    {
+      "id": "DEP-01",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "platform-engineering",
+      "rationale": "The hardened production overlay encodes the admitted profile and fails closed on weakened values.",
+      "evidence_refs": [
+        "production-scope",
+        "sandbox-network-boundary"
+      ]
+    },
+    {
+      "id": "DEP-02",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "The Helm profile renders a default-deny ingress/egress policy and requires exact DNS, ingress, and dependency CIDRs. No target-cluster CNI/server-side admission result or live allowed/denied traffic matrix proves the policy is enforced.",
+      "evidence_refs": [
+        "sandbox-network-boundary",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-03",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "Production Helm and release contracts reject mutable image references and require a digest. No exact built image digest has been signed, scanned, published, bound to the source revision, and admitted by the target cluster.",
+      "evidence_refs": [
+        "production-runtime-contract",
+        "release-truth",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-04",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "The reviewed Helm workload disables service-account token automount and runtime startup rejects a projected Kubernetes token path. No target-cluster admission/runtime inspection proves every rendered production pod preserves that setting.",
+      "evidence_refs": [
+        "production-runtime-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-05",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "Production requires exact staged file custody, refuses raw/ambient credentials, and defines rotation generations and ownership. Live Vault/CSI or equivalent projection, access policy, overlap, revocation, restart, rollback, and audit evidence is absent.",
+      "evidence_refs": [
+        "secret-custody",
+        "secret-rotation-contract",
+        "production-runtime-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-06",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "Source and Helm contracts require HTTPS ingress/dependencies, verified Postgres TLS, Vault TLS, and authenticated metrics/SIEM endpoints. No exact certificates, trust roots, hostname verification, expiry/rotation result, or end-to-end live traffic proof exists.",
+      "evidence_refs": [
+        "postgres-tenant-rls",
+        "siem-outbox",
+        "secret-custody",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-07",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "The dependency contract maps required Postgres, KMS, model, audit, quota, policy, and queue conditions to fail-closed readiness signals. No target deployment has exercised each dependency outage and verified removal from service plus recovery behavior.",
+      "evidence_refs": [
+        "dependency-failure-contract",
+        "assurance-observability",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-08",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "The Helm/runtime contract sets CPU, memory, ephemeral/PVC storage, process/file limits, concurrency, and termination grace. Target-cluster quota, storage class, eviction, disk-pressure, OOM, and cleanup behavior have not been admitted and exercised.",
+      "evidence_refs": [
+        "production-runtime-contract",
+        "tenant-quota-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-09",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "The migration and change-control contracts define fenced pre-upgrade jobs, predecessor compatibility, rollback/forward-fix decisions, evidence retention, and failure refusal. No exact staging-to-production rollout, health gate, rollback, or mixed-version prevention exercise is retained.",
+      "evidence_refs": [
+        "production-migration-contract",
+        "change-control-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-10",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "Contracts require managed snapshot/PITR completion and retention markers before destructive migration. No provider automation, encryption/custody proof, schedule, retention, alerting, or exact-release recovery point is available.",
+      "evidence_refs": [
+        "production-migration-contract",
+        "postgres-encryption-migration",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-11",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "Migration admission requires an independent restore/integrity evidence input, but no isolated full restore has measured RPO/RTO, row/integrity counts, RLS/TLS posture, audit-chain continuity, application decrypt, or key recovery for the exact candidate.",
+      "evidence_refs": [
+        "production-migration-contract",
+        "postgres-encryption-migration",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-12",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "The source contract documents admission, in-flight, readiness, operator response, recovery, and excluded behavior for each required dependency. Exact region/provider topology, target-environment outage drills, data-loss boundaries, and approved customer-facing recovery commitments remain unset.",
+      "evidence_refs": [
+        "dependency-failure-contract",
+        "service-objectives-draft",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-13",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "Repository release policy checks staged cohorts, checksums, signatures, provenance, and immutable references. No exact signed artifact or target-cluster admission policy has verified publisher identity, signature, provenance, and digest before deployment.",
+      "evidence_refs": [
+        "change-control-contract",
+        "release-truth",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-14",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "Helm and migration contracts can bind exact configuration and artifact digests, but there is no retained staging inventory proving parity for cluster policy, Postgres, Vault, identity, model, network, storage, and observability before promotion.",
+      "evidence_refs": [
+        "production-runtime-contract",
+        "production-migration-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "DEP-17",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "platform-engineering",
+      "rationale": "Source policy constrains workflow permissions, owners, artifact staging, and release provenance, and rejects authority expansion in tests. Protected branches, required independent review, GitHub environment approvals, Trusted Publisher identity, and hosted workflow enforcement are external and unverified.",
+      "evidence_refs": [
+        "change-control-contract",
+        "release-truth",
+        "namespace-ownership-blocker",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "OPS-01",
+      "priority": "P0",
+      "disposition": "pending",
+      "owner": "site-reliability",
+      "rationale": "Metrics, alert rules, and runbooks exist, but no exact-release deployed scrape, firing, routing, and operator-acknowledgment evidence is recorded.",
+      "evidence_refs": [
+        "assurance-observability",
+        "production-operations-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "OPS-02",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "site-reliability",
+      "rationale": "Source controls emit redacted structured logs, bounded authenticated metrics, and signed audit correlation spanning tenant, principal, agent, flow or run, action, approval or signoff, receipt, provider, and connector. Secret leakage, unsafe cardinality, unauthenticated scrape, and correlation drift are covered by fail-closed regressions; deployed collector operation remains OPS-01 and OPS-11 evidence.",
+      "evidence_refs": [
+        "production-operations-contract"
+      ]
+    },
+    {
+      "id": "OPS-03",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "site-reliability",
+      "rationale": "The repository contains a complete objective schema and draft measurement contract, but approved targets, live baselines, error-budget policy, and measured exact-release results remain empty.",
+      "evidence_refs": [
+        "production-operations-contract",
+        "service-objectives-draft",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "OPS-04",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "site-reliability",
+      "rationale": "Twenty-six alert rules, 12 dashboard panels, severities, owners, runbooks, and customer-impact interpretations are exact-source bound. No live threshold calibration, page route, notification delivery, or operator acknowledgement has been retained.",
+      "evidence_refs": [
+        "production-operations-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "OPS-05",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "site-reliability",
+      "rationale": "Nine required incident scenarios and their source runbooks are inventoried and drift-checked, but none has a retained production-like rehearsal, timing, operator acknowledgement, recovery, or after-action record.",
+      "evidence_refs": [
+        "production-operations-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "OPS-06",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "site-reliability",
+      "rationale": "Fail-closed fleet halt, admission stop, session and delegation revocation, secret rotation, and evidence preservation source controls exist. An exact-release production-like drill measuring containment and safe recovery has not been performed.",
+      "evidence_refs": [
+        "production-operations-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "OPS-07",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "site-reliability",
+      "rationale": "Capacity, quota, provider-spend, queue, database, storage, and telemetry-pipeline metrics and alerts are source-bound. Live baselines, budgets, forecasts, saturation tests, and forecasted-exhaustion pages remain unverified.",
+      "evidence_refs": [
+        "production-operations-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "OPS-08",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "site-reliability",
+      "rationale": "The audit evidence command creates one active tenant's signed, chain-verifiable day or time-range packet with optional goal, incident, or action selectors. Offline verification requires an independently trusted publisher key and refuses another tenant, untrusted keys, broken chains, missing anchors, tampering, and selector omission or addition.",
+      "evidence_refs": [
+        "production-operations-contract"
+      ]
+    },
+    {
+      "id": "OPS-09",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "site-reliability",
+      "rationale": "Severity, escalation, maintenance, status, notification, and after-action source procedures exist, but primary and backup rotations, response commitments, contact paths, and a live escalation exercise are not staffed or evidenced.",
+      "evidence_refs": [
+        "production-operations-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "OPS-11",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "site-reliability",
+      "rationale": "The exact alert contract covers audit/SIEM backlog and dead letters, scrape authentication failure, telemetry readiness, exporter failure, and bounded cardinality. Live authenticated-TLS scrape, exporter delivery, firing, routing, and acknowledgement evidence is absent.",
+      "evidence_refs": [
+        "production-operations-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "API-01",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "application-security",
+      "rationale": "The exact endpoint policy inventory is default-deny and fingerprint pinned.",
+      "evidence_refs": [
+        "endpoint-inventory",
+        "production-identity"
+      ]
+    },
+    {
+      "id": "API-02",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "application-security",
+      "rationale": "An exact 69-operation OpenAPI and API contract at contract version 5.0.0 now exists with compatibility, deprecation, migration, and contract tests. It is intentionally unpublished and release_eligible=false, so no supported compatibility commitment has begun.",
+      "evidence_refs": [
+        "production-api-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "API-03",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "application-security",
+      "rationale": "The exact production endpoint registry applies bounded query, body, multipart/message, pagination, cursor, timeout, per-principal/global concurrency, rate, schema, and safe-error policy before routing. Upload endpoints are absent, and the single-control-plane profile makes process-wide admission counters authoritative.",
+      "evidence_refs": [
+        "production-api-contract",
+        "endpoint-inventory",
+        "production-runtime-contract"
+      ]
+    },
+    {
+      "id": "API-04",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "application-security",
+      "rationale": "Every admitted consequential HTTP operation requires a durable key bound to tenant, principal, route operation, canonical validated request, expiry, first result, and dispatch intent. Mismatched reuse, concurrent claims, lost acknowledgments, retirement, and ambiguous recovery refuse duplicate mutation.",
+      "evidence_refs": [
+        "production-api-contract",
+        "effect-lifecycle"
+      ]
+    },
+    {
+      "id": "API-05",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "application-security",
+      "rationale": "Open requirement: Validate browser security as deployed. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "API-06",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "application-security",
+      "rationale": "Admitted tasks persist authoritative dispatch and lifecycle state before acknowledgment, repair after restart or worker loss, bind cancellation/retry identities, and expose monotonic reconnect cursors or content-addressed snapshots instead of relying on process memory.",
+      "evidence_refs": [
+        "durable-worker-authority",
+        "production-api-contract"
+      ]
+    },
+    {
+      "id": "API-07",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "application-security",
+      "rationale": "MCP task/resource service state is outside the supported production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "API-08",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "application-security",
+      "rationale": "MCP HTTP and stdio interfaces are outside the supported production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "API-09",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "application-security",
+      "rationale": "MCP sampling is outside the supported production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "API-10",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "application-security",
+      "rationale": "The supported command inventory has deterministic structured output and exit semantics, noninteractive automation, dry-run and confirmation controls for destructive commands, safe defaults, bounded options, actionable errors, and default denial of unclassified commands.",
+      "evidence_refs": [
+        "operator-contract"
+      ]
+    },
+    {
+      "id": "API-11",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "application-security",
+      "rationale": "Endpoint admission resolves semantic entitlements against the signed production surface and tenant grants on the server, while missing, expired, unknown, untrusted, or unavailable paid authority denies. UI hiding and client state never grant suite, connector, model, or enterprise-control access.",
+      "evidence_refs": [
+        "production-api-contract",
+        "endpoint-inventory",
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "API-13",
+      "priority": "P0",
+      "disposition": "excluded",
+      "owner": "client-security",
+      "rationale": "Embedded/mobile/widget clients are outside the profile and omitted from production authority.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "API-14",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "application-security",
+      "rationale": "Open requirement: Publish MCP/client conformance evidence. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "INT-01",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "integration-security",
+      "rationale": "All connectors/channels default off, remain hidden, and are absent from the production package set.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "INT-02",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "integration-security",
+      "rationale": "Open requirement: Certify each supported connector against a live vendor sandbox. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "INT-03",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "integration-security",
+      "rationale": "Open requirement: Harden OAuth and credential lifecycle. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "INT-04",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "integration-security",
+      "rationale": "Open requirement: Verify inbound callbacks. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "INT-05",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "integration-security",
+      "rationale": "Open requirement: Govern outbound writes. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "INT-06",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "integration-security",
+      "rationale": "Open requirement: Test channel lifecycle. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "INT-07",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "integration-security",
+      "rationale": "The misleading auto-wire implication has been removed: every discovered channel and connector is explicitly unsupported, none is packaged or registered by the first production profile, and source counts cannot be presented as runtime registration or support.",
+      "evidence_refs": [
+        "claims-support-contract",
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "INT-08",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "integration-security",
+      "rationale": "Open requirement: Apply egress DLP/redaction consistently. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "INT-09",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "integration-security",
+      "rationale": "Glasses support is outside the supported production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "INT-10",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "integration-security",
+      "rationale": "Voice and attachment processing are outside the supported production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "INT-11",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "integration-security",
+      "rationale": "Open requirement: Maintain vendor-version contract tests. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "INT-13",
+      "priority": "P0",
+      "disposition": "excluded",
+      "owner": "integration-security",
+      "rationale": "Third-party plugins are disabled before discovery/import and omitted from the surface.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "INT-14",
+      "priority": "P0",
+      "disposition": "excluded",
+      "owner": "integration-security",
+      "rationale": "Inbound channels are absent from the profile and cannot receive production messages.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "INT-15",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "integration-security",
+      "rationale": "Open requirement: Make outbound channel delivery durable. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "INT-16",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "integration-security",
+      "rationale": "Voice channels are outside the supported production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "INT-17",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "integration-security",
+      "rationale": "Attachment processing is outside the supported production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "REL-01",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "release-engineering",
+      "rationale": "Open requirement: Create a real release for the current cohort. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "REL-02",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "release-engineering",
+      "rationale": "Open requirement: Make the documented install path real. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "REL-03",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "release-engineering",
+      "rationale": "Open requirement: Produce reproducible, signed artifacts. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "REL-04",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "release-engineering",
+      "rationale": "Open requirement: Ship supported native installers only after completion. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "REL-05",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "release-engineering",
+      "rationale": "Open requirement: Test clean install, upgrade, rollback, and uninstall. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "REL-06",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "release-engineering",
+      "rationale": "Open requirement: Build a signed update and rollback channel. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "REL-07",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "release-engineering",
+      "rationale": "An exact 18-row source support matrix exists and is drift-checked, but it is release_eligible=false and has not been published as a supported-version commitment. Live platform, dependency, upgrade, and customer-support qualification remains open.",
+      "evidence_refs": [
+        "claims-support-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "REL-08",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "release-engineering",
+      "rationale": "Dynamic tests, packages, routes, channels, MCP tools, connectors, ports, installer questions, feature status, and proof freshness are now generated from source and checked against documentation. Stale strategy totals and capability claims are truth-bounded, mobile and dashboard ports agree, and unreleased API, support, and proof states are explicit.",
+      "evidence_refs": [
+        "claims-support-contract",
+        "proof-claim-hygiene",
+        "release-truth"
+      ]
+    },
+    {
+      "id": "REL-09",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "release-engineering",
+      "rationale": "Proof and buyer documents label seeded worlds, fixture/oracle/stub evaluations, proposal-only outputs, historical snapshots, and absent live integrations explicitly, and prohibit using those artifacts as release, production, capability, customer-outcome, or ROI evidence.",
+      "evidence_refs": [
+        "proof-claim-hygiene",
+        "claims-support-contract"
+      ]
+    },
+    {
+      "id": "REL-10",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "release-engineering",
+      "rationale": "Buyer-facing capability statements are bound to exact source evidence and limitations: keyword/caption retrieval is not called multimodal semantic RAG, WebGPU source is not represented as qualified vision, and shipped/supported wording is denied while no exact release exists.",
+      "evidence_refs": [
+        "claims-support-contract",
+        "proof-claim-hygiene",
+        "release-truth"
+      ]
+    },
+    {
+      "id": "REL-11",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "release-engineering",
+      "rationale": "The mobile companion is outside the supported production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "REL-12",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "release-engineering",
+      "rationale": "On-device mobile runtime claims are outside the supported production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "REL-13",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "release-engineering",
+      "rationale": "Editor clients are outside the supported production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "REL-14",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "release-engineering",
+      "rationale": "The deployment, operations, security, migration, secret-rotation, and operator-contract guides collectively cover hardened configuration, identity, key custody, sandbox and network limits, Postgres RLS/TLS, backup/restore boundaries, audit anchors, upgrades, incidents, and known limitations.",
+      "evidence_refs": [
+        "operator-contract",
+        "production-runtime-contract",
+        "production-migration-contract",
+        "secret-rotation-contract",
+        "assurance-observability"
+      ]
+    },
+    {
+      "id": "REL-15",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "release-engineering",
+      "rationale": "The API and operator guides cover version and support boundaries, least-privilege authentication, safe errors, idempotency and recovery, quotas, audit evidence, tenant lifecycle, troubleshooting, and escalation boundaries. They explicitly identify 0.1.7 as unreleased and make no current support commitment; publication remains gated separately.",
+      "evidence_refs": [
+        "production-api-contract",
+        "operator-contract",
+        "claims-support-contract"
+      ]
+    },
+    {
+      "id": "REL-17",
+      "priority": "P0",
+      "disposition": "pending",
+      "owner": "release-engineering",
+      "rationale": "The checked-in production-surface manifest is an ineligible draft and is not an exact-revision-bound generated and signed release asset.",
+      "evidence_refs": [
+        "production-scope",
+        "release-truth",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "REL-18",
+      "priority": "P0",
+      "disposition": "blocked",
+      "owner": "release-engineering",
+      "rationale": "Registry not-found observations do not prove namespace ownership; signed ownership and Trusted Publisher configuration require external registry actions.",
+      "evidence_refs": [
+        "namespace-ownership-blocker"
+      ]
+    },
+    {
+      "id": "REL-19",
+      "priority": "P0",
+      "disposition": "pending",
+      "owner": "release-engineering",
+      "rationale": "The repository records the unreleased 0.1.7 state, but no matching tag, GitHub Release, or exact signed release cohort exists.",
+      "evidence_refs": [
+        "release-truth",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "REL-20",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "release-engineering",
+      "rationale": "Browser-widget delivery is outside the supported production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "REL-21",
+      "priority": "P1",
+      "disposition": "excluded",
+      "owner": "release-engineering",
+      "rationale": "VS Code delivery is outside the supported production profile.",
+      "evidence_refs": [
+        "excluded-surfaces"
+      ]
+    },
+    {
+      "id": "REL-22",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "release-engineering",
+      "rationale": "Support bundles require a bounded preview and digest-bound customer consent, strict schema/redaction/classification, X25519 recipient encryption, ciphertext-only publication, and verified intake. Secrets, sealed content, unsafe files, aliases, tampering, recipient substitution, or any required-control failure refuse output.",
+      "evidence_refs": [
+        "support-bundle-contract",
+        "hook-redaction-boundary"
+      ]
+    },
+    {
+      "id": "REL-23",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "release-engineering",
+      "rationale": "License, DPA, SLA, privacy, subprocessor, acceptable-use, retention, third-party notice, accessibility, and compliance-scope materials exist as clearly marked source-only templates. They are not counsel-approved, customer-executed, independently assessed, or published release commitments.",
+      "evidence_refs": [
+        "claims-support-contract",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "REL-24",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "release-engineering",
+      "rationale": "A deterministic code inventory now derives tests, packages, dashboard routes, channels, MCP tools, connectors, ports, installer questions, feature status, and proof freshness from AST and runtime authorities. Exact committed bytes and documentation claims fail verification when any source inventory drifts.",
+      "evidence_refs": [
+        "claims-support-contract"
+      ]
+    },
+    {
+      "id": "REL-25",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "release-engineering",
+      "rationale": "Production onboarding is report-only and mutation-free. It evaluates all 11 required domains only from a trusted-authority-signed evidence manifest bound to deployment ID, rendered configuration digest, source revision, exact contract bytes, and exact release-state bytes; missing, stale, forged, dangling, duplicate, cross-deployment, and same-ID/different-config evidence refuses readiness. Actual deployment observations and cross-evaluation replay consumption remain external evidence.",
+      "evidence_refs": [
+        "production-onboarding-contract"
+      ]
+    },
+    {
+      "id": "QA-01",
+      "priority": "P0",
+      "disposition": "satisfied",
+      "owner": "quality-engineering",
+      "rationale": "Each confirmed P0 blocker has a named adverse-path regression; the final combined run remains a release task.",
+      "evidence_refs": [
+        "p0-adverse-regressions"
+      ]
+    },
+    {
+      "id": "QA-02",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "quality-engineering",
+      "rationale": "Open requirement: Run a full production-profile end-to-end suite. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "QA-03",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "quality-engineering",
+      "rationale": "The repository now fails closed on unreviewed, stale, expired, non-strict, unowned, or unenforced production-critical pytest exceptions. This closes the repository-level code gate only; hosted execution and the remaining production-readiness gates are still unresolved.",
+      "evidence_refs": [
+        "pytest-exception-governance"
+      ]
+    },
+    {
+      "id": "QA-04",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "quality-engineering",
+      "rationale": "Open requirement: Add load and soak qualification. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "QA-05",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "quality-engineering",
+      "rationale": "Critical admitted durability boundaries now have a source-bound crash/restart inventory. Exact tests cover torn-log recovery, absent or corrupt required checkpoints, checkpoint write refusal, child-process death, stale-worker reclaim and fencing, queue recreation, lost post-commit acknowledgement, flow-resume crash windows, transactional outbox repair, and Postgres session-lock cleanup. Live infrastructure outage, backup restore, and target RPO/RTO evidence remain separate QA-06 and deployment gates.",
+      "evidence_refs": [
+        "production-qa-assurance",
+        "effect-lifecycle",
+        "durable-worker-authority",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "QA-06",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "quality-engineering",
+      "rationale": "Open requirement: Add backup/restore and dependency-failure release gates. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "QA-07",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "quality-engineering",
+      "rationale": "All admitted first-profile parser and protocol families are inventoried within 16 source-bound deterministic property, fuzz, state-machine, durability, and crash-recovery mappings totaling 108 exact tests. Governed-flow IR/graph documents, vLLM tool-call JSON, tenant/workspace normalization, the automation-safe operator CLI, migrations, signed identity inputs, replay records, and other admitted boundaries fail closed on malformed, duplicate, non-finite, oversized, deep, or authority-shifting input.",
+      "evidence_refs": [
+        "production-qa-assurance",
+        "parser-state-properties",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "QA-08",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "quality-engineering",
+      "rationale": "Eleven required supply-chain controls are bound to exact parser-strict triggers, complete critical job semantics, live transitive prerequisites, unconditional non-soft-failing steps, and 104 pinned action or reusable-workflow references. Dead or zero-job execution paths, runner/container/shell/environment substitution, predecessor poisoning, ambiguous YAML, local collection plugins, unpinned actions, erased mappings, and checksum-recomputed governance assets are refused. Hosted execution and external signing or registry configuration remain separate release evidence.",
+      "evidence_refs": [
+        "production-qa-assurance",
+        "change-control-contract",
+        "release-truth"
+      ]
+    },
+    {
+      "id": "QA-09",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "quality-engineering",
+      "rationale": "Open requirement: Validate cross-platform security behavior. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "QA-10",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "quality-engineering",
+      "rationale": "Three regime mappings now identify source controls, deployment responsibility, evidence ownership, cadence, and exceptions, and explicitly claim no certification. They remain drafts without independent assessment or approved customer scope.",
+      "evidence_refs": [
+        "production-qa-assurance",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "QA-11",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "quality-engineering",
+      "rationale": "Incident, vulnerability, and disclosure procedures cover intake, severity, response targets, coordinated disclosure, CVE handling, notification, forensics, and remediation at source. Staffing, contact-channel operation, response-clock measurement, customer notification exercise, and live drills are unverified.",
+      "evidence_refs": [
+        "production-qa-assurance",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "QA-12",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "quality-engineering",
+      "rationale": "Open requirement: Run controlled customer pilots before GA. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "QA-13",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "quality-engineering",
+      "rationale": "The proof and claim ledgers explicitly separate local regression results and source inventory from competitive capability, customer outcomes, ROI, penetration tests, live deployment performance, and regulatory certification; unsupported pairings fail verification.",
+      "evidence_refs": [
+        "proof-claim-hygiene",
+        "claims-support-contract"
+      ]
+    },
+    {
+      "id": "QA-16",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "quality-engineering",
+      "rationale": "The admitted state-machine inventory is source-bound to exact deterministic properties for governed-flow parsing and hash-chained transitions, retention/erasure, provider tool-call authority, migration reconciliation, quota fencing, idempotency retirement, signoff CAS, durable jobs, capability attenuation, and tenant/path normalization. Crash, replay, tamper, predecessor loss, ambiguous effect, and concurrent-resume negatives are retained in the unconditional repository suite.",
+      "evidence_refs": [
+        "production-qa-assurance",
+        "parser-state-properties",
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "QA-17",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "quality-engineering",
+      "rationale": "Open requirement: Qualify supported providers against one conformance matrix. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "QA-18",
+      "priority": "P1",
+      "disposition": "pending",
+      "owner": "quality-engineering",
+      "rationale": "Open requirement: Bind operating evidence to the release. No exact-release evidence set currently closes this gate; any repository-local work has not been accepted as sufficient.",
+      "evidence_refs": [
+        "unresolved-gate-register"
+      ]
+    },
+    {
+      "id": "QA-19",
+      "priority": "P1",
+      "disposition": "satisfied",
+      "owner": "quality-engineering",
+      "rationale": "The generated claim ledger inventories every buyer document and binds each admitted security, capability, connector, channel, performance, compliance, and outcome statement to evidence, method, environment, limitations, owner, and refresh horizon. The ledger remains draft and unapproved, so it cannot authorize release or customer claims.",
+      "evidence_refs": [
+        "claims-support-contract"
+      ]
+    }
+  ]
+}

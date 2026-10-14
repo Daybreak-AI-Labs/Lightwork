@@ -1,0 +1,1296 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 59d4a4b9d78473d2cda55f55355811bd08dbdf39..191a3111b7f905cea10d75bee6824dbe8635948c 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -30,7 +30,8 @@ Lightwork: proprietary Python 3.10-3.12 uv-workspace monorepo. 8 pip packages
+ 6. New capabilities need a config knob + an installer-wizard step.
+ 7. PR titles: Conventional Commits prefix and the subject starts with a
+    letter (`feat: add the 2027 ...`, never `feat: 2027 ...`).
+-8. Don't fix/enable ruff bugbear (B) findings in unrelated PRs — deliberately off.
++8. Ruff Bugbear (B) is enabled repo-wide in `pyproject.toml`; keep fixes scoped
++   to the task and preserve the configured FastAPI immutable-call exceptions.
+ 9. Don't add `/api/v1/health` — `/healthz`, `/livez`, `/readyz` exist,
+    auth-exempt by design; `/healthz` 503s until a provider key is configured.
+ 10. Relative imports inside packages, absolute in tests; renames must update
+@@ -40,5 +41,9 @@ Lightwork: proprietary Python 3.10-3.12 uv-workspace monorepo. 8 pip packages
+ 12. pytest aborts everything on one collection error; a pyo3 PanicException
+     usually hides a missing import on the stderr line above it.
+ 
+-Suite at HEAD: 9094 passed, 107 skipped, 1 xfailed (~2m40s). No type checker
+-configured; ruff is the only static gate.
++Do not treat a recorded test count or old green run as current HEAD validation.
++Check the exact commit's CI results and report the interpreter, test selection,
++passes, skips and failures for local runs. `.github/workflows/ci.yml` and
++`.github/actions/test-shard/action.yml` define the current matrix and sharding.
++No mypy/pyright gate is configured. Static checks include Ruff, Vulture,
++high-severity Bandit and the repository's custom contract/integrity checks.
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index fad797d554d7dc0f31762da64df7d8bcd0072220..3889b3c0dc59e83508fb56f7372e0087ae854dad 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -1,6 +1,11 @@
+ # Architecture
+ 
+-Lightwork is a recursive multi-agent swarm with a safety layer at every chokepoint.
++Lightwork combines a governed multi-agent runtime with enterprise workflows for
++evidence, approvals, privacy, vendor risk and model assurance. This page maps
++the main components; [runtime architecture](docs/architecture.md),
++[features](docs/FEATURES.md) and [deployment](docs/deployment.md) cover their
++configuration and operating boundaries. Implemented code, a passing fixture,
++an accepted deployment and a published release are distinct evidence levels.
+ 
+ ## Big picture
+ 
+@@ -11,18 +16,18 @@ Lightwork is a recursive multi-agent swarm with a safety layer at every chokepoi
+                                   │ pass
+                                   ▼
+                   ┌────────────────────────────────┐
+-                  │    Orchestrator agent (Opus)        │
++                  │    Orchestrator agent              │
+                   │  plans → spawns → verifies → final  │
+                   └─┬────────────────────────────────┘
+                     │ spawn_swarm / spawn_subagent
+       ┌──────────┼──────────┐
+       ▼           ▼           ▼
+-  researcher    coder       writer       (parallel Sonnet workers)
++  researcher    coder       writer       (configured per-role models)
+       │           │           │
+       └────────────────────────────┘
+             shared state via SwarmContext:
+               • Blackboard (per run, in-memory)
+-              • WorldModel (SQLite + FTS5, persistent)
++              • WorldModel (SQLite + FTS5 or Postgres, persistent)
+               • Budget (global token/$/wall/tool caps)
+               • Sandbox (local / docker / ssh)
+               • Shield (input / tool / output scans)
+@@ -37,12 +42,12 @@ The agent kernel. Ported from `cdayAI/research/maverick/` and evolved here.
+ | Module | Role |
+ |---|---|
+ | `agent.py` | The recursive `Agent`. Every node in the swarm is one of these. |
+-| `orchestrator.py` | Entry point `run_goal()` — wires SwarmContext, spawns external MCP clients, runs the root agent, distills the trajectory into a skill. |
++| `orchestrator.py` | Entry point `run_goal()` — wires SwarmContext, external MCP clients and the root agent. Local distillation and additional model-based distillation have separate configuration and learning gates. |
+ | `swarm.py` | `SwarmContext` shared by all agents in a run. |
+ | `blackboard.py` | Append-only shared workspace for one run. Mirrors entries into `world.goal_events` when `attach_world()` is called so the dashboard can stream live progress. |
+-| `world_model.py` | SQLite + FTS5: goals, episodes, facts, questions, messages, goal_events. WAL mode + `busy_timeout=5000` for safe concurrent dashboard+agent access. Forward-only schema migrations (v1 → v23). |
++| `world_model.py` | Tenant-aware goals, episodes, facts, questions, messages and events, with SQLite + FTS5 or the Postgres backend. Forward migrations and `SCHEMA_VERSION` in source define the supported schema; `migrations.lock.json` records their integrity contract. |
+ | `budget.py` | Hard caps on tokens, $, wall-clock, tool calls. Raises `BudgetExceeded`. |
+-| `llm.py` | Multi-provider adapter: Anthropic, OpenAI, Azure, Bedrock, Gemini, xAI, DeepSeek, Moonshot, OpenRouter, Ollama, TGI, vLLM (+ OpenAI-compatible). Per-role model routing via config. |
++| `llm.py` | Per-role provider/model routing via config. `providers.KNOWN_PROVIDERS` is the current registry, including cloud APIs, self-hosted/OpenAI-compatible endpoints and the separate local Codex CLI adapter. |
+ | `providers/` | One adapter file per provider + a shared OpenAI ↔ Anthropic translator (`translator.py`). |
+ | `config.py` | TOML config loader. Per-role model choice + persona + MCP server table. |
+ | `skills.py` | Auto-distill successful trajectories into reusable SKILL.md files. Strict skill source validation (`gh:`, `https:`, `mvk:`); rejects bare paths, `file://`, etc. |
+@@ -51,7 +56,7 @@ The agent kernel. Ported from `cdayAI/research/maverick/` and evolved here.
+ | `mcp_client.py` | Spawns external MCP servers as subprocesses, drains their stderr, registers their tools. |
+ | `runner.py` | `run_goal_in_thread(...)` — process-wide BoundedSemaphore-capped background runner shared by the dashboard, REST API, and MCP server. |
+ | `health.py` | `maverick doctor` — every red/yellow row carries an actionable `fix=...` remediation. |
+-| `cli.py` | `maverick start / status / answer / resume / fact / facts / skills / chat / dashboard / mcp / budget / template / doctor / version / config / logs`. |
++| `cli/` | `maverick` command group and subcommands. Run `maverick --help` and a subcommand's `--help` for the installed version's interface. |
+ | `sandbox/` | Execution backends: `local.py` (subprocess), `docker.py` (`--network=none` default), gVisor (`runsc` runtime), `podman.py`, `devcontainer.py`, `kubernetes.py`, `firecracker.py`, `ssh.py` (uses user's `ssh` binary + keys), `modal_backend.py` — nine selectable. |
+ | `tools/` | `read_file`, `write_file`, `list_dir`, `shell`, `ask_user`, `spawn_subagent`, `spawn_swarm`. |
+ 
+@@ -88,12 +93,12 @@ One adapter per messaging surface, all normalizing to the same `IncomingMessage`
+ 
+ This is how phone-companion mode works: the swarm lives on Desktop or VPS, the user talks to it from their phone via Telegram/iMessage/etc.
+ 
+-### `packages/maverick-installer/` (`apps/installer-cli/` from spec)
++### `apps/installer-cli/`
+ 
+ `maverick init` — the interactive wizard. The single source of truth for user-facing UX. Walks through:
+ 
+ 1. Deployment target (Desktop / Docker / VPS / Phone companion)
+-2. AI providers (Anthropic / OpenAI / Azure / Bedrock / Gemini / xAI / DeepSeek / Moonshot / OpenRouter / Ollama / TGI / vLLM)
++2. AI providers and credentials from the supported provider registry
+ 3. Per-role model picks
+ 4. Safety profile (Strict / Balanced / Permissive / Off)
+ 5. Sandbox backend
+@@ -103,20 +108,50 @@ This is how phone-companion mode works: the swarm lives on Desktop or VPS, the u
+ 
+ Writes `~/.maverick/config.toml`, then runs a smoke test.
+ 
+-### `apps/installer-desktop/` (scaffold)
++### `packages/maverick-evolve/`
+ 
+-Tauri-based GUI installer for users who would never open a terminal. Cargo + tauri.conf.json + Svelte UI + Python sidecar bridge in place. Notarized DMG / signed `.exe` / AppImage targets defined; CI build deferred until signing certs are wired up.
++Governed config-only evolutionary search. The package separates bounded
++development search from sealed confirmation and lock-protected config adoption;
++it does not mutate arbitrary application code. Evaluator quality, held-out
++evidence and the selected adoption contract determine what a result supports.
++See its [package guide](packages/maverick-evolve/README.md).
++
++### `packages/maverick-knowledge/`
++
++Per-domain document retrieval. The dependency-light core supplies chunking,
++deterministic embeddings and SQLite vector storage; hosted/local embedding
++providers, richer document parsers and external vector stores require their
++configured extras. A deterministic local retrieval fixture does not establish
++semantic retrieval quality for a customer's corpus.
++
++### Desktop applications and installers
++
++`apps/installer-desktop/` is the authenticated source-bootstrap Tauri installer;
++`.github/workflows/desktop.yml` builds engineering artifacts. `apps/desktop/`
++is the native dashboard shell with an owned runtime launcher, OAuth return
++broker and recovery/maintenance controls. The engineering MSI bootstrap is
++separate from the self-contained [Windows customer MSI candidate](apps/installer-msi/CUSTOMER.md).
++That candidate bundles the full frozen runtime and offline WebView2 installer.
++Native candidate CI, recognized publisher signing and clean-customer/release-pair
++acceptance are separate gates; a build workflow is not a published product.
+ 
+ ## Governance, learning & enterprise layers
+ 
+ Beyond the swarm kernel, `maverick-core` carries the subsystems that make
+-Lightwork a *governed, self-improving* platform rather than a bare runtime. All
+-are opt-in and additive (kernel rule 1 — the kernel runs unchanged with them
+-off). See `docs/FEATURES.md` for depth.
++Lightwork a governed platform with several learning authority levels. They do
++not share one opt-in switch. Secure defaults enable audit signing, at-rest
++encryption and fail-closed high/critical-risk consent; deployment-specific
++identity, capability and egress settings have their own controls, with mandatory
++enterprise floors. Local and governed prompt/policy learning default on, while
++executable-tool generation, third-party MCP acquisition and extra learning
++provider egress require separate authority. Code self-modification remains an
++opt-in research path that proposes, evaluates and archives; it never applies or
++promotes live code. See `config.py`, `security_defaults.py`, `self_modify.py` and
++[runtime architecture](docs/architecture.md) for these boundaries.
+ 
+ | Subsystem | Modules | Role |
+ |---|---|---|
+-| **Governed Actions** | `governed_actions.py`, `governed_connectors.py`, `governed_rest.py`, `governed_tools.py` | A consequential operation is a typed `ActionSpec`: **simulated** before commit, **gated** on risk/approval (`[actions] require_approval_at`), and **lineage-tracked** (tamper-evident hash chain). `governed_rest` adapts the LIVE enterprise REST connectors into this surface; `governed_tools` wraps them in the **live tool path** when `[governed_connectors] enable` — a connector write is previewed and approval-gated against a standing operator approver (the agent can't self-approve), instead of a bare confirm-gated call. |
++| **Governed Actions** | `governed_actions.py`, `governed_connectors.py`, `governed_rest.py`, `governed_tools.py` | A consequential operation is a typed `ActionSpec`: simulated before commit, risk/approval-gated and lineage-tracked. The governed connector path previews writes and binds operator approval; it is opt-in in standard mode and a mandatory runtime floor in enterprise mode. A connector definition or local fixture does not establish live provider acceptance. |
+ | **Closed learning loop** | `dreaming.py`, `hindsight.py`, `reflexion.py`, `self_learning.py`, `skills.py` | Offline consolidation (dream), regression detection (hindsight), snapshot + rollback with a per-cycle signed audit row. |
+ | **Training flywheel** | `training/ingest.py`, `training/rlaif.py`, `training/reward_model.py` | Verifier rewards → DPO preference pairs (`rlaif`, GPU/torch for the policy update) and a CPU-trainable Bradley-Terry **reward model** (`reward_model`) that learns real weights over structural trajectory features to rank attempts — and, via `rlaif --reward-model`, cross-checks the verifier's preference labels, downweighting DPO pairs the two signals don't corroborate (label-noise mitigation). |
+ | **Multi-tenancy** | `tenant/registry.py`, `tenant/kms.py`, `paths.py`, `world_model_backends/` | Per-tenant data isolation (`~/.maverick/tenants/<t>/`), per-tenant envelope encryption (DEK wrapped by a KEK), Postgres RLS. |
+@@ -139,7 +174,7 @@ What makes Lightwork different from OpenClaw / Hermes on the long-horizon axis:
+ 
+ What makes Lightwork a real multi-agent system, not just N parallel instances:
+ 
+-1. **Shared blackboard.** Specialists never talk directly; they post observations and findings to a single board the orchestrator reads.
++1. **Shared blackboard and peer bus.** Specialists post observations to the per-run board; `agent_bus.py` also supports in-process peer messages. Neither structure is a distributed cross-host message fabric.
+ 2. **Shared world model.** Facts written by one agent are visible to siblings.
+ 3. **Shared budget.** Tokens, $, tool calls are counted across the entire swarm. One greedy worker can't drain the run.
+ 4. **Shared sandbox.** All workers see the same filesystem and tool state.
+@@ -147,20 +182,35 @@ What makes Lightwork a real multi-agent system, not just N parallel instances:
+ 
+ ## Deployment targets
+ 
+-| Target | How it runs | Status |
++| Target | How it runs | Evidence / operating boundary |
+ |---|---|---|
+-| **Desktop** | Reviewed source checkout or signed release binary; runs in user's home dir. | v0.1.1 |
+-| **Docker** | `docker run -v ~/.maverick:/root/.maverick ghcr.io/daybreak-ai-labs/lightwork:<tag>`. Isolated sandbox. | v0.1.1 |
+-| **VPS** | `deploy/vps/install.sh` provisions a systemd unit. `MAVERICK_VERSION=v0.1.0 deploy/vps/install.sh` pins the release. | v0.1.1 |
+-| **Phone (companion)** | Swarm runs on Desktop or VPS; phone talks via Telegram / iMessage / WhatsApp / Signal / Discord / Slack / SMS / Matrix / email. Native iOS/Android later. | v0.1.1 |
++| **Desktop** | Reviewed source checkout; native customer MSI has a separate candidate path. | Follow [deployment](docs/deployment.md) and the [customer candidate](apps/installer-msi/CUSTOMER.md) acceptance record. |
++| **Docker** | Build `deploy/docker/Dockerfile` or verify a published image's immutable digest. | Mount only the workspace and required config for untrusted skills; see [mount guidance](docs/deployment.md#docker). |
++| **VPS** | `deploy/vps/install.sh` provisions a systemd unit using `MAVERICK_REF=<reviewed-full-40-character-commit-sha>`. | Review the pinned script and host configuration before provisioning. |
++| **Phone (companion)** | Runtime remains on Desktop/VPS; configured messaging channels provide the phone interface. | Each channel needs its own credentials and setup; this is not on-phone agent execution. |
++
++The supported control plane has **one writer**, including with Postgres.
++Execution workers scale separately. Postgres does not make approval, flow,
++audit, credential, learning and reconciliation file stores replica-safe.
++Helm enforces a single control-plane replica and persistent state; the runtime
++ownership lock requires the same data root and a filesystem with working locks.
++See the [enterprise playbook](docs/enterprise/deployment-playbook.md) for topology
++and [schema upgrade coordination](docs/deployment.md#security-sensitive-world-schema-upgrades).
+ 
+ ## Distribution channels
+ 
+-`.github/workflows/release.yml` triggers on `git tag v*`:
+-
+-- **PyPI**: `maverick-agent` (squatted, so we ship under this name; the Python import name + CLI name remain `maverick`), `maverick-shield`, `maverick-dashboard`, `maverick-mcp-server`, `maverick-channels`, `maverick-installer`. Gated on `PYPI_API_TOKEN`.
+-- **GHCR**: multi-tag Docker image — `:latest`, `:vX.Y.Z`, `:vX.Y`.
+-- **GitHub Releases**: PyInstaller single-file binaries for Linux x86_64, macOS arm64, Windows x86_64, each **Sigstore-signed keyless** (cosign via GitHub OIDC — `.sig` + `.pem` per artifact, logged to Rekor; verify with `deploy/verify-release.sh`), plus a per-release CycloneDX SBOM.
++These are configured publication paths, not evidence that artifacts have shipped:
++
++- **Release cohort:** [release-cohort.toml](release-cohort.toml) defines the current
++  version and all eight Python distributions. The import and CLI remain `maverick`.
++- **PyPI:** [publish.yml](.github/workflows/publish.yml) publishes only the explicit
++  public allowlist after a successful Release workflow, using externally configured
++  OIDC trusted publishing. Manual dispatch is build-only.
++- **GHCR and GitHub Releases:** [release.yml](.github/workflows/release.yml) defines
++  tagged-main provenance checks, images, platform binaries, source archives,
++  checksums, SBOMs and Sigstore verification. Check the exact workflow run and
++  [release assets](https://github.com/Daybreak-AI-Labs/Lightwork/releases) before
++  relying on an artifact. Native Windows customer signing/acceptance is separate.
+ 
+ ## Adding a new feature
+ 
+diff --git a/CLAUDE.md b/CLAUDE.md
+index d0aedba43f7bcf4bd58c0cafb090d723119ac94a..7ae6b4afbb612db86c7f06b788e93a03051851c5 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -1,15 +1,16 @@
+ # CLAUDE.md
+ 
+-> Generated by /harness (live docs via WebFetch; Hyperbrowser not configured).
+-> 8 tasks run. 16 failures/findings caught. 31 rules written.
++Maintainer guidance. The failure log records a historical harness run; it is
++not evidence that the current commit passes. Current dependencies and checks
++are defined by the repository manifests and CI workflows linked below.
+ 
+ ## Project
+ 
+ - **Stack:** Python 3.10-3.12 uv-workspace monorepo (8 pip packages under
+   `packages/` + `apps/installer-cli`), FastAPI dashboard, Tauri desktop apps,
+-  one TypeScript SDK (`sdks/plugin-ts`, Node 22). pip editable installs; npm
+-  only for the TS SDK.
+-- **Entry points:** `maverick` CLI (`packages/maverick-core/maverick/cli.py`),
++  one TypeScript SDK (`sdks/plugin-ts`, Node 22). Python packages use per-package
++  installs; frontend/SDK tooling is defined by each app's `package.json`.
++- **Entry points:** `maverick` CLI (`packages/maverick-core/maverick/cli/__init__.py`),
+   dashboard app (`maverick_dashboard.app:app`), MCP server (`maverick mcp`).
+ 
+ ## Commands (verified working)
+@@ -19,9 +20,11 @@
+   resolve `maverick>=0.1` from PyPI), then runtime deps + dev tools, including
+   `pyjwt[crypto]` (CI parity; test_oidc self-skips without it), `cffi`, and
+   `build` — all three added after this harness run caught their absence.
+-- **Test:** `python3 -m pytest -q -n auto --dist loadfile` from repo root
+-  (pytest-xdist, one worker per core, grouped by file -- the CI invocation;
+-  ~27 min serial, minutes in parallel). NOT bare `pytest`.
++- **Test:** `python3 -m pytest -q` from repo root. NOT bare `pytest`.
++  CI uses file shards and xdist, with a separate serial concurrency phase;
++  see `.github/actions/test-shard/action.yml` for its current invocation and
++  `requirements/ci.txt` for test dependencies. The devcontainer bootstrap does
++  not install every optional test dependency or reproduce the complete CI matrix.
+ - **Lint:** `python -m ruff check .` and `python -m vulture` (no args).
+ - **Build:** `python3 -m build --wheel` per package dir (setup installs build).
+ - **CLI smoke:** `maverick version`, `maverick doctor`.
+@@ -80,7 +83,8 @@
+ 
+ ### Lint / CI gates beyond ruff
+ 
+-All verified locally green; each is a build-failer:
++These checks are configured build gates; consult the exact commit's results
++before describing them as green. `.github/workflows/ci.yml` is authoritative:
+ - Bare `import tomllib` at column 0 (greps apps/packages/benchmarks). Use:
+   `try: import tomllib` / `except ModuleNotFoundError: import tomli as tomllib`
+   (3.10 support; this broke three PRs).
+@@ -116,8 +120,9 @@ All verified locally green; each is a build-failer:
+   defaults is whitelisted via extend-immutable-calls, not a violation.
+   Complexity capped at 20 with ~30 grandfathered `# noqa: C901` — new code
+   stays under the cap.
+-- No mypy/pyright anywhere. Ruff is the only static gate; don't add type-only
+-  "fixes" expecting a checker to validate them.
++- No mypy/pyright gate is configured. Ruff, Vulture, high-severity Bandit and
++  custom contract/integrity checks cover different static properties; don't
++  add type-only "fixes" expecting a type checker to validate them.
+ 
+ ### File structure / imports
+ 
+@@ -139,16 +144,19 @@ All verified locally green; each is a build-failer:
+ - New capabilities need a config knob AND a wizard step in
+   `apps/installer-cli/maverick_installer/` (rules 5-6 below).
+ 
+-### Dependencies (live docs, June 2026)
++### Dependencies and framework lifecycle
+ 
+-- `anthropic` floor `>=0.40.0`; current SDK is v0.109.1. `client.messages.create`
+-  pattern unchanged; pin floors when touching provider code.
+-- FastAPI: `@app.on_event` is deprecated (lifespan handlers replace it).
+-  `app.py:285` still uses it — the suite's DeprecationWarnings are known noise;
+-  don't "fix" drive-by, it's an intentional pending migration.
+-- MCP protocol current = `2025-11-25` — exactly what maverick-mcp implements
+-  (plus `2024-11-05` fallback). Don't bump without the spec. (Also expect
+-  starlette's "install httpx2" TestClient deprecation warning — known noise.)
++- Package `pyproject.toml` files define supported dependency ranges;
++  `requirements/ci.txt` defines reviewed CI constraints. Inspect both before
++  changing an SDK rather than relying on a version copied into this guide.
++- The dashboard uses `FastAPI(lifespan=_lifespan)` in
++  `packages/maverick-dashboard/maverick_dashboard/app.py`. Add startup and
++  teardown work through that lifecycle; the former `on_event` migration is
++  complete. Investigate new warnings against current code and dependencies.
++- The MCP server negotiates its implemented versions in
++  `packages/maverick-mcp/maverick_mcp/server.py`. Check those constants and the
++  protocol contract tests before changing them; a supported version is not a
++  claim to implement every optional capability or the latest external spec.
+ 
+ ## Kernel rules (pre-existing, still enforced)
+ 
+@@ -195,12 +203,19 @@ footer to the body even when you didn't write one. After EVERY PR creation,
+ immediately re-post the clean body via the PR-update tool — no exceptions,
+ and never mark the PR work done until the body has been verified clean.
+ CI ENFORCES THIS: the `no-ai-attribution` check (`scripts/check_attribution.py`,
+-`.github/workflows/commit-hygiene.yml`) fails the PR on any such trailer,
+-footer or session link in a commit message or the PR text, runs again on the
+-merge-queue commit, and goes red on `main` if one lands anyway. Run it
+-locally on unpushed commits with `bash scripts/pre-push-lint.sh`.
+-
+-## Failure log
++`.github/workflows/commit-hygiene.yml`) scans commit author/committer identities
++as well as messages and PR text. An assistant identity can become a prohibited
++co-author trailer during squash even when the source message is clean. Use the
++legitimate contributor's Git identity; do not copy another person's name/email
++to make a check pass. The check also runs on the merge-queue commit and pushes
++to `main`. Run it locally on unpushed commits with
++`bash scripts/pre-push-lint.sh`. A prevention fix does not clear an existing
++failure or rewrite a historical commit; report that status separately.
++
++## Historical harness failure log
++
++The counts, timings and lint findings below belong to that harness run. They
++are retained as debugging evidence and do not override the current rules above.
+ 
+ | Task | Result | Key failure |
+ |------|--------|-------------|
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+index 53ac3f10f937f6a55687cabb540380fac86cb283..79dcd832f1c866804b1bfc79824bc609dd500f05 100644
+--- a/CONTRIBUTING.md
++++ b/CONTRIBUTING.md
+@@ -126,7 +126,7 @@ pins that):
+ | ---------------------------------- | --------------------------------------------------------------------- |
+ | `lint`                             | `ruff check .`, vulture, the tomllib/shell=True greps, detect-secrets, and every `python -m maverick.<gate> --ci` contract gate |
+ | `lint-pr-title`                    | Conventional-Commit PR title (see below)                              |
+-| `no-ai-attribution`                | `scripts/check_attribution.py` over the PR's commits + title/body, the merge-queue commit, and pushes to `main`: no AI co-author trailers, generator footers or assistant session links (CLAUDE.md) |
++| `no-ai-attribution`                | `scripts/check_attribution.py` over commit author/committer identities and messages, plus PR title/body, the merge-queue commit and pushes to `main`: no assistant identities, AI co-author trailers, generator footers or assistant session links (CLAUDE.md) |
+ | `test (3.10, 1/2/3)`               | the full `pytest` suite on the floor interpreter, three file-level slices, on every pull request |
+ | `test (3.11, 1/2/3)`, `test (3.12, 1/2/3)` | the same slices on the rest of the supported window (`test-window` in ci.yml): on a pull request the legs start, skip every step and report success within seconds; on the merge queue's commit and on `main` they run for real |
+ | `posture (1/2/3)`                  | the full suite again under the production security posture on 3.12, three slices. Gated the same way as `test-window`: it starts, skips and reports success on a pull request, and runs for real on the merge queue's commit and on `main` -- so the whole 3.12 + secure-defaults suite is proven at merge, not on every PR push |
+@@ -151,6 +151,14 @@ Two recurring foot-guns, both enforced by CI:
+ prefix must start with a letter** -- not a digit, quote, or backtick
+ (`feat: 2027 roadmap` fails; `feat: add the 2027 roadmap` passes).
+ 
++**Commit identity:** use the legitimate contributor's Git author/committer
++identity. An assistant author identity can cause GitHub's squash merge to add a
++prohibited co-author trailer even when every original commit message is clean.
++The attribution check therefore covers identities as well as messages. Do not
++copy another contributor's name/email or rewrite shared history to bypass a
++failure; a historical failed commit and prevention for future commits are
++separate matters.
++
+ ## Adding a provider
+ 
+ 1. Create `packages/maverick-core/maverick/providers/<name>_provider.py`
+diff --git a/apps/desktop/README.md b/apps/desktop/README.md
+index 6b769e1ac23fbc1ef2f2b14c90ce9344c3ac5a1a..a87cf1c4bdeb2d82cfa40e4878e95fd29cfbe3d8 100644
+--- a/apps/desktop/README.md
++++ b/apps/desktop/README.md
+@@ -75,11 +75,11 @@ addresses:
+    trouble card; a native menu; explicit `main` window label; sensible minimum
+    window size.
+ 
+-## Icons (do this before bundling)
++## Icons
+ 
+-Only a placeholder `icons/icon.png` ships. Generate the full platform set
+-(`.icns`, `.ico`, sized PNGs) from a single 1024×1024 source, then expand the
+-`bundle.icon` list in `tauri.conf.json`:
++`bundle.icon` in `src-tauri/tauri.conf.json` selects the PNG and shared Windows
++ICO. For additional platform sizes/formats, generate the set from an approved
++1024×1024 source and update that list:
+ 
+ ```bash
+ cargo tauri icon path/to/maverick-1024.png   # writes src-tauri/icons/*
+@@ -87,9 +87,11 @@ cargo tauri icon path/to/maverick-1024.png   # writes src-tauri/icons/*
+ 
+ ## Build & run
+ 
+-Needs Rust + the Tauri CLI (plus platform webview dev packages, e.g.
+-`webkit2gtk` on Linux). None of that is available in the authoring
+-environment, so **the first local build is the smoke-test.**
++Needs Rust + the Tauri CLI and platform SDK/linker/webview development packages
++(for example, `webkit2gtk` on Linux). Run a native build on the target platform;
++source or browser-only checks do not substitute for packaged startup. Windows
++customer native candidate CI evidence and its limits are recorded in the
++[candidate guide](../installer-msi/CUSTOMER.md).
+ 
+ ```bash
+ cargo install tauri-cli            # once
+@@ -121,10 +123,14 @@ Bundle targets (`src-tauri/tauri.conf.json`):
+ 
+ This dashboard shell is distinct from `apps/installer-desktop`: this app opens
+ an already-installed Lightwork dashboard, while `installer-desktop` performs
+-the authenticated source installation. It is not currently selected by
+-`.github/workflows/desktop.yml` and is not attached to product releases, so
+-treat it as an unshipped engineering prototype rather than a supported
+-installer.
++the authenticated source installation. The cross-platform engineering workflow
++`.github/workflows/desktop.yml` builds the bootstrap installer. The separate
++`.github/workflows/windows-customer.yml` builds this shell with
++`customer-runtime` and the bundled frozen runtime. Its `build-and-accept` job
++passed on 2026-09-09 at PR commit `460f90ec08b9ef17b950ded96892918cda923148`;
++see the [exact run and acceptance scope](../installer-msi/CUSTOMER.md).
++The signing job was skipped. This evidence establishes native candidate CI,
++not current-HEAD validation or an accepted, published customer installer.
+ 
+ The current Tauri 2.11 dependency graph uses Wry's GTK3 backend on Linux. OSV
+ Scanner 2.3.8 therefore reports one medium-severity `glib` soundness advisory
+@@ -138,5 +144,7 @@ than known exploitable defects and also have no fixed versions. Do not suppress
+ the findings globally; keep Linux artifacts engineering-only and re-evaluate
+ the graph when Tauri/Wry moves to maintained dependencies.
+ 
+-Any locally produced bundles are **unsigned**, so SmartScreen (Windows) and
+-Gatekeeper (macOS) will warn until code-signing certificates exist.
++Default local engineering builds are **unsigned** unless signing is explicitly
++configured. Customer signing uses the separate workflow path and identities
++described in the candidate guide; fixture-trusted certificates do not establish
++a recognized publisher or SmartScreen/Gatekeeper acceptance.
+diff --git a/apps/installer-msi/CUSTOMER.md b/apps/installer-msi/CUSTOMER.md
+index 672b4fd1e9ae356aef470a72ed75f466dd700da5..d7a24c990a120d57730a503422216aeab4869a0c 100644
+--- a/apps/installer-msi/CUSTOMER.md
++++ b/apps/installer-msi/CUSTOMER.md
+@@ -8,11 +8,15 @@ Provider accounts, licensing and network-dependent product features retain
+ their normal requirements. The engineering `Package.wxs` bootstrap is separate.
+ 
+ **Status: implemented candidate path, not yet an accepted customer release.**
+-The runtime has been built and exercised locally. The new Windows workflow has
+-not yet passed on a native CI runner, no recognized publisher certificate has
+-been supplied, and no clean-VM acceptance has been performed. Local frozen
+-runtime checks do not establish those gates. This workflow produces candidates;
+-it does not publish an installer or activate an update channel.
++The runtime has been built and exercised locally, and native candidate CI has
++passed: on 2026-09-09, the `build-and-accept` job in
++[Windows customer run 34415651897](https://github.com/Daybreak-AI-Labs/Lightwork/actions/runs/34415651897)
++succeeded at PR commit `460f90ec08b9ef17b950ded96892918cda923148`.
++The customer signing job was skipped. This is dated hosted-runner fixture
++acceptance at that exact commit, not a current-HEAD rerun, recognized production
++publisher signing, clean-customer VM acceptance or actual release-pair
++acceptance. Those release gates remain separate below. This workflow produces
++candidates; it does not publish an installer or activate an update channel.
+ 
+ ## Customer maintenance
+ 
+diff --git a/deploy/aws/terraform/NEXT_STEPS.md b/deploy/aws/terraform/NEXT_STEPS.md
+index 44d0ef32f824085797cb5fcd9cec4d2fe561afcf..edb2ac69723787110acf6e9544b96da79b610a23 100644
+--- a/deploy/aws/terraform/NEXT_STEPS.md
++++ b/deploy/aws/terraform/NEXT_STEPS.md
+@@ -1,4 +1,20 @@
+-# Lightwork AWS deploy — handoff
++# Lightwork AWS deploy — historical handoff
++
++> **Historical session record, not current cloud inventory or an execution
++> runbook.** The account, resource, cost, permission and "next step" statements
++> below describe the original pre-apply session and have not been reverified
++> against AWS. Do not replay its apply, credential or publication commands as
++> current instructions. The stack has evolved since this note: inspect
++> [ecs.tf](ecs.tf), [efs.tf](efs.tf), [rds.tf](rds.tf), [alb.tf](alb.tf),
++> [acm.tf](acm.tf), [deployer.tf](deployer.tf) and [variables.tf](variables.tf),
++> plus the [current deployment guidance](../../../docs/deployment.md) and
++> [enterprise playbook](../../../docs/enterprise/deployment-playbook.md).
++> Reconcile live state and a fresh reviewed plan before an authorized apply.
++> Current Terraform config includes EFS persistence and a single-task ECS
++> deployment strategy; Postgres does not authorize multiple control-plane
++> writers. Configured TLS/OIDC is not evidence of a working cloud deployment.
++
++## Original handoff (retained)
+ 
+ Everything needed to finish standing up Lightwork on AWS tonight. Written
+ because the prior session hit a permission wall on `terraform apply` (Auto
+diff --git a/deploy/docker/Dockerfile b/deploy/docker/Dockerfile
+index 1c3584be7269b6fb15e4b18241920f9b12060168..cb2af46ac5ff5c739f8b3e3c55b898345edc180f 100644
+--- a/deploy/docker/Dockerfile
++++ b/deploy/docker/Dockerfile
+@@ -2,15 +2,20 @@
+ #
+ # Build:   docker build -f deploy/docker/Dockerfile -t maverick:latest .
+ # Run:     docker run -it --rm \
+-#            -v $HOME/.maverick:/home/maverick/.maverick \
+ #            -v $HOME/maverick-workspace:/workspace \
++#            -v $HOME/.maverick/config.toml:/home/maverick/.maverick/config.toml:ro \
+ #            -e ANTHROPIC_API_KEY \
+ #            maverick:latest start "..."
+ #
+ # Runs as the unprivileged "maverick" user (uid/gid 1000), not root.
+ #
+-# First run drops you into `maverick init` so the wizard can set up the
+-# config inside the mounted ~/.maverick directory.
++# Create the host config first with `maverick init`; the file must exist and
++# the workspace must be writable by uid/gid 1000. Do not mount the whole host
++# data home into an agent container running untrusted skills. Tools can read
++# mounts and environment, including the scoped key passed to this run.
++# This disposable CLI example does not persist internal state. For a durable
++# service, use dedicated state storage and one control-plane writer, including
++# with Postgres. See docs/deployment.md for those distinct deployment modes.
+ 
+ # Pin the base by digest for a reproducible build: override on the build command
+ # with --build-arg PYTHON_DIGEST=@sha256:<digest> (resolve it for your target
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 494fd4281c3dd87bb2d10d8057ac94dbbe4a5d65..5f6971cc68b52c5c8b67d9debfe661748f7b85f5 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -27,11 +27,11 @@ the next section for scope.
+ |---|---|---|
+ | Kernel / scheduler | dispatch and schedule agents | recursive swarm with shared context, per-call fan-out cap (`MAVERICK_MAX_SWARM_FANOUT`, default 8) and a total-spawn cap (`MAVERICK_MAX_TOTAL_SPAWNS`, default 64), parallel tool execution, plus a cron-style scheduler over a durable job queue (`swarm.py`, `tools/spawn.py`, `scheduler.py`, `job_queue.py`, `worker.py`) |
+ | Processes / isolation | agents + execution sandboxing | 9 sandbox backends behind one `build_sandbox()` factory and a uniform `.exec()` interface — local subprocess, Docker, gVisor, Podman, devcontainer, Kubernetes, Firecracker, SSH, and Modal cloud (`sandbox/`) |
+-| Syscalls / drivers | tools, providers, channels | 286 built-in tool modules (`tools/`) — incl. 2,877 write-capable token-authed REST/GraphQL connectors and 37 read-only primary-source data connectors — 12 LLM providers routable per role (`providers/`, `llm.py`), and MCP client over stdio **and** Streamable HTTP (`mcp_client.py`) |
++| Syscalls / drivers | tools, providers, channels | built-in tools (`tools/`), including 2,877 write-capable token-authed REST/GraphQL connector definitions (count checked against the registry) and read-only data connectors; role-routable providers (`providers.KNOWN_PROVIDERS`, `llm.py`); and MCP client over stdio **and** Streamable HTTP (`mcp_client.py`). Catalog breadth is not a count of live customer-validated integrations. |
+ | IPC | inter-agent communication | append-only blackboard, parent↔child spawn handoffs, and a peer message bus — **in-process today** (`blackboard.py`, `tools/spawn.py`, `agent_bus.py`) |
+ | Memory management | context = RAM, long-term = disk | turn-list compaction (drop/summarize, opt-in digest RAG), a model-curated cross-session memory directory, and per-goal KV memory (`compaction.py`, `tools/memory.py`, `tools/kv_memory.py`) |
+ | Permissions / capabilities | per-agent access control | tool allow/deny ACLs, per-identity risk ceilings, destructive-action consent gating, plus Ed25519-signable **attenuating** capabilities that can only narrow as they propagate to children (`safety/tool_acl.py`, `safety/tool_risk.py`, `safety/consent.py`, `capability.py`) |
+-| Filesystem / state | persistent state | persistent world model (SQLite + FTS5, or Postgres; schema v23) and durable single-agent checkpoints for crash-resume (`world_model.py`, `checkpoint.py`) |
++| Filesystem / state | persistent state | tenant-aware persistent world model (SQLite + FTS5, or Postgres) and durable single-agent checkpoints for crash-resume (`world_model.py`, `checkpoint.py`). `world_model.SCHEMA_VERSION` and `migrations.lock.json` define the current migration contract. |
+ | Package manager | installable units | community skills and MCP servers with validated install and **Ed25519 signed-publisher** verification (`skills.py`, `mcp_registry.py`) |
+ | Budgets / quotas | cost as a managed resource | a hard per-run `Budget.check()` (dollars / wall-clock / tokens) plus opt-in per-principal rolling-window quotas for chargeback (`budget.py`, `quotas.py`) |
+ | Audit / governance | tamper-evident log | append-only NDJSON with an Ed25519 Merkle-chained signature and offline `verify_chain`, plus GDPR Art.17 erasure (`audit/signing.py`, `audit/erase.py`) |
+@@ -69,21 +69,36 @@ installed skills and the live tool registry — `tools.base_tool_names()` — an
+ surfaces the gaps at the approval gate; `apply_plan` then installs matching
+ catalog skills via `self_learning.acquire_skill` and synthesizes missing
+ declared tools via `self_learning.write_generated_tool`) → `agent_from_profile`
+-spawns the specialist. Provisioning is consent-gated, off by default
+-(`[self_learning] enable` + `provision_packs`), and **never widens the pack's
+-already-clamped envelope** — it only fills capabilities the approved workflow
+-already declares.
++spawns the specialist. Governed self-learning and catalog pack provisioning are
++on by default (`[self_learning] enable` + `provision_packs`), subject to the
++approval and acquisition gates. They **never widen the pack's already-clamped
++envelope**. Executable-tool generation (`create_tools`), third-party MCP
++acquisition (`allow_mcp_acquisition`) and additional learning provider egress
++(`allow_provider_egress`) remain separate, explicit opt-ins; enabling ordinary
++learning does not authorize any of those higher-authority operations.
+ 
+ Closing the loop, **`factory_learning.py`** feeds *generation quality* back into
+ the front of the pipeline: provisioning/approval gaps are attributed to a pack's
+ suite, mined into proposer **corrections**, and promoted through the existing
+-`SelfImprovementController` on the `prompt` rung (guidance text widens no
+-capability, so the evidence + calibration gates apply but no escalation proof or
+-human sign-off is needed). Promoted guidance folds into future pack generation
+-(`augment_system_prompt`, scope-matched per suite). It is OFF by default and
+-byte-identical to before while off (`[self_improvement] enable` +
+-`factory_learning`, or `MAVERICK_FACTORY_LEARNING=1`), and likewise never widens
+-any pack's envelope.
++`SelfImprovementController` on the `prompt` rung. Promotion requires strict
++paired measured evidence and the controller's evidence/calibration gates;
++recurring feedback alone cannot score or promote a correction. Promoted guidance
++folds into future pack generation (`augment_system_prompt`, scope-matched per
++suite). This is on by default with governed self-improvement; disable it with
++`[self_improvement] factory_learning = false` or `MAVERICK_FACTORY_LEARNING=0`.
++Ordinary guidance grants no tools, and envelope-widening signals are excluded
++from automatic promotion because they require explicit authority review.
++
++### Learning does not imply live code deployment
++
++Local memory/skill learning, governed prompt/policy promotion, executable-tool
++generation, adapter training and code modification have different evidence and
++authority requirements. The current `self_modify.py` code path is **off by
++default and research-only**: it may propose, sandbox-evaluate and archive a
++constrained patch, but it never applies or promotes live code. Enabling it or
++passing a fixture is not permission to deploy code or a claim of measured
++customer improvement. See [self-learning](self-learning.md) and the
++`self_modify.py` protected surface for its research and deployment boundaries.
+ 
+ ## What's strong, what's deliberately scoped
+ 
+@@ -97,10 +112,11 @@ signed audit (`audit/signing.py`), and least-privilege attenuating capabilities
+ 
+ **Deliberately scoped — being honest about the edges:**
+ 
+-- **IPC is in-process.** The blackboard, spawn handoffs, and the peer message
++- **Swarm IPC is in-process.** The blackboard, spawn handoffs, and the peer message
+   bus are per-process, in-memory structures (`agent_bus.py` is explicit about
+-  this). Agents coordinate within a single runtime; there is no cross-host
+-  inter-agent message fabric.
++  this). Agents in one swarm coordinate within that runtime. Queue workers and
++  remote dispatch are separate execution routes, not a distributed replacement
++  for this in-memory bus.
+ - **Cross-process service supervision is a future increment.** The durable job
+   queue and worker (`job_queue.py`, `worker.py`) run scheduled and background
+   goals across process restarts, but Lightwork is not yet a long-lived
+@@ -109,13 +125,24 @@ signed audit (`audit/signing.py`), and least-privilege attenuating capabilities
+ - **Durable checkpointing is single-agent (Phase 1).** Crash-resume covers a
+   linear, non-spawning agent's loop state; resuming a full spawn tree is a
+   later phase (`checkpoint.py`).
+-- **Tenancy is partial.** The cross-session memory store and audit signing keys
+-  are tenant-scoped; routing the rest of the world model through the same
+-  partition is an ongoing increment (`paths.py`).
+-- **Several governance primitives are opt-in and default-open.** Capability
+-  enforcement, per-principal quotas, OIDC, and OpenTelemetry are all off unless
+-  configured, so a single-user install behaves exactly as before. Enterprise
+-  mode flips the relevant defaults to fail-closed (see [safety.md](safety.md)).
++- **Tenancy is implemented across the world and local state paths.** The active
++  tenant is resolved at world-open time (`world_model.default_db_path`), and
++  tenant namespaces protect memory, audit, keys and other state (`paths.py`).
++  Postgres has tenant enforcement/RLS. Shared administration and global HALT
++  are deliberately global; a tenant directory alone is not proof of every
++  integration's isolation or a claim that all stores share one transaction.
++- **One control-plane writer, including with Postgres.** Local approval, flow,
++  audit, learning and reconciliation stores remain part of the authority model.
++  Execution workers may scale separately; the Helm chart rejects control-plane
++  replicas above one. The ownership guard needs the same data root and working
++  filesystem locks. See the [deployment playbook](enterprise/deployment-playbook.md).
++- **Governance defaults differ by control.** Audit signing, at-rest encryption
++  and fail-closed high/critical-risk consent default on under
++  `security_defaults.py`. Capability enforcement, per-principal quotas, OIDC
++  and telemetry have separate switches. Enterprise mode imposes mandatory
++  capability, connector-governance and provider-egress floors; inspect the
++  resolved profile and [safety settings](safety.md) rather than describing all
++  controls as opt-in or all actions as human-approved.
+ 
+ The honest summary: Lightwork already implements more of the runtime primitive
+ set than a typical agent framework — strongest on budgets, sandboxing, signed
+diff --git a/docs/connectors.md b/docs/connectors.md
+index 8cafc95ce396b8c8ee3cbe4cba078d234b54a7ed..797eaff82619518a97896a9704f6702aff0c6ada 100644
+--- a/docs/connectors.md
++++ b/docs/connectors.md
+@@ -1,21 +1,29 @@
+ # Connectors
+ 
+-Lightwork ships connectors to the systems enterprises actually run on. Every
+-connector follows the same house rules:
++Lightwork supplies dedicated connectors and a shared REST/GraphQL framework.
++The catalog and credential labels describe available implementations; each
++customer operation still needs configuration, authority and acceptance checks.
++The shared connector path follows these rules:
+ 
+-- **Explicit-env auth.** Each connector reads its credentials from named
+-  environment variables (e.g. `SERVICENOW_INSTANCE_URL` + `SERVICENOW_TOKEN`).
+-  Nothing uses ambient host credentials unless you opt in.
++- **Credential scope follows execution identity.** Standard/local calls can
++  use the named environment variables below (for example,
++  `SERVICENOW_INSTANCE_URL` + `SERVICENOW_TOKEN`) or an authorized saved
++  connection. Authenticated enterprise execution requires a saved connection
++  that authorizes the current principal; it refuses ambient process credentials
++  and extra-header credentials. Setting a global environment variable does not
++  grant another user access. Public keyless readers need no credential.
+ - **Writes are confirm-gated.** Any state-changing call (POST/PUT/PATCH/DELETE,
+   GraphQL mutations, non-read SQL) is a dry run until you pass `confirm=true`.
++  That argument is a connector-level check, not a human approval or permission
++  grant. Applicable tool, enterprise and workflow governance still applies.
+ - **Fail closed, fail loud.** Missing config or an API error returns an
+   `ERROR:`-prefixed message; it never silently half-succeeds.
+ 
+ There are **2,877 write-capable long-tail enterprise connectors** in the
+ catalog below, plus dedicated-module connectors (Salesforce, HubSpot, Stripe,
+ ServiceNow, Snowflake, Notion, Gmail, Microsoft Graph (Outlook/Teams/
+-OneDrive), Google Drive, Jira, Confluence, ...), part of **286 built-in tool
+-modules** in the kernel. They span nearly every category of enterprise and
++OneDrive), Google Drive, Jira, Confluence, ...), alongside the kernel's other
++built-in tools. They span nearly every category of enterprise and
+ SMB software: ITSM/ESM, CRM & sales, ERP & finance, HCM & payroll,
+ observability & APM, security/IAM/GRC, cloud & infra, DevOps/CI/CD, data/BI/
+ ETL/CMS, collaboration & content, marketing/commerce/CX, contact center,
+@@ -42,8 +50,9 @@ packs by suite (see **Primary-source data grounding** below).
+ 
+ ## Enabling a connector
+ 
+-Set the connector's environment variables in `~/.maverick/.env` (chmod 600) or
+-your process environment. The interactive installer can do this for you:
++For standard/local operator configuration, set the connector's environment
++variables in `~/.maverick/.env` (chmod 600) or the process environment. The
++interactive installer can collect these values:
+ 
+ ```
+ maverick init        # advanced flow → "Connect any enterprise systems now?"
+@@ -52,6 +61,15 @@ maverick init        # advanced flow → "Connect any enterprise systems now?"
+ Pick the systems by name and the wizard prompts for each one's URL and token.
+ You can also add or edit them in `~/.maverick/.env` at any time.
+ 
++For authenticated enterprise use, configure the saved connection and its
++allowed principals in the dashboard Connections workflow. The runtime binds
++credential resolution to the authenticated caller; a connection outside that
++scope is unavailable. The named variables in the catalog describe the
++connector's configuration shape, not permission to bypass saved-connection
++authority. A saved or locally checked connection is not evidence that the
++provider accepted the intended operation: qualify the exact account, scopes,
++read/write target and recovery behavior before a customer commitment.
++
+ ## Primary-source data grounding
+ 
+ Separately from the write-capable catalog above, the kernel ships **37
+diff --git a/docs/deployment.md b/docs/deployment.md
+index 5b265082143350464f3def3a0a00ec83e5fe8293..ff375c6543050ccdb1dc43785e7fc8d30c842ad9 100644
+--- a/docs/deployment.md
++++ b/docs/deployment.md
+@@ -9,27 +9,48 @@ For most users.
+ ```bash
+ git clone https://github.com/Daybreak-AI-Labs/Lightwork
+ cd Lightwork
+-git checkout --detach <reviewed-full-40-character-commit-sha>
+-pip install -e ./packages/maverick-core
+-pip install -e ./apps/installer-cli
++git checkout --detach '<reviewed-full-40-character-commit-sha>'
++python -m venv .venv
++source .venv/bin/activate
++python scripts/install_release_cohort.py --constraint requirements/ci.txt --core-extra release-runtime
+ maverick init
+ ```
+ 
++On Windows PowerShell, activate with `.\.venv\Scripts\Activate.ps1` instead
++of `source`. The cohort installer installs all eight reviewed local packages
++together and verifies their dependency consistency; the root is not a Python
++distribution and `pip install -e .` is invalid. The `release-runtime` extra
++installs the packaged provider runtime dependencies, including the OpenAI SDK
++used by OpenAI-compatible providers. Other optional feature dependencies, such
++as Postgres or Azure identity support, remain separate extras to select for the
++deployment.
++
+ Do not install the Lightwork distribution names from public PyPI until the
+ project has reserved and protected every namespace. The desktop bootstrap
+ scripts also require a lowercase, full commit SHA and fail closed.
+ 
+ Runs as your user. Stores everything under `~/.maverick/`. The sandbox
+ `workdir` defaults to `~/maverick-workspace/`. Nothing listens on a
+-network port unless you enable a channel that needs one (WhatsApp/SMS).
++network port for an ordinary CLI run. Starting `maverick dashboard`, the native
++shell, an HTTP/MCP server or a webhook channel opens the configured listener;
++review bind address and authentication before exposing it beyond loopback.
+ 
+ **Artifact status:** reviewed source is the dependable installation route
+ today. A successful tagged release is configured to publish three single-file
+ PyInstaller binaries, checksums, SBOMs, and Sigstore material; check the
+ [release assets](https://github.com/Daybreak-AI-Labs/Lightwork/releases) for
+-the exact operating-system file before relying on one. The Tauri and MSI
+-projects are authenticated source-bootstrap/build engineering artifacts, not
+-self-contained product installers, and are not attached to product releases.
++the exact operating-system file before relying on one. There are three distinct
++native installation paths:
++
++- `apps/installer-desktop` is an authenticated source-bootstrap Tauri installer.
++- The [engineering MSI](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/apps/installer-msi/README.md) needs Python/pip and
++  downloads dependencies at first launch.
++- The [Windows customer MSI candidate](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/apps/installer-msi/CUSTOMER.md) bundles
++  the complete frozen runtime, native shell and offline WebView2 installer;
++  the customer machine needs no developer toolchain or source checkout. Its
++  native candidate build passed CI on the dated commit recorded in that guide.
++  Recognized publisher signing, actual release-pair/clean-customer acceptance
++  and publication remain separate gates; it is not yet an accepted release.
+ 
+ ## Docker
+ 
+@@ -39,29 +60,61 @@ Isolated, reproducible, easy to nuke.
+ docker run -it --rm \
+   -v ~/maverick-workspace:/workspace \
+   -v ~/.maverick/config.toml:/home/maverick/.maverick/config.toml:ro \
+-  -e ANTHROPIC_API_KEY=... \
+-  ghcr.io/daybreak-ai-labs/lightwork:latest \
++  -e ANTHROPIC_API_KEY \
++  maverick:reviewed \
+   start "..."
+ ```
+ 
++Build that local image from the reviewed checkout with
++`docker build -f deploy/docker/Dockerfile -t maverick:reviewed .`, or substitute
++the immutable digest of a published image whose provenance you have verified.
++The configured release workflow alone does not establish registry publication.
++Set the scoped provider key in your environment before running the container.
++The host config file must already exist and the workspace must be writable by
++the image's unprivileged uid/gid 1000. This disposable CLI example does not
++persist the container's internal state; durable service deployments need a
++dedicated state volume and the single-writer topology below.
++
+ For untrusted skills, **do not** mount `~/.maverick/` into the same
+ container that runs the agent tools. A local sandbox inside this
+ container can read mounted files and process environment variables.
+ Mount only the workspace and a read-only `config.toml`; keep API keys
+ scoped to this container run.
+ 
++### Persistent control-plane topology
++
++Use **one dashboard/serve control-plane writer**, including when the world
++model uses Postgres. Approval, flow, audit, learning, credential and
++reconciliation stores still include local files. Scale execution workers
++separately; do not infer active-active control-plane support from Postgres or
++from a persistent volume. Helm enforces one replica; the runtime ownership
++guard requires a shared data root and a filesystem with working locks. See the
++[enterprise deployment playbook](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/enterprise/deployment-playbook.md) for
++configuration, persistence and operational readiness checks.
++
+ ## VPS
+ 
+ Always-on, accessible from anywhere via channel adapters.
+ 
+-The `vps` deployment target generates:
++The pinned `deploy/vps/install.sh` bootstrap installs the complete release
++cohort, runs the wizard and renders a service for the selected non-root user:
+ 
+ - A `systemd` unit at `/etc/systemd/system/maverick.service`
+-- A Caddy reverse proxy config (if you need HTTPS for WhatsApp/SMS webhooks)
+-- Config under `/etc/maverick/config.toml` (`MAVERICK_CONFIG` env)
++- Config at that user's `~/.maverick/config.toml`, bound by `MAVERICK_CONFIG`
++- Credentials from that user's `~/.maverick/.env` via `EnvironmentFile`
++- Workspace at that user's `~/maverick-workspace`
++
++With `sudo`, the invoking non-root user owns the installation. Direct-root
++invocation uses the dedicated service account selected by
++`MAVERICK_SERVICE_USER` (default `maverick`); the script resolves its actual
++home directory rather than assuming `/home/<user>`. The service runs
++`maverick serve`, and does not start the dashboard by itself. An optional
++`deploy/vps/Caddyfile` template is provided for proxying a separately enabled
++dashboard; review its domain and upstream and install/reload it separately.
++The bootstrap does not automatically provision a public HTTPS endpoint.
+ 
+ ```bash
+-LIGHTWORK_REF=<lowercase-full-40-character-commit-sha>
++LIGHTWORK_REF='<lowercase-full-40-character-commit-sha>'
+ curl -fsSLo /tmp/lightwork-install.sh \
+   "https://raw.githubusercontent.com/Daybreak-AI-Labs/Lightwork/${LIGHTWORK_REF}/deploy/vps/install.sh"
+ sudo MAVERICK_REF="$LIGHTWORK_REF" bash /tmp/lightwork-install.sh
+diff --git a/docs/enterprise/deployment-playbook.md b/docs/enterprise/deployment-playbook.md
+index 7c8daf618a3182a7f18e2f0aec94e59f552a52ba..c2a3a4c8662db885ef4dbe398a6a60ec026294eb 100644
+--- a/docs/enterprise/deployment-playbook.md
++++ b/docs/enterprise/deployment-playbook.md
+@@ -146,7 +146,10 @@ docker compose -f deploy/docker/docker-compose.yml up -d
+ ### 4.4 Other reference architectures
+ `deploy/reference-architectures/{ecs,fly,railway}/` — ECS uses SSM Parameter
+ Store secrets + EFS; Fly uses `fly secrets set` + a volume; Railway uses a
+-mounted volume + env vars. All pin a single writer unless Postgres is used.
++mounted volume + env vars. Keep one control-plane writer with every world
++backend, including Postgres. Postgres does not make the remaining file-backed
++approval, flow, audit, learning and reconciliation stores replica-safe; scale
++execution workers separately.
+ 
+ ## 5. First-run configuration
+ `maverick init` (the wizard) writes `~/.maverick/config.toml` + `~/.maverick/.env`
+@@ -356,6 +359,6 @@ Honest, current state — what's now enforced in code vs. what genuinely remains
+ ---
+ 
+ *Grounded in: `deploy/{helm,vps,docker,postgres,observability,reference-architectures}/`,
+-`packages/maverick-core/maverick/{config.py,cli.py,sandbox/,enterprise.py,deployment.py,audit/,backup.py}`,
++`packages/maverick-core/maverick/{config.py,cli/,sandbox/,enterprise.py,deployment.py,audit/,backup.py}`,
+ and `packages/maverick-dashboard/maverick_dashboard/{app.py,api.py,auth.py,rbac.py}`.*
+ </content>
+diff --git a/packages/maverick-core/tests/test_agent_loop_612.py b/packages/maverick-core/tests/test_agent_loop_612.py
+index 30bc1f5006d392f65932b4df2c5e5e49f236f23b..bc641fdff7e2af27030bed25e952db8e3c734b85 100644
+--- a/packages/maverick-core/tests/test_agent_loop_612.py
++++ b/packages/maverick-core/tests/test_agent_loop_612.py
+@@ -305,7 +305,7 @@ class TestReleaseSpawns:
+ 
+ class TestToolDispatchWallClockGuard:
+     @pytest.mark.asyncio
+-    async def test_hung_tool_is_aborted_at_the_wall_cap(self, tmp_path):
++    async def test_hung_tool_is_aborted_at_the_wall_cap(self, tmp_path, monkeypatch):
+         # W1-31: a tool with no timeout of its own (a plugin, an MCP server,
+         # a browser/file-watcher wait) previously had no equivalent to
+         # _complete_guarded's wall-clock/killswitch polling -- it could hold
+@@ -342,11 +342,45 @@ class TestToolDispatchWallClockGuard:
+             fn=_never_returns,
+         ))
+ 
+-        t0 = time.monotonic()
++        # Exercise expiration during dispatch, independently of cold setup or
++        # scheduler delays before it. The actual guard still runs against the
++        # event loop's real monotonic deadline and cancels the actual tool.
++        armed_at = None
++        guarded = agent._await_wall_clock_guarded
++
++        def elapsed():
++            return 0.0 if armed_at is None else time.monotonic() - armed_at
++
++        async def arm_at_tool_dispatch(make_coro, *, in_flight_note):
++            nonlocal armed_at
++            if in_flight_note == "mid-tool-execution":
++                armed_at = time.monotonic()
++            return await guarded(make_coro, in_flight_note=in_flight_note)
++
++        monkeypatch.setattr(ctx.budget, "elapsed", elapsed)
++        monkeypatch.setattr(agent, "_await_wall_clock_guarded", arm_at_tool_dispatch)
+         with pytest.raises(BudgetExceeded, match="mid-tool-execution"):
+             await agent.run()
+-        elapsed = time.monotonic() - t0
+ 
+         # Aborted near the cap, not left hanging toward the 3600s sleep.
+-        assert elapsed < 5.0
++        assert armed_at is not None
++        assert time.monotonic() - armed_at < 5.0
+         assert hung["cancelled"] is True
++        assert llm.last_messages is not None
++        _assert_no_orphan_tool_use(llm.last_messages)
++
++    @pytest.mark.asyncio
++    async def test_wall_cap_exhausted_during_setup_stops_before_dispatch(self, tmp_path):
++        # A startup that consumes the cap has a different, valid outcome from
++        # a mid-tool timeout: the turn boundary returns a structured stop.
++        llm = _CapturingLLM([])
++        ctx = _ctx(tmp_path, llm, max_wall_seconds=1.0)
++        agent = Agent(ctx=ctx, role="researcher", brief="...")
++        ctx.budget._started_monotonic -= 2.0
++
++        result = await agent.run()
++
++        assert result.stop_kind == "budget"
++        assert "wall" in result.stop_detail
++        assert llm.last_messages is None
++        assert ctx.budget.tool_calls == 0
+diff --git a/packages/maverick-core/tests/test_check_attribution.py b/packages/maverick-core/tests/test_check_attribution.py
+index 76bca508a08a84ae9af61334e750a4c65207e868..1360f500e17fa9842ac4872930ecb2c071357958 100644
+--- a/packages/maverick-core/tests/test_check_attribution.py
++++ b/packages/maverick-core/tests/test_check_attribution.py
+@@ -103,6 +103,75 @@ def test_commit_range_names_only_the_offending_commit(tmp_path, capsys):
+     assert "AI co-author trailer" in err
+ 
+ 
++def _commit_as(repo: Path, message: str, *, author: tuple[str, str],
++               committer: tuple[str, str] | None = None) -> str:
++    """Commit with explicit identities (env beats the -c user.* config)."""
++    import os
++    committer = committer or author
++    env = dict(os.environ, GIT_AUTHOR_NAME=author[0], GIT_AUTHOR_EMAIL=author[1],
++               GIT_COMMITTER_NAME=committer[0], GIT_COMMITTER_EMAIL=committer[1])
++    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", message],
++                   cwd=repo, check=True, capture_output=True, text=True, env=env)
++    return _git(repo, "rev-parse", "HEAD")
++
++
++ASSISTANT = ("Claude", "noreply@anthropic.com")
++HUMAN = ("Christopher Day", "131784708+cdayAI@users.noreply.github.com")
++
++
++@pytest.mark.parametrize("role", ["author", "committer"])
++def test_assistant_identity_is_caught_even_with_a_clean_message(tmp_path, capsys, role):
++    """GitHub's squash merge adds a Co-authored-by trailer for every distinct
++    commit author, so an assistant *identity* lands the banned trailer on main
++    with no offending line in any message (main went red this way at 3b2c9cf)."""
++    repo, shas = _repo(tmp_path, ["chore: base"])
++    identities = {"author": HUMAN, "committer": HUMAN}
++    identities[role] = ASSISTANT
++    tainted = _commit_as(repo, "fix: clean message", author=identities["author"],
++                         committer=identities["committer"])
++    gate = _load()
++    assert gate.main(["--commits", f"{shas[0]}..{tainted}", "--repo", str(repo)]) == 1
++    err = capsys.readouterr().err
++    assert f"commit {tainted[:12]}: AI {role} identity: Claude <noreply@anthropic.com>" in err
++    assert "--reset-author" in err
++
++
++def test_human_github_noreply_identity_passes(tmp_path, capsys):
++    """'cdayAI' contains 'AI'; a human no-reply identity must not trip the rule."""
++    repo, shas = _repo(tmp_path, ["chore: base"])
++    clean = _commit_as(repo, "fix: clean", author=HUMAN)
++    gate = _load()
++    assert gate.main(["--commits", f"{shas[0]}..{clean}", "--repo", str(repo)]) == 0
++    assert "1 message(s) inspected" in capsys.readouterr().out
++
++
++@pytest.mark.parametrize("identity", [
++    ("Claude Martin", "claude.martin@example.com"),
++    ("Devin Patel", "devin.patel@example.com"),
++    ("Alex Smith", "alex@openai.com"),
++    ("Claude", "claude@example.com"),
++    ("Devin", "devin@example.com"),
++])
++def test_human_names_and_employer_domains_are_not_assistant_identities(
++    tmp_path, capsys, identity,
++):
++    repo, shas = _repo(tmp_path, ["chore: base"])
++    clean = _commit_as(repo, "fix: clean", author=identity)
++    gate = _load()
++    assert gate.main(["--commits", f"{shas[0]}..{clean}", "--repo", str(repo)]) == 0
++    assert "1 message(s) inspected" in capsys.readouterr().out
++
++
++@pytest.mark.parametrize("identity", [
++    "Claude Code <build@example.com>",
++    "Codex <build@example.com>",
++    "Build Agent <noreply@anthropic.com>",
++])
++def test_known_assistant_names_or_mailboxes_are_still_rejected(identity):
++    hits = _load().identity_findings(identity, "GitHub <noreply@github.com>", "commit")
++    assert hits == [f"commit: AI author identity: {identity}"]
++
++
+ def test_clean_range_passes_and_reports_the_count(tmp_path, capsys):
+     repo, shas = _repo(tmp_path, ["chore: base", "feat: a", "fix: b"])
+     gate = _load()
+diff --git a/packages/maverick-core/tests/test_research_jobs.py b/packages/maverick-core/tests/test_research_jobs.py
+index 62bfb0ac50977c1c72529cabf5390e5203513217..0832bc7fa80ed5a10c10f1938acb82a13ddacda1 100644
+--- a/packages/maverick-core/tests/test_research_jobs.py
++++ b/packages/maverick-core/tests/test_research_jobs.py
+@@ -643,28 +643,55 @@ def test_tampered_durable_candidate_never_reaches_runner(controller):
+     assert result["status"] == "review_required" and state["calls"] == 0
+ 
+ 
+-def test_concurrent_workers_only_one_claim_enters_candidate(controller):
++@pytest.mark.parametrize("loser_reads_after_claim", [False, True])
++def test_concurrent_workers_only_one_claim_enters_candidate(
++    controller, monkeypatch, loser_reads_after_claim,
++):
+     from maverick.privacy_ops import RecordConflict
++    from maverick.research_jobs import ResearchConflict
+ 
+     service, state = controller
+     row = _submit(service)
+     review_sha256 = service.review("tenant-a", "user:admin", row["id"])["review_sha256"]
+-    barrier = threading.Barrier(2)
+-
+-    def dispatch():
+-        barrier.wait(timeout=5)
++    winner, loser = state["make"](), state["make"]()
++    loser_read = threading.Event()
++    winner_entered = threading.Event()
++    original_record = loser._record
++
++    def read_loser(record_id):
++        # Force both valid interleavings: the loser either reads the reviewed
++        # revision before the claim, or reads the newly claimed revision.
++        if loser_reads_after_claim:
++            assert winner_entered.wait(timeout=5)
++        current = original_record(record_id)
++        loser_read.set()
++        assert winner_entered.wait(timeout=5)
++        return current
++
++    monkeypatch.setattr(loser, "_record", read_loser)
++    state["during"] = winner_entered.set
++
++    def dispatch(worker):
++        if worker is winner and not loser_reads_after_claim:
++            assert loser_read.wait(timeout=5)
+         try:
+-            return _run(state["make"](), row, review_sha256=review_sha256)
+-        except RecordConflict:
+-            return "stale"
++            return _run(worker, row, review_sha256=review_sha256)
++        except (RecordConflict, ResearchConflict) as exc:
++            return exc
+ 
+     with ThreadPoolExecutor(max_workers=2) as pool:
+-        futures = [pool.submit(dispatch) for _ in range(2)]
++        futures = [pool.submit(dispatch, worker) for worker in (winner, loser)]
+         results = [future.result(timeout=10) for future in futures]
+     assert (
+         sum(isinstance(result, dict) and result["status"] == "completed" for result in results) == 1
+     )
+-    assert results.count("stale") == 1 and state["calls"] == 1
++    # A fresh read rejects the now-stale review; an older snapshot reaches
++    # the CAS and rejects the stale revision. Neither path may run a candidate.
++    expected_conflict = ResearchConflict if loser_reads_after_claim else RecordConflict
++    assert type(results[1]) is expected_conflict
++    if loser_reads_after_claim:
++        assert "review the exact source again" in str(results[1])
++    assert state["calls"] == 1 and state["constructions"] == 1
+ 
+ 
+ def test_queue_expiry_denies_before_candidate_effect(controller, monkeypatch):
+diff --git a/packages/maverick-mcp/README.md b/packages/maverick-mcp/README.md
+index 4c5a5961beaa2f6e515f7b838cd11fec9250cb0a..7cb2fda4a8b74c922504b9548b4174b85102cf11 100644
+--- a/packages/maverick-mcp/README.md
++++ b/packages/maverick-mcp/README.md
+@@ -1,30 +1,39 @@
+ # maverick-mcp-server
+ 
+ A Model Context Protocol (MCP) server that exposes Lightwork's agent
+-loop as a set of MCP tools. Any MCP-compatible client (Claude Code,
+-Claude Desktop, Cursor, etc.) can drive Lightwork over stdio JSON-RPC.
++loop and supporting operations as MCP tools. Clients can connect through
++stdio JSON-RPC or Streamable HTTP. The capabilities returned by `initialize`
++and the caller-authorized `tools/list` response describe the running server;
++client support and transport settings determine which optional features work.
+ 
+ ## Why
+ 
+-Lightwork is a swarm of agents with persistent memory, budget caps,
+-and verifier loops. Most MCP clients are single-turn. By plugging
+-Lightwork in via MCP, you get:
++Lightwork supplies persistent goals, governed memory, budget caps and verifier
++loops to a connected MCP client:
+ 
+ - A "think hard for an hour" tool from inside Claude Code
+ - Persistent goals that survive editor restarts
+ - Per-role model routing controlled by your `~/.maverick/config.toml`
+-- Auto-distilled skills that compound across sessions
++- Governed skill and memory reuse, with separate learning configuration and
++  authority requirements
+ 
+ ## Install
+ 
++Start with the reviewed source cohort in the
++[deployment guide](../../docs/deployment.md). Per-package development installs
++assume the matching local kernel and dependencies are already installed:
++
+ ```bash
+-pip install -e ./packages/maverick-mcp
++python -m pip install -e ./packages/maverick-mcp
+ ```
+ 
+-## Wire into Claude Code
++The HTTP transport needs this package's `http` extra (FastAPI, Uvicorn and
++Starlette), or the equivalent dependencies from the complete dashboard cohort.
++
++## Connect a stdio client
+ 
+-Add to your Claude Code MCP config (typically
+-`~/.config/claude-code/mcp.json` or similar):
++Add a server entry to the MCP client's configuration using its documented
++configuration location. For clients using the `mcpServers` format:
+ 
+ ```json
+ {
+@@ -37,10 +46,29 @@ Add to your Claude Code MCP config (typically
+ }
+ ```
+ 
+-Then restart Claude Code. The Lightwork tools should appear under the
+-MCP servers menu.
++Reload the client's MCP configuration. It starts `maverick-mcp` as a subprocess
++and discovers the tools available to that caller.
++
++## Connect over HTTP
++
++With the HTTP dependencies installed, set `MAVERICK_MCP_TOKEN` in the service
++environment and run:
++
++```bash
++maverick mcp --http --host 127.0.0.1 --port 8771
++```
++
++Connect the client to `http://127.0.0.1:8771/mcp` with the corresponding bearer
++credential.
++Review bind address, authentication, Host/Origin controls and deployment policy
++before exposing it beyond loopback. See
++[http_transport.py](maverick_mcp/http_transport.py) for the transport contract.
+ 
+-## Tools exposed
++## Representative tools
++
++This is an overview, not a fixed complete catalog. `tools/list` filters tools
++by the current caller's principal and capability; declarations live in
++[`server.py`'s `TOOLS`](maverick_mcp/server.py).
+ 
+ | Tool | What it does |
+ |---|---|
+@@ -48,18 +76,32 @@ MCP servers menu.
+ | `maverick_status` | List recent goals + open questions |
+ | `maverick_resume` | Resume a paused goal |
+ | `maverick_answer` | Answer a queued question |
+-| `maverick_skill_install` | Install a SKILL.md from URL / gh:org/repo / local path |
++| `maverick_skill_install` | Install from a supported URL or `gh:org/repo[:path]` source, subject to validation; arbitrary local paths are not accepted |
+ | `maverick_skills_list` | List installed / distilled skills |
+ | `maverick_fact_set` | Set a fact in the world model |
+ | `maverick_facts_get` | Get all known facts |
++| `maverick_fleet_ingest` | Deposit external-agent experience through enabled, roster-bound fleet memory |
++| `maverick_fleet_recall` | Read permitted fleet memory with caller attribution |
+ 
+-All calls go through `maverick.orchestrator.run_goal` -- same Shield
+-chokepoints, same budget caps, same per-role model routing.
++Goal start/resume enter the governed goal runtime with its budget, model routing
++and applicable Shield checks. Status, facts, skills and fleet-memory operations
++have their own authorized handlers; they do not all execute an agent loop.
++Server dispatch checks tool permission, and asynchronous tasks retain and
++revalidate their execution authority.
+ 
+ ## Protocol
+ 
+-Minimal JSON-RPC 2.0 over stdio, matching the MCP 2025-11-25 spec
+-(with a 2024-11-05 fallback)
+-(`initialize`, `tools/list`, `tools/call`). No external dependencies.
+-The full `mcp` Python SDK is an option for a future hardening pass;
+-this hand-rolled version keeps the dependency footprint tiny.
++The implementation uses JSON-RPC 2.0 without the external `mcp` SDK. It still
++depends on the Lightwork kernel and, for HTTP, the web transport dependencies.
++`SUPPORTED_PROTOCOL_VERSIONS` in `server.py` defines negotiated versions;
++support for a version does not imply every optional MCP capability.
++
++Beyond tool listing/calling, the server implements resources and prompts, plus
++stdio elicitation when the client advertises support. Eligible long-running
++tools support asynchronous, pollable
++Tasks: stdio enables Tasks, while HTTP requires `MAVERICK_MCP_HTTP_TASKS=1`.
++Clients use `tasks/get`, `tasks/result`, `tasks/cancel` and `tasks/list` according
++to the negotiated capability. HTTP can return JSON or stream progress and the
++final JSON-RPC result with `Accept: text/event-stream`. Server-initiated
++`sampling` remains unimplemented. See `initialize` for the exact capabilities
++advertised by the selected transport.
+diff --git a/scripts/check_attribution.py b/scripts/check_attribution.py
+index 792ab5775d570867b6769818b6036c3630be2ed8..6e3cf30cf7a88b0539429db4468a845eeeb90ffe 100755
+--- a/scripts/check_attribution.py
++++ b/scripts/check_attribution.py
+@@ -16,6 +16,12 @@ can still be refused:
+ * ``push`` to ``main`` -- detective. If something slipped past, ``main`` goes
+   red instead of quietly accumulating trailers.
+ 
++The commit AUTHOR and COMMITTER identities are inspected as well as the
++message: GitHub's squash merge appends a ``Co-authored-by:`` trailer for every
++distinct author in the squashed commits, so a branch whose commits are merely
++*authored* as an assistant lands the trailer on ``main`` without a single
++offending line in any message (this is how ``main`` went red at 3b2c9cf).
++
+ Usage::
+ 
+     python scripts/check_attribution.py --commits BASE..HEAD [--text FILE ...]
+@@ -56,6 +62,36 @@ RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
+ )
+ 
+ 
++#: Match the complete assistant display name, not words in a human name or
++#: employer email domain. The known no-reply addresses also catch assistants
++#: using a model-version or generic display name.
++IDENTITY_RULE = re.compile(rf"(?:{_ASSISTANTS}|claude code)", re.IGNORECASE)
++_ASSISTANT_MAILBOXES = frozenset({
++    "noreply@anthropic.com", "noreply@openai.com", "copilot@github.com",
++})
++#: These assistant names are also common human names. Without an assistant
++#: mailbox, the name alone is not evidence of assistant authorship.
++_AMBIGUOUS_NAMES = frozenset({"claude", "devin"})
++
++
++def identity_findings(author: str, committer: str, source: str) -> list[str]:
++    """Author/committer identities of one commit that are assistant identities."""
++    out: list[str] = []
++    for role, identity in (("author", author), ("committer", committer)):
++        name, separator, mailbox = identity.strip().rpartition(" <")
++        if not separator:
++            name = identity.strip()
++        name = name.strip()
++        mailbox = mailbox[:-1].casefold() if mailbox.endswith(">") else ""
++        assistant_name = (
++            IDENTITY_RULE.fullmatch(name) is not None
++            and name.casefold() not in _AMBIGUOUS_NAMES
++        )
++        if assistant_name or mailbox in _ASSISTANT_MAILBOXES:
++            out.append(f"{source}: AI {role} identity: {identity}")
++    return out
++
++
+ def findings(text: str, source: str) -> list[str]:
+     """Every line of ``text`` that carries AI attribution, labelled by rule."""
+     out: list[str] = []
+@@ -67,18 +103,19 @@ def findings(text: str, source: str) -> list[str]:
+     return out
+ 
+ 
+-def commit_messages(rev_range: str, repo: Path | None = None) -> list[tuple[str, str]]:
+-    """(sha, full message) for every commit in ``rev_range``, newest first."""
++def commit_records(rev_range: str, repo: Path | None = None) -> list[tuple[str, str, str, str]]:
++    """(sha, author, committer, full message) for every commit in ``rev_range``,
++    newest first. Identities are ``Name <email>``."""
+     proc = subprocess.run(
+-        ["git", "log", "-z", "--format=%H%n%B", rev_range],
++        ["git", "log", "-z", "--format=%H%n%an <%ae>%n%cn <%ce>%n%B", rev_range],
+         cwd=repo, capture_output=True, text=True, check=True,
+     )
+-    out: list[tuple[str, str]] = []
++    out: list[tuple[str, str, str, str]] = []
+     for chunk in proc.stdout.split("\0"):
+         if not chunk.strip():
+             continue
+-        sha, _, body = chunk.partition("\n")
+-        out.append((sha, body))
++        sha, author, committer, body = (chunk.split("\n", 3) + ["", "", ""])[:4]
++        out.append((sha, author, committer, body))
+     return out
+ 
+ 
+@@ -101,14 +138,16 @@ def main(argv: list[str] | None = None) -> int:
+     problems: list[str] = []
+     if args.commits:
+         try:
+-            messages = commit_messages(args.commits, args.repo)
++            records = commit_records(args.commits, args.repo)
+         except subprocess.CalledProcessError as exc:
+             print(f"check-attribution: ERROR -- git log {args.commits!r} failed: "
+                   f"{exc.stderr.strip()}", file=sys.stderr)
+             return 2
+-        for sha, body in messages:
++        for sha, author, committer, body in records:
+             inspected += 1
+-            problems.extend(findings(body, f"commit {sha[:12]}"))
++            source = f"commit {sha[:12]}"
++            problems.extend(identity_findings(author, committer, source))
++            problems.extend(findings(body, source))
+     for path in args.text:
+         inspected += 1
+         problems.extend(findings(path.read_text(encoding="utf-8", errors="replace"),
+@@ -128,9 +167,12 @@ def main(argv: list[str] | None = None) -> int:
+         for problem in problems:
+             print(f"  {problem}", file=sys.stderr)
+         print("\nDrop the trailer/footer and rewrite the commit (git commit --amend, "
+-              "or git rebase -i for older ones), or edit the PR description. The "
+-              "squash merge is prefilled from these, so they must be clean before "
+-              "the merge, not after.", file=sys.stderr)
++              "or git rebase -i for older ones), or edit the PR description. An AI "
++              "author/committer identity must be recommitted under a human one "
++              "(git config user.name/user.email, then git commit --amend "
++              "--reset-author, or git rebase --exec for older commits): the squash "
++              "merge turns every distinct author into a Co-authored-by trailer. All "
++              "of this must be clean before the merge, not after.", file=sys.stderr)
+         return 1
+     print(f"check-attribution: clean ({inspected} message(s) inspected)")
+     return 0

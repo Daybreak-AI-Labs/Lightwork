@@ -1,0 +1,535 @@
+diff --git a/apps/installer-cli/maverick_installer/wizard.py b/apps/installer-cli/maverick_installer/wizard.py
+index b0fb275a068b127bc7466dda6b85f4416403e030..941ab4c4cbb00040ab8b6ee4deb6234dcbe5d0c3 100644
+--- a/apps/installer-cli/maverick_installer/wizard.py
++++ b/apps/installer-cli/maverick_installer/wizard.py
+@@ -3424,10 +3424,15 @@ def pick_security_suite() -> dict[str, Any]:
+         _q_confirm("  Allow reviewed local Word, Excel, PDF and text evidence uploads, including explicit PDF transcription?", default=True)
+         if vendor_onboarding else False
+     )
++    vendor_page_review = (
++        _q_confirm("  Enable local original-PDF page comparison and English OCR using the packaged document runtime? Review all pages and uncertain text before adding evidence.", default=False)
++        if vendor_reviewed_uploads else False
++    )
+     result = {
+         "vendor_onboarding": vendor_onboarding,
+         "vendor_onboarding_owner": vendor_onboarding_owner,
+         "vendor_reviewed_uploads": vendor_reviewed_uploads,
++        "vendor_page_review": vendor_page_review,
+         "customer_sandbox_lifecycle": customer_sandbox_lifecycle,
+         "security_ops": security_ops,
+         "administration_document_access": administration_document_access,
+@@ -8116,6 +8121,7 @@ def write_config(
+             f"enable = {'true' if security_suite.get('vendor_onboarding', False) else 'false'}",
+             "resource_owner = " + _toml_str(security_suite.get("vendor_onboarding_owner", "")),
+             f"reviewed_uploads = {'true' if security_suite.get('vendor_reviewed_uploads', True) else 'false'}",
++            f"page_review = {'true' if security_suite.get('vendor_page_review', False) else 'false'}",
+             'document_connection = "gdrive"',
+             'ticket_connection = "jira"',
+         ]
+diff --git a/apps/installer-cli/tests/test_wizard_security_suite.py b/apps/installer-cli/tests/test_wizard_security_suite.py
+index 66e8f3b8b3f6358d135ed49a2a31adeb86ea889e..b31eb64ac34338d0c594346abcd8bc6aaac4e6fe 100644
+--- a/apps/installer-cli/tests/test_wizard_security_suite.py
++++ b/apps/installer-cli/tests/test_wizard_security_suite.py
+@@ -20,6 +20,7 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
+         "vendor_onboarding": False,
+         "vendor_onboarding_owner": "",
+         "vendor_reviewed_uploads": False,
++        "vendor_page_review": False,
+         "customer_sandbox_lifecycle": False,
+         "security_ops": True,
+         "administration_document_access": False,
+diff --git a/build/maverick.spec b/build/maverick.spec
+index ead993b45284212000137f1de02af15d746d2555..f305a967e9853fa9c81a49e867357fb6b891cab2 100644
+--- a/build/maverick.spec
++++ b/build/maverick.spec
+@@ -1,6 +1,10 @@
+ # -*- mode: python ; coding: utf-8 -*-
+ 
+-from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
++from pathlib import Path
++
++from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules, copy_metadata
++
++from maverick.vendor_pdf_runtime import runtime
+ 
+ # Bundle the .dist-info metadata so `maverick version` can read the
+ # installed package versions from inside the frozen binary.
+@@ -12,12 +16,23 @@ _datas = (
+     collect_data_files('maverick')
+     + collect_data_files('maverick_dashboard')
+     + collect_data_files('maverick_shield')
++    + collect_data_files('pypdfium2')
++    + collect_data_files('pypdfium2_raw')
+ )
++# Only the build helper's verified, offline resource bundle may enter the
++# customer payload. Its native executable is a binary to retain POSIX mode.
++_ocr = runtime()
++_ocr_root = Path(_ocr['executable']).parent.parent
++_binaries = collect_dynamic_libs('pypdfium2_raw') + [(str(_ocr['executable']), 'vendor-pdf-runtime/bin')]
++for _file in sorted(_ocr_root.rglob('*')):
++    if _file.is_file() and _file != _ocr['executable']:
++        _datas.append((str(_file), 'vendor-pdf-runtime/' + _file.parent.relative_to(_ocr_root).as_posix()))
+ for _dist in (
+     'maverick-agent', 'maverick-shield', 'maverick-channels',
+     'maverick-evolve', 'maverick-dashboard', 'maverick-mcp-server',
+     'maverick-knowledge', 'maverick-installer', 'pywhispercpp',
+     'openai',
++    'pypdfium2', 'Pillow',
+ ):
+     try:
+         _datas += copy_metadata(_dist)
+@@ -27,7 +42,7 @@ for _dist in (
+ a = Analysis(
+     ['pyinstaller_entry.py'],
+     pathex=[],
+-    binaries=[],
++    binaries=_binaries,
+     datas=_datas,
+     hiddenimports=[
+         'sqlite3',
+diff --git a/build/pyinstaller_entry.py b/build/pyinstaller_entry.py
+index 4ec39c801ad93fe006f36156e9bd98ed8ce28f8f..6337c2ed52bfe81cc62d23e35b123a8314830ace 100644
+--- a/build/pyinstaller_entry.py
++++ b/build/pyinstaller_entry.py
+@@ -6,7 +6,10 @@ binary. Distributed via GitHub Releases for macOS / Linux / Windows.
+ import sys
+ 
+ if __name__ == "__main__":
+-    if len(sys.argv) == 3 and sys.argv[1] == "--recovery-rehearsal-worker":
++    if len(sys.argv) > 1 and sys.argv[1] == "--vendor-document-worker":
++        from maverick.vendor_document_worker import main
++        raise SystemExit(main(sys.argv[2:]))
++    elif len(sys.argv) == 3 and sys.argv[1] == "--recovery-rehearsal-worker":
+         from maverick.recovery_rehearsal import main
+         raise SystemExit(main([sys.argv[2]]))
+     else:
+diff --git a/docs/vendor-onboarding.md b/docs/vendor-onboarding.md
+index 972cc010c2c16bfa3e056583fd9ea37a24d557bb..d4ca4443723cbb341597d970f7dd62c23b695517 100644
+--- a/docs/vendor-onboarding.md
++++ b/docs/vendor-onboarding.md
+@@ -190,6 +190,17 @@ retained records contain content hashes, source versions, uploader/date provenan
+ parser limitations and short redacted quotations. Uploaded evidence is verified
+ against its retained snapshot, never described as current provider readback.
+ 
++PDF and Office parsing runs in a disposable child process, using the same fixed
++worker protocol in source installations and the packaged runtime. Each worker
++has a 30-second limit, a 512 MiB process-memory limit, bounded output and a
++temporary home without inherited provider credentials or application settings.
++At most two extractions run concurrently per serving process. Failures, timeouts
++and malformed results refuse evidence; parsing never falls back into the server.
++Source bytes pass through stdin and are not saved to the temporary directory.
++This contains parser crashes and resource use; it is not an OS filesystem or
++network sandbox, and adds neither rendering nor OCR. The existing preview
++confirmation, source hashes and page/paragraph/cell citations remain required.
++
+ Replacing or removing evidence clears the assessment and pending action approval.
+ Every Drive source is checked again before task execution, including secondary
+ documents. Renewals retain the previous accepted case unchanged and show added,
+diff --git a/packages/maverick-core/maverick/config.py b/packages/maverick-core/maverick/config.py
+index 2472882c7721d2b8d32aa637a3e5c991a961485b..11579219310d73003effff6b6b2da183241c9e70 100644
+--- a/packages/maverick-core/maverick/config.py
++++ b/packages/maverick-core/maverick/config.py
+@@ -2845,6 +2845,13 @@ def vendor_reviewed_uploads_enabled(cfg: dict | None = None) -> bool:
+     return section.get("reviewed_uploads", True) is True
+ 
+ 
++def vendor_pdf_review_enabled(cfg: dict | None = None) -> bool:
++    """Explicit deployment opt-in to local PDF rendering and English OCR."""
++    current = load_global_config() if cfg is None else cfg
++    section = current.get("vendor_onboarding") or {}
++    return isinstance(section, dict) and section.get("page_review", False) is True
++
++
+ def data_use_governance_enabled(cfg: dict | None = None) -> bool:
+     """Whether the Data Use Governance module is on.
+ 
+diff --git a/packages/maverick-core/maverick/vendor_onboarding_config.py b/packages/maverick-core/maverick/vendor_onboarding_config.py
+index 490e31389fd33b4c1fc51d9a5e366f3c87030c0d..30972e1d09b5cc5b04c1157c918f8715575bc5dd 100644
+--- a/packages/maverick-core/maverick/vendor_onboarding_config.py
++++ b/packages/maverick-core/maverick/vendor_onboarding_config.py
+@@ -11,6 +11,7 @@ class VendorOnboardingSettings:
+     document_connection: str = "gdrive"
+     ticket_connection: str = "jira"
+     reviewed_uploads: bool = True
++    page_review: bool = False
+ 
+     @classmethod
+     def from_config(cls, config: dict) -> VendorOnboardingSettings:
+@@ -18,8 +19,8 @@ class VendorOnboardingSettings:
+         if not isinstance(raw, dict) or set(raw) - set(cls.__dataclass_fields__):
+             raise ValueError("vendor_onboarding must be a closed configuration table")
+         settings = cls(**raw)
+-        if type(settings.enable) is not bool or type(settings.reviewed_uploads) is not bool:
+-            raise ValueError("vendor_onboarding.enable and reviewed_uploads must be booleans")
++        if any(type(getattr(settings, key)) is not bool for key in ("enable", "reviewed_uploads", "page_review")):
++            raise ValueError("vendor_onboarding.enable, reviewed_uploads and page_review must be booleans")
+         for key in ("resource_owner", "document_connection", "ticket_connection"):
+             value = getattr(settings, key)
+             if not isinstance(value, str) or len(value) > 256 or value != value.strip():
+diff --git a/packages/maverick-core/maverick/vendor_onboarding_documents.py b/packages/maverick-core/maverick/vendor_onboarding_documents.py
+index 40e7dfe2e671b3bbd78a2c440822f71bf9497525..62b42b7bd9364925c3ebd2f088c00574570cde03 100644
+--- a/packages/maverick-core/maverick/vendor_onboarding_documents.py
++++ b/packages/maverick-core/maverick/vendor_onboarding_documents.py
+@@ -7,17 +7,18 @@ import re
+ 
+ from . import ai_vendor_risk as risk
+ from .privacy_ops import _build_document_evidence, _document_text
+-from .vendor_office_text import MAX_OFFICE_BYTES, MAX_TEXT_CHARS, OFFICE_MIMES, extract_office
++from .vendor_office_text import MAX_OFFICE_BYTES, MAX_TEXT_CHARS, OFFICE_MIMES
+ from .vendor_onboarding_adapters import GOOGLE_DOC_MIME, MAX_PDF_BYTES, MAX_TEXT_BYTES
+ 
+ MAX_DOCUMENTS = 8
+ MAX_TOTAL_BYTES = 32 * 1024 * 1024
+ 
+ 
+-def _read(document, mime, transcription):
++def _read(document, mime, transcription, page_review):
+     metadata = {}
+-    if mime in OFFICE_MIMES:
+-        text, metadata = extract_office(document.content, mime)
++    if mime in OFFICE_MIMES or mime == "application/pdf":
++        from .vendor_document_worker import parse
++        text, metadata = parse(document.content, mime, page_review=page_review and mime == "application/pdf")
+     else:
+         text = _document_text(document.content, mime, _metadata=metadata)
+     if transcription is not None:
+@@ -28,10 +29,11 @@ def _read(document, mime, transcription):
+         if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", transcription):
+             raise ValueError("Transcription contains unsupported control characters")
+         text = transcription
+-        metadata = {"method": "human_transcription", "scope": "user_supplied_text",
++        rendered = {key: metadata[key] for key in ("pages", "page_count", "page_previews", "renderer", "ocr") if key in metadata}
++        metadata = {**rendered, "method": "human_transcription", "scope": "user_supplied_text",
+                     "confidence": "untrusted", "review_required": True,
+                     "source_extraction_method": metadata.get("method", "unsupported"),
+-                    "limits": ["User-supplied transcription; no OCR or source-text verification was performed.",
++                    "limits": ["User-supplied transcription; OCR suggestions are separate and do not verify this text." if rendered else "User-supplied transcription; no OCR or source-text verification was performed.",
+                                "Paragraph locations refer to the transcription, not PDF pages."]}
+     return text, metadata
+ 
+@@ -60,7 +62,7 @@ def _locations(result, text, metadata, mime, source, document, name):
+ 
+ 
+ def extract(document, *, source: str, name: str, now: float, freshness_days: int,
+-            transcription: str | None = None, preview: dict | None = None) -> dict:
++            transcription: str | None = None, preview: dict | None = None, page_review: bool | None = None) -> dict:
+     """Retain only provenance, parser limits and bounded redacted quotations."""
+     if (not document.version or not math.isfinite(document.modified_at)
+             or document.modified_at <= 0 or document.modified_at > now):
+@@ -75,12 +77,20 @@ def extract(document, *, source: str, name: str, now: float, freshness_days: int
+         raise ValueError("document exceeds the supported byte limit")
+     if mime == "text/plain":
+         document.content.decode("utf-8", errors="strict")
+-    text, metadata = _read(document, mime, transcription)
++    if page_review is None:
++        from .config import vendor_pdf_review_enabled
++        page_review = vendor_pdf_review_enabled()
++    if type(page_review) is not bool:
++        raise ValueError("PDF page review requires an explicit boolean setting")
++    text, metadata = _read(document, mime, transcription, page_review)
++    pages = metadata.pop("page_previews", None)
+     if preview is not None:
+         if len(text) > MAX_TEXT_CHARS:
+             raise ValueError("Extracted text exceeds the 120,000-character review limit; split the evidence file")
+         preview.update(text=text, locations=metadata.get("location_spans", []),
+                        can_transcribe=mime == "application/pdf" and not text.strip() and document.content.startswith(b"%PDF-"))
++        if pages is not None:
++            preview["page_previews"] = pages
+     result = None
+     status = "empty" if not text.strip() and mime == "text/plain" else "extraction_failed"
+     if text.strip():
+diff --git a/packages/maverick-core/pyproject.toml b/packages/maverick-core/pyproject.toml
+index 223e4bda31b17f1e6901850f15fb70700eb2ebfb..1dda2de695b59a2964bd361272f4eb0f9a25f5a4 100644
+--- a/packages/maverick-core/pyproject.toml
++++ b/packages/maverick-core/pyproject.toml
+@@ -45,7 +45,7 @@ dependencies = [
+ 
+ [project.optional-dependencies]
+ openai     = ["openai>=1.30,<4"]
+-release-runtime = ["openai>=1.30,<4"]
++release-runtime = ["openai>=1.30,<4", "pypdfium2==5.13.0", "pillow>=12.3.0"]
+ azure      = ["openai>=1.30,<4", "azure-identity>=1.25.3,<2"]
+ openrouter = ["openai>=1.30,<4"]
+ ollama     = ["openai>=1.30,<4"]
+@@ -84,6 +84,7 @@ capture         = ["playwright>=1.40"]
+ browser         = ["playwright>=1.40", "lxml>=5.0"]
+ computer-use    = ["pillow>=12.3.0", "mss>=9.0", "pyautogui>=0.9.54"]
+ pdf             = ["pdfplumber>=0.10", "pypdf>=6.14.2"]
++vendor-documents = ["pypdfium2==5.13.0", "pillow>=12.3.0"]
+ # Bounded local parsers used by the AI Evidence Analysis workbench. Production
+ # OCR invokes an operator-installed, absolute-path/SHA-pinned Tesseract binary;
+ # it never discovers a binary from PATH. Legacy XLS dependencies are narrowly
+diff --git a/packages/maverick-dashboard/maverick_dashboard/static/lightwork-vendor-onboarding.js b/packages/maverick-dashboard/maverick_dashboard/static/lightwork-vendor-onboarding.js
+index 3b9194fb64a0d07346629adc8f588326e7aa3dad..f8a279a6c6dc26dea8c820dcbb1c83bd2e4d761f 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/static/lightwork-vendor-onboarding.js
++++ b/packages/maverick-dashboard/maverick_dashboard/static/lightwork-vendor-onboarding.js
+@@ -9,6 +9,7 @@
+   let reviewedAt = null;
+   let busy = false;
+   let uploadReview = null, uploadGeneration = 0, uploadDenied = false;
++  let pageReview = null, pageExpiry = null;
+   const show = (id, value) => { byId(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2); };
+   const message = (text, error = false) => {
+     byId("message").setAttribute("role", error ? "alert" : "status");
+@@ -45,6 +46,8 @@
+       if (byId(id)) byId(id).disabled = busy || !editable || uploadDenied;
+     if (byId("upload-accept")) byId("upload-accept").disabled = busy || uploadDenied || !editable ||
+       uploadReview?.preview.status !== "available" || !byId("upload-confirm").checked;
++    if (byId("page-previous")) byId("page-previous").disabled = busy || !pageReview || pageReview.index === 0;
++    if (byId("page-next")) byId("page-next").disabled = busy || !pageReview || pageReview.index === pageReview.pages.length - 1;
+   }
+   const evidenceDocuments = record => record.evidence?.documents || (record.evidence ? [record.evidence] : []);
+   const documentIds = value => String(value || "").split(/\r?\n/).map(id => id.trim()).filter(Boolean);
+@@ -94,6 +97,10 @@
+       headers: {"Content-Type": "application/json"},
+       ...(body === undefined ? {} : {body: JSON.stringify(body)})
+     });
++    if ([401,403].includes(response.status)) {
++      clearUploadReview(true); uploadDenied = true;
++      throw new Error("Access to this request is unavailable. Sign in or check permissions, then reload this page.");
++    }
+     let data;
+     try { data = await response.json(); } catch (_) { throw new Error("Server response unavailable; reload the case before retrying."); }
+     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Server response unavailable; reload the case before retrying.");
+@@ -271,12 +278,106 @@
+   })));
+   function clearUploadReview(clearInput = false) {
+     uploadReview = null; uploadGeneration++;
++    clearPageReview();
+     if (!byId("upload-review")) return;
+     byId("upload-review").hidden = true; byId("upload-confirm").checked = false;
+     byId("upload-text").textContent = ""; byId("upload-fingerprints").textContent = "";
+     byId("upload-summary").textContent = ""; byId("upload-limits").replaceChildren();
+     if (clearInput) { byId("upload-transcription").value = ""; byId("upload").value = ""; }
+   }
++  function clearPageReview() {
++    if (pageExpiry !== null) { clearTimeout(pageExpiry); pageExpiry = null; }
++    if (pageReview) for (const page of pageReview.pages) URL.revokeObjectURL(page.url);
++    pageReview = null;
++    if (!byId("page-review")) return;
++    byId("page-image").removeAttribute("src"); byId("page-image").alt = "";
++    for (const id of ["page-position", "page-caption", "page-confidence", "page-text"]) show(id, "");
++    byId("page-review").hidden = true; byId("page-manual").hidden = true;
++  }
++  function base64Bytes(value, maximum) {
++    if (typeof value !== "string" || value.length > Math.ceil(maximum / 3) * 4 || value.length % 4 ||
++        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value))
++      throw new Error("The PDF page preview was invalid. Preview the selected file again.");
++    const bytes = Uint8Array.from(atob(value), char => char.charCodeAt(0));
++    if (bytes.length > maximum) throw new Error("The PDF page preview exceeded its limit. Select a smaller PDF.");
++    return bytes;
++  }
++  async function sha256(bytes) {
++    if (!globalThis.crypto?.subtle) throw new Error("This browser cannot verify PDF previews. Open the app using its secure address and retry.");
++    return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), value => value.toString(16).padStart(2, "0")).join("");
++  }
++  async function verifiedPages(preview, body) {
++    const meta = preview.extraction, pages = preview.page_previews;
++    if (pages !== undefined && !Array.isArray(pages)) throw new Error("The PDF page preview was incomplete.");
++    const hasPages = Boolean(pages?.length || meta?.pages || meta?.method === "pdf_rendered_page_ocr");
++    if (!hasPages) return null;
++    const bad = () => { throw new Error("The PDF page preview did not match the selected file. Preview it again."); };
++    const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
++    const score = value => value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100);
++    if (!meta || typeof meta !== "object" || body.mime !== "application/pdf" || !Array.isArray(pages) || pages.length < 1 || pages.length > 8 ||
++        !Array.isArray(meta.pages) || meta.pages.length !== pages.length || meta.page_count !== pages.length ||
++        !["pdf_rendered_page_ocr","human_transcription"].includes(meta.method) || meta.confidence !== "untrusted" || meta.review_required !== true ||
++        (meta.method === "pdf_rendered_page_ocr" && meta.scope !== "rendered_pages") ||
++        typeof meta.renderer?.pypdfium2 !== "string" || typeof meta.renderer?.pdfium !== "string" ||
++        meta.ocr?.engine !== "tesseract" || typeof meta.ocr.version !== "string" || meta.ocr.language !== "eng" || !hash(meta.ocr.model_sha256)) bad();
++    if (await sha256(base64Bytes(body.content_base64, 16 * 1024 * 1024)) !== preview.source_sha256 ||
++        await sha256(new TextEncoder().encode(preview.text)) !== preview.text_sha256) bad();
++    const verified = []; let total = 0;
++    for (let index = 0; index < pages.length; index++) {
++      const page = pages[index], identity = meta.pages[index];
++      if (!page || !identity || page.page !== index + 1 || identity.page !== page.page ||
++          !Number.isInteger(page.width) || !Number.isInteger(page.height) || page.width < 1 || page.height < 1 ||
++          page.width > 3200 || page.height > 3200 || page.width * page.height > 4_000_000 ||
++          identity.width !== page.width || identity.height !== page.height || typeof page.text !== "string" || [...page.text].length > 120000 ||
++          !hash(identity.png_sha256) || !hash(identity.text_sha256) || !["optical_text","blank_page"].includes(identity.method) ||
++          !Number.isInteger(identity.word_count) || identity.word_count < 0 || identity.word_count > 120000 ||
++          !score(identity.confidence_score) || !score(identity.minimum_confidence) ||
++          ((identity.confidence_score === null) !== (identity.minimum_confidence === null)) || identity.minimum_confidence > identity.confidence_score ||
++          ((identity.confidence_score === null) !== (identity.word_count === 0)) ||
++          (identity.method === "blank_page" && (page.text || identity.word_count || identity.confidence_score !== null || identity.minimum_confidence !== null))) bad();
++      const png = base64Bytes(page.png_base64, 1024 * 1024); total += png.length;
++      if (total > 6 * 1024 * 1024 || png.length < 24 ||
++          ![137,80,78,71,13,10,26,10].every((value, offset) => png[offset] === value) ||
++          String.fromCharCode(...png.slice(12,16)) !== "IHDR") bad();
++      const header = new DataView(png.buffer, png.byteOffset, png.byteLength);
++      if (header.getUint32(16) !== page.width || header.getUint32(20) !== page.height ||
++          await sha256(png) !== identity.png_sha256 || await sha256(new TextEncoder().encode(page.text)) !== identity.text_sha256) bad();
++      verified.push({png, text:page.text, identity});
++    }
++    return verified;
++  }
++  function showPage() {
++    if (!pageReview) return;
++    const {identity, text, url} = pageReview.pages[pageReview.index];
++    byId("page-image").src = url;
++    byId("page-image").alt = `Original PDF page ${identity.page} of ${pageReview.pages.length}: ${pageReview.name}`;
++    show("page-position", `Page ${identity.page} of ${pageReview.pages.length}`);
++    show("page-caption", `Original PDF page ${identity.page}, rendered locally from the selected file.`);
++    show("page-text", text || (identity.method === "blank_page" ? "This page was detected as blank. Confirm this against the image." : "No readable words were recognized on this page. Check the image and note the omission."));
++    show("page-confidence", identity.confidence_score === null ? "OCR confidence unavailable." :
++      `OCR word confidence: average ${identity.confidence_score.toFixed(2)} / 100; lowest ${identity.minimum_confidence?.toFixed(2) ?? "unavailable"}. ${identity.word_count} words. This is not verified accuracy.`);
++    buttons();
++  }
++  function installPages(pages, preview) {
++    if (!pages) return;
++    pageReview = {index:0, name:preview.name, pages:[]};
++    for (const page of pages) pageReview.pages.push({...page, url:URL.createObjectURL(new Blob([page.png], {type:"image/png"}))});
++    byId("page-review").hidden = false;
++    byId("page-manual").hidden = preview.extraction.method !== "human_transcription";
++    showPage();
++    pageExpiry = setTimeout(() => {
++      clearUploadReview(); buttons(); message("The PDF preview expired. Preview the selected file again before adding evidence.", true);
++    }, Math.max(0, Math.min(600000, preview.expires_at * 1000 - Date.now())));
++  }
++  byId("page-image")?.addEventListener("error", () => {
++    if (!pageReview) return;
++    clearUploadReview(); buttons(); message("The PDF page image could not be displayed. Preview the file again before adding evidence.", true);
++  });
++  for (const [id, step] of [["page-previous",-1],["page-next",1]]) byId(id)?.addEventListener("click", () => {
++    if (!pageReview || busy || byId(id).disabled) return;
++    pageReview.index += step; showPage();
++  });
++  window.addEventListener?.("pagehide", () => { clearUploadReview(true); buttons(); });
+   function fileBase64(file) {
+     return new Promise((resolve, reject) => {
+       const reader = new FileReader();
+@@ -326,14 +427,21 @@
+           !/^[0-9a-f]{64}$/.test(preview.review_digest) || !/^[0-9a-f]{64}$/.test(preview.source_sha256) || !/^[0-9a-f]{64}$/.test(preview.text_sha256) ||
+           !Number.isFinite(preview.expires_at) || !["available","empty","extraction_failed","extraction_limit"].includes(preview.status))
+         throw new Error("The evidence preview was incomplete. Select the file and preview again.");
++      const pages = await verifiedPages(preview, body);
++      if (generation !== uploadGeneration || selected?.id !== caseId || selected?.revision !== revision || byId("upload").files?.[0] !== file)
++        throw new Error("The request or file changed during verification. Preview it again.");
+       uploadReview = {body, preview, caseId, revision, file, generation};
+       byId("upload-review").hidden = false;
+       show("upload-text", preview.text || "No supported text was extracted from this file.");
+       const manual = preview.extraction?.method === "human_transcription";
+       byId("upload-fallback").hidden = !preview.can_transcribe && !manual;
+-      show("upload-summary", `${preview.name}: ${manual ? "user-supplied transcription; no OCR performed" : "locally extracted text"}. Nothing has been added to the request yet.`);
++      show("upload-summary", `${preview.name}: ${manual ? (pages ? "user-supplied transcription; compare with the original page images" : "user-supplied transcription; no OCR performed") : pages ? "local OCR suggestions from the original page images" : "locally extracted text"}. Nothing has been added to the request yet.`);
++      if (byId("upload-fallback-help")) show("upload-fallback-help", pages ?
++        "Compare every original page image above. You may transcribe the whole document below, clearly noting unreadable or omitted content. Your transcription stays separate from OCR suggestions and has no verified PDF page citations." :
++        "Lightwork could not read this PDF using its local text reader. No OCR was performed. Select a supported copy, or transcribe the relevant content while comparing your original PDF. Clearly note omissions. Transcription paragraphs are not verified PDF page locations.");
+       for (const limit of preview.extraction?.limits || []) element("li", String(limit), byId("upload-limits"));
+       show("upload-fingerprints", `Original file SHA-256: ${preview.source_sha256}\n${manual ? "Supplied" : "Extracted"} text SHA-256: ${preview.text_sha256}\nMethod: ${friendly(preview.extraction?.method)}\nPreview expires: ${date(preview.expires_at)}`);
++      installPages(pages, preview);
+       return preview.can_transcribe ? "This PDF needs a readable copy or your explicit transcription. No evidence was added." : "Preview ready. Compare the text against the original, then explicitly add reviewed evidence.";
+     } catch (error) { clearUploadReview(); throw error; }
+   }
+diff --git a/packages/maverick-dashboard/maverick_dashboard/templates/vendor_onboarding.html b/packages/maverick-dashboard/maverick_dashboard/templates/vendor_onboarding.html
+index fd60d1ef8b559e7dd6e01277c8b5068bab9d897e..7297cc48ab612f4628352b4070b195dfb9cb84e9 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/templates/vendor_onboarding.html
++++ b/packages/maverick-dashboard/maverick_dashboard/templates/vendor_onboarding.html
+@@ -28,10 +28,16 @@
+   #vo-cases button[aria-current="true"] {border-color:var(--accent); background:var(--surface-2)}
+   #vo-case-reference {overflow-wrap:anywhere; color:var(--muted)}
+   #vo-upload-review pre {max-height:24rem;min-width:0}
++  .vo-page-nav {display:flex;align-items:center;flex-wrap:wrap;gap:.6rem}
++  .vo-page-grid {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;margin-top:1rem}
++  .vo-page-grid > * {min-width:0;margin:0}
++  .vo-page-grid img {display:block;width:100%;height:auto;background:white;border:1px solid var(--border);box-sizing:border-box}
++  .vo-page-grid figcaption {margin:.5rem 0;overflow-wrap:anywhere}
++  #vo-page-text {max-height:36rem}
+   .vo-card .vo-upload-confirm-label {display:flex;align-items:flex-start;gap:.6rem}
+   .vo-card #vo-upload-confirm {width:auto;flex:0 0 auto}
+   #vendor-onboarding:has(#vo-upload-review:not([hidden])) #vo-message {position:static}
+-  @media(max-width:800px) {.vo-layout {grid-template-columns:1fr}}
++  @media(max-width:800px) {.vo-layout,.vo-page-grid {grid-template-columns:1fr}}
+ </style>
+ {% endblock %}
+ {% block content %}
+@@ -108,10 +114,24 @@
+             <h4 id="vo-upload-review-title">Review text before adding evidence</h4>
+             <p id="vo-upload-summary" role="status"></p>
+             <ul id="vo-upload-limits"></ul>
++            <section id="vo-page-review" hidden aria-labelledby="vo-page-review-title">
++              <h5 id="vo-page-review-title">Compare the original PDF pages</h5>
++              <p>Check every page and any omissions. OCR suggestions can be wrong; its confidence score is not a probability that a statement is correct.</p>
++              <div class="vo-page-nav" role="group" aria-label="Original PDF page navigation">
++                <button id="vo-page-previous" type="button" aria-controls="vo-page-image vo-page-text" disabled>Previous page</button>
++                <span id="vo-page-position" role="status" aria-live="polite"></span>
++                <button id="vo-page-next" type="button" aria-controls="vo-page-image vo-page-text" disabled>Next page</button>
++              </div>
++              <div class="vo-page-grid">
++                <figure><img id="vo-page-image" alt=""><figcaption id="vo-page-caption"></figcaption></figure>
++                <div><h6>OCR text from this page</h6><p id="vo-page-confidence"></p><pre id="vo-page-text" tabindex="0" aria-label="OCR text from the selected original PDF page"></pre></div>
++              </div>
++              <p id="vo-page-manual" hidden>Your transcription below is separate from these OCR suggestions. Transcription citations refer to your paragraphs, not verified PDF page text.</p>
++            </section>
+             <pre id="vo-upload-text" tabindex="0" aria-label="Text to compare against the original file"></pre>
+             <details><summary>Source and extraction details</summary><pre id="vo-upload-fingerprints"></pre></details>
+             <div id="vo-upload-fallback" hidden>
+-              <p>Lightwork could not read this PDF using its local text reader. No OCR was performed. You can select a supported text or Word copy, or transcribe the relevant content below while comparing it with your original PDF. Clearly note any omitted or unreadable sections. The resulting evidence will be labeled user-supplied transcription, with no verified PDF page locations.</p>
++              <p id="vo-upload-fallback-help">Lightwork could not read this PDF using its local text reader. No OCR was performed. You can select a supported text or Word copy, or transcribe the relevant content below while comparing it with your original PDF. Clearly note any omitted or unreadable sections. The resulting evidence will be labeled user-supplied transcription, with no verified PDF page locations.</p>
+               <label for="vo-upload-transcription">Your transcription and any omissions</label><textarea id="vo-upload-transcription" rows="8" maxlength="120000" data-draft-recovery="off"></textarea>
+               <button id="vo-upload-transcribe" type="button">Preview my transcription</button>
+             </div>
+diff --git a/packages/maverick-dashboard/maverick_dashboard/vendor_onboarding_page.py b/packages/maverick-dashboard/maverick_dashboard/vendor_onboarding_page.py
+index fe0e68415c4995b82a7aeee14052980b9f28cb81..76f5c245c83d197dbcb666c7726083a64b8ff2db 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/vendor_onboarding_page.py
++++ b/packages/maverick-dashboard/maverick_dashboard/vendor_onboarding_page.py
+@@ -33,7 +33,7 @@ def create_vendor_onboarding_page_router(templates: Jinja2Templates) -> APIRoute
+             "Content-Security-Policy": (
+                 "default-src 'self'; script-src 'self'; "
+                 f"style-src 'self' 'nonce-{nonce}'; "
+-                "connect-src 'self'; object-src 'none'; base-uri 'none'; "
++                "connect-src 'self'; img-src 'self' blob:; object-src 'none'; base-uri 'none'; "
+                 "frame-ancestors 'none'; form-action 'none'"
+             ),
+         })
+diff --git a/packages/maverick-dashboard/tests/test_vendor_onboarding_api.py b/packages/maverick-dashboard/tests/test_vendor_onboarding_api.py
+index f5cc2c03243afe6a78f276a435c350fbd08d16dd..262ac0ab7c53067f512e4f18ac8cadb033f007ca 100644
+--- a/packages/maverick-dashboard/tests/test_vendor_onboarding_api.py
++++ b/packages/maverick-dashboard/tests/test_vendor_onboarding_api.py
+@@ -258,6 +258,11 @@ def test_existing_dashboard_page_and_asset_are_usable(web):
+     assert "Human review" in response.text
+     assert "Approve this exact Jira task" in response.text
+     assert "no-store" in response.headers["cache-control"]
++    directives = response.headers["content-security-policy"].split("; ")
++    assert "img-src 'self' blob:" in directives
++    assert "object-src 'none'" in directives
++    assert "default-src 'self'" in directives
++    assert not any("https:" in item or "data:" in item for item in directives)
+     asset = client.get("/static/lightwork-vendor-onboarding.js")
+     assert asset.status_code == 200
+     assert "textContent" in asset.text
+diff --git a/requirements/ci.txt b/requirements/ci.txt
+index b328694924e36f5911303f1e3c9706c81802602d..005cdbc02a2b9d10e8fb806444214b8f282af1ca 100644
+--- a/requirements/ci.txt
++++ b/requirements/ci.txt
+@@ -97,6 +97,7 @@ pywin32-ctypes==0.2.3
+ pyparsing==3.3.2
+ pyproject-hooks==1.2.0
+ pypdf==6.16.2
++pypdfium2==5.13.0
+ pytest==9.1.1
+ pytest-asyncio==1.4.0
+ pytest-timeout==2.4.0
+diff --git a/scripts/acceptance/fixtures/vendor-documents/README.md b/scripts/acceptance/fixtures/vendor-documents/README.md
+index 0496dbb023fc88c37da70cc2e548d84058133f6e..2fe47870ce1517127dabeb1056794216a8416042 100644
+--- a/scripts/acceptance/fixtures/vendor-documents/README.md
++++ b/scripts/acceptance/fixtures/vendor-documents/README.md
+@@ -3,3 +3,18 @@
+ These internally authored fixtures contain no customer or live vendor data. The PDF has three real pages, including a blank second page, to test source-grounded page locations. The text fixture deliberately contradicts its provenance and training-data claims. They demonstrate supported parsing and unresolved review; they are not compliance evidence or live acceptance.
+ 
+ `northstar-policy.docx` and `northstar-policy.xlsx` are authored with python-docx and openpyxl by `make_office_fixtures.py`. They exercise Word body text and table paragraphs, Excel visible cells and a deliberately hidden contradictory row. The Word header is intentionally outside the supported scope. `northstar-scan.pdf` is a real raster-only PDF containing the same short synthetic provenance sentence; it requires the explicit human-transcription fallback, with no OCR claim. The generator's optional development libraries are not product or test-runtime dependencies.
++
++## Authored extraction corpus
++
++`document-corpus.json` pins the bytes, expected text, source locations, omissions and refusal outcomes of 14 selected cases. `evaluate_document_corpus.py` runs the current vendor extraction entry point and checks those expectations; it also checks citation source hashes and versions. Run from the repository root with the core package installed:
++
++```console
++python scripts/acceptance/fixtures/vendor-documents/evaluate_document_corpus.py --output authored-document-evaluation.json
++python -m pytest -q packages/maverick-core/tests/test_vendor_document_corpus.py
++```
++
++The baseline profile is `legacy_page_stream_and_office_body_cells`. It covers Word body/table paragraphs, omitted header/footer/hidden content, tracked-change refusal, Excel visible cells, hidden rows/columns/sheets, a deliberately stale cached formula result, and an uncached formula omission. Cached values are extracted as stored; formulas are not recalculated.
++
++The PDF cases include a supported three-page reference with a blank middle page and independently renderable authored digital, multicolumn, embedded-font/Unicode, rotated, image-only, low-quality and blank PDFs. The legacy parser refuses the latter fixtures; a passing baseline records those limitations rather than claiming successful extraction. A malformed PDF is separate from valid-but-unsupported layouts. Virtual oversized PDF and Office cases are assembled from small pinned fixtures and must be refused before a parser starts. Image-only and low-quality files have authored ground truth, but this baseline does not evaluate OCR, rendered review, reading order, representative accuracy or customer document acceptance. Any rendered/OCR backend needs its own explicit profile and results.
++
++`make_document_corpus.py` regenerates the 11 `corpus-*` binaries and manifest using optional development libraries: python-docx 1.2.0, openpyxl 3.1.5, ReportLab 4.4.9 and Pillow 12.3.0. It normalizes ZIP timestamps/order and uses ReportLab's invariant output and bundled Vera font (digest recorded in the manifest). These libraries are not required to evaluate the checked-in bytes. The fixture names, canaries and contents are authored test data, with no customer information or live vendor records.

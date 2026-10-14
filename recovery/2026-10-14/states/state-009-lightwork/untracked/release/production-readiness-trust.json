@@ -1,0 +1,5 @@
+{
+  "schema": "lightwork.production-readiness-trust.v1",
+  "status": "unconfigured",
+  "trusted_ed25519_public_keys": {}
+}

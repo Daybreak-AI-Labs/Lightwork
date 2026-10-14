@@ -1,0 +1,140 @@
+diff --git a/packages/maverick-dashboard/maverick_dashboard/rbac.py b/packages/maverick-dashboard/maverick_dashboard/rbac.py
+index 44879620cc68d43d625c9cf67e34fd05a940dcce..63ba7bc1c9575685a5cc8f027f591274493343d4 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/rbac.py
++++ b/packages/maverick-dashboard/maverick_dashboard/rbac.py
+@@ -55,7 +55,11 @@ _PERMISSIONS: dict[str, frozenset[str]] = {
+ 
+ 
+ def store_path() -> Path:
+-    return Path.home() / ".maverick" / "dashboard-users.json"
++    # This is deployment-global, not tenant-scoped, but it still belongs under
++    # the configured Lightwork data root.  Respecting MAVERICK_HOME keeps a
++    # service install's access-control state alongside its other state.
++    from maverick.paths import maverick_home
++    return maverick_home() / "dashboard-users.json"
+ 
+ 
+ def default_role() -> str:
+@@ -139,7 +143,8 @@ def remove_user(principal: str) -> None:
+ 
+ 
+ def tenant_store_path() -> Path:
+-    return Path.home() / ".maverick" / "dashboard-tenant-roles.json"
++    from maverick.paths import maverick_home
++    return maverick_home() / "dashboard-tenant-roles.json"
+ 
+ 
+ def _load_tenant() -> dict[str, dict[str, str]]:
+diff --git a/packages/maverick-dashboard/maverick_dashboard/ui_visibility.py b/packages/maverick-dashboard/maverick_dashboard/ui_visibility.py
+index b5a6dc6721a09f1717f847df126bc88e6912afc1..d75041c37a6a0a62c098268b29fe67c812fd6a7b 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/ui_visibility.py
++++ b/packages/maverick-dashboard/maverick_dashboard/ui_visibility.py
+@@ -215,7 +215,10 @@ def _locked(path: Path):
+ 
+ 
+ def store_path() -> Path:
+-    return Path.home() / ".maverick" / "dashboard-ui-visibility.json"
++    # Visibility policy is deployment-global, but must follow MAVERICK_HOME so
++    # custom/service deployments do not split it from the rest of their data.
++    from maverick.paths import maverick_home
++    return maverick_home() / "dashboard-ui-visibility.json"
+ 
+ 
+ def overrides() -> dict[str, dict[str, bool]]:
+diff --git a/packages/maverick-dashboard/tests/test_access_control_fixes.py b/packages/maverick-dashboard/tests/test_access_control_fixes.py
+index b9c34a3b8b984322ef4a70567e644ed39f975099..34429358147184118303069235370344c6c8e9cf 100644
+--- a/packages/maverick-dashboard/tests/test_access_control_fixes.py
++++ b/packages/maverick-dashboard/tests/test_access_control_fixes.py
+@@ -22,6 +22,7 @@ def _isolated(tmp_path, monkeypatch):
+     from maverick import world_model
+     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+     monkeypatch.setenv("HOME", str(tmp_path))
++    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
+     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+     app_mod._world_cache.clear()
+     yield
+diff --git a/packages/maverick-dashboard/tests/test_rbac.py b/packages/maverick-dashboard/tests/test_rbac.py
+index 4ca77f6f721e8451f95f26345eb1441017ffb315..ef58a3eaea4028f56a069e82e3999f7b57b8907a 100644
+--- a/packages/maverick-dashboard/tests/test_rbac.py
++++ b/packages/maverick-dashboard/tests/test_rbac.py
+@@ -13,6 +13,12 @@ fastapi = pytest.importorskip("fastapi")
+ TestClient = pytest.importorskip("fastapi.testclient").TestClient
+ 
+ 
++@pytest.fixture(autouse=True)
++def _isolated_data_home(tmp_path, monkeypatch):
++    """Keep role files under the test's explicit Lightwork data root."""
++    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
++
++
+ # ---------- store + role logic (no HTTP) ----------
+ 
+ def test_store_roundtrip_and_validation(monkeypatch, tmp_path):
+@@ -31,6 +37,13 @@ def test_store_roundtrip_and_validation(monkeypatch, tmp_path):
+         rbac.set_role("", "viewer")
+ 
+ 
++def test_role_stores_follow_maverick_home(monkeypatch, tmp_path):
++    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "service-data"))
++    from maverick_dashboard import rbac
++    assert rbac.store_path() == tmp_path / "service-data" / "dashboard-users.json"
++    assert rbac.tenant_store_path() == tmp_path / "service-data" / "dashboard-tenant-roles.json"
++
++
+ def test_concurrent_set_role_does_not_lose_assignments(monkeypatch, tmp_path):
+     """set_role does a load-modify-save; without the lock two concurrent role
+     assignments both load the same roster and the second drops the first -- a
+diff --git a/packages/maverick-dashboard/tests/test_settings_webhooks.py b/packages/maverick-dashboard/tests/test_settings_webhooks.py
+index 0b8cea4bc6c0a7a4c5d8f26d54f26d43c4869e3e..94a66806fd67e808671c40ba481249b1da2c4b1c 100644
+--- a/packages/maverick-dashboard/tests/test_settings_webhooks.py
++++ b/packages/maverick-dashboard/tests/test_settings_webhooks.py
+@@ -16,6 +16,7 @@ def _isolated(tmp_path, monkeypatch):
+     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+     monkeypatch.setenv("HOME", str(tmp_path))
+     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "mvhome"))
++    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / ".maverick" / "config.toml"))
+     monkeypatch.delenv("MAVERICK_WEBHOOK_SECRET", raising=False)
+     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+ 
+diff --git a/packages/maverick-dashboard/tests/test_triggers.py b/packages/maverick-dashboard/tests/test_triggers.py
+index f2ae7b30bf37d7bf4fcfe577142bf587e9b2bb04..3f7edd523830c0189ae417cb2d12ae2aaf7df438 100644
+--- a/packages/maverick-dashboard/tests/test_triggers.py
++++ b/packages/maverick-dashboard/tests/test_triggers.py
+@@ -36,7 +36,7 @@ def _sign_headers(body: bytes) -> dict:
+ def _isolate(monkeypatch, tmp_path):
+     monkeypatch.setenv("HOME", str(tmp_path))
+     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+-    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
++    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / ".maverick" / "config.toml"))
+     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+     monkeypatch.delenv("MAVERICK_WEBHOOK_SECRET", raising=False)
+     from maverick import world_model
+diff --git a/packages/maverick-dashboard/tests/test_ui_visibility.py b/packages/maverick-dashboard/tests/test_ui_visibility.py
+index f016bab721ce1a40c562af82434faf5a0467c962..f230f5e88c5ffccec540f489e7e088e73a4964a1 100644
+--- a/packages/maverick-dashboard/tests/test_ui_visibility.py
++++ b/packages/maverick-dashboard/tests/test_ui_visibility.py
+@@ -17,6 +17,11 @@ fastapi = pytest.importorskip("fastapi")
+ TestClient = pytest.importorskip("fastapi.testclient").TestClient
+ 
+ 
++@pytest.fixture(autouse=True)
++def _isolated_data_home(tmp_path, monkeypatch):
++    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
++
++
+ # ---------- registry + pure logic (no HTTP) ----------
+ 
+ def test_registry_is_well_formed():
+@@ -82,6 +87,12 @@ def test_store_roundtrip_diffs_and_validation(monkeypatch, tmp_path):
+         ui_visibility.set_visibility("/benchmarks", "superuser", False)
+ 
+ 
++def test_visibility_store_follows_maverick_home(monkeypatch, tmp_path):
++    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "service-data"))
++    from maverick_dashboard import ui_visibility
++    assert ui_visibility.store_path() == tmp_path / "service-data" / "dashboard-ui-visibility.json"
++
++
+ def test_corrupt_or_foreign_store_entries_are_dropped(monkeypatch, tmp_path):
+     monkeypatch.setenv("HOME", str(tmp_path))
+     from maverick_dashboard import ui_visibility

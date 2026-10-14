@@ -1,0 +1,78 @@
+{
+  "schema": "lightwork.release-state.v1",
+  "repository": "Daybreak-AI-Labs/Lightwork",
+  "source_version": "0.1.7",
+  "source_state": "unreleased",
+  "latest_canonical_tag": {
+    "name": "v0.1.6",
+    "commit": "86760df9882bdb48692a9776058e8013eed05300"
+  },
+  "known_noncanonical_tags": [
+    "v.0.1.2"
+  ],
+  "github_release_observation": {
+    "observed_at": "2026-08-03T20:51:15Z",
+    "releases": []
+  },
+  "security_support": {
+    "policy": "latest-signed-github-release",
+    "snapshot_status": "none",
+    "supported_versions": []
+  },
+  "manifests": {
+    "claim_evidence_ledger": "release/claim-evidence-ledger.json",
+    "dependency_failure_contract": "release/dependency-failure-contract.json",
+    "release_cohort": "release-cohort.toml",
+    "production_api_contract": "release/production-api-contract.json",
+    "production_change_control": "release/production-change-control-policy.json",
+    "production_code_inventory": "release/production-code-inventory.json",
+    "production_data_boundary": "release/production-data-boundary.json",
+    "production_identity_posture_contract": "release/production-identity-posture-contract.json",
+    "production_migration_contract": "release/production-migration-contract.json",
+    "production_model_policy": "release/production-model-policy.json",
+    "production_onboarding_contract": "release/production-onboarding-contract.json",
+    "production_openapi_schema": "release/production-openapi-schema.json",
+    "production_operations_contract": "release/production-operations-contract.json",
+    "production_qa_assurance": "release/production-qa-assurance.json",
+    "production_runtime_contract": "release/production-runtime-contract.json",
+    "production_surface": "release/production-surface-manifest.json",
+    "production_support_matrix": "release/production-support-matrix.json",
+    "production_readiness": "release/production-readiness-evidence.json",
+    "pytest_exceptions": "qa/pytest-exceptions.json",
+    "secret_rotation_contract": "release/secret-rotation-contract.json",
+    "tenant_quota_contract": "release/tenant-quota-contract.json",
+    "service_objectives": "release/service-objectives.json"
+  },
+  "independent_distributions": [
+    {
+      "registry": "npm",
+      "name": "@maverick/plugin-sdk",
+      "path": "sdks/plugin-ts",
+      "version": "0.1.0",
+      "status": "experimental",
+      "workflow": "publish.yml",
+      "environment": "npm",
+      "publish_authorized": false
+    },
+    {
+      "registry": "pypi",
+      "name": "maverick-native",
+      "path": "rust/mvk-scan-py",
+      "version": "0.1.0",
+      "status": "experimental",
+      "workflow": "native.yml",
+      "environment": "pypi",
+      "publish_authorized": false
+    },
+    {
+      "registry": "npm",
+      "name": "mvk-scan-wasm",
+      "path": "rust/mvk-scan-wasm",
+      "version": "0.1.0",
+      "status": "experimental",
+      "workflow": "native.yml",
+      "environment": "npm",
+      "publish_authorized": false
+    }
+  ]
+}

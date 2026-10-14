@@ -1,0 +1,394 @@
+diff --git a/packages/maverick-core/maverick/compliance_scoping.py b/packages/maverick-core/maverick/compliance_scoping.py
+index 3b30f9bb..47cfead0 100644
+--- a/packages/maverick-core/maverick/compliance_scoping.py
++++ b/packages/maverick-core/maverick/compliance_scoping.py
+@@ -24,7 +24,7 @@ import re
+ import sqlite3
+ import time
+ from collections.abc import Callable, Mapping, Sequence
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
+ from pathlib import Path
+ from typing import Any
+ 
+@@ -492,6 +492,61 @@ class ScopingQuestion:
+     condition: Mapping[str, object] | None
+ 
+ 
++def _display_names(value, questionnaire_id, questions, rules):
++    """Optional short customer labels, bound to the immutable closed definition."""
++    if value is None:
++        return {}
++    if not isinstance(value, Mapping) or len(value) > 4096:
++        raise ComplianceScopingValidationError("questionnaire names must be a bounded object")
++    allowed = {questionnaire_id}
++    for question in questions:
++        allowed.update((question["question_id"], question["question_ref"]))
++        allowed.update(question["options"])
++    for rule in rules:
++        allowed.update((rule["rule_id"], rule["framework_ref"], rule["reason_code"]))
++        allowed.update(rule["control_refs"])
++        allowed.update(rule["overlap_refs"])
++    names = {}
++    for key, name in value.items():
++        if (key not in allowed or not isinstance(name, str) or not name.strip()
++                or name != name.strip() or len(name) > 120
++                or any(ord(char) < 32 or ord(char) == 127 for char in name)):
++            raise ComplianceScopingValidationError("questionnaire names must be short labels for declared items")
++        names[key] = name
++    return names
++
++
++def _creation_material(questionnaire_id, questions, rules, expected_latest_version,
++                       actor, display_names=None, expected_latest_integrity=None):
++    questionnaire = _id(questionnaire_id, "questionnaire_id")
++    expected = _integer(expected_latest_version, "expected_latest_version", 0, 1_000_000)
++    known = {}
++    validated_questions = []
++    for item in _sequence(questions, "questions", minimum=len(SCOPING_DOMAINS), maximum=_MAX_QUESTIONS):
++        question = _validate_question(item, known)
++        if question["question_id"] in known:
++            raise ComplianceScopingValidationError("question_id must be unique")
++        known[str(question["question_id"])] = question
++        validated_questions.append(question)
++    if {str(item["domain"]) for item in validated_questions} != SCOPING_DOMAINS:
++        raise ComplianceScopingValidationError("questionnaire must cover every required scoping domain")
++    validated_rules = [_validate_rule(item, known)
++                       for item in _sequence(rules, "rules", minimum=1, maximum=_MAX_RULES)]
++    if len({item["rule_id"] for item in validated_rules}) != len(validated_rules):
++        raise ComplianceScopingValidationError("rule_id must be unique")
++    names = _display_names(display_names, questionnaire, validated_questions, validated_rules)
++    request = {"action": "create_questionnaire_version", "questionnaire_id": questionnaire,
++               "questions": validated_questions, "rules": validated_rules,
++               "expected_latest_version": expected, "actor_ref": actor}
++    if names:
++        request["display_names"] = names
++    if expected_latest_integrity is not None:
++        request["expected_latest_integrity"] = _digest(expected_latest_integrity, "latest questionnaire")
++        if expected == 0:
++            raise ComplianceScopingValidationError("a new questionnaire has no previous revision")
++    return request
++
++
+ @dataclass(frozen=True)
+ class QuestionnaireVersion:
+     tenant_id: str
+@@ -507,6 +562,7 @@ class QuestionnaireVersion:
+     created_at: float
+     reviewed_at: float | None
+     integrity_sha256: str
++    display_names: Mapping[str, str] = field(default_factory=dict)
+ 
+ 
+ @dataclass(frozen=True)
+@@ -898,6 +954,8 @@ class ComplianceScopingStore:
+         publication_digest: str,
+     ) -> QuestionnaireVersion:
+         return QuestionnaireVersion(
++            display_names=_display_names(definition.get("display_names"), definition["questionnaire_id"],
++                                         definition["questions"], definition["rules"]),
+             tenant_id=definition["tenant_id"],
+             questionnaire_id=definition["questionnaire_id"],
+             version=definition["version"],
+@@ -991,45 +1049,20 @@ class ComplianceScopingStore:
+         rules: Sequence[Mapping[str, object]],
+         expected_latest_version: int,
+         idempotency_key: str,
++        display_names: Mapping[str, str] | None = None,
++        expected_latest_integrity: str | None = None,
+     ) -> QuestionnaireVersion:
+         """Append an immutable questionnaire definition pending independent review."""
+ 
+         tenant = _tenant(tenant_id)
+-        questionnaire = _id(questionnaire_id, "questionnaire_id")
+-        expected = _integer(
+-            expected_latest_version, "expected_latest_version", 0, 1_000_000
+-        )
+-        known: dict[str, Mapping[str, object]] = {}
+-        validated_questions: list[dict[str, object]] = []
+-        for item in _sequence(
+-            questions, "questions", minimum=len(SCOPING_DOMAINS), maximum=_MAX_QUESTIONS
+-        ):
+-            question = _validate_question(item, known)
+-            if question["question_id"] in known:
+-                raise ComplianceScopingValidationError("question_id must be unique")
+-            known[str(question["question_id"])] = question
+-            validated_questions.append(question)
+-        if {str(item["domain"]) for item in validated_questions} != SCOPING_DOMAINS:
+-            raise ComplianceScopingValidationError(
+-                "questionnaire must cover every required scoping domain"
+-            )
+-        validated_rules = tuple(
+-            _validate_rule(item, known)
+-            for item in _sequence(rules, "rules", minimum=1, maximum=_MAX_RULES)
+-        )
+-        if len({item["rule_id"] for item in validated_rules}) != len(validated_rules):
+-            raise ComplianceScopingValidationError("rule_id must be unique")
+         actor = self._actor()
++        request = _creation_material(questionnaire_id, questions, rules, expected_latest_version,
++                                     actor, display_names, expected_latest_integrity)
++        questionnaire = request["questionnaire_id"]
++        expected = request["expected_latest_version"]
++        validated_questions, validated_rules = request["questions"], request["rules"]
+         now = _timestamp(self._clock(), "current time")
+         version = expected + 1
+-        request = {
+-            "action": "create_questionnaire_version",
+-            "questionnaire_id": questionnaire,
+-            "questions": validated_questions,
+-            "rules": list(validated_rules),
+-            "expected_latest_version": expected,
+-            "actor_ref": actor,
+-        }
+         with self._connect() as connection:
+             self._begin(connection)
+             request_sha, operation = self._operation(
+@@ -1049,6 +1082,10 @@ class ComplianceScopingStore:
+                 raise ComplianceScopingConflict(
+                     f"latest questionnaire CAS failed: expected {expected}, found {latest}"
+                 )
++            if expected_latest_integrity is not None:
++                current = self._get_questionnaire(connection, tenant, questionnaire, latest)
++                if current.integrity_sha256 != expected_latest_integrity:
++                    raise ComplianceScopingConflict("the reviewed questionnaire changed before saving")
+             definition = {
+                 "tenant_id": tenant,
+                 "questionnaire_id": questionnaire,
+@@ -1058,6 +1095,8 @@ class ComplianceScopingStore:
+                 "created_by": actor,
+                 "created_at": now,
+             }
++            if request.get("display_names"):
++                definition["display_names"] = request["display_names"]
+             definition_digest = self._insert(
+                 connection,
+                 "scope_questionnaires",
+@@ -1103,6 +1142,32 @@ class ComplianceScopingStore:
+                 definition, publication, definition_digest, publication_digest
+             )
+ 
++    def latest_questionnaire(self, tenant_id: str, questionnaire_id: str) -> QuestionnaireVersion | None:
++        """Read the exact latest source; list pagination is not a source guard."""
++        tenant, questionnaire = _tenant(tenant_id), _id(questionnaire_id, "questionnaire_id")
++        self._actor()
++        with self._connect() as connection:
++            row = connection.execute("SELECT MAX(version) AS latest FROM scope_questionnaires "
++                                     "WHERE tenant_id=? AND questionnaire_id=?", (tenant, questionnaire)).fetchone()
++            return None if row["latest"] is None else self._get_questionnaire(connection, tenant, questionnaire, int(row["latest"]))
++
++    def questionnaire_creation_receipt(self, tenant_id: str, questionnaire_id: str, *,
++                                       questions, rules, expected_latest_version: int,
++                                       idempotency_key: str, display_names=None,
++                                       expected_latest_integrity=None) -> QuestionnaireVersion | None:
++        """Read only the original actor's atomically accepted operation, never replay it."""
++        tenant = _tenant(tenant_id)
++        request = _creation_material(questionnaire_id, questions, rules, expected_latest_version,
++                                     self._actor(), display_names, expected_latest_integrity)
++        with self._connect() as connection:
++            _digest_value, operation = self._operation(connection, tenant, idempotency_key, request)
++            if operation is None:
++                return None
++            expected_id = f"{questionnaire_id}:{expected_latest_version + 1}"
++            if operation["result_kind"] != "questionnaire" or operation["result_id"] != expected_id:
++                raise ComplianceScopingIntegrityError("questionnaire receipt result binding failed")
++            return self._get_questionnaire(connection, tenant, questionnaire_id, expected_latest_version + 1)
++
+     def publish_questionnaire(
+         self,
+         tenant_id: str,
+diff --git a/packages/maverick-dashboard/maverick_dashboard/compliance_scoping_api.py b/packages/maverick-dashboard/maverick_dashboard/compliance_scoping_api.py
+index 712e8958..466ba683 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/compliance_scoping_api.py
++++ b/packages/maverick-dashboard/maverick_dashboard/compliance_scoping_api.py
+@@ -232,7 +232,8 @@ def _principal(request: Request, tenant_id: str) -> str:
+ 
+ def _jsonable(value: Any) -> Any:
+     if is_dataclass(value) and not isinstance(value, type):
+-        return {key: _jsonable(item) for key, item in asdict(value).items()}
++        return {key: _jsonable(item) for key, item in asdict(value).items()
++                if key != "display_names" or item}
+     if isinstance(value, Mapping):
+         return {str(key): _jsonable(item) for key, item in value.items()}
+     if isinstance(value, (list, tuple)):
+@@ -381,6 +382,7 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
+                     "questions": len(q.questions),
+                     "rules": len(q.rules),
+                     "created_at": q.created_at,
++                    **({"display_names": dict(q.display_names)} if q.display_names else {}),
+                 }
+                 for q in listed["questionnaires"]
+             ],
+@@ -539,7 +541,16 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
+             assessment_id,
+             limit=limit,
+         )
+-        return {"items": _jsonable(items), "count": len(items)}
++        assessment = await call(scoping, store.get_assessment, tenant, assessment_id)
++        questionnaire = await call(scoping, store.get_questionnaire, tenant,
++                                   assessment.questionnaire_id, assessment.questionnaire_version)
++        rendered = _jsonable(items)
++        if questionnaire.display_names:
++            for question in rendered:
++                question["display_name"] = questionnaire.display_names.get(question["question_ref"], "")
++                question["option_labels"] = {option: questionnaire.display_names.get(option, option)
++                                             for option in question["options"]}
++        return {"items": rendered, "count": len(items)}
+ 
+     @router.post("/assessments/{assessment_id}/responses/{question_id}")
+     async def record_response(
+@@ -587,7 +598,13 @@ def create_compliance_scoping_router(  # noqa: C901, PLR0915
+     async def get_scope(request: Request, scope_id: ObjectPath):
+         require_permission(request, "view")
+         scoping, tenant, store = bound_authority(request)
+-        return _jsonable(await call(scoping, store.get_scope, tenant, scope_id))
++        scope = await call(scoping, store.get_scope, tenant, scope_id)
++        result = _jsonable(scope)
++        questionnaire = await call(scoping, store.get_questionnaire, tenant,
++                                   scope.questionnaire_id, scope.questionnaire_version)
++        if questionnaire.display_names:
++            result["display_names"] = dict(questionnaire.display_names)
++        return result
+ 
+     async def scope_projection(request: Request, scope_id: str, field: str):
+         require_permission(request, "view")
+diff --git a/packages/maverick-dashboard/maverick_dashboard/static/lightwork-compliance-scoping.js b/packages/maverick-dashboard/maverick_dashboard/static/lightwork-compliance-scoping.js
+index 6a34d2d9..30a6a358 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/static/lightwork-compliance-scoping.js
++++ b/packages/maverick-dashboard/maverick_dashboard/static/lightwork-compliance-scoping.js
+@@ -11,6 +11,7 @@
+   var statusEl = document.getElementById('cs-status');
+   var records = { questionnaires: [], assessments: [], scopes: [], reports: [] };
+   var answering = null;
++  var names = {};
+ 
+   var STATUS = {
+     pending_review: ['Waiting for approval', 'warn'], published: ['Ready to use', 'active'],
+@@ -34,15 +35,18 @@
+   }
+   // "ref:question-org-size" -> "Org size"; "framework-eu-privacy" -> "Eu privacy".
+   function label(ref) {
+-    return R.human(String(ref || '').replace(/^(ref|evidence):/, '').replace(/^(question|framework|control|overlap)[-_]/, ''));
++    return names[ref] || R.human(String(ref || '').replace(/^(ref|evidence):/, '').replace(/^(question|framework|control|overlap)[-_]/, ''));
+   }
+   function questionnaireName(id, version) {
+-    return label(id) + (version ? ' (version ' + version + ')' : '');
++    var q = records.questionnaires.find(function (row) { return row.questionnaire_id === id && (!version || row.version === version); });
++    return (q && q.display_names && q.display_names[id] || label(id)) + (version ? ' (version ' + version + ')' : '');
+   }
+ 
+   function load() {
+     return R.call('GET', API + '/records').then(function (body) {
+       records = body;
++      names = {};
++      records.questionnaires.slice().reverse().forEach(function (q) { Object.assign(names, q.display_names || {}); });
+       render();
+       say(records.assessments.length ? '' : 'Start an assessment to work out which controls apply to you.');
+     }).catch(function (f) {
+@@ -88,13 +92,14 @@
+     var latest = {};
+     records.questionnaires.forEach(function (q) { latest[q.questionnaire_id] = Math.max(latest[q.questionnaire_id] || 0, q.version); });
+     R.table(document.getElementById('cs-questionnaires'), [
+-      { label: 'Questionnaire', value: function (q) { return label(q.questionnaire_id); } },
++      { label: 'Questionnaire', value: function (q) { return q.display_names && q.display_names[q.questionnaire_id] || label(q.questionnaire_id); } },
+       { label: 'Version', value: function (q) { return q.version; } },
+       { label: 'Questions', value: function (q) { return q.questions; } },
+       { label: 'Status', value: function (q) { return statusBadge(q.status); } },
+     ], records.questionnaires, [
+       { label: 'Approve for use', kind: 'primary', when: function (q) { return canAdmin && q.status !== 'published'; }, run: publishQuestionnaire },
+-    ], { text: 'No questionnaires yet. Add one from a file your compliance team provides.' });
++      { label: 'Review a new version', run: function (q) { window.LightworkComplianceQuestionnaire.open(q.questionnaire_id); } },
++    ], { text: 'No questionnaires yet. Build one here and have a different administrator approve it.' });
+   }
+ 
+   function find(kind, key, value) {
+@@ -115,7 +120,9 @@
+     });
+   }
+ 
+-  document.getElementById('cs-add-questionnaire').addEventListener('click', function () {
++  document.getElementById('cs-add-questionnaire').addEventListener('click', function () { window.LightworkComplianceQuestionnaire.open(); });
++  document.addEventListener('lightwork:questionnaire-saved', load);
++  document.getElementById('cs-import-questionnaire').addEventListener('click', function () {
+     R.form('Add a questionnaire', [
+       { key: 'name', label: 'Questionnaire name', type: 'text', required: true, placeholder: 'For example: Annual scoping' },
+     ], 'Choose file').then(function (values) {
+@@ -170,7 +177,7 @@
+ 
+   function fieldFor(q, index) {
+     var wrap = R.el('fieldset', 'panel');
+-    var legend = R.el('legend', '', label(q.question_ref));
++    var legend = R.el('legend', '', q.display_name || label(q.question_ref));
+     wrap.appendChild(legend);
+     wrap.appendChild(R.el('p', 'muted', DOMAINS[q.domain] || R.human(q.domain)));
+     var id = 'cs-q-' + index;
+@@ -186,14 +193,14 @@
+     } else if (q.answer_type === 'single_choice') {
+       control = R.el('select', 'select'); control.id = id;
+       var blank = R.el('option', '', 'Choose an answer'); blank.value = ''; control.appendChild(blank);
+-      q.options.forEach(function (o) { var op = R.el('option', '', label(o)); op.value = o; control.appendChild(op); });
++      q.options.forEach(function (o) { var op = R.el('option', '', (q.option_labels || {})[o] || label(o)); op.value = o; control.appendChild(op); });
+       var lab = R.el('label', '', 'Answer'); lab.setAttribute('for', id); wrap.appendChild(lab);
+     } else if (q.answer_type === 'multi_choice') {
+       control = R.el('div');
+       q.options.forEach(function (o, j) {
+         var l = R.el('label');
+         var c = R.el('input'); c.type = 'checkbox'; c.name = id; c.value = o; c.id = id + '-' + j;
+-        l.appendChild(c); l.appendChild(document.createTextNode(' ' + label(o) + ' '));
++        l.appendChild(c); l.appendChild(document.createTextNode(' ' + ((q.option_labels || {})[o] || label(o)) + ' '));
+         control.appendChild(l);
+       });
+     } else if (q.answer_type === 'integer') {
+@@ -302,6 +309,7 @@
+   // ---- scopes -------------------------------------------------------------
+   function viewScope(s) {
+     R.call('GET', API + '/scopes/' + encodeURIComponent(s.scope_id)).then(function (scope) {
++      Object.assign(names, scope.display_names || {});
+       var box = document.getElementById('cs-scope-detail');
+       box.textContent = '';
+       box.appendChild(R.el('h2', '', 'Scope results'));
+@@ -310,7 +318,7 @@
+       R.table(ctl, [
+         { label: 'Control', value: function (c) { return label(c.control_ref); } },
+         { label: 'Framework', value: function (c) { return label(c.framework_ref); } },
+-        { label: 'Why it applies', value: function (c) { return (c.reason_codes || []).map(R.human).join(', '); } },
++        { label: 'Why it applies', value: function (c) { return (c.reason_codes || []).map(label).join(', '); } },
+       ], scope.control_applicability, null, { text: 'No controls apply.' });
+       box.appendChild(ctl);
+       var owners = scope.responsibility_assignments || {};
+diff --git a/packages/maverick-dashboard/maverick_dashboard/templates/compliance_scoping.html b/packages/maverick-dashboard/maverick_dashboard/templates/compliance_scoping.html
+index 883ea6af..c8f84748 100644
+--- a/packages/maverick-dashboard/maverick_dashboard/templates/compliance_scoping.html
++++ b/packages/maverick-dashboard/maverick_dashboard/templates/compliance_scoping.html
+@@ -2,6 +2,10 @@
+ {% block title %}Find which controls apply · Lightwork{% endblock %}
+ {% block content %}
+ <style>
++  #cs-questionnaire-head { flex-wrap:wrap; }
++  #cs-questionnaire-design { min-width:0; overflow-wrap:anywhere; }
++  #cs-questionnaire-design fieldset { min-width:0; }
++  #cs-questionnaire-design button { max-width:100%; white-space:normal; }
+   .cs-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
+              gap:var(--space-4); }
+   .cs-stack { display:flex; flex-direction:column; gap:var(--space-3); }
+@@ -60,9 +64,11 @@
+   <div class="section-head"><h2>Reports</h2></div>
+   <div class="panel" id="cs-reports"><p class="muted">Loading…</p></div>
+ 
+-  <div class="section-head"><h2>Questionnaires</h2>
+-    <button type="button" class="btn btn--ghost" id="cs-add-questionnaire">Add a questionnaire from a file</button></div>
++  <div class="section-head" id="cs-questionnaire-head"><h2>Questionnaires</h2>
++    <div class="actions"><button type="button" class="btn btn--primary" id="cs-add-questionnaire">Build a questionnaire</button>
++    <button type="button" class="btn btn--ghost" id="cs-import-questionnaire">Import an existing file</button></div></div>
+   <div class="panel" id="cs-questionnaires"><p class="muted">Loading…</p></div>
++  {% include "_compliance_questionnaire_builder.html" %}
+ 
+   {% if can_audit or can_admin %}
+   <div class="panel" style="display:flex; gap:.5rem; flex-wrap:wrap;">
+@@ -226,6 +232,7 @@
+ </script>
+ </details>
+ <script src="/static/lightwork-record-workflows.js" defer></script>
++<script src="/static/lightwork-compliance-questionnaire-builder.js" defer></script>
+ <script src="/static/lightwork-compliance-scoping.js" defer></script>
+ {% endif %}
+ {% endblock %}

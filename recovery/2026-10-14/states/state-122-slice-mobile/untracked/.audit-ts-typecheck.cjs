@@ -1,0 +1,10 @@
+const fs=require('node:fs'),path=require('node:path');
+const anchor='C:/Users/Cstep/Documents/Codex/2026-07-17/new-chat/work/lightwork-audit-2026-07-29/apps/mobile-companion/App.tsx';
+const ts=require(path.join(path.dirname(anchor),'node_modules/typescript/lib/typescript.js'));
+const files=fs.readdirSync('apps/mobile-companion/src',{recursive:true}).filter(f=>/\.tsx?$/.test(f)).map(f=>path.resolve('apps/mobile-companion/src',f));files.push(path.resolve('apps/mobile-companion/App.tsx'));
+const options={strict:true,jsx:ts.JsxEmit.ReactNative,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true,skipLibCheck:true,noEmit:true,lib:['lib.es2022.d.ts','lib.dom.d.ts'],types:[]};
+const host=ts.createCompilerHost(options);
+host.resolveModuleNames=(names,containing)=>names.map(name=>ts.resolveModuleName(name,containing,options,host).resolvedModule||ts.resolveModuleName(name,anchor,options,host).resolvedModule);
+const program=ts.createProgram(files,options,host), diagnostics=ts.getPreEmitDiagnostics(program);
+for(const d of diagnostics)console.log(ts.flattenDiagnosticMessageText(d.messageText,' '),d.file?`${d.file.fileName}:${d.file.getLineAndCharacterOfPosition(d.start).line+1}`:'');
+console.log('Static TypeScript type diagnostics:',diagnostics.length,'(reused installed dependencies; no execution).');if(diagnostics.length)process.exitCode=1;

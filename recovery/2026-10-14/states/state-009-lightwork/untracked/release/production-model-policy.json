@@ -1,0 +1,18 @@
+{
+  "schema": "lightwork.production-model-policy.v1",
+  "policy_id": "enterprise-single-control-plane-model-policy-v1",
+  "profile_id": "enterprise-single-control-plane-v1",
+  "source_version": "0.1.7",
+  "production_surface_sha256": "0ba3ca2055ab1395c162d3a6ef944581014de55a4169fccc6fcade7c3d0c50c8",
+  "production_surface_digest_mode": "utf8-lf-sha256",
+  "status": "draft",
+  "approved_at": null,
+  "expires_at": null,
+  "approvers": [],
+  "models": [],
+  "limitations": [
+    "No model is approved until an exact artifact digest, authenticated HTTPS endpoint, region, retention posture, credential source, spend ceiling, and failover chain are reviewed.",
+    "Repository validation does not prove the deployed model server, network route, retention behavior, or provider contract; deployment evidence remains required.",
+    "The first production profile admits only vLLM, but provider-family admission alone does not authorize any model dispatch."
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "api_version": "0.1.0",
+  "canonical_schema_sha256": "06de05207fde88417ee667475a29243d3a9a02c6913cfbed951e1aa8401d5d9b",
+  "compatibility_policy": "exact-until-reviewed-version-bump",
+  "contract_version": "5.0.0",
+  "deprecation_policy": {
+    "clock_starts": "first-supported-release-containing-the-deprecation-notice",
+    "minimum_calendar_days": 90,
+    "minimum_supported_minor_releases": 2,
+    "removal_requires": [
+      "reviewed-contract-version-bump",
+      "migration-guide",
+      "release-notes",
+      "claim-evidence-ledger-refresh"
+    ]
+  },
+  "lifecycle_status": "unpublished-release-candidate",
+  "migration_guide": "docs/api.md#api-compatibility-deprecation-and-migration",
+  "openapi_version": "3.1.0",
+  "operation_count": 69,
+  "packaged_runtime_contract": "packages/maverick-dashboard/maverick_dashboard/contracts/openapi-production-v1.json",
+  "packaged_runtime_contract_sha256": "8685d043a53cc08019daccaba882e3dfd83513951b40957977f4727d755d894f",
+  "profile_id": "enterprise-single-control-plane-v1",
+  "release_boundary": {
+    "clock_starts": "first-supported-release-containing-the-deprecation-notice",
+    "compatibility_commitment_active": false,
+    "external_release_requirements": [
+      "signed-exact-release-governance-packet",
+      "published-supported-release",
+      "release-specific-migration-notes",
+      "qualified-client-and-browser-journeys"
+    ]
+  },
+  "release_eligible": false,
+  "repository": "Daybreak-AI-Labs/Lightwork",
+  "schema": "lightwork.production-api-contract.v1",
+  "schema_artifact": "release/production-openapi-schema.json",
+  "schema_artifact_sha256": "adc7a27b276b141f997991ab3efc0ef8170ced3c5a7e16780de3f51436261170",
+  "source_bindings": [
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "docs/api.md",
+      "sha256": "4a13c8634cc9fb4821b077c4ef8437b71791526e682d477c5b20b5c7bad8c1ce"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-dashboard/maverick_dashboard/app.py",
+      "sha256": "08cf07f8e164f9315ba1749a7fb4802e971ca05768619274fd268d6ccf56adf4"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-dashboard/maverick_dashboard/endpoint_policy.py",
+      "sha256": "b6b66e363cb3fe4e978c331ad634efb888915804f2905f6d4628451dd45a7316"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-dashboard/maverick_dashboard/openapi_contract.py",
+      "sha256": "e82785f68a57116de4c90254de8c52455bdbbe580edc8d23d1008542695e415a"
+    },
+    {
+      "digest_mode": "utf8-lf-sha256",
+      "path": "packages/maverick-dashboard/maverick_dashboard/production_visibility.py",
+      "sha256": "e7e89cb4e8b02c4147c65028f1ca84743369e94c03d6cfcd432e8497d42cde43"
+    }
+  ],
+  "source_version": "0.1.7",
+  "startup_gate": {
+    "failure_semantics": "startup-refuses-unreviewed-schema-drift",
+    "lifespan_symbol": "_lifespan",
+    "source": "packages/maverick-dashboard/maverick_dashboard/app.py",
+    "validator_symbol": "validate_production_openapi_contract"
+  }
+}

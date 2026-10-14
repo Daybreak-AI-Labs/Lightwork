@@ -1,0 +1,61 @@
+# Non-secret production-assurance policy. Credentials and private keys belong
+# in maverick-production-secrets, never in this ConfigMap.
+
+[world_model]
+backend = "postgres"
+rls = true
+
+[governed_records]
+backend = "postgres"
+
+[authority]
+mode = "strict"
+
+[capabilities]
+enforce = true
+
+[tenancy]
+by_user = true
+
+[encryption]
+at_rest = true
+per_tenant = true
+
+[audit]
+sign = true
+require_offhost_key = true
+# Required on every replica via the deployment environment before bootstrap:
+# MAVERICK_AUDIT_TRUST_ROOT_SHA256=sha256:<digest from trust-root-digest>
+
+[quotas]
+enforce = true
+
+[security_ops]
+enable = true
+
+[evidence_graph]
+enable = true
+
+[evidence_factory]
+enable = true
+
+[governed_connectors]
+# Strict authority already makes this a floor. Keeping it explicit makes the
+# production policy self-describing if the surrounding posture is inspected.
+enable = true
+connectors = []
+
+[agent_trust_auditor]
+enable = true
+stale_after_seconds = 604800
+
+[cra_ops]
+enable = true
+
+[model_risk_assurance]
+enable = true
+gate_promotions = true
+
+[connectors.certification]
+certified_only = true
+allow_uncertified = false

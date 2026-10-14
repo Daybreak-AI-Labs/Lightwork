@@ -1,0 +1,95 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Target availability",
+      "type": "stat",
+      "targets": [{"expr": "min(up{job=\"maverick\"})", "refId": "A"}]
+    },
+    {
+      "id": 2,
+      "title": "Required production assurance",
+      "type": "stat",
+      "targets": [{"expr": "min(maverick_production_assurance_state)", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "title": "Concurrency utilization",
+      "type": "timeseries",
+      "targets": [{"expr": "maverick_concurrent_goals / clamp_min(maverick_max_concurrent_goals, 1)", "legendFormat": "utilization", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "title": "Durable queue standing",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "maverick_production_assurance_value{signal=~\"queue_pending|queue_dead_letter|queue_stale_leases\"}", "legendFormat": "{{signal}}", "refId": "A"}
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Tenant quota remaining ratio (pseudonymous)",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "max by (tenant, resource) (maverick_tenant_quota_resource{standing=\"remaining\"}) / clamp_min(max by (tenant, resource) (maverick_tenant_quota_resource{standing=\"limit\"}), 1)", "legendFormat": "{{tenant}} {{resource}}", "refId": "A"}
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Inference spend rate",
+      "type": "timeseries",
+      "targets": [{"expr": "rate(maverick_cost_dollars_total[15m]) * 3600", "legendFormat": "USD/hour", "refId": "A"}]
+    },
+    {
+      "id": 7,
+      "title": "Goal outcomes",
+      "type": "timeseries",
+      "targets": [{"expr": "sum by (status) (rate(maverick_goals_total[5m]))", "legendFormat": "{{status}}", "refId": "A"}]
+    },
+    {
+      "id": 8,
+      "title": "Authentication refusals",
+      "type": "timeseries",
+      "targets": [{"expr": "sum by (reason) (rate(maverick_auth_failures_total[5m]))", "legendFormat": "{{reason}}", "refId": "A"}]
+    },
+    {
+      "id": 9,
+      "title": "Audit pipeline",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "maverick_production_assurance_value{signal=~\"audit_forwarder_backlog|audit_anchor_lag_seconds\"}", "legendFormat": "{{signal}}", "refId": "A"},
+        {"expr": "increase(maverick_production_assurance_events_total{signal=~\"durable_audit_refusal|audit_forwarder_failure\"}[5m])", "legendFormat": "{{signal}} events", "refId": "B"}
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Data-volume free bytes",
+      "type": "timeseries",
+      "targets": [{"expr": "maverick_data_disk_free_bytes", "legendFormat": "free", "refId": "A"}]
+    },
+    {
+      "id": 11,
+      "title": "Metrics-service authentication health",
+      "type": "timeseries",
+      "targets": [{"expr": "increase(maverick_auth_failures_total{reason=~\"metrics_bad_token|metrics_credential_unavailable|metrics_scope_violation\"}[5m])", "legendFormat": "{{reason}}", "refId": "A"}]
+    },
+    {
+      "id": 12,
+      "title": "Firing Lightwork alerts",
+      "type": "table",
+      "targets": [{"expr": "ALERTS{alertstate=\"firing\",alertname=~\"Maverick.*\"}", "format": "table", "instant": true, "refId": "A"}]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["lightwork", "production-source-template", "live-qualification-required"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "utc",
+  "title": "Lightwork production overview (source template)",
+  "uid": "lightwork-production-overview-v1",
+  "version": 1
+}

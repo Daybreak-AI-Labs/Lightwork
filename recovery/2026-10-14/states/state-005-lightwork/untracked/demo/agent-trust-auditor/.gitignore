@@ -1,0 +1,4 @@
+.agent-trust-auditor/
+__pycache__/
+*.pyc
+
