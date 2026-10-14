@@ -9,13 +9,14 @@ import time
 from dataclasses import asdict
 
 from fastapi import HTTPException
-from maverick import config, crypto_at_rest, domain, domain_edit
+from maverick import agent_tests_policy, config, crypto_at_rest, domain, domain_edit
+from maverick import specialist_canary as canary
 from maverick.authority_effects import authority_effect_fence
 from maverick.file_lock import cross_process_lock
 from maverick.governed_operations import digest
 from maverick.governed_records import GovernedRecordStore
 
-from . import auth, tools_ops_api
+from . import agent_changelog, auth, tools_ops_api
 from .agent_override_changes import PROFILE_LABELS, _readable
 from .draft_api import context_for
 
@@ -27,7 +28,10 @@ NOTICE = ("Saving a draft does not change the specialist people use. Preview che
           "Its complete instructions and fictional requests are sent to the configured AI service for those answer checks. "
           "They do not establish that connected actions work or that an answer is correct. Publishing or restoring changes new work; work already running can retain earlier instructions.")
 ACTIONS = {"save": "Saved a draft", "try": "Tried a draft answer", "check": "Checked the draft's saved questions",
-           "publish": "Published a saved draft", "restore": "Restored an earlier definition"}
+           "publish": "Published a saved draft", "restore": "Restored an earlier definition",
+           "promote": "Promoted a trial version", "rollback": "Rolled back a trial version"}
+TRIAL_LIVE = ("A trial version of this specialist is live. Promote it or roll it back in Workforce before "
+              "publishing another change. Nothing was changed.")
 
 
 def authority(request, context=None, *, write=False):
@@ -245,6 +249,33 @@ def inventory(request, name):
             "earlier": earlier, "originals": originals, "notice": NOTICE, "actor": actor, "tool_services": services}
 
 
+def trials(request) -> dict:
+    """Every live trial this person may read, with each version's goal counts (no content)."""
+    from ._shared import _world
+
+    actor, context = authority(request)
+    world = _world()
+    found = []
+    for row in canary.TRIALS.list(limit=canary.MAX_ROWS + 1):
+        trial = row.get("live")
+        if trial is None:
+            continue
+        name = row["name"]
+        try:
+            _source(request, name)  # the same department access as the editor
+        except HTTPException:
+            continue
+        try:
+            versions = canary.version_stats(name, world, candidate_id=trial["candidate_id"])
+        except RuntimeError:
+            versions = None
+        found.append({"name": name, "candidate_id": trial["candidate_id"], "percent": trial["percent"],
+                      "started_at": trial["started_at"], "title": trial.get("title") or "", "versions": versions,
+                      "auto_rollback": agent_tests_policy.canary_auto_rollback(), "min_finished": canary.MIN_FINISHED_GOALS})
+    authority(request, context)
+    return {"context": context, "trials": sorted(found, key=lambda item: item["name"])}
+
+
 def saved_draft(request, identifier):
     row = _owned(request, identifier)
     if row["action"] != "save" or row["state"] != "confirmed" or row.get("_audit_pending"):
@@ -294,8 +325,16 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
         raise HTTPException(422, "Choose Save draft, Try, Check saved questions, Publish or Restore.")
     source = _source(request, name)
     selected_revision = None
+    trial = canary.live(name)
+    candidate_id = None
+    if action in {"publish", "restore"} and trial is not None:
+        raise HTTPException(409, TRIAL_LIVE)
     if action == "save" or (entered is not None and action in {"try", "check"}):
         patch, profile = _draft(request, name, entered, source)
+    elif action in {"promote", "rollback"}:
+        if trial is None:
+            raise HTTPException(409, "There is no trial version of this specialist to promote or roll back.")
+        patch, profile, candidate_id = copy.deepcopy(trial["patch"]), copy.deepcopy(trial["profile"]), trial["candidate_id"]
     else:
         row, patch, profile = _target(request, action, selected, source)
         if row["name"] != name:
@@ -323,9 +362,10 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
                 "before": source, "patch": patch, "profile": profile, "selected": selected,
                 "selected_revision": selected_revision, "task": task, "title": title,
                 "reason": reason, "cases": cases, "connection": connection, "expires": time.time() + TTL,
-                "uncertain": uncertain, "acknowledge_previous": acknowledge_previous}
+                "uncertain": uncertain, "acknowledge_previous": acknowledge_previous,
+                "candidate_id": candidate_id, "trial_percent": agent_tests_policy.canary_percent()}
     prepared["tool_services"] = _server_state(profile["mcp_servers"])
-    if action in {"publish", "restore"}:
+    if action in {"publish", "restore", "promote"}:
         verdict = _publication_verdict(prepared)
         if verdict["blocked"] and verdict.get("hard"):
             raise HTTPException(409, verdict["message"])
@@ -341,7 +381,8 @@ def changes(request, prepared):
     from .plain_labels import model_label
     _guard(request, prepared)
     limits = tests.draft_answer_limits(len(prepared["cases"]) if prepared["action"] == "check" else 1)
-    rows = [{"label": "Decision", "after": ACTIONS[prepared["action"]]},
+    decision = ACTIONS[prepared["action"]] + (f" as a trial on {prepared['trial_percent']}% of new goals" if _starts_trial(prepared) else "")
+    rows = [{"label": "Decision", "after": decision},
             {"label": "Complete draft", "after": _readable(prepared["profile"], "definition")},
             {"label": "Currently used definition", "after": _readable(prepared["before"]["profile"], "definition") if prepared["before"]["profile"] else "No active custom agent"},
             {"label": "AI used for answer checks", "after": model_label(prepared["connection"]["model"])}]
@@ -354,7 +395,12 @@ def changes(request, prepared):
     if prepared["action"] == "check":
         rows.append({"label": "Every saved question and passing condition", "after": [{"Question": row["task"], "Must mention": row["includes"],
             "Must never say": row["excludes"], "Should refuse": "Yes" if row["refusal"] else "No", "Needs a source reference": "Yes" if row["citation"] else "No"} for row in prepared["cases"]]})
-    if prepared["action"] in {"publish", "restore"}:
+    if prepared["action"] in {"promote", "rollback"}:
+        trial = canary.live(prepared["name"]) or {}
+        rows.append({"label": "Trial being decided", "after": f"{trial.get('percent', 0)}% of new goals used it. "
+                     + ("Promoting makes it the current version for everyone." if prepared["action"] == "promote"
+                        else "Rolling back discards it; the current version stays as it is.")})
+    if prepared["action"] in {"publish", "restore", "promote"}:
         rows.append({"label": "Publication tests", "after": _publication_verdict(prepared)["message"]})
         if prepared["reason"]:
             rows.append({"label": "Reason for publishing without a complete passing check", "after": prepared["reason"]})
@@ -515,6 +561,8 @@ def apply(request, prepared, operation):
                 return _start_answers(request, prepared, row, began)
             if prepared["action"] in {"publish", "restore"}:
                 return _publish(request, prepared, row, began)
+            if prepared["action"] in {"promote", "rollback"}:
+                return _settle_trial(request, prepared, row, began)
             STORE.update(row["id"], lambda current: current.update(state="confirmed"), expected_revision=row["revision"],
                 action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared))
         except HTTPException:
@@ -542,12 +590,25 @@ def _mark_not_started(prepared, row):
         return False
 
 
-def _publish(request, prepared, row, began):
+def _starts_trial(prepared) -> bool:
+    """A changed existing specialist is published as a trial while ``canary_percent`` is above 0."""
+    before = prepared["before"]["profile"]
+    return (prepared["action"] in {"publish", "restore"} and prepared.get("trial_percent", 0) > 0
+            and bool(before) and before != prepared["profile"])
+
+
+def _payload(prepared):
     from .api import AgentOverrideIn
-    payload = AgentOverrideIn.model_validate({**prepared["patch"], "publish_without_passing_tests": bool(prepared["reason"]),
+    return AgentOverrideIn.model_validate({**prepared["patch"], "publish_without_passing_tests": bool(prepared["reason"]),
         "override_reason": prepared["reason"], "expected_generation": prepared["before"]["generation"]})
 
+
+def _publish(request, prepared, row, began):
+    payload = _payload(prepared)
+
     second_person = _publication_admission(request, prepared, payload)
+    if _starts_trial(prepared):
+        return _start_trial(request, prepared, row, began, payload, second_person)
 
     def guard():
         _guard(request, prepared)
@@ -564,6 +625,79 @@ def _publish(request, prepared, row, began):
     # published or restored definition, as the retired direct save did.
     from .api import _record_agent_change
     _record_agent_change(request, prepared["name"], prepared["before"]["profile"], prepared["profile"])
+    return original(request, row["id"], prepared=prepared)
+
+
+def _start_trial(request, prepared, row, began, payload, second_person):
+    """Keep the current definition and make the changed one a trial on a share of new goals."""
+    from .api import caller_principal
+
+    name = prepared["name"]
+
+    def guard():
+        _guard(request, prepared)
+        _publication_current(request, prepared, payload)
+        began.append(True)
+
+    try:
+        trial = canary.start(name, patch=prepared["patch"], profile=prepared["profile"], percent=prepared["trial_percent"],
+                             actor=prepared["actor"], title=prepared["title"], reason=prepared["reason"], effect_guard=guard)
+    except canary.TrialAlreadyLive as exc:
+        raise HTTPException(409, TRIAL_LIVE) from exc
+    published = digest(_source(request, name))
+    STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published, trial=trial["candidate_id"],
+        bypass_approval=(second_person or {}).get("approval")), expected_revision=row["revision"],
+        action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared, published=published))
+    agent_changelog.record(name, [f"Started a trial of changed instructions on {trial['percent']}% of new goals; "
+                                  "the current version keeps the rest"], by=caller_principal(request) or "")
+    return original(request, row["id"], prepared=prepared)
+
+
+def _settle_trial(request, prepared, row, began):
+    """Promote the live trial to everyone, or roll it back. Both are reviewed and audited like a publication."""
+
+    name = prepared["name"]
+    before = prepared["before"]["profile"]
+    live_trial = canary.live(name)
+    if live_trial is None or live_trial["candidate_id"] != prepared["candidate_id"]:
+        raise HTTPException(409, "The trial version changed. Review it again.")
+    if prepared["action"] == "promote":
+        payload = _payload(prepared)
+        second_person = _publication_admission(request, prepared, payload)
+
+        def guard():
+            _guard(request, prepared)
+            _publication_current(request, prepared, payload)
+            began.append(True)
+
+        domain_edit.write_override(name, prepared["patch"], expected_generation=prepared["before"]["generation"], effect_guard=guard)
+        canary.finish(name, candidate_id=prepared["candidate_id"], outcome=canary.PROMOTED, actor=prepared["actor"])
+        published = digest(_source(request, name))
+        STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published,
+            bypass_approval=(second_person or {}).get("approval")), expected_revision=row["revision"],
+            action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared, published=published))
+        from .api import _record_agent_change
+        _record_agent_change(request, name, before, prepared["profile"])
+    else:
+        _roll_back_trial(request, prepared, row, began)
+    return original(request, row["id"], prepared=prepared)
+
+
+def _roll_back_trial(request, prepared, row, began):
+    from .api import caller_principal
+
+    name = prepared["name"]
+
+    def guard():
+        _guard(request, prepared)
+        began.append(True)
+
+    canary.finish(name, candidate_id=prepared["candidate_id"], outcome=canary.ROLLED_BACK, actor=prepared["actor"], effect_guard=guard)
+    published = digest(_source(request, name))
+    STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published), expected_revision=row["revision"],
+        action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared, published=published))
+    agent_changelog.record(name, ["Rolled back the trial version; the current instructions stay as they were"],
+                           by=caller_principal(request) or "")
     return original(request, row["id"], prepared=prepared)
 
 

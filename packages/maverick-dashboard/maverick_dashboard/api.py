@@ -14367,6 +14367,7 @@ async def graduate_agent(request: Request, name: str, payload: AgentGraduationIn
     view = await run_in_threadpool(resolved_view, name)
     if view is None:
         raise HTTPException(status_code=404, detail="No such agent or specialist.")
+    _refuse_while_trial_live(name)
     if view["generation"] != payload.expected_generation:
         raise HTTPException(status_code=409, detail=_this_one(name) + " changed. Refresh before granting independence.")
     if not levels_enabled():
@@ -14407,6 +14408,7 @@ def delete_agent_override(request: Request, name: str, expected_generation: str 
                           payload: dict | None = None) -> Response:
     """The ordinary complete review is required before removal or reset."""
     _require_pack_editing(request)
+    _refuse_while_trial_live(name)
     from .agent_override_changes_api import ApplyIn, apply_sealed
 
     if payload is None:
@@ -14416,6 +14418,14 @@ def delete_agent_override(request: Request, name: str, expected_generation: str 
     except ValueError as exc:
         raise HTTPException(422, "Confirm the complete current review in Agent Factory. Nothing was changed.") from exc
     return apply_sealed(request, reviewed, expected_name=name, expected_generation=expected_generation)
+
+
+def _refuse_while_trial_live(name: str) -> None:
+    """A trial keeps the current definition as it is; it is promoted or rolled back first."""
+    from maverick import specialist_canary
+
+    if specialist_canary.live(name) is not None:
+        raise HTTPException(status_code=409, detail="A trial version of this specialist is live. Promote it or roll it back in Workforce first. Nothing was changed.")
 
 
 def _record_agent_change(request: Request, name: str, before: dict | None, after: dict | None) -> None:
