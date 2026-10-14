@@ -7,6 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 API = "/api/v1/workforce-ops/test-suite"
+DRAFTS = "/api/v1/specialist-drafts"
+PACK = "proc_po_chaser"
 
 
 @pytest.fixture
@@ -19,10 +21,12 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "mh"))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setattr("maverick.config.dashboard_overrides_path", lambda: tmp_path / "dashboard.toml")
     monkeypatch.setattr(audit_writer, "_default", None)
     audit_writer._defaults.clear()
     config.reset_config_cache()
@@ -358,3 +362,74 @@ def test_the_workforce_page_says_whether_tool_checks_are_on(client):
     assert app.get(API + "/customer", params={"specialist": "finance_ap"}).json()["tool_checks_enabled"] is False
     _knob(tmp, "[models]\ncapability_tests = true\n[agent_tests]\ntool_checks = true\n")
     assert app.get(API + "/customer", params={"specialist": "finance_ap"}).json()["tool_checks_enabled"] is True
+
+
+# ---- a complete draft's publication check -------------------------------------------
+
+def _decide(app, name, action, **fields):
+    """Review, then confirm, one Agent Factory decision on a complete draft."""
+    context = app.get(DRAFTS + "/history").json()["context"]
+    review = app.post(DRAFTS + "/review", json={"name": name, "action": action, "context": context, **fields})
+    if review.status_code != 200:
+        return review
+    return app.post(DRAFTS + "/apply", json={"token": review.json()["token"], "confirmed": True})
+
+
+def _original_when_finished(app, operation):
+    deadline = time.time() + 20
+    original = app.get(DRAFTS + "/originals/" + operation).json()
+    while not (original["confirmed"] and (original.get("run") or {}).get("state") in {"done", "failed", "stopped", "unknown"}):
+        assert time.time() < deadline, original
+        time.sleep(.05)
+        original = app.get(DRAFTS + "/originals/" + operation).json()
+    return original
+
+
+def _tool_check_draft(app, monkeypatch, new):
+    """A saved tool check, then a retained complete draft that changes the specialist's instructions."""
+    created = app.post(API + "/customer", json={
+        "specialist": PACK, "task": "The supplier is late. Who should we chase?", "includes": ["chase"],
+        "excludes": [], "refusal": False, "citation": False, "with_tools": True,
+        "tools_called": [{"name": "send_email", "contains": "Acme"}], "tools_not_called": [], "tool_results": []})
+    assert created.status_code == 200, created.text
+    saved = _decide(app, PACK, "save", entered={"persona": new})
+    assert saved.status_code == 200 and saved.json()["confirmed"], saved.text
+    return "SPD-" + saved.json()["operation"]
+
+
+def test_a_complete_draft_with_a_tool_check_can_pass_the_publication_gate(client, monkeypatch, no_real_tools):
+    app, tmp = client
+    _knob(tmp, "[models]\ncapability_tests = true\n[agent_tests]\ntool_checks = true\n")
+    new = "You chase overdue purchase orders and always say which supplier to chase first."
+    draft = _tool_check_draft(app, monkeypatch, new)
+    calls = _scripted_llm(monkeypatch, [
+        _use("send_email", {"to": "Acme", "body": "Chasing the late delivery."}),
+        _say("We should chase the supplier first; I emailed Acme."),
+    ])
+    checked = _decide(app, PACK, "check", selected=draft)
+    assert checked.status_code == 200, checked.text
+    run = _original_when_finished(app, checked.json()["operation"])["run"]
+    assert run["state"] == "done" and run["passed"] == 1 and run["total"] == 1, run
+    assert [c["passed"] for c in run["results"][0]["tool_checks"]] == [True]
+    assert len(calls) == 2
+    published = _decide(app, PACK, "publish", selected=draft)
+    assert published.status_code == 200 and published.json()["confirmed"], published.text
+    assert app.get("/api/v1/agents/" + PACK).json()["persona"] == new
+
+
+def test_a_complete_draft_with_a_tool_check_is_not_publishable_while_the_switch_is_off(client, monkeypatch, no_real_tools):
+    app, tmp = client
+    _knob(tmp, "[models]\ncapability_tests = true\n[agent_tests]\ntool_checks = true\n")
+    new = "You chase overdue purchase orders and always say which supplier to chase first."
+    draft = _tool_check_draft(app, monkeypatch, new)
+    _knob(tmp, "[models]\ncapability_tests = true\n")
+    calls = _scripted_llm(monkeypatch, [_say("We should chase the supplier first; I emailed Acme.")])
+    checked = _decide(app, PACK, "check", selected=draft)
+    assert checked.status_code == 200, checked.text
+    run = _original_when_finished(app, checked.json()["operation"])["run"]
+    assert calls == []
+    assert run["state"] == "done" and run["passed"] == 0
+    assert "turned off" in run["results"][0]["note"] and run["results"][0]["passed"] is False
+    refused = _decide(app, PACK, "publish", selected=draft)
+    assert refused.status_code == 409, refused.text
+    assert app.get("/api/v1/agents/" + PACK).json()["persona"] != new

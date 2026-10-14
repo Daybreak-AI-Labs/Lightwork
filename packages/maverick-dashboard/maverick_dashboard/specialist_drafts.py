@@ -340,7 +340,11 @@ def changes(request, prepared):
     from . import specialist_test_sets as tests
     from .plain_labels import model_label
     _guard(request, prepared)
-    limits = tests.draft_answer_limits(len(prepared["cases"]) if prepared["action"] == "check" else 1)
+    from maverick.agent_tests_policy import tool_checks_enabled
+
+    from .specialist_tool_checks import budget_questions
+    limits = tests.draft_answer_limits(budget_questions(prepared["cases"], enabled=tool_checks_enabled())
+                                       if prepared["action"] == "check" else 1)
     rows = [{"label": "Decision", "after": ACTIONS[prepared["action"]]},
             {"label": "Complete draft", "after": _readable(prepared["profile"], "definition")},
             {"label": "Currently used definition", "after": _readable(prepared["before"]["profile"], "definition") if prepared["before"]["profile"] else "No active custom agent"},

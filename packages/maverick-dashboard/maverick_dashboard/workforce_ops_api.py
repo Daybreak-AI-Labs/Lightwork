@@ -604,7 +604,14 @@ def _start_draft_customer_test_job(request, specialist, operation, draft, source
         raise HTTPException(409, "The complete chosen draft questions exceed the supported limit.")
     budget = _budget("specialist_eval")
     # Grows with the questions, as a saved-test run does; five or fewer keep the original $0.25 run.
-    for key, ceiling in (*saved.draft_answer_limits(len(cases)).items(), ("max_tool_calls", 0)):
+    # A tool check counts as several questions and gets the same few tool calls as a saved-test run.
+    from maverick.agent_tests_policy import tool_checks_enabled
+
+    from .specialist_tool_checks import budget_questions, tool_call_ceiling
+    tools_on = tool_checks_enabled()
+    questions = budget_questions(cases, enabled=tools_on)
+    for key, ceiling in (*saved.draft_answer_limits(questions).items(),
+                         ("max_tool_calls", tool_call_ceiling(cases, enabled=tools_on))):
         current = getattr(budget, key)
         setattr(budget, key, ceiling if current is None else min(current, ceiling))
     source_guard(budget)
