@@ -348,10 +348,29 @@ def test_vault_default_key_area_is_not_written(monkeypatch):
         (KEY_NAME, "lightwork"),
         (VAULT_ADDRESS, "https://vault.internal:8200"),
         (VAULT_MOUNT, "transit"),
-        (VAULT_TOKEN, ""),
+        (VAULT_TOKEN, "hvs.default-area-token"),  # pragma: allowlist secret
         (SIEM, False),
     )
     assert "mount" not in config["kms"]
+
+
+def test_vault_without_a_token_is_not_saved(tmp_path, monkeypatch, capsys):
+    # The runtime reads the token only from VAULT_TOKEN, so a Vault table with no token
+    # would be an unauthenticated client. The built-in keys stay in use instead.
+    config, keys = _pick(
+        monkeypatch,
+        (TRACE, False),
+        (KMS, _label(wizard._KMS_PROVIDERS, "vault")),
+        (KEY_NAME, "lightwork"),
+        (VAULT_ADDRESS, "https://vault.internal:8200"),
+        (VAULT_MOUNT, "transit"),
+        (VAULT_TOKEN, ""),
+        (SIEM, False),
+    )
+    cfg, _text, env = _write(tmp_path, monkeypatch, monitoring=config, keys=keys)
+    assert "kms" not in cfg
+    assert keys == {} and env is None
+    assert "needs its access token" in capsys.readouterr().out
 
 
 # ---------- security monitoring services ----------

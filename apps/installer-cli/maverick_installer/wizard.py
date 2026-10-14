@@ -7854,8 +7854,11 @@ def _pick_key_service(keys: dict[str, str]) -> dict[str, Any]:
         if mount != "transit":
             kms["mount"] = mount
         token = _ask_credential("VAULT_TOKEN", "Vault access token")
-        if token:
-            keys["VAULT_TOKEN"] = token
+        if not token:
+            console.print("  [yellow]Not saved: HashiCorp Vault needs its access token, so the "
+                          "built-in keys stay in use.[/yellow]")
+            return {}
+        keys["VAULT_TOKEN"] = token
     return {"kms": kms}
 
 
