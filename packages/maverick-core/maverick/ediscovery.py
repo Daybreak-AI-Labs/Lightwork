@@ -57,7 +57,9 @@ _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 # A linked messaging account, as stored by maverick.personal_identity.account_identity.
 _ACCOUNT_RE = re.compile(r"account:[0-9a-f]{64}:person:[0-9a-f]{64}\Z")
-_CHANNEL_ACCOUNT_RE = re.compile(r"user:[^\s:]+:account:[0-9a-f]{64}:person:[0-9a-f]{64}\Z")
+# Any ``user:<channel>:account:`` text, whatever follows: such a custodian is refused, never
+# narrowed silently to a single thread or to a channel identifier.
+_CHANNEL_ACCOUNT_PREFIX_RE = re.compile(r"user:(?:[^\s:]+:)?account:")
 # Room and thread histories append one digest to the account identity.
 _THREAD_SUFFIX_RE = re.compile(r":conversation:[0-9a-f]{64}\Z")
 
@@ -199,7 +201,7 @@ def _custodians(value: object) -> list[str]:
     found: set[str] = set()
     for item in value:
         text = item.strip() if isinstance(item, str) else ""
-        if _CHANNEL_ACCOUNT_RE.fullmatch(text):
+        if _CHANNEL_ACCOUNT_PREFIX_RE.match(text):
             raise MatterValidationError(
                 "Write a linked messaging account as account:<hash>:person:<hash>, "
                 "without the user: and channel parts")

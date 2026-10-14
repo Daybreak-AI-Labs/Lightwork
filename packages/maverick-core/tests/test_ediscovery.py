@@ -590,12 +590,25 @@ DIGEST = "d" * 64
     ACCOUNT + ":conversation:" + DIGEST,                     # a thread key is not a custodian
     "user:slack:" + ACCOUNT,                                 # refused: write the account form alone
     "user:telegram:account:" + "a" * 64 + ":person:" + "b" * 64,
+    "user:slack:" + ACCOUNT + ":conversation:" + DIGEST,     # a thread key is not a custodian either
+    "user:slack:account:" + "a" * 63 + ":person:" + "b" * 64,   # channel form, one hex character short
+    "user:slack:account:" + "a" * 64 + ":person:" + "b" * 63,   # channel form, one hex character short
+    "user:slack:account:" + "a" * 64,                        # channel form without the person part
+    "user:slack:account:" + "a" * 64 + ":person:" + "b" * 64 + ":conversation:" + DIGEST,
+    "user:account:" + ACCOUNT,                               # an account is never a channel name
 ])
 def test_account_custodians_must_be_written_exactly(tmp_path, custodian, events):
     store = ediscovery.MatterStore(tmp_path / "ledger.sqlite3")
     with pytest.raises(ediscovery.MatterValidationError):
         store.create("ws-a", actor="auditor", values=_values(custodians=[custodian]))
     assert store.list("ws-a") == []
+
+
+@pytest.mark.parametrize("custodian", ["user:slack:accountant", "user:cli:account", "user:account"])
+def test_principals_that_only_mention_account_are_still_ordinary_custodians(tmp_path, custodian, events):
+    store = ediscovery.MatterStore(tmp_path / "ledger.sqlite3")
+    matter = store.create("ws-a", actor="auditor", values=_values(custodians=[custodian]))
+    assert matter["custodians"] == [custodian]
 
 
 def test_account_custodian_in_the_exact_form_is_saved_and_listed(tmp_path, events):
