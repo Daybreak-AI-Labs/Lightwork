@@ -1108,3 +1108,35 @@ def test_starting_watching_deletes_expired_ekko_events(context, monkeypatch, tmp
                            headers=headers())
     assert response.status_code == 201, response.text
     assert _ekko_event_ids(path) == []
+
+
+def test_pausing_watching_still_pauses_when_its_retention_record_cannot_be_queued(context, monkeypatch, tmp_path):
+    from maverick import work_discovery_store
+
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+    monkeypatch.setattr(work_discovery_store, "MAX_AUDIT_OUTBOX", 0)
+
+    response = client.post("/api/v1/ekko/sessions/expired-session/pause", json={"device_id": "local-device"}, headers=headers())
+    # The pause is the safety action and stands; nothing is deleted without its record.
+    assert response.status_code == 200, response.text
+    assert response.json()["session"]["state"] == "paused"
+    assert _ekko_event_ids(path) == ["event-1"]
+
+    monkeypatch.setattr(work_discovery_store, "MAX_AUDIT_OUTBOX", 2_000)
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    assert _ekko_event_ids(path) == []
+
+
+def test_a_pause_delivers_the_retention_record_with_the_number_removed(context, monkeypatch, tmp_path):
+    client, world = context
+    seed(world)
+    _ekko_with_an_expired_event(monkeypatch, tmp_path)
+    delivered = []
+    monkeypatch.setattr(audit, "record", lambda kind, **payload: delivered.append((kind, payload)) or True)
+
+    response = client.post("/api/v1/ekko/sessions/expired-session/pause", json={"device_id": "local-device"}, headers=headers())
+    assert response.status_code == 200, response.text
+    purges = [payload["lifecycle"] for kind, payload in delivered if kind == "ekko_retention_purge"]
+    assert purges == [{"state": "expired_removed", "removed": 1}]
