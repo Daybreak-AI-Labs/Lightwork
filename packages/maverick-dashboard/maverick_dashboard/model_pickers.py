@@ -64,7 +64,11 @@ def _configured_cloud_model(name: str) -> str:
 
         table = get_provider_config(name) or {}
         field, env = fields[name]
-        value = str(os.environ.get(env, "") or table.get(field) or "").strip()
+        env_value = str(os.environ.get(env, "") or "").strip()
+        saved = str(table.get(field) or "").strip()
+        # The Vertex client takes the saved model over the environment, so the
+        # picker offers that one; Azure and Bedrock take the environment first.
+        value = (saved or env_value) if name == "vertex" else (env_value or saved)
         return value if _VALID_SPEC.fullmatch(f"{name}:{value}") else ""
     except Exception:
         return ""

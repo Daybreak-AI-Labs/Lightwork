@@ -229,3 +229,13 @@ def test_vertex_receipt_goes_stale_when_the_routed_region_changes(workspace, mon
     monkeypatch.setenv("CLOUD_ML_REGION", "europe-west4")
     assert readiness.get("provider", "vertex",
                          readiness._cloud_receipt_material("vertex", material))["status"] != "verified"
+
+
+def test_vertex_picker_offers_the_saved_model_the_route_calls(monkeypatch):
+    """The Vertex client takes the saved model over VERTEX_MODEL_ID, so the picker must too."""
+    from maverick_dashboard import model_pickers
+
+    monkeypatch.setenv("VERTEX_MODEL_ID", "claude-sonnet-4-5@20250929")
+    monkeypatch.setattr("maverick.config.get_provider_config",
+                        lambda name: {"model_id": _HAIKU} if name == "vertex" else {})
+    assert model_pickers._configured_cloud_model("vertex") == _HAIKU
