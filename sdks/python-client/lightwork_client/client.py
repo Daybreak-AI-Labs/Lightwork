@@ -71,10 +71,14 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def _urllib_transport(method: str, url: str, headers: Mapping[str, str],
                       body: bytes | None, timeout: float) -> tuple[int, Mapping[str, str], bytes]:
-    opener = urllib.request.build_opener(
+    handlers: list[Any] = [
         _NoRedirect,
         urllib.request.HTTPSHandler(context=ssl.create_default_context()),
-    )
+    ]
+    if _is_loopback(urllib.parse.urlsplit(url).hostname):
+        # urllib would send a loopback request, bearer token included, through HTTP_PROXY.
+        handlers.insert(0, urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(*handlers)
     request = urllib.request.Request(url, data=body, headers=dict(headers), method=method)
     try:
         with opener.open(request, timeout=timeout) as response:

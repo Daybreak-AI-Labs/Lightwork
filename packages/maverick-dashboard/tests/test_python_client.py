@@ -124,6 +124,20 @@ def _binding(lw, approval_id):
     return row["approval_card"]["binding_sha256"]
 
 
+def _json_reply(handler, body: bytes) -> None:
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _loopback_server(handler_class):
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler_class)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
 def test_health_returns_the_degraded_answer_instead_of_raising(dashboard, monkeypatch):
     from maverick_dashboard import app as dashboard_app
 
@@ -539,3 +553,65 @@ def test_the_default_transport_hands_the_timeout_to_the_opener(monkeypatch):
     monkeypatch.setattr(client_module.urllib.request, "build_opener", lambda *handlers: FakeOpener())
     Lightwork("https://dashboard.example.test", "tok-timeout-check", timeout=4.25).spend()
     assert seen == [(4.25, "Bearer tok-timeout-check")]
+
+
+def test_loopback_requests_never_go_through_an_environment_proxy(monkeypatch):
+    """urllib would send a loopback request, bearer token included, to HTTP_PROXY."""
+    dashboard_seen: list[str | None] = []
+    proxy_seen: list[str] = []
+
+    class Dashboard(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server naming
+            dashboard_seen.append(self.headers.get("Authorization"))
+            _json_reply(self, b'{"total": 0, "episodes": []}')
+
+        def log_message(self, *args):
+            return
+
+    class Proxy(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server naming
+            proxy_seen.append(self.path)
+            _json_reply(self, b'{"total": 0, "episodes": []}')
+
+        def log_message(self, *args):
+            return
+
+    dashboard_server = _loopback_server(Dashboard)
+    proxy_server = _loopback_server(Proxy)
+    try:
+        for name in ("HTTP_PROXY", "http_proxy"):
+            monkeypatch.setenv(name, f"http://127.0.0.1:{proxy_server.server_address[1]}")
+        for name in ("NO_PROXY", "no_proxy"):
+            monkeypatch.delenv(name, raising=False)
+        base = f"http://127.0.0.1:{dashboard_server.server_address[1]}"
+        assert Lightwork(base, "tok-proxy-check").spend()["episodes"] == []
+        assert dashboard_seen == ["Bearer tok-proxy-check"]
+        assert proxy_seen == []
+    finally:
+        for server in (dashboard_server, proxy_server):
+            server.shutdown()
+            server.server_close()
+
+
+def test_other_hosts_still_use_the_environment_proxy(monkeypatch):
+    """Only loopback bypasses the proxy: a remote host without a token still goes through HTTP_PROXY."""
+    proxy_seen: list[str] = []
+
+    class Proxy(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server naming
+            proxy_seen.append(self.path)
+            _json_reply(self, b'{"total": 0, "episodes": []}')
+
+        def log_message(self, *args):
+            return
+
+    proxy_server = _loopback_server(Proxy)
+    try:
+        monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{proxy_server.server_address[1]}")
+        monkeypatch.delenv("NO_PROXY", raising=False)
+        monkeypatch.delenv("no_proxy", raising=False)
+        assert Lightwork("http://remote.example.test").spend()["episodes"] == []
+        assert proxy_seen == ["http://remote.example.test/api/v1/spend"]
+    finally:
+        proxy_server.shutdown()
+        proxy_server.server_close()
