@@ -268,6 +268,10 @@ def _fresh_builtin_base(name: str) -> DomainProfile | None:
     try:
         signature = _builtin_layout()
         if signature and _canonical_builtin_layout(signature) and _builtin_layout() == signature:
+            # Every built-in pack is named by its file, so a name with no file has no
+            # built-in base. Answer from the listing instead of parsing the catalogue.
+            if f"{name}.toml" not in {item[0] for item in signature[1]}:
+                return None
             profile = load_domain(Path(signature[0]) / f"{name}.toml")
             if profile.name == name:
                 return profile
