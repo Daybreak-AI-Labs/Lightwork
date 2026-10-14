@@ -50,9 +50,11 @@ MAX_MESSAGE = 2000
 MAX_REQUESTER = 120
 TIMEOUT = 10.0
 TERMINAL = frozenset({"sent", "failed", "unknown"})
-LABELS = {"queued": "Waiting to send", "sending": "Sending", "retrying": "Retrying",
-          "sent": "Sent", "failed": "Not sent", "unknown": "Not confirmed",
+LABELS = {"queued": "Waiting to send", "waiting": "Waiting for Settings", "sending": "Sending",
+          "retrying": "Retrying", "sent": "Sent", "failed": "Not sent", "unknown": "Not confirmed",
           "unavailable": "Status unavailable", "not_recorded": "Not queued"}
+PENDING = frozenset({"queued", "retrying", "waiting"})
+CHANGED = "The contact centre address or provider changed after this handoff was reviewed, so nothing was sent."
 STOPPED = ("Lightwork stopped while this was being sent, so the outcome is not confirmed. "
            "It was not sent again; check the contact centre before sending it by hand.")
 UNCONFIRMED_RESULT = ("Lightwork could not record the result of this send, so the outcome is not confirmed. "
@@ -97,28 +99,43 @@ def _secret(env_name: str, key: str) -> str:
     return saved.strip() if isinstance(saved, str) else ""
 
 
-def _problem(policy: dict[str, Any]) -> str:
-    """Why the chosen provider cannot send yet, in plain words. ``""`` when ready."""
+def _address_problem(policy: dict[str, Any]) -> str:
+    """Why the destination address is not set, in plain words. ``""`` when it is set.
+
+    An address is part of what the customer is shown before confirming, so a handoff
+    without one is final: it is never sent to an address that was set afterwards.
+    """
+    if policy["provider"] == "zendesk" and not policy["zendesk_subdomain"]:
+        return "Enter the Zendesk subdomain in Settings."
+    if policy["provider"] == "webhook" and not policy["webhook_url"]:
+        return "Enter the https address of the webhook in Settings."
+    return ""
+
+
+def _credential_problem(policy: dict[str, Any]) -> str:
+    """Why the credentials are not set yet, in plain words. ``""`` when they are.
+
+    A handoff waits for these and is sent once they are set; nothing is lost.
+    """
     if policy["provider"] == "zendesk":
-        if not policy["zendesk_subdomain"]:
-            return "Enter the Zendesk subdomain in Settings."
         if not policy["zendesk_email"]:
             return "Enter the Zendesk agent email in Settings."
         if not _secret(ZENDESK_TOKEN_ENV, "zendesk_api_token"):
             return "Set the Zendesk API token in Settings."
     elif policy["provider"] == "webhook":
-        if not policy["webhook_url"]:
-            return "Enter the https address of the webhook in Settings."
         if not _secret(WEBHOOK_SECRET_ENV, "webhook_secret"):
             return "Set the webhook signing secret in Settings."
     return ""
 
 
 def _destination(policy: dict[str, Any]) -> str:
-    if policy["provider"] == "zendesk":
+    """The address a send goes to, or ``""`` while it is not set. Compared again before every send."""
+    if policy["provider"] == "zendesk" and policy["zendesk_subdomain"]:
         # Endpoint form not verified against Zendesk's reference or a live tenant; see docs/contact-centre-handoff.md.
         return f"https://{policy['zendesk_subdomain']}.zendesk.com/api/v2/tickets.json"
-    return policy["webhook_url"]
+    if policy["provider"] == "webhook":
+        return policy["webhook_url"]
+    return ""
 
 
 # ------------------------------------------------------------------ content
@@ -277,7 +294,11 @@ def enqueue_handoff(*, handoff_id: str, title: str, reason: str, requester_name:
     key = _key(handoff_id)
     if key is None:
         raise ValueError("The handoff identity is not valid for the contact centre.")
-    problem = _problem(policy)
+    address, credentials = _address_problem(policy), _credential_problem(policy)
+    state = "failed" if address else "waiting" if credentials else "queued"
+    status_text = (f"{address} Nothing was sent." if address else
+                   f"{credentials} It will be sent once Settings are complete." if credentials else
+                   "Lightwork will send it in the background.")
     now = time.time()
     with _locked(create=True) as path:
         data = _load(path)
@@ -287,19 +308,19 @@ def enqueue_handoff(*, handoff_id: str, title: str, reason: str, requester_name:
             _prune(data)
         if len(data) >= MAX_ENTRIES:
             raise OutboxFull("The contact centre outbox is full. The handoff stays in Lightwork but was not queued.")
-        content = {} if problem else _content(title=title, reason=reason, requester_name=requester_name,
+        content = {} if address else _content(title=title, reason=reason, requester_name=requester_name,
                                               requester_email=requester_email, messages=messages,
                                               link=link, limit=policy["max_messages"])
         entry = {"key": key, "provider": policy["provider"],
-                 "destination": "" if problem else _destination(policy),
-                 "state": "failed" if problem else "queued", "attempts": 0, "next_attempt_at": now,
-                 "reason": problem or "Lightwork will send it in the background.", "ticket_id": "", "payload": content,
+                 "destination": "" if address else _destination(policy),
+                 "state": state, "attempts": 0, "next_attempt_at": now if state == "queued" else None,
+                 "reason": status_text, "ticket_id": "", "payload": content,
                  "created_at": now, "updated_at": now}
         # Recorded before the entry is saved: a refused record leaves nothing queued to send later.
-        _audit(key, policy["provider"], "failed" if problem else "queued", entry["state"])
+        _audit(key, policy["provider"], "failed" if address else "queued", entry["state"])
         data[key] = entry
         _save(path, data)
-    if not problem:
+    if state == "queued":
         _start(key)
     return _public(entry)
 
@@ -429,7 +450,19 @@ def _attempt(key: str, *, honour_schedule: bool) -> tuple[str, float]:
         with _locked(create=False) as path:
             data = _load(path)
             entry = data.get(key)
-            if entry is None or entry.get("state") not in {"queued", "retrying"}:
+            if entry is None or entry.get("state") not in PENDING:
+                return "done", 0.0
+            # Checked at send time: the customer reviewed this provider and address, so a different one is never used.
+            policy = config.get_contact_centre()
+            if policy["provider"] != entry.get("provider") or _destination(policy) != entry.get("destination"):
+                entry.update(state="failed", reason=CHANGED, payload={}, next_attempt_at=None, updated_at=now)
+                _save(path, data)
+                return "done", 0.0
+            problem = _credential_problem(policy)
+            if problem:
+                entry.update(state="waiting", reason=f"{problem} It will be sent once Settings are complete.",
+                             updated_at=now)
+                _save(path, data)
                 return "done", 0.0
             due = float(entry.get("next_attempt_at") or 0.0)
             if honour_schedule and due > now:
@@ -549,7 +582,7 @@ def resume_pending() -> int:
                 marked.append((key, str(entry.get("provider") or ""), "unknown"))
         if marked:
             _save(path, data)
-        pending = [key for key, entry in data.items() if entry.get("state") in {"queued", "retrying"}]
+        pending = [key for key, entry in data.items() if entry.get("state") in PENDING]
     for key, provider, state in marked:
         _audit(key, provider, "unknown", state)
     for key in pending:

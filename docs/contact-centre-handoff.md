@@ -26,8 +26,13 @@ Settings > Integrations > **Contact centre**, or the `[contact_centre]` table in
 Secrets are never written to `config.toml`. The setup wizard asks only for the
 provider and the non-secret addresses, and tells you where to enter the secret.
 
-Until the chosen provider is complete (for example, the token is missing), each
-handoff is recorded as **Not sent** with the reason, and nothing leaves Lightwork.
+A handoff made while a secret or the Zendesk agent email is missing is kept as
+**Waiting for Settings** with the reason. Lightwork checks it again before each send
+and when it next starts, so it is sent once Settings are complete. A handoff made
+while the Zendesk subdomain or the webhook address is missing is **Not sent** at once,
+because the customer was shown that address. Lightwork never sends it to an address
+that was set afterwards: if the provider or address is changed before a waiting
+handoff is sent, it is recorded as **Not sent** and nothing leaves Lightwork.
 
 ## What is sent
 
@@ -84,6 +89,7 @@ Verify with the same rule as `maverick.webhooks.verify_signature`.
 | Shown as | Meaning |
 |---|---|
 | Waiting to send | Queued; the first attempt starts in the background. |
+| Waiting for Settings | A secret or the Zendesk agent email is missing. It is sent once Settings are complete. |
 | Sending | An attempt is in progress. |
 | Retrying | The last attempt did not reach the receiver. The next attempt is scheduled. |
 | Sent | Accepted. For Zendesk, the ticket number is shown when the reply includes it. |

@@ -159,14 +159,51 @@ def test_webhook_address_with_an_invalid_port_reads_as_empty(tmp_path):
     assert config.get_contact_centre()["webhook_url"] == ""
 
 
-def test_incomplete_settings_record_a_plain_failure_and_send_nothing(tmp_path, monkeypatch):
+def test_a_missing_token_waits_for_settings_and_sends_nothing(tmp_path, monkeypatch):
     _configure(tmp_path, '[contact_centre]\nprovider = "zendesk"\nzendesk_subdomain = "acme-support"\n'
                          'zendesk_email = "agent@acme.example"\n')
     receiver = Receiver(CREATED)
     monkeypatch.setattr(contact_centre, "_post", receiver)
     status = _enqueue()
-    assert status["state"] == "failed"
+    assert status["state"] == "waiting" and status["label"] == "Waiting for Settings"
     assert "API token" in status["reason"]
+    assert receiver.calls == []
+
+
+def test_a_missing_subdomain_is_a_final_failure_that_sends_nothing(tmp_path, monkeypatch):
+    _configure(tmp_path, '[contact_centre]\nprovider = "zendesk"\nzendesk_email = "agent@acme.example"\n')
+    monkeypatch.setenv("MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN", ZENDESK_TOKEN)
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    status = _enqueue()
+    assert status["state"] == "failed"
+    assert "subdomain" in status["reason"] and "Nothing was sent" in status["reason"]
+    assert receiver.calls == []
+
+
+def test_a_handoff_waiting_for_a_token_is_sent_once_the_token_is_set(tmp_path, monkeypatch):
+    _configure(tmp_path, '[contact_centre]\nprovider = "zendesk"\nzendesk_subdomain = "acme-support"\n'
+                         'zendesk_email = "agent@acme.example"\n')
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    assert _enqueue()["state"] == "waiting"
+    monkeypatch.setenv("MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN", ZENDESK_TOKEN)
+    assert contact_centre.resume_pending() == 1
+    status = contact_centre.status_for(HANDOFF)
+    assert status["state"] == "sent" and status["ticket_id"] == "4242"
+    assert len(receiver.calls) == 1
+
+
+def test_a_waiting_handoff_is_not_sent_to_an_address_changed_after_it_was_queued(tmp_path, monkeypatch):
+    _configure(tmp_path, '[contact_centre]\nprovider = "webhook"\nwebhook_url = "https://hooks.acme.example/one"\n')
+    receiver = Receiver((200, 4, "ok", ""))
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    assert _enqueue()["state"] == "waiting"  # no signing secret yet
+    _configure(tmp_path, '[contact_centre]\nprovider = "webhook"\nwebhook_url = "https://hooks.other.example/two"\n')
+    monkeypatch.setenv("MAVERICK_CONTACT_CENTRE_WEBHOOK_SECRET", WEBHOOK_SECRET)
+    assert contact_centre.resume_pending() == 1
+    status = contact_centre.status_for(HANDOFF)
+    assert status["state"] == "failed" and "changed" in status["reason"]
     assert receiver.calls == []
 
 
@@ -262,7 +299,7 @@ def test_webhook_without_a_signing_secret_is_never_sent_unsigned(tmp_path, monke
     _configure(tmp_path, '[contact_centre]\nprovider = "webhook"\nwebhook_url = "https://hooks.acme.example/x"\n')
     receiver = Receiver((200, 4, "ok", ""))
     monkeypatch.setattr(contact_centre, "_post", receiver)
-    assert _enqueue()["state"] == "failed"
+    assert _enqueue()["state"] == "waiting"
     assert receiver.calls == []
 
 
