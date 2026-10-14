@@ -254,6 +254,22 @@ def _nonce_problems(response) -> list[str]:
     return problems
 
 
+# The walk's principal (a local admin with no person account) cannot open these
+# pages. Each answers 401 or 403 with an error page: a sign-in or permission
+# page, or a page the workspace has turned off. Their own templates are still
+# covered by the static scan, and their error pages by the nonce check.
+GATED_PATHS = frozenset({
+    "/access-requests", "/companion", "/companion/admin", "/compliance/scope-actions/mapping",
+    "/content-access", "/deliverable-bundles", "/devices", "/get-started/employee",
+    "/human-conversations", "/knowledge-access", "/learning/acquisition", "/learning/applicability",
+    "/learning/approval-challenges", "/learning/distinctions", "/learning/instructions",
+    "/learning/portable-rules", "/learning/recheck-rules", "/learning/recovery-visibility",
+    "/learning/request-program", "/learning/rule-evolution", "/learning/rules-together",
+    "/learning/work-restructuring", "/my-data", "/notifications", "/preferences",
+    "/project-reviews", "/research", "/task-handoffs", "/today",
+})
+
+
 def test_every_inline_script_on_a_rendered_page_carries_that_responses_nonce(monkeypatch, tmp_path):
     from maverick import world_model
     from maverick_dashboard import app as dash_app
@@ -271,15 +287,23 @@ def test_every_inline_script_on_a_rendered_page_carries_that_responses_nonce(mon
     paths = [page["path"] for page in ui_visibility.PAGES] + ["/docs", "/docs/oauth2-redirect", "/redoc"]
     rendered = inline_total = 0
     failures = []
+    gated = {}
     for path in paths:
         response = client.get(path, headers={"Accept": "text/html"})
-        if response.status_code != 200 or not response.headers.get("content-type", "").startswith("text/html"):
+        if not response.headers.get("content-type", "").startswith("text/html"):
+            gated[path] = response.status_code
+            continue
+        failures += [f"{path}: {problem}" for problem in _nonce_problems(response)]
+        if response.status_code != 200:
+            gated[path] = response.status_code
             continue
         rendered += 1
         inline_total += len(_inline_scripts(response.text))
-        failures += [f"{path}: {problem}" for problem in _nonce_problems(response)]
     assert rendered >= 100, rendered
     assert inline_total >= 100, inline_total
+    # Any other page that stops rendering for this principal fails here rather than being skipped.
+    assert set(gated) == GATED_PATHS, sorted(set(gated) ^ GATED_PATHS)
+    assert set(gated.values()) <= {401, 403}, gated
     assert failures == []
 
 
