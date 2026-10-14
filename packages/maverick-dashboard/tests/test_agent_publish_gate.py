@@ -1,8 +1,6 @@
 """Builders run a whole saved test set, and changed instructions publish only after it passes."""
 from __future__ import annotations
 
-import time
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -48,14 +46,26 @@ def audit_rows(monkeypatch):
     return rows
 
 
+def _join_background_jobs():
+    """Wait for the background job threads started so far to finish.
+
+    The wait ends when the work does, so a slow machine waits longer but never
+    fails on a clock, and the test does not sleep. The join timeout only stops a
+    hung worker from hanging the suite; a thread still running then fails here.
+    """
+    from maverick_dashboard import learning_jobs
+
+    for thread, _job in list(learning_jobs._workers):
+        thread.join(timeout=120)
+        assert not thread.is_alive(), thread.name
+
+
 def _wait(app, response):
     assert response.status_code == 200, response.text
     job = response.json()["job"]
-    deadline = time.time() + 20
-    while job["state"] in {"admitted", "queued", "running", "stopping"}:
-        assert time.time() < deadline, job
-        time.sleep(.05)
-        job = app.get("/api/v1/learning-ops/jobs/" + job["id"]).json()["job"]
+    _join_background_jobs()
+    job = app.get("/api/v1/learning-ops/jobs/" + job["id"]).json()["job"]
+    assert job["state"] not in {"admitted", "queued", "running", "stopping"}, job
     return job
 
 
@@ -176,12 +186,10 @@ def test_a_passing_comparison_of_the_exact_new_instructions_unlocks_publishing(c
     checked = _decide(app, PACK, "check", selected=draft)
     assert checked.status_code == 200, checked.text
     # The background worker confirms the original admission when it starts.
-    operation, original = checked.json()["operation"], checked.json()
-    deadline = time.time() + 20
-    while not (original["confirmed"] and (original.get("run") or {}).get("state") in {"done", "failed", "stopped", "unknown"}):
-        assert time.time() < deadline, original
-        time.sleep(.05)
-        original = app.get(DRAFTS + "/originals/" + operation).json()
+    operation = checked.json()["operation"]
+    _join_background_jobs()
+    original = app.get(DRAFTS + "/originals/" + operation).json()
+    assert original["confirmed"] and (original.get("run") or {}).get("state") in {"done", "failed", "stopped", "unknown"}, original
     run = original["run"]
     assert run["state"] == "done" and all(row["passed"] for row in run["results"]), run
     saved = _decide(app, PACK, "publish", selected=draft)
@@ -271,16 +279,14 @@ NEW_ENTERED = {"description": "PO helper", "persona": "You help with purchase or
                "allow_tools": ["read_file"], "max_risk": "low"}
 
 
-def _check_draft(app, name, draft, seconds=20):
+def _check_draft(app, name, draft):
     """Check a retained complete draft against its saved checks; wait for its confirmed outcome."""
     checked = _decide(app, name, "check", selected=draft)
     assert checked.status_code == 200, checked.text
-    operation, original = checked.json()["operation"], checked.json()
-    deadline = time.time() + seconds
-    while not (original["confirmed"] and (original.get("run") or {}).get("state") in {"done", "failed", "stopped", "unknown"}):
-        assert time.time() < deadline, original
-        time.sleep(.05)
-        original = app.get(DRAFTS + "/originals/" + operation).json()
+    operation = checked.json()["operation"]
+    _join_background_jobs()
+    original = app.get(DRAFTS + "/originals/" + operation).json()
+    assert original["confirmed"] and (original.get("run") or {}).get("state") in {"done", "failed", "stopped", "unknown"}, original
     return original
 
 
@@ -533,7 +539,7 @@ def test_a_complete_draft_check_of_many_questions_gets_a_limit_that_grows_with_t
     assert review.status_code == 200, review.text
     limits = " ".join(str(row["after"]) for row in review.json()["changes"] if row["label"] == "Limits and consequences")
     assert "$1.25" in limits and "50,000 input tokens" in limits, limits
-    original = _check_draft(app, NEW, draft, seconds=900)  # 25 answers took about two minutes on a loaded machine
+    original = _check_draft(app, NEW, draft)
     assert original["run"]["state"] == "done", original["run"]
     assert len(original["run"]["results"]) == 25 and all(row["passed"] for row in original["run"]["results"])
     published = _decide(app, NEW, "publish", selected=draft)
