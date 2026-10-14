@@ -8,7 +8,7 @@ def entries(setting):
         setting("public_chat", "enabled", "Chat box on your public website",
                 "Let anonymous visitors on a listed website ask one published specialist's questions. "
                 "Off by default. Each website is listed exactly and has a daily spending limit. "
-                "Visitors cannot use tools or see records. Websites are added and revoked in the dashboard.",
+                "Visitors cannot use tools or see records. An administrator adds and revokes websites with separate admin tools; a dashboard page for this does not exist yet.",
                 "toggle", group, False, reader),
         setting("public_chat", "allow_localhost_origins", "Allow a local test address for the chat",
                 "For development only: lets a website at http://localhost use the chat. "
