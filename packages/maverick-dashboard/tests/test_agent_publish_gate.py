@@ -335,3 +335,118 @@ def test_the_new_specialist_switch_leaves_the_default_and_existing_specialists_a
                          reason="Description wording approved by procurement")
     assert described.status_code == 200 and described.json()["confirmed"], described.text
     assert "saved check" not in str(described.json())
+
+
+BYPASS = "agent_publish.bypass_passing_tests"
+
+
+def _approve(app, approval_id, who, monkeypatch):
+    """A decision on the Approvals page: the card's binding and the typed acknowledgement, as the page sends them."""
+    from maverick.approval_cards import decode_approval_detail
+    from maverick_dashboard import api, auth
+    from maverick_dashboard._shared import _world
+
+    binding = decode_approval_detail(_world().get_approval(approval_id).detail)["binding_sha256"]
+    with monkeypatch.context() as patch:  # the signed-in person is restored afterwards
+        patch.setattr(auth, "caller_principal", lambda request: who)
+        patch.setattr(api, "_supervisor", lambda request: who)
+        return app.post(f"/api/v1/approvals/{approval_id}/approve", json={"acknowledged": True, "confirmation": "approve"},
+                        headers={"Origin": "http://testserver", "X-Lightwork-Approval-Binding": binding})
+
+
+def test_a_reasoned_bypass_needs_another_administrator_when_switched_on(client, monkeypatch, audit_rows):
+    app, tmp = client
+    from maverick import config
+    from maverick_dashboard import auth, rbac, specialist_drafts
+    from maverick_dashboard._shared import _world
+
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n"
+                                    "[agent_tests]\nbypass_requires_second_person = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    actor = {"who": "user:requester"}
+    monkeypatch.setattr(auth, "caller_principal", lambda request: actor["who"])
+    rbac.set_role("user:requester", "admin")
+    rbac.set_role("user:reviewer", "admin")
+    rbac.set_role("user:observer", "operator")
+    _save_tests(app, 2)
+    first = "You chase overdue purchase orders and always say which supplier to chase first."
+    reason = "Urgent supplier change approved by finance"
+
+    def approvals():
+        return [row for row in _world().list_approvals(limit=50) if row.action == BYPASS]
+
+    sent = _publish(app, PACK, {"persona": first}, reason=reason)
+    assert sent.status_code == 409 and "Approvals page" in sent.json()["detail"], sent.text
+    assert _current(app)["persona"] != first and len(approvals()) == 1
+    waiting = _publish(app, PACK, {"persona": first}, reason=reason)
+    assert waiting.status_code == 409 and "waiting for another administrator" in waiting.json()["detail"]
+    assert len(approvals()) == 1  # the same request is reused, not duplicated
+    aid = approvals()[0].id
+    assert approvals()[0].requested_by == "user:requester" and approvals()[0].status == "pending"
+
+    # The person who asked cannot approve it, and a person without administrator access cannot either.
+    own = _approve(app, aid, "user:requester", monkeypatch)
+    assert own.status_code == 403 and "another administrator" in own.json()["detail"]
+    assert _approve(app, aid, "user:observer", monkeypatch).status_code == 403
+    assert _world().get_approval(aid).status == "pending"
+
+    approved = _approve(app, aid, "user:reviewer", monkeypatch)
+    assert approved.status_code == 204, approved.text
+    assert _world().get_approval(aid).status == "approved"
+    actor["who"] = "user:requester"
+    published = _publish(app, PACK, {"persona": first}, reason=reason)
+    assert published.status_code == 200 and published.json()["confirmed"], published.text
+    assert _current(app)["persona"] == first
+    logged = [row for row in audit_rows if row.get("verb") == "agent_published_without_passing_tests"]
+    assert logged and logged[-1]["reason"] == reason and logged[-1]["approval"] == aid
+    assert logged[-1]["requested_by"] == "user:requester" and logged[-1]["approved_by"] == "user:reviewer"
+    requested = [row for row in audit_rows if row.get("verb") == "agent_publish_bypass_requested"]
+    assert requested and requested[0]["actor"] == "user:requester" and requested[0]["reason"] == reason
+    assert specialist_drafts.bypass_used(PACK, aid) is True
+
+
+def test_an_approved_bypass_covers_one_publication_only(client, monkeypatch):
+    app, tmp = client
+    from maverick import config
+    from maverick_dashboard import auth, rbac
+    from maverick_dashboard._shared import _world
+
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n"
+                                    "[agent_tests]\nbypass_requires_second_person = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:requester")
+    rbac.set_role("user:requester", "admin")
+    rbac.set_role("user:reviewer", "admin")
+    _save_tests(app, 2)
+    first = "You chase overdue purchase orders and always say which supplier to chase first."
+    second = "You chase overdue purchase orders and always name the buyer."
+    reason = "Urgent supplier change approved by finance"
+    _publish(app, PACK, {"persona": first}, reason=reason)
+    aid = [row.id for row in _world().list_approvals(limit=50) if row.action == BYPASS][0]
+    assert _approve(app, aid, "user:reviewer", monkeypatch).status_code == 204
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:requester")
+    assert _publish(app, PACK, {"persona": first}, reason=reason).status_code == 200
+
+    # A different change needs its own approval...
+    other = _publish(app, PACK, {"persona": second}, reason="Buyer names requested by procurement")
+    assert other.status_code == 409 and "Approvals page" in other.json()["detail"]
+    other_id = max(row.id for row in _world().list_approvals(limit=50) if row.action == BYPASS)
+    assert _approve(app, other_id, "user:reviewer", monkeypatch).status_code == 204
+    assert _publish(app, PACK, {"persona": second}, reason="Buyer names requested by procurement").status_code == 200
+
+    # ...and the first approval cannot be spent again to return to the first wording.
+    again = _publish(app, PACK, {"persona": first}, reason=reason)
+    assert again.status_code == 409 and "Approvals page" in again.json()["detail"], again.text
+    assert _current(app)["persona"] == second
+
+
+def test_an_administrator_can_read_a_bypass_card_to_decide_it(monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick_dashboard import auth, content_access
+
+    card = SimpleNamespace(id=1, action=BYPASS, provenance="agent_publish.bypass.four_eyes.v1", status="pending",
+                           requested_by="user:requester", scope=PACK, detail=None, goal_id=None)
+    monkeypatch.setattr(auth, "api_key_permissions", lambda request: None)
+    monkeypatch.setattr(auth, "has_permission", lambda request, permission, api_scope=None: permission == "admin")
+    assert content_access.can_read_approval(object(), card, world=object()) is True

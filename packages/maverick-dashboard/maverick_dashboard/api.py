@@ -14270,8 +14270,12 @@ def _publish_check(name: str, payload: AgentOverrideIn, before_view: dict | None
 
 
 def _require_tested_instructions(request: Request, name: str, payload: AgentOverrideIn,
-                                 before_view: dict | None) -> None:
-    """Changed instructions need a passing run of the saved tests, or a recorded reason."""
+                                 before_view: dict | None, *, second_person: dict | None = None) -> None:
+    """Changed instructions need a passing run of the saved tests, or a recorded reason.
+
+    ``second_person`` is the approval a different administrator gave for this reasoned bypass
+    (agent_publish_bypass); the activity record names both people with the reason and the time.
+    """
     try:
         verdict = _publish_check(name, payload, before_view)
     except Exception as exc:
@@ -14292,7 +14296,7 @@ def _require_tested_instructions(request: Request, name: str, payload: AgentOver
             EventKind.CONTROL_PLANE_ACTION, agent="dashboard",
             verb="agent_published_without_passing_tests",
             actor=caller_principal(request) or "local administrator", specialist=name,
-            reason=reason, tests=verdict["tests"], latest=verdict["latest"])
+            reason=reason, tests=verdict["tests"], latest=verdict["latest"], **(second_person or {}))
     except AuditRefused as exc:
         raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.") from exc
     if not recorded:
@@ -15492,6 +15496,8 @@ def _decide_approval(request: Request, approval_id: int, payload: dict, status: 
                                resource=str(approval_id))
     who, world = _supervisor(request), _world()
     _require_settings_decider(request, world, approval_id, who, approving=approving)
+    from . import agent_publish_bypass
+    agent_publish_bypass.require_decider(request, world.get_approval(approval_id), who, approving=approving)
     from .approval_queue_operations import guard, require_review
 
     vote_guard = reviewed

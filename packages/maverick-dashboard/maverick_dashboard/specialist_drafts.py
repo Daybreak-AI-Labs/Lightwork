@@ -533,7 +533,7 @@ def _publish(request, prepared, row, began):
     payload = AgentOverrideIn.model_validate({**prepared["patch"], "publish_without_passing_tests": bool(prepared["reason"]),
         "override_reason": prepared["reason"], "expected_generation": prepared["before"]["generation"]})
 
-    _publication_admission(request, prepared, payload)
+    second_person = _publication_admission(request, prepared, payload)
 
     def guard():
         _guard(request, prepared)
@@ -543,7 +543,8 @@ def _publish(request, prepared, row, began):
 
     domain_edit.write_override(prepared["name"], prepared["patch"], expected_generation=prepared["before"]["generation"], effect_guard=guard)
     published = digest(_source(request, prepared["name"]))
-    STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published), expected_revision=row["revision"],
+    STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published,
+        bypass_approval=(second_person or {}).get("approval")), expected_revision=row["revision"],
         action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared, published=published))
     # The agent's own plain-words history (who, when, what) records every
     # published or restored definition, as the retired direct save did.
@@ -562,26 +563,47 @@ def _publication_current(request, prepared, payload):
         raise HTTPException(409, "Current passing tests no longer support this complete publication. Review a new check or an explicit reason.")
 
 
-def _publication_admission(request, prepared, payload):
+def bypass_used(name: str, approval_id: int) -> bool:
+    """Whether a publication of this specialist already spent this second-person approval."""
+    rows = STORE.list(limit=MAX_RECORDS + 1)
+    return len(rows) > MAX_RECORDS or any(row.get("name") == name and row.get("bypass_approval") == approval_id for row in rows)
+
+
+def _publication_admission(request, prepared, payload) -> dict | None:
+    """Admit a publication. Returns the second person's approval that a reasoned bypass used, if any."""
+    from maverick.agent_tests_policy import bypass_requires_second_person
     from maverick.audit import EventKind, audit_event
 
-    from .api import _record_agent_autonomy_intent, _require_tested_instructions
+    from . import agent_publish_bypass
+    from .api import _publish_check, _record_agent_autonomy_intent, _require_tested_instructions
     _guard(request, prepared)
     verdict = _publication_verdict(prepared)
     if verdict["blocked"] and verdict.get("hard"):
         # A brand-new specialist is refused before any reasoned bypass is considered or recorded.
         raise HTTPException(409, verdict["message"])
     _publication_current(request, prepared, payload)
-    _require_tested_instructions(request, prepared["name"], payload, prepared["before"]["profile"])
-    if _publication_verdict(prepared)["blocked"]:
+    reason = " ".join((payload.override_reason or "").split())
+    second_person = None
+    if payload.publish_without_passing_tests and len(reason) >= 8 and bypass_requires_second_person():
+        try:
+            plain_blocked = _publish_check(prepared["name"], payload, prepared["before"]["profile"])["blocked"]
+        except Exception as exc:
+            raise HTTPException(503, "The saved test results could not be read. Nothing was changed.") from exc
+        if plain_blocked or verdict["blocked"]:
+            second_person = agent_publish_bypass.second_person_approval(
+                request, prepared["name"], prepared["profile"], reason,
+                used=lambda approval_id: bypass_used(prepared["name"], approval_id))
+    _require_tested_instructions(request, prepared["name"], payload, prepared["before"]["profile"], second_person=second_person)
+    if verdict["blocked"]:
         accepted = audit_event(EventKind.CONTROL_PLANE_ACTION, agent="dashboard", verb="agent_draft_published_without_complete_check",
-            actor=prepared["actor"], specialist=prepared["name"], reason=prepared["reason"])
+            actor=prepared["actor"], specialist=prepared["name"], reason=prepared["reason"], **(second_person or {}))
         if not accepted:
             raise HTTPException(503, "The reason could not be recorded. Read the original decision before another publication intent.")
     before = (prepared["before"]["profile"] or {}).get("autonomy") or {}
     after = prepared["profile"].get("autonomy") or {}
     if before != after and after:
         _record_agent_autonomy_intent(request, prepared["name"], before, after)
+    return second_person
 
 
 def _start_answers(request, prepared, row, began):
