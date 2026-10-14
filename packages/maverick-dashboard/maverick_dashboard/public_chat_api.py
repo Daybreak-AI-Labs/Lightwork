@@ -305,7 +305,7 @@ async def _start_session(request: Request) -> JSONResponse:
         _SESSION_KEY_LIMITER(site["id"], "session")
     except PublicConsentRateLimitExceeded:
         raise _Refused(429, _RATE_DETAIL, origin=origin, headers={"Retry-After": "60"}) from None
-    await run_in_threadpool(store.purge_transcripts, tenant, site, now=now)
+    await run_in_threadpool(store.purge_expired_if_due, now=now)
     try:
         token, expires_at, _conversation = await run_in_threadpool(
             store.issue_session, tenant, site["id"], origin, now=now)

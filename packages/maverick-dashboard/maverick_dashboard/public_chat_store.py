@@ -20,6 +20,7 @@ import json
 import re
 import secrets
 import sqlite3
+import threading
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -44,6 +45,10 @@ MAX_DAILY_CAP_DOLLARS = 1_000.0
 ANSWER_RESERVE_DOLLARS = 0.05
 _DAY_SECONDS = 86_400
 _MINUTE_SECONDS = 60.0
+# Retention sweeps across every tenant run at most this often, on visits.
+_SWEEP_SECONDS = 3_600.0
+_sweep_lock = threading.Lock()
+_last_sweep: float | None = None
 _HOST_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\Z")
 
 _INDEX_SCHEMA = (
@@ -256,6 +261,9 @@ def revoke_site(tenant: str | None, site_id: str, *, now: float) -> None:
                       (now, site_id))
         index.execute("DELETE FROM chat_origins WHERE site_id = ?", (site_id,))
         index.execute("DELETE FROM chat_sessions WHERE site_id = ?", (site_id,))
+    # A stopped chat keeps no visitor text: its transcripts go with it, not at retention.
+    with _write(sites_path(tenant), _TENANT_SCHEMA) as db:
+        db.execute("DELETE FROM chat_transcripts WHERE site_id = ?", (site_id,))
 
 
 def site_for_key(key: str) -> tuple[str | None, str] | None:
@@ -380,9 +388,33 @@ def append_transcript(tenant: str | None, site: dict[str, Any], conversation_id:
         )
 
 
-def purge_transcripts(tenant: str | None, site: dict[str, Any], *, now: float) -> None:
-    with _write(sites_path(tenant), _TENANT_SCHEMA) as db:
-        _purge(db, site["id"], now, site["retention_days"])
+def purge_expired(*, now: float) -> None:
+    """Remove transcripts past their site's retention in every tenant that ever listed a site.
+
+    Rows whose site no longer exists are removed too. Each tenant's file is
+    opened in turn; no site state or key material is read.
+    """
+    with _connect(index_path(), _INDEX_SCHEMA) as index:
+        tenants = [row[0] or None for row in index.execute(
+            "SELECT DISTINCT tenant_id FROM chat_keys").fetchall()]
+    for tenant in tenants:
+        with _write(sites_path(tenant), _TENANT_SCHEMA) as db:
+            db.execute("DELETE FROM chat_transcripts WHERE site_id NOT IN (SELECT id FROM chat_sites)")
+            db.execute(
+                "DELETE FROM chat_transcripts WHERE created_at < ? - ? * "
+                "(SELECT retention_days FROM chat_sites WHERE chat_sites.id = chat_transcripts.site_id)",
+                (now, float(_DAY_SECONDS)),
+            )
+
+
+def purge_expired_if_due(*, now: float) -> None:
+    """Run ``purge_expired`` at most once per ``_SWEEP_SECONDS`` of the injected clock."""
+    global _last_sweep
+    with _sweep_lock:
+        if _last_sweep is not None and 0 <= now - _last_sweep < _SWEEP_SECONDS:
+            return
+        _last_sweep = now
+    purge_expired(now=now)
 
 
 def read_transcripts(tenant: str | None, site: dict[str, Any], *, now: float, limit: int) -> list[dict[str, Any]]:

@@ -46,6 +46,9 @@ def chat(tmp_path, monkeypatch):
     _write_config(tmp_path, ON)
     clock = {"now": 1_800_000_000.0}
     monkeypatch.setattr(api, "_now", lambda: clock["now"])
+    from maverick_dashboard import public_chat_store as store_module
+
+    monkeypatch.setattr(store_module, "_last_sweep", None)
     # The limiters run on the same injected clock as the visitor-session TTL.
     monkeypatch.setattr(api, "_SESSION_KEY_LIMITER", PublicConsentRateLimiter(
         limit_source=lambda: api.SESSION_KEY_PER_MINUTE, clock=lambda: clock["now"]))
@@ -424,6 +427,44 @@ def test_transcripts_are_sealed_tenant_scoped_and_purged_after_retention(chat, m
     monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
     chat.clock["now"] += 2 * 86_400
     assert chat.client.get(f"/api/v1/public-chat/sites/{site_id}/transcripts").json()["messages"] == []
+
+
+def _stored_rows(tenant, site_id):
+    """Transcript rows as they sit on disk, read directly with no admin view."""
+    import sqlite3
+
+    from maverick_dashboard import public_chat_store as store
+
+    with sqlite3.connect(str(store.sites_path(tenant))) as db:
+        return db.execute("SELECT COUNT(*) FROM chat_transcripts WHERE site_id = ?",
+                          (site_id,)).fetchone()[0]
+
+
+def test_revoking_a_site_deletes_its_transcripts_at_once(chat, model):
+    created = _site(chat)
+    site_id = created["site"]["id"]
+    token = _session(chat, created["publishable_key"])
+    assert _say(chat, token, "is this stored?").status_code == 200
+    assert _stored_rows(None, site_id) == 2
+    chat.client.post(f"/api/v1/public-chat/sites/{site_id}/revoke")
+    assert _stored_rows(None, site_id) == 0
+
+
+def test_retention_is_enforced_for_every_tenant_on_a_visit_without_an_admin_read(chat, model, monkeypatch):
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+    old = _site(chat, retention_days=1)
+    kept = _site(chat, origins=[OTHER], retention_days=30)
+    for created, origin in ((old, SHOP), (kept, OTHER)):
+        token = _start(chat, created["publishable_key"], origin=origin).json()["session_token"]
+        assert _say(chat, token, "question", origin=origin).status_code == 200
+        assert _stored_rows("tenant-a", created["site"]["id"]) == 2
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-b")
+    fresh = _site(chat, origins=[EVIL])
+    chat.clock["now"] += 2 * 86_400
+    # A visit to another tenant's chat runs the sweep for every tenant, not only its own.
+    assert _start(chat, fresh["publishable_key"], origin=EVIL).status_code == 201
+    assert _stored_rows("tenant-a", old["site"]["id"]) == 0
+    assert _stored_rows("tenant-a", kept["site"]["id"]) == 2  # inside its 30 days
 
 
 def test_auth_exemption_covers_only_the_public_prefix(chat):
