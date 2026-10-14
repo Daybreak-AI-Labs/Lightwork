@@ -30484,6 +30484,46 @@
           "disposition": "Second-factor secrets live in the owner record: the sealed authenticator secret, recovery-code digests and second-step token digests. They restore with that record under its registered dashboard_owner policy; this module adds no separate restore path."
         }
       ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/specialist_canary.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/specialist_canary.py",
+      "purpose": "Trial versions of changed specialists and the version each trial-period goal used.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added with the specialist trial versions",
+      "governed_namespaces": [
+        {
+          "namespace": "specialist-canaries",
+          "line": 37,
+          "recovery_policy": "specialist_canary_trial_authority"
+        },
+        {
+          "namespace": "specialist-canary-goals",
+          "line": 38,
+          "recovery_policy": "specialist_canary_goal_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 2
+      },
+      "source_sites": [
+        {
+          "line": 37,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('specialist-canaries', 'SPC', 'specialist_canary', archive_when_full=False)"
+        },
+        {
+          "line": 38,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('specialist-canary-goals', 'SCG', 'specialist_canary_goal', archive_when_full=False)"
+        }
+      ]
     }
   ],
   "customer_audit_additions": {

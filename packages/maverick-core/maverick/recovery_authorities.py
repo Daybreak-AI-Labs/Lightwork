@@ -178,6 +178,9 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "personal-alert-tests": "personal_alert_test_dispatch_authority",
     # Reviewed specialist publication and vendor identity decisions.
     "specialist-drafts": "specialist_draft_publication_authority",
+    # A restored trial must not route goals to a version that was since promoted or rolled back.
+    "specialist-canaries": "specialist_canary_trial_authority",
+    "specialist-canary-goals": "specialist_canary_goal_authority",
     "vendor-profile-decisions": "vendor_profile_decision_authority",
     # Exact retained safety-settings copies and reviewed restore requests are
     # runtime-override authority: a restored copy must not reapply itself.

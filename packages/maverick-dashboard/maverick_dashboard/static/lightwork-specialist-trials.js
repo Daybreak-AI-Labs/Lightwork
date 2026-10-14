@@ -28,15 +28,11 @@
       return [key + ': ' + text[0]].concat(text.slice(1).map(line => '   ' + line));
     });
   }
-  async function call(path, body) {
-    const response = await fetch(API + path, {
-      method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
-      headers: body === undefined ? {} : {'Content-Type': 'application/json'},
-      ...(body === undefined ? {} : {body: JSON.stringify(body)})});
-    let value = null;
-    try { value = await response.json(); } catch (error) { value = null; }
-    if (!response.ok) throw new Error((value && (value.detail || value.message)) || 'The request could not be completed. Nothing was changed.');
-    return value;
+  function call(path, body) {
+    // serverDetail: the server's own plain sentence is shown when it sends one; this is the fallback.
+    const options = {cache: 'no-store', serverDetail: 'The request could not be completed. Nothing was changed.'};
+    if (body !== undefined) Object.assign(options, {method: 'POST', body});
+    return window.mvFetchJSON(API + path, options);
   }
 
   function table(trial) {
