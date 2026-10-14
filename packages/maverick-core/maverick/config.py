@@ -1095,6 +1095,12 @@ PROVIDER_KEY_ENV_VARS = tuple(
 PROVIDER_CREDENTIAL_ENV_MAP: dict[str, tuple[str, ...]] = {
     **PROVIDER_KEY_ENV_MAP,
     "azure": (*PROVIDER_KEY_ENV_MAP["azure"], "AZURE_OPENAI_AD_TOKEN"),
+    # Vertex AI signs in with Google Application Default Credentials, which
+    # have no provider variable. GOOGLE_APPLICATION_CREDENTIALS is deliberately
+    # not listed: it is shared with other Google tooling, so listing it here
+    # would make such a host look configured. The GitHub Action sanitizer
+    # registry still tracks it as a secret file.
+    "vertex": (),
 }
 PROVIDER_CREDENTIAL_ENV_VARS = tuple(
     dict.fromkeys(v for vs in PROVIDER_CREDENTIAL_ENV_MAP.values() for v in vs)
