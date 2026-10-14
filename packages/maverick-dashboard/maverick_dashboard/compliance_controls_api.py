@@ -663,6 +663,10 @@ def _run_erase(channel: str, user: str, actor: str = "local") -> dict:
             refused = True
         except (SystemExit, click.exceptions.Exit, click.ClickException) as exc:
             # A command-line exit must not end the server's worker thread.
+            if obj.get("erase_refusal"):
+                # A legal hold refused the erasure before anything was deleted.
+                return {"erased": False, "conversations": before, "clean": False,
+                        "message": obj["erase_refusal"]}
             raise RuntimeError("erasure command stopped") from exc
     # Who erased, never whose data (the subject is exactly what was erased).
     from maverick.audit import EventKind, audit_event

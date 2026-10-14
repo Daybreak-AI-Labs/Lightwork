@@ -253,8 +253,14 @@ def _checkpoint(row, actor, mutate):
 
 def _erase_conversations(world, row, target):
     from maverick.cli import _unlink_erasure_attachments
+    from maverick.ediscovery import erasure_refusal
     from maverick.erasure_receipts import build_manifest, persist_receipt
     plan = target["scope"]
+    # A legal matter holds only the in-scope closure. Nothing is erased or receipted then.
+    refusal = erasure_refusal(world, conversation_ids=plan["conversation_ids"], goal_ids=plan["goal_ids"])
+    if refusal:
+        return {"state": "held", "message": refusal,
+                "retained": "No conversation, task or attachment in this closure was erased."}
     # Never pass private host paths or unrelated planning fields to the proof.
     manifest = build_manifest(tenant_id=current_tenant_id_strict() or "shared", **plan)
     # Business records need an exact durable pre-delete proof. Failure prevents

@@ -80,6 +80,12 @@ def _policy() -> dict:
     return policy
 
 
+def _broad_blocked(target: dict) -> bool:
+    """Whether a preservation hold (case or legal matter) blocks this workspace's broad purge."""
+    preservation = target.get("preservation", {})
+    return bool(preservation.get("broad_purge_blocked", preservation.get("blocked")))
+
+
 def _scope() -> tuple[str | None, list[dict]]:
     from maverick.audit.preservation import preservation_snapshot
     from maverick.paths import current_tenant_id, tenant_scope
@@ -131,7 +137,7 @@ def preview(actor: str, *, context: str | None = None, run_id: str | None = None
                "scope": selected, "policy_revision": _fingerprint(selected, targets),
                "targets": targets, "status": "review", "steps": [],
                "holds": "Recorded privacy-rights holds block broad workspace deletion. External holds require separate confirmation with your records owner.",
-               "blocked_by_hold": any(target.get("preservation", {}).get("blocked") for target in targets),
+               "blocked_by_hold": any(_broad_blocked(target) for target in targets),
                "dependencies": "Task-history deletion removes provenance links from retained facts. Completed deletions cannot be undone."}
     if context is not None:
         receipt["context"] = context
@@ -184,7 +190,7 @@ def apply(run_id: str, actor: str, *, confirm_holds: bool, retry: bool, authoriz
         selected, targets = _scope()
         if _fingerprint(selected, targets) != receipt["policy_revision"]:
             raise HTTPException(409, "Workspace, preservation holds or effective retention policy changed. Review a new preview.")
-        if any(target.get("preservation", {}).get("blocked") for target in targets):
+        if any(_broad_blocked(target) for target in targets):
             raise HTTPException(409, "Recorded preservation holds block this deletion. The records owner must resolve the hold; confirmation cannot override it.")
         if receipt["status"] == "completed":
             return receipt

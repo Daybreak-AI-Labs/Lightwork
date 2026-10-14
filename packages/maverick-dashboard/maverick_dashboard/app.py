@@ -8810,6 +8810,9 @@ async def compliance_page(request: Request, tab: str = "") -> HTMLResponse:
     view["can_operate"] = has_permission(request, "operate")
     view["can_global_admin"] = has_global_permission(request, "admin")
     view.update(_compliance_owner_view(request, view["can_admin"]))
+    from .ediscovery_api import page_context as ediscovery_page_context
+
+    view.update(ediscovery_page_context(request))
     return templates.TemplateResponse(request, "compliance.html", view)
 
 
