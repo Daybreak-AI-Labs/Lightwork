@@ -120,7 +120,8 @@ def version_stats(name: str, world, *, candidate_id: str) -> dict[str, dict]:
     if len(rows) > MAX_ROWS:
         raise RuntimeError("The trial history exceeds its supported limit.")
     goals = world.get_goals([row["goal_id"] for row in rows]) if rows else {}
-    ratings = {row["goal_id"]: row["rating"] for row in result_feedback_receipts.summary_rows(world)}
+    feedback, truncated = result_feedback_receipts.summary_scan(world)
+    ratings = {row["goal_id"]: row["rating"] for row in feedback}
     stats = {CURRENT: _tally(), CANDIDATE: _tally()}
     for row in rows:
         tally = stats[row["version"]]
@@ -131,6 +132,9 @@ def version_stats(name: str, world, *, candidate_id: str) -> dict[str, dict]:
         rating = ratings.get(row["goal_id"])
         if rating in {"up", "down"}:
             tally["thumbs_up" if rating == "up" else "thumbs_down"] += 1
+    for tally in stats.values():
+        # The feedback read is bounded; when it reached its limit the thumbs counts can be too low.
+        tally["feedback_complete"] = not truncated
     return stats
 
 

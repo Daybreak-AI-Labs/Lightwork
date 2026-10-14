@@ -48,6 +48,7 @@ def test_the_trial_script_is_served_and_builds_no_markup_from_strings(client):
     assert "innerHTML" not in script and "outerHTML" not in script and "insertAdjacentHTML" not in script
     assert "document.write" not in script
     assert not re.search(r"\son[a-z]+\s*=\s*[\"']", script)  # no inline event handler attributes
+    assert "feedback_complete" in script  # a partial feedback count says so on the panel
 
 
 def test_the_template_passes_the_static_accessibility_audit():

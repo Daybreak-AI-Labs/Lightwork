@@ -56,6 +56,9 @@
       [tally.goals, tally.done + tally.failed, tally.failed, tally.other, tally.thumbs_up, tally.thumbs_down]
         .forEach(count => node('td', String(count), row));
     });
+    if (versions.candidate.feedback_complete === false) {
+      node('p', 'Thumbs counts may be too low: this workspace has more feedback than this summary can count. The goal counts are complete.', host, 'muted');
+    }
   }
 
   function reviewBox(name, action, review) {

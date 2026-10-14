@@ -242,3 +242,20 @@ def test_the_automatic_check_runs_at_most_once_a_minute_for_a_trial(env, monkeyp
     clock[0] += canary.AUTO_CHECK_SECONDS + 1
     canary.version_for_goal(PACK, 7, world=world)
     assert len(calls) == 2
+
+
+def test_the_feedback_counts_say_when_the_bounded_summary_was_cut_short(env):
+    canary = env.canary
+    _start(canary, percent=50)
+    _goals_on(canary, canary.CANDIDATE, 1)
+
+    class FullFeedbackWorld(FakeWorld):
+        def query(self, sql, params=()):
+            # Five thousand receipts is the summary's limit; these cannot be read, so the summary stays partial.
+            return [{"id": index, "owner": "", "receipt": "{}"} for index in range(5000)]
+
+    stats = canary.version_stats(PACK, FullFeedbackWorld(), candidate_id=canary.live(PACK)["candidate_id"])
+    assert stats[canary.CANDIDATE]["feedback_complete"] is False
+    assert stats[canary.CURRENT]["feedback_complete"] is False
+    complete = canary.version_stats(PACK, FakeWorld(), candidate_id=canary.live(PACK)["candidate_id"])
+    assert complete[canary.CANDIDATE]["feedback_complete"] is True
