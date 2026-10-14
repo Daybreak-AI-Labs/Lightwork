@@ -129,8 +129,9 @@ async def _submit(request, *, setup):
                                             fields.get("password", ""), colleagues)
         if isinstance(token, Challenge):
             # The owner's authenticator app is set up or asked for before any session exists.
-            from .local_owner_mfa_routes import challenge_response
-            return challenge_response(request, token)
+            from .local_owner_mfa_routes import challenge_response, safe_return_to
+            return challenge_response(request, token, return_to=(
+                "" if setup else safe_return_to(request.query_params.get("return_to"))))
         from .invites import session_ttl_seconds
         from .oidc_login import _cookie_secure, _set_cookie
         # The owner lands on Get started; a colleague lands on their home page.

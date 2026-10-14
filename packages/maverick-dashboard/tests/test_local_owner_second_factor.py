@@ -582,3 +582,41 @@ def test_a_refused_audit_for_set_up_ends_the_session_it_made_and_stores_nothing(
     assert stopped.value.status_code == 503
     assert "totp" not in row() and "recovery" not in row()
     assert len(session_registry.list_for("user:" + EMAIL)) == before
+
+
+def test_the_second_step_returns_the_owner_to_the_page_they_asked_for(clock):
+    """R8: a safe return address from the passphrase step survives the second step."""
+    from maverick_dashboard import local_passphrases
+    from maverick_dashboard.app import app
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    local_passphrases.reset_attempt_limit()
+    with TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 53215),
+                    headers={"Origin": ORIGIN}, follow_redirects=False) as client:
+        step = client.post("/auth/local-login?return_to=%2Fchat", data={"email": EMAIL, "password": PASSPHRASE})
+        assert step.status_code == 200, step.text
+        assert 'action="/auth/owner-second-factor?return_to=%2Fchat"' in step.text
+        local_passphrases.reset_attempt_limit()
+        done = client.post("/auth/owner-second-factor?return_to=%2Fchat", data={"code": current_code(secret, clock)})
+        assert done.status_code == 303, done.text
+        assert done.headers["location"] == "/chat"
+
+
+def test_the_second_step_never_returns_the_owner_off_site_or_to_a_sign_in_page(clock):
+    from maverick_dashboard import local_passphrases
+    from maverick_dashboard.app import app
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    with TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 53216),
+                    headers={"Origin": ORIGIN}, follow_redirects=False) as client:
+        for unsafe in ("%2F%2Fevil.example", "%2Fauth%2Flogout", "https%3A%2F%2Fevil.example"):
+            local_passphrases.reset_attempt_limit()
+            step = client.post(f"/auth/local-login?return_to={unsafe}", data={"email": EMAIL, "password": PASSPHRASE})
+            assert step.status_code == 200, step.text
+            assert 'action="/auth/owner-second-factor"' in step.text
+            local_passphrases.reset_attempt_limit()
+            done = client.post("/auth/owner-second-factor", data={"code": current_code(secret, clock)})
+            assert done.status_code == 303, done.text
+            assert done.headers["location"] == "/start"
+            clock.advance(30)
+            client.cookies.clear()

@@ -6,7 +6,7 @@ recovery codes; it is for the owner, signed in on this computer.
 """
 from __future__ import annotations
 
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -41,17 +41,31 @@ def _step_page(request, *, view: str, action: str, cancel: str, status_code: int
     }, status_code=status_code))
 
 
+def safe_return_to(value: object) -> str:
+    """A page the owner may return to after the second step: a local path, never a sign-in page."""
+    from .oidc_login import _is_safe_return_to
+
+    if isinstance(value, str) and _is_safe_return_to(value) and not value.startswith("/auth/"):
+        return value
+    return ""
+
+
 def challenge_response(request: Request, challenge: second.Challenge, *, status_code: int = 200,
-                       message: str = "") -> HTMLResponse:
-    """The page that asks for the code. The second-step token goes in a short-lived cookie."""
+                       message: str = "", return_to: str = "") -> HTMLResponse:
+    """The page that asks for the code. The second-step token goes in a short-lived cookie.
+
+    ``return_to`` (already checked by :func:`safe_return_to`) rides on the form's
+    address, so the second step can send the owner back to the same page.
+    """
     from .oidc_login import _cookie_secure
 
+    action = SECOND_STEP + ("?" + urlencode({"return_to": return_to}) if return_to else "")
     if challenge.purpose == "enroll":
-        response = _step_page(request, view="setup", action=SECOND_STEP, cancel="/auth/local-login",
+        response = _step_page(request, view="setup", action=action, cancel="/auth/local-login",
                               status_code=status_code, message=message, secret=challenge.secret,
                               uri=challenge.uri)
     else:
-        response = _step_page(request, view="code", action=SECOND_STEP, cancel="/auth/local-login",
+        response = _step_page(request, view="code", action=action, cancel="/auth/local-login",
                               status_code=status_code, message=message)
     response.set_cookie(second.COOKIE, challenge.token, max_age=second.PENDING_SECONDS,
                         path=second.COOKIE_PATH, httponly=True, samesite="strict",
@@ -97,6 +111,7 @@ async def second_step_submit(request: Request):
     from .local_owner_routes import _form
 
     token = request.cookies.get(second.COOKIE) or ""
+    return_to = safe_return_to(request.query_params.get("return_to"))
     try:
         local_owner._local(request, mutate=True)
         # Per client address, as for the passphrase step.
@@ -108,7 +123,7 @@ async def second_step_submit(request: Request):
         challenge = second.challenge_for(token) if exc.status_code == 401 else None
         if challenge is not None:
             response = challenge_response(request, challenge, status_code=exc.status_code,
-                                          message=str(exc.detail))
+                                          message=str(exc.detail), return_to=return_to)
         else:
             response = _form(request, setup=False, message=str(exc.detail), status=exc.status_code)
             response.delete_cookie(second.COOKIE, path=second.COOKIE_PATH)
@@ -122,7 +137,7 @@ async def second_step_submit(request: Request):
                               message="Your authenticator app is on. Save these recovery codes now. "
                                       "Each works once, and they are not shown again.")
     else:
-        response = RedirectResponse("/start", status_code=303)
+        response = RedirectResponse(return_to or "/start", status_code=303)
     _set_session(request, response, finished.session)
     return response
 
