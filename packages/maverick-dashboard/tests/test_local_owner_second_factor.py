@@ -472,3 +472,34 @@ def test_a_passphrase_only_recovery_check_does_not_reset_the_code_lock(clock):
     with pytest.raises(HTTPException) as still_locked:
         local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
     assert still_locked.value.status_code == 429
+
+
+def test_required_mode_gives_no_session_at_first_owner_setup(monkeypatch, clock):
+    """R3: the first owner's set-up under required mode ends in the set-up step, not a session."""
+    from maverick_dashboard import invites, local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    set_mode(monkeypatch, "required")
+    result = local_owner.enroll(request(), email=EMAIL, password=PASSPHRASE, confirm=True)
+    assert isinstance(result, second.Challenge) and result.purpose == "enroll"
+    assert result.secret and result.uri.startswith("otpauth://totp/")
+    assert "totp" not in row() and "totp_setup" in row()
+    finished = second.complete(request(), token=result.token, code=current_code(result.secret, clock))
+    assert len(finished.recovery_codes) == 10
+    principal = invites.local_session_principal(session_request(finished.session))
+    assert principal.principal == "user:" + EMAIL and principal.claims["mfa"] is True
+
+
+def test_required_first_owner_form_asks_for_set_up_and_sets_no_session_cookie(monkeypatch):
+    from maverick_dashboard import local_passphrases
+    from maverick_dashboard.app import app
+    set_mode(monkeypatch, "required")
+    local_passphrases.reset_attempt_limit()
+    with TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 53214),
+                    headers={"Origin": ORIGIN}, follow_redirects=False) as client:
+        response = client.post("/auth/local-owner", data={"email": EMAIL, "password": PASSPHRASE,
+                                                          "password2": PASSPHRASE, "confirm": "yes"})
+        assert response.status_code == 200, response.text
+        assert "Set up your authenticator app" in response.text and "Nothing is turned on yet" in response.text
+        assert "mvk_session=" not in response.headers.get("set-cookie", "")
+        assert "mvk_owner_second_factor=" in response.headers.get("set-cookie", "")
+        assert client.get("/api/v1/features/modules").status_code in {401, 403}

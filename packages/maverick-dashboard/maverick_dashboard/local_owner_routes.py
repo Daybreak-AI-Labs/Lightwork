@@ -127,10 +127,10 @@ async def _submit(request, *, setup):
         else:
             token = await run_in_threadpool(_sign_in, request, fields.get("email", ""),
                                             fields.get("password", ""), colleagues)
-            if isinstance(token, Challenge):
-                # The owner's authenticator app is asked for before any session exists.
-                from .local_owner_mfa_routes import challenge_response
-                return challenge_response(request, token)
+        if isinstance(token, Challenge):
+            # The owner's authenticator app is set up or asked for before any session exists.
+            from .local_owner_mfa_routes import challenge_response
+            return challenge_response(request, token)
         from .invites import session_ttl_seconds
         from .oidc_login import _cookie_secure, _set_cookie
         # The owner lands on Get started; a colleague lands on their home page.

@@ -224,6 +224,27 @@ def _credentials(email, password):
     return email, password
 
 
+def _claim(row) -> None:
+    """Complete a pending owner claim: the administrator role, then ``ready``. No session."""
+    from . import auth, invites, rbac
+    principal = "user:" + row["email"]
+    try:
+        existing = rbac.list_users()
+        if existing and existing != {principal: "admin"}:
+            raise HTTPException(409, "Owner setup conflicts with existing role assignments. No roles were changed.")
+        rbac.set_role(principal, "admin", actor=principal)
+    except rbac.RosterMissingError:
+        # A configured administrator is an administrator without a stored
+        # role, and can start a new role list from the Users page.
+        if not auth.is_dashboard_admin(principal):
+            raise
+    # Generate the session key before the claim is completed; any failure
+    # retains pending ownership rather than silently reopening bootstrap.
+    invites.local_session_secret()
+    row["status"] = "ready"
+    _write(row)
+
+
 def _finish(row, request=None, *, mfa_at=None):
     """Complete a pending claim and mint the session.
 
@@ -233,21 +254,7 @@ def _finish(row, request=None, *, mfa_at=None):
     from . import auth, invites, rbac
     principal = "user:" + row["email"]
     if row["status"] == "pending":
-        try:
-            existing = rbac.list_users()
-            if existing and existing != {principal: "admin"}:
-                raise HTTPException(409, "Owner setup conflicts with existing role assignments. No roles were changed.")
-            rbac.set_role(principal, "admin", actor=principal)
-        except rbac.RosterMissingError:
-            # A configured administrator is an administrator without a stored
-            # role, and can start a new role list from the Users page.
-            if not auth.is_dashboard_admin(principal):
-                raise
-        # Generate the session key before the claim is completed; any failure
-        # retains pending ownership rather than silently reopening bootstrap.
-        invites.local_session_secret()
-        row["status"] = "ready"
-        _write(row)
+        _claim(row)
     elif not auth.is_dashboard_admin(principal) and rbac.get_stored_role(principal) is None:
         # A configured administrator is checked first: they keep access when
         # the role list is lost, and it is how they reach the page that
@@ -283,6 +290,16 @@ def enroll(request: Request, *, email: str, password: str, confirm: bool):
                "password_hash": _password(password, salt), "status": "pending",
                "created_at": time.time(), "failures": 0, "locked_until": 0}
         _write(row)
+        from . import local_owner_second_factor as second
+        if second.mode() == "required":
+            # The owner claim is completed, but no session exists until the
+            # authenticator app is set up and its code accepted.
+            _claim(row)
+            challenge = second.after_passphrase(row)
+            if challenge is None:  # the policy changed meanwhile: nothing is minted
+                raise HTTPException(409, "Owner setup could not finish. Try again.")
+            _write(row)
+            return challenge
         return _finish(row, request)
 
 
