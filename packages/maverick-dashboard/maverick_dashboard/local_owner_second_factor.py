@@ -237,14 +237,32 @@ def after_passphrase(row: dict) -> Challenge | None:
                      uri=owner_totp.otpauth_uri(text, row["email"]))
 
 
+def _end_unused_session(session: str) -> None:
+    """End a session minted for a change that was then refused. Its cookie was never sent."""
+    from maverick.web_session import verify_session
+
+    from . import invites, session_registry
+
+    payload = verify_session(session, invites.local_session_secret()) or {}
+    if isinstance(payload.get("sid"), str) and payload["sid"]:
+        session_registry.revoke(payload["sid"], by="not-completed")
+
+
 def complete(request, *, token: object, code: object) -> Finished:
     """The second sign-in step: an authenticator code (or set-up code) or a recovery code."""
+    from maverick.oidc import VerifiedPrincipal
+
     from . import local_owner
+    from .auth import _enforce_scim_active
 
     now = _now()
+    # The managed sign-in policy and the deprovisioning check apply to this step too:
+    # a token begun before either changed does not finish a sign-in.
+    local_owner._policy()
     with local_owner._LOCK, file_lock.cross_process_lock(local_owner.path(), strict=True):
         row = _row_or_refuse(ready=False)
         _unlocked(row, now=now)
+        _enforce_scim_active(VerifiedPrincipal(sub=row["email"], issuer="invite-session", audience="", claims={}))
         digest, entry = _live_entry(row, token, now=now)
         enrolling = entry["purpose"] == "enroll"
         if enrolling:
@@ -264,10 +282,17 @@ def complete(request, *, token: object, code: object) -> Finished:
         row.update(failures=0, locked_until=0)
         codes: list[str] = []
         if enrolling:
-            _audit("owner_authenticator_enabled", row["email"])
             codes = _commit_enrollment(row)
-        local_owner._write(row)
+        # The session is made before anything is written: a set-up that cannot
+        # finish stores no secret and no codes, and the same code can be tried again.
         session = local_owner._finish(row, request, mfa_at=now)
+        if enrolling:
+            try:
+                _audit("owner_authenticator_enabled", row["email"])
+            except HTTPException:
+                _end_unused_session(session)
+                raise
+        local_owner._write(row)
         return Finished(session=session, recovery_codes=tuple(codes))
 
 

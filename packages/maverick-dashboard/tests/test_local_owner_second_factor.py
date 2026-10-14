@@ -503,3 +503,82 @@ def test_required_first_owner_form_asks_for_set_up_and_sets_no_session_cookie(mo
         assert "mvk_session=" not in response.headers.get("set-cookie", "")
         assert "mvk_owner_second_factor=" in response.headers.get("set-cookie", "")
         assert client.get("/api/v1/features/modules").status_code in {401, 403}
+
+
+def test_a_second_step_begun_before_managed_sign_in_is_refused_and_spends_nothing(monkeypatch, clock):
+    """R6: the second step runs the managed sign-in policy again, as the passphrase step does."""
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "managed-sign-in-set-after-the-challenge")  # pragma: allowlist secret - fixture token
+    with pytest.raises(HTTPException) as refused:
+        second.complete(request(), token=challenge.token, code=current_code(secret, clock))
+    assert refused.value.status_code == 409
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN")
+    finished = second.complete(request(), token=challenge.token, code=current_code(secret, clock))
+    assert finished.session
+
+
+def test_a_second_step_begun_before_the_owner_was_deprovisioned_is_refused(monkeypatch, clock):
+    from fastapi import HTTPException as Refusal
+    from maverick_dashboard import auth, local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+
+    def deprovisioned(principal):
+        raise Refusal(status_code=401, detail="invalid identity")
+
+    monkeypatch.setattr(auth, "_enforce_scim_active", deprovisioned)
+    with pytest.raises(HTTPException) as refused:
+        second.complete(request(), token=challenge.token, code=current_code(secret, clock))
+    assert refused.value.status_code == 401
+    assert "totp" in row() and len(row()["recovery"]) == 10
+
+
+def test_a_set_up_whose_session_cannot_be_made_stores_no_secret_and_no_codes(monkeypatch, clock):
+    """R7: the authenticator app and recovery codes are committed only when a session can be shown."""
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    events = []
+    monkeypatch.setattr("maverick.audit.audit_event", lambda kind, **kw: events.append((kind, kw)) or True)
+    enroll_owner()
+    set_mode(monkeypatch, "required")
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    real_finish = local_owner._finish
+
+    def no_session(*args, **kwargs):
+        raise RuntimeError("session store unavailable")
+
+    monkeypatch.setattr(local_owner, "_finish", no_session)
+    with pytest.raises(RuntimeError):
+        second.complete(request(), token=challenge.token, code=current_code(challenge.secret, clock))
+    stored = row()
+    assert "totp" not in stored and "recovery" not in stored and "totp_setup" in stored
+    assert not [kw for kind, kw in events if kw.get("verb") == "owner_authenticator_enabled"]
+    monkeypatch.setattr(local_owner, "_finish", real_finish)
+    finished = second.complete(request(), token=challenge.token, code=current_code(challenge.secret, clock))
+    assert len(finished.recovery_codes) == 10
+
+
+def test_a_refused_audit_for_set_up_ends_the_session_it_made_and_stores_nothing(monkeypatch, clock):
+    from maverick.audit import AuditRefused
+    from maverick_dashboard import local_owner, session_registry
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    set_mode(monkeypatch, "required")
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    before = len(session_registry.list_for("user:" + EMAIL))
+
+    def refuse(*a, **k):
+        raise AuditRefused("log unavailable")
+
+    monkeypatch.setattr("maverick.audit.audit_event", refuse)
+    with pytest.raises(HTTPException) as stopped:
+        second.complete(request(), token=challenge.token, code=current_code(challenge.secret, clock))
+    assert stopped.value.status_code == 503
+    assert "totp" not in row() and "recovery" not in row()
+    assert len(session_registry.list_for("user:" + EMAIL)) == before
