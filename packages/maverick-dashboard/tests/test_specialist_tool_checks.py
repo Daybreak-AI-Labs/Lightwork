@@ -206,6 +206,28 @@ def test_the_stubs_record_each_call_and_answer_with_the_canned_text_or_a_fixed_r
     assert len(tools._bounded("y" * 5000, tools._RECORD_LIMIT)) <= tools._RECORD_LIMIT
 
 
+def test_the_text_a_call_must_include_is_matched_against_the_whole_argument_values():
+    from maverick_dashboard import specialist_test_sets as saved
+    from maverick_dashboard import specialist_tool_checks as tools
+
+    quoted = tools.ToolStubs(["send_email"], {})
+    quoted.answer("send_email", {"to": 'Acme "Ltd"'})
+    quoted_case = _tool_case(tools_called=[{"name": "send_email", "contains": 'Acme "Ltd"'}])
+    assert tools.tool_check_results(quoted_case, quoted.calls)[0]["passed"] is True
+
+    # The text sits after the first characters kept for the run record, so it must still count.
+    long = tools.ToolStubs(["send_email"], {})
+    long.answer("send_email", {"body": "x" * 1200 + " END"})
+    long_case = _tool_case(tools_called=[{"name": "send_email", "contains": "END"}])
+    assert tools.tool_check_results(long_case, long.calls)[0]["passed"] is True
+
+    # The record keeps only the bounded arguments, never the matching text.
+    stored = saved.grade({**long_case, "id": "d" * 32, "revision": 1, "task": "Late. What now?", "includes": ["chase"],
+                          "excludes": [], "refusal": False, "citation": False}, "Chase the supplier now.", tool_calls=long.calls)
+    assert stored["passed"] is True and set(stored["tool_calls"][0]) == {"name", "arguments", "answer"}
+    assert len(stored["tool_calls"][0]["arguments"]) <= tools._RECORD_LIMIT
+
+
 def test_offered_tools_are_the_named_ones_plus_the_allowed_ones_minus_the_denied():
     from maverick_dashboard import specialist_tool_checks as tools
 

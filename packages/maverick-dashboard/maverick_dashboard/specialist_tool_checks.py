@@ -31,6 +31,15 @@ def _bounded(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit]
 
 
+def _match_text(value: Any) -> str:
+    """Every key and value in a call's arguments as plain text, untruncated, for "must include" checks."""
+    if isinstance(value, dict):
+        return "\n".join(part for key, item in value.items() for part in (str(key), _match_text(item)))
+    if isinstance(value, list):
+        return "\n".join(_match_text(item) for item in value)
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+
+
 def _clean_name(value: Any) -> str:
     name = " ".join(str(value or "").split())
     if not _NAME.match(name):
@@ -106,7 +115,7 @@ def tool_check_results(case: dict, calls: list[dict]) -> list[dict]:
         named = [call for call in calls if call["name"] == name]
         if not named:
             outcome, passed = f"Did not call {name}.", False
-        elif contains and not any(contains.casefold() in call["arguments"].casefold() for call in named):
+        elif contains and not any(contains.casefold() in call.get("match", call["arguments"]).casefold() for call in named):
             outcome, passed = f'Called {name}, but no call included "{contains}".', False
         else:
             outcome, passed = f"Called {name}{suffix}.", True
@@ -138,7 +147,9 @@ class ToolStubs:
             kind, reply = "not_available", _NOT_AVAILABLE
         else:
             kind, reply = "not_offered", _NOT_AVAILABLE
-        self.calls.append({"name": _bounded(str(name), 64), "arguments": text, "answer": kind})
+        # "match" holds the untruncated text for grading only; it is never stored in a run record.
+        self.calls.append({"name": _bounded(str(name), 64), "arguments": text, "answer": kind,
+                           "match": _match_text(arguments)})
         return reply
 
 

@@ -348,8 +348,10 @@ def skipped_tool_check(case: dict, *, variant: str | None = None) -> dict[str, A
 def _tool_outcome(case: dict, tool_calls: list[dict] | None) -> tuple[dict[str, Any], bool]:
     if not case.get("with_tools"):
         return {}, True
-    checks = tool_check_results(case, list(tool_calls or []))
-    return {"tool_checks": checks, "tool_calls": list(tool_calls or [])}, all(row["passed"] for row in checks)
+    calls = list(tool_calls or [])
+    checks = tool_check_results(case, calls)
+    stored = [{key: value for key, value in call.items() if key != "match"} for call in calls]
+    return {"tool_checks": checks, "tool_calls": stored}, all(row["passed"] for row in checks)
 
 
 def grade(case: dict, output: str, *, retain_full: bool = False,
