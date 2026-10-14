@@ -73,6 +73,26 @@ base_url = "http://localhost:11434"
 auth_mode = "iam"
 # endpoint = "mantle"
 
+[providers.vertex]
+# Claude on Google Cloud Vertex AI through the Anthropic SDK's Vertex client
+# (prompt caching, thinking, tool_choice all work). There is no key: sign-in is
+# Google Application Default Credentials (a service-account file named by
+# GOOGLE_APPLICATION_CREDENTIALS, `gcloud auth application-default login`, or
+# workload identity). Needs the `vertex` extra: google-auth.
+# project_id falls back to ANTHROPIC_VERTEX_PROJECT_ID, then GOOGLE_CLOUD_PROJECT;
+# region falls back to CLOUD_ML_REGION; model_id falls back to VERTEX_MODEL_ID;
+# base_url (optional) falls back to ANTHROPIC_VERTEX_BASE_URL. The table wins
+# over the environment. The model_id is the id shown in the Vertex AI Model
+# Garden (name@version form, for example claude-haiku-4-5@20251001); Lightwork
+# ships no Vertex model id.
+# Billing: Google Cloud invoices Vertex AI at its own rates, which are not in
+# Lightwork's verified rate card. Like Bedrock, planning estimates use the Claude
+# API list rate for the model behind the id; set [budget] strict_pricing=false to
+# account live usage at that estimate.
+project_id = "my-gcp-project"
+region = "us-east5"
+model_id = "claude-haiku-4-5@20251001"   # copy the exact id from Model Garden
+
 [models]
 # Settings > Models offers every model a saved provider key can reach: each
 # configured provider's own model-list endpoint is read (one bounded request,
