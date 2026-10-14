@@ -98,9 +98,9 @@ formally modeled and TLC-verified in TLA+
 ([`docs/specs/tla/`](./specs/tla/README.md)).
 
 Two more threads run through all five: **per-role model choice** — you
-pick the models, per role, from 12 providers (`llm.py`; Anthropic, OpenAI,
-OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI,
-vLLM), configured in `~/.maverick/config.toml`, never hard-coded — and the
+pick the models, per role, from 13 providers (`llm.py`; Anthropic, OpenAI,
+OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Vertex AI, Azure, xAI, Moonshot,
+TGI, vLLM), configured in `~/.maverick/config.toml`, never hard-coded — and the
 **audit log**, a signed, hash-chained, append-only record of every action
 (`audit/`), verifiable offline.
 

@@ -3201,8 +3201,8 @@ skip container startup; torn down on `close()`.
 
 ## LLM providers & routing
 
-14 providers, routable per role (`llm.py`): Anthropic, OpenAI, OpenRouter,
-Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI, vLLM, and
+15 providers, routable per role (`llm.py`): Anthropic, OpenAI, OpenRouter,
+Ollama, Gemini, DeepSeek, Bedrock, Vertex AI, Azure, xAI, Moonshot, TGI, vLLM, and
 `openai_compatible` (a separate generic-gateway provider — any other
 OpenAI-compatible server or proxy via a configurable `base_url`: LM Studio,
 llama.cpp, Together, Groq, etc.), and **Codex CLI**
