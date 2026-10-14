@@ -355,3 +355,24 @@ test("a run shows each tool check in plain words and a skipped check as not run"
   assert.match(history, /Not run/);
   assert.match(history, /Skipped: tool checks are turned off/);
 });
+
+test("an existing tool check is not saved with its tool lines while tool checks are off", async (t) => {
+  const base = defaults(true)["/api/v1/workforce-ops/test-suite/customer"];
+  const tooled = {...base.cases[0], with_tools: true, tools_called: [{name: "send_email", contains: "Acme"}],
+    tools_not_called: [], tool_results: []};
+  const ui = await fixture(partial("_workforce_ops.html"), {
+    responses: { "/api/v1/workforce-ops/test-suite/customer": { ...base, tool_checks_enabled: false, cases: [tooled] } } });
+  t.after(() => ui.window.close());
+  const select = ui.doc.getElementById("wo-test-specialist");
+  select.value = "finance_ap";
+  select.dispatchEvent(new ui.window.Event("change"));
+  await ui.settle();
+  const edit = [...ui.doc.querySelectorAll("button")].find((b) => b.textContent === "Edit");
+  edit.click();
+  await ui.settle();
+  assert.equal(ui.doc.querySelector("#wo-test-form .wo-test-tools-fields").hidden, true);
+  ui.doc.getElementById("wo-test-form").dispatchEvent(new ui.window.Event("submit", {cancelable: true}));
+  await ui.settle();
+  assert.equal(ui.calls.filter((c) => c.method === "POST").length, 0);
+  assert.match(ui.doc.getElementById("wo-test-status").textContent, /Tool checks are turned off/);
+});

@@ -21,6 +21,7 @@
   var testAdmin = false;
   var testCases = [];
   var testLiveEnabled = false;
+  var testToolsEnabled = false;
   var editingCase = null;
   var testBaseline = '', testInstructions = '', testContext = '', testLoad = 0, comparisonReview = null;
   // A whole saved set runs at once, up to the [agent_tests] limit the server reports (20 by default).
@@ -108,7 +109,7 @@
     });
   }
   function toolFieldsShown() {
-    var on = $('wo-test-tools').checked;
+    var on = testToolsEnabled && $('wo-test-tools').checked;
     document.querySelectorAll('#wo-test-form .wo-test-tools-fields').forEach(function (n) { n.hidden = !on; });
   }
   function testCriteria(c) {
@@ -150,6 +151,8 @@
     testCases = data.cases || [];
     MAX_RUN = Number(data.max_checks) || 20;
     testLiveEnabled = !!data.live_enabled;
+    testToolsEnabled = !!data.tool_checks_enabled;
+    toolFieldsShown();
     document.querySelectorAll('#wo-test-form .wo-test-tools-row').forEach(function (n) { n.hidden = !data.tool_checks_enabled; });
     testBaseline = data.baseline_revision || ''; testInstructions = data.current_instructions || ''; testContext = data.context || '';
     $('wo-test-current-instructions').textContent = testInstructions;
@@ -391,6 +394,10 @@
       event.preventDefault();
       var specialist = $('wo-test-specialist').value;
       if (!specialist) return;
+      if ($('wo-test-tools').checked && !testToolsEnabled) {
+        $('wo-test-status').textContent = 'Tool checks are turned off in All settings, so this check cannot be saved with its tool lines. Turn tool checks on there, or cancel and make a check without tools.';
+        return;
+      }
       var save = $('wo-test-save'); save.disabled = true;
       $('wo-test-status').textContent = 'Saving…';
       try {
