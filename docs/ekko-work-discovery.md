@@ -1,12 +1,11 @@
 # Ekko work discovery
 
-Ekko turns repeated, observable work into evidence-backed Lightwork drafts. A
-typical candidate is “download a scheduled report, open PowerPoint, and assemble
-the same management deck.” Ekko can identify that repeated sequence and propose
-a first-pass flow and agent profile. It does not execute, save, schedule, or
-activate either draft.
+Ekko helps a person find repeated work, explain the job and prepare a reviewable
+workflow or assistant draft. The page starts with opportunities, the evidence
+behind them and the next useful action. It does not execute, save, schedule or
+activate work by opening a draft.
 
-That detailed example requires a reviewed `guided` integration to supply the
+Identifying actions such as downloading a report and creating a presentation requires a reviewed `guided` integration to supply the
 semantic labels `download/report` and `create/presentation`. The built-in
 desktop metadata observers deliberately know only that the user moved between
 allowlisted applications; it never guesses a document action from a process
@@ -157,9 +156,45 @@ TPM/OS-backed monotonic authority before enabling production capture.
 
 ## Draft review boundary
 
-Discovery requires repeated evidence across the configured number of days. A
-candidate contains frequency, confidence, estimated manual time, and risk
-signals. `discover` produces reviewable data only. Saving an agent profile,
-saving a flow, activating a schedule, or running a side effect remains a
-separate authenticated human action through the normal Agent Factory and Flow
-governance paths.
+Discovery requires separate occurrences across the configured number of UTC
+days. Overlapping windows of the same pattern cannot inflate its occurrence
+count. Repeated identical actions and periodic app loops are suppressed; a
+sequence gap, reversed clock or gap longer than 30 minutes breaks a sequence.
+These checks cannot establish that all work between recorded events was observed.
+Shorter, more frequent patterns remain visible beside less frequent longer ones.
+Evidence previews include up to 20 examples, representing distinct days first.
+Discovery consumes at most 50,000 events; the page discloses when that boundary
+is reached. This is a bounded sample, not a complete activity-history analysis.
+
+App switches are labelled as app activity, never inferred document actions.
+Their intervals do not establish task duration or savings. The API returns
+`estimated_minutes_per_run: null` when timing is unknown; guided sequences with
+positive recorded durations may show median step time, explicitly not savings.
+The legacy `confidence` field remains a recurrence ranking heuristic, labelled
+`confidence_kind: recurrence_heuristic`; it is not a calibrated probability and
+is no longer shown as “% sure.” Risk signals describe observed labels, not a
+completed automation assessment.
+
+Choose **Review this opportunity** and describe the job, starting inputs,
+expected output and what a person checks. These owner-supplied notes are distinct
+from recorded evidence and travel with the draft, not the recording store.
+Keep descriptions general; select actual sources and authorized connections in
+the editor. The generated plan approves inputs, checks them, prepares a draft,
+checks for gaps and pauses again for final review. It does not infer tool access
+from an app name. Missing sources and integrations still require qualification.
+
+Both dashboard handoffs require the reviewed evidence revision. Changed or
+erased evidence is refused; retry after refreshing and reviewing the pattern.
+Entered notes survive a recoverable handoff error. Device or workspace changes
+clear the review and invalidate pending replies. Drafts remain unsaved and use
+the normal editor's separate save, publish and execution controls.
+
+Copilot's **Review repeated work with Ekko** operation opens the same protected
+review through current access/workspace checks. It does not put recorded
+activity or task notes into conversational context, select a candidate or
+submit the review. This is a protected in-product handoff, not autonomous
+conversational drafting. Existing `[ekko]` settings, installer setup and the
+Learning operation family control these improvements; no additional capture or
+provider permission is introduced. The compatibility CLI returns metadata
+candidates with a next step to review them in Ekko; semantic guided proposals
+retain their review-only CLI path.

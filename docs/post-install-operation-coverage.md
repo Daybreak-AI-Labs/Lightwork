@@ -363,6 +363,22 @@ The responsive DOM stayed within 320 pixels; the retained screenshot is desktop,
 so phone visual quality is not claimed. No live model, image quality, pricing or
 provider availability was qualified.
 
+October 14 Ekko discovery review: the direct page leads with repeat evidence,
+the configured recurrence requirements and an actionable empty state. The owner
+reviews a pattern and supplies the job, inputs, output and approval criteria
+before an unsaved workflow or assistant handoff. Native handoff rechecks the
+owner/device candidate and evidence revision; the workflow proposal has initial
+and final approval. Device/workspace changes clear notes and invalidate pending
+replies, while recoverable handoff errors preserve notes. Existing default-off
+Ekko configuration and enrollment apply; Flow drafting additionally requires
+Workflows enabled. Copilot's `learning.ekko_discovery_review` uses the protected
+native review with current authority/context checks; recorded activity remains
+outside conversation. Direct conversational selection/submission is not covered.
+Implementation evidence: detector, native API and JavaScript regressions plus
+`tests/browser/ekko_discovery.spec.js` against the isolated authenticated app
+with synthetic events. Local qualification is separate from a released build,
+physical desktop recording, real integrations and measured time savings.
+
 October 7 desktop recording follow-through: Ekko offers explicit automatic app
 recording on the installed Windows computer, Mac or local Linux X11 desktop.
 Mac reads only its frontmost application bundle; Linux reads bounded local

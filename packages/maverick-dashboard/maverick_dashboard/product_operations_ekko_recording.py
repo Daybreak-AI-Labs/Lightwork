@@ -24,8 +24,25 @@ def prepare(request, selection, _arguments):
         "scope": "current_page", "context": current.revision}})
 
 
+def discovery_snapshot(request, selection):
+    current = snapshot(request, selection)
+    return Snapshot(current.revision, "Review Ekko's automation opportunities",
+        "Open the current device's evidence, describe the job, and review a workflow or assistant draft. "
+        "Recorded activity stays in the protected page; it is not sent to Copilot. "
+        "Opening this review does not record activity, save a draft, or run work.")
+
+
+def discovery_prepare(request, selection, _arguments):
+    current = discovery_snapshot(request, selection)
+    return Preview(current.summary, native={"ekko_discovery_review": {
+        "scope": "current_page", "context": current.revision}})
+
+
 def entries():
     return (Adapter("learning.ekko_recording_controls", "Open activity recording controls", "learning",
         "/ekko#ekko-recording", ("/ekko",), EmptyInput, snapshot, prepare,
         aliases=("record the apps I use", "open activity recording controls",
-                 "start recording activity", "how can Ekko record activity")),)
+                 "start recording activity", "how can Ekko record activity")),
+        Adapter("learning.ekko_discovery_review", "Review repeated work with Ekko", "learning",
+            "/ekko#ekko-opportunities-heading", ("/ekko",), EmptyInput, discovery_snapshot, discovery_prepare,
+            aliases=("find work to automate", "review Ekko suggestions", "turn repeated work into a workflow")))

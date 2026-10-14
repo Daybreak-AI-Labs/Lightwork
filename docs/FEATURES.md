@@ -2265,8 +2265,13 @@ limits are recorded in the [operation coverage register](post-install-operation-
 - **Ekko — client-controlled work discovery** (`work_discovery.py`,
   `work_discovery_store.py`, `ekko_daemon.py`, `maverick ekko`, independently
   gated by default-off `[ekko]` / `MAVERICK_EKKO`) — turns repeated application
-  transitions into evidence-backed automation candidates and review-only Agent
-  Factory + Flow drafts. Enrollment is owner/device scoped, observation uses a
+  transitions into automation candidates with separate-occurrence evidence,
+  actionable discovery progress and an owner review of the task, inputs, output
+  and approval. App switches do not imply task timing or tool access. Reviewed
+  Agent Factory + Flow drafts are unsaved, with initial and final human approval
+  in the workflow proposal; stale evidence requires another review. Copilot
+  opens the same protected review without receiving recorded activity.
+  Enrollment is owner/device scoped, observation uses a
   positive application allowlist with a winning sensitive-app blocklist, and
   raw local events expire after at most 30 days. The bundled foreground daemon
   accepts an explicitly supplied observer; it never chooses an ambient OS

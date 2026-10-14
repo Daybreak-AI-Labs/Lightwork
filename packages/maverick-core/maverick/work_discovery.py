@@ -22,6 +22,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from itertools import islice
 from typing import Any
 
 DEFAULT_RETENTION_DAYS = 14
@@ -31,6 +32,7 @@ DEFAULT_MIN_DISTINCT_DAYS = 2
 MAX_PATTERN_LENGTH = 6
 MAX_DISCOVERY_EVENTS = 50_000
 MAX_CANDIDATES = 20
+MAX_SEQUENCE_GAP_SECONDS = 30 * 60
 
 # Canonical application identifiers.  Platform adapters may map a process name
 # to one of these values, but an unknown process is never persisted as-is.
@@ -460,12 +462,20 @@ class WorkOpportunity:
     distinct_days: int
     confidence: float
     opportunity_score: float
-    estimated_minutes_per_run: float
+    estimated_minutes_per_run: float | None
     risk: str
     evidence: tuple[OpportunityEvidence, ...]
 
+    @property
+    def observation_basis(self) -> str:
+        return (
+            "application_metadata"
+            if all(step.action == "switch" and step.object_type == "none" for step in self.pattern)
+            else "guided"
+        )
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "opportunity_id": self.opportunity_id,
             "title": self.title,
             "pattern": [step.to_dict() for step in self.pattern],
@@ -476,7 +486,15 @@ class WorkOpportunity:
             "estimated_minutes_per_run": self.estimated_minutes_per_run,
             "risk": self.risk,
             "evidence": [item.to_dict() for item in self.evidence],
+            "observation_basis": self.observation_basis,
+            "confidence_kind": "recurrence_heuristic",
+            "review_required": True,
+            "timing_basis": "recorded_step_durations" if self.estimated_minutes_per_run is not None else "unknown",
         }
+        result["evidence_revision"] = hashlib.sha256(
+            json.dumps(result, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return result
 
 
 @dataclass
@@ -508,6 +526,54 @@ class _Candidate:
     durations: list[float] = field(default_factory=list)
 
 
+def _candidate_windows(by_session, max_pattern_length):
+    candidates: dict[tuple[tuple[str, str, str], ...], _Candidate] = {}
+    for session_id in sorted(by_session):
+        ordered = sorted(by_session[session_id], key=lambda e: (e.sequence, e.event_id))
+        last_end: dict[tuple, int] = {}
+        for length in range(2, min(max_pattern_length, len(ordered)) + 1):
+            for start in range(len(ordered) - length + 1):
+                window = ordered[start:start + length]
+                if any(
+                    b.sequence != a.sequence + 1
+                    or not 0 <= b.occurred_at - a.occurred_at <= MAX_SEQUENCE_GAP_SECONDS
+                    for a, b in zip(window, window[1:], strict=False)
+                ):
+                    continue
+                pattern = tuple(event.semantic_key() for event in window)
+                # One repeated action and periodic loops are not new tasks.
+                if any(all(step == pattern[index % size] for index, step in enumerate(pattern))
+                       for size in range(1, length // 2 + 1)):
+                    continue
+                # A recorded event may support only one occurrence of this pattern.
+                if window[0].sequence <= last_end.get(pattern, -1):
+                    continue
+                last_end[pattern] = window[-1].sequence
+                candidate = candidates.setdefault(pattern, _Candidate(pattern))
+                candidate.evidence.append(OpportunityEvidence(
+                    session_id=session_id, day=window[0].day,
+                    start_sequence=window[0].sequence, end_sequence=window[-1].sequence,
+                    event_ids=tuple(event.event_id for event in window),
+                ))
+                # Foreground intervals precede app switches; they are not task effort.
+                candidate.durations.append(
+                    sum(event.duration_seconds for event in window)
+                    if all(event.duration_seconds > 0 and event.action != "switch" for event in window)
+                    else 0.0
+                )
+    return candidates.values()
+
+
+def _evidence_sample(evidence):
+    """Represent distinct days before filling the bounded evidence preview."""
+    ordered = sorted(evidence, key=lambda e: (e.day, e.session_id, e.start_sequence))
+    first_by_day = {item.day: item for item in reversed(ordered)}
+    first = sorted(first_by_day.values(), key=lambda e: e.day, reverse=True)[:20]
+    sampled = set(first)
+    return tuple(sorted((first + [e for e in ordered if e not in sampled])[:20],
+                        key=lambda e: (e.day, e.session_id, e.start_sequence)))
+
+
 def discover_candidates(
     events: Iterable[WorkEvent], *, min_occurrences: int = DEFAULT_MIN_OCCURRENCES,
     min_distinct_days: int = DEFAULT_MIN_DISTINCT_DAYS,
@@ -528,7 +594,7 @@ def discover_candidates(
     if not 1 <= int(max_candidates) <= MAX_CANDIDATES:
         raise ValueError(f"max_candidates must be between 1 and {MAX_CANDIDATES}")
 
-    materialized = list(events)
+    materialized = list(islice(events, MAX_DISCOVERY_EVENTS + 1))
     if len(materialized) > MAX_DISCOVERY_EVENTS:
         raise ValueError(f"discovery accepts at most {MAX_DISCOVERY_EVENTS} events")
     by_session: dict[str, list[WorkEvent]] = defaultdict(list)
@@ -541,32 +607,8 @@ def discover_candidates(
         seen_ids.add(event.event_id)
         by_session[event.session_id].append(event)
 
-    candidates: dict[tuple[tuple[str, str, str], ...], _Candidate] = {}
-    for session_id, session_events in by_session.items():
-        ordered = sorted(session_events, key=lambda e: e.sequence)
-        for length in range(2, min(max_pattern_length, len(ordered)) + 1):
-            for start in range(len(ordered) - length + 1):
-                window = ordered[start:start + length]
-                # A sequence gap means events may have been redacted/dropped;
-                # do not claim the visible steps were a contiguous process.
-                if any(
-                    b.sequence != a.sequence + 1
-                    for a, b in zip(window, window[1:], strict=False)
-                ):
-                    continue
-                pattern = tuple(event.semantic_key() for event in window)
-                candidate = candidates.setdefault(pattern, _Candidate(pattern))
-                candidate.evidence.append(OpportunityEvidence(
-                    session_id=session_id,
-                    day=window[0].day,
-                    start_sequence=window[0].sequence,
-                    end_sequence=window[-1].sequence,
-                    event_ids=tuple(event.event_id for event in window),
-                ))
-                candidate.durations.append(sum(event.duration_seconds for event in window))
-
     opportunities: list[WorkOpportunity] = []
-    for candidate in candidates.values():
+    for candidate in _candidate_windows(by_session, max_pattern_length):
         days = {item.day for item in candidate.evidence}
         occurrences = len(candidate.evidence)
         if occurrences < min_occurrences or len(days) < min_distinct_days:
@@ -578,10 +620,10 @@ def discover_candidates(
             + 0.04 * min(occurrences - len(days), 4)
             + 0.03 * min(len(candidate.pattern) - 2, 3),
         )
-        minutes = statistics.median(candidate.durations) / 60.0
+        minutes = statistics.median(candidate.durations) / 60.0 if all(candidate.durations) else None
         risk = _pattern_risk(candidate.pattern)
         recurrence = min(1.0, len(days) / 5.0)
-        time_value = min(1.0, math.log1p(minutes) / math.log(31.0))
+        time_value = min(1.0, math.log1p(minutes or 0) / math.log(31.0))
         risk_penalty = {"low": 0.0, "medium": 8.0, "high": 20.0}[risk]
         score = max(0.0, min(100.0, confidence * 70.0 + recurrence * 15.0 + time_value * 15.0 - risk_penalty))
         canonical = json.dumps(candidate.pattern, separators=(",", ":"))
@@ -595,15 +637,15 @@ def discover_candidates(
             distinct_days=len(days),
             confidence=round(confidence, 3),
             opportunity_score=round(score, 1),
-            estimated_minutes_per_run=round(minutes, 1),
+            estimated_minutes_per_run=round(minutes, 1) if minutes is not None else None,
             risk=risk,
-            evidence=tuple(candidate.evidence[:20]),
+            evidence=_evidence_sample(candidate.evidence),
         ))
 
     # Prefer the most useful maximal explanation and suppress a shorter slice of
     # a pattern already selected.  This avoids three cards for A->B, B->C, A->B->C.
     opportunities.sort(
-        key=lambda item: (item.opportunity_score, len(item.pattern), item.distinct_days),
+        key=lambda item: (item.opportunity_score, len(item.pattern), item.distinct_days, item.opportunity_id),
         reverse=True,
     )
     selected: list[WorkOpportunity] = []
@@ -612,7 +654,8 @@ def discover_candidates(
         if any(_is_contiguous_subsequence(
             signature,
             tuple((s.app, s.action, s.object_type) for s in chosen.pattern),
-        ) for chosen in selected):
+        ) and chosen.occurrences >= item.occurrences
+          and chosen.distinct_days >= item.distinct_days for chosen in selected):
             continue
         selected.append(item)
         if len(selected) >= max_candidates:
@@ -639,6 +682,8 @@ def _pattern_risk(pattern: Sequence[tuple[str, str, str]]) -> str:
 
 
 _APP_LABELS = {
+    "excel": "Microsoft Excel", "powerpoint": "Microsoft PowerPoint",
+    "chrome": "Google Chrome", "edge": "Microsoft Edge",
     "google_sheets": "Google Sheets", "google_slides": "Google Slides",
     "google_docs": "Google Docs", "file_manager": "file manager",
     "file_explorer": "File Explorer", "power_bi": "Power BI",
@@ -652,6 +697,10 @@ def _step_label(step: StepSignature) -> str:
 
 
 def _opportunity_title(pattern: Sequence[StepSignature]) -> str:
+    if all(step.action == "switch" and step.object_type == "none" for step in pattern):
+        apps = list(dict.fromkeys(_APP_LABELS.get(step.app, step.app.replace("_", " ").title())
+                                  for step in pattern))
+        return "Recurring work across " + " → ".join(apps)
     has_report_download = any(
         step.action == "download" and step.object_type in {"report", "pdf", "spreadsheet"}
         for step in pattern
@@ -677,10 +726,77 @@ def _tool_hint(step: StepSignature) -> str:
     return ""
 
 
-def draft_bundle(opportunity: WorkOpportunity, *, owner: str = "") -> DraftBundle:
+@dataclass(frozen=True)
+class DraftReview:
+    """User-supplied task context, never inferred from content-free observation."""
+
+    goal: str
+    inputs: str
+    output: str
+    approval: str
+
+    def __post_init__(self):
+        for name in ("goal", "inputs", "output", "approval"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not 3 <= len(value.strip()) <= 1000:
+                raise ValueError(f"Describe the job's {name} in 3–1000 characters.")
+            object.__setattr__(self, name, value.strip())
+
+
+def _reviewed_bundle(opportunity, owner, review):
+    from .demonstration import Demonstration, DemoStep, induce_profile
+    from .flow.ir import NODE_AGENT, NODE_APPROVAL, Flow, FlowNode
+
+    boundary = (
+        "Use only sources explicitly selected and authorized for this run. "
+        "These task notes do not grant permissions or prove an integration is available. "
+        "If required information or access is missing, ask the owner; do not invent it. "
+        "Prepare a draft only; do not publish, send, or change source records. "
+    )
+    steps = [
+        ("prepare-inputs", "Check the selected inputs", f"Identify the inputs needed for: {review.goal}. Inputs: {review.inputs}"),
+        ("draft-result", "Prepare the requested result", f"Goal: {review.goal}. Expected result: {review.output}"),
+        ("check-result", "Check the draft and flag gaps", f"Check the draft against: {review.output}. Flag missing evidence, assumptions and exceptions. Review criteria: {review.approval}"),
+    ]
+    demonstration = Demonstration(
+        title=review.goal, source="ekko-owner-reviewed-task",
+        steps=[DemoStep(kind="action", summary=brief, tool="", target="").normalized()
+               for _, _, brief in steps],
+    )
+    nodes = {
+        node_id: FlowNode(id=node_id, kind=NODE_AGENT, label=label,
+                          brief=boundary + brief,
+                          next=steps[index + 1][0] if index + 1 < len(steps) else "review-result",
+                          x=380.0 + index * 260, y=140.0)
+        for index, (node_id, label, brief) in enumerate(steps)
+    }
+    nodes["human-review"] = FlowNode(
+        id="human-review", kind=NODE_APPROVAL, next="prepare-inputs", label="Approve inputs and plan",
+        prompt=f"Review the selected sources, permissions and plan before starting. Goal: {review.goal}. Inputs: {review.inputs}",
+        x=120.0, y=140.0,
+    )
+    nodes["review-result"] = FlowNode(
+        id="review-result", kind=NODE_APPROVAL, label="Review the finished draft",
+        prompt=f"Check the output before using or sharing it. {review.approval}", x=1160.0, y=140.0,
+    )
+    flow = Flow(id=f"ekko-draft-{opportunity.opportunity_id}", name=review.goal,
+                start="human-review", nodes=nodes, owner=owner, schedule="", notify=True)
+    errors = flow.validate()
+    if errors:
+        raise ValueError("generated draft flow is invalid: " + "; ".join(map(str, errors)))
+    return DraftBundle(opportunity, demonstration, induce_profile(demonstration), flow)
+
+
+def draft_bundle(opportunity: WorkOpportunity, *, owner: str = "", review: DraftReview | None = None) -> DraftBundle:
     """Build deterministic, UNSAVED flow and agent-factory proposals."""
     if not isinstance(opportunity, WorkOpportunity) or len(opportunity.pattern) < 2:
         raise ValueError("a recurring work opportunity is required")
+    if review is not None:
+        if not isinstance(review, DraftReview):
+            raise ValueError("a validated task review is required")
+        return _reviewed_bundle(opportunity, owner, review)
+    if opportunity.observation_basis == "application_metadata":
+        raise ValueError("Describe the job, inputs, expected output and review before drafting from app activity.")
     from .demonstration import Demonstration, DemoStep, induce_profile
     from .flow.ir import NODE_AGENT, NODE_APPROVAL, Flow, FlowNode
 
@@ -757,7 +873,7 @@ __all__ = [
     "ACTION_KINDS", "APPLICATION_METADATA_ACTIONS",
     "APPLICATION_METADATA_OBJECT_TYPES", "CapturePolicy", "DEFAULT_ALLOWED_APPS",
     "DEFAULT_BLOCKED_APPS", "DEFAULT_MIN_DISTINCT_DAYS",
-    "DEFAULT_MIN_OCCURRENCES", "DEFAULT_RETENTION_DAYS", "DraftBundle",
+    "DEFAULT_MIN_OCCURRENCES", "DEFAULT_RETENTION_DAYS", "DraftBundle", "DraftReview",
     "Enrollment", "GUIDED_OBJECT_KINDS", "KNOWN_APPS", "MAX_RETENTION_DAYS",
     "OBJECT_KINDS", "ObservedActivity", "OpportunityEvidence",
     "SENSITIVE_OBJECT_KINDS", "SessionState", "StepSignature",

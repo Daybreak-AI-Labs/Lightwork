@@ -45,8 +45,17 @@ class StartSessionIn(DeviceIn):
     acknowledge_capture_scope: bool = False
 
 
+class TaskReviewIn(_StrictInput):
+    goal: str = Field(min_length=3, max_length=1000)
+    inputs: str = Field(min_length=3, max_length=1000)
+    output: str = Field(min_length=3, max_length=1000)
+    approval: str = Field(min_length=3, max_length=1000)
+
+
 class HandoffIn(DeviceIn):
     kind: Literal["flow", "agent"] = "flow"
+    review: TaskReviewIn | None = None
+    evidence_revision: str = Field("", max_length=64)
 
 
 class EnrollIn(DeviceIn):
@@ -335,7 +344,7 @@ def _candidate(store, policy: dict, opportunity_id: str):
     raise HTTPException(status_code=404, detail="no such Ekko opportunity")
 
 
-def _handoff_brief(candidate, kind: str) -> str:
+def _handoff_brief(candidate, kind: str, review) -> str:
     steps = [
         f"{index}. {step.action} {step.object_type} in {step.app}"
         for index, step in enumerate(candidate.pattern, 1)
@@ -343,17 +352,21 @@ def _handoff_brief(candidate, kind: str) -> str:
     artifact = "workflow" if kind == "flow" else "agent playbook"
     return "\n".join(
         [
-            f"Draft an unsaved {artifact} for: {candidate.title}",
+            f"Draft an unsaved {artifact} for: {review.goal}",
+            f"Owner-selected inputs: {review.inputs}",
+            f"Expected output: {review.output}",
+            f"Human review: {review.approval}",
             "",
-            "Evidence from approved, content-free application metadata:",
+            ("Evidence from approved, content-free application metadata:"
+             if candidate.observation_basis == "application_metadata"
+             else "Evidence from approved guided activity labels:"),
             *steps,
             "",
             (
                 f"Observed {candidate.occurrences} times across "
-                f"{candidate.distinct_days} distinct days; confidence "
-                f"{candidate.confidence:.0%}; estimated "
-                f"{candidate.estimated_minutes_per_run:.1f} minutes per run; "
-                f"risk signal {candidate.risk}."
+                f"{candidate.distinct_days} distinct days. "
+                "These observations do not establish the task's purpose, completeness, "
+                "time savings or automation feasibility. The task description above comes from the owner."
             ),
             "",
             "Preserve human review before saving, scheduling, running, or delivering. ",
@@ -590,11 +603,30 @@ async def ekko_stop_session(
 
 
 def _candidate_response(store, policy: dict) -> dict:
-    candidates = _discover(store, policy) if store.path.exists() else []
+    from maverick.work_discovery import MAX_DISCOVERY_EVENTS, discover_candidates
+
+    events = store.list_events(limit=MAX_DISCOVERY_EVENTS) if store.path.exists() else []
+    min_occurrences = max(2, int(policy.get("min_occurrences", 3)))
+    min_days = max(2, int(policy.get("min_distinct_days", 2)))
+    candidates = discover_candidates(events, min_occurrences=min_occurrences, min_distinct_days=min_days)
+    days = len({event.day for event in events})
+    if candidates:
+        next_step = "Review a pattern and describe the job before preparing a draft."
+    elif not events:
+        next_step = "Enroll this device and start recording allowed apps to gather evidence."
+    elif days < min_days:
+        next_step = f"Activity covers {days} of the {min_days} days needed. Continue normal work on another day."
+    else:
+        next_step = f"No pattern has met both evidence requirements yet: {min_occurrences} separate repeats across {min_days} days."
     return {
         "candidates": [candidate.to_dict() for candidate in candidates],
         "count": len(candidates),
         "preview_only": True,
+        "progress": {
+            "activities": len(events), "observed_days": days,
+            "required_occurrences": min_occurrences, "required_days": min_days,
+            "next_step": next_step, "at_event_limit": len(events) == MAX_DISCOVERY_EVENTS,
+        },
     }
 
 
@@ -630,7 +662,7 @@ def ekko_candidate_handoff(
     from maverick.audit import EventKind
     from maverick.config import get_ekko
     from maverick.flow import enabled as flows_enabled
-    from maverick.work_discovery import build_draft_bundle
+    from maverick.work_discovery import DraftReview, build_draft_bundle
 
     from .in_app_routes import _draft_context
 
@@ -645,10 +677,18 @@ def ekko_candidate_handoff(
         )
     store = _store(request, payload.device_id)
     candidate = _candidate(store, get_ekko(), opportunity_id)
+    if payload.review is None:
+        raise HTTPException(422, "Describe the job, inputs, expected output and human review before preparing a draft.")
+    if payload.evidence_revision != candidate.to_dict()["evidence_revision"]:
+        raise HTTPException(409, "The evidence changed. Refresh the suggestions and review this pattern again before drafting.")
+    try:
+        review = DraftReview(**payload.review.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     # Give the workflow editor the exact provider-free, validated graph. Agent
     # handoffs still use a bounded brief. Neither path saves or activates work.
-    bundle = build_draft_bundle(candidate, owner=_owner(request))
-    brief = _handoff_brief(candidate, payload.kind)
+    bundle = build_draft_bundle(candidate, owner=_owner(request), review=review)
+    brief = _handoff_brief(candidate, payload.kind, review)
     prepared_flow = bundle.flow.to_dict() if payload.kind == "flow" else None
     if prepared_flow is not None:
         prepared_flow.pop("owner", None)

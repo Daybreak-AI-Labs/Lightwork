@@ -111,7 +111,7 @@ def test_ekko_page_and_agent_factory_entry_explain_the_safe_boundary(
         "Work Discovery",
         "Ekko is off by default",
         "Never captures",
-        "not employee productivity",
+        "never an employee performance score",
         "lightwork.authoring-handoff",
         'id="ekko-enroll-go"',
         'id="ekko-enroll-days"',
@@ -228,7 +228,7 @@ def test_mining_and_handoff_are_evidence_backed_preview_only(tmp_path, monkeypat
 
     handoff = client.post(
         f"/api/v1/ekko/candidates/{candidate['opportunity_id']}/handoff",
-        json={"device_id": "desk", "kind": "flow"},
+        json=_review_payload(candidate),
     )
     assert handoff.status_code == 200
     body = handoff.json()
@@ -241,9 +241,10 @@ def test_mining_and_handoff_are_evidence_backed_preview_only(tmp_path, monkeypat
     assert body["flow"]["revision"] == ""
     nodes = {node["id"]: node for node in body["flow"]["nodes"]}
     assert nodes["human-review"]["kind"] == "approval"
-    assert nodes["human-review"]["next"] == "observed-1"
-    assert nodes["observed-1"]["next"] == "observed-2"
-    assert nodes["observed-2"].get("next") is None
+    assert nodes["human-review"]["next"] == "prepare-inputs"
+    assert nodes["check-result"]["next"] == "review-result"
+    assert nodes["review-result"]["kind"] == "approval"
+    assert nodes["review-result"].get("next") is None
     assert "approved, content-free application metadata" in body["brief"]
     assert "do not" in body["brief"].lower()
 
@@ -252,7 +253,7 @@ def test_mining_and_handoff_are_evidence_backed_preview_only(tmp_path, monkeypat
     assert saved.json()["published"] is False
     again = client.post(
         f"/api/v1/ekko/candidates/{candidate['opportunity_id']}/handoff",
-        json={"device_id": "desk", "kind": "flow"},
+        json=_review_payload(candidate),
     )
     assert again.status_code == 200
     assert again.json()["flow"]["id"] != body["flow"]["id"]
@@ -285,7 +286,7 @@ def test_workflow_handoff_refuses_off_engine_before_unusable_editor(tmp_path, mo
     assert "/learning#lrn-flows-on" not in client.get("/ekko?device_id=desk").text
     assert client.post(
         f"/api/v1/ekko/candidates/{opportunity_id}/handoff",
-        json={"device_id": "desk", "kind": "agent"},
+        json=_review_payload(client.get("/api/v1/ekko/candidates?device_id=desk").json()["candidates"][0], kind="agent"),
     ).status_code == 200
 
     monkeypatch.delenv("MAVERICK_FLOWS")
@@ -404,3 +405,64 @@ def test_enroll_needs_ekko_on_and_operate(tmp_path, monkeypatch):
     assert client.post("/api/v1/ekko/enroll", json={"device_id": "desk", "apps": ["excel"],
                                                     "acknowledge_capture_scope": True}).status_code == 403
     assert client.post("/api/v1/ekko/revoke", json={"device_id": "desk"}).status_code == 403
+
+
+def _review_payload(candidate, kind="flow"):
+    return {"device_id": "desk", "kind": kind, "evidence_revision": candidate["evidence_revision"], "review": {
+        "goal": "Prepare a weekly summary", "inputs": "The export selected for this run",
+        "output": "A presentation with totals and exceptions", "approval": "I verify figures before sharing",
+    }}
+
+
+def test_handoff_requires_task_context_and_current_evidence(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    store = _enroll(device="desk")
+    _seed_recurring_evidence(store)
+    state = client.get("/api/v1/ekko/candidates?device_id=desk").json()
+    assert state["progress"]["activities"] == 4
+    assert state["progress"]["observed_days"] == 2
+    candidate = state["candidates"][0]
+    assert candidate["estimated_minutes_per_run"] is None
+    path = f"/api/v1/ekko/candidates/{candidate['opportunity_id']}/handoff"
+    missing = client.post(path, json={"device_id": "desk", "kind": "agent"})
+    assert missing.status_code == 422
+    payload = _review_payload(candidate, kind="agent")
+    payload["evidence_revision"] = "0" * 64
+    stale = client.post(path, json=payload)
+    assert stale.status_code == 409
+    assert "evidence changed" in stale.json()["detail"]
+    payload = _review_payload(candidate, kind="agent")
+    payload["review"]["goal"] = "   "
+    assert client.post(path, json=payload).status_code == 422
+    payload = _review_payload(candidate, kind="agent")
+    payload["review"]["owner"] = "someone-else"
+    assert client.post(path, json=payload).status_code == 422
+    client.delete("/api/v1/ekko/data?device_id=desk")
+    assert client.post(path, json=_review_payload(candidate, kind="agent")).status_code == 404
+
+
+def test_discovery_progress_for_an_empty_device_is_actionable(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    body = client.get("/api/v1/ekko/candidates?device_id=desk").json()
+    assert body["candidates"] == []
+    assert body["progress"]["activities"] == 0
+    assert "Enroll this device" in body["progress"]["next_step"]
+
+
+def test_copilot_discovery_review_keeps_recorded_activity_on_the_page(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    from maverick_dashboard import product_operations_ekko_recording as operations
+
+    monkeypatch.setattr(operations.native, "recording_options", lambda request: {
+        "context": "a" * 64, "active_app": False,
+        "availability_message": "Not available here", "platform": "test",
+    })
+    adapter = next(item for item in operations.entries() if item.id == "learning.ekko_discovery_review")
+    state = adapter.snapshot(None, {})
+    assert state.details == {}
+    assert "not sent to Copilot" in state.summary
+    preview = adapter.prepare(None, {}, {})
+    assert preview.native == {"ekko_discovery_review": {"scope": "current_page", "context": "a" * 64}}
+    with pytest.raises(Exception) as error:
+        adapter.snapshot(None, {"device_id": "someone-else"})
+    assert error.value.status_code == 422
