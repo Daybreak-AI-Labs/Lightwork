@@ -130,6 +130,20 @@ task_limits_enabled = true
 # max_output_tokens = 200000
 strict_pricing      = true
 
+[contact_centre]
+# Where a human handoff goes outside Lightwork when a person takes over a
+# conversation. Off by default: nothing is sent and no outbox is kept.
+# provider = "off"                 # "off" | "zendesk" | "webhook"
+# zendesk_subdomain = "acme-support"   # the part before .zendesk.com
+# zendesk_email = "agent@acme.example" # agent whose API token is used
+# webhook_url = "https://hooks.acme.example/lightwork"
+# dashboard_url = "https://lightwork.acme.example"  # links back to conversations
+# max_messages = 20                # 1-50 recent messages, each 2,000 characters
+# The Zendesk API token and the webhook signing secret are never set here. Enter
+# them in Settings > Integrations > Contact centre (stored sealed), or set
+# MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN / MAVERICK_CONTACT_CENTRE_WEBHOOK_SECRET.
+# See contact-centre-handoff.md.
+
 [safety]
 profile         = "balanced"   # strict | balanced | permissive | off
 block_threshold = "high"       # low | medium | high | critical

@@ -112,6 +112,59 @@ _ROUTE_FILES = (("image", "Picture"), ("audio", "Sound recording"), ("video", "V
                 ("pdf", "PDF"), ("text", "Text file"), ("file", "Other file"))
 
 
+def _contact_centre_rows(S) -> tuple:
+    """Where a conversation goes outside Lightwork when a person takes it over. Off by default."""
+    group, sub = "Integrations", "Contact centre"
+    return (
+        S("contact_centre", "provider", "Send handed-off conversations to",
+          "Off sends nothing. Zendesk creates a support ticket with the reason, the customer and "
+          "the recent messages. A signed webhook posts the same details to your own system. "
+          "Each handoff is sent once; a send that cannot be confirmed is shown as not confirmed "
+          "and is not sent again.",
+          "select", group, "off", "maverick.config", subgroup=sub,
+          choices=(("off", "Off: do not send anything"),
+                   ("zendesk", "Zendesk: create a support ticket"),
+                   ("webhook", "Signed webhook: post to your own system")),
+          aliases="contact centre zendesk ticket handoff webhook"),
+        S("contact_centre", "zendesk_subdomain", "Zendesk subdomain",
+          "The part before .zendesk.com in your Zendesk address, such as acme-support.",
+          "text", group, "", "maverick.config", subgroup=sub, max_length=63,
+          pattern=r"[a-z0-9][a-z0-9-]{0,62}", aliases="zendesk account"),
+        S("contact_centre", "zendesk_email", "Zendesk agent email",
+          "The email address of the Zendesk agent whose API token is used. Tickets are created "
+          "as that agent.",
+          "text", group, "", "maverick.config", subgroup=sub, max_length=254,
+          pattern=_EMAIL),
+        S("contact_centre", "zendesk_api_token", "Zendesk API token",
+          "The API token for the agent above, created in Zendesk under Apps and integrations, "
+          "then APIs. It is stored sealed and never shown again. A value set on the server is "
+          "used instead.",
+          "secret", group, "", "maverick.contact_centre", subgroup=sub, max_length=300,
+          pattern=r"[^\s\"'<>]{8,300}", env=("MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN",),
+          aliases="zendesk token password"),
+        S("contact_centre", "webhook_url", "Webhook address",
+          "A secure web address (https) that receives the signed message.",
+          "text", group, "", "maverick.config", subgroup=sub, max_length=300, pattern=_HTTPS,
+          aliases="signed webhook contact centre"),
+        S("contact_centre", "webhook_secret", "Webhook signing secret",
+          "The secret that signs each message, so your system can check it came from Lightwork. "
+          "It is stored sealed and never shown again. A value set on the server is used instead. "
+          "Without it, nothing is sent to the webhook.",
+          "secret", group, "", "maverick.contact_centre", subgroup=sub, max_length=300,
+          pattern=r"[^\s\"'<>]{8,300}", env=("MAVERICK_CONTACT_CENTRE_WEBHOOK_SECRET",),
+          aliases="webhook signing secret"),
+        S("contact_centre", "dashboard_url", "Lightwork web address",
+          "The secure web address people use to open Lightwork. Each ticket or message links back "
+          "to the conversation there. Leave empty to send without a link.",
+          "text", group, "", "maverick.config", subgroup=sub, max_length=300, pattern=_HTTPS),
+        S("contact_centre", "max_messages", "Recent messages to include",
+          "How many of the latest messages of the conversation are sent. Each message is "
+          "shortened to 2,000 characters.",
+          "number", group, 20, "maverick.config", subgroup=sub, minimum=1, maximum=50,
+          integer=True, unit="messages"),
+    )
+
+
 def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
     from maverick.image_edit_models import CHOICES, MAX_MODEL_LENGTH, MODEL_PATTERN
 
@@ -124,6 +177,7 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           minimum=0, maximum=10000, integer=True, unit="tasks", default=0),
     )
     return (
+        *_contact_centre_rows(S),
         *(S("image_edit", field, label,
             "Copy the model name from its Replicate page, with a version if you want to "
             "keep using that version. Leave empty to keep the built-in choice. A choice "

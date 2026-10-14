@@ -2792,6 +2792,57 @@ def get_support() -> dict:
             "contact_email": email if _SUPPORT_EMAIL_RE.fullmatch(email) else ""}
 
 
+_CONTACT_CENTRE_PROVIDERS = ("off", "zendesk", "webhook")
+_CONTACT_CENTRE_SUBDOMAIN_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
+_CONTACT_CENTRE_EMAIL_RE = re.compile(r"[^@\s\"'<>,;]{1,64}@[^@\s\"'<>,;]{1,190}\.[A-Za-z]{2,24}")
+
+
+def _https_or_empty(value: object) -> str:
+    """An https address without credentials, or ``""``."""
+    from urllib.parse import urlsplit
+    text = str(value or "").strip()
+    try:
+        parts = urlsplit(text)
+        _ = parts.port  # raises ValueError for an out-of-range port
+    except ValueError:
+        return ""
+    if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
+        return ""
+    return text
+
+
+def get_contact_centre() -> dict:
+    """Return the ``[contact_centre]`` section: where a conversation goes when a person takes it over.
+
+    ``provider`` is ``off`` (default: nothing is sent), ``zendesk`` or ``webhook``.
+    An unknown provider reads as ``off``. The Zendesk subdomain must be a single
+    host label; the email must look like an address; the webhook and dashboard
+    addresses must be https without credentials. Anything else reads as empty so
+    the setting is reported as incomplete rather than sent somewhere unexpected.
+    Secrets (the Zendesk API token and webhook signing secret) are not returned
+    here; :mod:`maverick.contact_centre` reads them from the environment or the
+    sealed settings value.
+    """
+    cfg = load_config().get("contact_centre", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    provider = str(cfg.get("provider") or "off").strip().lower()
+    if provider not in _CONTACT_CENTRE_PROVIDERS:
+        provider = "off"
+    subdomain = str(cfg.get("zendesk_subdomain") or "").strip()
+    email = str(cfg.get("zendesk_email") or "").strip()
+    raw_max = cfg.get("max_messages", 20)
+    max_messages = raw_max if type(raw_max) is int and 1 <= raw_max <= 50 else 20
+    return {
+        "provider": provider,
+        "zendesk_subdomain": subdomain if _CONTACT_CENTRE_SUBDOMAIN_RE.fullmatch(subdomain) else "",
+        "zendesk_email": email if _CONTACT_CENTRE_EMAIL_RE.fullmatch(email) else "",
+        "webhook_url": _https_or_empty(cfg.get("webhook_url")),
+        "dashboard_url": _https_or_empty(cfg.get("dashboard_url")).rstrip("/"),
+        "max_messages": max_messages,
+    }
+
+
 def get_fleet_memory() -> dict:
     """Return the ``[fleet_memory]`` section (agent-agnostic learning plane).
     OFF by default: exposing governed memory to third-party agents is an

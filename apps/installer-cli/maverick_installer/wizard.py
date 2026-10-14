@@ -7472,6 +7472,52 @@ def pick_suggestions() -> dict[str, Any]:
     return {"ai_suggestions": False}
 
 
+def pick_contact_centre() -> tuple[dict[str, Any], list[str]]:
+    """Where a human handoff goes outside Lightwork. Returns (config, env_vars_needed).
+
+    Off unless chosen, and nothing is sent until the chosen provider is complete.
+    The Zendesk API token and the webhook signing secret are not asked for here
+    and are never written to the config file: enter them on the Settings page
+    (Integrations, Contact centre; stored sealed), or set the
+    MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN or MAVERICK_CONTACT_CENTRE_WEBHOOK_SECRET
+    environment variable (``maverick.contact_centre``)."""
+    from maverick.config import (
+        _CONTACT_CENTRE_EMAIL_RE,
+        _CONTACT_CENTRE_SUBDOMAIN_RE,
+        _https_or_empty,
+    )
+
+    provider = _q_select(
+        "Send handed-off conversations to a contact centre outside Lightwork?",
+        ["off", "zendesk", "webhook"],
+        default="off",
+    )
+    if provider == "off":
+        return {}, []
+    cfg: dict[str, Any] = {"provider": provider}
+    if provider == "zendesk":
+        subdomain = _q_text("  Zendesk subdomain (the part before .zendesk.com):", default="").strip()
+        email = _q_text("  Zendesk agent email whose API token is used:", default="").strip()
+        if not _CONTACT_CENTRE_SUBDOMAIN_RE.fullmatch(subdomain) or not _CONTACT_CENTRE_EMAIL_RE.fullmatch(email):
+            console.print("[yellow]Skipped: enter a Zendesk subdomain such as acme-support and an agent email.[/yellow]")
+            return {}, []
+        cfg.update(zendesk_subdomain=subdomain, zendesk_email=email)
+    else:
+        url = _q_text("  Webhook address (https://...):", default="").strip()
+        if not _https_or_empty(url):
+            console.print("[yellow]Skipped: the webhook must be a secure https:// address.[/yellow]")
+            return {}, []
+        cfg["webhook_url"] = url
+    link = _q_text("  Lightwork web address for links in each ticket (https://..., empty for none):", default="").strip()
+    if link and _https_or_empty(link):
+        cfg["dashboard_url"] = link
+    elif link:
+        console.print("[yellow]Skipped the link: use a secure https:// address.[/yellow]")
+    console.print("[dim]Add the API token or signing secret on the Settings page (Contact centre) "
+                  "before handoffs are sent. Until then nothing is sent.[/dim]")
+    return cfg, []
+
+
 def pick_deliverable_handoff() -> tuple[dict[str, Any], list[str]]:
     """System-of-record hand-off for APPROVED deliverables. Returns
     (config, env_vars_needed).
@@ -10469,6 +10515,7 @@ def write_config(
     deadline_alerts: dict[str, Any] | None = None,
     webhooks: dict[str, Any] | None = None,
     deliverables: dict[str, Any] | None = None,
+    contact_centre: dict[str, Any] | None = None,
     personas: dict[str, Any] | None = None,
     a2a: dict[str, Any] | None = None,
     my_work: dict[str, Any] | None = None,
@@ -10686,6 +10733,7 @@ def write_config(
     lines += _cfg_table("collaboration", collaboration)
     lines += _cfg_table("webhooks", webhooks)
     lines += _cfg_table("deliverables", deliverables)
+    lines += _cfg_table("contact_centre", contact_centre)
     lines += _cfg_table("personas", personas)
     lines += _cfg_table("a2a", a2a)
     lines += _cfg_table("first_outcome", first_outcome)
@@ -12052,6 +12100,10 @@ def run(fast: bool = False, resume: bool = False) -> int:
     state["_deliverables_pair"] = [deliverables, deliverable_envs]
     _save_partial(state)
 
+    contact_centre, contact_centre_envs = state.get("_contact_centre_pair") or pick_contact_centre()
+    state["_contact_centre_pair"] = [contact_centre, contact_centre_envs]
+    _save_partial(state)
+
     personas = state.get("_personas") or pick_persona_roles()
     state["_personas"] = personas
     _save_partial(state)
@@ -12122,6 +12174,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         deadline_alerts=deadline_alerts,
         webhooks=webhooks,
         deliverables=deliverables,
+        contact_centre=contact_centre,
         personas=personas,
         a2a=a2a_cfg,
         my_work=my_work_cfg,

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import re
 import time
 from contextlib import ExitStack
@@ -17,6 +18,7 @@ from .task_execution_guard import lease
 HELD = {"stopping", "waiting", "active", "unknown"}
 MAX_ROWS, MAX_MESSAGES, MAX_SCOPE = 10000, 200, 100
 DUTY_SCHEMA = "lightwork.human-conversation-duty.v1"
+log = logging.getLogger(__name__)
 
 
 def _identifier(root):
@@ -150,8 +152,10 @@ class HumanConversations:
         if visible and self.metadata_only:
             visible.update(shared={"title":"Withheld","brief":"Current source permission is unavailable.","saved_reply":"Withheld"},
                            purpose="",recipient="",duty_label="",messages=[])
+        from . import contact_centre
+        external = contact_centre.shown_status(human["current"]) if session and not self.metadata_only else None
         return {"goal_id": goal.id, "root_id": root.id, "owner": root.owner, "is_owner": self.actor == root.owner, "revision": record["revision"],
-                "session": visible, "held": bool(session and session["state"] in HELD),
+                "session": visible, "held": bool(session and session["state"] in HELD), "contact_centre": external,
                 "audit_pending": bool(record.get("_audit_pending")), "source_unavailable": self.metadata_only,
                 "title": "Owned human conversation" if self.metadata_only else goal.title}
 
@@ -290,7 +294,25 @@ class HumanConversations:
             session["state"] = "returned"
         human["operations"][operation]["state"] = "confirmed"
         self._save(record, value, action="human_decision_confirmed", guard=guard)
+        if prepared["action"] == "request":
+            self._contact_centre_handoff(prepared, goal, session_id)
         return self.original(prepared["goal_id"], operation)
+
+    def _contact_centre_handoff(self, prepared, goal, session_id):
+        """Queue the outside contact-centre handoff. Never raises: the in-app handoff is already confirmed."""
+        from . import config, contact_centre
+        try:
+            policy = config.get_contact_centre()
+            if policy["provider"] == "off":
+                return
+            from .chat_threads import ChatThreads
+            turns, _more = ChatThreads(self.world).history(goal.id, limit=policy["max_messages"])
+            contact_centre.enqueue_handoff(
+                handoff_id=session_id, title=prepared["shared"]["title"], reason=prepared["purpose"],
+                requester_name=self.actor, requester_email=self.actor if "@" in self.actor else "",
+                messages=[(turn.role, turn.content) for turn in turns], link=contact_centre.conversation_link(goal.id))
+        except Exception as exc:
+            log.warning("contact centre: handoff %s was not queued (%s)", session_id, type(exc).__name__)
 
     def original(self, goal_id, operation):
         _goal, _root, _binding, record, _value, _human = self._load(goal_id)

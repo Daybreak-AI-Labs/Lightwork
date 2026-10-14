@@ -105,6 +105,8 @@ KNOWN_SECTIONS = frozenset({
     "retention", "role_assignments", "roles", "routing", "safety",
     "sandbox", "screening", "search", "security", "self_learning",
     "sharing", "shield", "skill_synthesis", "skills", "security_ops",
+    # [contact_centre] where a human handoff goes outside Lightwork (config.get_contact_centre).
+    "contact_centre",
     # [support] the Help menu's status page and support contact (config.get_support).
     "support",
     "shoring",
