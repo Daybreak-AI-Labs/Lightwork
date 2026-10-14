@@ -42,6 +42,7 @@ ASSETS = (
     "lightwork-community-templates.js",
     "lightwork-business-agent.js",
     "lightwork-ekko-recording.js",
+    "lightwork-ekko-planning.js",
     "lightwork-flow-teach.js",
     "lightwork-learning-examples.js",
     "lightwork-planning-steps.js",

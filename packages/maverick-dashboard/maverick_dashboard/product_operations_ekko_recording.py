@@ -38,6 +38,19 @@ def discovery_prepare(request, selection, _arguments):
         "scope": "current_page", "context": current.revision}})
 
 
+def planning_snapshot(request, selection):
+    current = snapshot(request, selection)
+    return Snapshot(current.revision, "Open your private opportunity workspace",
+        "Review saved plans, benefit assumptions and owner-reported pilot results on the protected Ekko page. "
+        "Task notes and recorded activity stay outside this conversation. Opening the workspace does not save or start work.")
+
+
+def planning_prepare(request, selection, _arguments):
+    current = planning_snapshot(request, selection)
+    return Preview(current.summary, native={"ekko_planning_review": {
+        "scope": "current_page", "context": current.revision}})
+
+
 def entries():
     return (Adapter("learning.ekko_recording_controls", "Open activity recording controls", "learning",
         "/ekko#ekko-recording", ("/ekko",), EmptyInput, snapshot, prepare,
@@ -45,4 +58,7 @@ def entries():
                  "start recording activity", "how can Ekko record activity")),
         Adapter("learning.ekko_discovery_review", "Review repeated work with Ekko", "learning",
             "/ekko#ekko-opportunities-heading", ("/ekko",), EmptyInput, discovery_snapshot, discovery_prepare,
-            aliases=("find work to automate", "review Ekko suggestions", "turn repeated work into a workflow")))
+            aliases=("find work to automate", "review Ekko suggestions", "turn repeated work into a workflow")),
+        Adapter("learning.ekko_planning_review", "Open private opportunity plans", "learning",
+            "/ekko#ekko-planning", ("/ekko",), EmptyInput, planning_snapshot, planning_prepare,
+            aliases=("review my automation shortlist", "record an Ekko pilot result", "estimate automation benefit")))

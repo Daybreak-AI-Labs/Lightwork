@@ -379,6 +379,23 @@ Implementation evidence: detector, native API and JavaScript regressions plus
 with synthetic events. Local qualification is separate from a released build,
 physical desktop recording, real integrations and measured time savings.
 
+The same journey now includes opt-in private opportunity plans
+(`ekko.planning_enabled`, installer step and All settings), task-specific draft
+instructions, shortlist/pilot/parked stages, explicit benefit assumptions and
+owner-reported pilot scorecards. The page supports save, reopen, filter,
+record/retry a pilot and remove. Native routes recheck access and configuration;
+encrypted records bind owner/device/tenant, expire, and cascade on linked source
+erasure. Revision checks reject concurrent stale edits, and stable pilot
+references prevent duplicate counting after an unconfirmed reply. Access loss
+clears notes; recoverable failures preserve entered values. Copilot's
+`learning.ekko_planning_review` opens this protected workspace without including
+notes or observations in conversation. Direct conversational plan editing and
+pilot submission remain uncovered. Browser qualification includes native
+save/reload, a committed-but-lost pilot reply and retry, rejected-output costs,
+parking/removal, access withdrawal, keyboard navigation, 390-pixel layout and
+automated accessibility checks. These tests do not establish live automation
+feasibility, real-world savings or released-installer behavior.
+
 October 7 desktop recording follow-through: Ekko offers explicit automatic app
 recording on the installed Windows computer, Mac or local Linux X11 desktop.
 Mac reads only its frontmost application bundle; Linux reads bounded local

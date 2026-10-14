@@ -2263,7 +2263,7 @@ limits are recorded in the [operation coverage register](post-install-operation-
   reading the codes to *realize* the savings is a separate, gated step.
 
 - **Ekko — client-controlled work discovery** (`work_discovery.py`,
-  `work_discovery_store.py`, `ekko_daemon.py`, `maverick ekko`, independently
+  `work_discovery_store.py`, `work_discovery_planning.py`, `ekko_daemon.py`, `maverick ekko`, independently
   gated by default-off `[ekko]` / `MAVERICK_EKKO`) — turns repeated application
   transitions into automation candidates with separate-occurrence evidence,
   actionable discovery progress and an owner review of the task, inputs, output
@@ -2271,6 +2271,13 @@ limits are recorded in the [operation coverage register](post-install-operation-
   Agent Factory + Flow drafts are unsaved, with initial and final human approval
   in the workflow proposal; stale evidence requires another review. Copilot
   opens the same protected review without receiving recorded activity.
+  Opt-in private opportunity plans retain reviewed task descriptions, benefit
+  assumptions and shortlist/pilot/parked stages with scoped encryption and
+  expiry. Estimates include setup and remaining human work; pilot scorecards
+  count rejected outputs and rework as losses. Assumptions and owner-reported
+  results remain distinct from verified savings. Reporting, reconciliation and
+  document review tailor the unsaved draft's instructions. Revision checks and
+  pilot retry references protect against stale edits and duplicate counts.
   Enrollment is owner/device scoped, observation uses a
   positive application allowlist with a winning sensitive-app blocklist, and
   raw local events expire after at most 30 days. The bundled foreground daemon

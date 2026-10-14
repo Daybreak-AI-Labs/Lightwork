@@ -81,7 +81,7 @@ def main():
     parser.add_argument("--port", type=int, required=True)
     args = parser.parse_args()
     server.CONFIG += '\n[value]\nhourly_rate=60.0\n[audit]\nsign=true\n'
-    server.CONFIG += '\n[ekko]\nenable=true\nallowed_apps=["excel", "powerpoint"]\nmin_occurrences=2\nmin_distinct_days=2\n'
+    server.CONFIG += '\n[ekko]\nenable=true\nplanning_enabled=true\nallowed_apps=["excel", "powerpoint"]\nmin_occurrences=2\nmin_distinct_days=2\n'
     with tempfile.TemporaryDirectory(prefix="lightwork-intent-value-") as temporary:
         directory = Path(temporary)
         server.environment(directory)

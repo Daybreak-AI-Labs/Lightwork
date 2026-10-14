@@ -174,10 +174,10 @@
       const data = options(await window.mvFetchJSON('/api/v1/ekko/recording/options', {cache: 'no-store'}));
       if (!current() || data.context !== handoff.context) return false;
       if (discovery) {
-        const heading = document.getElementById('ekko-opportunities-heading');
+        const heading = document.getElementById(discovery === 'planning' ? 'ekko-planning-heading' : 'ekko-opportunities-heading');
         if (!heading || !current()) return false;
         heading.scrollIntoView({block: 'nearest'}); heading.focus();
-        document.dispatchEvent(new CustomEvent('lightwork:ekko-discovery-review'));
+        document.dispatchEvent(new CustomEvent(discovery === 'planning' ? 'lightwork:ekko-planning-review' : 'lightwork:ekko-discovery-review'));
         return true;
       }
       showAvailability(data);
@@ -192,6 +192,7 @@
   }
   window.LightworkEkkoRecording = {
     openReview: (payload, handoff) => openControls(payload, handoff, false),
-    openDiscovery: (payload, handoff) => openControls(payload, handoff, true)
+    openDiscovery: (payload, handoff) => openControls(payload, handoff, true),
+    openPlanning: (payload, handoff) => openControls(payload, handoff, 'planning')
   };
 })();

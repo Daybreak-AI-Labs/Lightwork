@@ -39,8 +39,10 @@ values. Guided mode also rejects `email`, `message`, and system-of-record
 sensitive-data floor cannot be weakened by enrollment policy.
 
 Raw events stay in the active tenant's local data boundary and expire after 14
-days by default (hard maximum: 30 days). Opportunities are computed on demand,
-not retained in a second candidate store. Provider egress is reserved and
+days by default (hard maximum: 30 days). Opportunities are computed on demand.
+Separately, an owner can explicitly save task notes and pilot observations when
+private opportunity planning is enabled; this does not copy the raw events.
+Provider egress is reserved and
 unsupported in this release; it must remain false, and setting it true fails
 closed rather than opening a network path.
 
@@ -66,6 +68,7 @@ same native policy for installations managed outside the ordinary page:
 ```toml
 [ekko]
 enable = true
+planning_enabled = false # opt in separately to private opportunity plans
 retention_days = 14
 enrollment_days = 30
 min_occurrences = 3
@@ -176,8 +179,11 @@ is no longer shown as “% sure.” Risk signals describe observed labels, not a
 completed automation assessment.
 
 Choose **Review this opportunity** and describe the job, starting inputs,
-expected output and what a person checks. These owner-supplied notes are distinct
-from recorded evidence and travel with the draft, not the recording store.
+expected output and what a person checks. Choose general work, reporting,
+reconciliation or document review to tailor the draft's checks and instructions.
+These owner-supplied notes are distinct from recorded evidence and travel with
+the draft. They are not persisted by opening a draft; saving an opportunity plan
+is a separate, explicit action.
 Keep descriptions general; select actual sources and authorized connections in
 the editor. The generated plan approves inputs, checks them, prepares a draft,
 checks for gaps and pauses again for final review. It does not infer tool access
@@ -198,3 +204,53 @@ Learning operation family control these improvements; no additional capture or
 provider permission is introduced. The compatibility CLI returns metadata
 candidates with a next step to review them in Ekko; semantic guided proposals
 retain their review-only CLI path.
+
+## Private opportunity workspace
+
+Enable **Save private Ekko opportunity plans** in All settings, or opt in during
+the Ekko installer step (`ekko.planning_enabled`, default false). The owner must
+also acknowledge private storage before each save. This capability does not
+start capture, save a workflow or grant automation authority.
+
+After reviewing an opportunity:
+
+1. Enter runs per week, current human minutes, remaining human minutes including
+   review/rework, and setup/testing hours. Blank remaining effort or setup means
+   an incomplete estimate; zero must be entered explicitly. Estimated weekly
+   hours equal frequency times the per-run difference divided by 60. The
+   four-week estimate subtracts setup; break-even uses positive weekly savings.
+   Negative estimates remain negative. These are owner assumptions, with no
+   monetary ROI or verified savings claim.
+2. Save the plan as **Shortlisted**, **In pilot** or **Parked for later**. The
+   opportunity workspace sorts plans by estimated weekly benefit and filters
+   parked work. Reopening restores the task description and assumptions.
+3. Test the draft through its normal editor, connections and approval controls.
+   Record the manual baseline, actual checking/rework, and whether the output
+   was accepted. Accepted runs save baseline minus human effort. Rejected runs
+   assume the full manual job still had to be done, making the extra effort a
+   negative saving. The scorecard shows acceptance, total and median time saved,
+   clearly labelled **owner-reported pilot**, separate from verified outcomes.
+
+Plans use scoped authenticated encryption in the local Ekko database, bound to
+the current tenant, owner and device. A maximum of 100 plans per device and 30
+pilot runs per plan bounds storage. Saves expire within the shorter deployment
+or enrollment retention period (2–30 days); explicitly saving a revision renews
+that period, but recording a pilot does not. Raw events may expire earlier than
+the separately saved notes. Erasing a linked evidence session, erasing the
+device's data, or forgetting the device removes its linked plans. Audit events
+contain identifiers/stage/count, not the entered task text or assumptions.
+
+Current permissions are checked on every API request. Concurrent edits require
+the latest saved revision; an older tab cannot overwrite a newer plan. An
+unconfirmed pilot can be retried with the same reference without double counting.
+After an unconfirmed plan save, use **Refresh saved plans** and **Open saved plan**
+to inspect the current record before retrying. Disabling planning blocks saves
+and pilot additions but preserves authorized inspection and deletion. Device,
+workspace or access changes clear the private view and invalidate late replies.
+
+Copilot's **Open private opportunity plans** opens the same protected workspace
+with fresh authority/context checks. It does not receive the notes, estimate
+benefits conversationally, submit a plan or record a run. Direct conversational
+editing remains outside this implementation. Local browser qualification uses
+synthetic activity against native APIs; real desktop capture, live task execution
+and independently measured savings require separate validation.

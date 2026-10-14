@@ -19,6 +19,7 @@ function reviewState() {
     fields.set('ekko-review-' + field, {value: 'Owner supplied ' + field});
   }
   fields.set('ekko-review-flow', {}); fields.set('ekko-review-agent', {});
+  fields.set('ekko-review-type', {value: 'reporting'});
   return {
     handoffPending: false, deviceRevision: 0,
     reviewCandidate: {opportunity_id: 'opportunity', evidence_revision: 'current-evidence'},

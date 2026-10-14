@@ -50,6 +50,34 @@ class TaskReviewIn(_StrictInput):
     inputs: str = Field(min_length=3, max_length=1000)
     output: str = Field(min_length=3, max_length=1000)
     approval: str = Field(min_length=3, max_length=1000)
+    task_type: Literal["general", "reporting", "reconciliation", "document_review"] = "general"
+
+
+class BenefitIn(_StrictInput):
+    runs_per_week: float = Field(0, ge=0, le=10000, allow_inf_nan=False, strict=True)
+    manual_minutes: float = Field(0, ge=0, le=10080, allow_inf_nan=False, strict=True)
+    remaining_minutes: float | None = Field(None, ge=0, le=10080, allow_inf_nan=False, strict=True)
+    setup_hours: float | None = Field(None, ge=0, le=10000, allow_inf_nan=False, strict=True)
+
+
+class PlanIn(DeviceIn):
+    acknowledge_private_storage: bool = Field(False, strict=True)
+    review: TaskReviewIn
+    assumptions: BenefitIn = Field(default_factory=BenefitIn)
+    stage: Literal["shortlisted", "pilot", "parked"] = "shortlisted"
+    evidence_revision: str = Field(min_length=64, max_length=64)
+    expected_revision: str = Field("", max_length=32)
+
+
+class PlanRevisionIn(DeviceIn):
+    expected_revision: str = Field(min_length=32, max_length=32)
+
+
+class PilotRunIn(PlanRevisionIn):
+    sample_id: str = Field(pattern=r"^[A-Za-z0-9-]{8,64}$")
+    manual_minutes: float = Field(gt=0, le=10080, allow_inf_nan=False, strict=True)
+    remaining_minutes: float = Field(ge=0, le=10080, allow_inf_nan=False, strict=True)
+    accepted: bool = Field(strict=True)
 
 
 class HandoffIn(DeviceIn):
@@ -209,6 +237,7 @@ def _status_data(request: Request, device_id: str) -> dict:
     blocked = set(policy.get("blocked_apps") or [])
     return {
         "enabled": bool(policy.get("enable", False)),
+        "planning_enabled": bool(policy.get("enable") and policy.get("planning_enabled")),
         "workflows_enabled": flows_enabled(),
         "workflows_control_managed": "MAVERICK_FLOWS" in os.environ,
         "control_managed": "MAVERICK_EKKO" in os.environ,
@@ -353,6 +382,7 @@ def _handoff_brief(candidate, kind: str, review) -> str:
     return "\n".join(
         [
             f"Draft an unsaved {artifact} for: {review.goal}",
+            f"Kind of work: {review.task_type.replace('_', ' ')}",
             f"Owner-selected inputs: {review.inputs}",
             f"Expected output: {review.output}",
             f"Human review: {review.approval}",
@@ -711,6 +741,88 @@ def ekko_candidate_handoff(
         "requires_human_approval": bool(bundle.requires_human_approval),
         **({"flow": prepared_flow} if prepared_flow is not None else {}),
     }
+
+
+def _plans(request, device_id):
+    from maverick.work_discovery_planning import OpportunityPlans
+
+    return OpportunityPlans(_store(request, device_id))
+
+
+def _planning_access(request, *, write=False):
+    from maverick import config
+
+    from .ekko_ops_api import _access
+
+    _access(request)
+    policy = config.get_ekko()
+    if write:
+        _app()._require_same_origin(request)
+        if not policy["enable"] or not policy["planning_enabled"]:
+            raise HTTPException(409, "Saving opportunity plans is off. An administrator can enable it in All settings under Ekko.")
+    return policy
+
+
+def _plan_result(operation):
+    from maverick.work_discovery_planning import PlanConflict
+    from maverick.work_discovery_store import WorkDiscoveryStoreError
+
+    try:
+        return operation()
+    except PlanConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except WorkDiscoveryStoreError as exc:
+        raise HTTPException(503, "Saved opportunities could not be verified. Your current notes are kept; try again later.") from exc
+
+
+@router.get("/api/v1/ekko/plans")
+def ekko_plans(request: Request, device_id: str = Query(_DEFAULT_DEVICE, min_length=1, max_length=64)):
+    policy = _planning_access(request)
+    plans = _plan_result(lambda: _plans(request, device_id).list())
+    return {"plans": plans, "enabled": bool(policy["enable"] and policy["planning_enabled"]),
+            "retention_days": policy["retention_days"]}
+
+
+@router.put("/api/v1/ekko/candidates/{opportunity_id}/plan")
+def ekko_save_plan(request: Request, opportunity_id: str, payload: PlanIn):
+    policy = _planning_access(request, write=True)
+    if not payload.acknowledge_private_storage:
+        raise HTTPException(422, "Confirm that your task notes, assumptions and pilot results may be saved privately.")
+    store = _store(request, payload.device_id)
+    candidate = _candidate(store, policy, opportunity_id)
+    if candidate.to_dict()["evidence_revision"] != payload.evidence_revision:
+        raise HTTPException(409, "The evidence changed. Refresh and review this opportunity before saving.")
+    enrolled = store.get_policy()
+    retention = min(policy["retention_days"], enrolled.retention_days) if enrolled else policy["retention_days"]
+    result = _plan_result(lambda: _plans(request, payload.device_id).save(
+        candidate, review=payload.review.model_dump(), assumptions=payload.assumptions.model_dump(),
+        stage=payload.stage, expected_revision=payload.expected_revision, retention_days=retention,
+    ))
+    return {"plan": result, "saved": True, "started_work": False}
+
+
+@router.post("/api/v1/ekko/plans/{opportunity_id}/runs")
+def ekko_record_pilot(request: Request, opportunity_id: str, payload: PilotRunIn):
+    _planning_access(request, write=True)
+    if not _OPPORTUNITY_RE.fullmatch(opportunity_id):
+        raise HTTPException(404, "Choose a saved opportunity.")
+    sample = payload.model_dump(exclude={"device_id", "expected_revision"})
+    result = _plan_result(lambda: _plans(request, payload.device_id).record_run(
+        opportunity_id, sample=sample, expected_revision=payload.expected_revision,
+    ))
+    return {"plan": result, "recorded": True, "basis": "owner_reported_pilot"}
+
+
+@router.delete("/api/v1/ekko/plans/{opportunity_id}")
+def ekko_delete_plan(request: Request, opportunity_id: str, payload: PlanRevisionIn):
+    _planning_access(request)
+    _app()._require_same_origin(request)
+    removed = _plan_result(lambda: _plans(request, payload.device_id).delete(
+        opportunity_id, expected_revision=payload.expected_revision,
+    ))
+    return {"removed": removed}
 
 
 @router.delete("/api/v1/ekko/sessions/{session_id}")

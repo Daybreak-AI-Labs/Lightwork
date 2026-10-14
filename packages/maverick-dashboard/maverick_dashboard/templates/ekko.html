@@ -102,6 +102,12 @@
         <p class="ekko-note">You supply the purpose; Ekko supplies the evidence. Use general descriptions here.
           Choose actual files and approved connections in the editor. These notes travel with your draft.</p>
         <form id="ekko-review-form">
+          <label for="ekko-review-type"><strong>What kind of work is this?</strong></label>
+          <select class="select" id="ekko-review-type">
+            <option value="general">Other repeatable work</option><option value="reporting">Reporting and summaries</option>
+            <option value="reconciliation">Reconciling two sets of records</option><option value="document_review">Reviewing a document against criteria</option>
+          </select>
+          <p id="ekko-task-guidance" class="ekko-note">The draft will use your goal and review criteria.</p>
           <div class="ekko-review-grid">
             <label for="ekko-review-goal"><strong>What job are you doing?</strong>
               <textarea class="input" id="ekko-review-goal" required minlength="3" maxlength="1000" placeholder="Prepare the weekly sales summary"></textarea></label>
@@ -112,6 +118,17 @@
             <label for="ekko-review-approval"><strong>What will a person check?</strong>
               <textarea class="input" id="ekko-review-approval" required minlength="3" maxlength="1000" placeholder="I verify the figures and approve the draft before sharing"></textarea></label>
           </div>
+          <details id="ekko-benefit-panel">
+            <summary>Estimate whether this is worth automating</summary>
+            <p class="ekko-note">Your planning assumptions, not observed savings. Include checking, exceptions and rework in the time that remains. No monetary return is inferred.</p>
+            <div class="ekko-review-grid">
+              <label for="ekko-plan-frequency">Runs in a typical week<input class="input" id="ekko-plan-frequency" type="number" min="0" max="10000" step="0.1" value="0"></label>
+              <label for="ekko-plan-before">Human minutes per run today<input class="input" id="ekko-plan-before" type="number" min="0" max="10080" step="0.1" value="0"></label>
+              <label for="ekko-plan-after">Human minutes remaining per run<input class="input" id="ekko-plan-after" type="number" min="0" max="10080" step="0.1" placeholder="Include review and rework"></label>
+              <label for="ekko-plan-setup">One-time setup and testing hours<input class="input" id="ekko-plan-setup" type="number" min="0" max="10000" step="0.1" placeholder="Enter 0 only if none is needed"></label>
+            </div>
+            <p id="ekko-benefit-preview" class="ekko-note" role="status">Enter frequency and current effort to estimate the opportunity.</p>
+          </details>
           <details>
             <summary>The plan your draft will contain</summary>
             <ol><li>You approve the inputs and plan.</li><li>Check the selected inputs.</li>
@@ -120,12 +137,50 @@
             <p class="ekko-note">Connections and task feasibility still need checking. Nothing is saved, scheduled or run by opening a draft.</p>
           </details>
           <p id="ekko-review-message" class="ekko-note" role="status" aria-live="polite"></p>
+          <div id="ekko-plan-save-controls" hidden>
+            <label for="ekko-plan-stage">Where is this opportunity?</label>
+            <select class="select" id="ekko-plan-stage"><option value="shortlisted">Shortlisted</option><option value="pilot">In pilot</option><option value="parked">Parked for later</option></select>
+            <label class="ekko-consent" for="ekko-plan-consent"><input id="ekko-plan-consent" type="checkbox">
+              <span>Save these task notes, assumptions and pilot results privately for this device. They expire within the Ekko retention period. Erasing the source session or device removes linked plans.</span></label>
+            <button class="btn" id="ekko-plan-save" type="button">Save opportunity plan</button>
+            <p id="ekko-plan-save-message" class="ekko-note" role="status" aria-live="polite"></p>
+          </div>
           <div class="ekko-controls" style="margin-top: var(--space-3);">
             <button class="btn btn--primary" id="ekko-review-flow" type="submit" value="flow">Open workflow draft</button>
             <button class="btn" id="ekko-review-agent" type="submit" value="agent">Open assistant draft</button>
             <button class="btn btn--ghost" id="ekko-review-cancel" type="button">Close review</button>
           </div>
         </form>
+      </section>
+    </section>
+
+    <section class="card ekko-panel" id="ekko-planning" aria-labelledby="ekko-planning-heading">
+      <div class="section-head"><h2 id="ekko-planning-heading" tabindex="-1">Your opportunity workspace</h2>
+        <button class="btn" id="ekko-plans-refresh" type="button">Refresh saved plans</button></div>
+      <p class="ekko-note">Build a shortlist, test the most promising work, and record what happened. Assumptions and owner-reported pilot results stay separate from verified platform outcomes.</p>
+      <p id="ekko-planning-availability" class="ekko-note" role="status">Checking whether private plans are available…</p>
+      <p id="ekko-planning-off" class="ekko-note" hidden>Saving plans is off. {% if ekko.can_control %}<a href="/settings/all?q=Ekko#ekko.planning_enabled">Enable private opportunity plans in All settings</a>.{% else %}Ask your administrator to enable private opportunity plans under Ekko in All settings.{% endif %} Unsaved drafts remain available.</p>
+      <label for="ekko-plans-filter">Show saved plans</label>
+      <select class="select" id="ekko-plans-filter"><option value="active">Shortlisted and in pilot</option><option value="all">All plans</option><option value="parked">Parked for later</option></select>
+      <p class="ekko-note">Ordered by estimated weekly human time saved. These are your assumptions, not a ranking of employee performance.</p>
+      <div id="ekko-plans-list" class="ekko-stack" style="margin-top: var(--space-3);"></div>
+      <section id="ekko-pilot" hidden aria-labelledby="ekko-pilot-heading" style="margin-top: var(--space-4);">
+        <h3 id="ekko-pilot-heading" tabindex="-1">Pilot scorecard</h3>
+        <p id="ekko-pilot-title"></p><div id="ekko-plan-details" class="ekko-stack"></div>
+        <p id="ekko-pilot-summary" class="ekko-note"></p>
+        <p class="ekko-note">Record your observations after testing the draft through its normal approval controls. This form does not run the automation or verify its output.</p>
+        <form id="ekko-pilot-form">
+          <div class="ekko-review-grid">
+            <label for="ekko-pilot-before">Manual baseline for this run (minutes)<input class="input" id="ekko-pilot-before" type="number" required min="0.1" max="10080" step="0.1"></label>
+            <label for="ekko-pilot-after">Human checking and rework (minutes)<input class="input" id="ekko-pilot-after" type="number" required min="0" max="10080" step="0.1"></label>
+          </div>
+          <label for="ekko-pilot-accepted">Was the result usable?</label>
+          <select class="select" id="ekko-pilot-accepted"><option value="yes">Yes, accepted after review</option><option value="no">No, the job still needed manual completion</option></select>
+          <p class="ekko-note">For a rejected result, Ekko counts checking and rework as extra effort and assumes the full manual job still had to be done.</p>
+          <button class="btn" id="ekko-pilot-record" type="submit">Record pilot run</button>
+          <p id="ekko-pilot-message" class="ekko-note" role="status" aria-live="polite"></p>
+        </form>
+        <button class="btn btn--ghost" id="ekko-plan-remove" type="button">Remove this saved plan</button>
       </section>
     </section>
 
@@ -485,6 +540,7 @@
 
   function renderCandidates(items, progress) {
     candidates = items || [];
+    document.dispatchEvent(new CustomEvent('lightwork:ekko-candidates-updated'));
     if (reviewCandidate && !candidates.some(function (item) { return item.opportunity_id === reviewCandidate.opportunity_id; })) closeReview();
     if (progress) {
       setText('ekko-discovery-progress', progress.activities + ' activities across ' + progress.observed_days +
@@ -566,6 +622,7 @@
     chosenDevice = id;
     deviceRevision++;
     closeReview();
+    document.dispatchEvent(new CustomEvent('lightwork:ekko-scope-reset'));
     renderCandidates([]);
     setText('ekko-discovery-progress', 'Checking the evidence for this device…');
     remember(id);
@@ -682,6 +739,7 @@
     reviewForm.reset();
     document.getElementById('ekko-review').hidden = true;
     setText('ekko-review-message', '');
+    document.dispatchEvent(new CustomEvent('lightwork:ekko-review-closed'));
   }
 
   function openReview(id) {
@@ -695,7 +753,15 @@
     document.getElementById('ekko-review-flow').disabled = !current.workflows_enabled;
     document.getElementById('ekko-review-heading').focus();
     document.getElementById('ekko-review').scrollIntoView({block: 'nearest'});
+    document.dispatchEvent(new CustomEvent('lightwork:ekko-opportunity-opened', {detail: {opportunity_id: id}}));
   }
+
+  window.LightworkEkkoDiscovery = {
+    open: openReview,
+    close: closeReview,
+    candidate: function () { return reviewCandidate; },
+    hasCandidate: function (id) { return candidates.some(function (item) { return item.opportunity_id === id; }); }
+  };
 
   async function handoff(id, kind) {
     if (kind === 'flow' && !current.workflows_enabled) {
@@ -707,6 +773,7 @@
     ['goal', 'inputs', 'output', 'approval'].forEach(function (field) {
       review[field] = document.getElementById('ekko-review-' + field).value.trim();
     });
+    review.task_type = document.getElementById('ekko-review-type').value;
     if (Object.values(review).some(function (value) { return value.length < 3; })) {
       setText('ekko-review-message', 'Please describe each part of the job before opening a draft.'); return;
     }
@@ -787,6 +854,7 @@
   });
   function invalidateDiscovery() {
     deviceRevision++; refreshVersion++; closeReview(); renderCandidates([]);
+    document.dispatchEvent(new CustomEvent('lightwork:ekko-scope-reset'));
     setText('ekko-discovery-progress', 'Your workspace or access changed. Refresh the page to review current evidence.');
   }
   ['lightwork:context-changed', 'lightwork:workspace-changed', 'lightwork:account-changed',
@@ -805,4 +873,5 @@
   refresh();
 }());
 </script>
+<script src="/static/lightwork-ekko-planning.js" defer></script>
 {% endblock %}

@@ -375,16 +375,17 @@
               ? function (isCurrent) { return codePracticeControls.openCodePractice(codePracticeForm.context, isCurrent); } : null);
           return;
         }
-        if (entry[0] === 'ekko_recording_review' || entry[0] === 'ekko_discovery_review') {
+        if (['ekko_recording_review', 'ekko_discovery_review', 'ekko_planning_review'].includes(entry[0])) {
+          var ekkoPlanning = entry[0] === 'ekko_planning_review';
           var ekkoDiscovery = entry[0] === 'ekko_discovery_review';
-          var ekkoOpenMethod = ekkoDiscovery ? 'openDiscovery' : 'openReview';
+          var ekkoOpenMethod = ekkoPlanning ? 'openPlanning' : ekkoDiscovery ? 'openDiscovery' : 'openReview';
           var ekkoRecordingReview = entry[1], ekkoRecordingControls = window.LightworkEkkoRecording;
           if (!ekkoRecordingReview || Array.isArray(ekkoRecordingReview) ||
               Object.keys(ekkoRecordingReview).sort().join(',') !== 'context,scope' ||
               ekkoRecordingReview.scope !== 'current_page' ||
               !/^[a-f0-9]{64}$/.test(ekkoRecordingReview.context || '')) return;
-          protectedControls(node('dd', undefined, list), ekkoDiscovery ? 'Review repeated work' : 'Review activity recording permissions',
-            ekkoDiscovery ? '/ekko#ekko-opportunities-heading' : '/ekko#ekko-recording',
+          protectedControls(node('dd', undefined, list), ekkoPlanning ? 'Open private opportunity plans' : ekkoDiscovery ? 'Review repeated work' : 'Review activity recording permissions',
+            ekkoPlanning ? '/ekko#ekko-planning' : ekkoDiscovery ? '/ekko#ekko-opportunities-heading' : '/ekko#ekko-recording',
             ekkoRecordingControls && typeof ekkoRecordingControls[ekkoOpenMethod] === 'function'
               ? function (isCurrent) { return ekkoRecordingControls[ekkoOpenMethod]({}, {context: ekkoRecordingReview.context, isCurrent: isCurrent}); } : null);
           return;

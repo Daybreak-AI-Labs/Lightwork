@@ -312,6 +312,23 @@ def test_more_frequent_shorter_work_is_not_hidden_by_a_longer_sequence():
                and item.occurrences == 4 for item in opportunities)
 
 
+@pytest.mark.parametrize("task_type,expected", [
+    ("reporting", "reporting period"), ("reconciliation", "matching keys"),
+    ("document_review", "document"),
+])
+def test_task_type_changes_the_draft_without_granting_tools(task_type, expected):
+    from maverick.work_discovery import DraftReview
+
+    candidate, = discover_candidates(_switches(["excel", "powerpoint"]), min_occurrences=2)
+    review = DraftReview(goal="Prepare an auditable result", inputs="My approved source files",
+                        output="A result with source references", approval="I check all exceptions", task_type=task_type)
+    bundle = build_draft_bundle(candidate, owner="alice", review=review)
+    assert expected in bundle.flow.nodes["prepare-inputs"].brief.lower()
+    assert bundle.flow.nodes["review-result"].kind == "approval"
+    assert all(not step.tool for step in bundle.demonstration.steps)
+    assert bundle.flow.validate() == []
+
+
 def test_evidence_preview_represents_days_and_is_stable_when_events_are_reordered():
     events = _switches(["excel", "powerpoint"])
     for index in range(22):

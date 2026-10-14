@@ -734,8 +734,11 @@ class DraftReview:
     inputs: str
     output: str
     approval: str
+    task_type: str = "general"
 
     def __post_init__(self):
+        if self.task_type not in {"general", "reporting", "reconciliation", "document_review"}:
+            raise ValueError("Choose a supported kind of work.")
         for name in ("goal", "inputs", "output", "approval"):
             value = getattr(self, name)
             if not isinstance(value, str) or not 3 <= len(value.strip()) <= 1000:
@@ -758,6 +761,26 @@ def _reviewed_bundle(opportunity, owner, review):
         ("draft-result", "Prepare the requested result", f"Goal: {review.goal}. Expected result: {review.output}"),
         ("check-result", "Check the draft and flag gaps", f"Check the draft against: {review.output}. Flag missing evidence, assumptions and exceptions. Review criteria: {review.approval}"),
     ]
+    task_guidance = {
+        "general": ("", "", ""),
+        "reporting": (
+            "Check the reporting period, source coverage, units and missing records.",
+            "Build a source-linked summary of totals, changes and exceptions. Separate observations from interpretations.",
+            "Reconcile totals to the selected inputs and flag unsupported conclusions or missing periods.",
+        ),
+        "reconciliation": (
+            "Confirm both source sets, matching keys, date ranges and the owner's tolerance rules.",
+            "Prepare matched, unmatched and ambiguous groups. Do not invent matches or change source records.",
+            "Check coverage and control totals; keep ambiguous matches for a person's decision.",
+        ),
+        "document_review": (
+            "Confirm the selected document and the owner's review criteria; identify missing versions or reference material.",
+            "Prepare a findings table with supporting passages, the applicable criterion and a proposed follow-up.",
+            "Check each finding against its source and flag uncertainty. Do not present the review as legal or regulatory approval.",
+        ),
+    }[review.task_type]
+    steps = [(node_id, label, brief + " " + guidance)
+             for (node_id, label, brief), guidance in zip(steps, task_guidance, strict=True)]
     demonstration = Demonstration(
         title=review.goal, source="ekko-owner-reviewed-task",
         steps=[DemoStep(kind="action", summary=brief, tool="", target="").normalized()
