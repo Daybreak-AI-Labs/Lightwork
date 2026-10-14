@@ -45,6 +45,12 @@ handoff is sent, it is recorded as **Not sent** and nothing leaves Lightwork.
 
 The task brief and saved reply are **not** sent. Attachments are not sent.
 
+Before the customer confirms a handoff, the review names the destination and lists
+these fields. The destination shown is fixed when the review is made: if the
+provider or address is changed before the request is confirmed, the request is
+refused and must be reviewed again. A handoff that is already queued is also
+checked against the reviewed provider and address before each send.
+
 Free text (the reason, the title and each message) passes through the proven
 redactor (`provable_redaction.redact_proven`) first. Personal data and secrets it
 detects are removed, and text it cannot verify is replaced with a notice. The

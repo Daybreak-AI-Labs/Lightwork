@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 def test_the_conversation_link_path_is_the_chat_goal_page_that_shows_the_handoff_panel():
     from maverick_dashboard.app import app
@@ -63,3 +65,63 @@ def test_the_conversation_inventory_still_opens_when_the_outbox_is_unreadable(tm
     assert value["conversation"]["session"]["state"] == "waiting"
     assert value["conversation"]["contact_centre"]["state"] == "unavailable"
     assert value["people"] == []
+
+
+def _prepared(**overrides):
+    prepared = {"action": "request", "shared": {"title": "Card declined", "brief": "b", "saved_reply": ""},
+                "purpose": "Need a person", "expires_at": 0, "message": "", "person_name": "Agent Lee",
+                "task_names": ["Card declined"], "tasks": [["7", "ana@example.com", 1.0, "done"]], "outside": None}
+    prepared.update(overrides)
+    return prepared
+
+
+def _limits(rows):
+    return next(row for row in rows if row["label"] == "Limits and consequences")["after"]
+
+
+def test_the_review_names_the_outside_destination_and_what_is_sent_when_a_provider_is_set():
+    from maverick_dashboard import human_conversation_handoffs as dashboard_handoffs
+
+    outside = {"provider": "zendesk", "where": "Zendesk, at acme-support.zendesk.com", "messages": 20}
+    rows = dashboard_handoffs.changes(_prepared(outside=outside))
+    row = next(row for row in rows if row["label"] == "Outside contact centre")
+    assert "acme-support.zendesk.com" in row["after"]["Destination"]
+    assert "latest 20 messages" in row["after"]["Sent"]
+    assert "outside contact centre" in _limits(rows)
+    assert _limits(rows) != dashboard_handoffs.NOTICE
+
+
+def test_the_review_has_no_outside_row_and_keeps_the_in_app_notice_when_no_provider_is_set():
+    from maverick_dashboard import human_conversation_handoffs as dashboard_handoffs
+
+    rows = dashboard_handoffs.changes(_prepared(outside=None))
+    assert all(row["label"] != "Outside contact centre" for row in rows)
+    assert _limits(rows) == dashboard_handoffs.NOTICE
+
+
+def test_a_handoff_is_refused_when_the_outside_destination_changed_after_review(tmp_path, monkeypatch):
+    import time
+
+    from fastapi import HTTPException
+    from maverick import config, contact_centre
+    from maverick_dashboard import human_conversation_handoffs as dashboard_handoffs
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    (tmp_path / "config.toml").write_text(
+        '[contact_centre]\nprovider = "zendesk"\nzendesk_subdomain = "acme-support"\n', encoding="utf-8")
+    config.reset_config_cache()
+    reviewed = contact_centre.disclosure()
+    assert reviewed["provider"] == "zendesk"
+    monkeypatch.setattr(dashboard_handoffs, "authority",
+                        lambda request, context=None, write=False, enabled=False: ("ana@example.com", "ctx"))
+    prepared = _prepared(outside=reviewed, actor="ana@example.com", context="ctx", review_expires=time.time() + 300)
+
+    (tmp_path / "config.toml").write_text('[contact_centre]\nprovider = "webhook"\n'
+                                          'webhook_url = "https://hooks.other.example/x"\n', encoding="utf-8")
+    config.reset_config_cache()
+    with pytest.raises(HTTPException) as caught:
+        dashboard_handoffs._guard(object(), prepared)
+    assert caught.value.status_code == 409
+    assert "outside contact centre" in caught.value.detail

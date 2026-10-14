@@ -30,6 +30,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from . import config
 from .audit.errors import AuditRefused
@@ -83,6 +84,30 @@ def conversation_link(goal_id: int) -> str:
     """Absolute link to a conversation, or ``""`` when no dashboard address is set."""
     base = config.get_contact_centre()["dashboard_url"]
     return f"{base}/chat/goal/{int(goal_id)}" if base else ""
+
+
+def enabled() -> bool:
+    """True when a provider is set on Settings (anything but off)."""
+    return config.get_contact_centre()["provider"] != "off"
+
+
+def disclosure() -> dict[str, Any] | None:
+    """What an outside handoff sends and where, shown to the customer before they confirm.
+
+    ``None`` when the provider is off. Only the webhook's host name is shown: no path,
+    query or credential. The review stores this value, and a send is refused when the
+    settings no longer match it.
+    """
+    policy = config.get_contact_centre()
+    if policy["provider"] == "off":
+        return None
+    if policy["provider"] == "zendesk":
+        where = (f"Zendesk, at {policy['zendesk_subdomain']}.zendesk.com" if policy["zendesk_subdomain"]
+                 else "Zendesk (the subdomain is not set in Settings)")
+    else:
+        host = urlsplit(policy["webhook_url"]).hostname if policy["webhook_url"] else ""
+        where = f"a signed webhook at {host}" if host else "a signed webhook (the address is not set in Settings)"
+    return {"provider": policy["provider"], "where": where, "messages": policy["max_messages"]}
 
 
 def _secret(env_name: str, key: str) -> str:
@@ -285,8 +310,9 @@ def enqueue_handoff(*, handoff_id: str, title: str, reason: str, requester_name:
 
     Returns ``None`` when the provider is off (nothing is recorded or sent). An
     existing entry for the same handoff is returned unchanged, so a repeated call
-    never creates a second ticket. Raises :class:`OutboxFull` or
-    :class:`OutboxUnavailable`; the caller keeps the in-app handoff either way.
+    never creates a second ticket. Raises :class:`OutboxFull`, :class:`OutboxUnavailable`
+    or :class:`~maverick.audit.errors.AuditRefused` (nothing is queued then); the caller
+    keeps the in-app handoff either way.
     """
     policy = config.get_contact_centre()
     if policy["provider"] == "off":
@@ -615,5 +641,5 @@ def resume_all_workspaces() -> int:
     return total
 
 
-__all__ = ["OutboxFull", "OutboxUnavailable", "conversation_link", "enqueue_handoff",
-           "resume_all_workspaces", "resume_pending", "run_delivery", "status_for"]
+__all__ = ["OutboxFull", "OutboxUnavailable", "conversation_link", "disclosure", "enabled", "enqueue_handoff",
+           "resume_all_workspaces", "resume_pending", "run_delivery", "shown_status", "status_for"]
