@@ -2443,6 +2443,28 @@ def _lint_trust_root_keys(value: dict) -> list[Finding]:
     return findings
 
 
+def _lint_local_owner_totp(cfg: dict) -> list[Finding]:
+    """``[auth.local_owner] totp`` must be one of the three modes; anything else reads as optional."""
+    from .config import LOCAL_OWNER_TOTP_MODES
+
+    value = _at_path(cfg, ("auth", "local_owner", "totp"))
+    if value is _MISSING:
+        return []
+    if isinstance(value, str) and value.strip().lower() in LOCAL_OWNER_TOTP_MODES:
+        return []
+    # As in the runtime, only a short plain word is written out; never a pasted secret.
+    shown = f"{value!r}" if isinstance(value, str) and re.fullmatch(r"[a-z]{1,20}", value) else "a value"
+    return [
+        _nested_error(
+            "auth.local_owner",
+            "totp",
+            f"auth.local_owner.totp must be one of {', '.join(LOCAL_OWNER_TOTP_MODES)}, got {shown}; "
+            "until it is fixed the owner's authenticator app is read as optional",
+            severity="warning",
+        )
+    ]
+
+
 def _lint_identity_controls(cfg: dict) -> list[Finding]:
     findings: list[Finding] = []
     controls = _at_path(cfg, ("ai_identity_governance_connectors", "controls"))
@@ -4780,6 +4802,7 @@ def _lint_governance_nested_tables(cfg: dict) -> list[Finding]:
             )
 
     findings.extend(_lint_identity_controls(cfg))
+    findings.extend(_lint_local_owner_totp(cfg))
     trust_roots = _at_path(cfg, ("ai_benchmark_exchange", "trust_roots"))
     if isinstance(trust_roots, dict):
         findings.extend(_lint_trust_root_keys(trust_roots))
