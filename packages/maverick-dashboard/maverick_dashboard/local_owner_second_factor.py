@@ -10,7 +10,9 @@ the passphrase and its failure count:
 * ``totp_setup``: a secret shown during set-up, sealed, until it is confirmed;
 * ``recovery``: unused recovery codes, each a salted scrypt digest;
 * ``second_factor``: second-step tokens, kept as digests with their purpose,
-  expiry and wrong-code count.
+  expiry and wrong-code count;
+* ``flow_proofs``: recovery proofs, one live proof per restricted flow (see
+  :func:`recovery_step`), kept as digests with their flow and expiry.
 
 Rules:
 
@@ -22,6 +24,12 @@ Rules:
 * Every wrong code counts toward the same lock as a wrong passphrase. A
   second-step token takes at most ``ATTEMPTS`` codes, then is discarded.
 * A recovery code works once. An authenticator code's time step is remembered.
+* A restricted recovery step (company sign-in, company SAML) needs the passphrase
+  and a code the first time. The code issues a recovery proof for that flow only:
+  a random token, valid ten minutes, stored as a digest, sent as an HttpOnly
+  SameSite=Strict cookie on the flow's own path. Later steps of the same flow
+  accept the proof instead of a code. The proof is spent when the flow completes
+  or is cancelled.
 * Enabling, turning off, making new recovery codes and using a recovery code are
   recorded in the activity log first. If the log refuses, nothing changes.
 """
@@ -47,6 +55,17 @@ PENDING_LIMIT = 5  # second-step tokens kept at once
 ATTEMPTS = 5  # wrong codes one second-step token takes
 COOKIE = "mvk_owner_second_factor"
 COOKIE_PATH = "/auth/owner-second-factor"
+PROOF_SECONDS = 600  # a recovery proof: later steps of one restricted flow, for ten minutes
+PROOF_COOKIE = "mvk_owner_recovery_proof"
+# The restricted flows that take a passphrase and a code. Each proof cookie is
+# sent only under its flow's own path, so no other flow receives it.
+FLOW_PATHS = {
+    "company-signin-activation": "/api/v1/settings/sign-in-migration",
+    "company-signin-recovery": "/auth/company-signin-recovery",
+    "company-saml-activation": "/api/v1/settings/single-sign-on",
+    "company-saml-recovery": "/auth/company-saml-recovery",
+}
+RESET_KEYS = ("totp", "totp_step", "totp_setup", "recovery", "second_factor", "flow_proofs")
 WRONG_CODE = ("That code was not accepted. Check the six-digit code in your authenticator app, "
               "or use one of your recovery codes.")
 EXPIRED = "That sign-in step has expired. Sign in with your passphrase again."
@@ -55,6 +74,8 @@ LOCKED = "Wait one minute before trying again."
 REQUIRED = "This installation requires an authenticator app, so it cannot be turned off."
 OFF = "This installation does not offer changes to the owner's authenticator app."
 ALREADY_ON = "Your authenticator app is already on."
+CODE_REQUIRED = ("Enter a current code from your authenticator app, or one of your recovery codes, "
+                 "to continue this step.")
 NOT_ON = "No authenticator app is set up."
 SEALING = "An authenticator app needs encryption at rest, which is unavailable right now."
 
@@ -145,15 +166,14 @@ def _unlocked(row: dict, *, now: float) -> None:
         raise HTTPException(429, LOCKED)
 
 
-def _audit(verb: str, email: str) -> None:
+def _audit(verb: str, email: str, detail: str = "owner authenticator app", *, actor: str = "") -> None:
     """Record the change first. An explicit refusal by the activity log stops it."""
     from maverick.audit import AuditRefused, EventKind, audit_event
 
-    actor = "user:" + email
+    actor = actor or "user:" + email
     try:
         audit_event(EventKind.CONTROL_PLANE_ACTION, agent="dashboard", _global=True,
-                    verb=verb, principal=actor, actor=actor, ok=True,
-                    detail="owner authenticator app")
+                    verb=verb, principal=actor, actor=actor, ok=True, detail=detail)
     except AuditRefused as exc:
         raise HTTPException(
             503, "The activity log refused to record this change, so nothing was changed. "
@@ -391,7 +411,7 @@ def disable(*, password: object, code: object) -> None:
             local_owner._count_failure(row)
             raise HTTPException(401, WRONG_CODE)
         _audit("owner_authenticator_disabled", row["email"])
-        for key in ("totp", "totp_step", "totp_setup", "recovery"):
+        for key in ("totp", "totp_step", "totp_setup", "recovery", "flow_proofs"):
             row.pop(key, None)
         row.update(failures=0, locked_until=0)
         local_owner._write(row)
@@ -422,3 +442,108 @@ def regenerate(*, code: object) -> list[str]:
 
 def status(row: dict) -> dict:
     return {"mode": mode(), "enrolled": "totp" in row, "unused_recovery": len(row.get("recovery", []))}
+
+
+def _proof_key(row: dict, flow: str, token: str) -> str:
+    """The stored digest of a recovery proof, bound to the owner and to its flow."""
+    return hashlib.sha256(f"{flow}\n{row['email']}\n{token}".encode()).hexdigest()
+
+
+def _issue_proof(row: dict, flow: str, *, now: float) -> str:
+    """A new recovery proof for ``flow``, replacing any earlier one for that flow."""
+    token = secrets.token_urlsafe(32)
+    kept = {k: v for k, v in row.get("flow_proofs", {}).items() if v["expires"] > now and v["flow"] != flow}
+    kept[_proof_key(row, flow, token)] = {"flow": flow, "expires": now + PROOF_SECONDS}
+    row["flow_proofs"] = kept
+    return token
+
+
+def recovery_step(request, row: dict, *, flow: str, code: object) -> None:
+    """The owner's second factor for one restricted step of ``flow``, under the owner lock.
+
+    The passphrase has already been checked. A live proof for this flow passes the
+    step with no code. Otherwise a current authenticator code or an unused
+    recovery code passes it and issues a new proof for the flow, which
+    :func:`attach_proof` hands to the browser. A missing code is refused without
+    counting; a wrong one counts toward the owner's lock. ``row`` is written only
+    when a code is accepted, and after its audit events are recorded.
+    """
+    from . import local_owner
+
+    if flow not in FLOW_PATHS:
+        raise ValueError("unknown restricted flow")
+    now = _now()
+    presented = request.cookies.get(PROOF_COOKIE) or ""
+    entry = row.get("flow_proofs", {}).get(_proof_key(row, flow, presented)) if presented else None
+    if entry is not None and entry["expires"] > now:
+        _audit("owner_recovery_proof_used", row["email"], f"recovery flow {flow}")
+        return
+    how = _accept(row, code, now=now)
+    if how is None:
+        if not _strip(code):
+            raise HTTPException(401, CODE_REQUIRED)
+        local_owner._count_failure(row)
+        raise HTTPException(401, WRONG_CODE)
+    if how == "recovery":
+        _audit("owner_recovery_code_used", row["email"])
+    _audit("owner_recovery_proof_issued", row["email"], f"recovery flow {flow}")
+    row.update(failures=0, locked_until=0)
+    token = _issue_proof(row, flow, now=now)
+    local_owner._write(row)
+    request.state.owner_recovery_proof = (flow, token)
+
+
+def attach_proof(request, response) -> None:
+    """Give the browser the recovery proof this request issued, for its flow's path only."""
+    from .oidc_login import _cookie_secure
+
+    issued = getattr(request.state, "owner_recovery_proof", None)
+    if issued is None:
+        return
+    flow, token = issued
+    response.set_cookie(PROOF_COOKIE, token, max_age=PROOF_SECONDS, path=FLOW_PATHS[flow],
+                        httponly=True, samesite="strict", secure=_cookie_secure(request))
+
+
+def close_flow(response, *, flow: str) -> None:
+    """Spend a restricted flow's recovery proof when the flow completes or is cancelled."""
+    from . import local_owner
+
+    if flow not in FLOW_PATHS:
+        raise ValueError("unknown restricted flow")
+    with local_owner._LOCK, file_lock.cross_process_lock(local_owner.path(), strict=True):
+        row = local_owner._read()
+        proofs = (row or {}).get("flow_proofs") or {}
+        kept = {k: v for k, v in proofs.items() if v["flow"] != flow}
+        if row is not None and len(kept) != len(proofs):
+            if kept:
+                row["flow_proofs"] = kept
+            else:
+                row.pop("flow_proofs", None)
+            local_owner._write(row)
+    response.delete_cookie(PROOF_COOKIE, path=FLOW_PATHS[flow])
+
+
+def reset_by_operator(*, confirm_email: str, actor: str) -> bool:
+    """Host-only reset for a lost phone whose recovery codes are all used.
+
+    Turns the authenticator app off and deletes its recovery codes, any set-up
+    under way, and pending sign-in tokens and recovery proofs. The operator must
+    type the owner's email. Returns whether an app was on. Used by
+    ``maverick owner reset-authenticator``; no dashboard route reaches it.
+    """
+    from . import local_owner
+
+    with local_owner._LOCK, file_lock.cross_process_lock(local_owner.path(), strict=True):
+        row = local_owner._read()
+        if row is None:
+            raise LookupError("No local owner has been set up on this computer.")
+        if confirm_email.strip().lower() != row["email"]:
+            raise ValueError("The email does not match this computer's owner. Nothing was changed.")
+        was_on = "totp" in row
+        _audit("owner_authenticator_reset", row["email"],
+               "owner authenticator app; reset from this computer's command line", actor=actor)
+        for key in RESET_KEYS:
+            row.pop(key, None)
+        local_owner._write(row)
+        return was_on

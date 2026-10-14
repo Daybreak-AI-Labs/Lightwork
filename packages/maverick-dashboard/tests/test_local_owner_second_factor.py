@@ -15,6 +15,7 @@ PASSPHRASE = "a long local owner fixture phrase"  # pragma: allowlist secret - t
 WRONG = "an incorrect long fixture phrase"  # pragma: allowlist secret - deliberately wrong test passphrase
 EMAIL = "owner@example.com"
 ORIGIN = "http://127.0.0.1:8765"
+FLOW = "company-signin-recovery"  # a restricted flow (local_owner_second_factor.FLOW_PATHS)
 
 
 @pytest.fixture(autouse=True)
@@ -461,15 +462,16 @@ def test_a_passphrase_only_recovery_check_does_not_reset_the_code_lock(clock):
         with pytest.raises(HTTPException):
             second.complete(request(), token=challenge.token, code="000000")
     assert row()["failures"] == 4
-    local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE)
+    with pytest.raises(HTTPException) as passphrase_only:
+        local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE, flow=FLOW)
+    assert passphrase_only.value.status_code == 401
     assert row()["failures"] == 4 and row()["locked_until"] == 0
-    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
     with pytest.raises(HTTPException) as fifth:
-        second.complete(request(), token=challenge.token, code="000000")
+        local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE, flow=FLOW, code="000000")
     assert fifth.value.status_code == 401
     assert row()["failures"] == 5
     with pytest.raises(HTTPException) as locked:
-        local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE)
+        local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE, flow=FLOW, code="000000")
     assert locked.value.status_code == 429
     with pytest.raises(HTTPException) as still_locked:
         local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
@@ -654,3 +656,234 @@ def test_a_colleague_is_not_offered_the_owner_authenticator_link():
     assert local_owner_mfa_routes.owner_link_visible(owner_request) is True
     assert local_owner_mfa_routes.owner_link_visible(colleague_request) is False
     assert local_owner_mfa_routes.owner_link_visible(request()) is False
+
+
+def proof_request(token, *, flow_cookie=None):
+    """A request that presents a recovery proof cookie, as the browser sends it on its flow's path."""
+    base = request()
+    scope = dict(base.scope)
+    scope["headers"] = [*scope["headers"], (b"cookie", f"mvk_owner_recovery_proof={token}".encode())]
+    return Request(scope)
+
+
+def capture_audit(monkeypatch):
+    events = []
+    monkeypatch.setattr("maverick.audit.audit_event", lambda kind, **kw: events.append((kind, kw)) or True)
+    return events
+
+
+def test_a_passphrase_alone_is_refused_for_an_enrolled_owner_and_counts_nothing(clock):
+    from maverick_dashboard import local_owner
+    enroll_owner()
+    turn_on(clock)
+    with pytest.raises(HTTPException) as refused:
+        local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE, flow=FLOW)
+    assert refused.value.status_code == 401
+    assert "authenticator app" in refused.value.detail and "recovery code" in refused.value.detail
+    assert row()["failures"] == 0 and "flow_proofs" not in row()
+
+
+def test_a_current_code_passes_the_step_and_issues_a_proof_kept_only_as_a_digest(monkeypatch, clock):
+    import hashlib
+
+    from maverick_dashboard import local_owner
+    events = capture_audit(monkeypatch)
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    step = request()
+    local_owner.verify_recovery(step, email=EMAIL, password=PASSPHRASE, flow=FLOW, code=current_code(secret, clock))
+    flow, token = step.state.owner_recovery_proof
+    assert flow == FLOW and len(token) >= 40
+    stored = row()
+    key = hashlib.sha256(f"{FLOW}\n{EMAIL}\n{token}".encode()).hexdigest()
+    assert list(stored["flow_proofs"]) == [key]
+    assert stored["flow_proofs"][key]["flow"] == FLOW
+    assert 0 < stored["flow_proofs"][key]["expires"] - clock.now() <= 600
+    assert token not in local_owner.path().read_text()
+    issued = [kw for kind, kw in events if kw.get("verb") == "owner_recovery_proof_issued"]
+    assert len(issued) == 1 and issued[0]["actor"] == "user:" + EMAIL
+    assert token not in json.dumps(issued[0]) and secret not in json.dumps(issued[0])
+
+
+def test_a_recovery_code_passes_the_step_and_is_spent_and_audited(monkeypatch, clock):
+    from maverick_dashboard import local_owner
+    events = capture_audit(monkeypatch)
+    enroll_owner()
+    _secret, codes = turn_on(clock)
+    step = request()
+    local_owner.verify_recovery(step, email=EMAIL, password=PASSPHRASE, flow=FLOW, code=codes[4].lower())
+    assert len(row()["recovery"]) == 9
+    used = [kw for kind, kw in events if kw.get("verb") == "owner_recovery_code_used"]
+    assert len(used) == 1 and codes[4] not in json.dumps(events, default=str)
+    with pytest.raises(HTTPException):
+        local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE, flow=FLOW, code=codes[4])
+
+
+def test_a_later_step_of_the_same_flow_accepts_the_proof_without_a_code(monkeypatch, clock):
+    from maverick_dashboard import local_owner
+    events = capture_audit(monkeypatch)
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    first = request()
+    local_owner.verify_recovery(first, email=EMAIL, password=PASSPHRASE, flow=FLOW, code=current_code(secret, clock))
+    _flow, token = first.state.owner_recovery_proof
+    clock.advance(30)
+    later = proof_request(token)
+    local_owner.verify_recovery(later, email=EMAIL, password=PASSPHRASE, flow=FLOW, code="")
+    # The passphrase is still checked, and the proof is not spent by a later step.
+    with pytest.raises(HTTPException) as wrong:
+        local_owner.verify_recovery(proof_request(token), email=EMAIL, password=WRONG, flow=FLOW)
+    assert wrong.value.status_code == 401
+    local_owner.verify_recovery(proof_request(token), email=EMAIL, password=PASSPHRASE, flow=FLOW)
+    used = [kw for kind, kw in events if kw.get("verb") == "owner_recovery_proof_used"]
+    assert len(used) == 2 and used[0]["actor"] == "user:" + EMAIL
+    assert token not in json.dumps(events, default=str)
+
+
+def test_a_proof_never_works_for_another_flow(clock):
+    from maverick_dashboard import local_owner
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    first = request()
+    local_owner.verify_recovery(first, email=EMAIL, password=PASSPHRASE, flow=FLOW, code=current_code(secret, clock))
+    _flow, token = first.state.owner_recovery_proof
+    for other in ("company-saml-recovery", "company-saml-activation", "company-signin-activation"):
+        with pytest.raises(HTTPException) as refused:
+            local_owner.verify_recovery(proof_request(token), email=EMAIL, password=PASSPHRASE, flow=other)
+        assert refused.value.status_code == 401
+    # The proof still works for its own flow.
+    local_owner.verify_recovery(proof_request(token), email=EMAIL, password=PASSPHRASE, flow=FLOW)
+
+
+def test_an_expired_proof_is_refused_and_a_closed_flow_spends_its_proof(clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    from starlette.responses import Response
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    first = request()
+    local_owner.verify_recovery(first, email=EMAIL, password=PASSPHRASE, flow=FLOW, code=current_code(secret, clock))
+    _flow, token = first.state.owner_recovery_proof
+    clock.advance(second.PROOF_SECONDS + 1)
+    with pytest.raises(HTTPException) as expired:
+        local_owner.verify_recovery(proof_request(token), email=EMAIL, password=PASSPHRASE, flow=FLOW)
+    assert expired.value.status_code == 401
+    # A fresh code issues a new proof; closing the flow spends it at once.
+    again = request()
+    local_owner.verify_recovery(again, email=EMAIL, password=PASSPHRASE, flow=FLOW,
+                                code=current_code(secret, clock, 1))
+    _flow, live = again.state.owner_recovery_proof
+    assert list(row()["flow_proofs"].values())[0]["expires"] > clock.now()
+    response = Response()
+    second.close_flow(response, flow=FLOW)
+    assert "flow_proofs" not in row()
+    assert f"Path={second.FLOW_PATHS[FLOW]}" in response.headers["set-cookie"]
+    with pytest.raises(HTTPException):
+        local_owner.verify_recovery(proof_request(live), email=EMAIL, password=PASSPHRASE, flow=FLOW)
+
+
+def test_a_new_proof_replaces_the_earlier_one_for_the_same_flow(clock):
+    from maverick_dashboard import local_owner
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    first = request()
+    local_owner.verify_recovery(first, email=EMAIL, password=PASSPHRASE, flow=FLOW, code=current_code(secret, clock))
+    _flow, old = first.state.owner_recovery_proof
+    clock.advance(30)
+    second_step = request()
+    local_owner.verify_recovery(second_step, email=EMAIL, password=PASSPHRASE, flow=FLOW,
+                                code=current_code(secret, clock))
+    assert len(row()["flow_proofs"]) == 1
+    with pytest.raises(HTTPException):
+        local_owner.verify_recovery(proof_request(old), email=EMAIL, password=PASSPHRASE, flow=FLOW)
+
+
+def test_wrong_codes_count_toward_the_lock_and_a_correct_passphrase_does_not_clear_it(clock):
+    from maverick_dashboard import local_owner
+    enroll_owner()
+    turn_on(clock)
+    for _ in range(4):
+        with pytest.raises(HTTPException) as bad:
+            local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE, flow=FLOW, code="000000")
+        assert bad.value.status_code == 401
+    assert row()["failures"] == 4
+    with pytest.raises(HTTPException) as fifth:
+        local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE, flow=FLOW, code="000000")
+    assert fifth.value.status_code == 401 and row()["failures"] == 5 and row()["locked_until"] > clock.now()
+    with pytest.raises(HTTPException) as locked:
+        local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE, flow=FLOW, code="000000")
+    assert locked.value.status_code == 429
+
+
+def test_an_unenrolled_owner_passes_the_step_on_the_passphrase_alone_as_before(clock):
+    from maverick_dashboard import local_owner
+    enroll_owner()
+    step = request()
+    local_owner.verify_recovery(step, email=EMAIL, password=PASSPHRASE, flow=FLOW)
+    assert not hasattr(step.state, "owner_recovery_proof")
+    assert "flow_proofs" not in row() and "totp" not in row()
+
+
+def test_turning_the_app_off_also_ends_recovery_proofs(monkeypatch, clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    capture_audit(monkeypatch)
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    step = request()
+    local_owner.verify_recovery(step, email=EMAIL, password=PASSPHRASE, flow=FLOW, code=current_code(secret, clock))
+    clock.advance(30)
+    second.disable(password=PASSPHRASE, code=current_code(secret, clock))
+    assert "flow_proofs" not in row() and "totp" not in row()
+
+
+def test_a_malformed_proof_record_makes_owner_authority_unavailable(clock):
+    from maverick_dashboard import local_owner
+    enroll_owner()
+    turn_on(clock)
+    stored = row()
+    stored["flow_proofs"] = {"not-a-digest": {"flow": FLOW, "expires": 1.0}}
+    local_owner.path().write_text(json.dumps(stored))
+    with pytest.raises(HTTPException) as unavailable:
+        local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE, flow=FLOW)
+    assert unavailable.value.status_code == 503
+
+
+def test_the_operator_reset_needs_the_owners_email_and_clears_everything_second_factor(monkeypatch, clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    events = capture_audit(monkeypatch)
+    enroll_owner()
+    secret, codes = turn_on(clock)
+    step = request()
+    local_owner.verify_recovery(step, email=EMAIL, password=PASSPHRASE, flow=FLOW, code=current_code(secret, clock))
+    before = row()
+    with pytest.raises(ValueError):
+        second.reset_by_operator(confirm_email="someone@example.com", actor="os:posix:1000")
+    assert row() == before and not [e for e in events if e[1].get("verb") == "owner_authenticator_reset"]
+    assert second.reset_by_operator(confirm_email=" OWNER@example.com ", actor="os:posix:1000") is True
+    stored = row()
+    for key in ("totp", "totp_step", "totp_setup", "recovery", "second_factor", "flow_proofs"):
+        assert key not in stored
+    assert stored["status"] == "ready" and stored["email"] == EMAIL
+    reset = [kw for kind, kw in events if kw.get("verb") == "owner_authenticator_reset"]
+    assert len(reset) == 1 and reset[0]["actor"] == "os:posix:1000"
+    assert secret not in json.dumps(events, default=str) and codes[0] not in json.dumps(events, default=str)
+    assert second.reset_by_operator(confirm_email=EMAIL, actor="os:posix:1000") is False
+
+
+def test_a_refused_audit_stops_the_operator_reset(monkeypatch, clock):
+    from maverick.audit import AuditRefused
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    turn_on(clock)
+    before = row()
+
+    def refuse(*a, **k):
+        raise AuditRefused("log unavailable")
+
+    monkeypatch.setattr("maverick.audit.audit_event", refuse)
+    with pytest.raises(HTTPException) as stopped:
+        second.reset_by_operator(confirm_email=EMAIL, actor="os:posix:1000")
+    assert stopped.value.status_code == 503
+    assert row() == before
