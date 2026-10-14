@@ -54,6 +54,16 @@ class AgentIn(BaseModel):
     description: str = Field(default="", max_length=200)
 
 
+class ToolCallExpectIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    contains: str = Field(default="", max_length=100)
+
+
+class ToolResultIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    text: str = Field(min_length=1, max_length=500)
+
+
 class SpecialistCaseIn(BaseModel):
     specialist: str = Field(min_length=1, max_length=100)
     task: str = Field(min_length=8, max_length=1000)
@@ -61,6 +71,11 @@ class SpecialistCaseIn(BaseModel):
     excludes: list[str] = Field(default_factory=list, max_length=8)
     refusal: bool = False
     citation: bool = False
+    # Tool checks ([agent_tests] tool_checks): which tools the specialist must or must not call.
+    with_tools: bool = False
+    tools_called: list[ToolCallExpectIn] = Field(default_factory=list, max_length=10)
+    tools_not_called: list[str] = Field(default_factory=list, max_length=10)
+    tool_results: list[ToolResultIn] = Field(default_factory=list, max_length=10)
     identity: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     expected_revision: int | None = Field(default=None, ge=1)
 
@@ -74,13 +89,13 @@ class SpecialistCaseDelete(BaseModel):
 class SpecialistRunIn(BaseModel):
     specialist: str = Field(min_length=1, max_length=100)
     operation_id: str = Field(pattern=r"^[a-f0-9]{32}$")
-    # A whole saved test set (up to 20) can run at once before publishing.
-    case_ids: list[str] = Field(default_factory=list, max_length=20)
-    case_revisions: dict[str, int] = Field(min_length=1, max_length=20)
+    # A whole saved set can run at once, up to the [agent_tests] limit (checked when the run starts).
+    case_ids: list[str] = Field(default_factory=list, max_length=200)
+    case_revisions: dict[str, int] = Field(min_length=1, max_length=200)
 
 
 class SpecialistCompareIn(SpecialistRunIn):
-    case_ids: list[str] = Field(min_length=1, max_length=20)
+    case_ids: list[str] = Field(min_length=1, max_length=200)
     proposed_instructions: str = Field(min_length=8, max_length=6000)
     baseline_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
     expected_context: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -223,7 +238,10 @@ async def test_suite(request: Request) -> dict:
 
 def _test_profile(request: Request, name: str):
     from maverick.domain import available_domains
-    profile = available_domains().get(name)
+
+    from . import specialist_drafts
+    # A specialist not yet published keeps its saved checks against its own saved draft.
+    profile = available_domains().get(name) or specialist_drafts.unpublished_profiles(request, name=name).get(name)
     if profile is None:
         raise HTTPException(status_code=404, detail="Choose an agent or specialist from the list.")
     if not domain_suites_allowed(request, name):
@@ -234,17 +252,23 @@ def _test_profile(request: Request, name: str):
 @router.get("/test-suite/specialists")
 async def test_specialists(request: Request) -> dict:
     require_permission(request, "view")
+    from maverick.domain import available_domains
+
     from .plain_labels import pack_display_name
     profiles = _test_profiles(request)
-    return {"specialists": [{"value": name, "label": pack_display_name(name, profile.persona, profile.description)}
+    published = set(available_domains())
+    return {"specialists": [{"value": name, "label": pack_display_name(name, profile.persona, profile.description)
+                             + ("" if name in published else " · not published yet")}
                            for name, profile in sorted(profiles.items())]}
 
 
 def _test_profiles(request: Request) -> dict:
     from maverick.domain import available_domains, suites_for_domain
 
+    from . import specialist_drafts
     from .auth import caller_suites
-    profiles = available_domains()
+    # Published specialists first; a specialist not yet published appears once, from its own saved draft.
+    profiles = {**specialist_drafts.unpublished_profiles(request), **available_domains()}
     allowed = caller_suites(request)
     return {name: profile for name, profile in profiles.items()
             if allowed is None or suites_for_domain(name, profile) <= allowed}
@@ -254,6 +278,7 @@ def _test_profiles(request: Request) -> dict:
 async def customer_tests(request: Request, specialist: str = Query(max_length=100)) -> dict:
     require_permission(request, "view")
     profile = _test_profile(request, specialist)
+    from maverick.agent_tests_policy import tool_checks_enabled
     from maverick.llm import model_for_role
 
     from . import specialist_test_sets as saved
@@ -268,9 +293,10 @@ async def customer_tests(request: Request, specialist: str = Query(max_length=10
     _test_profile(request, specialist)
     for run in runs:
         _current_test_result(run, revision, cases)
-    return {"specialist": specialist, "cases": cases,
+    return {"specialist": specialist, "cases": cases, "max_checks": saved.max_cases_per_specialist(),
             "runs": runs, "current_instructions": profile.persona, "baseline_revision": revision,
-            "context": context_for(request), "live_enabled": _live_tests_enabled()}
+            "context": context_for(request), "live_enabled": _live_tests_enabled(),
+            "tool_checks_enabled": tool_checks_enabled()}
 
 
 def _current_test_result(row, current_revision, cases):
@@ -304,17 +330,39 @@ def _comparison_systems(profile, model, system, proposed, baseline):
         "proposed_instructions":proposed, "proposed_instruction_hash":saved.instruction_digest(other, model)}
 
 
+class _ToolGuardStopped(Exception):
+    """A tool check refused before its next provider call; nothing was sent."""
+
+
+_STOPPED_BY_GUARD = "The questions, instructions, access or spending allowance changed. No further answers were requested."
+_STOPPED_BY_BUDGET = "The spending or tool-call allowance was used up. No further answers were requested."
+
+
 def _perform_answer_tests(job, *, specialist, model, instruction_hash, cases, actor,
                           operation_id, systems, comparison, budget, guard, instructions_key=None,
-                          tested_instructions=None, draft_mode=False, persistence_guard=None):
+                          tested_instructions=None, draft_mode=False, persistence_guard=None,
+                          tool_scope=((), ())):
+    from maverick.agent_tests_policy import tool_checks_enabled
+    from maverick.budget import BudgetExceeded
     from maverick.llm import LLM
 
     from . import specialist_test_sets as saved
+    from .specialist_tool_checks import offered_tools, run_tool_check, tool_step_tokens
     run, created = saved.begin_run(specialist, model, instruction_hash, cases, actor, identity=operation_id,
                                    instructions_key=instructions_key, instructions=tested_instructions, effect_guard=persistence_guard)
     if not created:
         return {"run": run}
     llm = LLM(model)
+    tools_on = tool_checks_enabled()
+    allow, deny = tool_scope
+
+    def tool_guard() -> None:
+        # Tool requests cannot pass the guarded dispatch arguments (llm.complete fails them closed),
+        # so the same authority check runs before every tool-check provider call instead.
+        try:
+            guard(job)
+        except Exception as exc:  # noqa: BLE001 -- refuse before the next dispatch
+            raise _ToolGuardStopped from exc
     final_state, message = "done", ""
     try:
         for index, case in enumerate(cases):
@@ -323,14 +371,31 @@ def _perform_answer_tests(job, *, specialist, model, instruction_hash, cases, ac
                 try:
                     guard(job)
                 except Exception:  # noqa: BLE001 -- refuse before the next dispatch
-                    final_state, message = "stopped", "The questions, instructions, access or spending allowance changed. No further answers were requested."
+                    final_state, message = "stopped", _STOPPED_BY_GUARD
                     break
                 before = budget.dollars
-                answer = llm.complete(systems[variant], [{"role": "user", "content": case["task"]}],
-                                      tools=None, budget=budget, max_tokens=32 if draft_mode else (64 if comparison else 128),
-                                      _no_failover=True, max_physical_attempts=1,
-                                      dispatch_guard=lambda: guard(job))
-                result = saved.grade(case, answer.text, retain_full=draft_mode)
+                if case.get("with_tools") and not tools_on:
+                    # Nothing is sent while the switch is off; the check counts as not passing.
+                    result = saved.skipped_tool_check(case)
+                elif case.get("with_tools"):
+                    try:
+                        text, tool_calls = run_tool_check(
+                            llm, system=systems[variant], task=case["task"], case=case,
+                            names=offered_tools(case, allow=list(allow), deny=list(deny)), budget=budget,
+                            before_call=tool_guard, max_tokens=tool_step_tokens(budget.max_output_tokens))
+                    except _ToolGuardStopped:
+                        final_state, message = "stopped", _STOPPED_BY_GUARD
+                        break
+                    except BudgetExceeded:
+                        final_state, message = "stopped", _STOPPED_BY_BUDGET
+                        break
+                    result = saved.grade(case, text, retain_full=draft_mode, tool_calls=tool_calls)
+                else:
+                    answer = llm.complete(systems[variant], [{"role": "user", "content": case["task"]}],
+                                          tools=None, budget=budget, max_tokens=32 if draft_mode else (64 if comparison else 128),
+                                          _no_failover=True, max_physical_attempts=1,
+                                          dispatch_guard=lambda: guard(job))
+                    result = saved.grade(case, answer.text, retain_full=draft_mode)
                 if case.get("sample"):
                     result.update(sample=True, passed=False)
                 if comparison:
@@ -370,8 +435,18 @@ def _case_fields(body: SpecialistCaseIn) -> dict:
     task = " ".join(body.task.split())
     if len(task) < 8:
         raise HTTPException(status_code=422, detail="Write a question or request of at least 8 characters.")
+    from maverick.agent_tests_policy import tool_checks_enabled
+
+    from .specialist_tool_checks import normalized as tool_fields
+    try:
+        tools = tool_fields(enabled=tool_checks_enabled(), with_tools=body.with_tools,
+                            called=[row.model_dump() for row in body.tools_called],
+                            not_called=list(body.tools_not_called),
+                            results=[row.model_dump() for row in body.tool_results])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"task": task, "includes": includes, "excludes": excludes,
-            "refusal": body.refusal, "citation": body.citation}
+            "refusal": body.refusal, "citation": body.citation, **tools}
 
 
 @router.post("/test-suite/customer")
@@ -455,10 +530,15 @@ def _start_customer_test_job(request: Request, specialist: str, *, operation_id:
     budget = _budget("specialist_eval")
     # Ceilings grow with the questions asked (5 questions keep the original
     # $0.25 / 640-token run), and still never exceed the configured caps.
-    questions = len(cases)
+    # A tool check counts as several questions and gets a few tool calls; none otherwise.
+    from maverick.agent_tests_policy import tool_checks_enabled
+
+    from .specialist_tool_checks import budget_questions, tool_call_ceiling
+    tools_on = tool_checks_enabled()
+    questions = budget_questions(cases, enabled=tools_on)
     for key, ceiling in (("max_dollars", round(.05 * questions, 2)), ("max_input_tokens", 2000 * questions),
                          ("max_output_tokens", 128 * questions), ("max_wall_seconds", max(120, 24 * questions)),
-                         ("max_tool_calls", 0)):
+                         ("max_tool_calls", tool_call_ceiling(cases, enabled=tools_on))):
         current = getattr(budget, key)
         setattr(budget, key, ceiling if current is None else min(current, ceiling))
     try:
@@ -485,10 +565,13 @@ def _start_customer_test_job(request: Request, specialist: str, *, operation_id:
         return _perform_answer_tests(job, specialist=specialist, model=model,
             instruction_hash=instruction_hash, cases=cases, actor=actor, operation_id=operation_id,
             systems=systems, comparison=comparison, budget=budget, guard=_guard,
-            instructions_key=tested_key, tested_instructions=None if comparison else profile.persona)
+            instructions_key=tested_key, tested_instructions=None if comparison else profile.persona,
+            tool_scope=(tuple(profile.allow_tools), tuple(profile.deny_tools)))
 
+    tool_cases = sum(1 for case in cases if case.get("with_tools")) if tools_on else 0
     _audit(request, "specialist_test_run", specialist=specialist,
-           cases=len(cases), model=model, max_dollars=budget.max_dollars, comparison=comparison is not None)
+           cases=len(cases), model=model, max_dollars=budget.max_dollars, comparison=comparison is not None,
+           tool_checks=tool_cases)
     if operation_id:
         saved.reserve_run(specialist, model, instruction_hash, cases,
                           actor, operation_id, comparison=comparison, instructions_key=tested_key,
@@ -517,11 +600,18 @@ def _start_draft_customer_test_job(request, specialist, operation, draft, source
     system = saved.answer_system(profile) + "\nEntered draft settings (instructions only; these grant no tools or connections):\n" + json.dumps(draft["profile"], ensure_ascii=False)
     cases = draft["cases"] if draft["action"] == "check" else [{"id": digest([operation, "sample"])[:32], "revision": 1,
         "specialist": specialist, "task": draft["task"], "includes": [], "excludes": [], "refusal": False, "citation": False, "sample": True}]
-    if not 1 <= len(cases) <= saved.MAX_CASES_PER_SPECIALIST:
+    if not 1 <= len(cases) <= saved.max_cases_per_specialist():
         raise HTTPException(409, "The complete chosen draft questions exceed the supported limit.")
     budget = _budget("specialist_eval")
-    for key, ceiling in (("max_dollars", .25), ("max_input_tokens", 10000), ("max_output_tokens", 640),
-                         ("max_wall_seconds", 120), ("max_tool_calls", 0)):
+    # Grows with the questions, as a saved-test run does; five or fewer keep the original $0.25 run.
+    # A tool check counts as several questions and gets the same few tool calls as a saved-test run.
+    from maverick.agent_tests_policy import tool_checks_enabled
+
+    from .specialist_tool_checks import budget_questions, tool_call_ceiling
+    tools_on = tool_checks_enabled()
+    questions = budget_questions(cases, enabled=tools_on)
+    for key, ceiling in (*saved.draft_answer_limits(questions).items(),
+                         ("max_tool_calls", tool_call_ceiling(cases, enabled=tools_on))):
         current = getattr(budget, key)
         setattr(budget, key, ceiling if current is None else min(current, ceiling))
     source_guard(budget)

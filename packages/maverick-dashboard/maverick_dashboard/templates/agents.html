@@ -560,7 +560,7 @@
       <section class="panel" id="specialist-drafts" data-specialist-drafts aria-labelledby="specialist-drafts-title" style="margin-top: var(--space-4);">
         <h3 id="specialist-drafts-title">Preview, try and publish</h3>
         <p>Keep a draft before changing the {{ kind_word }} people use. Preview shows every entered setting together with the other settings being preserved.</p>
-        <p>Answer checks send the draft instructions and fictional questions to your configured AI service. They use no tools, files, company knowledge or shared learning. A plausible answer does not prove connected actions work.</p>
+        <p>Answer checks send the draft instructions and fictional questions to your configured AI service. They use no real tools, files, company knowledge or shared learning. Checks that test tool use get recording test stubs that run nothing real. A plausible answer does not prove connected actions work.</p>
         <label for="sd-title">Draft name (optional)</label><input class="input" id="sd-title" data-sd-title maxlength="120" placeholder="For example, Clearer invoice follow-up">
         <div class="af-actions" style="margin-block: var(--space-3);">
           <button class="btn" type="button" data-sd-action="preview">Preview entered draft</button>
@@ -660,7 +660,7 @@
   {% endif %}
 
   <script src="/static/lightwork-department-team-updates.js"></script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // ---- shared page helpers: plain errors, readable names, action pickers ----
     function plainError(failure, what) {
       return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
@@ -1167,8 +1167,8 @@
 
   {% if (selected or creating) and editable %}
   {# Server values for the editor script below, so that script stays plain JavaScript. #}
-  <script type="application/json" id="agent-editor-data">{{ {"services": (selected.mcp_servers if selected else []), "model_options": (model_options | default([])), "model_roles": (model_roles | default([])), "models": (selected.models if selected else {})} | tojson }}</script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}" type="application/json" id="agent-editor-data">{{ {"services": (selected.mcp_servers if selected else []), "model_options": (model_options | default([])), "model_roles": (model_roles | default([])), "models": (selected.models if selected else {})} | tojson }}</script>
+  <script nonce="{{ csp_script_nonce }}">
     // ---- save / validate / reset (real agent-override endpoints) ----
     (function () {
       const form = document.getElementById('agent-form');
@@ -1698,7 +1698,7 @@
       <div class="jc-sec"><h3>Tools it can use</h3><div class="jc-chips" id="jc-tools"></div></div>
     </div>
   </dialog>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     var NAME = {{ selected.name | tojson }};

@@ -20,10 +20,15 @@ class _BinderWorld:
     def __init__(self, approvals: list[SimpleNamespace]) -> None:
         self.approvals = approvals
         self.requested_limit: int | None = None
+        self.requested_window: tuple[float, float] | None = None
 
     def list_approvals(self, limit: int = 500) -> list[SimpleNamespace]:
         self.requested_limit = limit
         return list(self.approvals)
+
+    def approvals_requested_between(self, since: float, until: float) -> list[SimpleNamespace]:
+        self.requested_window = (since, until)
+        return [a for a in self.approvals if since <= float(a.requested_at or 0) <= until]
 
     def approval_state(self, approval_id: int) -> dict[str, object]:
         return {
@@ -32,6 +37,9 @@ class _BinderWorld:
             "audit_pending_count": 0,
             "effective": False,
         }
+
+    def approval_states(self, approvals) -> dict[int, dict[str, object]]:
+        return {approval.id: self.approval_state(approval.id) for approval in approvals}
 
 
 def _approval(approval_id: int, requested_at: float) -> SimpleNamespace:
@@ -237,7 +245,9 @@ def test_binder_exact_window_is_inclusive_uncapped_and_verifies_each_segment_onc
     assert {1, 1_000}.issubset(approval_ids)
     assert payload["approvals_total"] == 303
     assert payload["approvals_truncated"] is False
-    assert observed.world.requested_limit == 2_147_483_647
+    assert observed.world.requested_window == (
+        payload["window"]["since"], payload["window"]["until"],
+    )
 
     assessment_ids = {row["id"] for row in payload["assessments"]}
     assert {"before", "after"}.isdisjoint(assessment_ids)
@@ -364,3 +374,47 @@ def test_binder_json_response_is_no_store_attachment(
         'attachment; filename="lightwork-audit-binder-0123456789abcdef.json"'
     )
     assert response.json()["window_days"] == 30
+
+
+def test_binder_quorum_state_is_read_in_one_batch_and_matches_per_approval_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from maverick.safety import dual_control
+    from maverick.world_model import WorldModel
+
+    now = 1_800_000_000.0
+    _install_binder_sources(monkeypatch, tmp_path, now=now, segments={})
+    monkeypatch.setattr(dual_control, "allow_self_approval", lambda: False)
+    world = WorldModel(tmp_path / "world.db")
+    monkeypatch.setattr(dashboard_api, "_world", lambda: world)
+    quorum = world.create_approval(
+        "wire $1M", risk="critical", approvals_required=2, requested_by="u:req",
+    )
+    world.decide_approval(quorum, "approved", decided_by="u:alice")
+    world.decide_approval(quorum, "approved", decided_by="u:bob")
+    refund = world.create_approval("refund $20", risk="medium", approvals_required=1)
+    world.decide_approval_audited(refund, "approved", decided_by="u:carol")
+    expected = {a.id: world.approval_state(a.id) for a in world.list_approvals(limit=50)}
+
+    per_id_reads: list[int] = []
+    real_state = WorldModel.approval_state
+
+    def counting_state(self, approval_id):
+        per_id_reads.append(approval_id)
+        return real_state(self, approval_id)
+
+    monkeypatch.setattr(WorldModel, "approval_state", counting_state)
+    rows = {row["id"]: row for row in dashboard_api._binder_payload(days=1)["approvals"]}
+
+    assert per_id_reads == []
+    assert set(rows) == set(expected) == {quorum, refund}
+    for approval_id, state in expected.items():
+        row = rows[approval_id]
+        assert row["approved_count"] == state["approved_count"]
+        assert row["approvers"] == state["approvers"]
+        assert row["audit_pending_count"] == state["audit_pending_count"]
+        assert row["effective"] == state["effective"]
+    assert rows[quorum]["approvers"] == ["u:alice", "u:bob"]
+    assert rows[quorum]["effective"] is True
+    assert rows[refund]["audit_pending_count"] == 1

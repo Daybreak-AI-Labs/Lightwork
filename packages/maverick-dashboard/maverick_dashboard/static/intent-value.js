@@ -38,7 +38,16 @@
     const version = ++generation;
     $('iv-status').textContent = 'Refreshing authorized work and execution evidence…';
     $('iv-report').hidden = true; $('iv-error').hidden = true; $('iv-retry').hidden = true;
+    if (!$('iv-device').checkValidity()) {
+      // The device name goes with the sync and the suggestions, so a malformed one is refused before any request.
+      $('iv-status').textContent = 'Report unavailable; no zero-value claim was made.';
+      error(new Error('Enter the name of an enrolled Ekko device, using letters, numbers, dots, dashes, colons or underscores, then review its observations again.'));
+      return;
+    }
     try {
+      // Reads never record work. Recording newly observed work is the explicit sync, so the page syncs first.
+      const synced = await request('/sync?device_id=' + encodeURIComponent($('iv-device').value), 'POST', {});
+      if (version !== generation) return;
       const [metrics, config, defaults, suggestions] = await Promise.all([
         request('?' + filters()), request('/settings'), request('/benchmarks'),
         request('/opportunities?include_decided=' + $('iv-decided').checked + '&device_id=' + encodeURIComponent($('iv-device').value))
@@ -47,7 +56,7 @@
       report = metrics; settings = config; benchmarks = defaults.benchmarks; proposals = suggestions.opportunities; external = suggestions.external_observations;
       recommendationNotice = suggestions.recommendations_enabled === false ? suggestions.notice : '';
       render(); $('iv-report').hidden = false;
-      $('iv-status').textContent = 'Current ' + (report.scope === 'company' ? 'company' : 'personal') + ' report, checked ' + new Date(report.checked_at * 1000).toLocaleString() + '.';
+      $('iv-status').textContent = 'Current ' + (report.scope === 'company' ? 'company' : 'personal') + ' report, checked ' + new Date(synced.checked_at * 1000).toLocaleString() + '.';
     } catch (err) { if (version === generation) { $('iv-status').textContent = 'Report unavailable; no zero-value claim was made.'; error(err); } }
   }
   function options(select, rows, empty) {

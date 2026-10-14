@@ -61,7 +61,7 @@
 <script src="/static/cytoscape-3.30.2.min.js"
         integrity="sha384-IWROdLKRsN1UuJywMlWl7/blXQ8GEooN2n7dzTxfEPd7ybYIKCUJ2Ol/1Gpf3YV4" {# pragma: allowlist secret #}
         crossorigin="anonymous"></script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
   // Interactive plan-tree: fetch /api/v1/goals/{id}/tree, render with
   // Cytoscape, and poll for live updates while the goal is running.
   (function() {

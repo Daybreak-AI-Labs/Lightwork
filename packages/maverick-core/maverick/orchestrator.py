@@ -2031,6 +2031,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                         "goal_id": goal_id, "status": "blocked", "result": msg,
                     })
                     return msg
+                # A changed specialist may be on trial: this goal runs the trial
+                # version only when its recorded choice says so (see specialist_canary).
+                from .specialist_canary import profile_for_goal
+                _profile, _ = profile_for_goal(domain, _profile, goal_id, world=world, resume=resume)
                 if (allowed_suites is not None
                         and not suites_for_domain(domain, _profile) <= allowed_suites):
                     msg = ("This specialist is outside your department access. "

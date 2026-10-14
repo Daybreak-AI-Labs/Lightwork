@@ -97,6 +97,11 @@ _KEPT_WRAPPERS = {
     # Loaded by both shells and tested on its own without lightwork-ui.js; it
     # tells a refusal from a blocked request in its own words.
     ("lightwork-pins.js", "change"),
+    # The public website chat widget runs on customers' sites from one script
+    # tag, where lightwork-ui.js and window.mvFetchJSON do not exist. Its
+    # request is cross-origin with no cookies, and it reads the status and the
+    # body to show its own words.
+    ("lightwork-public-chat-widget.js", "post"),
 }
 
 # Status-line setters that still write the text themselves, each named with

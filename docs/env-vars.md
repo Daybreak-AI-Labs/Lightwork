@@ -160,6 +160,8 @@ these drive the *platform's own* Stripe account to bill tenants.
 | `MAVERICK_STRIPE_ENABLE` | config `[billing.stripe] enable` (off) | Master switch for platform billing collection. Even on, nothing charges until a secret key is present. |
 | `MAVERICK_STRIPE_SECRET_KEY` | — | The platform Stripe secret key (`sk_...`). Resolved through the secret provider; NEVER read from config or logged. Required to create customers/subscriptions and push usage. |
 | `MAVERICK_STRIPE_WEBHOOK_SECRET` | — | Webhook signing secret (`whsec_...`) used to verify inbound Stripe events (stdlib HMAC; no SDK needed). A verified `invoice.payment_failed` / past-due subscription downgrades the tenant to the base entitlement tier; a recovered payment restores it. |
+| `MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN` | — | Zendesk API token for contact-centre handoffs (see `docs/contact-centre-handoff.md` in the repository). Resolved through the secret provider; overrides the sealed value saved in Settings. Never logged. |
+| `MAVERICK_CONTACT_CENTRE_WEBHOOK_SECRET` | — | Signing secret for contact-centre webhook handoffs. Resolved through the secret provider; overrides the sealed value saved in Settings. Without it nothing is sent to the webhook. |
 | `MAVERICK_STRIPE_BILL_METERED` | config `[billing.stripe] bill_metered_usage` (off) | **Pricing decision pending.** Off bills only the recurring platform-fee subscription; on also pushes the metered model-usage line items. No markup is set here — amounts come from whatever `RateCard` rated the invoice. |
 
 ### Fleet queue
@@ -320,8 +322,12 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_RESIDENCY_STRICT` | config `[residency] strict` (off) | Refuse to boot when the declared data region is missing or outside the allowed set (`require_residency_or_die`). Off = informational only. |
 | `MAVERICK_DATA_REGION` | config `[residency] region` | The deployment's declared data region (ISO code or group, e.g. `DE`, `EU`). |
 | `MAVERICK_RESIDENCY_ALLOWED` | config `[residency] allowed_regions` | Comma-separated permitted storage regions; `EU`/`EEA` groups expand to members. Empty = region unconstrained. |
-| `MAVERICK_SIEM_DEST` | config `[audit] siem_dest` | Destination for `maverick audit forward`: `tcp://host:port` / `udp://host:port` (syslog) or `http(s)://host/path` (Splunk HEC `/raw`, etc.). |
+| `MAVERICK_SIEM_DEST` | config `[audit] siem_dest` | Destination for `maverick audit forward`: `tcp://host:port` / `udp://host:port` (syslog), `http(s)://host/path` (Splunk HEC `/raw`, etc.), `datadog://<site>` (Datadog Logs intake for a documented site such as `datadoghq.com` or `datadoghq.eu`), or `sentinel://<dce-host>/<dcr-immutable-id>/Custom-<stream>` (Microsoft Sentinel through the Azure Monitor Logs Ingestion API; the host must end in `.monitor.azure.com`). The Sentinel DCR stream must declare `TimeGenerated` (datetime) and `RawData` (string). Each line becomes one row with the event time from its `ts` field, or now. A Datadog log over 1,000,000 bytes or a Sentinel line over 64,000 bytes is refused instead of truncated (the vendors do not define MB or KB, so the smaller decimal reading is used; the Sentinel call is capped at 1,000,000 bytes). |
 | `MAVERICK_SIEM_TOKEN` | — | Bearer sent on HTTP(S) audit forwarding (read via the secret provider). |
+| `MAVERICK_DATADOG_API_KEY` | config `[audit] datadog_api_key` | Datadog API key for `datadog://` forwarding, sent in the `DD-API-KEY` header (read via the secret provider; never logged or put in the URI). |
+| `MAVERICK_SENTINEL_TENANT_ID` | config `[audit] sentinel_tenant_id` | Microsoft Entra directory (tenant) ID for `sentinel://` forwarding. |
+| `MAVERICK_SENTINEL_CLIENT_ID` | config `[audit] sentinel_client_id` | Application (client) ID of the Entra app registration that has the Monitoring Metrics Publisher role on the data collection rule. |
+| `MAVERICK_SENTINEL_CLIENT_SECRET` | config `[audit] sentinel_client_secret` | Client secret of that app registration (read via the secret provider; never logged). |
 
 ## Observability
 
@@ -330,10 +336,11 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_LOG_LEVEL` | `INFO` | Logging level. |
 | `MAVERICK_LOG_FORMAT` | `text` | Log format: `text` or `json`. |
 | `MAVERICK_LOG_TURNS` | unset | Set to log full LLM turns (verbose). |
-| `MAVERICK_OTEL_EXPORTER` | unset (off) | Set to enable the OpenTelemetry trace exporter. |
+| `MAVERICK_OTEL_EXPORTER` | unset (off) | Set to `otlp` to enable the OpenTelemetry trace exporter. `false`, `0`, `off`, `no` or blank keep it off, in the environment and in `[observability] otel_exporter` alike. |
 | `MAVERICK_OTEL_ENDPOINT` | `http://localhost:4318/v1/traces` | OTLP collector endpoint. |
+| `MAVERICK_OTEL_METRICS` | config `[observability] otlp_metrics` (off) | Also send the Prometheus series over OTLP to the same collector, under the same names. Needs `MAVERICK_OTEL_EXPORTER=otlp`; the metrics URL is the endpoint with `/v1/traces` replaced by `/v1/metrics`, so the endpoint must end in `/v1/traces`. |
 | `MAVERICK_RESIDENCY_REGION` | config `[residency] region` (unset) | Declare a data-residency requirement (e.g. `eu`). `maverick doctor` then warns about any residency-sensitive feature still defaulting to a US region (`AWS_REGION`→us-east-1, `VERTEX_LOCATION`→us-central1). No effect unset. |
-| `MAVERICK_PROMETHEUS_PORT` | unset (off) | Set a port to expose Prometheus metrics. |
+| `MAVERICK_PROMETHEUS_PORT` | unset (off) | Set a port to expose Prometheus metrics. `false`, `0`, `off`, `no` or blank keep it off. |
 | `MAVERICK_PROMETHEUS_ADDR` | `127.0.0.1` | Bind address for the Prometheus metrics server. |
 | `MAVERICK_ALERTS` | config `[alerts] enabled` (off) | Enable OPERATIONAL alerts — page the operator (via the configured notification backends) on infrastructure events like a killswitch trip or a deployment-wide provider cost-cap exhaustion. Distinct from agent-task notifications. |
 
@@ -433,6 +440,10 @@ variable still wins; with neither set, behaviour is unchanged.
 | `MAVERICK_FEDERATION_RATE_LIMIT` | `[federation] rate_limit` |
 | `MAVERICK_SIEM_TOKEN` | `[audit] siem_token` |
 | `MAVERICK_SIEM_ALLOW_INSECURE` | `[audit] siem_allow_insecure` |
+| `MAVERICK_DATADOG_API_KEY` | `[audit] datadog_api_key` |
+| `MAVERICK_SENTINEL_TENANT_ID` | `[audit] sentinel_tenant_id` |
+| `MAVERICK_SENTINEL_CLIENT_ID` | `[audit] sentinel_client_id` |
+| `MAVERICK_SENTINEL_CLIENT_SECRET` | `[audit] sentinel_client_secret` |
 | `MAVERICK_PUBLIC_BASE_URL` | `[channels] public_base_url` |
 
 `MAVERICK_SETTINGS_PATH_ROOTS` (deployment only) replaces the list of places a

@@ -853,6 +853,17 @@ def _approval_undo_marker_id(tenant_id: str | None, approval_id: int, undo_round
     return _approval_audit_event_id(tenant_id, approval_id, APPROVAL_UNDO_STATUS, "", undo_round)
 
 
+_EPISODE_SPEND_COLS = (
+    "e.id, e.goal_id, e.started_at, e.ended_at, e.outcome, "
+    "COALESCE(e.cost_dollars, 0) AS cost_dollars, "
+    "COALESCE(e.input_tokens, 0) AS input_tokens, "
+    "COALESCE(e.output_tokens, 0) AS output_tokens, "
+    "COALESCE(e.tool_calls, 0) AS tool_calls, "
+    "COALESCE(e.cache_read_tokens, 0) AS cache_read_tokens, "
+    "COALESCE(e.cache_write_tokens, 0) AS cache_write_tokens "
+)
+
+
 @dataclass
 class EpisodeSpend:
     id: int
@@ -1116,6 +1127,19 @@ def goals_by_id(world, goal_ids) -> dict:
     return found
 
 
+def episodes_by_goal_batch(world, goal_ids, *, per_goal: int) -> dict | None:
+    """``{goal_id: newest per_goal runs}`` in one read when the world can batch
+    (:meth:`WorldModel.episodes_by_goal`). ``None`` when it cannot, or when the
+    batch read fails, so the caller reads goal by goal as it did before."""
+    batch = getattr(world, "episodes_by_goal", None)
+    if not callable(batch):
+        return None
+    try:
+        return batch(goal_ids, per_goal=per_goal)
+    except Exception:
+        return None
+
+
 def _goal_event_from_row(row) -> GoalEvent:
     """Build a GoalEvent from a row, decrypting the sealed content field."""
     d = dict(row)
@@ -1191,6 +1215,20 @@ def _single_approver(approval, approvers: list[str]) -> list[str]:
     ):
         return [approval.decided_by]
     return approvers
+
+
+def _approval_state_view(approval, approvers: list[str], audit_pending: int) -> dict:
+    """The operator/UI quorum view of one approval (shared by the per-id and
+    the batched readers so both return the same shape and values)."""
+    return {
+        "status": approval.status,
+        "approvals_required": max(1, int(approval.approvals_required or 1)),
+        "approved_count": len(approvers),
+        "approvers": approvers,
+        "requested_by": approval.requested_by,
+        "audit_pending_count": audit_pending,
+        "effective": approval.status != "pending",
+    }
 
 
 def _approval_audit_event_from_row(row) -> ApprovalAuditEvent:
@@ -2622,6 +2660,35 @@ class WorldModel:
         rows = self._read_all(sql, params)
         return _goals_from_rows(rows)
 
+    def goal_states(self, *, owner: str | None = None, limit: int = 10_000,
+                    offset: int = 0, order: str = "asc") -> list[tuple[int, str, float | None]]:
+        """``(id, status, updated_at)`` for the goals ``list_goals`` returns for
+        the same owner, limit, offset and order, read without decrypting any
+        goal (the callers only count, compare or page on these columns)."""
+        direction = "DESC" if order.lower() == "desc" else "ASC"
+        where = " WHERE owner = ?" if owner is not None else ""
+        params = (owner,) if owner is not None else ()
+        rows = self._read_all(
+            f"SELECT id, status, updated_at FROM goals{where} ORDER BY id {direction} LIMIT ? OFFSET ?",
+            (*params, max(1, int(limit)), max(0, int(offset))),
+        )
+        return [(int(row[0]), row[1], row[2]) for row in rows]
+
+    def goals_due_by(self, horizon: float, *, owner: str | None = None,
+                     limit: int = 2000) -> list[Goal]:
+        """The pending or active goals with a non-zero deadline at or before
+        ``horizon`` among the ``limit`` oldest goals (owner-scoped), oldest
+        first. Filtering happens before decryption, so only matches are decoded."""
+        where = " WHERE owner = ?" if owner is not None else ""
+        params = (owner,) if owner is not None else ()
+        rows = self._read_all(
+            "SELECT * FROM (SELECT * FROM goals" + where + " ORDER BY id ASC LIMIT ?) "
+            "WHERE status IN ('pending', 'active') AND deadline IS NOT NULL "
+            "AND deadline != 0 AND deadline <= ? ORDER BY id ASC",
+            (*params, max(1, int(limit)), float(horizon)),
+        )
+        return _goals_from_rows(rows)
+
     def list_goal_results(self, *, owner: str, limit: int = 26,
                           offset: int = 0) -> list[Goal]:
         """Completed root tasks with saved output for the owner's Results page.
@@ -2857,15 +2924,7 @@ class WorldModel:
         Without this filter ``/api/v1/spend`` returned every user's runs + cost
         to any caller.
         """
-        cols = (
-            "e.id, e.goal_id, e.started_at, e.ended_at, e.outcome, "
-            "COALESCE(e.cost_dollars, 0) AS cost_dollars, "
-            "COALESCE(e.input_tokens, 0) AS input_tokens, "
-            "COALESCE(e.output_tokens, 0) AS output_tokens, "
-            "COALESCE(e.tool_calls, 0) AS tool_calls, "
-            "COALESCE(e.cache_read_tokens, 0) AS cache_read_tokens, "
-            "COALESCE(e.cache_write_tokens, 0) AS cache_write_tokens "
-        )
+        cols = _EPISODE_SPEND_COLS
         join = ("FROM episodes e JOIN goals g ON e.goal_id = g.id "
                 if owner is not None else "FROM episodes e ")
         where, params = [], []
@@ -2881,6 +2940,46 @@ class WorldModel:
         sql += "ORDER BY e.started_at DESC LIMIT ?"
         params.append(limit)
         rows = self._read_all(sql, tuple(params))
+        return _episode_spends_from_rows(rows)
+
+    def episodes_by_goal(self, goal_ids, *, per_goal: int = 50) -> dict[int, list[EpisodeSpend]]:
+        """The newest ``per_goal`` runs of each listed goal, newest first: the
+        rows ``list_episodes(goal_id=..., limit=per_goal)`` returns for each
+        goal, in the same order. Each goal is read by its own query, which the
+        (goal_id, started_at) index stops after ``per_goal`` rows, so a goal
+        with many runs is never read in full; the rows are then decoded in one
+        pass, resolving the encryption policy and keys once for all of them.
+        Every listed goal is a key, with an empty list when it has no runs.
+        """
+        ids = list(dict.fromkeys(int(goal_id) for goal_id in goal_ids))
+        limit = int(per_goal)   # passed to LIMIT as list_episodes does, so 0 and negatives match it
+        rows: list = []
+        for gid in ids:
+            rows.extend(self._read_all(
+                "SELECT " + _EPISODE_SPEND_COLS + "FROM episodes e WHERE e.goal_id = ? "
+                "ORDER BY e.started_at DESC LIMIT ?",
+                (gid, limit),
+            ))
+        found: dict[int, list[EpisodeSpend]] = {gid: [] for gid in ids}
+        for episode in _episode_spends_from_rows(rows):
+            found[episode.goal_id].append(episode)
+        return found
+
+    def episodes_for_owner_goals(self, owner: str, *, goal_limit: int = 10_000,
+                                 limit: int = 500) -> list[EpisodeSpend]:
+        """The owner's runs for their newest ``goal_limit`` goals: newest goal
+        first, newest run first within a goal, at most ``limit`` rows.
+
+        Same rows and order as ``list_goals(owner=..., limit=goal_limit,
+        order="desc")`` followed by ``list_episodes(goal_id=...)`` for each goal
+        until ``limit`` rows, in one query and one decode.
+        """
+        rows = self._read_all(
+            "SELECT " + _EPISODE_SPEND_COLS + "FROM episodes e JOIN ("
+            "SELECT id FROM goals WHERE owner = ? ORDER BY id DESC LIMIT ?"
+            ") g ON e.goal_id = g.id ORDER BY g.id DESC, e.started_at DESC LIMIT ?",
+            (owner, max(1, int(goal_limit)), max(1, int(limit))),
+        )
         return _episode_spends_from_rows(rows)
 
     def episode_costs_since(self, since: float, *, limit: int = 100_000) -> list[tuple[str, float, float]]:
@@ -3629,6 +3728,17 @@ class WorldModel:
         )
         return _approvals_from_rows(rows)
 
+    def approvals_requested_between(self, since: float, until: float) -> list[Approval]:
+        """Approvals with ``since <= requested_at <= until``, in the order
+        :meth:`list_approvals` returns them. The window is applied in SQL, so
+        rows outside it are never decrypted (the audit binder reads one window)."""
+        rows = self._read_all(
+            "SELECT * FROM approvals WHERE requested_at >= ? AND requested_at <= ? "
+            "ORDER BY requested_at DESC, id DESC",
+            (float(since), float(until)),
+        )
+        return _approvals_from_rows(rows)
+
     def pending_approvals(self) -> list[Approval]:
         rows = self._read_all(
             "SELECT * FROM approvals WHERE status = 'pending' ORDER BY id"
@@ -4205,7 +4315,7 @@ class WorldModel:
             return None
         rows = self._read_all(
             "SELECT approver, decision FROM approval_signoffs "
-            "WHERE approval_id = ? ORDER BY decided_at", (approval_id,),
+            "WHERE approval_id = ? ORDER BY decided_at, approver", (approval_id,),
         )
         approvers = [r["approver"] for r in rows if r["decision"] == "approved"]
         approvers = _single_approver(appr, approvers)
@@ -4216,14 +4326,39 @@ class WorldModel:
                 (approval_id,),
             )[0]
         )
+        return _approval_state_view(appr, approvers, audit_pending)
+
+    def approval_states(self, approvals) -> dict[int, dict]:
+        """:meth:`approval_state` for approvals the caller has already listed,
+        in two queries for the whole set instead of three per approval (the
+        audit binder spent ~1.2 ms per approval re-reading each one). Each
+        value equals ``approval_state(id)`` for that approval."""
+        listed = {int(a.id): a for a in approvals}
+        approvers: dict[int, list[str]] = {approval_id: [] for approval_id in listed}
+        pending: dict[int, int] = dict.fromkeys(listed, 0)
+        ids = list(listed)
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            marks = ",".join("?" * len(chunk))
+            for approval_id, approver, decision in self._read_all(
+                "SELECT approval_id, approver, decision FROM approval_signoffs "
+                f"WHERE approval_id IN ({marks}) ORDER BY decided_at, approver",
+                tuple(chunk),
+            ):
+                if decision == "approved":
+                    approvers[approval_id].append(approver)
+            for approval_id, count in self._read_all(
+                "SELECT approval_id, COUNT(*) FROM approval_audit_outbox "
+                f"WHERE approval_id IN ({marks}) AND delivered_at IS NULL "
+                "GROUP BY approval_id",
+                tuple(chunk),
+            ):
+                pending[approval_id] = int(count)
         return {
-            "status": appr.status,
-            "approvals_required": max(1, int(appr.approvals_required or 1)),
-            "approved_count": len(approvers),
-            "approvers": approvers,
-            "requested_by": appr.requested_by,
-            "audit_pending_count": audit_pending,
-            "effective": appr.status != "pending",
+            approval_id: _approval_state_view(
+                appr, _single_approver(appr, approvers[approval_id]), pending[approval_id]
+            )
+            for approval_id, appr in listed.items()
         }
 
     def claim_approval(self, approval_id: int, principal: str) -> bool:

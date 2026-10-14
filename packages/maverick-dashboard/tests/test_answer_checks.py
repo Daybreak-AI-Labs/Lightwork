@@ -177,6 +177,10 @@ def test_the_first_answer_after_a_change_tells_the_person_what_changed(world):
     notice = _text(body.split('id="answer-agent-notice"', 1)[1].split("</div>", 1)[0])
     assert "This specialist changed since you last used it:" in notice and "Changed its instructions" in notice
     assert "Hide this notice" in notice and "alice" not in notice
+    # The refreshed panel carries the notice with no script: the page's refresh
+    # refuses any fetched panel that has one (lightwork-answer-panel.js).
+    panel = client.get(f"/chat/goal/{second}/answer-panel").text
+    assert 'id="answer-agent-notice"' in panel and "<script" not in panel
     time.sleep(0.01)
     third = _finish(world, "Any overdue POs today?", "One is overdue.")
     assert 'id="answer-agent-notice"' not in client.get(f"/chat/goal/{third}").text

@@ -64,7 +64,7 @@
     {% endfor %}{ display: none; }
   </style>
   <div id="settings-sections" data-settings-active="{{ settings_group }}" role="tabpanel" aria-labelledby="settings-tab-{{ settings_group }}">
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   // A link to /settings#settings-<group> (or an older section name) shows that
   // group, and selects its tab, from the first paint: the server cannot see
   // the address fragment. The page script below then takes over the tabs.
@@ -199,7 +199,7 @@
     </select></label>
     <p class="muted">Filters use reported evidence. Missing metadata does not mean a model lacks a capability. Other model (advanced) stays available and the approved-model policy still applies.</p>
     <p class="muted">Refresh model lists above checks availability with a bounded request; it does not run a paid generation or prove tool quality. Pricing is a dated planning reference, not a final invoice.</p>
-    <script type="application/json" id="model-guidance-data">{{ model_guidance|tojson }}</script>
+    <script nonce="{{ csp_script_nonce }}" type="application/json" id="model-guidance-data">{{ model_guidance|tojson }}</script>
   </div>
   {% endif %}
 
@@ -450,7 +450,7 @@
       </p>
       <p class="settings-foot"><button type="submit" class="btn">Save task limit</button></p>
     </form>
-    <script>
+    <script nonce="{{ csp_script_nonce }}">
     (function () {
       // A written error beside the amount, tied to the field, in place of the
       // browser's bubble: it says what is wrong and how to fix it.
@@ -497,7 +497,7 @@
   <div class="section-head" data-settings-group="integrations" id="settings-integrations"><h2>Provider keys</h2></div>
   <div class="panel" data-settings-group="integrations">
     <p class="muted settings-lead">
-      Connect the AI service your company uses. Azure and Bedrock can use the
+      Connect the AI service your company uses. Azure, Bedrock and Vertex AI can use the
       server's company sign-in instead of a key. Keys are stored securely and
       never shown again. Leave a key or server address blank to keep its current value.
     </p>
@@ -507,7 +507,7 @@
         <div class="provider-row__name" id="provider-name-{{ p.name }}">{{ p.label }}</div>
         <div class="muted provider-row__meta">
           {% if p.configured %}Set up{% if p.via %}, {{ p.via|source_label }}{% endif %}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
-          {% elif p.name in ('azure', 'bedrock') %}Not ready yet. Enter the connection details below.
+          {% elif p.name in ('azure', 'bedrock', 'vertex') %}Not ready yet. Enter the connection details below.
           {% elif p.base_url_field %}Enter your model server's address. Add a key only if that service requires one.
           {% else %}No key yet. Paste one to use this provider.{% endif %}
           {% if p.source_errors %}<div><span class="badge blocked">Settings could not be read</span></div>{% endif %}
@@ -570,6 +570,17 @@
               <option value="api_key"{% if p.setup.auth_mode == 'api_key' %} selected{% endif %}>Bedrock access key</option>
             </select></label>
           <p class="muted provider-row__meta">This connection runs Claude through your AWS account. Choosing server sign-in removes a Bedrock key saved here. After saving, test the connection, choose this model under Models, and <a href="#settings-model-prices" data-settings-jump="models">review its spending ceiling</a>.</p>
+          {% elif p.name == 'vertex' %}
+          <label class="settings-field"><span>Google Cloud project ID</span>
+            <input class="input" name="project_id" value="{{ p.setup.project_id }}" maxlength="128" required placeholder="my-project-id"
+                   {% if p.setup_locked.project_id %}disabled{% endif %} /></label>
+          <label class="settings-field"><span>Vertex AI region</span>
+            <input class="input" name="region" value="{{ p.setup.region }}" maxlength="63" required placeholder="us-east5"
+                   {% if p.setup_locked.region %}disabled{% endif %} /></label>
+          <label class="settings-field"><span>Claude model in your Google Cloud project</span>
+            <input class="input" name="model_id" value="{{ p.setup.model_id }}" maxlength="120" required
+                   placeholder="Paste the model ID from Vertex AI Model Garden" {% if p.setup_locked.model_id %}disabled{% endif %} /></label>
+          <p class="muted provider-row__meta">This connection runs Claude through your Google Cloud project and signs in with the server's Google credentials, so no key is stored here. After saving, test the connection, choose this model under Models, and <a href="#settings-model-prices" data-settings-jump="models">review its spending ceiling</a>.</p>
           {% elif p.base_url_field %}
           <label class="settings-field">
             <span>Model server address</span>
@@ -580,14 +591,16 @@
           </label>
           <p class="muted provider-row__meta" id="provider-url-help-{{ p.name }}">{% if p.base_url %}Leave blank to keep the address above. Enter an address only to change it.{% else %}Use the address supplied by your model service.{% endif %}</p>
           {% endif %}
+          {% if p.name != 'vertex' %}
           <label class="settings-field">
             <span>{{ 'Azure resource key' if p.name == 'azure' else 'Bedrock access key' if p.name == 'bedrock' else 'Server access key (if required)' if p.base_url_field else p.label ~ ' key' }}</span>
             <input class="input" id="provider-key-{{ p.name }}" type="password" name="api_key"
                    placeholder="Paste your key" autocomplete="off"
                    {% if not p.dashboard_can_set_api_key %}disabled{% endif %} />
           </label>
+          {% endif %}
           <button type="submit" class="btn"
-                  {% if p.name not in ('azure', 'bedrock') and (not p.dashboard_can_set_api_key) and ((not p.base_url_field) or (not p.dashboard_can_set_base_url)) %}disabled aria-disabled="true"{% endif %}>Save</button>
+                  {% if p.name not in ('azure', 'bedrock', 'vertex') and (not p.dashboard_can_set_api_key) and ((not p.base_url_field) or (not p.dashboard_can_set_base_url)) %}disabled aria-disabled="true"{% endif %}>Save</button>
         </form>
         <div class="settings-row-form provider-row__buttons">
           {% if p.configured %}
@@ -595,7 +608,7 @@
             <input type="hidden" name="provider" value="{{ p.name }}" />
             <button type="submit" class="btn">Test connection</button>
           </form>
-          {% if p.name in ('azure', 'bedrock') %}<span class="muted provider-row__meta">This sends one small model request. Your provider may charge for it.</span>{% endif %}
+          {% if p.name in ('azure', 'bedrock', 'vertex') %}<span class="muted provider-row__meta">This sends one small model request. Your provider may charge for it.</span>{% endif %}
           {% endif %}
           {% if p.configured and p.discovery and p.discovery.supported and discovery_enabled %}
           <form method="post" action="/settings/models/discover">
@@ -606,7 +619,7 @@
           {% if p.dashboard_set %}
           <form method="post" action="/settings/providers/clear" data-confirm="Remove the saved {{ p.label }} setup? Tasks using this provider will stop until you set it up again." data-confirm-ok="Remove setup">
             <input type="hidden" name="provider" value="{{ p.name }}" />
-            <button type="submit" class="btn btn--danger">{{ 'Remove setup' if p.name in ('azure', 'bedrock') else 'Remove key' }}</button>
+            <button type="submit" class="btn btn--danger">{{ 'Remove setup' if p.name in ('azure', 'bedrock', 'vertex') else 'Remove key' }}</button>
           </form>
           {% endif %}
         </div>
@@ -998,7 +1011,7 @@
     .model-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-1) 0; }
     .model-row input { width: 18px; height: 18px; accent-color: var(--brand); flex-shrink: 0; }
   </style>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     var index = document.querySelector('.settings-index');

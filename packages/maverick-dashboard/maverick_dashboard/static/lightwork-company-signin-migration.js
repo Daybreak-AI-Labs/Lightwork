@@ -4,7 +4,7 @@
   if (!root) return;
   const recovery = root.hasAttribute('data-recovery');
   const find = name => root.querySelector('[data-' + name + ']');
-  const choice = find('migration-choice'), password = find('owner-password');
+  const choice = find('migration-choice'), password = find('owner-password'), code = find('owner-code');
   const message = find('migration-message'), reviewHost = find('migration-full-review');
   const confirmation = find('migration-confirm'), ack = find('migration-ack');
   const originals = find('migration-original'), originalPanel = find('migration-original-panel');
@@ -23,13 +23,18 @@
       control.disabled = value || (name === 'migration-review' && !choice.value) || (name === 'migration-apply' && (!reviewed || !ack.checked));
     });
   }
+  // Ends the proof of an unfinished review on the server; a failure here changes nothing the owner can see.
+  function endProof() {
+    fetch(recovery ? '/auth/company-signin-recovery/cancel' : '/api/v1/settings/sign-in-migration/cancel',
+      { method: 'POST', credentials: 'same-origin', cache: 'no-store', redirect: 'error' }).catch(() => {});
+  }
   function credentials() {
     if (!password.reportValidity()) throw new Error('Enter this computer\'s original owner passphrase.');
     const email = find('owner-email');
     if (email && !email.reportValidity()) throw new Error('Enter the original owner\'s email.');
-    return { email: email ? email.value.trim() : '', password: password.value };
+    return { email: email ? email.value.trim() : '', password: password.value, code: code.value.trim() };
   }
-  function stamp() { return JSON.stringify([choice.value, password.value, recovery ? find('owner-email').value : '', context]); }
+  function stamp() { return JSON.stringify([choice.value, password.value, code.value, recovery ? find('owner-email').value : '', context]); }
   function remember(operation) {
     pending = operation;
     try { sessionStorage.setItem(storageKey, operation); } catch (_) { /* Native history remains available. */ }
@@ -62,7 +67,7 @@
   }
   function clearPrivate() {
     generation++; if (abort) abort.abort(); invalidate(); choice.replaceChildren(); choice.disabled = true;
-    password.value = ''; const email = find('owner-email'); if (email) email.value = '';
+    password.value = ''; code.value = ''; const email = find('owner-email'); if (email) email.value = '';
     if (!recovery) { find('preset-directory').value = ''; find('preset-application').value = ''; }
     originals.replaceChildren(); originalPanel.hidden = true; context = ''; find('migration-next').hidden = true;
     lock(false); say('Your account or access changed. Private choices were cleared; sign in again before continuing.', true);
@@ -91,7 +96,7 @@
     if (busy || !choice.value) return; const started = generation; const formStamp = stamp(); lock(true); invalidate();
     try {
       const creds = credentials();
-      const result = await request(recovery ? '/auth/company-signin-recovery/review' : '/api/v1/settings/sign-in-migration/review', recovery ? { ...creds, operation: choice.value } : { check: choice.value, password: creds.password, context });
+      const result = await request(recovery ? '/auth/company-signin-recovery/review' : '/api/v1/settings/sign-in-migration/review', recovery ? { ...creds, operation: choice.value } : { check: choice.value, password: creds.password, code: creds.code, context });
       if (started !== generation) return;
       if (formStamp !== stamp() || (!recovery && result.context !== context)) { say('Your choices changed while the review loaded. Keep them and review again.', true); return; }
       Object.entries(result.changes).forEach(([label, value]) => { const field = document.createElement('div'); field.className = 'mv-field';
@@ -109,7 +114,7 @@
       const body = recovery ? { ...credentials(), token: saved.token, confirmed: true } : { token: saved.token, confirmed: true };
       const result = await request(recovery ? '/auth/company-signin-recovery/apply' : '/api/v1/settings/sign-in-migration/activate', body);
       if (started !== generation) return; invalidate(); say(result.message, !result.confirmed);
-      if (result.confirmed) { password.value = ''; find('migration-next').hidden = false;
+      if (result.confirmed) { password.value = ''; code.value = ''; find('migration-next').hidden = false;
         if (recovery) say(result.message + ' Enter the owner passphrase again for another original-result lookup.'); }
     } catch (error) { if (started === generation) { invalidate(); failure(error); } } finally { if (started === generation) lock(false); }
   }
@@ -122,7 +127,7 @@
   }
   find('migration-load').addEventListener('click', load); find('migration-review').addEventListener('click', review);
   find('migration-apply').addEventListener('click', apply); find('migration-read-original').addEventListener('click', readOriginal);
-  find('migration-cancel').addEventListener('click', () => { invalidate(); say('Review cancelled. No sign-in change was submitted.'); });
+  find('migration-cancel').addEventListener('click', () => { invalidate(); endProof(); say('Review cancelled. No sign-in change was submitted.'); });
   if (!recovery) {
     const provider = find('preset-provider'), directory = find('preset-directory'), application = find('preset-application'), prepare = find('preset-prepare');
     provider.addEventListener('change', () => {
@@ -151,6 +156,7 @@
     });
   }
   choice.addEventListener('change', () => { invalidate(); lock(busy); }); password.addEventListener('input', invalidate);
+  code.addEventListener('input', invalidate);
   if (recovery) find('owner-email').addEventListener('input', invalidate);
   ack.addEventListener('change', () => lock(busy));
   ['workspace-changed', 'account-context-changed'].forEach(name => document.addEventListener('lightwork:' + name, clearPrivate));

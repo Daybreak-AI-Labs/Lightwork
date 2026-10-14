@@ -31,6 +31,19 @@
   }
   function bind(panel) {
     if (panel.dataset.bound === '1') return; panel.dataset.bound = '1';
+    // AI-12: a hidden "changed since you last used it" notice stays hidden in
+    // this browser. Bound here rather than by a script inside the panel:
+    // refresh() refuses any fetched panel that carries a script.
+    var notice = panel.querySelector('#answer-agent-notice');
+    if (notice) {
+      var noticeKey = 'lightwork-hidden-notice:' + notice.getAttribute('data-notice-key');
+      try { if (window.localStorage.getItem(noticeKey)) notice.hidden = true; } catch (_) { /* no storage: the notice stays */ }
+      var hideNotice = notice.querySelector('[data-hide-notice]');
+      if (hideNotice) hideNotice.addEventListener('click', function () {
+        notice.hidden = true;
+        try { window.localStorage.setItem(noticeKey, '1'); } catch (_) { /* hidden for this view only */ }
+      });
+    }
     // Deliverable sign-off: record the human certify/reject decision, then
     // reload to show the signed-off state (and the hand-off download).
     (function () {

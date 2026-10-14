@@ -39,7 +39,7 @@
 {% else %}
 <p class="err-empty">No problems recorded for this task.</p>
 {% endif %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
   document.querySelectorAll(".err-copy").forEach(function (btn) {
     btn.addEventListener("click", function () {
       var pre = btn.closest("details").querySelector(".err-content");

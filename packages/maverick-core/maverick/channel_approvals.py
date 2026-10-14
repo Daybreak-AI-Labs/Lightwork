@@ -65,6 +65,9 @@ _RISK_LABELS = {
 # dashboard (settings_quorum enforces who may decide); a chat channel cannot
 # prove that role, so it never decides them.
 SETTINGS_PROVENANCE = "settings_quorum"
+# Publishing changed instructions without a passing test run (the dashboard's agent_publish_bypass.PROVENANCE): the
+# person who asked may never approve it, on any surface and whatever [approval] separate_approver says.
+ALWAYS_SEPARATE_PROVENANCES = frozenset({"agent_publish.bypass.four_eyes.v1"})
 
 # The HTTP status each refusal maps to when a surface speaks HTTP.
 _STATUS_CODES: dict[str, int] = {
@@ -433,6 +436,7 @@ def separate_approver_refusal(world: Any, approval: Any, who: str) -> str:
     Only the person who asked is ever refused, only for a High or Critical
     request with one approver, and only as ``[approval] separate_approver``
     says: always, or (the default) whenever another person could decide it.
+    A publication bypass (``ALWAYS_SEPARATE_PROVENANCES``) is always refused.
     Rejecting is never refused. Every surface asks this one question: the
     Approvals page disables its Approve button with the sentence, and
     :func:`record_vote` refuses the vote with it."""
@@ -445,6 +449,8 @@ def separate_approver_refusal(world: Any, approval: Any, who: str) -> str:
                                      getattr(approval, "approvals_required", 1)):
         return ""
     mode = separate_approver_mode()
+    if getattr(approval, "provenance", None) in ALWAYS_SEPARATE_PROVENANCES:
+        mode = "always"
     if mode == "never":
         return ""
     if mode == "when_available" and not other_approver_available(world, approval, requester):

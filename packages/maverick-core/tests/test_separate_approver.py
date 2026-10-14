@@ -71,7 +71,7 @@ def _config(tmp_path, text: str) -> None:
     config.reset_config_cache()
 
 
-def _park(world, *, risk="high", required=1, requested_by=REQUESTER):
+def _park(world, *, risk="high", required=1, requested_by=REQUESTER, provenance=None):
     from maverick.approval_cards import build_approval_card, encode_approval_detail
 
     card = build_approval_card(
@@ -85,7 +85,8 @@ def _park(world, *, risk="high", required=1, requested_by=REQUESTER):
     )
     approval_id = world.create_approval("shell", risk=risk, scope="sandbox:/work",
                                         detail=encode_approval_detail(card),
-                                        approvals_required=required, requested_by=requested_by)
+                                        approvals_required=required, requested_by=requested_by,
+                                        provenance=provenance)
     return approval_id, card["binding_sha256"]
 
 
@@ -336,3 +337,30 @@ def test_a_slack_button_tells_the_requester_privately(tmp_path, others, recorded
     assert answer["response_type"] == "ephemeral"
     assert answer["text"] == "Another approver is available, so someone else must approve this."
     assert world.get_approval(approval_id).status == "pending"
+
+
+def test_a_publication_bypass_is_never_approved_by_the_person_who_asked(tmp_path, others):
+    """A reasoned bypass of the passing tests needs someone else in every mode, not only the default."""
+    from maverick.channel_approvals import separate_approver_refusal
+
+    bypass = "agent_publish.bypass.four_eyes.v1"
+    others.people = []  # nobody else could decide it
+    for mode in ("when_available", "always", "never"):
+        _config(tmp_path, f'[approval]\nseparate_approver = "{mode}"\n')
+        world = _world(tmp_path)
+        approval_id, _binding = _park(world, provenance=bypass)
+        assert separate_approver_refusal(world, world.get_approval(approval_id), REQUESTER) == (
+            "You asked for this, so someone else must approve it."), mode
+        assert separate_approver_refusal(world, world.get_approval(approval_id), MANAGER) == ""
+        world.close()
+
+
+def test_an_ordinary_request_is_still_allowed_to_its_requester_when_switched_to_never(tmp_path, others):
+    from maverick.channel_approvals import separate_approver_refusal
+
+    _config(tmp_path, '[approval]\nseparate_approver = "never"\n')
+    world = _world(tmp_path)
+    approval_id, _binding = _park(world)
+    others.people = []
+    assert separate_approver_refusal(world, world.get_approval(approval_id), REQUESTER) == ""
+    world.close()

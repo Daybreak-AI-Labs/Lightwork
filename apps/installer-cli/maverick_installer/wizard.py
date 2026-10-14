@@ -32,8 +32,10 @@ import stat
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 try:
     import tomllib  # Python 3.11+
@@ -303,6 +305,7 @@ STEPS: list[tuple[str, str]] = [
     ("intent_value", "Intent, work value and opportunities"),
     ("assessments", "Assessment assists"),
     ("security_suite", "Security & GRC"),
+    ("monitoring", "Monitoring and key management"),
     ("advanced", "Advanced reasoning"),
     ("api_keys", "API access"),
     ("web_search", "Web search"),
@@ -934,6 +937,38 @@ def pick_bedrock_auth() -> dict[str, Any]:
     return {"auth_mode": pick.split()[0]}
 
 
+def pick_vertex() -> dict[str, Any]:
+    """Where Lightwork reaches Claude on Google Cloud Vertex AI; written to
+    ``[providers.vertex]``. Google sign-in (Application Default Credentials)
+    replaces a key, so the step asks for the project, the region and the model
+    ID exactly as shown in the Vertex AI Model Garden."""
+    console.print(
+        "[dim]Vertex AI signs in with Google Cloud credentials -- a service account, "
+        "gcloud login, or workload identity (Application Default Credentials). No API "
+        "key is stored. It needs the vertex extra: google-auth.[/dim]"
+    )
+    project_default = (os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", "").strip()
+                       or os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip())
+    while True:
+        project = _q_text("  Google Cloud project ID", default=project_default).strip()
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:_-]{0,127}", project):
+            break
+        console.print("[yellow]Enter the Google Cloud project ID.[/yellow]")
+    while True:
+        region = _q_text("  Vertex AI region (for example us-east5)",
+                         default=os.environ.get("CLOUD_ML_REGION", "").strip()).strip()
+        if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", region):
+            break
+        console.print("[yellow]Enter a lowercase Vertex AI region such as us-east5.[/yellow]")
+    while True:
+        model_id = _q_text("  Claude model ID, exactly as shown in the Vertex AI Model Garden",
+                           default="").strip()
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}@[A-Za-z0-9][A-Za-z0-9._-]{0,63}", model_id):
+            break
+        console.print("[yellow]Enter the model ID as shown in the Model Garden, for example claude-haiku-4-5@20251001.[/yellow]")
+    return {"project_id": project, "region": region, "model_id": model_id}
+
+
 def pick_per_tenant_keys() -> bool:
     """Offer per-tenant BYOK provider keys (multi-tenant deployments only).
 
@@ -964,7 +999,8 @@ def _local_first_model(providers: list[str]) -> str | None:
     return None
 
 
-def pick_models_per_role(providers: list[str]) -> dict[str, str]:
+def pick_models_per_role(providers: list[str],
+                         provider_options: dict[str, dict[str, Any]] | None = None) -> dict[str, str]:
     console.print()
     if _q_confirm(
         "Use the default model for each role?",
@@ -987,7 +1023,11 @@ def pick_models_per_role(providers: list[str]) -> dict[str, str]:
             if not info:
                 continue
             tag = "" if info["status"] == "ready" else " [v0.2]"
-            for m in info["models"]:
+            models = info["models"]
+            typed = str(((provider_options or {}).get(prov) or {}).get("model_id") or "").strip()
+            if prov == "vertex" and typed:
+                models = [{"id": typed, "notes": "Claude on Vertex AI, the model ID you entered"}]
+            for m in models:
                 choices.append(f"{prov}:{m['id']}{tag}  - {m['notes']}")
         choices.append("[skip - use default]")
 
@@ -1499,6 +1539,7 @@ def pick_capabilities() -> dict[str, Any]:
         default=True,
     )
     require_passing_tests = pick_agent_publish_gate()
+    agent_tests = pick_agent_test_rules()
     practice_mode = pick_practice_mode()
     practice_cap = pick_practice_spend_cap() if practice_mode else 1.0
     return {
@@ -1511,6 +1552,7 @@ def pick_capabilities() -> dict[str, Any]:
         "tool_exposure": tool_exposure,
         "jd_hiring": jd_hiring,
         "require_passing_tests": require_passing_tests,
+        **agent_tests,
         "practice_mode": practice_mode,
         "practice_daily_spend_cap": practice_cap,
     }
@@ -1560,6 +1602,77 @@ def pick_agent_publish_gate() -> bool:
         "reason, which is recorded.)",
         default=True,
     )
+
+
+def pick_agent_test_rules() -> dict[str, Any]:
+    """Saved answer checks that gate publishing. The defaults keep today's behaviour.
+
+    How many checks one specialist may keep (1 to 200, 20 by default); whether a
+    brand-new specialist needs a passing full run before it is published; whether a
+    second administrator must approve publishing without a passing run; and whether
+    checks may test which tools a specialist calls (off by default). Also asks for the
+    gradual-rollout share (``canary_percent``, 0 is off) and whether a trial version
+    rolls back on its own. Written under
+    ``[agent_tests]`` only when an answer differs from the default.
+    """
+    limit = _prompt_check_limit()
+    new_needs_run = _q_confirm(
+        "Require a passing run of every saved answer check before a brand-new specialist "
+        "is published? (A reason does not skip this.)",
+        default=False,
+    )
+    second_person = _q_confirm(
+        "Should a second administrator approve publishing changed instructions without "
+        "passing tests? (The person who asked cannot approve their own reason.)",
+        default=False,
+    )
+    tool_checks = _q_confirm(
+        "Allow saved answer checks to test which tools a specialist calls? (Tools are "
+        "replaced by test stubs that record the call and answer with a fixed result. "
+        "No real tool, file, network call or shell command runs.)",
+        default=False,
+    )
+    canary = _prompt_canary_percent()
+    auto_rollback = bool(canary) and _q_confirm(
+        "Roll a trial version back automatically when it fails clearly more often than the current "
+        "version? (It needs at least 10 finished goals on the trial first.)",
+        default=False,
+    )
+    return {"max_cases_per_specialist": limit, "require_for_new_specialists": new_needs_run,
+            "bypass_requires_second_person": second_person, "tool_checks": tool_checks,
+            "canary_percent": canary,
+            "canary_auto_rollback": auto_rollback}
+
+
+def _prompt_canary_percent() -> int:
+    while True:
+        raw = _q_text(
+            "When a changed specialist is published, what share of new goals should try it first? "
+            "(0 publishes changes straight away; 1 to 50 is a trial share)",
+            default="0",
+        ).strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            value = -1
+        if 0 <= value <= 50:
+            return value
+        console.print("[yellow]Enter a whole number from 0 to 50.[/yellow]")
+
+
+def _prompt_check_limit() -> int:
+    while True:
+        raw = _q_text(
+            "How many saved answer checks may one specialist keep? (1 to 200; 20 is the default)",
+            default="20",
+        ).strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 0
+        if 1 <= value <= 200:
+            return value
+        console.print("[yellow]Enter a whole number from 1 to 200.[/yellow]")
 
 
 def pick_self_learning() -> dict[str, Any]:
@@ -2025,6 +2138,70 @@ def pick_knowledge() -> dict[str, Any]:
         url = _q_text("  Qdrant URL (blank = QDRANT_URL env)", default="").strip()
         if url:
             out["url"] = url
+    return out
+
+
+# Size limits for saved company folders and spaces (dashboard Knowledge sources):
+# key, label, default, lowest and highest allowed value. They match
+# config.get_knowledge_sources, which refuses anything outside these ranges.
+_KNOWLEDGE_SOURCE_LIMITS: tuple[tuple[str, str, int, int, int], ...] = (
+    ("max_items", "Most items in one saved folder or space", 64, 1, 1000),
+    ("max_pages", "Most listing pages for one saved source", 16, 1, 200),
+    ("max_download_mib", "Largest SharePoint, OneDrive or Drive file (MiB)", 4, 1, 32),
+    ("max_text_kib", "Most source text kept per refresh (KiB)", 256, 1, 8192),
+    ("max_refresh_minutes", "Longest time one saved refresh may run (minutes)", 5, 1, 60),
+)
+
+
+def pick_knowledge_source_permissions() -> dict[str, Any]:
+    """Who sees each file of a saved SharePoint, OneDrive, Google Drive or
+    Confluence source. Off (the default) keeps the rule that anyone the
+    connection is shared with can use its cached content. Email matching
+    shows a file only to people the file itself is shared with, by email,
+    email domain or link. Group-shared files are withheld because group
+    members are not read. Returns {"permission_filter": "by_email"} or {}.
+    """
+    console.print()
+    console.print(
+        "[dim]By default, anyone the saved account is shared with can use a company folder's "
+        "cached files. Matching each file's own sharing settings is stricter: a file is shown only "
+        "to people it is shared with by email or email domain, or to anyone with its link. Files "
+        "shared only with a group are left out, because group members are not checked. People who "
+        "sign in with SAML, or whose provider does not confirm their email, see no saved company "
+        "files while this is on.[/dim]"
+    )
+    if not _q_confirm("Show each saved company file only to the people it is shared with?", default=False):
+        return {}
+    return {"permission_filter": "by_email"}
+
+
+def pick_knowledge_sources() -> dict[str, Any]:
+    """Optional size limits for saved SharePoint, OneDrive, Google Drive and
+    Confluence sources. Asked only when Knowledge RAG is on, because saved
+    sources are searched through it. Declining keeps the defaults, which are
+    the bounds the dashboard has always used. Returns a dict written under
+    ``[knowledge_sources]``, or {} to write nothing.
+    """
+    console.print()
+    console.print(
+        "[dim]Saved company folders and spaces use these limits for each refresh. "
+        "Defaults: 64 items, 16 listing pages, 4 MiB per document, 256 KiB of "
+        "source text and 5 minutes per refresh. Keep the defaults unless a folder or space is larger.[/dim]"
+    )
+    if not _q_confirm("Change the size limits for saved company folders and spaces?", default=False):
+        return {}
+    out: dict[str, Any] = {}
+    for key, label, default, low, high in _KNOWLEDGE_SOURCE_LIMITS:
+        while True:
+            raw = _q_text(f"  {label} ({low}-{high}, default {default})", default=str(default)).strip()
+            try:
+                value = int(raw)
+            except ValueError:
+                value = None
+            if value is not None and low <= value <= high:
+                break
+            console.print(f"[yellow]Enter a whole number from {low} to {high}.[/yellow]")
+        out[key] = value
     return out
 
 
@@ -4556,6 +4733,21 @@ def pick_sign_in_security(sso_enabled: bool) -> dict[str, Any]:
             default=15,
         )
         result["step_up_minutes"] = max(1, min(minutes, 1440))
+    if not sso_enabled:
+        # Local sign-in only: the owner's authenticator app (read by
+        # maverick.config.get_auth_local_owner_totp). Optional is the default.
+        console.print(
+            "[dim]Owner's authenticator app. Optional lets the owner add a code from an "
+            "authenticator app to their passphrase. Required makes them set one up at their "
+            "next sign-in. Off hides the option.[/dim]"
+        )
+        totp = _q_select(
+            "Owner's authenticator app at sign-in",
+            ["optional", "required", "off"],
+            default="optional",
+        )
+        if totp in {"required", "off"}:
+            result["local_owner_totp"] = totp
     cidrs = _csv_list(
         _q_text(
             "Network addresses or ranges allowed to reach Lightwork "
@@ -5139,6 +5331,14 @@ def pick_advanced() -> dict[str, Any]:
             "OFF by default.",
             default=False,
         ),
+        "ediscovery": _q_confirm(
+            "Legal holds and matter export? Hold the records of a legal matter for "
+            "named custodians and date ranges, so bulk deletion pauses and their "
+            "records cannot be erased, then export the matter as a signed archive "
+            "for counsel. Only auditors and administrators see matter details. "
+            "OFF by default.",
+            default=False,
+        ),
         "breach_notification": _q_confirm(
             "Breach-notification planner? Fourteen regimes' verified "
             "who/when/whether rules (GDPR, HIPAA, six US states, LGPD, "
@@ -5220,6 +5420,12 @@ def pick_advanced() -> dict[str, Any]:
             "Let people add guidance, queue their next message or start separate work while a task runs? On by default. "
             "Guidance is reviewed and read at the task's next safe point; existing task ownership, permissions and spending limits remain enforced.",
             default=True,
+        ),
+        "allow_public_chat": _q_confirm(
+            "Allow a chat box on your public website for anonymous visitors? Off by default. "
+            "Each website is listed exactly and has a daily spending limit. Visitors can ask one "
+            "published specialist's questions only; they cannot use tools or see your records.",
+            default=False,
         ),
         "allow_human_conversation_handoffs": _q_confirm(
             "Allow reviewed human help inside Chat? People select an on-duty helper "
@@ -7379,6 +7585,52 @@ def pick_suggestions() -> dict[str, Any]:
     return {"ai_suggestions": False}
 
 
+def pick_contact_centre() -> tuple[dict[str, Any], list[str]]:
+    """Where a human handoff goes outside Lightwork. Returns (config, env_vars_needed).
+
+    Off unless chosen, and nothing is sent until the chosen provider is complete.
+    The Zendesk API token and the webhook signing secret are not asked for here
+    and are never written to the config file: enter them on the Settings page
+    (Integrations, Contact centre; stored sealed), or set the
+    MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN or MAVERICK_CONTACT_CENTRE_WEBHOOK_SECRET
+    environment variable (``maverick.contact_centre``)."""
+    from maverick.config import (
+        _CONTACT_CENTRE_EMAIL_RE,
+        _CONTACT_CENTRE_SUBDOMAIN_RE,
+        _https_or_empty,
+    )
+
+    provider = _q_select(
+        "Send handed-off conversations to a contact centre outside Lightwork?",
+        ["off", "zendesk", "webhook"],
+        default="off",
+    )
+    if provider == "off":
+        return {}, []
+    cfg: dict[str, Any] = {"provider": provider}
+    if provider == "zendesk":
+        subdomain = _q_text("  Zendesk subdomain (the part before .zendesk.com):", default="").strip()
+        email = _q_text("  Zendesk agent email whose API token is used:", default="").strip()
+        if not _CONTACT_CENTRE_SUBDOMAIN_RE.fullmatch(subdomain) or not _CONTACT_CENTRE_EMAIL_RE.fullmatch(email):
+            console.print("[yellow]Skipped: enter a Zendesk subdomain such as acme-support and an agent email.[/yellow]")
+            return {}, []
+        cfg.update(zendesk_subdomain=subdomain, zendesk_email=email)
+    else:
+        url = _q_text("  Webhook address (https://...):", default="").strip()
+        if not _https_or_empty(url):
+            console.print("[yellow]Skipped: the webhook must be a secure https:// address.[/yellow]")
+            return {}, []
+        cfg["webhook_url"] = url
+    link = _q_text("  Lightwork web address for links in each ticket (https://..., empty for none):", default="").strip()
+    if link and _https_or_empty(link):
+        cfg["dashboard_url"] = link
+    elif link:
+        console.print("[yellow]Skipped the link: use a secure https:// address.[/yellow]")
+    console.print("[dim]Add the API token or signing secret on the Settings page (Contact centre) "
+                  "before handoffs are sent. Until then nothing is sent.[/dim]")
+    return cfg, []
+
+
 def pick_deliverable_handoff() -> tuple[dict[str, Any], list[str]]:
     """System-of-record hand-off for APPROVED deliverables. Returns
     (config, env_vars_needed).
@@ -7475,6 +7727,366 @@ def pick_connectors() -> dict[str, str]:
             if val:
                 keys[env_name] = val
     return keys
+
+
+# ---------- monitoring and key management ----------
+
+_MONITORING_TRACE_DEFAULT = "http://localhost:4318/v1/traces"
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+# The settings page's pattern for [observability] otel_endpoint (settings_catalog_runtime.py).
+# The installer does not import the dashboard, so the text is copied; a test keeps the two equal.
+_COLLECTOR_PATTERN = (r"(https://[^\s\"'<>?#]{1,300}|http://(localhost|127\.0\.0\.1|\[::1\])"
+                      r"(:[0-9]{1,5})?(/[^\s\"'<>?#]{0,300})?)?")
+# The settings page's patterns for the key service and the security monitoring address
+# (settings_catalog_access.py). Copied for the same reason; a test keeps each equal.
+_KEY_ID_PATTERN = r"[A-Za-z0-9:/._-]{1,300}"
+_REGION_PATTERN = r"[a-z]{2}(-[a-z]+)+-[0-9]{1,2}"
+_VAULT_ADDRESS_PATTERN = r"https://[^\s\"'<>?#]{1,300}"
+_VAULT_MOUNT_PATTERN = r"[A-Za-z0-9._-]{1,64}"
+_SIEM_PATTERN = r"(https?|tcp|udp|datadog|sentinel)://[^\s\"'<>]{1,300}"
+_SIEM_KINDS: list[tuple[str, str]] = [
+    ("https", "A web address (https://)"),
+    ("tcp", "Syslog over TCP (host:port)"),
+    ("udp", "Syslog over UDP (host:port)"),
+    ("datadog", "Datadog"),
+    ("sentinel", "Microsoft Sentinel"),
+]
+_SIEM_ADDRESS_EXAMPLES = {
+    "https": "https://collector.example.com/services/collector/raw",
+    "tcp": "siem.example.com:514",
+    "udp": "siem.example.com:514",
+    "sentinel": "sentinel://<data-collection-host>/<dcr-id>/Custom-<stream>",
+}
+# The schemes each kind of destination may use: https also takes http, which is asked for.
+_SIEM_SCHEMES = {
+    "https": {"https", "http"}, "tcp": {"tcp"}, "udp": {"udp"}, "sentinel": {"sentinel"},
+}
+_KMS_PROVIDERS: list[tuple[str, str]] = [
+    ("local", "On this computer (Lightwork's own keys, the default)"),
+    ("aws", "Amazon Web Services key service"),
+    ("gcp", "Google Cloud key service"),
+    ("vault", "HashiCorp Vault"),
+    ("azure", "Azure Key Vault or Managed HSM"),
+]
+
+
+def _choice_value(choices: list[tuple[str, str]], label: str) -> str:
+    """The value behind a label that a select prompt returned."""
+    return next(value for value, shown in choices if shown == label)
+
+
+def _ask_until(message: str, *, default: str, check: Callable[[str], str | None]) -> str:
+    """Ask a text question until ``check`` accepts the answer; ``check`` returns the
+    problem to show, or ``None`` when the answer is fine."""
+    while True:
+        answer = _q_text(message, default=default).strip()
+        problem = check(answer)
+        if problem is None:
+            return answer
+        console.print(f"  [yellow]{problem}[/yellow]")
+
+
+def _web_address_problem(value: str, schemes: tuple[str, ...]) -> str | None:
+    """Why ``value`` is not a web address of one of ``schemes``, or ``None``."""
+    try:
+        parts = urlsplit(value)
+        valid = (parts.scheme in schemes and bool(parts.hostname)
+                 and "@" not in parts.netloc)
+    except ValueError:
+        valid = False
+    if valid:
+        return None
+    return ("Enter a web address that starts with " + " or ".join(f"{s}://" for s in schemes)
+            + " and has no user name or password in it.")
+
+
+def _ask_credential(env_name: str, label: str) -> str:
+    """A credential for ~/.maverick/.env, asked the way the connector prompts ask: blank
+    keeps the value the environment already holds."""
+    current = os.environ.get(env_name, "")
+    masked = (current[:4] + "...") if current else "(none)"
+    return _q_secret(f"  {label} [current: {masked}] (blank = keep current)").strip() or current
+
+
+def _ask_azure_id(env_name: str, label: str) -> str:
+    """An Azure directory or app ID, checked with the forwarder's own pattern. Blank
+    returns ``""``, which leaves the service off."""
+    from maverick.audit.forwarder import _AZURE_ID_RE
+
+    current = os.environ.get(env_name, "")
+    while True:
+        answer = _q_text(f"  {label} (blank = leave this service off)", default=current).strip()
+        if not answer or _AZURE_ID_RE.fullmatch(answer):
+            return answer
+        console.print("  [yellow]Enter the ID as Azure shows it: letters, digits, dots and "
+                      "dashes.[/yellow]")
+
+
+def _collector_problem(address: str) -> str | None:
+    problem = _web_address_problem(address, ("http", "https"))
+    if problem is not None:
+        return problem
+    # Traces name tasks and tools, so plain http is only for a collector on this computer.
+    if urlsplit(address).scheme == "http" and urlsplit(address).hostname not in _LOCAL_HOSTS:
+        return ("Only a collector on this computer may use http://. Enter an https:// address, "
+                "so the traces are encrypted on the way.")
+    if re.fullmatch(_COLLECTOR_PATTERN, address) is None:
+        return "Enter a collector address with no spaces, quotes, question marks or # in it."
+    return None
+
+
+def _ask_measurements(address: str) -> bool:
+    """Whether measurements also go to ``address``. They need an address that ends in
+    /v1/traces, so a yes with another address is asked again; a no always stands."""
+    from maverick.observability import _otlp_metrics_endpoint
+
+    while True:
+        if not _q_confirm(
+            "  Also send measurements (counts, timings and spending) to the same collector? "
+            "(They name tools and models.)",
+            default=False,
+        ):
+            return False
+        if _otlp_metrics_endpoint(address) is not None:
+            return True
+        console.print("  [yellow]Measurements need a collector address that ends in /v1/traces. "
+                      "Answer no to leave them off.[/yellow]")
+
+
+def _pick_trace_collector() -> dict[str, Any]:
+    """The ``[observability]`` table for an OpenTelemetry collector, or ``{}`` to skip."""
+    if not _q_confirm(
+        "Send a trace of each task's steps to a monitoring collector? "
+        "(Traces name tasks and tools.)",
+        default=False,
+    ):
+        return {}
+    address = _ask_until(
+        "  Collector address",
+        default=_MONITORING_TRACE_DEFAULT,
+        check=_collector_problem,
+    )
+    observability: dict[str, Any] = {"otel_exporter": "otlp", "otel_endpoint": address}
+    if _ask_measurements(address):
+        observability["otlp_metrics"] = True
+    return {"observability": observability}
+
+
+def _key_name_problem(value: str) -> str | None:
+    if re.fullmatch(_KEY_ID_PATTERN, value) is None:
+        return ("Enter the key name exactly as your key service shows it: letters, digits and "
+                ": / . _ - only, without spaces.")
+    return None
+
+
+def _azure_key_problem(value: str) -> str | None:
+    from maverick.kms_backends import _azure_key_parts
+
+    if re.fullmatch(_KEY_ID_PATTERN, value) is None or _azure_key_parts(value) is None:
+        return ("Enter the key's web address, such as https://<vault>.vault.azure.net/keys/<name>, "
+                "optionally with its version at the end.")
+    return None
+
+
+def _region_problem(value: str) -> str | None:
+    if value and re.fullmatch(_REGION_PATTERN, value) is None:
+        return "Enter a region name such as us-east-1, or leave the answer blank."
+    return None
+
+
+def _vault_address_problem(value: str) -> str | None:
+    problem = _web_address_problem(value, ("https",))
+    if problem is None and re.fullmatch(_VAULT_ADDRESS_PATTERN, value) is None:
+        return "Enter a web address with no spaces, quotes, question marks or # in it."
+    return problem
+
+
+def _vault_mount_problem(value: str) -> str | None:
+    if value and re.fullmatch(_VAULT_MOUNT_PATTERN, value) is None:
+        return "Enter the name of the Vault key area: letters, digits and . _ - only."
+    return None
+
+
+def _pick_key_service(keys: dict[str, str]) -> dict[str, Any]:
+    """The ``[kms]`` table for a cloud key service, or ``{}`` to keep the built-in keys."""
+    labels = [label for _value, label in _KMS_PROVIDERS]
+    provider = _choice_value(_KMS_PROVIDERS, _q_select(
+        "Where should Lightwork lock each workspace's data keys? Choose before Lightwork stores "
+        "any data: data already locked with the built-in keys is not moved to a new service.",
+        labels, default=labels[0],
+    ))
+    if provider == "local":
+        return {}
+    kms: dict[str, Any] = {"provider": provider}
+    if provider == "azure":
+        kms["key_id"] = _ask_until(
+            "  Key address (https://<vault>.vault.azure.net/keys/<name>)",
+            default="", check=_azure_key_problem)
+    else:
+        kms["key_id"] = _ask_until(
+            "  Key name at the service", default="", check=_key_name_problem)
+    if provider == "aws":
+        region = _ask_until(
+            "  Region of the key (blank = the AWS_REGION setting)", default="",
+            check=_region_problem)
+        if region:
+            kms["region"] = region
+    if provider == "vault":
+        kms["address"] = _ask_until(
+            "  Vault web address (https://...)", default="", check=_vault_address_problem)
+        mount = _ask_until(
+            "  Vault key area", default="transit", check=_vault_mount_problem) or "transit"
+        if mount != "transit":
+            kms["mount"] = mount
+        token = _ask_credential("VAULT_TOKEN", "Vault access token")
+        if not token:
+            console.print("  [yellow]Not saved: HashiCorp Vault needs its access token, so the "
+                          "built-in keys stay in use.[/yellow]")
+            return {}
+        keys["VAULT_TOKEN"] = token
+    return {"kms": kms}
+
+
+def _siem_address_problem(address: str, kind: str) -> str | None:
+    """Why ``address`` is not a valid destination of ``kind``, or ``None``.
+
+    The kernel's own parser decides. Its error text can echo the address, so that text
+    is not shown.
+    """
+    from maverick.audit.forwarder import parse_dest
+
+    try:
+        if "@" in urlsplit(address).netloc:
+            return "Leave out any user name or password. The access key is asked on its own."
+        scheme = parse_dest(address)[0]
+    except ValueError:
+        return "Lightwork cannot send to that address. Check it against the example."
+    if scheme not in _SIEM_SCHEMES[kind]:
+        return ("That address is not one of the kind you chose. Example: "
+                f"{_SIEM_ADDRESS_EXAMPLES[kind]}")
+    if re.fullmatch(_SIEM_PATTERN, address) is None:
+        return "Lightwork cannot send to that address. Check it against the example."
+    return None
+
+
+def _ask_siem_address(kind: str) -> str | None:
+    """A destination address of ``kind``, asked until the kernel accepts it; ``None`` when
+    left blank. A plain http:// address is accepted only when the operator says so."""
+    from maverick.audit.forwarder import parse_dest
+
+    while True:
+        answer = _q_text(
+            f"  Address (for example {_SIEM_ADDRESS_EXAMPLES[kind]}; blank = leave this off)",
+            default="",
+        ).strip()
+        if not answer:
+            return None
+        if kind in ("tcp", "udp") and "://" not in answer:
+            answer = f"{kind}://{answer}"
+        problem = _siem_address_problem(answer, kind)
+        if problem is not None:
+            console.print(f"  [yellow]{problem}[/yellow]")
+            continue
+        if parse_dest(answer)[0] == "http" and not _q_confirm(
+            "  This address is not encrypted, so activity records cross the network in plain "
+            "text. Use it anyway?",
+            default=False,
+        ):
+            continue
+        return answer
+
+
+def _siem_credentials(scheme: str) -> dict[str, str] | None:
+    """The credentials a destination needs, as ``{ENV_NAME: value}`` for ~/.maverick/.env,
+    or ``None`` when a required one is left blank."""
+    if scheme == "https":
+        # Sent only over https: the kernel refuses to send it over plain http.
+        token = _ask_credential("MAVERICK_SIEM_TOKEN", "Access key for the service")
+        return {"MAVERICK_SIEM_TOKEN": token} if token else {}
+    if scheme == "datadog":
+        values = {"MAVERICK_DATADOG_API_KEY": _ask_credential(
+            "MAVERICK_DATADOG_API_KEY", "Datadog API key")}
+    elif scheme == "sentinel":
+        values = {
+            "MAVERICK_SENTINEL_TENANT_ID": _ask_azure_id(
+                "MAVERICK_SENTINEL_TENANT_ID", "Directory (tenant) ID"),
+            "MAVERICK_SENTINEL_CLIENT_ID": _ask_azure_id(
+                "MAVERICK_SENTINEL_CLIENT_ID", "App (client) ID"),
+            "MAVERICK_SENTINEL_CLIENT_SECRET": _ask_credential(
+                "MAVERICK_SENTINEL_CLIENT_SECRET", "App client secret"),
+        }
+    else:
+        # tcp and udp carry no credentials; plain http gets no token, which the kernel
+        # would refuse to send anyway.
+        return {}
+    if not all(values.values()):
+        console.print("  [yellow]Not saved: this service needs its access details. Add the "
+                      "destination later in Lightwork Settings.[/yellow]")
+        return None
+    return values
+
+
+def _pick_siem_destination() -> tuple[str, dict[str, str]] | None:
+    """``(siem_dest, credentials)`` for a security monitoring service, or ``None`` to skip."""
+    from maverick.audit.forwarder import _DATADOG_SITES, parse_dest
+
+    if not _q_confirm(
+        "Send each activity record to a security monitoring service?", default=False,
+    ):
+        return None
+    labels = [label for _value, label in _SIEM_KINDS]
+    kind = _choice_value(_SIEM_KINDS, _q_select(
+        "Which kind of service?", labels, default=labels[0]))
+    if kind == "datadog":
+        site = _q_select("Datadog site", sorted(_DATADOG_SITES), default="datadoghq.com")
+        address = f"datadog://{site}"
+    else:
+        address = _ask_siem_address(kind)
+        if address is None:
+            return None
+    creds = _siem_credentials(parse_dest(address)[0])
+    if creds is None:
+        return None
+    return address, creds
+
+
+def _siem_destination(monitoring: dict[str, Any] | None) -> str:
+    """The ``[audit] siem_dest`` the monitoring step chose, or ``""``."""
+    return str(((monitoring or {}).get("audit") or {}).get("siem_dest") or "")
+
+
+def _cfg_monitoring(monitoring: dict[str, Any] | None) -> list[str]:
+    """``[observability]`` and ``[kms]`` from the monitoring step. A skipped answer writes
+    nothing; ``[audit] siem_dest`` is written by ``_cfg_advanced``, which owns that table."""
+    monitoring = monitoring or {}
+    return (_cfg_table("observability", monitoring.get("observability"))
+            + _cfg_table("kms", monitoring.get("kms")))
+
+
+def pick_monitoring() -> tuple[dict[str, Any], dict[str, str]]:
+    """The optional monitoring and key-management step. Returns ``(config, keys)``.
+
+    ``config`` holds the ``[observability]`` and ``[kms]`` tables and the ``[audit]``
+    ``siem_dest``. ``keys`` maps environment names to credential values for
+    ~/.maverick/.env, the file that holds the provider keys and connector credentials, so
+    config.toml never holds a credential. Every question defaults to no, and a skipped
+    answer writes nothing.
+    """
+    config: dict[str, Any] = {}
+    keys: dict[str, str] = {}
+    console.print()
+    console.print(
+        "[dim]Optional. Skip a question to keep the default, which sends nothing and keeps "
+        "Lightwork's own keys.[/dim]"
+    )
+    config.update(_pick_trace_collector())
+    config.update(_pick_key_service(keys))
+    destination = _pick_siem_destination()
+    if destination is not None:
+        address, creds = destination
+        config["audit"] = {"siem_dest": address}
+        keys.update(creds)
+    return config, keys
 
 
 def collect_api_keys(providers: list[str], channel_envs: set[str]) -> dict[str, str]:
@@ -7794,6 +8406,17 @@ def _cfg_providers(
                          '"legacy" for Opus 4.6 and earlier')
             lines.append("")
             continue
+        if prov == "vertex":
+            # Google sign-in: no key. The project, region and model ID the operator entered.
+            vertex = options.get("vertex") or {}
+            for field in ("project_id", "region", "model_id"):
+                value = str(vertex.get(field) or "").strip()
+                if value:
+                    _emit_kv(lines, field, value)
+            lines.append("# Google Application Default Credentials sign in (gcloud login, a "
+                         "service account, or workload identity); no key is stored.")
+            lines.append("")
+            continue
         if env_name:
             lines.append(f'api_key = "${{{env_name}}}"')
         if prov == "ollama":
@@ -8049,6 +8672,20 @@ def _cfg_knowledge(knowledge: dict[str, Any] | None) -> list[str]:
     lines = ["", "[knowledge]"]
     for k, v in knowledge.items():
         _emit_kv(lines, k, v)
+    return lines
+
+
+def _cfg_knowledge_sources(knowledge_sources: dict[str, Any] | None) -> list[str]:
+    if not knowledge_sources:
+        return []
+    # Saved company folder and space limits. config.get_knowledge_sources reads
+    # them at each refresh and refuses any value outside its range.
+    lines = ["", "[knowledge_sources]"]
+    for key, _label, _default, low, high in _KNOWLEDGE_SOURCE_LIMITS:
+        value = knowledge_sources.get(key)
+        if type(value) is not int or not low <= value <= high:
+            raise ValueError(f"knowledge_sources.{key} must be a whole number from {low} to {high}")
+        lines.append(f"{key} = {value}")
     return lines
 
 
@@ -8845,6 +9482,27 @@ def _cfg_agent_factory(jd_hiring: bool, require_passing_tests: bool = True) -> l
     return ["", "[agent_factory]", *lines] if lines else []
 
 
+def _cfg_agent_tests(values: dict[str, Any]) -> list[str]:
+    # Saved answer checks (maverick.agent_tests_policy) default to today's
+    # behaviour, so the table is written only where an answer differs.
+    lines = []
+    limit = int(values["max_cases_per_specialist"])
+    if limit != 20:
+        lines.append(f"max_cases_per_specialist = {limit}")
+    if values["require_for_new_specialists"]:
+        lines.append("require_for_new_specialists = true")
+    if values["bypass_requires_second_person"]:
+        lines.append("bypass_requires_second_person = true")
+    if values.get("tool_checks"):
+        lines.append("tool_checks = true")
+    canary = int(values.get("canary_percent", 0))
+    if canary:
+        lines.append(f"canary_percent = {canary}")
+    if canary and values.get("canary_auto_rollback"):
+        lines.append("canary_auto_rollback = true")
+    return ["", "[agent_tests]", *lines] if lines else []
+
+
 def _cfg_suites(suites: dict[str, bool] | None) -> list[str]:
     if not suites:
         return []
@@ -8868,8 +9526,10 @@ def _cfg_license(license_cfg: dict[str, Any] | None) -> list[str]:
 def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     advanced: dict[str, Any] | None,
     providers: list[str],
+    *,
+    siem_dest: str = "",
 ) -> list[str]:
-    if not advanced:
+    if not advanced and not siem_dest:
         return []
     lines: list[str] = []
     budget_reporting = advanced.get("agent_budget_reporting")
@@ -9347,10 +10007,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             "backfill` before first start (see docs/multi-tenancy.md)."
         )
         lines.append("rls = true")
-    if advanced.get("audit_sign") or advanced.get("unified_audit"):
+    if advanced.get("audit_sign") or advanced.get("unified_audit") or siem_dest:
         lines.append("")
         lines.append("[audit]")
-        lines.append("sign = true")
+        if advanced.get("audit_sign") or advanced.get("unified_audit"):
+            lines.append("sign = true")
+        if siem_dest:
+            lines.append(f"siem_dest = {_toml_str(siem_dest)}")
     if advanced.get("unified_audit"):
         lines.append("")
         lines.append("[audit.unified]")
@@ -9491,6 +10154,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("role_editing = false")
     if type(advanced.get("allow_human_conversation_handoffs")) is bool:
         _feature_locks.append("human_conversation_handoffs = " + str(advanced["allow_human_conversation_handoffs"]).lower())
+    if advanced.get("allow_public_chat") is True:
+        # Off by default: only a deliberate yes is written. Sites are added on the Channels page (docs/public-chat.md).
+        lines.extend(["", "[public_chat]", "enabled = true"])
     if _feature_locks:
         lines.append("")
         lines.append("[features]")
@@ -9834,6 +10500,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[breach_notification]")
         lines.append("enable = true")
+    if advanced.get("ediscovery"):
+        lines.append("")
+        lines.append("[ediscovery]")
+        lines.append("enable = true")
     if advanced.get("dsar_fulfillment"):
         lines.append("")
         lines.append("[dsar_fulfillment]")
@@ -10054,6 +10724,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("[auth.mfa]")
         lines.append("require = true")
         _emit_kv(lines, "step_up_minutes", int(security.get("step_up_minutes") or 15))
+    if isinstance(security, dict) and security.get("local_owner_totp") in {"required", "off"}:
+        # The owner's authenticator app at local sign-in. Read by
+        # maverick.config.get_auth_local_owner_totp (the dashboard's owner sign-in).
+        lines.append("")
+        lines.append("[auth.local_owner]")
+        _emit_kv(lines, "totp", str(security["local_owner_totp"]))
     if isinstance(security, dict) and security.get("cidrs"):
         # Network addresses allowed to reach the dashboard. Read by
         # maverick.config.get_ip_allowlist (the dashboard's ip_allowlist).
@@ -10345,6 +11021,7 @@ def write_config(
     deadline_alerts: dict[str, Any] | None = None,
     webhooks: dict[str, Any] | None = None,
     deliverables: dict[str, Any] | None = None,
+    contact_centre: dict[str, Any] | None = None,
     personas: dict[str, Any] | None = None,
     a2a: dict[str, Any] | None = None,
     my_work: dict[str, Any] | None = None,
@@ -10359,6 +11036,7 @@ def write_config(
     event_triggers: dict[str, Any] | None = None,
     flows: dict[str, Any] | None = None,
     knowledge: dict[str, Any] | None = None,
+    knowledge_sources: dict[str, Any] | None = None,
     oauth: dict[str, Any] | None = None,
     governed_connectors: dict[str, Any] | None = None,
     durable: dict[str, Any] | None = None,
@@ -10368,6 +11046,7 @@ def write_config(
     intent_value: dict[str, Any] | None = None,
     assessments: dict[str, Any] | None = None,
     security_suite: dict[str, Any] | None = None,
+    monitoring: dict[str, Any] | None = None,
     deployment: str | None = None,
     suites: dict[str, bool] | None = None,
     license_cfg: dict[str, Any] | None = None,
@@ -10479,6 +11158,7 @@ def write_config(
     lines += _cfg_event_triggers(event_triggers)
     lines += _cfg_flows(flows)
     lines += _cfg_knowledge(knowledge)
+    lines += _cfg_knowledge_sources(knowledge_sources)
     lines += _cfg_oauth(oauth)
     lines += _cfg_governed_connectors(governed_connectors)
     lines += _cfg_durable(durable)
@@ -10522,6 +11202,13 @@ def write_config(
     # JD hiring lives under [agent_factory] (kernel: maverick.jd_hiring).
     jd_hiring = bool(capability_config.pop("jd_hiring", True))
     require_passing_tests = bool(capability_config.pop("require_passing_tests", True))
+    # Saved answer checks live under [agent_tests] (kernel: maverick.agent_tests_policy).
+    agent_tests = {"max_cases_per_specialist": capability_config.pop("max_cases_per_specialist", 20),
+                   "require_for_new_specialists": bool(capability_config.pop("require_for_new_specialists", False)),
+                   "bypass_requires_second_person": bool(capability_config.pop("bypass_requires_second_person", False)),
+                   "tool_checks": bool(capability_config.pop("tool_checks", False)),
+                   "canary_percent": capability_config.pop("canary_percent", 0),
+                   "canary_auto_rollback": bool(capability_config.pop("canary_auto_rollback", False))}
     # Practice mode lives under [practice] (kernel: maverick.practice), written only when off.
     practice_mode = bool(capability_config.pop("practice_mode", True))
     practice_cap = _safe_float(capability_config.pop("practice_daily_spend_cap", 1.0), default=1.0)
@@ -10533,10 +11220,11 @@ def write_config(
 
     lines += _cfg_capabilities(capability_config, embedded_flash)
     lines += _cfg_agent_factory(jd_hiring, require_passing_tests)
+    lines += _cfg_agent_tests(agent_tests)
     lines += _cfg_practice(practice_mode, practice_cap)
     lines += _cfg_suites(suites)
     lines += _cfg_license(license_cfg)
-    lines += _cfg_advanced(advanced, providers)
+    lines += _cfg_advanced(advanced, providers, siem_dest=_siem_destination(monitoring))
     lines += _cfg_mcp_servers(mcp_servers)
     lines += _cfg_registries("mcp_registries", mcp_registries)
     lines += _cfg_registries("template_registries", template_registries)
@@ -10560,9 +11248,11 @@ def write_config(
     lines += _cfg_table("collaboration", collaboration)
     lines += _cfg_table("webhooks", webhooks)
     lines += _cfg_table("deliverables", deliverables)
+    lines += _cfg_table("contact_centre", contact_centre)
     lines += _cfg_table("personas", personas)
     lines += _cfg_table("a2a", a2a)
     lines += _cfg_table("first_outcome", first_outcome)
+    lines += _cfg_monitoring(monitoring)
 
     # SECURITY: config.toml is NOT secret-free. Unlike API keys (which live in
     # ~/.maverick/.env and are referenced via ${VAR}), the OIDC browser-login
@@ -11546,6 +12236,14 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     knowledge = state.get("knowledge") or pick_knowledge()
     state["knowledge"] = knowledge
     _save_partial(state)
+    # Part of the Knowledge step (no progress line of its own): saved sources need Knowledge RAG.
+    knowledge_sources = state.get("knowledge_sources")
+    if knowledge_sources is None:
+        knowledge_sources = (
+            {**pick_knowledge_sources(), **pick_knowledge_source_permissions()} if knowledge.get("enable") else {}
+        )
+        state["knowledge_sources"] = knowledge_sources
+        _save_partial(state)
 
     _announce()
     oauth = state.get("oauth") or pick_oauth_vault()
@@ -11602,6 +12300,11 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         state["security_suite"] = security_suite
         _save_partial(state)
 
+    # Not saved with the partial state: its credentials must never be written there,
+    # so a resumed run asks this optional step again.
+    _announce()
+    monitoring, monitoring_keys = pick_monitoring()
+
     _announce()
     advanced = state.get("advanced") or pick_advanced()
     state["advanced"] = advanced
@@ -11631,6 +12334,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "event_triggers": event_triggers,
         "flows": flows,
         "knowledge": knowledge,
+        "knowledge_sources": knowledge_sources,
         "oauth": oauth,
         "governed_connectors": governed_connectors,
         "durable": durable,
@@ -11640,6 +12344,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "intent_value": intent_value,
         "assessments": assessments,
         "security_suite": security_suite,
+        "monitoring": (monitoring, monitoring_keys),
         "advanced": advanced,
     }
 
@@ -11810,6 +12515,8 @@ def run(fast: bool = False, resume: bool = False) -> int:
         provider_options = {}
         if "bedrock" in providers:
             provider_options["bedrock"] = pick_bedrock_auth()
+        if "vertex" in providers:
+            provider_options["vertex"] = pick_vertex()
         state["provider_options"] = provider_options
         _save_partial(state)
 
@@ -11822,7 +12529,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     _announce()
     role_models = state.get("role_models")
     if role_models is None:
-        role_models = pick_models_per_role(providers)
+        role_models = pick_models_per_role(providers, provider_options)
         state["role_models"] = role_models
         _save_partial(state)
 
@@ -11854,6 +12561,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     event_triggers = _simple["event_triggers"]
     flows = _simple["flows"]
     knowledge = _simple["knowledge"]
+    knowledge_sources = _simple["knowledge_sources"]
     oauth = _simple["oauth"]
     governed_connectors = _simple["governed_connectors"]
     durable = _simple["durable"]
@@ -11863,6 +12571,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     intent_value = _simple["intent_value"]
     assessments = _simple["assessments"]
     security_suite = _simple["security_suite"]
+    monitoring, monitoring_keys = _simple["monitoring"]
     advanced = _simple["advanced"]
 
     _announce()
@@ -11916,6 +12625,10 @@ def run(fast: bool = False, resume: bool = False) -> int:
     state["_deliverables_pair"] = [deliverables, deliverable_envs]
     _save_partial(state)
 
+    contact_centre, contact_centre_envs = state.get("_contact_centre_pair") or pick_contact_centre()
+    state["_contact_centre_pair"] = [contact_centre, contact_centre_envs]
+    _save_partial(state)
+
     personas = state.get("_personas") or pick_persona_roles()
     state["_personas"] = personas
     _save_partial(state)
@@ -11940,6 +12653,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     # user wants to wire up now (merged into ~/.maverick/.env, never persisted
     # to partial state). Editable later in the .env file.
     keys.update(pick_connectors())
+    keys.update(monitoring_keys)
 
     suites = pick_suites()
 
@@ -11986,6 +12700,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         deadline_alerts=deadline_alerts,
         webhooks=webhooks,
         deliverables=deliverables,
+        contact_centre=contact_centre,
         personas=personas,
         a2a=a2a_cfg,
         my_work=my_work_cfg,
@@ -12008,6 +12723,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         event_triggers=event_triggers if event_triggers.get("enable") else None,
         flows=flows if flows.get("enable") else None,
         knowledge=knowledge if knowledge.get("enable") else None,
+        knowledge_sources=knowledge_sources if knowledge.get("enable") else None,
         oauth=oauth if oauth.get("vault") else None,
         governed_connectors=governed_connectors if governed_connectors.get("enable") else None,
         durable=durable if durable.get("enabled") else None,
@@ -12017,6 +12733,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         intent_value=intent_value,
         assessments=assessments or None,
         security_suite=security_suite,
+        monitoring=monitoring,
         approval=approval,
         suites=suites,
         license_cfg=license_cfg or None,

@@ -166,12 +166,19 @@ def choices(request):
 
     items, coverage = [], []
     try:
+        from maverick.world_model import episodes_by_goal_batch
+
         world = _world()
         goals = world.list_goals(owner=goal_owner_filter(request), limit=201, order="desc")
-        for goal in goals[:200]:
-            if can_access_goal(request, goal) and domain_suites_allowed(request, goal.domain):
-                if _is_prepared(goal, world.list_episodes(goal_id=goal.id, limit=1)):
-                    items.append({"kind": "goal", "reference": str(goal.id), "label": goal.title})
+        visible = [goal for goal in goals[:200]
+                   if can_access_goal(request, goal) and domain_suites_allowed(request, goal.domain)]
+        # One batched read of each visible goal's newest run, not one query each.
+        latest = episodes_by_goal_batch(world, [goal.id for goal in visible], per_goal=1)
+        for goal in visible:
+            episodes = (latest[goal.id] if latest is not None and goal.id in latest
+                        else world.list_episodes(goal_id=goal.id, limit=1))
+            if _is_prepared(goal, episodes):
+                items.append({"kind": "goal", "reference": str(goal.id), "label": goal.title})
         coverage.append({"kind": "goal", "status": "partial" if len(goals) > 200 else "current"})
     except Exception:
         coverage.append({"kind": "goal", "status": "unavailable"})

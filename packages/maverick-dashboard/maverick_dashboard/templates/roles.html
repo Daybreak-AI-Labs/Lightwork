@@ -116,7 +116,7 @@
   </style>
 
   {% if selected and editable %}
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     (function () {
       const form = document.getElementById('role-form');
       if (!form) return;

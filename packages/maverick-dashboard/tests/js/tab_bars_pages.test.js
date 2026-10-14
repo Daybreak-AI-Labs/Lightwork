@@ -15,7 +15,7 @@ const { JSDOM } = require("jsdom");
 const { panelTabs, tabPanel, press } = require("./_tab_markup");
 
 const root = path.resolve(__dirname, "../../maverick_dashboard");
-const read = (name) => fs.readFileSync(path.join(root, name), "utf8");
+const read = (name) => fs.readFileSync(path.join(root, name), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const tabsScript = read("static/lightwork-tabs.js");
 
 function dom(html, url) {

@@ -247,8 +247,8 @@ with zero invariant violations.
 
 | Campaign | Load applied | Result |
 |----------|--------------|--------|
-| **JobQueue exactly-once** (multiprocess, true OS parallelism) | 5,000 jobs · **48 real processes** (12× cores) racing `claim()` | 0 duplicates, 0 lost — the `WHERE status='pending'` guard holds under genuine contention |
-| **Control/data-plane soak** (the CI gate, cranked) | 2,000 goals · 24 concurrent workers | zero-loss, exactly-once, clean drain in 15s |
+| **JobQueue exactly-once claims** (multiprocess, true OS parallelism) | 5,000 jobs · **48 real processes** (12× cores) racing `claim()` | 0 duplicates, 0 lost — the `WHERE status='pending'` guard holds under genuine contention |
+| **Control/data-plane soak** (the CI gate, cranked) | 2,000 goals · 24 concurrent workers | zero-loss, exactly-once claims, clean drain in 15s |
 | **Budget accounting integrity** | 32 threads × 5,000 `record_tokens`, barrier-synced | 160,000 == 160,000 — no lost updates; the per-instance lock is sound |
 | **Budget cap enforcement** | 16 threads racing a 10k-token cap | cap fired on every thread; no silent overshoot escape |
 | **Capability authorization fuzz** | **399,131 probes** across 200 seeds × 2,000 rounds against `Capability.permits()` | **0 leaks** — no probe escaped the allow/deny envelope |

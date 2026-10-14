@@ -1,5 +1,7 @@
 # Lightwork — User Experience Audit (September 2026)
 
+> **Status (2026-10-14): point-in-time record, not a tracker.** This is the September 30, 2026 baseline (`6daa3165`). Findings are not tracked per item. The "Current branch" notes under some findings record source fixes, and a source fix is not an installed customer acceptance result. Checked in this pass: UX-001 is fixed in `packages/maverick-dashboard/maverick_dashboard/goal_feedback_store.py` (feedback is kept per workspace; the legacy deployment-global file is not assigned to a workspace). UX-002 is fixed in `packages/maverick-core/maverick/ux_store.py:298-305` (the caller's workspace is resolved on every access). UX-003 is fixed in `packages/maverick-core/maverick/flow/runner.py:92-100` and `:278-281` (secret expressions cannot read deployment secrets). `packages/maverick-dashboard/maverick_dashboard/templates/_hero.html` has no `|safe`. UX-004 is about the vendor detail page, which was not re-checked in this pass. Open items as of 2026-10-14 are listed in [docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md).
+
 > Base commit `6daa3165` on `main` · prepared 2026-09-30 · companion to
 > `PLATFORM_IMPROVEMENT_AUDIT.md` (September 7), `QA_FINDINGS.md` and `CODE_QUALITY_AUDIT.md`.
 

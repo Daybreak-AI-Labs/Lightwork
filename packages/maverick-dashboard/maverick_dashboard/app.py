@@ -65,6 +65,7 @@ from . import (
     capability_assessment_controls_api,
     learning_acquisition_api,
     page_handoff,
+    request_spans,
     runtime_policy_recovery_api,
 )
 from . import health_routes as _health_routes
@@ -592,6 +593,15 @@ def _theme_context(request: Request) -> dict:
 # TemplateResponse picks up the resolved theme automatically.
 templates.context_processors.append(_theme_context)
 
+
+# Context processor: every page template gets this response's CSP script nonce
+# (drawn per request by security_headers) for its inline <script> tags.
+def _csp_nonce_context(request: Request) -> dict:
+    return {"csp_script_nonce": getattr(request.state, "csp_script_nonce", "")}
+
+
+templates.context_processors.append(_csp_nonce_context)
+
 templates.context_processors.append(_draft_page_context)
 templates.context_processors.append(_record_search_page_context)
 
@@ -983,8 +993,11 @@ def _assert_dashboard_auth_configured() -> None:
 # ---- background automation (event polling + scheduled dreaming) -------------
 # Runs in the dashboard lifespan, NOT the core worker: event triggers are a
 # dashboard-owned store the core worker (a separate process) can't reach. Driven
-# by maverick-core's JobQueue/Worker -- durable, retrying, exactly-once (the
-# flock is gone) -- via maverick_dashboard.automation_queue. Per-trigger polling
+# by maverick-core's JobQueue/Worker -- durable and retrying. A claim is atomic
+# (one worker per job), but delivery is at-least-once: a job whose worker dies
+# after its effect and before completion runs again once its lease expires, so
+# handlers must be idempotent. The flock is gone -- via
+# maverick_dashboard.automation_queue. Per-trigger polling
 # cadence + scheduled dreaming are recurring cron jobs; fired goals are durable
 # run_goal jobs with retry + dead-letter. TestClient skips the lifespan, so this
 # never runs under tests; both halves are OFF by default (their own enabled()).
@@ -1432,6 +1445,14 @@ async def _lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - never block startup
             log.exception("deadline alerts scheduler not started")
         try:
+            # Contact-centre handoffs still waiting when the server stopped continue; a send
+            # that was in flight is shown as not confirmed and is never sent again.
+            from maverick.contact_centre import resume_all_workspaces
+
+            await run_in_threadpool(resume_all_workspaces)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("contact centre deliveries not resumed")
+        try:
             # Profiling, the kernel activity monitor and the model proxy, each
             # only when its setting is on (All settings); stopped at shutdown.
             from maverick_dashboard.background_programs import start_enabled
@@ -1585,6 +1606,8 @@ app = FastAPI(
         Depends(enforce_page_visibility),
     ],
     lifespan=_lifespan,
+    # The request span (below) is the server span; see request_spans.
+    **request_spans.fastapi_telemetry_kwargs(),
 )
 from .administration_document_access_composition import (  # noqa: E402
     attach_administration_document_access_composition,
@@ -2293,6 +2316,16 @@ app.state.public_consent_error_origin_resolver = lambda request: public_consent_
     request, _public_consent_dependencies
 )
 app.include_router(create_consent_public_router(_public_consent_dependencies))
+# Public website chat: the visitor router is self-authenticated (publishable key
+# plus origin) and the admin router sits under dashboard auth. Both answer 404
+# while [public_chat] enabled is false, and store nothing until then.
+from .public_chat_api import (  # noqa: E402
+    create_public_chat_admin_router,
+    create_public_chat_router,
+)
+
+app.include_router(create_public_chat_router())
+app.include_router(create_public_chat_admin_router())
 # The public rights-request form: JSON API under /api/v1/public/rights and
 # the hosted pages under /rights/. Fail-closed on its module gate.
 from .public_rights_api import pages as _public_rights_pages  # noqa: E402
@@ -2450,11 +2483,13 @@ from .invite_routes import router as invite_router  # noqa: E402
 # Personal / service-account API keys: page + JSON routes. Self-gates on
 # [dashboard] api_keys (404 when off).
 app.include_router(api_keys_router)
+from .local_owner_mfa_routes import router as local_owner_mfa_router  # noqa: E402
 from .local_owner_routes import router as local_owner_router  # noqa: E402
 from .session_expiry import page_session as _page_session  # noqa: E402
 from .session_expiry import router as session_expiry_router  # noqa: E402
 
 app.include_router(local_owner_router)
+app.include_router(local_owner_mfa_router)
 app.include_router(session_expiry_router)
 # The page shell's sign-in timer (lightwork-session.js): when this browser's
 # sign-in ends and how to stay signed in. None when nobody is signed in.
@@ -2503,7 +2538,7 @@ _DOCS_CSP = (
     "default-src 'self'; "
     "img-src 'self' data: https:; "
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "script-src 'self' 'nonce-{script_nonce}' https://cdn.jsdelivr.net; "
     "connect-src 'self'; "
     "frame-ancestors 'none'; "
     "base-uri 'none'; "
@@ -2511,11 +2546,12 @@ _DOCS_CSP = (
     "object-src 'none'"
 )
 
+# {script_nonce} is filled per response by security_headers.
 _DEFAULT_CSP = (
     "default-src 'self'; "
     "img-src 'self' data:; "
     "style-src 'self' 'unsafe-inline'; "
-    "script-src 'self' 'unsafe-inline'; "
+    "script-src 'self' 'nonce-{script_nonce}'; "
     "connect-src 'self'; "
     "frame-ancestors 'none'; "
     "base-uri 'none'; "
@@ -2691,6 +2727,7 @@ _AUTH_EXEMPT = {
     "/auth/error",
     "/auth/local-owner",
     "/auth/local-login",
+    "/auth/owner-second-factor",
     # The stylesheet, brand images, fonts and share-page renderer the
     # signed-out pages (sign-in, invitation, public rights form, shared
     # result) load before any session exists. One reviewed set of exact files,
@@ -2728,6 +2765,14 @@ _MAX_PUBLIC_CONSENT_BODY_BYTES = 64 * 1024
 _MAX_NATIVE_CONSENT_BODY_BYTES = 256 * 1024
 _MAX_THIRD_PARTY_COLLABORATION_BODY_BYTES = 2 * 1024 * 1024
 _EVIDENCE_GATEWAY_PREFIX = "/api/v1/security/assurance/gateway/"
+# Owner passphrase and authenticator-code steps: their bodies hold both secrets, so a 422 names
+# the field and never echoes the value.
+_OWNER_SECRET_PREFIXES = (
+    "/auth/company-signin-recovery/",
+    "/auth/company-saml-recovery/",
+    "/api/v1/settings/sign-in-migration/review",
+    "/api/v1/settings/single-sign-on/activation-review",
+)
 _SECURITY_HUNTER_BODY_PATHS = {
     "/api/v1/security/threats/scan",
     "/api/v1/security/soc/ingest",
@@ -3221,6 +3266,9 @@ async def bearer_auth(request: Request, call_next):
         # design; gated, origin-checked and token-addressed in its router.
         or path.startswith("/rights/")
         or path.startswith("/api/v1/public/rights/")
+        # Public website chat (its own publishable key, origin and visitor
+        # session). The admin prefix /api/v1/public-chat stays authenticated.
+        or path.startswith("/public/chat/v1/")
     ):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
@@ -3519,7 +3567,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
         # The owner and invited colleagues both sign in on that page.
         if ((local_owner_claimed() or passphrase_sign_in())
-                and request.url.path not in {"/auth/local-owner", "/auth/local-login"}):
+                and request.url.path not in {"/auth/local-owner", "/auth/local-login", "/auth/owner-second-factor"}):
             # Back to this page after signing in again (the sign-in keeps
             # only a local path; see local_owner_routes).
             from urllib.parse import quote
@@ -3686,7 +3734,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     from fastapi.encoders import jsonable_encoder
 
     errors = jsonable_encoder(exc.errors())
-    if route_path(request).startswith(_EVIDENCE_GATEWAY_PREFIX):
+    if route_path(request).startswith(_EVIDENCE_GATEWAY_PREFIX) or route_path(request).startswith(
+        _OWNER_SECRET_PREFIXES
+    ):
         for error in errors:
             if isinstance(error, dict) and "input" in error:
                 error["input"] = "[redacted]"
@@ -3855,6 +3905,10 @@ async def security_headers(request: Request, call_next):
     (clickjacking, MIME sniffing, Referer leakage, cross-origin
     exfiltration) the dashboard had no defense against before.
     """
+    # One script nonce per response, for the inline <script> tags the templates
+    # render (csp_script_nonce, see _csp_nonce_context).
+    script_nonce = secrets.token_urlsafe(16)
+    request.state.csp_script_nonce = script_nonce
     response = await call_next(request)
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -3894,10 +3948,11 @@ async def security_headers(request: Request, call_next):
             "Strict-Transport-Security",
             "max-age=31536000; includeSubDomains",
         )
-    # Content-Security-Policy. The templates use first-party inline
-    # <style>, <script>, and style="" attributes, so script/style-src
-    # need 'unsafe-inline' for now (a nonce-based tightening is tracked
-    # tech debt). The value still hardens the dashboard meaningfully:
+    # Content-Security-Policy. Inline <script> tags carry this response's
+    # nonce, so script-src admits no 'unsafe-inline' and an injected inline
+    # script cannot run. The templates' first-party inline <style> and
+    # style="" attributes still need 'unsafe-inline' in style-src (out of
+    # scope for this change). The value still hardens the dashboard meaningfully:
     #   - default/connect/script/style 'self' → injected JS can't fetch()
     #     to an external exfil endpoint or pull a remote script
     #   - frame-ancestors 'none' → reinforces X-Frame-Options (clickjack)
@@ -3907,9 +3962,9 @@ async def security_headers(request: Request, call_next):
     # if any of it ever reaches an HTML sink, CSP is the backstop.
     path = route_path(request)
     if path == "/redoc":
-        csp = _DOCS_CSP
+        csp = _DOCS_CSP.format(script_nonce=script_nonce)
     else:
-        csp = _DEFAULT_CSP
+        csp = _DEFAULT_CSP.format(script_nonce=script_nonce)
     if path == "/connections" and str(request.base_url).rstrip("/") == "http://127.0.0.1:8765":
         from maverick.connection_oauth import desktop_return_enabled
 
@@ -8792,6 +8847,9 @@ async def compliance_page(request: Request, tab: str = "") -> HTMLResponse:
     view["can_operate"] = has_permission(request, "operate")
     view["can_global_admin"] = has_global_permission(request, "admin")
     view.update(_compliance_owner_view(request, view["can_admin"]))
+    from .ediscovery_api import page_context as ediscovery_page_context
+
+    view.update(ediscovery_page_context(request))
     return templates.TemplateResponse(request, "compliance.html", view)
 
 
@@ -10524,7 +10582,7 @@ def _render_channels_page(request: Request, *, saved: str = "",
         "email_failed": "The test email could not be sent. Check the mail settings "
                         "(Settings > All settings > Integrations > Email alerts).",
     }.get(saved, "")
-    from . import plain_labels, teams_links_api
+    from . import plain_labels, public_chat_api, teams_links_api
     try:
         from .service_supervisor import status as service_status
 
@@ -10560,6 +10618,7 @@ def _render_channels_page(request: Request, *, saved: str = "",
             "sendable": ["email", "sms", "slack"],
             "channel_runtime": channel_runtime,
             **teams_links_api.page_context(issued_code),
+            **public_chat_api.admin_section_context(request),
             "mail_configured": _mail_configured(),
             "channel_context": _channel_form_context(request),
             "channel_review": _channel_form_review(request),
@@ -10907,6 +10966,15 @@ def goal_cost_breakdown(request: Request, goal_id: int) -> JSONResponse:
     return JSONResponse({"goal_id": goal_id, "total_dollars": round(total, 4), "buckets": rows})
 
 
+def _owned_goal_ids(world, owner: str) -> set[int]:
+    """Ids of the owner's newest 10,000 goals. A world that reads the status
+    columns alone is asked for the ids only, so no goal is decrypted here."""
+    states = getattr(world, "goal_states", None)
+    if callable(states):
+        return {gid for gid, _status, _updated in states(owner=owner, limit=10_000, order="desc")}
+    return {g.id for g in world.list_goals(owner=owner, limit=10_000, order="desc")}
+
+
 @app.get("/api/v1/cost/anomalies")
 def cost_anomalies(
     request: Request,
@@ -10929,7 +10997,7 @@ def cost_anomalies(
     owner = goal_owner_filter(request)
     owned: set[int] | None = None
     if owner is not None:
-        owned = {g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")}
+        owned = _owned_goal_ids(w, owner)
     by_goal: dict[int, float] = {}
     for ep in w.list_episodes(limit=limit):
         gid = getattr(ep, "goal_id", None)
@@ -11327,10 +11395,16 @@ def cost_by_tag_api(
     limit = max(1, min(int(limit), 10_000))
     w = _world()
     owner = goal_owner_filter(request)
-    goal_ids = None
-    if owner is not None:
-        goal_ids = [g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")]
-    buckets = split_by_tag(gather(w, tag_field=tag_field, limit=limit, goal_ids=goal_ids))
+    if owner is not None and hasattr(w, "episodes_for_owner_goals"):
+        # One owner-scoped query: the newest goals' runs, no per-goal reads.
+        rows = gather(w, tag_field=tag_field,
+                      episodes=w.episodes_for_owner_goals(owner, limit=limit))
+    else:
+        goal_ids = None
+        if owner is not None:
+            goal_ids = [g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")]
+        rows = gather(w, tag_field=tag_field, limit=limit, goal_ids=goal_ids)
+    buckets = split_by_tag(rows)
     return JSONResponse({"tag_field": tag_field, "buckets": buckets})
 
 
@@ -14136,6 +14210,16 @@ def intent_value_styles(request: Request):
     return FileResponse(_STATIC_DIR / "intent-value.css", media_type="text/css")
 
 
+@app.get("/static/lightwork-archive-viewer.html")
+def archive_viewer_download(request: Request):
+    """The offline archive viewer the trajectory page offers. Sent only as a
+    download: it runs its own inline script when opened from disk, so it is
+    never rendered as a page under the dashboard's address."""
+    require_permission(request, "view")
+    return FileResponse(_STATIC_DIR / "lightwork-archive-viewer.html", media_type="text/html",
+                        filename="lightwork-archive-viewer.html")
+
+
 @app.get("/static/lightwork-analytics.js")
 async def embed_analytics_js() -> FileResponse:
     """The embeddable ``<lightwork-analytics>`` web component (plain JS, no
@@ -14228,6 +14312,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-employee-companion.css")
 @app.get("/static/lightwork-product-operations.js")
 @app.get("/static/lightwork-specialist-drafts.js")
+@app.get("/static/lightwork-specialist-trials.js")
 @app.get("/static/lightwork-company-signin-migration.js")
 @app.get("/static/lightwork-company-saml-setup.js")
 @app.get("/static/lightwork-connected-event-sources.js")
@@ -14455,6 +14540,20 @@ async def consent_native_admin_client() -> FileResponse:
 
     return FileResponse(
         _STATIC_DIR / "lightwork-consent-native-admin.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/static/lightwork-public-chat-admin.js")
+async def public_chat_admin_client() -> FileResponse:
+    """Same-origin client for the public website chat section of the Channels page."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-public-chat-admin.js",
         media_type="application/javascript; charset=utf-8",
         headers={
             "Cache-Control": "no-store, private, max-age=0",
@@ -15670,6 +15769,9 @@ from .request_activity import RequestActivityMiddleware  # noqa: E402
 
 app.add_middleware(RequestMemoMiddleware)
 app.add_middleware(RequestActivityMiddleware)
+# Added last, so outermost: one OTLP span per request, when tracing is on. Decided
+# here, once; with tracing off nothing is added and a request pays nothing for it.
+request_spans.install(app)
 
 # The 13 consecutive function middlewares above run as one layer (about 2 ms
 # of task groups and streams per request); order and isolation are unchanged.

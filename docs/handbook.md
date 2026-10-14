@@ -91,16 +91,16 @@ All shell execution is mediated — no tool calls `subprocess.run` directly;
 everything routes through `sandbox.exec()` (also a house rule). Nine
 selectable backends (`sandbox/`, `[sandbox] backend`): local subprocess,
 Docker, Podman, gVisor (Docker with the `runsc` userspace kernel),
-devcontainer, Kubernetes, Firecracker microVMs, SSH, and Modal cloud
+devcontainer, Kubernetes, Firecracker microVMs (experimental scaffold), SSH, and Modal cloud
 sandboxes. Third parties ship backends without forking via the Sandbox SDK
 v2 entry-point contract (`sandbox/sdk.py`). The interface itself is
 formally modeled and TLC-verified in TLA+
 ([`docs/specs/tla/`](./specs/tla/README.md)).
 
 Two more threads run through all five: **per-role model choice** — you
-pick the models, per role, from 12 providers (`llm.py`; Anthropic, OpenAI,
-OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI,
-vLLM), configured in `~/.maverick/config.toml`, never hard-coded — and the
+pick the models, per role, from 13 providers (`llm.py`; Anthropic, OpenAI,
+OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Vertex AI, Azure, xAI, Moonshot,
+TGI, vLLM), configured in `~/.maverick/config.toml`, never hard-coded — and the
 **audit log**, a signed, hash-chained, append-only record of every action
 (`audit/`), verifiable offline.
 

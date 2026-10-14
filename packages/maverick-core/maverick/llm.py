@@ -1539,6 +1539,33 @@ _BEDROCK_CLIENT_ENV_NAMES = (
     "ANTHROPIC_BEDROCK_BASE_URL",
     "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
 )
+# Everything the Vertex client reads (project, region, model); part of the client
+# fingerprint so a rotation of any of them rotates the cached client.
+_VERTEX_CLIENT_ENV_NAMES = (
+    "ANTHROPIC_VERTEX_BASE_URL",
+    "ANTHROPIC_VERTEX_PROJECT_ID",
+    "CLOUD_ML_REGION",
+    "GOOGLE_CLOUD_PROJECT",
+    "VERTEX_MODEL_ID",
+)
+
+
+def _vertex_client_environment(
+    environment: Mapping[str, str], pcfg: Mapping[str, Any],
+) -> dict[str, str]:
+    """Vertex AI client values from one snapshot. ``[providers.vertex]`` project_id,
+    region and model_id are the configuration and win over the same names in the
+    environment (Google ADC is the only credential, so no key is involved)."""
+    values = {name: environment.get(name, "") for name in _VERTEX_CLIENT_ENV_NAMES}
+    for field, env_name in (("project_id", "ANTHROPIC_VERTEX_PROJECT_ID"),
+                            ("region", "CLOUD_ML_REGION"),
+                            ("model_id", "VERTEX_MODEL_ID")):
+        value = pcfg.get(field)
+        if isinstance(value, str) and value.strip():
+            values[env_name] = value.strip()
+    return values
+
+
 _PROVIDER_SNAPSHOT_RETRIES = 3
 _CLIENT_CACHE_MAX = 32
 
@@ -1963,7 +1990,7 @@ class LLM:
         common_environment.update(_configured_timeouts(common_environment))
         if provider == "anthropic" and "ANTHROPIC_AUTH_TOKEN" in environment:
             common_environment["ANTHROPIC_AUTH_TOKEN"] = environment["ANTHROPIC_AUTH_TOKEN"]
-        if provider not in ("anthropic", "bedrock", "codex_cli"):
+        if provider not in ("anthropic", "bedrock", "vertex", "codex_cli"):
             common_environment.update({
                 name: environment[name] for name in ("OPENAI_ORG_ID", "OPENAI_PROJECT_ID") if name in environment
             })
@@ -2008,6 +2035,8 @@ class LLM:
                     and not bedrock_environment["BEDROCK_MODEL_ID"].strip()):
                 bedrock_environment["BEDROCK_MODEL_ID"] = raw_model.strip()
             common_environment.update(bedrock_environment)
+        elif provider == "vertex":
+            common_environment.update(_vertex_client_environment(environment, pcfg))
         elif provider == "codex_cli":
             from .providers.codex_cli_provider import _ENV_ALLOWLIST
             common_environment = {

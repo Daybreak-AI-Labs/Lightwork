@@ -60,6 +60,14 @@ REGISTRY: tuple[Deprecation, ...] = (
         deprecated_in="0.1.6",
         remove_in="0.3.0",
     ),
+    Deprecation(
+        name="intent_value.checked_at",
+        kind="api",
+        target="GET /api/v1/intent-value response field checked_at",
+        replacement="recorded_as_of (checked_at carries the same value until removal)",
+        deprecated_in="0.1.7",
+        remove_in="0.3.0",
+    ),
 )
 
 

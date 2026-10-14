@@ -109,10 +109,15 @@ def rows_from_world(world, *, classify: Callable[[object], str] | None = None,
         goals = world.list_goals(limit=limit)
     except Exception:  # pragma: no cover -- read-only, never block
         return rows
+    from .world_model import episodes_by_goal_batch
+
+    # The newest 50 runs per goal (list_episodes' default), read in one batch.
+    batch = episodes_by_goal_batch(world, [g.id for g in goals], per_goal=50)
     for goal in goals:
         try:
             cls = classify(goal) if classify else _default_class(goal)
-            episodes = world.list_episodes(goal_id=goal.id)
+            episodes = (batch[goal.id] if batch is not None and goal.id in batch
+                        else world.list_episodes(goal_id=goal.id))
             for ep in episodes:
                 cost = float(getattr(ep, "cost_dollars", 0.0) or 0.0)
                 outcome = str(getattr(ep, "outcome", "") or "").lower()

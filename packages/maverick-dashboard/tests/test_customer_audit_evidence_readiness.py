@@ -74,7 +74,7 @@ def test_binder_page_download_preserves_signed_digest(customer_audit):
     client, _world, _log = customer_audit
     response = client.get("/audit/binder?days=1")
     assert response.status_code == 200
-    match = re.search(r'<script id="binder-payload" type="application/json">(.*?)</script>', response.text, re.DOTALL)
+    match = re.search(r'<script\b[^>]*\bid="binder-payload"[^>]*>(.*?)</script>', response.text, re.DOTALL)
     assert match
     payload = json.loads(match.group(1))
     assert payload["artifact"]["signature_state"] == "signed"

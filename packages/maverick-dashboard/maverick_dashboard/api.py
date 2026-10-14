@@ -4144,12 +4144,14 @@ def _finance_sod() -> dict:
     """Structural SoD lint over the shipped finance/banking packs -- the
     record/authorize/custody/reconcile separation, checked statically."""
     try:
-        from maverick.domain import builtin_dir, load_domains
+        from maverick.domain import builtin_domains
         from maverick.finance.sod_linter import lint_roster
 
+        # The memoised shipped catalogue: re-parsing all ~2,000 packs per
+        # request cost ~700 ms for a roster of 122 finance and bank packs.
         packs = {
             n: d
-            for n, d in load_domains(builtin_dir()).items()
+            for n, d in builtin_domains().items()
             if n.startswith(("finance", "bank"))
         }
         conflicts = lint_roster(packs)
@@ -4671,11 +4673,14 @@ def _binder_payload(days: int = 90) -> dict:
     w = _world()
     approvals = []
     # A regulator-facing export must disclose every record in its exact window;
-    # it must not silently inherit the UI feed's default limit.
-    for approval in w.list_approvals(limit=2_147_483_647):
-        if not (cutoff <= float(approval.requested_at or 0) <= now):
-            continue
-        state = w.approval_state(approval.id) or {}
+    # it must not silently inherit the UI feed's default limit. The window is
+    # filtered in SQL, so approvals outside it are never decrypted.
+    listed = w.approvals_requested_between(cutoff, now)
+    # One batched read of the quorum state for the window, not three queries
+    # per approval (2,400 ms for 2,000 approvals before).
+    states = w.approval_states(listed)
+    for approval in listed:
+        state = states.get(approval.id) or {}
         approvers = list(state.get("approvers") or [])
         approvals.append(
             {
@@ -13180,6 +13185,10 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Breach notifications",
         "requires": (),
     },
+    "ediscovery": {  # ediscovery.enable
+        "label": "Legal holds and matter export",
+        "requires": (),
+    },
     "privacy_automation.drop_management": {  # privacy_drop_management.enabled
         "label": "Data broker deletion requests",
         "requires": ("privacy_automation", "privacy_automation.rights_orchestration"),
@@ -14265,8 +14274,12 @@ def _publish_check(name: str, payload: AgentOverrideIn, before_view: dict | None
 
 
 def _require_tested_instructions(request: Request, name: str, payload: AgentOverrideIn,
-                                 before_view: dict | None) -> None:
-    """Changed instructions need a passing run of the saved tests, or a recorded reason."""
+                                 before_view: dict | None, *, second_person: dict | None = None) -> None:
+    """Changed instructions need a passing run of the saved tests, or a recorded reason.
+
+    ``second_person`` is the approval a different administrator gave for this reasoned bypass
+    (agent_publish_bypass); the activity record names both people with the reason and the time.
+    """
     try:
         verdict = _publish_check(name, payload, before_view)
     except Exception as exc:
@@ -14287,7 +14300,7 @@ def _require_tested_instructions(request: Request, name: str, payload: AgentOver
             EventKind.CONTROL_PLANE_ACTION, agent="dashboard",
             verb="agent_published_without_passing_tests",
             actor=caller_principal(request) or "local administrator", specialist=name,
-            reason=reason, tests=verdict["tests"], latest=verdict["latest"])
+            reason=reason, tests=verdict["tests"], latest=verdict["latest"], **(second_person or {}))
     except AuditRefused as exc:
         raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.") from exc
     if not recorded:
@@ -14354,6 +14367,7 @@ async def graduate_agent(request: Request, name: str, payload: AgentGraduationIn
     view = await run_in_threadpool(resolved_view, name)
     if view is None:
         raise HTTPException(status_code=404, detail="No such agent or specialist.")
+    _refuse_while_trial_live(name)
     if view["generation"] != payload.expected_generation:
         raise HTTPException(status_code=409, detail=_this_one(name) + " changed. Refresh before granting independence.")
     if not levels_enabled():
@@ -14394,6 +14408,7 @@ def delete_agent_override(request: Request, name: str, expected_generation: str 
                           payload: dict | None = None) -> Response:
     """The ordinary complete review is required before removal or reset."""
     _require_pack_editing(request)
+    _refuse_while_trial_live(name)
     from .agent_override_changes_api import ApplyIn, apply_sealed
 
     if payload is None:
@@ -14403,6 +14418,14 @@ def delete_agent_override(request: Request, name: str, expected_generation: str 
     except ValueError as exc:
         raise HTTPException(422, "Confirm the complete current review in Agent Factory. Nothing was changed.") from exc
     return apply_sealed(request, reviewed, expected_name=name, expected_generation=expected_generation)
+
+
+def _refuse_while_trial_live(name: str) -> None:
+    """A trial keeps the current definition as it is; it is promoted or rolled back first."""
+    from maverick import specialist_canary
+
+    if specialist_canary.live(name) is not None:
+        raise HTTPException(status_code=409, detail="A trial version of this specialist is live. Promote it or roll it back in Workforce first. Nothing was changed.")
 
 
 def _record_agent_change(request: Request, name: str, before: dict | None, after: dict | None) -> None:
@@ -15487,6 +15510,8 @@ def _decide_approval(request: Request, approval_id: int, payload: dict, status: 
                                resource=str(approval_id))
     who, world = _supervisor(request), _world()
     _require_settings_decider(request, world, approval_id, who, approving=approving)
+    from . import agent_publish_bypass
+    agent_publish_bypass.require_decider(request, world.get_approval(approval_id), who, approving=approving)
     from .approval_queue_operations import guard, require_review
 
     vote_guard = reviewed
@@ -17847,6 +17872,7 @@ from .data_use_provider_api import router as data_use_provider_router  # noqa: E
 from .data_use_provider_audit_api import (  # noqa: E402
     router as data_use_provider_audit_router,
 )
+from .ediscovery_api import router as ediscovery_router  # noqa: E402
 from .finance_api import router as finance_operations_router  # noqa: E402
 from .governance_agent_cross_suite_context_api import (  # noqa: E402
     router as governance_agent_cross_suite_context_router,
@@ -17970,6 +17996,7 @@ router.include_router(privacy_drop_management_router)
 router.include_router(privacy_regulatory_intelligence_router)
 router.include_router(privacy_notice_governance_router)
 router.include_router(privacy_rights_orchestration_router)
+router.include_router(ediscovery_router)
 router.include_router(privacy_rights_consumer_delivery_router)
 router.include_router(third_party_intelligence_router)
 router.include_router(third_party_contracts_router)

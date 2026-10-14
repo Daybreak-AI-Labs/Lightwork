@@ -1167,6 +1167,7 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
     approval, and on approval saves it so the sealed, knowledge-loaded agent
     goes live. Nothing is activated without your yes.
     """
+    from ..agent_tests_policy import NewSpecialistNeedsTests
     from ..intake import IntakeSpec, attach_docs_to_profile, run_intake, save_profile
 
     # Only prompt when a human is attached (a TTY). In non-interactive use (CI,
@@ -1251,7 +1252,11 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
         return
     if kb is not None and doc_paths:
         attach_docs_to_profile(spec, profile, kb)
-    path = save_profile(profile, approved=True)
+    try:
+        path = save_profile(profile, approved=True)
+    except NewSpecialistNeedsTests as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(1)
     click.echo(click.style(f"\nActivated. Pack saved to {path}", fg="green"))
     click.echo(f"Domain '{profile.name}' is now available to the swarm.")
 
@@ -1277,6 +1282,7 @@ def learn_demo(ctx: click.Context, demo_file, name, industry, source, no_llm, ye
     your approval, and on approval saves it and provisions its skills/tools.
     Nothing is activated without your yes.
     """
+    from ..agent_tests_policy import NewSpecialistNeedsTests
     from ..demonstration import induce_profile, load_demonstration
     from ..intake import save_profile
 
@@ -1315,7 +1321,11 @@ def learn_demo(ctx: click.Context, demo_file, name, industry, source, no_llm, ye
     if not yes and not click.confirm("\nApprove and activate this agent?", default=False):
         click.echo("Discarded. Nothing was saved.")
         return
-    path = save_profile(profile, approved=True)
+    try:
+        path = save_profile(profile, approved=True)
+    except NewSpecialistNeedsTests as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(1)
     click.echo(click.style(f"\nActivated. Pack saved to {path}", fg="green"))
     click.echo(f"Domain '{profile.name}' is now available to the swarm.")
 
@@ -5541,20 +5551,10 @@ def monitor(ctx, goal_id, interval) -> None:
 
 
 def _conversation_user_matches(conv_user_id: str, requested: str, channel: str) -> bool:
-    """Match a conversation's user_id for erase/export-user.
+    """Match a conversation's user_id for erase/export-user (see ``ediscovery``)."""
+    from ..ediscovery import conversation_user_matches
 
-    Most channels store externally supplied user ids and must match exactly:
-    identifiers such as Twilio WhatsApp ``whatsapp:+15551234567`` or Matrix
-    room ids naturally contain colons, so treating any ``<prefix>:`` as the
-    requested user can disclose or erase unrelated conversations.
-
-    The only family match Lightwork currently needs is the local CLI chat
-    namespace: each REPL session is stored as ``local:<uuid>``, while the
-    documented GDPR subject is ``--channel cli --user local``.
-    """
-    if conv_user_id == requested:
-        return True
-    return channel == "cli" and requested == "local" and conv_user_id.startswith("local:")
+    return conversation_user_matches(conv_user_id, requested, channel)
 
 
 def _erase_subject_knowledge(channel: str, user: str) -> dict[str, int]:
@@ -5679,6 +5679,19 @@ def _dispatch_backend_erasure(world, conversation_ids, erasure_plan):
     return backend_erase(conversation_ids)
 
 
+def _refuse_under_legal_hold(ctx, world, conversation_ids) -> None:
+    """Stop before any deletion when an active legal matter covers this closure."""
+    from ..ediscovery import erasure_refusal
+
+    plan_hook = getattr(world, "plan_conversation_erasure", None)
+    goal_ids = plan_hook(conversation_ids)["goal_ids"] if callable(plan_hook) else []
+    message = erasure_refusal(world, conversation_ids=conversation_ids, goal_ids=goal_ids, actor="cli")
+    if message:
+        ctx.obj["erase_refusal"] = message
+        click.echo(message, err=True)
+        ctx.exit(1)
+
+
 def _erasure_failure_label(error: BaseException) -> str:
     """Describe an erase failure without echoing subject-bearing paths/data."""
     errno = getattr(error, "errno", None)
@@ -5800,6 +5813,7 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
     # these conversations. We use ALL turns (not just recent), so a
     # conversation with >10k turns doesn't leave orphan attachments.
     conv_ids = [c.id for c in convs]
+    _refuse_under_legal_hold(ctx, world, conv_ids)
     (
         erasure_plan,
         erasure_manifest,
@@ -6414,11 +6428,21 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
                 f"pruned {convs} conversation(s), {events} goal_event row(s), "
                 f"{dedup} processed-message row(s) across {len(tenants)} tenant(s)"
             )
+            held = sum(1 for row in rows if row.get("held"))
+            if held:
+                click.echo(
+                    f"{held} workspace(s) were skipped because a legal hold is active there.",
+                    err=True,
+                )
             return
+
+    from ..ediscovery import LegalHoldApplies
 
     world = open_world(ctx.obj["db"])
     try:
         convs, events, dedup = prune_world(world, days=days, events_days=events_days)
+    except LegalHoldApplies as exc:
+        raise click.ClickException(str(exc)) from exc
     finally:
         close_world_if_owned(world)
     click.echo(
@@ -7140,9 +7164,10 @@ def audit_export(
 @click.option("--format", "fmt", type=click.Choice(["json", "cef"]), default="json",
               help="Wire format for the SIEM (default: json).")
 @click.option("--to", "dest", default=None,
-              help="Destination URI: tcp://host:port, udp://host:port, or "
-                   "http(s)://host/path. Default: MAVERICK_SIEM_DEST / "
-                   "[audit] siem_dest.")
+              help="Destination URI: tcp://host:port, udp://host:port, "
+                   "http(s)://host/path, datadog://<site>, or "
+                   "sentinel://<dce-host>/<dcr-id>/Custom-<stream>. Default: "
+                   "MAVERICK_SIEM_DEST / [audit] siem_dest.")
 @click.option("--day", default=None, help="YYYY-MM-DD (default: today).")
 @click.option("--all", "all_days", is_flag=True,
               help="Forward every YYYY-MM-DD.ndjson day-file in the audit dir.")
@@ -7540,6 +7565,7 @@ from . import (  # noqa: E402,F401
     _knowledge_groups,
     _learning_groups,
     _ops_groups,
+    _owner_groups,
     _reporting_groups,
     _training_groups,
     _trust_groups,

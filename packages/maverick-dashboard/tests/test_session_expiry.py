@@ -132,3 +132,49 @@ def test_a_renewal_that_cannot_be_used_leaves_the_current_sign_in_alone(monkeypa
         assert client.post("/auth/session/renew").status_code == 401
         monkeypatch.setattr(session_expiry, "_ends", real)
         assert client.get("/auth/session/status").status_code == 200       # still signed in
+
+
+def _session_payload(client):
+    from maverick.web_session import verify_session
+    from maverick_dashboard import invites
+    return verify_session(client.cookies.get("mvk_session"), invites.local_session_secret())
+
+
+def _second_factor_session(client):
+    """The owner turns on an authenticator app, then signs in with a code from it."""
+    from maverick_dashboard import local_owner_second_factor as second
+    from maverick_dashboard import local_passphrases, owner_totp
+    _owner(client)
+    secret, _uri = second.start_setup(PASSPHRASE)
+    key = owner_totp.decode_secret(secret)
+    now = time.time()
+    second.confirm_setup(owner_totp.totp(key, now))
+    local_passphrases.reset_attempt_limit()
+    step = client.post("/auth/local-login", data={"email": "owner@example.com", "password": PASSPHRASE})
+    assert step.status_code == 200, step.text
+    local_passphrases.reset_attempt_limit()
+    code = owner_totp.totp(key, now + owner_totp.STEP_SECONDS)  # a later step than the set-up code
+    done = client.post("/auth/owner-second-factor", data={"code": code})
+    assert done.status_code == 303, done.text
+
+
+def test_staying_signed_in_keeps_the_second_factor_and_the_time_it_was_given():
+    with _client() as client:
+        _second_factor_session(client)
+        before = _session_payload(client)
+        assert before["mfa"] is True and before["mfa_at"]
+        renewed = client.post("/auth/session/renew")
+        assert renewed.status_code == 200, renewed.text
+        after = _session_payload(client)
+        assert after["sid"] != before["sid"]
+        assert after["mfa"] is True and after["mfa_at"] == before["mfa_at"]
+
+
+def test_staying_signed_in_after_a_passphrase_only_sign_in_adds_no_second_factor():
+    with _client() as client:
+        _owner(client)
+        before = _session_payload(client)
+        assert before["mfa"] is False and "mfa_at" not in before
+        assert client.post("/auth/session/renew").status_code == 200
+        after = _session_payload(client)
+        assert after["mfa"] is False and "mfa_at" not in after

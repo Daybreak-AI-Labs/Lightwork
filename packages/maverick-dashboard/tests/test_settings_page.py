@@ -182,7 +182,7 @@ def test_group_named_in_the_address_is_applied_before_the_sections_paint(monkeyp
     sections = text.index('<div id="settings-sections"')
     first_node = text.index("data-settings-group=", sections)
     early = text[sections:first_node]
-    assert "<script>" in early and "window.mvSettingsGroupFor" in early
+    assert '<script nonce="' in early and "window.mvSettingsGroupFor" in early
     assert "dataset.settingsActive" in early
     # The page script hands the painted state to the tabs instead of
     # repainting it, and keeps following later address changes.

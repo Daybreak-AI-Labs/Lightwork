@@ -64,7 +64,7 @@
   <div id="hunt-detail" aria-live="polite"></div>
 </section>
 </div>
-<script type="application/json" id="hunt-people">{{ people | tojson }}</script>
+<script nonce="{{ csp_script_nonce }}" type="application/json" id="hunt-people">{{ people | tojson }}</script>
 {% endif %}
 <script src="/static/lightwork-security-hunt.js" defer></script>
 {% endblock %}

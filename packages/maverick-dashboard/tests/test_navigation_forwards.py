@@ -344,6 +344,6 @@ def test_steps_mode_starts_from_a_saved_template_like_the_designer(monkeypatch, 
         "---\nowner: local\ntitle: Weekly digest\nparams: []\n---\nWrite the weekly digest.\n", encoding="utf-8")
     designer = client.get("/flows/designer?from_template=weekly-digest").text
     steps = client.get("/workflow-builder?mode=steps&from_template=weekly-digest").text
-    seed = re.compile(r'<script id="fd-seed" type="application/json">(.*?)</script>', re.DOTALL)
+    seed = re.compile(r'<script\b[^>]*\bid="fd-seed"[^>]*>(.*?)</script>', re.DOTALL)
     assert seed.search(designer).group(1) == seed.search(steps).group(1)
     assert "Write the weekly digest." in seed.search(steps).group(1)

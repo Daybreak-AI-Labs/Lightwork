@@ -31,14 +31,18 @@ stay anonymous.
 
 ## Supported versions
 
-Only the latest minor release receives security fixes. Older releases
-are not patched; users on `v0.1.x` should upgrade to the latest tagged
-release.
+No release has been published yet. The latest git tag is `v0.1.6`. The
+packages on `main` are at `0.1.7` (see `release-cohort.toml`), which is
+unreleased, and security fixes are made on `main`.
+
+Once releases are published, only the latest minor release receives
+security fixes. Older releases are not patched. This table will list
+each supported release when the first one is published.
 
 | Version | Supported |
 |---------|-----------|
-| v0.2.x  | Yes (current) |
-| v0.1.x  | No        |
+| `main` (0.1.7, unreleased) | Development line; no published release yet |
+| `v0.1.6` (latest tag) | Tag only; not a published release |
 
 ## Threat model
 
@@ -120,7 +124,8 @@ chooses the blast radius**. Defense in depth, from outermost to innermost:
 1. **Sandbox backend** — the real containment boundary. `local` = your host;
    `docker`/`podman` run each command in a throwaway container
    (`--network=none`, `--cap-drop=ALL`, `--security-opt=no-new-privileges`,
-   `--pids-limit`); `firecracker`/`kubernetes`/`ssh` isolate further. The
+   `--pids-limit`); `kubernetes`/`ssh` isolate further.
+   `firecracker` is an experimental scaffold, not a supported isolation backend. The
    setup wizard defaults real installs to a container when one is available,
    and the kernel logs a one-time warning when it runs on `local` (louder
    when the shield is absent). **For any untrusted goal, use a container

@@ -63,6 +63,7 @@ _OIDC_EXEMPT_PATHS = frozenset(
         "/auth/error",
         "/auth/local-owner",
         "/auth/local-login",
+        "/auth/owner-second-factor",
     }
 )
 
@@ -74,11 +75,13 @@ SELF_AUTH_SIGNIN_RECOVERY_PATHS = frozenset({
     "/auth/company-signin-recovery/original",
     "/auth/company-signin-recovery/review",
     "/auth/company-signin-recovery/apply",
+    "/auth/company-signin-recovery/cancel",
     "/auth/company-saml-recovery",
     "/auth/company-saml-recovery/lookup",
     "/auth/company-saml-recovery/original",
     "/auth/company-saml-recovery/review",
     "/auth/company-saml-recovery/apply",
+    "/auth/company-saml-recovery/cancel",
 })
 
 SELF_AUTH_WEBHOOK_PATHS = frozenset(
@@ -185,7 +188,10 @@ def _self_authenticated_path(path: str) -> bool:
         ("/share/", "/scim/", "/form/", "/dsar/response/", "/unsubscribe/", "/saml/",
          "/auth/invite/", "/api/v1/external/",
          "/api/v1/public/consent/", "/api/v1/public/policies/",
-         "/api/v1/devices/pairing/", "/rights/", "/api/v1/public/rights/")
+         "/api/v1/devices/pairing/", "/rights/", "/api/v1/public/rights/",
+         # Public website chat: the publishable key and visitor session are the
+         # credentials, checked in public_chat_api. The admin prefix is not listed.
+         "/public/chat/v1/")
     )
 
 
@@ -901,6 +907,35 @@ def domain_suites_allowed(request: Request, domain: str | None) -> bool:
         # An unreadable pack or grant policy is not evidence of access.  Keep
         # the server error out of customer responses without releasing data.
         raise HTTPException(status_code=503, detail="Access rules for agents and specialists are unavailable right now. Try again in a moment.") from exc
+
+
+def domain_suites_checker(request: Request):
+    """``domain_suites_allowed`` for many packs of one caller within one request.
+
+    A catalogue listing asks the same caller about every pack. The caller's
+    grants are read at most once for the listing; each pack then gets the same
+    suite test and the same fail-closed error as :func:`domain_suites_allowed`.
+    """
+    from maverick.domain import suites_for_domain
+
+    grants: list = []  # Read on first need; ``None`` (unrestricted) must stay distinct from unread.
+
+    def allowed(domain: str | None) -> bool:
+        if not domain:
+            return True
+        try:
+            for suite in suites_for_domain(domain):
+                if not grants:
+                    grants.append(caller_suites(request))
+                if suite is not None and grants[0] is not None and suite not in grants[0]:
+                    return False
+            return True
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Access rules for agents and specialists are unavailable right now. Try again in a moment.") from exc
+
+    return allowed
 
 
 BOARD_SCOPE_DETAIL = (

@@ -14,7 +14,7 @@
 <label>Access duration <select class="select" id="ca-minutes"><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">One hour</option></select></label>
 <button type="submit" class="btn btn--primary">Request independent review</button></form></section>
 <section class="panel"><h2>Requests and receipts</h2><div id="ca-records"></div></section>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   const byId = id => document.getElementById(id); let model = null, busy = false;

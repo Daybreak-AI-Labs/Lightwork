@@ -889,7 +889,7 @@
 
 <p>{{ back_link('/security', 'Security & GRC') }}</p>
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 // Shared helpers for this page: one plain sentence per failure, never a code.
 window.mraPlain = (failure, action) => (typeof window.mvErrorText === "function"
   ? window.mvErrorText(failure, action)
@@ -904,7 +904,7 @@ window.mraFailure = response => {
 };
 </script>
 {% if gateway_enabled %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (() => {
   const button = document.getElementById("gateway-demo-seed");
   const packetButton = document.getElementById("gateway-packet-download");
@@ -969,7 +969,7 @@ window.mraFailure = response => {
   });
 })();
 </script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (() => {
   const status = document.getElementById("impact-review-status");
   document.querySelectorAll("[data-impact-review]").forEach(button => button.addEventListener("click", async () => {
@@ -997,7 +997,7 @@ window.mraFailure = response => {
 {% endif %}
 {% if ai_inventory_enabled and gateway_admin and not ai_inventory_error
       and ai_inventory_connectors %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (() => {
   const panel = document.getElementById("ai-inventory-panel");
   const status = document.getElementById("ai-inventory-action-status");
@@ -1036,7 +1036,7 @@ window.mraFailure = response => {
       and not policy_pack_catalog.truncated
       and not policy_pack_channels.truncated
       and not policy_pack_subscriptions.truncated %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (() => {
   const panel = document.getElementById("policy-packs-panel");
   const status = document.getElementById("policy-pack-action-status");
@@ -1110,7 +1110,7 @@ window.mraFailure = response => {
 })();
 </script>
 {% endif %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (() => {
   const snapshotButton = document.getElementById("portfolio-snapshot-refresh");
   const snapshotStatus = document.getElementById("portfolio-snapshot-status");
@@ -1243,7 +1243,7 @@ window.mraFailure = response => {
   });
 })();
 </script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (() => {
   const prefix = "/api/v1/security/assurance";
   const ASSETS = {{ MRA_NAMES|tojson }};

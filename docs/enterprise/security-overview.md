@@ -126,7 +126,7 @@ sandbox policy.
   user →│  channel / OIDC ──→ maverick serve ──→ orchestrator + swarm  │
         │                          │                  │                │
         │                    tenant_scope        sandbox (local/       │
-        │                    per-tenant world.db  docker/k8s/firecracker)│
+        │                    per-tenant world.db  docker/k8s)          │
         │                          │                  │                │
         │   self-hosted LLM ←──────┘   signed audit ──┴─→ SIEM export  │
         │   (Ollama/vLLM/TGI)          (encrypted at rest)             │

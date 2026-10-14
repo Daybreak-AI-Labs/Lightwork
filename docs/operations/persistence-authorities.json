@@ -188,14 +188,14 @@
     "a2a": 4,
     "preferences": 8,
     "learning": 61,
-    "sqlite_domain": 82,
-    "configuration": 75,
+    "sqlite_domain": 84,
+    "configuration": 76,
     "read_projection": 24,
     "coordinator": 1,
     "audit": 26,
     "transient": 25,
     "business_records": 22,
-    "execution": 45,
+    "execution": 46,
     "recovery": 12,
     "derived": 17,
     "composition": 62,
@@ -30278,6 +30278,250 @@
           "function": "module",
           "kind": "GovernedRecordStore",
           "expression": "GovernedRecordStore('intent_value_benchmarks', 'IVB', 'intent_value')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/contact_centre.py",
+      "contract": "execution",
+      "owner": "packages/maverick-core/maverick/contact_centre.py",
+      "purpose": "Outbox for handing a human conversation to Zendesk or a signed webhook: one sealed entry per handoff, so a repeated request does not create a second ticket. Holds the customer name, email and recent messages only until the send is final.",
+      "referenced_store_owners": [
+        "maverick.file_lock",
+        "maverick.tenant.kms"
+      ],
+      "review": "module purpose and persistence seams read; contract-family classification (not every operation tested). Send-time provider and address checks, the sending marker written before the request, restart handling and retention were read in _attempt, resume_pending and _prune. No live provider qualification.",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "contact_centre",
+        "outbox.sealed"
+      ],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 1,
+        "atomic_replace": 1,
+        "outbox": 24
+      },
+      "source_sites": [
+        {
+          "line": 239,
+          "function": "_path",
+          "kind": "data_dir",
+          "expression": "data_dir('contact_centre', 'outbox.sealed')"
+        },
+        {
+          "line": 249,
+          "function": "_locked",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        },
+        {
+          "line": 272,
+          "function": "_save",
+          "kind": "atomic_write_bytes",
+          "expression": "atomic_write_bytes(path, blob, mode=384)"
+        }
+      ],
+      "recovery_disposition": "Not in the restore registry. The outbox is one sealed file per workspace under the data root, so backups include it. On restart an entry marked sending becomes not confirmed and is never resent, while queued, retrying and waiting entries resume. Restoring an older copy can therefore resend a handoff that was queued after that backup, so support must review pending entries before a restored workspace resumes delivery."
+    },
+    {
+      "path": "packages/maverick-core/maverick/ediscovery.py",
+      "contract": "sqlite_domain",
+      "owner": "packages/maverick-core/maverick/ediscovery.py",
+      "purpose": "Legal-hold ledger: each matter's name, custodians, date range and record kinds, with active holds that refuse broad retention purges and erasure of in-scope records.",
+      "referenced_store_owners": [
+        "maverick.audit",
+        "maverick.file_lock"
+      ],
+      "review": "module purpose and persistence seams read; contract-family classification (not every operation tested). Writes run in BEGIN IMMEDIATE with revision checks and an audit record; reads of holds open the ledger read-only and do not create it. No native deployment qualification.",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "ediscovery",
+        "legal-matters.sqlite3"
+      ],
+      "observed_mechanism_markers": {
+        "revision": 37,
+        "create_table": 1,
+        "begin_immediate": 1
+      },
+      "source_sites": [
+        {
+          "line": 119,
+          "function": "store_path",
+          "kind": "data_dir",
+          "expression": "data_dir('ediscovery', 'legal-matters.sqlite3')"
+        },
+        {
+          "line": 120,
+          "function": "store_path",
+          "kind": "data_dir",
+          "expression": "data_dir('ediscovery', 'legal-matters.sqlite3', tenant=tenant)"
+        },
+        {
+          "line": 277,
+          "function": "_connect",
+          "kind": "connect",
+          "expression": "sqlite3.connect(self.path, timeout=30.0, isolation_level=None)"
+        },
+        {
+          "line": 433,
+          "function": "_active_rows",
+          "kind": "connect",
+          "expression": "sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=5)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "ediscovery/legal-matters.sqlite3",
+          "recovery_policy": "unknown_sqlite",
+          "disposition": "Legal-hold ledger with no registry policy. A restored copy is classified as unclassified protected SQLite and blocks global start until external readback. Restore reconciliation does not interpret the holds it contains."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/public_chat_store.py",
+      "contract": "sqlite_domain",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/public_chat_store.py",
+      "purpose": "Storage for the public website chat: an installation index of publishable-key and visitor-session digests, and per-tenant sites, daily spend and sealed transcripts with retention. Raw keys and session tokens are never stored.",
+      "referenced_store_owners": [
+        "maverick.crypto_at_rest",
+        "maverick.file_lock",
+        "maverick.paths"
+      ],
+      "review": "module purpose and persistence seams read; contract-family classification (not every operation tested). Keys and tokens are kept as SHA-256 digests; transcript text is sealed and bound to tenant, site, conversation and row. No live website or provider qualification.",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "public_chat",
+        "index.sqlite3",
+        "sites.sqlite3"
+      ],
+      "observed_mechanism_markers": {
+        "create_table": 6,
+        "begin_immediate": 1
+      },
+      "source_sites": [
+        {
+          "line": 91,
+          "function": "index_path",
+          "kind": "data_dir",
+          "expression": "data_dir('public_chat', 'index.sqlite3', tenant=None)"
+        },
+        {
+          "line": 95,
+          "function": "sites_path",
+          "kind": "data_dir",
+          "expression": "data_dir('public_chat', 'sites.sqlite3', tenant=tenant)"
+        },
+        {
+          "line": 138,
+          "function": "_connect",
+          "kind": "connect",
+          "expression": "sqlite3.connect(str(path), isolation_level=None, timeout=10.0)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "public_chat/index.sqlite3",
+          "recovery_policy": "unknown_sqlite",
+          "disposition": "Installation-wide index of key and session digests and site routing, with no registry policy. A restored copy blocks global start until external readback; session digests expire after 30 minutes."
+        },
+        {
+          "sample_path": "public_chat/sites.sqlite3",
+          "recovery_policy": "unknown_sqlite",
+          "disposition": "Per-tenant site settings, daily spend and sealed transcripts, with no registry policy. A restored copy blocks global start until external readback. Transcript retention is applied by purge_expired, and sealed text stays bound to its tenant and site."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/local_owner_second_factor.py",
+      "contract": "configuration",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/local_owner_second_factor.py",
+      "purpose": "The owner's authenticator app: set-up, the second sign-in step, turning it off and recovery codes. It keeps no file of its own; its state is held in the owner record under local_owner's lock.",
+      "referenced_store_owners": [
+        ".local_owner"
+      ],
+      "review": "module purpose and persistence seams read; contract-family classification (not every operation tested). Each state change takes the owner record's cross-process lock and writes through local_owner, with the activity log recorded first. No live authenticator qualification.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "cross_process_lock": 5
+      },
+      "source_sites": [
+        {
+          "line": 262,
+          "function": "complete",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(local_owner.path(), strict=True)"
+        },
+        {
+          "line": 323,
+          "function": "start_setup",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(local_owner.path(), strict=True)"
+        },
+        {
+          "line": 356,
+          "function": "confirm_setup",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(local_owner.path(), strict=True)"
+        },
+        {
+          "line": 380,
+          "function": "disable",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(local_owner.path(), strict=True)"
+        },
+        {
+          "line": 405,
+          "function": "regenerate",
+          "kind": "cross_process_lock",
+          "expression": "file_lock.cross_process_lock(local_owner.path(), strict=True)"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "dashboard-owner.json",
+          "recovery_policy": "dashboard_owner",
+          "disposition": "Second-factor secrets live in the owner record: the sealed authenticator secret, recovery-code digests and second-step token digests. They restore with that record under its registered dashboard_owner policy; this module adds no separate restore path."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/specialist_canary.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/specialist_canary.py",
+      "purpose": "Trial versions of changed specialists and the version each trial-period goal used.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added with the specialist trial versions",
+      "governed_namespaces": [
+        {
+          "namespace": "specialist-canaries",
+          "line": 37,
+          "recovery_policy": "specialist_canary_trial_authority"
+        },
+        {
+          "namespace": "specialist-canary-goals",
+          "line": 38,
+          "recovery_policy": "specialist_canary_goal_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "revision": 2
+      },
+      "source_sites": [
+        {
+          "line": 37,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('specialist-canaries', 'SPC', 'specialist_canary', archive_when_full=False)"
+        },
+        {
+          "line": 38,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('specialist-canary-goals', 'SCG', 'specialist_canary_goal', archive_when_full=False)"
         }
       ]
     }

@@ -27,6 +27,8 @@ from .draft_api import context_for
 
 COOKIE = "mvk_saml_setup_test"
 SETTING = "auth.saml.enabled"
+ACTIVATION_FLOW = "company-saml-activation"  # the owner's activation review (passphrase and code)
+RECOVERY_FLOW = "company-saml-recovery"  # the restricted recovery form (passphrase and code)
 NOTICE = ("First save these files and details as an inactive setup. Trying sign-in verifies the "
           "provider's actual signed response without signing anyone into Lightwork or granting a role. "
           "Reviewing uploads keeps an encrypted copy before any sign-in setting changes. "
@@ -364,10 +366,10 @@ def _choice():
     return layers, state, {"present": present, "value": value if present else None, "reset": is_reset(layers["here"], setting)}
 
 
-def activation_review(request, selected, expected, password):
+def activation_review(request, selected, expected, password, code=""):
     current, owner = authority(request, expected)
     local_owner._local(request, mutate=True)
-    local_owner.verify_recovery(request, email=owner["email"], password=password)
+    local_owner.verify_recovery(request, email=owner["email"], password=password, flow=ACTIVATION_FLOW, code=code)
     with authority_effect_fence(), settings_store._locked(strict=True):
         proof = _proof(request, selected)
         cfg = current_configuration()
@@ -424,23 +426,23 @@ def migration_original(request, operation, expected):
     return {"context": current, "operation": operation, **migration._original(row)}
 
 
-def recovery_identity(request, email, password):
+def recovery_identity(request, email, password, code=""):
     local_owner._local(request, mutate=True)
     with authority_effect_fence():
         _policy(request, active=True)
-        return local_owner.verify_recovery(request, email=email, password=password)
+        return local_owner.verify_recovery(request, email=email, password=password, flow=RECOVERY_FLOW, code=code)
 
 
-def recovery_catalog(request, email, password):
-    owner = recovery_identity(request, email, password)
+def recovery_catalog(request, email, password, code=""):
+    owner = recovery_identity(request, email, password, code)
     rows = [row for row in migration._records() if row.get("protocol") == "saml"
             and row["actor"] == "user:" + owner["email"] and row["owner_claim"] == migration._claim_binding(owner)]
     return {"notice": NOTICE, "requests": [{"value": row["id"][4:], "kind": row["kind"], "label": ("Restore previous sign-in" if row["kind"] == "recovery" else "Enable single sign-on")
             + " / " + time.strftime("%b %d, %H:%M", time.localtime(row["created_at"]))} for row in rows]}
 
 
-def recovery_original(request, operation, email, password):
-    owner = recovery_identity(request, email, password)
+def recovery_original(request, operation, email, password, code=""):
+    owner = recovery_identity(request, email, password, code)
     row = migration._lookup(operation, owner)
     if row and row.get("protocol") != "saml":
         raise HTTPException(404, "Choose an original single-sign-on request.")
@@ -449,8 +451,8 @@ def recovery_original(request, operation, email, password):
     return {"operation": operation, **migration._original(row)}
 
 
-def recovery_review(request, operation, email, password):
-    owner = recovery_identity(request, email, password)
+def recovery_review(request, operation, email, password, code=""):
+    owner = recovery_identity(request, email, password, code)
     with authority_effect_fence(), settings_store._locked(strict=True):
         row = migration._lookup(operation, owner)
         if not row or row.get("protocol") != "saml" or row["kind"] != "activation" or row.get("_audit_pending"):
@@ -491,11 +493,11 @@ def _recovery_guard(request, value):
             raise HTTPException(409, "The current sign-in settings changed after recovery review. Nothing was restored.")
 
 
-def recover(request, token, email, password):
+def recover(request, token, email, password, code=""):
     value = migration._opened(token)
     if value.get("protocol") != "saml" or value["kind"] != "recovery":
         raise HTTPException(409, "Choose the separately reviewed single-sign-on recovery.")
-    owner = recovery_identity(request, email, password)
+    owner = recovery_identity(request, email, password, code)
     if value["actor"] != "user:" + owner["email"] or value["owner_claim"] != migration._claim_binding(owner):
         raise HTTPException(403, "This recovery review belongs to another original owner.")
     from maverick.oidc import VerifiedPrincipal

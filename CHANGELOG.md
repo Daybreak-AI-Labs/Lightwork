@@ -7,6 +7,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **OpenTelemetry metrics and request spans** (opt-in). `MAVERICK_OTEL_METRICS=1`
+  (or `[observability] otlp_metrics`, on the All settings page) also sends the
+  Prometheus series over OTLP to the same collector, under the same names and
+  labels, at `/v1/metrics` beside the trace endpoint. With OTLP tracing on, each
+  dashboard HTTP request is one server span named by route template (for example
+  `HTTP GET /goals/{goal_id}`). With OTLP tracing on, FastAPI's own per-request
+  span, which records the raw path and query, is switched off; with tracing off
+  the app is built as before. The request span joins the caller's trace when the
+  request sends a W3C `traceparent` header.
 - **Chat threads** — a chat is now a conversation, not a single goal. The
   first message opens a thread; every later message from the page's composer
   becomes a follow-up goal (`POST /chat/goal/{id}/reply`) that runs inside

@@ -1,5 +1,5 @@
 {% extends "public_base.html" %}
-{% from "_passphrase_fields.html" import styles, passphrase, script %}
+{% from "_passphrase_fields.html" import styles, passphrase, script with context %}
 {% block title %}{{ "You're invited" if invite else "Invitation" }} · Lightwork{% endblock %}
 {% block public_label %}Invitation{% endblock %}
 {% block public_footer %}Invitation to Lightwork{% endblock %}

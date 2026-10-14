@@ -71,8 +71,8 @@
   <p><a class="btn btn--ghost" href="/my-data#pd-memory">{{ ui("Review memory choices and sources in My data") }}</a></p>
 </section>
 {% endif %}
-<script id="preference-data" type="application/json">{{ preference_state|tojson }}</script>
-<script id="preference-thread" type="application/json">{{ preference_thread|tojson }}</script>
-<script id="preference-styles" type="application/json">{{ output_styles|tojson }}</script>
+<script nonce="{{ csp_script_nonce }}" id="preference-data" type="application/json">{{ preference_state|tojson }}</script>
+<script nonce="{{ csp_script_nonce }}" id="preference-thread" type="application/json">{{ preference_thread|tojson }}</script>
+<script nonce="{{ csp_script_nonce }}" id="preference-styles" type="application/json">{{ output_styles|tojson }}</script>
 <script src="/static/lightwork-preferences.js" defer></script>
 {% endblock %}

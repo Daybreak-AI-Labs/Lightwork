@@ -1282,7 +1282,9 @@ class PostgresWorldModel:
         # point there but harmless.
         self._lock = threading.RLock()
         self._tx_depth = threading.local()
+        self.rls_bypass_reason: str | None = None
         try:
+            self._check_database_role()
             self._migrate()
             if self._rls:
                 self._preflight_rls_or_die()
@@ -1290,6 +1292,51 @@ class PostgresWorldModel:
         except BaseException:
             self.close()
             raise
+
+    def _check_database_role(self) -> None:
+        """Note, once per open, whether this login bypasses row-level security.
+
+        A superuser or BYPASSRLS role skips every RLS policy, FORCE included.
+        With RLS in use, enterprise mode refuses to open; otherwise the problem
+        is logged once and reported by the deep health check. With RLS off no
+        policy is bypassed, so it is only logged. A failed lookup is only
+        logged, so an unreadable catalog never blocks boot.
+        """
+        try:
+            with self._tx() as cur:
+                cur.execute(
+                    "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user"
+                )
+                superuser, bypass = cur.fetchone()
+        except Exception as e:
+            log.warning(
+                "Could not check whether the Postgres login bypasses row-level security "
+                "(%s); tenant row policies are not verified at this start.", e,
+            )
+            return
+        if not (superuser or bypass):
+            return
+        problem = (
+            "the Postgres login is a superuser, which bypasses row-level security"
+            if superuser
+            else "the Postgres login has BYPASSRLS, which bypasses row-level security"
+        )
+        fix = (
+            "connect with a dedicated login that is neither a superuser nor BYPASSRLS "
+            "(for example CREATE ROLE maverick_app LOGIN NOSUPERUSER NOBYPASSRLS)"
+        )
+        if not self._rls:
+            # No row policy is in use, so nothing is bypassed yet: a hint only.
+            log.warning("%s. Turning on [world_model] rls would not protect tenants "
+                        "for this login. Fix: %s.", problem, fix)
+            return
+        self.rls_bypass_reason = f"{problem}; {fix}"
+        if _enterprise_default():
+            raise RuntimeError(
+                "Enterprise mode relies on Postgres row-level security for tenant "
+                f"isolation, but {problem}. Fix: {fix}."
+            )
+        log.warning("%s. Tenant row policies do not apply to this login. Fix: %s.", problem, fix)
 
     def __enter__(self) -> PostgresWorldModel:
         return self
@@ -2078,6 +2125,27 @@ class PostgresWorldModel:
             sql += " WHERE " + frag
         sql += " ORDER BY requested_at DESC, id DESC LIMIT %s"
         p.append(max(1, int(limit)))
+        with self._tx() as cur:
+            cur.execute(sql, tuple(p))
+            rows = cur.fetchall()
+        return [_dec_approval_row(r) for r in rows]
+
+    def approvals_requested_between(self, since: float, until: float) -> list:
+        """The SQLite twin's window read: same bounds, same order, same
+        tenant scope as :meth:`list_approvals`."""
+        frag, params = _tenant_scope()
+        where = ["requested_at >= %s", "requested_at <= %s"]
+        p: list = [float(since), float(until)]
+        if frag:
+            where.insert(0, frag)
+            p = list(params) + p
+        sql = (
+            "SELECT id, action, risk, scope, detail, provenance, status, "
+            "requested_at, decided_at, claimed_by, claimed_at, decided_by, "
+            "approvals_required, requested_by, goal_id, department, undo_hold "
+            "FROM approvals WHERE " + " AND ".join(where)
+            + " ORDER BY requested_at DESC, id DESC"
+        )
         with self._tx() as cur:
             cur.execute(sql, tuple(p))
             rows = cur.fetchall()
@@ -4697,10 +4765,10 @@ class PostgresWorldModel:
         with self._tx() as cur:
             cur.execute(
                 "SELECT approver, decision FROM approval_signoffs "
-                "WHERE approval_id = %s ORDER BY decided_at", (approval_id,),
+                "WHERE approval_id = %s ORDER BY decided_at, approver", (approval_id,),
             )
             rows = cur.fetchall()
-        from ..world_model import _single_approver
+        from ..world_model import _approval_state_view, _single_approver
 
         approvers = _single_approver(appr, [r[0] for r in rows if r[1] == "approved"])
         scope, params = _approval_outbox_scope()
@@ -4711,14 +4779,43 @@ class PostgresWorldModel:
                 tuple([approval_id, *params]),
             )
             audit_pending = int(cur.fetchone()[0])
+        return _approval_state_view(appr, approvers, audit_pending)
+
+    def approval_states(self, approvals) -> dict[int, dict]:
+        """Batched :meth:`approval_state` for approvals the caller has already
+        listed (tenant-scoped): two queries for the set, each value equal to
+        ``approval_state(id)``."""
+        from ..world_model import _approval_state_view, _single_approver
+
+        listed = {int(a.id): a for a in approvals}
+        if not listed:
+            return {}
+        ids = list(listed)
+        signoffs: dict[int, list[str]] = {approval_id: [] for approval_id in ids}
+        pending: dict[int, int] = dict.fromkeys(ids, 0)
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT approval_id, approver, decision FROM approval_signoffs "
+                "WHERE approval_id = ANY(%s) ORDER BY decided_at, approver", (ids,),
+            )
+            for approval_id, approver, decision in cur.fetchall():
+                if decision == "approved":
+                    signoffs[int(approval_id)].append(approver)
+        scope, params = _approval_outbox_scope()
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT approval_id, COUNT(*) FROM approval_audit_outbox "
+                f"WHERE approval_id = ANY(%s) AND delivered_at IS NULL AND {scope} "
+                "GROUP BY approval_id",
+                tuple([ids, *params]),
+            )
+            for approval_id, count in cur.fetchall():
+                pending[int(approval_id)] = int(count)
         return {
-            "status": appr.status,
-            "approvals_required": max(1, int(appr.approvals_required or 1)),
-            "approved_count": len(approvers),
-            "approvers": approvers,
-            "requested_by": appr.requested_by,
-            "audit_pending_count": audit_pending,
-            "effective": appr.status != "pending",
+            approval_id: _approval_state_view(
+                appr, _single_approver(appr, signoffs[approval_id]), pending[approval_id]
+            )
+            for approval_id, appr in listed.items()
         }
 
     def claim_approval(self, approval_id: int, principal: str) -> bool:

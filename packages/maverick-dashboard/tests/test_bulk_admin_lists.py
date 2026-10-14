@@ -80,7 +80,7 @@ def test_the_privacy_list_offers_bulk_rows_and_only_permitted_assignees(client):
     page = client.get("/privacy").text
     assert 'id="pw-dsar-rows"' in page
     assert re.search(r'<tr data-bulk-id="DSAR-[0-9a-f]{10}" data-bulk-label="jo@example.com \(DSAR-', page)
-    people = re.search(r'<script type="application/json" id="pw-dsar-assignees">(.*?)</script>', page, re.DOTALL).group(1)
+    people = re.search(r'<script\b[^>]*\bid="pw-dsar-assignees"[^>]*>(.*?)</script>', page, re.DOTALL).group(1)
     assert "user:priya@corp.com" in people
     assert "user:vic@corp.com" not in people  # a viewer cannot work requests
     assert ">Assigned to</th>" in page

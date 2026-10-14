@@ -51,6 +51,7 @@ _EXTRA_LABELS = {
     "tgi": "Hugging Face TGI (self-hosted)",
     "azure": "Azure OpenAI",
     "bedrock": "Amazon Bedrock",
+    "vertex": "Google Cloud Vertex AI",
     "openai_compatible": "OpenAI-compatible server",
     "codex_cli": "Codex CLI",
 }
@@ -128,6 +129,19 @@ def _configured(name: str, state: dict[str, Any], table: dict[str, Any]) -> tupl
         from maverick.config import azure_provider_configuration_missing
 
         return (not azure_provider_configuration_missing(table)), "sign-in"
+    if name == "vertex":
+        # Google sign-in needs no key: the project, region and model the operator
+        # names are the set-up; the live connection test proves the sign-in.
+        project = (str(table.get("project_id") or "").strip()
+                   or os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", "").strip()
+                   or os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip())
+        region = (str(table.get("region") or "").strip()
+                  or os.environ.get("CLOUD_ML_REGION", "").strip())
+        model = (str(table.get("model_id") or "").strip()
+                 or os.environ.get("VERTEX_MODEL_ID", "").strip())
+        if not (project and region and model):
+            return False, ""
+        return True, "Google sign-in"
     if name == "bedrock":
         region = (str(table.get("region") or "").strip()
                   or os.environ.get("AWS_REGION", "").strip()
@@ -162,7 +176,8 @@ def _configured(name: str, state: dict[str, Any], table: dict[str, Any]) -> tupl
 
 def _saved_word(saved: str) -> str:
     return {"key": "Key", "server address": "Server address", "login": "Login",
-            "sign-in": "Sign-in", "AWS sign-in": "AWS sign-in"}.get(saved, "Key")
+            "sign-in": "Sign-in", "AWS sign-in": "AWS sign-in",
+            "Google sign-in": "Google sign-in"}.get(saved, "Key")
 
 
 def _provider_row(name: str, label: str, cfg: dict[str, Any], roles: list[str]) -> dict[str, Any]:
@@ -208,7 +223,7 @@ def _provider_row(name: str, label: str, cfg: dict[str, Any], roles: list[str]) 
                    reason="The last connection test worked.")
     elif runtime["status"] == "failed":
         reason = plain_reason(live.get("detail") or runtime.get("detail") or "")
-        if name in {"azure", "bedrock"} and _HTTP_STATUS.search(str(live.get("detail") or "")):
+        if name in {"azure", "bedrock", "vertex"} and _HTTP_STATUS.search(str(live.get("detail") or "")):
             code = int(_HTTP_STATUS.search(str(live.get("detail") or "")).group(1))
             if code in (401, 403):
                 reason = "The service did not accept this sign-in. Check the account's model access and try again."
@@ -218,11 +233,12 @@ def _provider_row(name: str, label: str, cfg: dict[str, Any], roles: list[str]) 
             row.update(status="blocked", status_label="Blocked by outbound-connection rules", reason=reason)
         else:
             row.update(status="failed", status_label="Connection failed: " + reason, reason=reason)
-    elif name in {"azure", "bedrock"} and live.get("status") == "unknown" and live.get("tested_at"):
+    elif name in {"azure", "bedrock", "vertex"} and live.get("status") == "unknown" and live.get("tested_at"):
         kind = live.get("evidence", {}).get("kind")
         reason = {
             "price_preflight": "Add this model's spending ceiling under Models, then test again.",
             "model_mismatch": "The default task model differs from the saved connection. Choose the saved model under Models, then test again.",
+            "setup_incomplete": "Enter the model ID shown in your Vertex AI Model Garden, then test again.",
             "budget_limit": "The connection check reached its spending or token limit. Review the model's ceiling, then test again.",
         }.get(kind, "The connection check could not confirm a usable model response. Review its details and test again.")
         row["last_test"].update(status="unknown", reason=reason)

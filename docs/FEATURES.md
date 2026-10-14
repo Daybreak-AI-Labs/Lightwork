@@ -118,6 +118,16 @@ here.
   it is not presented as an editable working agent. Copilot shares current
   authority, complete review and original-outcome recovery.
 
+- **Gradual rollout of changed specialists** (`specialist_canary.py`,
+  `[agent_tests] canary_percent`, off by default) — with a share from 1 to 50,
+  publishing changed instructions for an existing specialist makes them a trial
+  beside the current version. New goals use the trial for that share, chosen
+  from the goal id, and every goal records the version it used. Workforce shows
+  goal counts and feedback per version, and Promote or Roll back are reviewed,
+  audited actions. `canary_auto_rollback` can roll a failing trial back after 10
+  finished goals. A new specialist publishes normally. Limits are in
+  `docs/configuration.md`.
+
 - **Additional-work capability qualification** — the optional
   `[features] commitment_capability_learning` setting adds guided Promise
   review forms for competing material/capacity/shared-setup explanations,
@@ -1486,6 +1496,12 @@ limits are recorded in the [operation coverage register](post-install-operation-
   (`[REDACTED:email]`); span-exact, idempotent on its own output, text
   only by design (no OCR — a dependency decision, not a drive-by). Used
   by the DSAR response path to scrub third-party identifiers.
+- **Legal holds and matter export** (`ediscovery.py`, `ediscovery_export.py`,
+  opt-in `[ediscovery] enable`, `/api/v1/ediscovery/matters`; the Legal holds section
+  on Compliance) — tenant-scoped matters over custodians, dates and record types.
+  While one is active, bulk deletion pauses for the workspace and in-scope erasure is
+  refused with a plain message. Export is a streamed ZIP with per-type JSONL, a signed
+  manifest and offline verification. See `docs/EDISCOVERY_LEGAL_HOLDS.md`.
 - **Breach-notification planner** (`breach_notification.py`, opt-in
   `[breach_notification] enable`, `maverick breach`,
   `POST /api/v1/breach/plan`,
@@ -3201,8 +3217,8 @@ skip container startup; torn down on `close()`.
 
 ## LLM providers & routing
 
-14 providers, routable per role (`llm.py`): Anthropic, OpenAI, OpenRouter,
-Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI, vLLM, and
+15 providers, routable per role (`llm.py`): Anthropic, OpenAI, OpenRouter,
+Ollama, Gemini, DeepSeek, Bedrock, Vertex AI, Azure, xAI, Moonshot, TGI, vLLM, and
 `openai_compatible` (a separate generic-gateway provider — any other
 OpenAI-compatible server or proxy via a configurable `base_url`: LM Studio,
 llama.cpp, Together, Groq, etc.), and **Codex CLI**
@@ -4719,7 +4735,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   [connection limits and validation](operations/governed-postgres-connections.md).
 - **Per-tenant KMS at fleet scale** — envelope encryption with a per-tenant DEK
   wrapped by a KEK in a pluggable `KMS` (`tenant/kms.py`; LocalKMS or AWS/GCP/
-  Vault BYOK via `kms_backends.py`). **Deterministic per-tenant BYOK**:
+  Vault/Azure Key Vault BYOK via `kms_backends.py`). **Deterministic per-tenant BYOK**:
   `get_kms(tenant_id)` reads each tenant's own `[kms]` overlay independent of the
   active context. A **DEK-cache TTL** (`MAVERICK_KMS_DEK_CACHE_TTL`) bounds how
   long a revoked cloud key keeps opening data. **Fleet KEK rotation** is operable
@@ -4743,8 +4759,9 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   gRPC, both installed at startup). Two CI-gated proofs back the claim:
   `control_data_plane_e2e.py` (one goal provably runs out-of-process, with a JSON
   evidence artifact) and `control_data_plane_soak.py` (many goals under
-  concurrent workers reach `done` zero-loss and **exactly-once** — the contention
-  test of `JobQueue.claim`'s `WHERE status='pending'` guard). The HTTP
+  concurrent workers reach `done` zero-loss with **exactly-once claims** — the contention
+  test of `JobQueue.claim`'s `WHERE status='pending'` guard; a job reclaimed after a
+  worker dies can run again, so handlers must be idempotent). The HTTP
   plane has its own proof: `maverick_dashboard.load_harness` drives the
   real app with concurrent clients and asserts no 5xx, that admission
   holds under contention (N clients racing one vendor name end with
@@ -4907,7 +4924,7 @@ attribute set** — `gen_ai.operation.name` / `system` / `request.model` /
 `execute_tool` tool-span attributes AND the `invoke_agent` agent-span leg
 (`gen_ai.agent.name/id` around every `Agent.run`) with semconv `error.type`
 stamped on failed spans — so any OTel-native backend reads them
-with no custom mapping), Prometheus `/metrics` — which serves the
+with no custom mapping), Prometheus `/metrics` (and, with `MAVERICK_OTEL_METRICS=1`, the same series over OTLP, plus one server span per dashboard request named by route template, `request_spans.py`) — which serves the
 platform series **and** Lightwork's own always-on counters from a
 dependency-free registry (`runtime_metrics.py`: dashboard requests by
 route TEMPLATE never raw path, request wall time, gateway calls,

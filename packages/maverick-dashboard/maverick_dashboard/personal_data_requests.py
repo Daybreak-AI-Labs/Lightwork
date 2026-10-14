@@ -253,8 +253,15 @@ def _checkpoint(row, actor, mutate):
 
 def _erase_conversations(world, row, target):
     from maverick.cli import _unlink_erasure_attachments
+    from maverick.ediscovery import erasure_refusal
     from maverick.erasure_receipts import build_manifest, persist_receipt
     plan = target["scope"]
+    # A legal matter holds only the in-scope closure. Nothing is erased or receipted then.
+    refusal = erasure_refusal(world, conversation_ids=plan["conversation_ids"], goal_ids=plan["goal_ids"],
+                              actor=row.get("reviewer") or row.get("owner") or "system")
+    if refusal:
+        return {"state": "held", "message": refusal,
+                "retained": "No conversation, task or attachment in this closure was erased."}
     # Never pass private host paths or unrelated planning fields to the proof.
     manifest = build_manifest(tenant_id=current_tenant_id_strict() or "shared", **plan)
     # Business records need an exact durable pre-delete proof. Failure prevents
@@ -287,12 +294,7 @@ def _erase_owned_account(row, target, *, authorize=None):
         from maverick.ux_store import shared
         return shared().erase_owned_navigation(actor, expected_version=target["inventory"]["version"])
     if kind == "conversation_inbox":
-        from maverick.conversation_inbox import erase_owned
-        for item in target["records"]:
-            result = erase_owned(actor, item["id"], item["revision"], _digest([row["id"], kind, item["id"]])[:32], actor=row["reviewer"])
-            if result["status"] not in {"confirmed", "replayed"}:
-                raise ValueError("Conversation-work erasure receipt is unconfirmed.")
-        return {"state": "purged", "removed": len(target["records"]), "retained": "Content-free operation tombstones, generation barriers, submitted tasks and accounting/audit receipts remain separately retained."}
+        return _erase_inbox(row, target)
     if kind == "generated_tools":
         from maverick.personal_learning import erase_reviewed
         return erase_reviewed(actor, target["records"], actor=row["reviewer"])
@@ -315,6 +317,34 @@ def _erase_collaboration(kind, actor):
             "retained": "Other people's comments, including ones that mention you, are theirs and remain."}
 
 
+def _erase_companion(actor):
+    from maverick.ediscovery import LegalHoldApplies
+    from maverick.employee_companion import EmployeeCompanionStore
+    try:
+        EmployeeCompanionStore().clear_history(actor, actor=actor)
+    except LegalHoldApplies as exc:
+        # The store refuses before it changes anything; nothing in the companion was erased.
+        return {"state": "held", "message": str(exc), "retained": "No companion message was erased."}
+    return {"state": "purged", "retained": "Administrator companion policy and content-free audit evidence remain."}
+
+
+def _erase_inbox(row, target):
+    from maverick.conversation_inbox import erase_owned, owned_items
+    from maverick.ediscovery import LegalHoldApplies, assert_personal_chats_erasable
+    actor, kind = row["owner"], target["store"]
+    try:
+        # Check every message before the first one is erased, so a refusal never leaves a partial erasure.
+        assert_personal_chats_erasable(actor, [item["created_at"] for item in owned_items(actor)],
+                                       actor=row["reviewer"])
+    except LegalHoldApplies as exc:
+        return {"state": "held", "message": str(exc), "retained": "No conversation message was erased."}
+    for item in target["records"]:
+        result = erase_owned(actor, item["id"], item["revision"], _digest([row["id"], kind, item["id"]])[:32], actor=row["reviewer"])
+        if result["status"] not in {"confirmed", "replayed"}:
+            raise ValueError("Conversation-work erasure receipt is unconfirmed.")
+    return {"state": "purged", "removed": len(target["records"]), "retained": "Content-free operation tombstones, generation barriers, submitted tasks and accounting/audit receipts remain separately retained."}
+
+
 def _erase_target(world, row, target, *, authorize=None):
     kind, actor = target["store"], row["owner"]
     channel, user_id = row["channel"], row["user_id"]
@@ -335,9 +365,7 @@ def _erase_target(world, row, target, *, authorize=None):
             removed = erase_notes(channel, user_id, strict=True)
         return {"state": "purged", "removed": removed, "retained": "Personal recall is off. Existing suppression rules remain so erased notes cannot silently regenerate."}
     if kind == "companion_history":
-        from maverick.employee_companion import EmployeeCompanionStore
-        EmployeeCompanionStore().clear_history(actor, actor=actor)
-        return {"state": "purged", "retained": "Administrator companion policy and content-free audit evidence remain."}
+        return _erase_companion(actor)
     if kind == "experience_preferences":
         from maverick.experience_preferences import erase_personal
         return {"state": "purged", "removed": erase_personal(actor)}

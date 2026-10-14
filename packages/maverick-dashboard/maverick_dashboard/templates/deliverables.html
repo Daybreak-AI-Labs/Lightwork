@@ -246,7 +246,7 @@
 {% block scripts_extra %}
   <script src="/static/lightwork-typeahead.js" defer></script>
   <script src="/static/lightwork-result-feedback.js" defer></script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // Format every server-rendered timestamp via the shared relative-time helper.
     (function () {
       document.querySelectorAll('[data-when]').forEach(function (el) {

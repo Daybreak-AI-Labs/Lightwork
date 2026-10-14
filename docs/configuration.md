@@ -73,6 +73,26 @@ base_url = "http://localhost:11434"
 auth_mode = "iam"
 # endpoint = "mantle"
 
+[providers.vertex]
+# Claude on Google Cloud Vertex AI through the Anthropic SDK's Vertex client
+# (prompt caching, thinking, tool_choice all work). There is no key: sign-in is
+# Google Application Default Credentials (a service-account file named by
+# GOOGLE_APPLICATION_CREDENTIALS, `gcloud auth application-default login`, or
+# workload identity). Needs the `vertex` extra: google-auth.
+# project_id falls back to ANTHROPIC_VERTEX_PROJECT_ID, then GOOGLE_CLOUD_PROJECT;
+# region falls back to CLOUD_ML_REGION; model_id falls back to VERTEX_MODEL_ID;
+# base_url (optional) falls back to ANTHROPIC_VERTEX_BASE_URL. The table wins
+# over the environment. The model_id is the id shown in the Vertex AI Model
+# Garden (name@version form, for example claude-haiku-4-5@20251001); Lightwork
+# ships no Vertex model id.
+# Billing: Google Cloud invoices Vertex AI at its own rates, which are not in
+# Lightwork's verified rate card. Like Bedrock, planning estimates use the Claude
+# API list rate for the model behind the id; set [budget] strict_pricing=false to
+# account live usage at that estimate.
+project_id = "my-gcp-project"
+region = "us-east5"
+model_id = "claude-haiku-4-5@20251001"   # copy the exact id from Model Garden
+
 [models]
 # Settings > Models offers every model a saved provider key can reach: each
 # configured provider's own model-list endpoint is read (one bounded request,
@@ -109,6 +129,20 @@ task_limits_enabled = true
 # max_input_tokens  = 1000000
 # max_output_tokens = 200000
 strict_pricing      = true
+
+[contact_centre]
+# Where a human handoff goes outside Lightwork when a person takes over a
+# conversation. Off by default: nothing is sent and no outbox is kept.
+# provider = "off"                 # "off" | "zendesk" | "webhook"
+# zendesk_subdomain = "acme-support"   # the part before .zendesk.com
+# zendesk_email = "agent@acme.example" # agent whose API token is used
+# webhook_url = "https://hooks.acme.example/lightwork"
+# dashboard_url = "https://lightwork.acme.example"  # links back to conversations
+# max_messages = 20                # 1-50 recent messages, each 2,000 characters
+# The Zendesk API token and the webhook signing secret are never set here. Enter
+# them in Settings > Integrations > Contact centre (stored sealed), or set
+# MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN / MAVERICK_CONTACT_CENTRE_WEBHOOK_SECRET.
+# See contact-centre-handoff.md.
 
 [safety]
 profile         = "balanced"   # strict | balanced | permissive | off
@@ -920,6 +954,32 @@ client_token = ""             # MAVERICK_PROXY_CLIENT_TOKEN (sealed when set on 
 [agent_factory]
 jd_hiring = true              # Agent Factory: draft or match agents from a job description
 require_passing_tests = true  # changed instructions publish only after every saved test passes (or with a recorded reason)
+
+[agent_tests]
+# Saved answer checks that gate publishing (maverick.agent_tests_policy). The defaults keep today's behaviour.
+max_cases_per_specialist = 20          # 1 to 200: saved checks one specialist can keep; one run checks at most this many.
+                                       # Lowering it keeps saved checks, but a set larger than the limit cannot pass a full run.
+require_for_new_specialists = false    # true: a specialist never published before needs a saved check and a passing full
+                                       # run of every check on its exact draft. A reason does not skip this. Business setup,
+                                       # customization bundles and the CLI (onboard, learn-demo) cannot add a new specialist
+                                       # while it is on; add it in Agent Factory instead.
+bypass_requires_second_person = false  # true: publishing changed instructions without a passing run (with a reason) needs
+                                       # another administrator's approval on the Approvals page or in chat. The requester cannot approve it
+                                       # on either. Rejecting is never refused.
+tool_checks = false                    # true: a saved check may say which tools the specialist must call, must not call, and
+                                       # what the call must include. Tools run as recording stubs with fixed answers; nothing real runs.
+                                       # While false, such checks cannot be created and any existing ones are skipped (never counted as passing).
+canary_percent = 0                     # 0 (off): publishing changed instructions replaces the current version, as before.
+                                       # 1 to 50: the changed version is a trial on that share of NEW goals (chosen by goal id);
+                                       # the rest keep the current version. Goals already running are not changed. Each goal
+                                       # records which version it used. Promote or roll back the trial in Workforce. Only one
+                                       # trial per specialist; a second change is refused until then. A new specialist publishes normally.
+                                       # Goals that ran before or after a trial record no version. Work a trial goal hands to other
+                                       # specialists, and public chat, use the current version. Unreadable settings publish nothing.
+canary_auto_rollback = false           # true: roll the trial back on its own once at least 10 of its goals have finished and its
+                                       # failed share is more than 20 percentage points above the current version's. Recorded in the
+                                       # activity log. It needs a finished goal on the current version to compare with, and it is
+                                       # checked at most once a minute. Unreadable settings or a value other than true leave it off.
 
 [autonomy]
 confirm_plan = false          # show the plan in Approvals and wait before a task's first action that reaches outside Lightwork

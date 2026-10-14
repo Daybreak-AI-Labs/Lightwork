@@ -8,6 +8,7 @@ import time
 from .goal_mutations import GoalMutationConflict, _fingerprint, _receipt, _record, _transaction
 
 KIND = "result_feedback"
+SUMMARY_LIMIT = 5000
 REASONS = {
     "wrong": "Wrong or inaccurate", "incomplete": "Missing something",
     "not_asked": "Not what I asked for", "unclear": "Hard to understand",
@@ -85,6 +86,11 @@ def summary_rows(world, *, owner=None):
     Agent identity comes from the reviewed original goal, never from the client.
     Earlier receipts without that identity remain under the general/unknown group.
     """
+    return summary_scan(world, owner=owner)[0]
+
+
+def summary_scan(world, *, owner=None):
+    """``summary_rows`` and whether the bounded read reached its limit, so some feedback may be missing."""
     from .world_model import _dec_field
     if hasattr(world, "_writing"):
         decode = _dec_field
@@ -93,7 +99,8 @@ def summary_rows(world, *, owner=None):
         decode = _unseal
     rows = world.query("SELECT g.id,g.owner,r.receipt FROM goals g JOIN goal_mutation_receipts r ON r.goal_id=g.id "
                        "WHERE r.kind=?" + (" AND COALESCE(g.owner,'')=?" if owner is not None else "") +
-                       " ORDER BY r.created_at DESC,r.operation_id DESC LIMIT 5000", (KIND, owner) if owner is not None else (KIND,))
+                       " ORDER BY r.created_at DESC,r.operation_id DESC LIMIT " + str(SUMMARY_LIMIT),
+                       (KIND, owner) if owner is not None else (KIND,))
     latest = {}
     for row in rows:
         try:
@@ -107,7 +114,7 @@ def summary_rows(world, *, owner=None):
                            "reason": value.get("reason", ""), "ts": value["recorded_at"]}
         except (KeyError, TypeError, ValueError):
             continue
-    return list(latest.values())
+    return list(latest.values()), len(rows) >= SUMMARY_LIMIT
 
 
 def rated_goals(world, *, owner=None):

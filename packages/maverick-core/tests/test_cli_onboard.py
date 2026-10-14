@@ -182,3 +182,43 @@ def test_onboard_approval_ingests_enabled_knowledge_then_saves(tmp_path, monkeyp
     assert len(ingested) == 1
     assert ingested[0][0].startswith("intake_pending_epsilon_co_")
     assert ingested[0][1] == str(doc)
+
+
+def test_onboard_cannot_activate_a_new_specialist_while_the_switch_is_on(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    from maverick import config
+    from maverick.cli import main
+    from maverick.domain import available_domains
+
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    (tmp_path / "config.toml").write_text("[agent_tests]\nrequire_for_new_specialists = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    try:
+        result = CliRunner().invoke(main, ["onboard", "--no-llm", "--name", "Acme Co", "--yes"],
+                                    input="an online store\nretail\n")
+        assert result.exit_code != 0 and "saved check" in result.output, result.output
+        assert "acme_co" not in available_domains()
+    finally:
+        config.reset_config_cache()
+
+
+def test_learn_demo_cannot_activate_a_new_specialist_while_the_switch_is_on(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    from maverick import config
+    from maverick.cli import main
+    from maverick.domain import available_domains
+
+    monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    (tmp_path / "config.toml").write_text("[agent_tests]\nrequire_for_new_specialists = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    demo = tmp_path / "digest.txt"
+    demo.write_text("ACTION[email]: send the weekly digest -> ops@example.test\n"
+                    "ACTION[email]: send the weekly digest to finance -> finance@example.test\n", encoding="utf-8")
+    try:
+        result = CliRunner().invoke(main, ["learn-demo", str(demo), "--no-llm", "--yes", "--name", "Weekly Digest"])
+        assert result.exit_code != 0 and "saved check" in result.output, result.output
+        assert not [name for name in available_domains() if "digest" in name]
+    finally:
+        config.reset_config_cache()

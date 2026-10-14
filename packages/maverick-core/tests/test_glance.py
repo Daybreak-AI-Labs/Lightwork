@@ -71,3 +71,53 @@ def test_glance_empty_world(tmp_path, monkeypatch):
     g = build_glance(w)
     assert g["active"] == 0 and g["last_result"] == ""
     w.close()
+
+
+class _FullScan:
+    """The pre-change read: every goal decrypted through list_goals."""
+
+    def __init__(self, world):
+        self._world = world
+
+    def list_goals(self, **kwargs):
+        return self._world.list_goals(**kwargs)
+
+    def get_goal(self, goal_id):
+        return self._world.get_goal(goal_id)
+
+
+def test_glance_counts_match_a_full_scan_and_decrypt_one_goal(tmp_path, monkeypatch):
+    import time
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    w = WorldModel(tmp_path / "world.db")
+    for title, owner, status, result in (
+        ("alpha", "user:alice", "active", None),
+        ("beta", "user:alice", "pending", None),
+        ("gamma", "user:alice", "done", "gamma wrapped"),
+        ("delta", "user:alice", "failed", "delta broke"),
+        ("epsilon", "user:bob", "done", "bob's result"),
+    ):
+        gid = w.create_goal(title, "", owner=owner)
+        w.set_goal_status(gid, status, result=result)
+    now = time.time()
+    expected = {
+        owner: build_glance(_FullScan(w), now=now, owner=owner)
+        for owner in (None, "user:alice")
+    }
+    assert build_glance(w, now=now) == expected[None]
+    assert build_glance(w, now=now, owner="user:alice") == expected["user:alice"]
+    assert expected[None]["active"] == 2 and expected[None]["done_today"] == 2
+
+    def no_full_decrypt(self, **kwargs):
+        raise AssertionError("glance must not decrypt every goal")
+
+    reads = []
+    real_get_goal = WorldModel.get_goal
+    monkeypatch.setattr(WorldModel, "list_goals", no_full_decrypt)
+    monkeypatch.setattr(WorldModel, "get_goal",
+                        lambda self, goal_id: reads.append(goal_id) or real_get_goal(self, goal_id))
+    build_glance(w, now=now)
+    assert len(reads) == 1
+    w.close()
+

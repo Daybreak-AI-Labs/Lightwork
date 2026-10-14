@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {JSDOM}=require('jsdom');
-const template=fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/templates/goals.html'),'utf8');
+const template=fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/templates/goals.html'),'utf8').replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const source=template.match(/<script>([\s\S]*?)<\/script>/)[1];
 const settle=()=>new Promise(resolve=>setTimeout(resolve,240));
 // Search reads one bounded page of the retained task list at a time

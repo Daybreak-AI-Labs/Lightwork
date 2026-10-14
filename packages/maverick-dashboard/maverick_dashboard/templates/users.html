@@ -786,7 +786,7 @@
   </style>
   <script src="/static/lightwork-access-state.js" defer></script>
   <script src="/static/lightwork-workspace-members.js" defer></script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     // Each role picker keeps its plain description of the chosen role current.

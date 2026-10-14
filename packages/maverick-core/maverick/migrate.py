@@ -37,10 +37,13 @@ log = logging.getLogger(__name__)
 # When adding a new config section, add it here or migrate will lint it.
 KNOWN_SECTIONS = frozenset({
     "conversation_inbox",
+    # [public_chat] enabled / allow_localhost_origins: the public website chat
+    # widget (maverick_dashboard.public_chat_api), off by default; on All settings.
+    "public_chat",
     # [chat_message_actions] enabled: alternative conversation answers
     # (maverick.chat_message_actions), changeable on All settings.
     "chat_message_actions",
-    "a2a", "adaptive_compute", "agent", "agent_factory", "agent_trust",
+    "a2a", "adaptive_compute", "agent", "agent_factory", "agent_tests", "agent_trust",
     # [alerts] enabled: operational alerts (maverick.ops_alert), changeable
     # on Settings > All settings.
     "alerts",
@@ -82,7 +85,7 @@ KNOWN_SECTIONS = frozenset({
     "erp", "event_triggers",
     "experience", "features", "federation", "finance", "finance_operations", "flows", "github",
     "governance", "governed_connectors", "governed_records", "grpc", "grpc_dispatch", "image_edit", "intake", "intent_value",
-    "kms", "knowledge",
+    "kms", "knowledge", "knowledge_sources",
     "langchain", "latency", "license", "limits", "local_first", "local_runtime",
     "logging", "lsp", "mcp_registries", "mcp_servers", "mcp_sidecar", "memory",
     # [mcp]: the tool server's limits and switches (maverick_mcp.settings),
@@ -105,6 +108,8 @@ KNOWN_SECTIONS = frozenset({
     "retention", "role_assignments", "roles", "routing", "safety",
     "sandbox", "screening", "search", "security", "self_learning",
     "sharing", "shield", "skill_synthesis", "skills", "security_ops",
+    # [contact_centre] where a human handoff goes outside Lightwork (config.get_contact_centre).
+    "contact_centre",
     # [support] the Help menu's status page and support contact (config.get_support).
     "support",
     "shoring",
@@ -150,6 +155,7 @@ KNOWN_SECTIONS = frozenset({
     "consent_registry",
     "data_map",
     "breach_notification",
+    "ediscovery",
     "dsar_fulfillment",
     "grc_sync",
     # Registry drift, again: these are all read by real load_config() call sites

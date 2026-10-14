@@ -104,6 +104,21 @@ curl -s http://127.0.0.1:9100/metrics | grep maverick_llm
 # maverick_llm_cache_tokens_total, maverick_budget_dollars_spent, ...
 ```
 
+### OTLP metrics and request spans
+
+`MAVERICK_OTEL_METRICS=1` (or `[observability] otlp_metrics`) also sends the
+series that `/metrics` serves over OTLP, to the same collector and under the
+same names and labels. The metrics URL is the trace endpoint with `/v1/traces`
+replaced by `/v1/metrics`, so the endpoint must end in `/v1/traces`.
+
+With the OTLP exporter on, each dashboard HTTP request is also one server span,
+named by its route template, for example `HTTP GET /goals/{goal_id}`. Raw paths,
+query strings, headers and identities are not recorded on it. The W3C
+`traceparent` and `tracestate` headers, when a caller sends them, are read so the
+span joins the caller's trace; no other header is read. A request that matches no
+route is named `HTTP GET`. An unhandled error marks the span failed,
+but the error's message and stack trace are not recorded on it either.
+
 ## Helicone as a gateway
 
 Lightwork has **no bespoke Helicone integration** either. LLM gateways like

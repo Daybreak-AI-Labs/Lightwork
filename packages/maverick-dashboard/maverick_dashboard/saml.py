@@ -225,7 +225,9 @@ def _pysaml2_config(cfg: SamlConfig) -> dict:
                 "allow_unsolicited": False,
                 "authn_requests_signed": bool(cfg.sp_key_file),
                 "want_assertions_signed": cfg.want_assertions_signed,
-                "want_response_signed": False,
+                # At least one signature is always required: with assertion
+                # signing switched off, the response signature carries it.
+                "want_response_signed": not cfg.want_assertions_signed,
             }
         },
         "metadata": metadata,

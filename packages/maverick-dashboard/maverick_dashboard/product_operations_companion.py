@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import HTTPException
+from maverick.ediscovery import LegalHoldApplies
 from maverick.employee_companion import (
     CompanionConflictError,
     CompanionError,
@@ -59,6 +60,8 @@ def execute(request, _selection, _arguments, prepared, operation_id):
         raise HTTPException(409, "Your companion conversation changed. Refresh and review it again.") from exc
     except CompanionPolicyDenied as exc:
         raise HTTPException(403, "Only you can clear your companion conversation.") from exc
+    except LegalHoldApplies as exc:
+        raise HTTPException(409, str(exc)) from exc
     except CompanionError as exc:
         raise HTTPException(503, "The clear result could not be confirmed. Check your companion before trying again.") from exc
     return Outcome("confirmed", "Your saved companion conversation was cleared and any pending reply was cancelled. Tasks and policy were unchanged. Earlier provider processing may still be billed.",

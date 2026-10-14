@@ -1410,3 +1410,24 @@ def test_employee_connected_accounts_are_written_with_named_connections(monkeypa
     written = tomllib.loads("\n".join(wizard._cfg_advanced(answers, [])))
     assert written["connections"]["enable"] is True
     assert written["connections"]["allow_self_connect"] is True
+
+
+def test_public_chat_is_off_by_default_and_on_only_when_chosen(tmp_path, monkeypatch):
+    """Public website chat stays closed unless the owner answers yes: no section
+    is written by default, and the dashboard gate reads the section the wizard writes."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+
+    default = _write(cfg_dir, monkeypatch, {})
+    assert "[public_chat]" not in default
+
+    chosen = _write(cfg_dir, monkeypatch, {"allow_public_chat": True})
+    assert tomllib.loads(chosen)["public_chat"] == {"enabled": True}
+
+    from maverick import config
+    from maverick_dashboard import public_chat_api
+
+    config.reset_config_cache()
+    assert public_chat_api.public_chat_enabled() is True

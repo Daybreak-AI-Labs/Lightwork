@@ -1,5 +1,7 @@
 # Lightwork / Lightwork — Exhaustive Code-Quality Audit
 
+> **Status (2026-10-14): point-in-time record, not a tracker.** This review is dated 2026-06-27 and is not tracked per item. Two points have moved since. (1) Its note that `maverick proof-pack` is not a registered CLI command is still correct. The pitch material now uses `python -m maverick.proof_pack`, which builds the same signed bundle. (2) It calls the job queue "exactly-once". Claims are atomic, but delivery is at-least-once on the lease-reclaim path, so that wording is no longer used. Open items as of 2026-10-14 are listed in [docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md).
+
 **"Vibe-coded slop" vs. true enterprise code — a full-codebase review.**  
 Prepared 2026-06-27 · ahead of the Grant Thornton partner meeting.
 

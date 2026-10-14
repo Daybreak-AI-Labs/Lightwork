@@ -20,6 +20,7 @@ from maverick import employee_companion_model as companion_model
 from maverick.authority_effects import authority_effect_fence
 from maverick.conversational_supervisor import DEFAULT_GRAMMAR, parse_utterance
 from maverick.domain import suites_for_domain
+from maverick.ediscovery import LegalHoldApplies
 from maverick.employee_companion import (
     CompanionConflictError,
     CompanionError,
@@ -151,6 +152,8 @@ def _call_sync(request: Request, operation: Callable, *, admin=False, write=Fals
         raise HTTPException(403, "Your administrator has not allowed this companion operation.") from exc
     except CompanionValidationError as exc:
         raise HTTPException(422, "Choose the supported read-only companion options.") from exc
+    except LegalHoldApplies as exc:
+        raise HTTPException(409, str(exc)) from exc
     except (CompanionError, OSError, ValueError) as exc:
         raise HTTPException(503, "Companion state is unavailable. Refresh before retrying; no task was changed.") from exc
     except Exception as exc:

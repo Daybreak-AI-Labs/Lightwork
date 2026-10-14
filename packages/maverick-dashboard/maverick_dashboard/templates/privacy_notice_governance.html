@@ -253,7 +253,7 @@
   </section>
 </div>
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   "use strict";
   var API = "/api/v1/privacy/notices";
@@ -394,7 +394,7 @@
 <script src="/static/lightwork-privacy-notice-governance.js" defer></script>
 <script src="/static/lightwork-privacy-notice-proposals.js" defer></script>
 {% if can_admin %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   "use strict";
   var API = "/api/v1/privacy/notice-publication/targets";

@@ -7,7 +7,7 @@
   <p><code id="xa-token" style="word-break: break-all;"></code></p>
   <button type="button" class="btn" id="xa-token-copy">Copy the key</button>
 </div>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   async function call(url, opts, okMsg, reload, what) {
     var data;
