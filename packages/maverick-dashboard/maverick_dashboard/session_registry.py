@@ -237,7 +237,7 @@ def touch(sid: str, *, ip: str = "", user_agent: str = "", activity: bool = Fals
     interval = min(_TOUCH_INTERVAL_SECONDS, idle * 15) if idle else _TOUCH_INTERVAL_SECONDS
     last = _TOUCHED.get(sid)
     if last is not None and now - last < interval:
-        return  # This process already refreshed it inside the window: the UPDATE would match nothing.
+        return  # This process wrote a refresh inside the window: the UPDATE would match nothing.
     summary = user_agent_summary(user_agent) if user_agent else ""
     try:
         with _connect() as conn:
@@ -245,13 +245,17 @@ def touch(sid: str, *, ip: str = "", user_agent: str = "", activity: bool = Fals
                 rows = _rows(conn, "WHERE sid = ?", (sid,))
                 if not rows or not rows[0].active:
                     return  # A late heartbeat cannot revive an ended session.
-            conn.execute(
+            written = conn.execute(
                 "UPDATE sessions SET last_seen = ?, ip = COALESCE(NULLIF(?, ''), ip), "
                 "user_agent = CASE WHEN ? = '' THEN user_agent ELSE ? END "
                 "WHERE sid = ? AND last_seen < ?",
                 (now, str(ip or ""), summary, summary, sid, now - interval),
-            )
+            ).rowcount
     except SessionStoreError:
+        return
+    if written != 1:
+        # Refreshed recently by another process (or gone): its time is unknown
+        # here, so the next touch asks the store again, as before.
         return
     if len(_TOUCHED) > 4096:
         _TOUCHED.clear()

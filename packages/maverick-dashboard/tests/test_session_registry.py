@@ -163,8 +163,9 @@ def test_no_store_handle_outlives_a_call_where_the_file_cannot_be_replaced(monke
 
 def test_a_refresh_inside_the_window_does_not_reach_the_store(monkeypatch):
     sr._TOUCHED.clear()
-    _register("s1")
+    _register("s1", issued_at=time.time() - 120)
     sr.touch("s1", ip="203.0.113.10", activity=True)   # this process's first refresh writes
+    assert sr.get("s1").ip == "203.0.113.10"
     calls = []
     real_connect = sr._connect
 
@@ -177,7 +178,24 @@ def test_a_refresh_inside_the_window_does_not_reach_the_store(monkeypatch):
     sr.touch("s1", activity=True)
     assert calls == []
     sr._TOUCHED.clear()
-    sr.touch("s1", activity=True)
+    sr.touch("s1", ip="203.0.113.11", activity=True)
     assert calls == [1]
-    assert sr.get("s1").ip == "203.0.113.9"   # last_seen is recent, so the UPDATE matches nothing, as before
+    assert sr.get("s1").ip == "203.0.113.10"   # last_seen is recent, so the UPDATE matches nothing, as before
+
+
+def test_a_refresh_another_process_wrote_does_not_throttle_this_one(monkeypatch):
+    # A touch whose UPDATE matched nothing (another process refreshed the row
+    # inside the window) must not start this process's window: the row's time
+    # is unknown here, so the next touch asks the store again.
+    start = time.time()
+    _register("s1", issued_at=start - 30)        # refreshed 30 s ago elsewhere
+    clock = [start]
+    monkeypatch.setattr(sr.time, "time", lambda: clock[0])
+    sr.touch("s1", ip="198.51.100.4", activity=True)
+    assert sr.get("s1").ip == "203.0.113.9"      # inside that window: no write
+    assert "s1" not in sr._TOUCHED
+    clock[0] = start + 40                         # 70 s after the other refresh
+    sr.touch("s1", ip="198.51.100.5", activity=True)
+    record = sr.get("s1")
+    assert record.ip == "198.51.100.5" and record.last_seen == start + 40
 
