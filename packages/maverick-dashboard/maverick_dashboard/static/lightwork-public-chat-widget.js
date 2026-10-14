@@ -141,7 +141,7 @@
       sessionToken = "";
       return "Your chat session ended. Send your message again to continue.";
     }
-    return "This chat is not available right now. Please try again later.";
+    return "This chat is not available right now. Try again later.";
   }
 
   launcher.addEventListener("click", function () {
@@ -150,7 +150,7 @@
     launcher.setAttribute("aria-expanded", String(open));
     if (open) {
       startSession().catch(function () {
-        addMessage("assistant", "This chat is not available right now. Please try again later.");
+        addMessage("assistant", "This chat is not available right now. Try again later.");
       });
       input.focus();
     }
@@ -177,7 +177,7 @@
         pending.textContent = refusalText(result.status);
       }
     }).catch(function () {
-      pending.textContent = "This chat is not available right now. Please try again later.";
+      pending.textContent = "This chat is not available right now. Try again later.";
     }).then(function () {
       busy = false;
       send.disabled = false;
