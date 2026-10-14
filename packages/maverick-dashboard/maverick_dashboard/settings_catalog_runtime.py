@@ -127,6 +127,12 @@ def _models(S, C) -> tuple:
           "AI models", False, "maverick.agent_tests_policy", subgroup="Effort and planning", weaker=False,
           warning="A reason alone is enough to publish changed instructions without a passing run.",
           aliases="four eyes approval reason publish gate test cases answer checks"),
+        S("agent_tests", "tool_checks", "Saved answer checks may test which tools a specialist calls",
+          "A saved check can say which tools a specialist must call, must not call, and what the call must "
+          "include. Each tool is replaced by a test stub that records the call and answers with a fixed result, "
+          "so no real tool, file, network call or shell command runs. Checks that use tools are skipped while this is off.",
+          "toggle", "AI models", False, "maverick.agent_tests_policy", subgroup="Effort and planning",
+          aliases="tool use tool calls stub test checks answer checks"),
 
         # ------------------------------------------------ conversation length
         S("context", "max_output_tokens", "Longest reply per step",
