@@ -589,6 +589,47 @@ def test_retention_is_enforced_for_every_tenant_on_a_visit_without_an_admin_read
     assert _stored_rows("tenant-a", kept["site"]["id"]) == 2  # inside its 30 days
 
 
+def test_the_background_sweep_creates_no_files_where_chat_was_never_used(chat, model, monkeypatch):
+    from maverick import compliance_history, deadline_alerts, webhook_subscriptions
+    from maverick_dashboard import deadline_alerts_scheduler as scheduler
+
+    monkeypatch.setattr(deadline_alerts, "settings", lambda: {"enabled": False, "poll_seconds": 900})
+    monkeypatch.setattr(webhook_subscriptions, "process_due", lambda **kwargs: 0)
+    monkeypatch.setattr(compliance_history, "recheck_if_due", lambda **kwargs: None)
+    scheduler._tick(chat.clock["now"], {})
+    assert not (chat.home / "public_chat").exists()
+
+
+def test_an_idle_install_purges_expired_transcripts_on_the_background_schedule(chat, model, monkeypatch):
+    # No visit and no admin view happens: only the dashboard's scheduler pass runs the sweep.
+    from maverick import compliance_history, deadline_alerts, webhook_subscriptions
+    from maverick_dashboard import deadline_alerts_scheduler as scheduler
+    from maverick_dashboard import public_chat_store as store
+
+    monkeypatch.setattr(deadline_alerts, "settings", lambda: {"enabled": False, "poll_seconds": 900})
+    monkeypatch.setattr(webhook_subscriptions, "process_due", lambda **kwargs: 0)
+    monkeypatch.setattr(compliance_history, "recheck_if_due", lambda **kwargs: None)
+    created = _site(chat, retention_days=1)
+    site_id = created["site"]["id"]
+    site = store.get_site(None, site_id)
+    t0 = chat.clock["now"]
+    store.append_transcript(None, site, "conversation", "visitor", "inside retention", now=t0)
+    store.append_transcript(None, site, "conversation", "visitor", "two days old", now=t0 - 2 * 86_400)
+    assert _stored_rows(None, site_id) == 2
+    # The dashboard starts: the first pass sweeps at once. Nothing has expired yet except the old row.
+    scheduler._tick(t0, {})
+    assert store._last_sweep == t0
+    assert _stored_rows(None, site_id) == 1
+    # Half an hour later the sweep is not due, so it does not run.
+    store.append_transcript(None, site, "conversation", "visitor", "two days old again", now=t0 - 2 * 86_400)
+    scheduler._tick(t0 + 1_800, {})
+    assert _stored_rows(None, site_id) == 2
+    # An hour after the last sweep it runs again, with no visit needed.
+    scheduler._tick(t0 + 3_600, {})
+    assert store._last_sweep == t0 + 3_600
+    assert _stored_rows(None, site_id) == 1
+
+
 def test_auth_exemption_covers_only_the_public_prefix(chat):
     from maverick_dashboard import auth
 

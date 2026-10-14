@@ -425,8 +425,11 @@ def purge_expired(*, now: float) -> None:
     """Remove transcripts past their site's retention in every tenant that ever listed a site.
 
     Rows whose site no longer exists are removed too. Each tenant's file is
-    opened in turn; no site state or key material is read.
+    opened in turn; no site state or key material is read. An installation that
+    never used the chat has no index, so nothing is created for it here.
     """
+    if not index_path().exists():
+        return
     with _connect(index_path(), _INDEX_SCHEMA) as index:
         tenants = [row[0] or None for row in index.execute(
             "SELECT DISTINCT tenant_id FROM chat_keys").fetchall()]

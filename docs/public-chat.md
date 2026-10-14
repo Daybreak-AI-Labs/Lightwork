@@ -118,9 +118,11 @@ A visitor cannot:
   keeps its hold.
 - **Transcripts.** Sealed with the at-rest helper, bound to the tenant, site,
   conversation and row. Stored per tenant. Removed after the site's retention
-  period. Revoking a site deletes its transcripts at once. Retention runs when
-  a visit or an admin view happens; a visit sweeps every tenant, at most once
-  an hour.
+  period. Revoking a site deletes its transcripts at once. Retention runs on
+  the dashboard's background schedule, once when it starts and then at most
+  once an hour, and also when a visit or an admin view happens. Each sweep
+  covers every workspace. An installation that never used the chat creates no
+  files for it.
 - **Errors.** Refusals use fixed, generic text. A key that is unknown or
   revoked gets `401` whatever the origin. A live key used from an origin the
   site does not list gets `403`. The two statuses differ, so a caller who
@@ -136,9 +138,9 @@ A visitor cannot:
 
 - Each answer sees only the visitor's current message, not earlier turns.
 - The visitor waits for the answer in the same request. There is no polling.
-- Transcripts past retention are removed when a visit or an admin view runs,
-  not by a background timer. An installation with no visits and no admin views
-  keeps them until one happens. A scheduled sweep is not built yet.
+- Transcripts past retention are removed by the hourly background pass, so one
+  can outlive its retention by up to an hour. A sweep that fails is logged and
+  is tried again an hour later.
 - The answer hold is a fixed 5 cents. A model whose estimated cost for one
   answer is above that is refused before the call, so a premium model needs a
   larger hold first. Not built.
