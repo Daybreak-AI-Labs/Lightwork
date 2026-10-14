@@ -83,7 +83,8 @@
     var newest = list.slice().reverse();
     var nodes = [];
     if (!newest.length) {
-      nodes.push(el('p', 'muted', 'No messages are stored for this website yet.'));
+      nodes.push(window.mvEmpty('No messages yet', 'Messages appear here after a visitor chats with this website. ' +
+        'If none arrive, check that its website code is on the site.', null, { compact: true }));
     } else {
       var listing = el('ol');
       newest.forEach(function (item) {
