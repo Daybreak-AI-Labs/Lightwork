@@ -19,14 +19,14 @@ def test_stock_media_contract_matches_governed_document_vault() -> None:
     assert iam.DEFAULT_MEDIA_TYPES == document_vault.DEFAULT_MEDIA_TYPES
 
 
-def _fixture_store(tmp_path, monkeypatch):
+def _fixture_store(tmp_path, monkeypatch, principal_ref=None):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "local")
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
     monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "1")
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     clock = [time.time()]
-    principal = ["incident-principal-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+    principal = [principal_ref or "incident-principal-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
     incident = {
         "kind": "privacy",
         "id": "INC-privacy-one",
@@ -325,3 +325,170 @@ def test_history_tampering_is_withheld(tmp_path, monkeypatch):
         )
         with pytest.raises(iam.IncidentAttachmentIntegrityError):
             store.get_attachment("alpha", created.attachment_id)
+
+
+# ---- legal matters: an uploader's attachments are held like other attachments -----
+
+def _matter_events(monkeypatch):
+    """Record the legal-matter control-plane events; every other audit event passes through unchanged."""
+    from maverick import audit
+
+    real = audit.audit_event
+    recorded: list[tuple[str, dict]] = []
+
+    def record(kind, **payload):
+        if payload.get("agent") == "ediscovery":
+            recorded.append((payload.get("verb", kind), dict(payload)))
+            return True
+        return real(kind, **payload)
+
+    monkeypatch.setattr(audit, "audit_event", record)
+    return recorded
+
+
+@pytest.fixture()
+def held_store(tmp_path, monkeypatch):
+    """An attachment store whose uploader is ``user:alice``, plus a matter ledger for tenant ``alpha``."""
+    from maverick import ediscovery
+
+    alice = iam.principal_ref_for_subject("alpha", "user:alice")
+    store, clock, principal, incident, document = _fixture_store(tmp_path, monkeypatch, principal_ref=alice)
+    ledger = tmp_path / "ledger.sqlite3"
+    monkeypatch.setattr(ediscovery, "store_path", lambda tenant=None: ledger)
+    events = _matter_events(monkeypatch)
+    with tenant_scope(tenant="alpha"):
+        yield SimpleNamespace(store=store, clock=clock, incident=incident, document=document,
+                              ledger=ledger, events=events, alice=alice)
+
+
+def _matter(ledger, **overrides):
+    from maverick import ediscovery
+
+    values = {"name": "Acme dispute", "description": "", "custodians": ["user:alice"],
+              "record_kinds": ["attachments"]}
+    values.update(overrides)
+    return ediscovery.MatterStore(ledger).create("alpha", actor="auditor", values=values)
+
+
+def test_principal_reference_is_derived_per_tenant_and_subject() -> None:
+    first = iam.principal_ref_for_subject("alpha", "user:alice")
+    assert first == iam.principal_ref_for_subject("alpha", "user:alice")
+    assert first.startswith("incident-principal-") and len(first) == len("incident-principal-") + 32
+    assert iam.principal_ref_for_subject("beta", "user:alice") != first
+    assert iam.principal_ref_for_subject("alpha", "user:bob") != first
+
+
+def test_a_matter_naming_the_uploader_refuses_their_attachment_delete_and_keeps_it(held_store):
+    s = held_store
+    with tenant_scope(tenant="alpha"):
+        created = _create(s.store, s.incident, s.document)
+        _matter(s.ledger)
+        with pytest.raises(iam.IncidentAttachmentConflict) as refused:
+            s.store.delete_attachment("alpha", created.attachment_id,
+                                      expected_revision=created.revision, idempotency_key="delete-held")
+        assert str(refused.value) == ediscovery_module().LEGAL_HOLD_MESSAGE
+        assert s.store.get_attachment("alpha", created.attachment_id).status == "active"
+        refusals = [payload for verb, payload in s.events if verb == "ediscovery_erasure_refused"]
+        assert refusals and refusals[-1]["attachments"] == 1
+        assert "alice" not in json.dumps(refusals) and "incident-report" not in json.dumps(refusals)
+
+
+@pytest.mark.parametrize("overrides", [
+    {"date_from": "2001-01-01", "date_to": "2001-01-02"},   # the attachment is outside the dates
+    {"custodians": ["user:bob"]},                           # another person is named
+    {"record_kinds": ["goals", "chats"]},                   # attachments are not among the kinds
+])
+def test_a_matter_outside_the_attachment_scope_leaves_the_delete_alone(held_store, overrides):
+    s = held_store
+    with tenant_scope(tenant="alpha"):
+        created = _create(s.store, s.incident, s.document)
+        _matter(s.ledger, **overrides)
+        deleted = s.store.delete_attachment("alpha", created.attachment_id,
+                                            expected_revision=created.revision, idempotency_key="delete-free")
+        assert deleted.status == "tombstoned"
+
+
+def test_a_released_matter_no_longer_refuses_the_attachment_delete(held_store):
+    from maverick import ediscovery
+
+    s = held_store
+    with tenant_scope(tenant="alpha"):
+        created = _create(s.store, s.incident, s.document)
+        matter = _matter(s.ledger)
+        ediscovery.MatterStore(s.ledger).release("alpha", matter["id"], actor="auditor", expected_revision=1)
+        deleted = s.store.delete_attachment("alpha", created.attachment_id,
+                                            expected_revision=created.revision, idempotency_key="delete-released")
+        assert deleted.status == "tombstoned"
+
+
+def test_retention_purge_keeps_a_held_attachment_until_the_matter_is_released(held_store):
+    from maverick import ediscovery
+
+    s = held_store
+    with tenant_scope(tenant="alpha"):
+        created = _create(s.store, s.incident, s.document)
+        deleted = s.store.delete_attachment("alpha", created.attachment_id,
+                                            expected_revision=created.revision, idempotency_key="delete-first")
+        matter = _matter(s.ledger)
+        s.clock[0] += 3_601
+        assert s.store.retention_due("alpha") == (deleted,)
+        assert s.store.purge_expired("alpha") == 0
+        assert s.store.get_attachment("alpha", created.attachment_id).status == "tombstoned"
+        ediscovery.MatterStore(s.ledger).release("alpha", matter["id"], actor="auditor", expected_revision=1)
+        assert s.store.purge_expired("alpha") == 1
+        assert s.store.get_attachment("alpha", created.attachment_id).status == "purged"
+
+
+def test_an_unreadable_matter_ledger_refuses_the_attachment_delete(held_store):
+    s = held_store
+    with tenant_scope(tenant="alpha"):
+        created = _create(s.store, s.incident, s.document)
+        s.ledger.write_bytes(b"not a matter ledger")
+        with pytest.raises(iam.IncidentAttachmentConflict) as refused:
+            s.store.delete_attachment("alpha", created.attachment_id,
+                                      expected_revision=created.revision, idempotency_key="delete-unverified")
+        assert str(refused.value) == ediscovery_module().HOLD_UNVERIFIED_MESSAGE
+        assert s.store.get_attachment("alpha", created.attachment_id).status == "active"
+
+
+def test_matter_scope_and_export_list_the_uploaders_attachment_metadata_only(held_store, tmp_path):
+    from maverick import ediscovery, ediscovery_export
+    from maverick.world_model import WorldModel
+
+    s = held_store
+    with tenant_scope(tenant="alpha"):
+        mine = _create(s.store, s.incident, s.document)
+        other_store = iam.IncidentAttachmentStore(
+            tenant_id="alpha",
+            principal_ref=iam.principal_ref_for_subject("alpha", "user:bob"),
+            principal_resolver=lambda: iam.principal_ref_for_subject("alpha", "user:bob"),
+            incident_authority_resolver=s.store._incident_resolver,
+            document_authority_resolver=s.store._document_resolver,
+            maintenance_authorizer=lambda: True,
+            config_gate=lambda: None,
+            clock=lambda: s.clock[0],
+        )
+        _create(other_store, s.incident, s.document, key="bob-upload")
+        matter = _matter(s.ledger, date_from=None, date_to=None)
+        with WorldModel(tmp_path / "world.db") as world:
+            scope = ediscovery.build_scope(world, matter)
+            assert [row.attachment_id for row in scope.incident_attachments] == [mine.attachment_id]
+            result = ediscovery_export.export_matter(world, matter, actor="auditor", out_dir=tmp_path / "exports")
+        import zipfile
+
+        with zipfile.ZipFile(result["path"]) as archive:
+            rows = [json.loads(line) for line in archive.read("attachments.jsonl").splitlines()]
+        incident_rows = [row for row in rows if row["record_type"] == "incident_attachment"]
+        assert [row["attachment_id"] for row in incident_rows] == [mine.attachment_id]
+        assert set(incident_rows[0]) <= {
+            "record_type", "attachment_id", "incident_kind", "incident_id", "incident_revision",
+            "document_id", "document_revision", "safe_display_name", "media_type", "byte_size", "sha256",
+            "redaction_state", "status", "created_at", "updated_at", "tombstoned_at", "purged_at",
+            "uploader_ref", "retained_until"}
+        assert "uploader_ref" in incident_rows[0] and incident_rows[0]["uploader_ref"] == s.alice
+
+
+def ediscovery_module():
+    from maverick import ediscovery
+
+    return ediscovery

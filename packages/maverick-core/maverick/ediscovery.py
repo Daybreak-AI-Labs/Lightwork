@@ -537,6 +537,33 @@ def _goal_owners(custodian: str) -> list[str]:
     return [f"user:{channel}:{custodian}" for channel in sorted(CHANNELS)]
 
 
+def _incident_principal_refs(custodians: Iterable[str], tenant: str) -> set[str]:
+    """Uploader references of the ``user:`` custodians (linked accounts never upload to incidents)."""
+    from .incident_attachment_metadata import principal_ref_for_subject
+
+    return {principal_ref_for_subject(tenant, owner) for owner in custodians if owner.startswith("user:")}
+
+
+def _incident_attachments(custodians: Sequence[str], tenant: str | None,
+                          low: float | None, high: float | None) -> list[Any]:
+    """Incident attachment records uploaded by a custodian, inside the matter's dates.
+
+    Fails closed: a register that cannot be listed completely refuses the matter's scope.
+    """
+    if not tenant:
+        return []
+    refs = _incident_principal_refs(custodians, tenant)
+    if not refs:
+        return []
+    from .incident_attachment_metadata import records_for_principal_refs
+
+    try:
+        rows = records_for_principal_refs(tenant, refs)
+    except Exception as exc:  # failure-policy: fail_closed -- a partial list would hide held records
+        raise MatterScopeUnverifiable("The incident attachments for this matter could not be listed completely") from exc
+    return [row for row in rows if in_range(float(row.created_at), low, high)]
+
+
 def _custodian_goals(world: Any, owner: str, scope: Scope, kinds: set[str],
                      low: float | None, high: float | None) -> None:
     for goal_owner in _goal_owners(owner):
@@ -581,6 +608,8 @@ class Scope:
     runs: list[Any] = field(default_factory=list)
     conversations: dict[int, tuple[Any, list[Any]]] = field(default_factory=dict)
     attachments: list[Any] = field(default_factory=list)
+    # Incident attachment records uploaded by a custodian (metadata only; the bytes are not here).
+    incident_attachments: list[Any] = field(default_factory=list)
     approvals: list[Any] = field(default_factory=list)
     custodian_goal_ids: set[int] = field(default_factory=set)
     # (custodian, record) pairs from the employee companion and the conversation inbox.
@@ -652,6 +681,10 @@ def build_scope(world: Any, matter: Mapping[str, Any], *, for_erasure: bool = Fa
             for attachment in world.list_attachments(goal_id):
                 if in_range(float(attachment.created_at), low, high):
                     scope.attachments.append(attachment)
+        if not for_erasure:
+            from .paths import current_tenant_id
+
+            scope.incident_attachments = _incident_attachments(custodians, current_tenant_id(), low, high)
     if "approvals" in kinds and not for_erasure:
         owners = {goal_owner for owner in custodians for goal_owner in _goal_owners(owner)}
         for approval in _bounded(world.list_approvals(limit=MAX_SCOPE_ROWS + 1), "approvals"):
@@ -735,6 +768,31 @@ def assert_erasure_permitted(world: Any, *, conversation_ids: Sequence[int], goa
             raise LegalHoldApplies(LEGAL_HOLD_MESSAGE)
 
 
+def incident_attachment_refusal(tenant_id: str, *, principal_ref: str, created_at: float,
+                                actor: str = "system") -> str | None:
+    """The plain refusal text when an active matter holds one incident attachment, or ``None``.
+
+    An attachment is held when its uploader is a ``user:`` custodian of a matter that
+    keeps attachments and its upload time falls in the matter's dates.  An unreadable
+    matter ledger holds every attachment.  Each refusal is audited with the actor and
+    a count, never content.
+    """
+    try:
+        matters = active_matters()
+    except Exception:  # failure-policy: fail_closed -- an unreadable ledger holds everything
+        return HOLD_UNVERIFIED_MESSAGE
+    for matter in matters:
+        if "attachments" not in matter["record_kinds"]:
+            continue
+        if principal_ref not in _incident_principal_refs(matter["custodians"], tenant_id):
+            continue
+        low, high = bounds(matter)
+        if in_range(float(created_at), low, high):
+            _audit_refusal(matter, actor=actor, attachments=1)
+            return LEGAL_HOLD_MESSAGE
+    return None
+
+
 def erasure_refusal(world: Any, *, conversation_ids: Sequence[int], goal_ids: Sequence[int],
                     actor: str = "system") -> str | None:
     """The plain refusal text for an erasure closure, or ``None`` when it may proceed."""
@@ -771,6 +829,7 @@ __all__ = [
     "conversation_user_matches",
     "enabled",
     "erasure_refusal",
+    "incident_attachment_refusal",
     "in_hold",
     "is_account_custodian",
     "normalize",
