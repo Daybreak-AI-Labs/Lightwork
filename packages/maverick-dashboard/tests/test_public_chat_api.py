@@ -282,6 +282,26 @@ def test_session_starts_are_rate_limited_per_key_and_per_client(chat, model):
     assert _start(chat, key).status_code == 429
 
 
+def _client_request(peer, forwarded=None):
+    from starlette.requests import Request
+
+    headers = [(b"x-forwarded-for", forwarded.encode("ascii"))] if forwarded is not None else []
+    return Request({"type": "http", "method": "POST", "path": "/public/chat/v1/sessions",
+                    "headers": headers, "client": (peer, 40000), "query_string": b""})
+
+
+def test_session_limits_use_the_real_client_only_behind_a_pinned_proxy(chat, model):
+    from maverick_dashboard import public_chat_api as api
+
+    _write_config(chat.tmp, ON + '[auth.proxy]\ntrusted_proxies = ["10.0.0.0/24"]\n')
+    digest = api._client_digest
+    behind_proxy = digest(_client_request("10.0.0.5", forwarded="198.51.100.7"))
+    assert behind_proxy == hashlib.sha256(b"198.51.100.7").hexdigest()
+    # A visitor who sends the header directly is not behind the pinned proxy, so it is ignored.
+    direct = digest(_client_request("203.0.113.9", forwarded="198.51.100.7"))
+    assert direct == hashlib.sha256(b"203.0.113.9").hexdigest()
+
+
 def test_message_limits_per_session_and_per_minute(chat, model):
     key = _site(chat, messages_per_session=3, messages_per_minute=2)["publishable_key"]
     token = _session(chat, key)

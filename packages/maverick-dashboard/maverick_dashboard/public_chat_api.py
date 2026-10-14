@@ -149,7 +149,11 @@ def _origin_of(request: Request) -> str | None:
 
 
 def _client_digest(request: Request) -> str:
-    host = request.client.host if request.client is not None else "unknown"
+    """A digest of the requester's address. Forwarded addresses count only behind a pinned proxy."""
+    from .ip_allowlist import client_ip
+
+    address = client_ip(request)
+    host = str(address) if address is not None else "unknown"
     return hashlib.sha256(host.encode("utf-8")).hexdigest()
 
 
