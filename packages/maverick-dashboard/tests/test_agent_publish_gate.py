@@ -271,12 +271,12 @@ NEW_ENTERED = {"description": "PO helper", "persona": "You help with purchase or
                "allow_tools": ["read_file"], "max_risk": "low"}
 
 
-def _check_draft(app, name, draft):
+def _check_draft(app, name, draft, seconds=20):
     """Check a retained complete draft against its saved checks; wait for its confirmed outcome."""
     checked = _decide(app, name, "check", selected=draft)
     assert checked.status_code == 200, checked.text
     operation, original = checked.json()["operation"], checked.json()
-    deadline = time.time() + 20
+    deadline = time.time() + seconds
     while not (original["confirmed"] and (original.get("run") or {}).get("state") in {"done", "failed", "stopped", "unknown"}):
         assert time.time() < deadline, original
         time.sleep(.05)
@@ -499,3 +499,42 @@ def test_a_later_failing_run_on_the_same_draft_blocks_a_new_specialist_until_a_n
     published = _decide(app, NEW, "publish", selected=draft)
     assert published.status_code == 200 and published.json()["confirmed"], published.text
     assert app.get("/api/v1/agents/" + NEW).json()["persona"] == NEW_ENTERED["persona"]
+
+
+def _answers_using_input(monkeypatch, text, input_tokens):
+    """Each answer records the input it used, so a run's spending limit is really tested."""
+    from maverick import llm
+
+    def answer(self, system, messages, **kwargs):
+        kwargs["dispatch_guard"]()
+        kwargs["budget"].record_tokens(input_tokens, 10)
+        return llm.LLMResponse(text=text, thinking=None, tool_calls=[], stop_reason="end_turn")
+
+    monkeypatch.setattr(llm.LLM, "complete", answer)
+
+
+def test_a_complete_draft_check_of_many_questions_gets_a_limit_that_grows_with_them(client, monkeypatch):
+    app, tmp = client
+    from maverick import config
+
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n"
+                                    "[agent_tests]\nrequire_for_new_specialists = true\nmax_cases_per_specialist = 30\n",
+                                    encoding="utf-8")
+    config.reset_config_cache()
+    draft = _save_draft(app, NEW, NEW_ENTERED)
+    for index in range(25):
+        added = app.post(API + "/customer", json={"specialist": NEW, "task": f"Purchase order {index} has no matching receipt; what now?",
+                                                  "includes": ["receipt"], "excludes": [], "refusal": False, "citation": False})
+        assert added.status_code == 200, added.text
+    # 500 input tokens per question is 12,500 in all: more than the old fixed 10,000 allowance, within 25 questions' allowance.
+    _answers_using_input(monkeypatch, "Hold payment until a receipt matches.", 500)
+    context = app.get(DRAFTS + "/history").json()["context"]
+    review = app.post(DRAFTS + "/review", json={"name": NEW, "action": "check", "context": context, "selected": draft})
+    assert review.status_code == 200, review.text
+    limits = " ".join(str(row["after"]) for row in review.json()["changes"] if row["label"] == "Limits and consequences")
+    assert "$1.25" in limits and "50,000 input tokens" in limits, limits
+    original = _check_draft(app, NEW, draft, seconds=120)  # 25 answers take longer than a short check
+    assert original["run"]["state"] == "done", original["run"]
+    assert len(original["run"]["results"]) == 25 and all(row["passed"] for row in original["run"]["results"])
+    published = _decide(app, NEW, "publish", selected=draft)
+    assert published.status_code == 200 and published.json()["confirmed"], published.text

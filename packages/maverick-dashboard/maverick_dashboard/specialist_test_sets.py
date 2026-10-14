@@ -32,6 +32,17 @@ def _max_all_cases() -> int:
     return max(1000, 50 * max_cases_per_specialist())
 
 
+def draft_answer_limits(questions: int) -> dict:
+    """The spending and size ceilings for one complete-draft check, before the configured caps apply.
+
+    Five questions keep the original $0.25 run. Each further question adds the same allowance a
+    saved-test run gets, so a set the limit allows can finish inside its budget.
+    """
+    count = max(5, int(questions))
+    return {"max_dollars": round(.05 * count, 2), "max_input_tokens": 2000 * count,
+            "max_output_tokens": 128 * count, "max_wall_seconds": max(120, 24 * count)}
+
+
 def _path():
     return data_dir("specialist-tests", "cases-and-runs.json")
 

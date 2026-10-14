@@ -337,8 +337,10 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
 
 
 def changes(request, prepared):
+    from . import specialist_test_sets as tests
     from .plain_labels import model_label
     _guard(request, prepared)
+    limits = tests.draft_answer_limits(len(prepared["cases"]) if prepared["action"] == "check" else 1)
     rows = [{"label": "Decision", "after": ACTIONS[prepared["action"]]},
             {"label": "Complete draft", "after": _readable(prepared["profile"], "definition")},
             {"label": "Currently used definition", "after": _readable(prepared["before"]["profile"], "definition") if prepared["before"]["profile"] else "No active custom agent"},
@@ -360,7 +362,10 @@ def changes(request, prepared):
         rows.append({"label": "Earlier unconfirmed decisions", "after": {
             "Earlier work may already exist": [{"Decision": item["action"], "Recorded": time.strftime("%b %d, %Y %H:%M", time.localtime(item["recorded_at"]))} for item in prepared["uncertain"]],
             "Separate new intent": "I acknowledged the earlier unknown outcomes. This new full review does not confirm or repeat those originals."}})
-    rows.extend([{"label": "Limits and consequences", "after": NOTICE + (" One shared answer-check limit: $0.25, 10,000 input tokens, 640 output tokens and two minutes. A partial or stopped check is not a passing publication check." if prepared["action"] in {"try", "check"} else "")},
+    rows.extend([{"label": "Limits and consequences", "after": NOTICE + (
+                     f" One shared answer-check limit: ${limits['max_dollars']:.2f}, {limits['max_input_tokens']:,} input tokens, "
+                     f"{limits['max_output_tokens']:,} output tokens and {limits['max_wall_seconds']:,} seconds. "
+                     "A partial or stopped check is not a passing publication check." if prepared["action"] in {"try", "check"} else "")},
                  {"label": "If the response is lost", "after": "Read this original decision. An unconfirmed original is not automatically repeated, and a matching current definition does not prove its outcome."}])
     return rows
 

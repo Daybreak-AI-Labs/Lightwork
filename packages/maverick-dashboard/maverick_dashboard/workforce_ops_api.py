@@ -529,8 +529,8 @@ def _start_draft_customer_test_job(request, specialist, operation, draft, source
     if not 1 <= len(cases) <= saved.max_cases_per_specialist():
         raise HTTPException(409, "The complete chosen draft questions exceed the supported limit.")
     budget = _budget("specialist_eval")
-    for key, ceiling in (("max_dollars", .25), ("max_input_tokens", 10000), ("max_output_tokens", 640),
-                         ("max_wall_seconds", 120), ("max_tool_calls", 0)):
+    # Grows with the questions, as a saved-test run does; five or fewer keep the original $0.25 run.
+    for key, ceiling in (*saved.draft_answer_limits(len(cases)).items(), ("max_tool_calls", 0)):
         current = getattr(budget, key)
         setattr(budget, key, ceiling if current is None else min(current, ceiling))
     source_guard(budget)
