@@ -969,6 +969,17 @@ bypass_requires_second_person = false  # true: publishing changed instructions w
 tool_checks = false                    # true: a saved check may say which tools the specialist must call, must not call, and
                                        # what the call must include. Tools run as recording stubs with fixed answers; nothing real runs.
                                        # While false, such checks cannot be created and any existing ones are skipped (never counted as passing).
+canary_percent = 0                     # 0 (off): publishing changed instructions replaces the current version, as before.
+                                       # 1 to 50: the changed version is a trial on that share of NEW goals (chosen by goal id);
+                                       # the rest keep the current version. Goals already running are not changed. Each goal
+                                       # records which version it used. Promote or roll back the trial in Workforce. Only one
+                                       # trial per specialist; a second change is refused until then. A new specialist publishes normally.
+                                       # Goals that ran before or after a trial record no version. Work a trial goal hands to other
+                                       # specialists, and public chat, use the current version. Unreadable settings publish nothing.
+canary_auto_rollback = false           # true: roll the trial back on its own once at least 10 of its goals have finished and its
+                                       # failed share is more than 20 percentage points above the current version's. Recorded in the
+                                       # activity log. It needs a finished goal on the current version to compare with, and it is
+                                       # checked at most once a minute. Unreadable settings or a value other than true leave it off.
 
 [autonomy]
 confirm_plan = false          # show the plan in Approvals and wait before a task's first action that reaches outside Lightwork

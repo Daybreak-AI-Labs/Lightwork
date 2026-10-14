@@ -1610,7 +1610,9 @@ def pick_agent_test_rules() -> dict[str, Any]:
     How many checks one specialist may keep (1 to 200, 20 by default); whether a
     brand-new specialist needs a passing full run before it is published; whether a
     second administrator must approve publishing without a passing run; and whether
-    checks may test which tools a specialist calls (off by default). Written under
+    checks may test which tools a specialist calls (off by default). Also asks for the
+    gradual-rollout share (``canary_percent``, 0 is off) and whether a trial version
+    rolls back on its own. Written under
     ``[agent_tests]`` only when an answer differs from the default.
     """
     limit = _prompt_check_limit()
@@ -1630,8 +1632,32 @@ def pick_agent_test_rules() -> dict[str, Any]:
         "No real tool, file, network call or shell command runs.)",
         default=False,
     )
+    canary = _prompt_canary_percent()
+    auto_rollback = bool(canary) and _q_confirm(
+        "Roll a trial version back automatically when it fails clearly more often than the current "
+        "version? (It needs at least 10 finished goals on the trial first.)",
+        default=False,
+    )
     return {"max_cases_per_specialist": limit, "require_for_new_specialists": new_needs_run,
-            "bypass_requires_second_person": second_person, "tool_checks": tool_checks}
+            "bypass_requires_second_person": second_person, "tool_checks": tool_checks,
+            "canary_percent": canary,
+            "canary_auto_rollback": auto_rollback}
+
+
+def _prompt_canary_percent() -> int:
+    while True:
+        raw = _q_text(
+            "When a changed specialist is published, what share of new goals should try it first? "
+            "(0 publishes changes straight away; 1 to 50 is a trial share)",
+            default="0",
+        ).strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            value = -1
+        if 0 <= value <= 50:
+            return value
+        console.print("[yellow]Enter a whole number from 0 to 50.[/yellow]")
 
 
 def _prompt_check_limit() -> int:
@@ -9469,6 +9495,11 @@ def _cfg_agent_tests(values: dict[str, Any]) -> list[str]:
         lines.append("bypass_requires_second_person = true")
     if values.get("tool_checks"):
         lines.append("tool_checks = true")
+    canary = int(values.get("canary_percent", 0))
+    if canary:
+        lines.append(f"canary_percent = {canary}")
+    if canary and values.get("canary_auto_rollback"):
+        lines.append("canary_auto_rollback = true")
     return ["", "[agent_tests]", *lines] if lines else []
 
 
@@ -11175,7 +11206,9 @@ def write_config(
     agent_tests = {"max_cases_per_specialist": capability_config.pop("max_cases_per_specialist", 20),
                    "require_for_new_specialists": bool(capability_config.pop("require_for_new_specialists", False)),
                    "bypass_requires_second_person": bool(capability_config.pop("bypass_requires_second_person", False)),
-                   "tool_checks": bool(capability_config.pop("tool_checks", False))}
+                   "tool_checks": bool(capability_config.pop("tool_checks", False)),
+                   "canary_percent": capability_config.pop("canary_percent", 0),
+                   "canary_auto_rollback": bool(capability_config.pop("canary_auto_rollback", False))}
     # Practice mode lives under [practice] (kernel: maverick.practice), written only when off.
     practice_mode = bool(capability_config.pop("practice_mode", True))
     practice_cap = _safe_float(capability_config.pop("practice_daily_spend_cap", 1.0), default=1.0)

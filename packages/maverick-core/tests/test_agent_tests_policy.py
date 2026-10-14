@@ -69,16 +69,46 @@ def test_unreadable_settings_keep_the_stricter_reading(settings):
     assert policy.max_cases_per_specialist() == 20
 
 
+def test_the_canary_share_is_off_by_default_and_follows_a_whole_share_from_one_to_fifty(settings):
+    from maverick import agent_tests_policy as policy
+
+    assert policy.canary_percent() == 0
+    assert policy.canary_auto_rollback() is False
+    settings("[agent_tests]\ncanary_percent = 1\n")
+    assert policy.canary_percent() == 1
+    settings("[agent_tests]\ncanary_percent = 50\ncanary_auto_rollback = true\n")
+    assert policy.canary_percent() == 50
+    assert policy.canary_auto_rollback() is True
+
+
+@pytest.mark.parametrize("value", ["51", "-1", "\"10\"", "2.5", "true"])
+def test_a_canary_share_that_is_not_a_whole_number_in_range_reads_as_off(settings, value):
+    from maverick import agent_tests_policy as policy
+
+    settings(f"[agent_tests]\ncanary_percent = {value}\n")
+    assert policy.canary_percent() == 0
+
+
+def test_unreadable_settings_turn_the_canary_off(settings):
+    from maverick import agent_tests_policy as policy
+
+    settings("[agent_tests\ncanary_percent = 20\n")
+    assert policy.canary_percent() == 0
+
+
 def test_the_config_checker_knows_the_section_and_its_limits():
     from maverick.config_lint import lint_config
 
     findings = lint_config({"agent_tests": {
         "max_cases_per_specialist": 500, "require_for_new_specialists": "yes",
-        "bypass_requires_second_person": True, "mystery": 1}})
+        "bypass_requires_second_person": True, "canary_percent": 75,
+        "canary_auto_rollback": "yes", "mystery": 1}})
     flagged = {(f.section, f.key) for f in findings}
     assert ("agent_tests", "max_cases_per_specialist") in flagged
     assert ("agent_tests", "require_for_new_specialists") in flagged
     assert ("agent_tests", "mystery") in flagged
+    assert ("agent_tests", "canary_percent") in flagged
+    assert ("agent_tests", "canary_auto_rollback") in flagged
     assert ("agent_tests", "bypass_requires_second_person") not in flagged
     assert lint_config({"agent_tests": {"max_cases_per_specialist": 200,
                                         "require_for_new_specialists": True}}) == []
@@ -112,3 +142,13 @@ def test_the_config_checker_knows_the_tool_checks_switch():
     assert ("agent_tests", "mystery") in flagged
     clean = lint_config({"agent_tests": {"tool_checks": True}})
     assert not [f for f in clean if f.key == "tool_checks"]
+
+
+@pytest.mark.parametrize("text", ["[agent_tests\ncanary_auto_rollback = true\n", "[agent_tests]\ncanary_auto_rollback = \"yes\"\n",
+                                  "[agent_tests]\ncanary_auto_rollback = 1\n"])
+def test_unreadable_or_non_boolean_settings_leave_automatic_roll_back_off(settings, text):
+    from maverick import agent_tests_policy as policy
+
+    # Automatic roll back is the one switch that acts without a person, so only a true value turns it on.
+    settings(text)
+    assert policy.canary_auto_rollback() is False
