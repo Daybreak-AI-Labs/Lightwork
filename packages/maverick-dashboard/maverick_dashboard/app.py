@@ -65,6 +65,7 @@ from . import (
     capability_assessment_controls_api,
     learning_acquisition_api,
     page_handoff,
+    request_spans,
     runtime_policy_recovery_api,
 )
 from . import health_routes as _health_routes
@@ -1597,6 +1598,8 @@ app = FastAPI(
         Depends(enforce_page_visibility),
     ],
     lifespan=_lifespan,
+    # The request span (below) is the server span; see request_spans.
+    **request_spans.fastapi_telemetry_kwargs(),
 )
 from .administration_document_access_composition import (  # noqa: E402
     attach_administration_document_access_composition,
@@ -15713,6 +15716,9 @@ from .request_activity import RequestActivityMiddleware  # noqa: E402
 
 app.add_middleware(RequestMemoMiddleware)
 app.add_middleware(RequestActivityMiddleware)
+# Added last, so outermost: one OTLP span per request, when tracing is on. Decided
+# here, once; with tracing off nothing is added and a request pays nothing for it.
+request_spans.install(app)
 
 # The 13 consecutive function middlewares above run as one layer (about 2 ms
 # of task groups and streams per request); order and isolation are unchanged.

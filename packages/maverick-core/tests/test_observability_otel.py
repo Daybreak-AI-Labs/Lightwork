@@ -14,6 +14,7 @@ otel-dependent tests.
 """
 from __future__ import annotations
 
+import contextlib
 import importlib
 import sys
 import types
@@ -418,3 +419,57 @@ def test_real_sdk_metrics_carry_the_prometheus_names(monkeypatch):
         ({"tool": "search", "status": "ok"}, 1)]
     latency = metrics["maverick_llm_latency_seconds"].data.data_points
     assert [dict(p.attributes) for p in latency] == [{"provider": "anthropic", "model": "m"}]
+
+
+# ---------- HTTP request spans (http_request_span / mark_span_failed) ----------
+
+def test_otlp_tracing_enabled_follows_the_exporter_knob(monkeypatch):
+    assert obs.otlp_tracing_enabled() is False
+    monkeypatch.setenv("MAVERICK_OTEL_EXPORTER", "otlp")
+    assert obs.otlp_tracing_enabled() is True
+
+
+def test_request_span_is_none_when_span_export_is_off(monkeypatch):
+    monkeypatch.setattr(obs, "_initialized", True)
+    with obs.http_request_span("GET") as span:
+        assert span is None
+
+
+def test_request_span_is_a_server_span_and_never_a_sentry_transaction(monkeypatch):
+    opened = []
+
+    class _Span:
+        pass
+
+    class _Tracer:
+        @contextlib.contextmanager
+        def start_as_current_span(self, name, kind=None, **_kwargs):
+            opened.append((name, kind))
+            yield _Span()
+
+    def _sentry_must_not_open(*_args, **_kwargs):
+        raise AssertionError("request spans are OTLP-only; Sentry is not called")
+
+    monkeypatch.setattr(obs, "_initialized", True)
+    monkeypatch.setattr(obs, "_tracer", _Tracer())
+    monkeypatch.setattr(obs, "_trace_api", types.SimpleNamespace(
+        SpanKind=types.SimpleNamespace(SERVER="SERVER")))
+    monkeypatch.setattr(obs, "_sentry", types.SimpleNamespace(
+        start_transaction=_sentry_must_not_open, start_span=_sentry_must_not_open,
+        get_current_scope=_sentry_must_not_open))
+    with obs.http_request_span("GET") as span:
+        assert isinstance(span, _Span)
+    assert opened == [("HTTP GET", "SERVER")]
+
+
+def test_mark_span_failed_sets_the_error_status(monkeypatch):
+    statuses = []
+
+    class _Span:
+        def set_status(self, status):
+            statuses.append(status)
+
+    monkeypatch.setattr(obs, "_trace_api", types.SimpleNamespace(
+        StatusCode=types.SimpleNamespace(ERROR="ERROR")))
+    obs.mark_span_failed(_Span())
+    assert statuses == ["ERROR"]

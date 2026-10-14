@@ -1,0 +1,274 @@
+"""Each dashboard HTTP request is one OTel server span, named for its route template.
+
+The span carries the route template (never the raw path or query), the method,
+and the status; a 5xx or an unhandled error marks it failed. With OTLP tracing
+off the middleware is not installed at all.
+
+The fake-tracer tests need no OpenTelemetry install. The real-SDK test
+importorskips it, like the repo's other OTel tests.
+"""
+from __future__ import annotations
+
+import contextlib
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+from fastapi import FastAPI, WebSocket
+from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
+from maverick import observability
+from maverick_dashboard import request_spans
+from maverick_dashboard.request_spans import RequestSpanMiddleware
+
+# Stand-ins for opentelemetry.trace's enums, as the middleware reads them.
+_TRACE_API = SimpleNamespace(
+    SpanKind=SimpleNamespace(SERVER="SERVER"),
+    StatusCode=SimpleNamespace(ERROR="ERROR"),
+)
+
+
+class _Span:
+    def __init__(self, name, kind):
+        self.name = name
+        self.kind = kind
+        self.attributes = {}
+        self.status = None
+
+    def update_name(self, name):
+        self.name = name
+
+    def set_attribute(self, key, value):
+        self.attributes[key] = value
+
+    def set_status(self, status):
+        self.status = status
+
+
+class _Tracer:
+    def __init__(self):
+        self.spans = []
+
+    @contextlib.contextmanager
+    def start_as_current_span(self, name, kind=None, **_kwargs):
+        span = _Span(name, kind)
+        self.spans.append(span)
+        try:
+            yield span
+        except BaseException:
+            span.status = "ERROR"  # what the SDK does for an exception it records
+            raise
+
+
+@pytest.fixture(autouse=True)
+def _otlp_tracing_on(monkeypatch):
+    """Tracing is on for these tests; no real exporter is ever started."""
+    monkeypatch.setenv("MAVERICK_OTEL_EXPORTER", "otlp")
+    monkeypatch.setattr(observability, "_initialized", True)
+    monkeypatch.setattr(observability, "_tracer", None)
+    monkeypatch.setattr(observability, "_trace_api", _TRACE_API)
+    monkeypatch.setattr(observability, "_sentry", None)
+
+
+@pytest.fixture
+def tracer(monkeypatch):
+    fake = _Tracer()
+    monkeypatch.setattr(observability, "_tracer", fake)
+    return fake
+
+
+def _app(**fastapi_options: Any) -> FastAPI:
+    app = FastAPI(**fastapi_options)
+
+    @app.get("/goals/{goal_id}")
+    def goal(goal_id: str):
+        return {"goal": goal_id}
+
+    @app.get("/unavailable")
+    def unavailable():
+        return JSONResponse({"detail": "down"}, status_code=503)
+
+    @app.get("/crash")
+    def crash():
+        raise RuntimeError("internal detail that must not reach a span")
+
+    @app.get("/work")
+    def work():
+        with observability.trace_span("tool search"):
+            return {"ok": True}
+
+    @app.websocket("/ws")
+    async def echo(websocket: WebSocket):
+        await websocket.accept()
+        await websocket.send_text(await websocket.receive_text())
+        await websocket.close()
+
+    assert request_spans.install(app) is True
+    return app
+
+
+def _client(app: FastAPI | None = None) -> TestClient:
+    # The dashboard builds its app with these options; see app.py.
+    app = app or _app(**request_spans.fastapi_telemetry_kwargs())
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def _sdk_provider():
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    return exporter, provider
+
+
+def test_span_is_named_for_the_route_template_and_carries_no_identifiers(tracer):
+    response = _client().get(
+        "/goals/42?token=s3cret",
+        headers={"Cookie": "session=abc", "X-Tenant": "tenant-7"},
+    )
+    assert response.status_code == 200
+    (span,) = tracer.spans
+    assert span.name == "HTTP GET /goals/{goal_id}"
+    assert span.kind == "SERVER"
+    assert span.attributes == {
+        "http.request.method": "GET",
+        "http.route": "/goals/{goal_id}",
+        "http.response.status_code": 200,
+    }
+    assert span.status is None
+
+
+def test_a_server_error_answer_marks_the_span_failed(tracer):
+    _client().get("/unavailable")
+    (span,) = tracer.spans
+    assert span.name == "HTTP GET /unavailable"
+    assert span.attributes["http.response.status_code"] == 503
+    assert span.status == "ERROR"
+
+
+def test_an_unhandled_error_is_a_500_span_marked_failed(tracer):
+    response = _client().get("/crash")
+    assert response.status_code == 500
+    (span,) = tracer.spans
+    assert span.name == "HTTP GET /crash"
+    assert span.attributes == {
+        "http.request.method": "GET",
+        "http.route": "/crash",
+        "http.response.status_code": 500,
+    }
+    assert span.status == "ERROR"
+
+
+def test_an_unmatched_request_is_named_by_method_alone(tracer):
+    response = _client().get("/nowhere/secret-id-99")
+    assert response.status_code == 404
+    (span,) = tracer.spans
+    assert span.name == "HTTP GET"
+    assert span.attributes == {
+        "http.request.method": "GET",
+        "http.response.status_code": 404,
+    }
+    assert "secret-id-99" not in span.name
+
+
+def test_an_invented_method_is_bounded_to_other(tracer):
+    _client().request("PURGE", "/goals/42")
+    (span,) = tracer.spans
+    assert span.name == "HTTP _OTHER /goals/{goal_id}"
+    assert span.attributes["http.request.method"] == "_OTHER"
+
+
+def test_websockets_pass_through_without_a_span(tracer):
+    with _client().websocket_connect("/ws") as websocket:
+        websocket.send_text("ping")
+        assert websocket.receive_text() == "ping"
+    assert tracer.spans == []
+
+
+def test_no_span_and_no_error_when_the_tracer_is_unavailable(monkeypatch):
+    monkeypatch.setattr(observability, "_tracer", None)
+    response = _client().get("/goals/42")
+    assert response.status_code == 200
+    assert response.json() == {"goal": "42"}
+
+
+def test_tracing_off_installs_nothing(monkeypatch):
+    monkeypatch.delenv("MAVERICK_OTEL_EXPORTER", raising=False)
+    app = FastAPI()
+    assert request_spans.install(app) is False
+    assert RequestSpanMiddleware not in [entry.cls for entry in app.user_middleware]
+
+
+def test_tracing_on_installs_the_middleware_once(monkeypatch):
+    app = FastAPI()
+    assert request_spans.install(app) is True
+    classes = [entry.cls for entry in app.user_middleware]
+    assert classes.count(RequestSpanMiddleware) == 1
+
+
+def test_the_dashboard_app_decides_at_startup():
+    source = (Path(request_spans.__file__).parent / "app.py").read_text(encoding="utf-8")
+    assert "request_spans.install(app)" in source
+
+
+def test_real_sdk_span_and_its_children(monkeypatch):
+    pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry import trace
+
+    exporter, provider = _sdk_provider()
+    monkeypatch.setattr(observability, "_tracer", provider.get_tracer("maverick"))
+    monkeypatch.setattr(observability, "_trace_api", trace)
+
+    client = _client()
+    client.get("/goals/42?x=1")
+    client.get("/unavailable")
+    client.get("/work")
+
+    spans = {span.name: span for span in exporter.get_finished_spans()}
+    goal = spans["HTTP GET /goals/{goal_id}"]
+    assert goal.kind == trace.SpanKind.SERVER
+    assert dict(goal.attributes) == {
+        "http.request.method": "GET",
+        "http.route": "/goals/{goal_id}",
+        "http.response.status_code": 200,
+    }
+    assert goal.status.status_code == trace.StatusCode.UNSET
+    assert spans["HTTP GET /unavailable"].status.status_code == trace.StatusCode.ERROR
+    # The request span is the current span while the handler runs.
+    work = spans["HTTP GET /work"]
+    tool = spans["tool search"]
+    assert tool.parent.span_id == work.context.span_id
+
+
+def test_fastapi_own_server_span_is_switched_off_so_no_raw_url_is_exported(monkeypatch):
+    """FastAPI 0.143+ opens its own server span once a provider is set; it records the
+    raw url.path and url.query. The dashboard's options switch it off."""
+    pytest.importorskip("fastapi.telemetry")
+    pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry import trace
+
+    exporter, provider = _sdk_provider()
+    monkeypatch.setattr(trace, "get_tracer_provider", lambda: provider)
+    monkeypatch.setattr(observability, "_tracer", provider.get_tracer("maverick"))
+    monkeypatch.setattr(observability, "_trace_api", trace)
+
+    # Negative control: FastAPI's own options leave its span on, raw query and all.
+    _client(_app()).get("/goals/42?tab=private")
+    assert any(
+        span.name == "GET /goals/{goal_id}" and "tab=private" in str(dict(span.attributes))
+        for span in exporter.get_finished_spans()
+    )
+
+    exporter.clear()
+    _client().get("/goals/42?tab=private")
+    names = [span.name for span in exporter.get_finished_spans()]
+    assert "HTTP GET /goals/{goal_id}" in names
+    assert "GET /goals/{goal_id}" not in names
+    exported = repr([dict(span.attributes) for span in exporter.get_finished_spans()])
+    assert "tab=private" not in exported and "/goals/42" not in exported

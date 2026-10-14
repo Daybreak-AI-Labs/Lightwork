@@ -22,6 +22,8 @@ When enabled, it wraps:
   - Tool invocations (one span per tool call, attributes = tool name +
     result-size + ms)
   - Provider dispatches (provider + model + tokens + cost in attributes)
+  - Dashboard HTTP requests: one server span each, named by route template
+    (``maverick_dashboard.request_spans``; never the raw path or query)
 
 Deps are heavyweight + optional. Install with:
     python -m pip install -e './packages/maverick-core[observability]'
@@ -45,6 +47,8 @@ log = logging.getLogger(__name__)
 _initialized = False
 _init_lock = threading.Lock()
 _tracer: Any = None
+# opentelemetry.trace itself (SpanKind, StatusCode), set together with _tracer.
+_trace_api: Any = None
 _sentry: Any = None
 _metrics: dict[str, Any] = {}
 # name -> (kind, OTLP instrument) for the metrics in _METRIC_SPECS (MAVERICK_OTEL_METRICS).
@@ -271,7 +275,7 @@ def _initialize_otlp_metrics(endpoint: str, headers: dict[str, str], resource: A
 def _initialize() -> None:
     """Idempotent setup. Imports happen here so the module is cheap to
     import when observability is off."""
-    global _initialized, _tracer, _sentry
+    global _initialized, _tracer, _sentry, _trace_api
     with _init_lock:
         if _initialized:
             return
@@ -338,6 +342,7 @@ def _initialize() -> None:
                 return
             trace.set_tracer_provider(provider)
             _tracer = trace.get_tracer("maverick")
+            _trace_api = trace
             log.info(
                 "observability: OTLP traces -> %s (%d header(s))",
                 endpoint, len(headers),
@@ -515,6 +520,33 @@ def trace_span(
                 raise
 
 
+@contextlib.contextmanager
+def http_request_span(method: str) -> Iterator[Any]:
+    """The OTLP server span for one dashboard HTTP request; ``None`` when span export is off.
+
+    The span is made current, so the spans a request starts (agent, tool,
+    provider) nest under it. Unlike trace_span() it never opens a Sentry
+    transaction: request spans are OTLP-only, so Sentry's performance quota is
+    not spent on every page.
+    """
+    _initialize()
+    if _tracer is None:
+        yield None
+        return
+    with _tracer.start_as_current_span(
+        f"HTTP {method}", kind=_trace_api.SpanKind.SERVER,
+    ) as span:
+        yield span
+
+
+def mark_span_failed(span: Any) -> None:
+    """Set the OTel status to ERROR on ``span``: a 5xx answer (exceptions set it themselves)."""
+    try:
+        span.set_status(_trace_api.StatusCode.ERROR)
+    except Exception:  # pragma: no cover -- a span never breaks a request
+        log.debug("span status not set", exc_info=True)
+
+
 def record_metric(
     name: str,
     value: float = 1.0,
@@ -574,6 +606,11 @@ def _record_otlp_metric(
             otel.add(value, attributes=labels or None)
     except Exception:  # pragma: no cover -- never crash on metric export
         log.debug("OTLP metric %s failed", name, exc_info=True)
+
+
+def otlp_tracing_enabled() -> bool:
+    """True when OTLP span export is on (``MAVERICK_OTEL_EXPORTER=otlp``)."""
+    return _otel_enabled()
 
 
 def is_enabled() -> bool:
@@ -701,6 +738,7 @@ def gen_ai_tool_attributes(
 
 __all__ = [
     "trace_span", "record_metric", "is_enabled",
+    "http_request_span", "mark_span_failed", "otlp_tracing_enabled",
     "gen_ai_span_name", "gen_ai_attributes", "gen_ai_tool_attributes",
     "gen_ai_agent_attributes",
     "safe_agent_telemetry_label",
