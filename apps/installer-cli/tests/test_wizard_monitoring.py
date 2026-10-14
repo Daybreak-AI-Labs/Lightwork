@@ -182,15 +182,18 @@ def test_measurements_are_written_when_the_address_ends_in_v1_traces(tmp_path, m
     assert cfg["observability"]["otlp_metrics"] is True
 
 
-def test_measurements_reask_an_address_they_cannot_use(monkeypatch, capsys):
+def test_measurements_need_a_v1_traces_address_and_a_no_is_honoured(monkeypatch, capsys):
+    # The address is asked first. A yes that the address cannot carry is asked again, and
+    # the no that follows is taken: the address is not asked a second time.
     config, _keys = _pick(
         monkeypatch,
-        (TRACE, True), (METRICS, True),
+        (TRACE, True),
         (COLLECTOR, "https://collector.example.com:4318"),
-        (COLLECTOR, "https://collector.example.com:4318/v1/traces"),
+        (METRICS, True), (METRICS, False),
         (KMS, _label(wizard._KMS_PROVIDERS, "local")), (SIEM, False),
     )
-    assert config["observability"]["otel_endpoint"] == "https://collector.example.com:4318/v1/traces"
+    assert config["observability"] == {
+        "otel_exporter": "otlp", "otel_endpoint": "https://collector.example.com:4318"}
     assert "ends in /v1/traces" in capsys.readouterr().out
 
 

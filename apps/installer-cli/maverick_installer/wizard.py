@@ -7759,9 +7759,7 @@ def _ask_azure_id(env_name: str, label: str) -> str:
                       "dashes.[/yellow]")
 
 
-def _collector_problem(address: str, *, metrics: bool) -> str | None:
-    from maverick.observability import _otlp_metrics_endpoint
-
+def _collector_problem(address: str) -> str | None:
     problem = _web_address_problem(address, ("http", "https"))
     if problem is not None:
         return problem
@@ -7771,10 +7769,25 @@ def _collector_problem(address: str, *, metrics: bool) -> str | None:
                 "so the traces are encrypted on the way.")
     if re.fullmatch(_COLLECTOR_PATTERN, address) is None:
         return "Enter a collector address with no spaces, quotes, question marks or # in it."
-    if metrics and _otlp_metrics_endpoint(address) is None:
-        return ("Measurements need an address that ends in /v1/traces. Enter that address, "
-                "or answer no to measurements.")
     return None
+
+
+def _ask_measurements(address: str) -> bool:
+    """Whether measurements also go to ``address``. They need an address that ends in
+    /v1/traces, so a yes with another address is asked again; a no always stands."""
+    from maverick.observability import _otlp_metrics_endpoint
+
+    while True:
+        if not _q_confirm(
+            "  Also send measurements (counts, timings and spending) to the same collector? "
+            "(They name tools and models.)",
+            default=False,
+        ):
+            return False
+        if _otlp_metrics_endpoint(address) is not None:
+            return True
+        console.print("  [yellow]Measurements need a collector address that ends in /v1/traces. "
+                      "Answer no to leave them off.[/yellow]")
 
 
 def _pick_trace_collector() -> dict[str, Any]:
@@ -7785,18 +7798,13 @@ def _pick_trace_collector() -> dict[str, Any]:
         default=False,
     ):
         return {}
-    metrics = _q_confirm(
-        "  Also send measurements (counts, timings and spending) to the same collector? "
-        "(They name tools and models.)",
-        default=False,
-    )
     address = _ask_until(
         "  Collector address",
         default=_MONITORING_TRACE_DEFAULT,
-        check=lambda value: _collector_problem(value, metrics=metrics),
+        check=_collector_problem,
     )
     observability: dict[str, Any] = {"otel_exporter": "otlp", "otel_endpoint": address}
-    if metrics:
+    if _ask_measurements(address):
         observability["otlp_metrics"] = True
     return {"observability": observability}
 
