@@ -40,7 +40,7 @@ test('the recovery lookup sends the owner code with the passphrase', async () =>
   doc.querySelector('[data-migration-load]').click();
   await settle();
   const lookup = sent.find(item => item.url === '/auth/company-signin-recovery/lookup');
-  assert.deepEqual(lookup.body, {email: 'owner@example.com', password: 'owner passphrase', code: '123456'});
+  assert.deepEqual(lookup.body, {email: 'owner@example.com', password: 'owner passphrase', code: '123456'}); // pragma: allowlist secret - test fixture passphrase
 });
 
 test('cancelling the recovery review ends its proof on the server', async () => {

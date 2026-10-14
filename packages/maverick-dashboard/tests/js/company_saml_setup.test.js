@@ -122,7 +122,7 @@ test('the restricted SAML recovery sends the owner code, and cancelling a review
   ui.doc.querySelector('[data-saml-code]').value = '123456';
   ui.doc.querySelector('[data-saml-lookup]').click();
   await settle();
-  assert.deepEqual(sent[0].body, {email: 'owner@example.com', password: 'owner passphrase', code: '123456'});
+  assert.deepEqual(sent[0].body, {email: 'owner@example.com', password: 'owner passphrase', code: '123456'}); // pragma: allowlist secret - test fixture passphrase
   ui.doc.querySelector('[data-saml-recovery-original]').value = 'b'.repeat(32);
   ui.doc.querySelector('[data-saml-restore-review]').click();
   await settle();
