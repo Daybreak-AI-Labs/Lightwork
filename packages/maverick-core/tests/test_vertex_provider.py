@@ -305,3 +305,22 @@ def test_preflight_names_the_missing_vertex_prerequisites(monkeypatch):
     assert preflight._route_configuration_missing("vertex", configured) == ()
     rendered = preflight._format_route_missing({"vertex": ("project_id", "region")})
     assert "CLOUD_ML_REGION" in rendered and "GOOGLE_CLOUD_PROJECT" in rendered
+
+
+@pytest.mark.parametrize("bad", ["claude-haiku-4-5/../../other", "claude-haiku-4-5:rawPredict",
+                                 "claude haiku", "claude-haiku-4-5?x=1", ""])
+def test_model_ids_cannot_reshape_the_request_path(fake_sdk, bad):
+    from maverick.providers.vertex_provider import VertexClient
+
+    c = VertexClient(environment=_ENV)
+    with pytest.raises((RuntimeError, ValueError)):
+        c._build_request("sys", [{"role": "user", "content": "hi"}], None, 64, None, bad)
+    assert c.client.calls == []
+
+
+def test_a_vertex_model_can_be_put_on_the_allow_list(monkeypatch, tmp_path):
+    from maverick import runtime_overrides
+
+    monkeypatch.setattr(runtime_overrides, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
+    runtime_overrides.set_allowed_models([f"vertex:{_HAIKU}"])
+    assert f"vertex:{_HAIKU}" in runtime_overrides.allowed_models()

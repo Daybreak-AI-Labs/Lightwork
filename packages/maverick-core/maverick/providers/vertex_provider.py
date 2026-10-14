@@ -56,6 +56,9 @@ GOOGLE_AUTH_HINT = (
 # are constrained to characters that cannot change the URL they land in.
 _PROJECT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.:_-]{0,127}")
 _REGION = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
+# The model id is a path segment of the request URL (models/{model}:rawPredict), so
+# it may carry the name@version form but never a slash, colon or query character.
+_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,127}")
 
 
 def google_auth_hint() -> str | None:
@@ -180,6 +183,8 @@ class VertexClient(AnthropicClient):
                 "Vertex AI needs a model id: set [providers.vertex] model_id to the id "
                 "shown in the Vertex AI Model Garden"
             )
+        if not _MODEL_ID.fullmatch(wire):
+            raise ValueError("the Vertex AI model id must look like claude-haiku-4-5@20251001, as shown in the Vertex AI Model Garden")
         canonical = vertex_rate_card_model_id(wire) or wire
         kwargs = super()._build_request(
             system, messages, tools, max_tokens, thinking_budget, canonical,
