@@ -85,7 +85,10 @@ never retries a pending audit receipt; the sync, saves and prepared actions do.
 A read withholds a work item whose recorded flow run, task or conversation turn
 has since been deleted, until the sync retires or re-derives it; the item's
 explanation answers not found. `recorded_as_of` in a report is the newest
-recorded change, not the time of the read. Each newly observed item keeps the
+recorded change, not the time of the read. `checked_at` in a report is a
+deprecated alias with the same value; use `recorded_as_of`. It is removed in
+0.3.0. The sync takes `device_id`, the enrolled Ekko device it reviews, and
+deletes that device's expired Ekko observations. Each newly observed item keeps the
 estimate assumptions in force when it was first recorded. Saving company
 assumptions or a benchmark first records observed work. If that work cannot be
 read completely, the save is refused (503 or 422) and nothing changes, so an

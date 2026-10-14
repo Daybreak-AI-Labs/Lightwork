@@ -40,7 +40,7 @@
     $('iv-report').hidden = true; $('iv-error').hidden = true; $('iv-retry').hidden = true;
     try {
       // Reads never record work. Recording newly observed work is the explicit sync, so the page syncs first.
-      const synced = await request('/sync', 'POST', {});
+      const synced = await request('/sync?device_id=' + encodeURIComponent($('iv-device').value), 'POST', {});
       if (version !== generation) return;
       const [metrics, config, defaults, suggestions] = await Promise.all([
         request('?' + filters()), request('/settings'), request('/benchmarks'),

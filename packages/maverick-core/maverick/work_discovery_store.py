@@ -1936,6 +1936,11 @@ class WorkDiscoveryStore:
                 )
         return count
 
+    def purge_expired(self) -> int:
+        """Delete this scope's expired ciphertext now. Explicit write actions call this."""
+        with self._deployment_control_barrier(), self._consent_barrier():
+            return self._purge_expired_events()
+
     def append_collector_event(
         self,
         event: WorkEvent,

@@ -1256,3 +1256,26 @@ def test_governed_projection_excludes_expired_events_without_deleting_them(store
     assert projection["lineage"]["event_count"] == 0
     assert projection["candidates"] == []
     assert _raw_event_rows(later) == stored
+
+
+def test_an_explicit_purge_deletes_only_this_scopes_expired_ciphertext(store):
+    policy = _policy()
+    store.enroll(policy)
+    store.create_session(policy=policy, session_id="expired-session")
+    _append(store, _event("expired-session"), policy)
+    assert len(_raw_event_rows(store)) == 1
+    # Events keep 14 days. Fifteen days later the explicit write path removes the expired row.
+    later = WorkDiscoveryStore(
+        "alice", "laptop-1", tenant="acme", path=store.path,
+        clock=lambda: NOW + 15 * 86_400.0, authority_check=_no_authority_check,
+    )
+    other_device = WorkDiscoveryStore(
+        "alice", "laptop-2", tenant="acme", path=store.path,
+        clock=lambda: NOW + 15 * 86_400.0, authority_check=_no_authority_check,
+    )
+
+    assert other_device.purge_expired() == 0
+    assert _raw_event_rows(later) != []
+    assert later.purge_expired() == 1
+    assert _raw_event_rows(later) == []
+    assert later.purge_expired() == 0

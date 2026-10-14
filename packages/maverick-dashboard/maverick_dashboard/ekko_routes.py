@@ -117,6 +117,18 @@ def _store(request: Request, device_id: str):
     )
 
 
+def _purge_expired(store) -> int:
+    """Delete this device's expired Ekko events during an explicit write action (start, pause, resume or stop)."""
+    from maverick.audit import EventKind
+
+    if not store.path.exists():
+        return 0
+    removed = store.purge_expired()
+    if removed:
+        _audit(EventKind.EKKO_RETENTION_PURGE, state="expired_removed", removed=removed)
+    return removed
+
+
 def _public_enrollment(value) -> dict | None:
     if value is None:
         return None
@@ -530,6 +542,7 @@ def ekko_start_session(request: Request, payload: StartSessionIn) -> dict:
     except (ValueError, WorkDiscoveryStoreError) as exc:
         raise HTTPException(status_code=409, detail="Watching could not start. Refresh the page and try again.") from exc
     _audit(EventKind.EKKO_SESSION, session_id=session.session_id, state="running")
+    _purge_expired(store)
     return {"session": _public_session(session), "unsaved": True}
 
 
@@ -559,6 +572,7 @@ def _transition(request: Request, device_id: str, session_id: str, target: str) 
     except WorkDiscoveryStoreError as exc:
         raise HTTPException(status_code=409, detail="That change could not be made. Refresh the page and try again.") from exc
     _audit(EventKind.EKKO_SESSION, session_id=sid, state=target)
+    _purge_expired(store)
     return {"session": _public_session(session)}
 
 

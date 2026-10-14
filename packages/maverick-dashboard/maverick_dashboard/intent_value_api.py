@@ -198,14 +198,19 @@ def report_endpoint(request: Request, start: str = "", end: str = "", scope: Lit
 
 
 @router.post("/sync")
-def sync_endpoint(request: Request):
-    """Record newly observed work and suggestions. Reads do not record them; the page calls this before it reads."""
-    return _call(lambda: _record(request))
+def sync_endpoint(request: Request, device_id: str = "local-device"):
+    """Record newly observed work and suggestions, and delete the expired Ekko observations of ``device_id``.
+    Reads do not record them; the page calls this before it reads."""
+    return _call(lambda: _record(request, device_id))
 
 
-def _record(request):
+def _record(request, device_id="local-device"):
     authority(request)
     settings.retry_pending()
+    if auth.has_permission(request, "operate"):
+        # Expired Ekko observations are deleted by this explicit write; a page read does not delete them.
+        from .ekko_routes import _purge_expired, _store
+        _purge_expired(_store(request, device_id))
     rows = records(request)
     enabled = settings.policy()["recommendations"]
     if enabled:
