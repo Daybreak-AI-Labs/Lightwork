@@ -221,47 +221,56 @@ def _require_live(tenant: str | None, site_id: str) -> None:
         raise RuntimeError("the chat site is no longer active")
 
 
-def _provider_answer(tenant: str | None, site: dict[str, Any], text: str, reserve: float) -> tuple[str, float]:
+def _provider_answer(tenant: str | None, site: dict[str, Any], text: str, budget: Any) -> str:
     """One tool-free, budgeted call: ``LLM.complete(tools=None)``, never the agent loop."""
     from maverick import llm as llm_module
     from maverick.domain import enabled_domains
-    from maverick.paths import tenant_scope
 
-    with tenant_scope(tenant=tenant):
-        profile = enabled_domains().get(site["specialist"])
-        if profile is None:
-            raise RuntimeError("the specialist is not published")
-        budget = _budget(reserve)
-        llm = llm_module.LLM(llm_module.model_for_role(site["specialist"]))
-        response = llm.complete(
-            public_chat_system(profile, site["display_name"]),
-            [{"role": "user", "content": text}],
-            tools=None,
-            budget=budget,
-            max_tokens=_ANSWER_MAX_TOKENS,
-            _no_failover=True,
-            max_physical_attempts=1,
-            dispatch_guard=lambda: _require_live(tenant, site["id"]),
-        )
-        answer = (getattr(response, "text", "") or "").strip()[:MAX_ANSWER_CHARS]
-        return (answer or _UNAVAILABLE_ANSWER), budget.dollars
+    profile = enabled_domains().get(site["specialist"])
+    if profile is None:
+        raise RuntimeError("the specialist is not published")
+    llm = llm_module.LLM(llm_module.model_for_role(site["specialist"]))
+    response = llm.complete(
+        public_chat_system(profile, site["display_name"]),
+        [{"role": "user", "content": text}],
+        tools=None,
+        budget=budget,
+        max_tokens=_ANSWER_MAX_TOKENS,
+        _no_failover=True,
+        max_physical_attempts=1,
+        dispatch_guard=lambda: _require_live(tenant, site["id"]),
+    )
+    answer = (getattr(response, "text", "") or "").strip()[:MAX_ANSWER_CHARS]
+    return answer or _UNAVAILABLE_ANSWER
 
 
 def _answer(tenant: str | None, site: dict[str, Any], text: str, now: float) -> str:
-    """Hold the answer's share of today's cap first; settle it to the real cost after."""
+    """Hold the answer's share of today's cap first; settle it to what was billed after."""
+    from maverick.budget import BudgetExceeded
+    from maverick.paths import tenant_scope
+
     cap = site["daily_cap_dollars"]
     reserve = min(store.ANSWER_RESERVE_DOLLARS, cap)
     day = store.reserve_spend(tenant, site["id"], cap=cap, amount=reserve, now=now)
     if day is None:
         return _UNAVAILABLE_ANSWER
-    answer, spent = _UNAVAILABLE_ANSWER, reserve  # a failed or unknown call keeps the whole hold
+    budget, settled = None, reserve
     try:
-        answer, spent = _provider_answer(tenant, site, text, reserve)
+        with tenant_scope(tenant=tenant):
+            budget = _budget(reserve)
+            answer = _provider_answer(tenant, site, text, budget)
+        settled = budget.dollars
+        return answer
+    except BudgetExceeded:
+        # The cap refused the call, possibly after billing it: record what was billed.
+        settled = budget.dollars if budget is not None else reserve
+        return _UNAVAILABLE_ANSWER
     except Exception as exc:  # noqa: BLE001 -- a provider call may have been billed
+        settled = max(reserve, budget.dollars if budget is not None else 0.0)
         logger.warning("public chat answer did not finish (%s)", type(exc).__name__)
+        return _UNAVAILABLE_ANSWER
     finally:
-        store.settle_spend(tenant, site["id"], day, reserved=reserve, actual=spent)
-    return answer
+        store.settle_spend(tenant, site["id"], day, reserved=reserve, actual=settled)
 
 
 def _resolve_key(key: str) -> tuple[str | None, dict[str, Any]]:

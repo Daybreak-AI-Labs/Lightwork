@@ -64,7 +64,7 @@ def model(monkeypatch):
     from maverick import llm as llm_module
 
     fake = SimpleNamespace(text="We are open 9 to 5, Monday to Friday.", dollars=0.01,
-                           calls=[], error=None)
+                           calls=[], error=None, enforce=False)
 
     class FakeLLM:
         def __init__(self, spec):
@@ -76,6 +76,8 @@ def model(monkeypatch):
             if fake.error is not None:
                 raise fake.error
             budget.dollars = fake.dollars
+            if fake.enforce:  # the real budget refuses an overrun after the call is billed
+                budget.check()
             return SimpleNamespace(text=fake.text)
 
     monkeypatch.setattr(llm_module, "LLM", FakeLLM)
@@ -344,6 +346,22 @@ def test_daily_cap_stops_answers_politely_before_each_call(chat, model):
     assert polite.status_code == 200
     assert "not available right now" in polite.json()["answer"]
     assert len(model.calls) == 2
+
+
+def test_a_call_billed_above_its_hold_counts_at_its_billed_cost(chat, model):
+    # The hold is 0.05 and this call bills 0.07, so the budget refuses it after billing.
+    key = _site(chat, daily_cap_dollars=0.10)["publishable_key"]
+    token = _session(chat, key)
+    model.dollars, model.enforce = 0.07, True
+    over = _say(chat, token, "one")
+    assert over.status_code == 200
+    assert "not available right now" in over.json()["answer"]
+    listed = chat.client.get("/api/v1/public-chat/sites").json()["sites"][0]
+    assert listed["spent_today_dollars"] == 0.07
+    # 0.07 spent plus the next 0.05 hold is over the 0.10 cap, so no second call is made.
+    model.enforce = False
+    assert "not available right now" in _say(chat, token, "two").json()["answer"]
+    assert len(model.calls) == 1
 
 
 def test_failed_provider_call_keeps_its_reservation_and_is_not_retried(chat, model):
