@@ -2028,6 +2028,47 @@ def pick_knowledge() -> dict[str, Any]:
     return out
 
 
+# Size limits for saved company folders and spaces (dashboard Knowledge sources):
+# key, label, default, lowest and highest allowed value. They match
+# config.get_knowledge_sources, which refuses anything outside these ranges.
+_KNOWLEDGE_SOURCE_LIMITS: tuple[tuple[str, str, int, int, int], ...] = (
+    ("max_items", "Most items in one saved folder or space", 64, 1, 1000),
+    ("max_pages", "Most listing pages for one saved source", 16, 1, 200),
+    ("max_download_mib", "Largest document to import (MiB)", 4, 1, 32),
+    ("max_text_kib", "Most source text kept per refresh (KiB)", 256, 1, 8192),
+)
+
+
+def pick_knowledge_sources() -> dict[str, Any]:
+    """Optional size limits for saved SharePoint, OneDrive, Google Drive and
+    Confluence sources. Asked only when Knowledge RAG is on, because saved
+    sources are searched through it. Declining keeps the defaults, which are
+    the bounds the dashboard has always used. Returns a dict written under
+    ``[knowledge_sources]``, or {} to write nothing.
+    """
+    console.print()
+    console.print(
+        "[dim]Saved company folders and spaces use these limits for each refresh. "
+        "Defaults: 64 items, 16 listing pages, 4 MiB per document and 256 KiB of "
+        "source text. Keep the defaults unless a folder or space is larger.[/dim]"
+    )
+    if not _q_confirm("Change the size limits for saved company folders and spaces?", default=False):
+        return {}
+    out: dict[str, Any] = {}
+    for key, label, default, low, high in _KNOWLEDGE_SOURCE_LIMITS:
+        while True:
+            raw = _q_text(f"  {label} ({low}-{high}, default {default})", default=str(default)).strip()
+            try:
+                value = int(raw)
+            except ValueError:
+                value = None
+            if value is not None and low <= value <= high:
+                break
+            console.print(f"[yellow]Enter a whole number from {low} to {high}.[/yellow]")
+        out[key] = value
+    return out
+
+
 def pick_oauth_vault() -> dict[str, Any]:
     """Opt-in to sealing captured OAuth tokens in the per-tenant vault.
 
@@ -8052,6 +8093,20 @@ def _cfg_knowledge(knowledge: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _cfg_knowledge_sources(knowledge_sources: dict[str, Any] | None) -> list[str]:
+    if not knowledge_sources:
+        return []
+    # Saved company folder and space limits. config.get_knowledge_sources reads
+    # them at each refresh and refuses any value outside its range.
+    lines = ["", "[knowledge_sources]"]
+    for key, _label, _default, low, high in _KNOWLEDGE_SOURCE_LIMITS:
+        value = knowledge_sources.get(key)
+        if type(value) is not int or not low <= value <= high:
+            raise ValueError(f"knowledge_sources.{key} must be a whole number from {low} to {high}")
+        lines.append(f"{key} = {value}")
+    return lines
+
+
 def _cfg_oauth(oauth: dict[str, Any] | None) -> list[str]:
     if not (oauth and oauth.get("vault")):
         return []
@@ -10359,6 +10414,7 @@ def write_config(
     event_triggers: dict[str, Any] | None = None,
     flows: dict[str, Any] | None = None,
     knowledge: dict[str, Any] | None = None,
+    knowledge_sources: dict[str, Any] | None = None,
     oauth: dict[str, Any] | None = None,
     governed_connectors: dict[str, Any] | None = None,
     durable: dict[str, Any] | None = None,
@@ -10479,6 +10535,7 @@ def write_config(
     lines += _cfg_event_triggers(event_triggers)
     lines += _cfg_flows(flows)
     lines += _cfg_knowledge(knowledge)
+    lines += _cfg_knowledge_sources(knowledge_sources)
     lines += _cfg_oauth(oauth)
     lines += _cfg_governed_connectors(governed_connectors)
     lines += _cfg_durable(durable)
@@ -11546,6 +11603,12 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     knowledge = state.get("knowledge") or pick_knowledge()
     state["knowledge"] = knowledge
     _save_partial(state)
+    # Part of the Knowledge step (no progress line of its own): saved sources need Knowledge RAG.
+    knowledge_sources = state.get("knowledge_sources")
+    if knowledge_sources is None:
+        knowledge_sources = pick_knowledge_sources() if knowledge.get("enable") else {}
+        state["knowledge_sources"] = knowledge_sources
+        _save_partial(state)
 
     _announce()
     oauth = state.get("oauth") or pick_oauth_vault()
@@ -11631,6 +11694,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "event_triggers": event_triggers,
         "flows": flows,
         "knowledge": knowledge,
+        "knowledge_sources": knowledge_sources,
         "oauth": oauth,
         "governed_connectors": governed_connectors,
         "durable": durable,
@@ -11854,6 +11918,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     event_triggers = _simple["event_triggers"]
     flows = _simple["flows"]
     knowledge = _simple["knowledge"]
+    knowledge_sources = _simple["knowledge_sources"]
     oauth = _simple["oauth"]
     governed_connectors = _simple["governed_connectors"]
     durable = _simple["durable"]
@@ -12008,6 +12073,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         event_triggers=event_triggers if event_triggers.get("enable") else None,
         flows=flows if flows.get("enable") else None,
         knowledge=knowledge if knowledge.get("enable") else None,
+        knowledge_sources=knowledge_sources if knowledge.get("enable") else None,
         oauth=oauth if oauth.get("vault") else None,
         governed_connectors=governed_connectors if governed_connectors.get("enable") else None,
         durable=durable if durable.get("enabled") else None,
