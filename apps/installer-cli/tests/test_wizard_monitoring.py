@@ -186,11 +186,11 @@ def test_measurements_reask_an_address_they_cannot_use(monkeypatch, capsys):
     config, _keys = _pick(
         monkeypatch,
         (TRACE, True), (METRICS, True),
-        (COLLECTOR, "http://collector.example.com:4318"),
-        (COLLECTOR, "http://collector.example.com:4318/v1/traces"),
+        (COLLECTOR, "https://collector.example.com:4318"),
+        (COLLECTOR, "https://collector.example.com:4318/v1/traces"),
         (KMS, _label(wizard._KMS_PROVIDERS, "local")), (SIEM, False),
     )
-    assert config["observability"]["otel_endpoint"] == "http://collector.example.com:4318/v1/traces"
+    assert config["observability"]["otel_endpoint"] == "https://collector.example.com:4318/v1/traces"
     assert "ends in /v1/traces" in capsys.readouterr().out
 
 
@@ -205,6 +205,38 @@ def test_collector_address_with_a_password_is_refused(monkeypatch, capsys):
     )
     assert config["observability"]["otel_endpoint"] == "https://collector.example.com/v1/traces"
     assert secret not in capsys.readouterr().out
+
+
+def test_remote_plain_http_collector_is_refused(monkeypatch, capsys):
+    # Traces name tasks and tools, so only a collector on this computer may take plain http.
+    config, _keys = _pick(
+        monkeypatch,
+        (TRACE, True), (METRICS, False),
+        (COLLECTOR, "http://collector.example.com:4318/v1/traces"),
+        (COLLECTOR, "https://collector.example.com/v1/traces"),
+        (KMS, _label(wizard._KMS_PROVIDERS, "local")), (SIEM, False),
+    )
+    assert config["observability"]["otel_endpoint"] == "https://collector.example.com/v1/traces"
+    assert "Only a collector on this computer may use http://" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("address", [
+    "http://localhost:4318/v1/traces", "http://127.0.0.1:4318/v1/traces",
+    "http://[::1]:4318/v1/traces",
+])
+def test_plain_http_collector_on_this_computer_is_accepted(monkeypatch, address):
+    config, _keys = _pick(
+        monkeypatch,
+        (TRACE, True), (METRICS, False), (COLLECTOR, address),
+        (KMS, _label(wizard._KMS_PROVIDERS, "local")), (SIEM, False),
+    )
+    assert config["observability"]["otel_endpoint"] == address
+
+
+def test_collector_pattern_is_the_settings_page_pattern():
+    from maverick_dashboard import settings_catalog
+
+    assert settings_catalog.BY_ID["observability.otel_endpoint"].pattern == wizard._COLLECTOR_PATTERN
 
 
 # ---------- key services ----------

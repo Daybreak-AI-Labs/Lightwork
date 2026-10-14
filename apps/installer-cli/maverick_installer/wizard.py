@@ -7676,6 +7676,11 @@ def pick_connectors() -> dict[str, str]:
 # ---------- monitoring and key management ----------
 
 _MONITORING_TRACE_DEFAULT = "http://localhost:4318/v1/traces"
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+# The settings page's pattern for [observability] otel_endpoint (settings_catalog_runtime.py).
+# The installer does not import the dashboard, so the text is copied; a test keeps the two equal.
+_COLLECTOR_PATTERN = (r"(https://[^\s\"'<>?#]{1,300}|http://(localhost|127\.0\.0\.1|\[::1\])"
+                      r"(:[0-9]{1,5})?(/[^\s\"'<>?#]{0,300})?)?")
 _SIEM_KINDS: list[tuple[str, str]] = [
     ("https", "A web address (https://)"),
     ("tcp", "Syslog over TCP (host:port)"),
@@ -7760,6 +7765,12 @@ def _collector_problem(address: str, *, metrics: bool) -> str | None:
     problem = _web_address_problem(address, ("http", "https"))
     if problem is not None:
         return problem
+    # Traces name tasks and tools, so plain http is only for a collector on this computer.
+    if urlsplit(address).scheme == "http" and urlsplit(address).hostname not in _LOCAL_HOSTS:
+        return ("Only a collector on this computer may use http://. Enter an https:// address, "
+                "so the traces are encrypted on the way.")
+    if re.fullmatch(_COLLECTOR_PATTERN, address) is None:
+        return "Enter a collector address with no spaces, quotes, question marks or # in it."
     if metrics and _otlp_metrics_endpoint(address) is None:
         return ("Measurements need an address that ends in /v1/traces. Enter that address, "
                 "or answer no to measurements.")
