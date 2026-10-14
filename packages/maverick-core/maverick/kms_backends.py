@@ -27,10 +27,18 @@ Config (``~/.maverick/config.toml``)::
 
 Auth uses each SDK's standard chain (IAM role / ADC / VAULT_TOKEN /
 DefaultAzureCredential).
+
+Azure Key Vault / Managed HSM: the key must allow the wrapKey, unwrapKey, sign and
+verify operations. The identity the SDK uses needs the wrapKey, unwrapKey and sign
+permissions, and verify (or get, which also lets the SDK verify locally). The vault
+signs each envelope, so a holder of the public key alone cannot build one the vault
+will unwrap. A vault that refuses sign fails with an error that names the missing
+permission.
 """
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import re
 from typing import Any
@@ -41,7 +49,7 @@ from .crypto_at_rest import EncryptionUnavailable
 _AWS_MAGIC = b"MVKKMS-AWS1\n"
 _GCP_MAGIC = b"MVKKMS-GCP1\n"
 _VAULT_MAGIC = b"MVKKMS-VLT1\n"
-_AZURE_MAGIC = b"MVKKMS-AZR1\n"
+_AZURE_MAGIC = b"MVKKMS-AZR2\n"
 
 
 def _kms_cfg() -> dict:
@@ -185,16 +193,52 @@ class VaultTransitKMS:
 
 
 # Azure's RSA key wrap takes no context, so the DEK is sealed under a random AES key
-# that is itself wrapped. Layout after the magic: 2-byte length + wrapped key, 2-byte
-# length + versioned key id (UTF-8), 12-byte nonce, AES-GCM ciphertext (with tag).
+# that is itself wrapped, and the vault signs the whole envelope, so that no one holding
+# only the public key can build one the vault will unwrap. Layout after the magic:
+# 2-byte length + wrapped key, 2-byte length + versioned key id (UTF-8), 2-byte length +
+# PS256 signature, 12-byte nonce, AES-GCM ciphertext (with tag).
 _AZURE_AAD = b"maverick-kms-azure-v1\n"
 # KeyWrapAlgorithm.rsa_oaep_256 of azure-keyvault-keys, given by value so building the
 # client needs no SDK import.
 _AZURE_WRAP_ALG = "RSA-OAEP-256"
 _AZURE_KEY_PATH = re.compile(r"/keys/([A-Za-z0-9-]{1,127})(?:/([A-Za-z0-9]{32}))?")
 _AZURE_HOST = re.compile(r"[a-z0-9.-]{1,253}")
+_AZURE_VERIFY_PERMISSION = "keys/verify (or keys/get, for local checks)"
 _GCM_NONCE_BYTES = 12
 _GCM_TAG_BYTES = 16
+
+
+def _azure_sig_alg():
+    """PS256 (RSASSA-PSS, SHA-256, MGF1-SHA-256, salt = digest length). The SDK's enum
+    when it is installed: its local verify reads ``.value``, which a bare string lacks, so
+    a string would log a warning and always fall back to the vault. Only an injected
+    client reaches the string, and it takes the name as given."""
+    try:
+        from azure.keyvault.keys.crypto import SignatureAlgorithm  # type: ignore
+    except ImportError:
+        return "PS256"
+    return SignatureAlgorithm.ps256
+
+
+def _azure_sig_digest(encrypted_key: bytes, key_id: bytes, nonce: bytes, sealed: bytes,
+                      context: bytes) -> bytes:
+    """SHA-256 of the canonical envelope the vault signs: the magic, wrapped key, versioned
+    key id, nonce, ciphertext (with tag) and tenant context, each with an 8-byte length
+    prefix so no two different splits give the same bytes."""
+    fields = (_AZURE_MAGIC, encrypted_key, key_id, nonce, sealed, context)
+    return hashlib.sha256(b"".join(len(f).to_bytes(8, "big") + f for f in fields)).digest()
+
+
+def _azure_refused(operation: str, permission: str, err: Exception) -> EncryptionUnavailable:
+    """The operator-facing error for a refused Key Vault operation. The service's own text
+    is not carried along (it can name the caller), and a 403 names the missing permission."""
+    if getattr(err, "status_code", None) == 403:
+        return EncryptionUnavailable(
+            f"Azure Key Vault refused the {operation} operation: the identity this server "
+            f"uses needs the {permission} permission on the key")
+    return EncryptionUnavailable(
+        f"Azure Key Vault {operation} operation failed ({type(err).__name__}); "
+        "the envelope is refused")
 
 
 def _azure_key_parts(key_id: str) -> tuple[str, str, str] | None:
@@ -232,10 +276,14 @@ class AzureKeyVaultKEK:
     """KEK in Azure Key Vault or Managed HSM. Key Vault's RSA wrap has no context
     parameter, so the tenant context is bound locally: ``wrap`` RSA-OAEP-256-wraps a
     fresh random 32-byte key with the vault key (``CryptographyClient.wrap_key``) and
-    seals the DEK under that key with AES-256-GCM, the context as associated data.
-    The envelope keeps the versioned key id the service reported; ``unwrap`` accepts
-    only an id for the same vault and key name (another version is fine, so a
-    rotated key still opens existing DEKs)."""
+    seals the DEK under that key with AES-256-GCM, the context as associated data. The
+    vault then signs a digest of the whole envelope (``CryptographyClient.sign``, PS256).
+    ``unwrap`` checks that signature (``CryptographyClient.verify``: locally when the SDK
+    holds the public key, otherwise in the vault) before the vault unwraps anything. So
+    the public key alone can wrap but cannot build an envelope the vault will open. The
+    envelope keeps the versioned key id the service reported; ``unwrap`` accepts only an
+    id for the same vault and key name (another version is fine, so a rotated key still
+    opens existing DEKs)."""
 
     def __init__(self, *, key_id: str | None = None, client_factory: Any | None = None,
                  cfg: dict | None = None):
@@ -287,8 +335,27 @@ class AzureKeyVaultKEK:
                 "keys/get so the current version can be read")
         nonce = os.urandom(_GCM_NONCE_BYTES)
         sealed = AESGCM(aes_key).encrypt(nonce, dek, _AZURE_AAD + (context or b""))
-        return (_AZURE_MAGIC + _len2(bytes(wrapped.encrypted_key))
-                + _len2(key_id.encode("utf-8")) + nonce + sealed)
+        encrypted_key, key_id_bytes = bytes(wrapped.encrypted_key), key_id.encode("utf-8")
+        digest = _azure_sig_digest(encrypted_key, key_id_bytes, nonce, sealed, context or b"")
+        client = self._crypto(key_id)
+        try:
+            signed = client.sign(_azure_sig_alg(), digest)
+        except Exception as err:
+            raise _azure_refused("sign", "keys/sign", err) from None
+        return (_AZURE_MAGIC + _len2(encrypted_key) + _len2(key_id_bytes)
+                + _len2(bytes(signed.signature)) + nonce + sealed)
+
+    def _check_signature(self, key_id: str, digest: bytes, signature: bytes) -> None:
+        """Refuse unless the key identified by ``key_id`` signed ``digest`` (PS256)."""
+        client = self._crypto(key_id)
+        try:
+            verified = client.verify(_azure_sig_alg(), digest, signature)
+        except Exception as err:
+            raise _azure_refused("verify", _AZURE_VERIFY_PERMISSION, err) from None
+        if not verified.is_valid:
+            raise EncryptionUnavailable(
+                "Azure KMS envelope signature is not valid: it was not made by this Key Vault "
+                "key over this envelope and context")
 
     def unwrap(self, wrapped: bytes, *, context: bytes | None = None) -> bytes:
         from cryptography.exceptions import InvalidTag
@@ -297,6 +364,7 @@ class AzureKeyVaultKEK:
         body = _split_magic(_AZURE_MAGIC, wrapped)
         encrypted_key, pos = _read_len2(body, 0)
         key_id_bytes, pos = _read_len2(body, pos)
+        signature, pos = _read_len2(body, pos)
         if len(body) < pos + _GCM_NONCE_BYTES + _GCM_TAG_BYTES:
             raise EncryptionUnavailable("Azure KMS envelope is truncated or malformed")
         nonce, sealed = body[pos:pos + _GCM_NONCE_BYTES], body[pos + _GCM_NONCE_BYTES:]
@@ -308,6 +376,8 @@ class AzureKeyVaultKEK:
         if not self._same_key(key_id) or not parts[2]:
             raise EncryptionUnavailable(
                 "Azure KMS envelope was wrapped under a different Key Vault key")
+        digest = _azure_sig_digest(encrypted_key, key_id_bytes, nonce, sealed, context or b"")
+        self._check_signature(key_id, digest, signature)
         aes_key = self._crypto(key_id).unwrap_key(_AZURE_WRAP_ALG, encrypted_key).key
         if len(aes_key) != 32:
             raise EncryptionUnavailable("Azure KMS unwrapped key is malformed")
