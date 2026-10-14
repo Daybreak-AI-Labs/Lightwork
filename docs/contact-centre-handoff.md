@@ -27,8 +27,9 @@ Secrets are never written to `config.toml`. The setup wizard asks only for the
 provider and the non-secret addresses, and tells you where to enter the secret.
 
 A handoff made while a secret or the Zendesk agent email is missing is kept as
-**Waiting for Settings** with the reason. Lightwork checks it again before each send
-and when it next starts, so it is sent once Settings are complete. A handoff made
+**Waiting for Settings** with the reason. Lightwork checks it again before each send,
+when it next starts, and when the contact-centre settings are saved in the dashboard,
+so it is sent once Settings are complete, without a restart. A handoff made
 while the Zendesk subdomain or the webhook address is missing is **Not sent** at once,
 because the customer was shown that address. Lightwork never sends it to an address
 that was set afterwards: if the provider or address is changed before a waiting

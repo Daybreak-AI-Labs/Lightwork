@@ -594,7 +594,7 @@ def _start(key: str) -> None:
 
 
 def resume_pending() -> int:
-    """After a restart: an interrupted send becomes unconfirmed (never resent); queued and retrying handoffs continue."""
+    """After a restart: an interrupted send becomes unconfirmed (never resent); queued, retrying and waiting handoffs continue."""
     if not _path().exists():
         return 0
     now = time.time()
@@ -616,16 +616,33 @@ def resume_pending() -> int:
     return len(pending)
 
 
-def resume_all_workspaces() -> int:
+def start_pending() -> int:
+    """While the server runs, after Settings are saved: start the waiting, queued and retrying handoffs now.
+
+    Unlike resume_pending, no send is marked unconfirmed: a send may be in flight in this process.
+    """
+    if not _path().exists():
+        return 0
+    with _locked(create=False) as path:
+        pending = [key for key, entry in _load(path).items() if entry.get("state") in PENDING]
+    for key in pending:
+        _start(key)
+    return len(pending)
+
+
+def resume_all_workspaces(*, restarted: bool = True) -> int:
     """Resume pending deliveries in the shared workspace and in every active workspace.
 
+    ``restarted=False`` (Settings were saved while the server runs) starts the pending
+    handoffs without marking any send unconfirmed; see :func:`start_pending`.
     One failing workspace is logged by exception type and does not stop the others.
     """
     from .paths import reset_tenant, set_tenant
     from .tenant.registry import list_tenants
+    resume = resume_pending if restarted else start_pending
     total = 0
     try:
-        total += resume_pending()
+        total += resume()
     except Exception as exc:
         log.warning("contact centre: shared workspace not resumed (%s)", type(exc).__name__)
     for record in list_tenants():
@@ -633,7 +650,7 @@ def resume_all_workspaces() -> int:
             continue
         token = set_tenant(record.id)
         try:
-            total += resume_pending()
+            total += resume()
         except Exception as exc:
             log.warning("contact centre: a workspace was not resumed (%s)", type(exc).__name__)
         finally:
@@ -642,4 +659,4 @@ def resume_all_workspaces() -> int:
 
 
 __all__ = ["OutboxFull", "OutboxUnavailable", "conversation_link", "disclosure", "enabled", "enqueue_handoff",
-           "resume_all_workspaces", "resume_pending", "run_delivery", "shown_status", "status_for"]
+           "resume_all_workspaces", "resume_pending", "run_delivery", "shown_status", "start_pending", "status_for"]

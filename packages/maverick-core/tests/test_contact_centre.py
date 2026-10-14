@@ -704,3 +704,54 @@ def test_the_handoff_passes_its_reviewed_title_reason_and_link_to_the_outbox(tmp
     assert seen["requester_email"] == "ana@example.com"
     assert seen["messages"] == [("user", "hi")]
     assert seen["link"] == "https://lightwork.acme.example/chat/goal/7"
+
+
+def test_a_settings_save_while_running_sends_a_waiting_handoff_without_a_restart(tmp_path, monkeypatch):
+    from maverick.tenant import registry
+    _configure(tmp_path, '[contact_centre]\nprovider = "zendesk"\nzendesk_subdomain = "acme-support"\n'
+                         'zendesk_email = "agent@acme.example"\n')
+    monkeypatch.setattr(registry, "list_tenants", list)
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    monkeypatch.setattr(contact_centre, "_start", lambda key: None)  # queue it without delivering
+    assert _enqueue()["state"] == "waiting"
+    monkeypatch.setattr(contact_centre, "_start", lambda key: contact_centre.run_delivery(key))
+    monkeypatch.setenv("MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN", ZENDESK_TOKEN)
+    assert contact_centre.resume_all_workspaces(restarted=False) == 1
+    status = contact_centre.status_for(HANDOFF)
+    assert status["state"] == "sent" and status["ticket_id"] == "4242"
+    assert len(receiver.calls) == 1
+
+
+def test_a_settings_save_never_marks_a_send_in_flight_as_unconfirmed(tmp_path, monkeypatch):
+    _configure(tmp_path, ZENDESK_CONFIG)
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    _write_state("handoff:" + HANDOFF, state="sending", attempts=1)
+    assert contact_centre.start_pending() == 0
+    assert contact_centre.status_for(HANDOFF)["state"] == "sending"
+    assert receiver.calls == []
+
+
+def test_a_settings_save_starts_pending_handoffs_in_every_active_workspace(tmp_path, monkeypatch):
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick.tenant import registry
+    _configure(tmp_path, ZENDESK_CONFIG)
+    monkeypatch.setattr(registry, "list_tenants", lambda: [SimpleNamespace(id="acme", active=True),
+                                                           SimpleNamespace(id="retired", active=False)])
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    monkeypatch.setattr(contact_centre, "_start", lambda key: None)  # queue it without delivering
+    token = set_tenant("acme")
+    try:
+        assert _enqueue()["state"] == "queued"
+    finally:
+        reset_tenant(token)
+    monkeypatch.setattr(contact_centre, "_start", lambda key: contact_centre.run_delivery(key))
+    assert contact_centre.resume_all_workspaces(restarted=False) == 1
+    token = set_tenant("acme")
+    try:
+        assert contact_centre.status_for(HANDOFF)["state"] == "sent"
+    finally:
+        reset_tenant(token)
+    assert len(receiver.calls) == 1

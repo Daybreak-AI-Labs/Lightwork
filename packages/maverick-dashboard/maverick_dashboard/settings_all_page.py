@@ -20,6 +20,7 @@ import dataclasses
 import hashlib
 import itertools
 import json
+import logging
 import os
 import threading
 import time
@@ -1667,6 +1668,22 @@ async def catalog_update(request: Request, body: CatalogUpdate, full: bool = Fal
     return await run_in_threadpool(save)
 
 
+def _resume_contact_centre(writes) -> None:
+    """Handoffs waiting for contact-centre settings are sent now, not at the next restart.
+
+    The save is already recorded, so a failure here is logged and the handoffs keep their
+    state for the next save or restart.
+    """
+    if not any(path[0] == "contact_centre" for path in writes):
+        return
+    try:
+        from maverick.contact_centre import resume_all_workspaces
+
+        resume_all_workspaces(restarted=False)
+    except Exception as exc:  # noqa: BLE001 -- the saved settings stand; only the resume is lost
+        logging.getLogger(__name__).warning("contact centre handoffs not resumed after a settings save (%s)", type(exc).__name__)
+
+
 def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=False, *, effect_guard=None) -> JSONResponse:
     """Save or reset settings. The reply carries the rows the save touched
     (``?full=1``: every row, as ``GET`` lists them)."""
@@ -1751,6 +1768,7 @@ def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=Fal
         from .automation_queue import refresh_runtime
 
         refresh_runtime(request)
+    _resume_contact_centre(writes)
     state = _saved_state(before, asked)
     return JSONResponse({'changed': [c['setting'].id for c in changes], 'restart': any(c['setting'].restart for c in changes), **state}, headers={'Cache-Control': 'no-store'})
 
