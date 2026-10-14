@@ -1297,6 +1297,15 @@ def _switches(S) -> tuple:
           "A refresh that runs past this time fails and publishes no new snapshot.",
           "number", "Memory & learning", 5, "maverick.config", subgroup="Saved company sources",
           minimum=1, maximum=60, integer=True, unit="minutes"),
+        S("knowledge_sources", "permission_filter", "Who sees each saved company file",
+          "Off keeps the current rule: anyone the connection is shared with can use the cached content. "
+          "Email matching reads each file's sharing permissions at refresh and shows a file only to people "
+          "it is shared with by email or email domain, or to anyone with its link. Group-shared files are "
+          "withheld, because group members are not read. Sources refreshed before this setting was turned on "
+          "must be refreshed again.",
+          "select", "Memory & learning", "off", "maverick.config", subgroup="Saved company sources",
+          choices=(("off", "Off: connection sharing decides (default)"),
+                   ("by_email", "Match each file's sharing permissions by email"))),
         # ------------------------------------------------------- diagnostics
         S("logging", "level", "How much the server records in its log",
           "More detail helps find problems; less keeps the log small.", "select",

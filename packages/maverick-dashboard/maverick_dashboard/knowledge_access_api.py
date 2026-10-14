@@ -8,6 +8,7 @@ import json
 import re
 import secrets
 import threading
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -206,6 +207,19 @@ def _enabled() -> bool:
     return knowledge_access_enabled()
 
 
+# The (principal, address) of the request being served. Bound per request, so an
+# address can only reach the authority of the same signed-in principal.
+_REQUEST_EMAIL: ContextVar[tuple[str, str] | None] = ContextVar("knowledge_request_email", default=None)
+
+
+def _verified_email(request: Request) -> str:
+    """The verified address the identity provider asserted for this sign-in, or "" (API keys, agents, unknown)."""
+    principal = getattr(getattr(request, "state", None), "principal", None)
+    claims = getattr(principal, "claims", None)
+    email = claims.get("verified_email") if isinstance(claims, dict) else None
+    return email if isinstance(email, str) else ""
+
+
 def _actor_authority(
     tenant: str,
     principal: str,
@@ -216,6 +230,8 @@ def _actor_authority(
 
     if not principal.startswith("user:"):
         raise PermissionError("a named dashboard user is required")
+    bound = _REQUEST_EMAIL.get()
+    email = bound[1] if bound is not None and bound[0] == principal else ""
     role = role_for_principal(principal)
     permissions = sorted(rbac.permissions_for(role))
     required = "view" if action == "read" else "operate"
@@ -241,12 +257,15 @@ def _actor_authority(
         action=action,
         purpose=purpose,
         authorization_sha256=hashlib.sha256(material).hexdigest(),
+        verified_email=email,
     )
 
 
 def _service(request: Request) -> KnowledgeAccessService:
     if not _enabled():
         raise KnowledgeAccessDenied("governed knowledge access is disabled")
+    caller = getattr(getattr(request, "state", None), "principal", None)
+    _REQUEST_EMAIL.set((getattr(caller, "principal", ""), _verified_email(request)))
     state = request.app.state
     factory = getattr(state, "knowledge_access_service_factory", None)
     if callable(factory):

@@ -150,7 +150,57 @@ max_pages           = 16   # 1-200: provider listing pages (each holds up to 64 
 max_download_mib    = 4    # 1-32: largest SharePoint, OneDrive or Drive file downloaded
 max_text_kib        = 256  # 1-8192: extracted text kept per refresh
 max_refresh_minutes = 5    # 1-60: wall-clock minutes one refresh may run
+permission_filter   = "off" # "off" (default) or "by_email": see below
 ```
+
+### Matching each file's sharing permissions
+
+By default, anyone the saved account is shared with can use the cached content of
+the source. Set `permission_filter = "by_email"` to show each file only to the
+people it is shared with. With this setting, every refresh reads each item's
+sharing permission from the provider and keeps only this record per item: the
+lower-case email addresses it is shared with, the email domains it is shared with,
+whether it is shared by link ("anyone"), and whether any group is granted access.
+Tokens and raw provider responses are never stored.
+
+At use, a file is shown only to a signed-in person who has a verified email, when
+that email matches one of the recorded addresses, when its domain matches a recorded
+domain, or when the file is shared by link. The verified address comes only from an
+OIDC sign-in whose `email` claim the provider marks `email_verified: true`. Many
+identity providers do not send that flag, and then no address is matched. Usernames,
+UPNs and subject identifiers are never used as the address. SAML sign-ins carry no
+such address, because a SAML assertion does not prove that an email is verified, so
+SAML users see no files under this setting. API keys, agents and workers have no
+address either, so they see no files under this setting.
+
+Files are withheld, and not named, when:
+
+- they are shared only with a group. Group grants are **not expanded**, so group
+  members are not read and such files are withheld, even for members of the group;
+- the provider's permissions could not be read, or their shape was not understood;
+- the saved source has not been refreshed while this setting is on. A refresh made
+  with the setting off removes the sharing records it reuses, so turning the setting
+  back on withholds those files until the next refresh. Refresh the source once after
+  changing the setting;
+- the signed-in person has no verified address.
+
+A refresh that does not complete keeps the previous snapshot, and its sharing
+records, until that snapshot's freshness window ends. Only a completed refresh reads sharing
+again.
+
+Search reports how many files were withheld for permissions. A refresh whose
+permission reads fail still completes; the affected files stay withheld until a
+later refresh reads them.
+
+Provider notes (not all verified against live tenants): Microsoft Graph's
+`driveItem` permissions and their `invitation.email` and `grantedToIdentitiesV2`
+fields are documented; whether Graph returns an email for each user grant depends on
+the tenant, so grants without one are withheld. Google Drive's `permissions.list`
+endpoint and `pageToken` paging are documented; the `emailAddress`, `domain` and
+`type` field names are not verified here. Confluence page read restrictions are
+read per page; a page with no restriction of its own inherits space permissions,
+which are not read, so it is withheld. Confluence user restrictions without an
+address are withheld as well.
 
 `max_download_mib` applies to SharePoint, OneDrive and Google Drive files. A
 Confluence page is read as JSON under a fixed 2 MiB limit that this setting does

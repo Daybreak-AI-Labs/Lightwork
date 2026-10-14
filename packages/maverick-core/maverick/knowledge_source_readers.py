@@ -343,3 +343,117 @@ def document(binding, actor, item, guard):
     if not text.strip():
         raise SourceReadError("The document contains no readable text.")
     return text, hashlib.sha256(raw).hexdigest(), parsed.metadata()
+
+
+_EMAIL = re.compile(r"[a-z0-9._%+-]{1,64}@[a-z0-9.-]{1,253}\.[a-z]{2,63}")
+_DOMAIN = re.compile(r"[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+")
+
+
+def _permission_record(emails=(), domains=(), anyone=False, groups=False, unknown=False):
+    """The only permission data kept per item: lower-case addresses, domains and three flags. No tokens or payloads."""
+    return {"emails": sorted(set(emails)), "domains": sorted(set(domains)), "anyone": bool(anyone),
+            "has_group_grants": bool(groups), "unknown": bool(unknown)}
+
+
+def _email(value):
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if _EMAIL.fullmatch(text) else None
+
+
+def _domain(value):
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if _DOMAIN.fullmatch(text) else None
+
+
+def _graph_permission_record(rows):
+    """Microsoft Graph driveItem permissions. Unrecognised grants make the item unknown."""
+    emails, domains, anyone, groups, unknown = [], [], False, False, False
+    for row in rows:
+        if not isinstance(row, dict):
+            unknown = True
+            continue
+        link, invitation = row.get("link"), row.get("invitation")
+        identities = row.get("grantedToIdentitiesV2")
+        if identities is None and isinstance(row.get("grantedToV2"), dict):
+            identities = [row["grantedToV2"]]
+        if not isinstance(link, dict) and not isinstance(invitation, dict) and not isinstance(identities, list):
+            unknown = True
+            continue
+        if isinstance(link, dict):
+            scope = link.get("scope")
+            if scope == "anonymous":
+                anyone = True
+            elif scope != "users":
+                unknown = True  # organization-wide links need the tenant's domain, which is not read
+        if isinstance(invitation, dict):
+            email = _email(invitation.get("email"))
+            if email:
+                emails.append(email)
+            else:
+                unknown = True
+        for identity in identities or ():
+            if not isinstance(identity, dict):
+                unknown = True
+            elif isinstance(identity.get("group"), dict):
+                groups = True
+            elif isinstance(identity.get("user"), dict) and _email(identity["user"].get("email")):
+                emails.append(_email(identity["user"]["email"]))
+            else:
+                unknown = True
+    return _permission_record(emails, domains, anyone, groups, unknown)
+
+
+def _drive_permission_record(rows):
+    """Google Drive permissions.list rows. Deleted rows are skipped."""
+    emails, domains, anyone, groups, unknown = [], [], False, False, False
+    for row in rows:
+        if row.get("deleted") is True:
+            continue
+        kind = row.get("type")
+        if kind == "anyone":
+            anyone = True
+        elif kind == "domain" and _domain(row.get("domain")):
+            domains.append(_domain(row.get("domain")))
+        elif kind == "group":
+            groups = True
+        elif kind == "user" and _email(row.get("emailAddress")):
+            emails.append(_email(row.get("emailAddress")))
+        else:
+            unknown = True
+    return _permission_record(emails, domains, anyone, groups, unknown)
+
+
+def _confluence_permission_record(body):
+    """Confluence page read restrictions. A page with no restriction of its own inherits space permissions, which are not read."""
+    restrictions = body.get("restrictions") if isinstance(body, dict) else None
+    if not isinstance(restrictions, dict):
+        return _permission_record(unknown=True)
+    users = (restrictions.get("user") or {}).get("results") or []
+    groups = (restrictions.get("group") or {}).get("results") or []
+    if not users and not groups:
+        return _permission_record(unknown=True)
+    emails, unknown = [], False
+    for user in users:
+        email = _email(user.get("email")) if isinstance(user, dict) else None
+        if email:
+            emails.append(email)
+        else:
+            unknown = True  # a restricted user whose address is not returned cannot be matched
+    return _permission_record(emails, (), False, bool(groups), unknown)
+
+
+def permissions(binding, actor, item, guard):
+    """One item's sharing permissions as a bounded record. A failed or unrecognised read is unknown, never a refresh failure."""
+    try:
+        cfg = validate(binding)
+        item_id = quote(identifier(item["id"]), safe="")
+        kind = cfg["kind"]
+        if kind in {"sharepoint", "onedrive"}:
+            path = "/v1.0/drives/" + quote(identifier(cfg["selection"]["drive"]), safe="") + "/items/" + item_id + "/permissions?$top=100"
+            return _graph_permission_record(collection(cfg, actor, path, guard))
+        if kind == "drive":
+            query = urlencode({"fields": "nextPageToken,permissions(type,emailAddress,domain,deleted)", "pageSize": 100})
+            return _drive_permission_record(collection(cfg, actor, "/drive/v3/files/" + item_id + "/permissions?" + query, guard, key="permissions"))
+        return _confluence_permission_record(read_json(cfg, actor, "/wiki/rest/api/content/" + item_id + "/restriction/byOperation/read", guard))
+    except Exception:  # noqa: BLE001 -- an unreadable permission is unknown; the caller's guard still stops a lost authority
+        return _permission_record(unknown=True)

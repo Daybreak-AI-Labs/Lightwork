@@ -2120,6 +2120,28 @@ _KNOWLEDGE_SOURCE_LIMITS: tuple[tuple[str, str, int, int, int], ...] = (
 )
 
 
+def pick_knowledge_source_permissions() -> dict[str, Any]:
+    """Who sees each file of a saved SharePoint, OneDrive, Google Drive or
+    Confluence source. Off (the default) keeps the rule that anyone the
+    connection is shared with can use its cached content. Email matching
+    shows a file only to people the file itself is shared with, by email,
+    email domain or link. Group-shared files are withheld because group
+    members are not read. Returns {"permission_filter": "by_email"} or {}.
+    """
+    console.print()
+    console.print(
+        "[dim]By default, anyone the saved account is shared with can use a company folder's "
+        "cached files. Matching each file's own sharing settings is stricter: a file is shown only "
+        "to people it is shared with by email or email domain, or to anyone with its link. Files "
+        "shared only with a group are left out, because group members are not checked. People who "
+        "sign in with SAML, or whose provider does not confirm their email, see no saved company "
+        "files while this is on.[/dim]"
+    )
+    if not _q_confirm("Show each saved company file only to the people it is shared with?", default=False):
+        return {}
+    return {"permission_filter": "by_email"}
+
+
 def pick_knowledge_sources() -> dict[str, Any]:
     """Optional size limits for saved SharePoint, OneDrive, Google Drive and
     Confluence sources. Asked only when Knowledge RAG is on, because saved
@@ -12174,7 +12196,9 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     # Part of the Knowledge step (no progress line of its own): saved sources need Knowledge RAG.
     knowledge_sources = state.get("knowledge_sources")
     if knowledge_sources is None:
-        knowledge_sources = pick_knowledge_sources() if knowledge.get("enable") else {}
+        knowledge_sources = (
+            {**pick_knowledge_sources(), **pick_knowledge_source_permissions()} if knowledge.get("enable") else {}
+        )
         state["knowledge_sources"] = knowledge_sources
         _save_partial(state)
 

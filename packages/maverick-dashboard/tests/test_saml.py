@@ -368,6 +368,8 @@ def test_acs_verifies_sets_session_and_redirects(_enabled, monkeypatch):
     payload = verify_session(cookie, SECRET)
     assert payload["sub"] == "opaque-name-id"
     assert payload["idp_email"] == "alice@example.com"
+    # SAML sign-ins carry no permission address: the assertion offers no proof that an email is verified.
+    assert "verified_email" not in payload
 
 
 _MFA_CONTEXT = "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken"

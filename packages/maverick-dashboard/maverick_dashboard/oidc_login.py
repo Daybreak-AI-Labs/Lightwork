@@ -361,6 +361,10 @@ def session_claims(payload: dict, request: Request, *, via: str) -> dict | None:
     idp_email = _normalized_invite_email(payload.get("idp_email"))
     if via == "session" and idp_email:
         claims["idp_email"] = idp_email
+    # The address that saved-source permissions match is kept apart from the invitation address.
+    verified_email = _normalized_invite_email(payload.get("verified_email"))
+    if via == "session" and verified_email:
+        claims["verified_email"] = verified_email
     if not isinstance(sid, str) or not sid:
         from .session_policy import company_ttl, idle_minutes
 
@@ -409,6 +413,14 @@ def _oidc_invite_email(claims: dict) -> str:
         if email:
             return email
     return ""
+
+
+def _oidc_permission_email(claims: dict) -> str:
+    """The address a saved-source permission may match: only the email claim, and only when the provider
+    asserts that it is verified. A username, UPN or subject is never an address the person has proved."""
+    if claims.get("email_verified") is not True:
+        return ""
+    return _normalized_invite_email(claims.get("email"))
 
 
 _AUTH_TIME_SKEW = 120  # seconds the provider's clock may run ahead of ours
@@ -699,7 +711,8 @@ async def auth_callback(request: Request):
             mfa=mfa, ttl=ttl, mfa_at=auth_time,
             extra={"oidc_issuer": principal.issuer,
                    "oidc_audience": principal.audience,
-                   "idp_email": _oidc_invite_email(principal.claims or {})},
+                   "idp_email": _oidc_invite_email(principal.claims or {}),
+                   "verified_email": _oidc_permission_email(principal.claims or {})},
         )
     except Exception:
         log.warning("OIDC callback: session record unavailable; refusing sign-in")

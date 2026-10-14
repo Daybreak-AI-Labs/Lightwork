@@ -499,3 +499,212 @@ def test_an_out_of_range_refresh_time_limit_fails_the_refresh_with_the_named_set
     assert result["state"] == "failed"
     assert result["message"] == "knowledge_sources.max_refresh_minutes must be a whole number from 1 to 60"
     assert native.JOB_STORE.get(result["id"])["max_wall_seconds"] == 300
+
+
+def _grant(**values):
+    """One item's permission record, with every field present."""
+    return {"emails": [], "domains": [], "anyone": False, "has_group_grants": False, "unknown": False, **values}
+
+
+def _reader(email="alice@contoso.com"):
+    return SimpleNamespace(action="analyze", purpose="support", principal="user:alice", verified_email=email)
+
+
+def _grant_items(service, identifier, version, permissions):
+    """Give a retained snapshot's items the permission records a filtered refresh would store."""
+    snapshot_id = "KNV-" + native.digest([identifier, version])[:32]
+    row = service.snapshots.get(snapshot_id)
+    items = [dict(item, permissions=permissions[item["remote_id"]]) if item["remote_id"] in permissions else dict(item)
+             for item in row["items"]]
+    service.snapshots.update(snapshot_id, lambda current: current.update(items=items), expected_revision=row["revision"],
+                             action="test.permissions", actor=OWNER)
+    source = service.sources.get(identifier)
+    service.sources.update(identifier, lambda current: current.update(projection_allowed=True, snapshot=snapshot_id,
+                                                                      fresh_until=time.time() + 3600),
+                           expected_revision=source["revision"], action="test.use", actor=OWNER)
+
+
+def _shared_items():
+    """Seven items, one for each case the filter must decide."""
+    return {
+        "by-email": _grant(emails=["alice@contoso.com"]),
+        "by-domain": _grant(domains=["contoso.com"]),
+        "by-link": _grant(anyone=True),
+        "other-user": _grant(emails=["bob@contoso.com"]),
+        "group-only": _grant(has_group_grants=True),
+        "unknown": _grant(unknown=True),
+        "group-and-alice": _grant(emails=["alice@contoso.com"], has_group_grants=True),
+    }
+
+
+def test_the_filter_admits_only_items_shared_with_the_signed_in_address(service, monkeypatch):
+    kb, identifier, version = _retained_snapshot(service, 8, text="x")
+    permissions = dict(zip([f"item-{n}" for n in range(8)], list(_shared_items().values()) + [None], strict=True))
+    _grant_items(service, identifier, version, {key: value for key, value in permissions.items() if value is not None})
+    _set_limits(monkeypatch, {"permission_filter": "by_email"})
+    result = native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb, authority=_reader())
+    visible = {item["item"]["remote_id"] for item in result["visible_items"]}
+    # The first seven are in the grant map; item-7 has no permissions record at all.
+    assert visible == {"item-0", "item-1", "item-2", "item-6"}
+    assert result["withheld_for_permissions"] == 4
+    assert len(result["items"]) == 8  # the commitment still covers every item
+
+
+def test_the_filter_off_ignores_permission_records(service, monkeypatch):
+    kb, identifier, version = _retained_snapshot(service, 2, text="x")
+    _grant_items(service, identifier, version, {"item-0": _grant(emails=["bob@contoso.com"])})
+    _set_limits(monkeypatch, {})
+    result = native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb, authority=_reader())
+    assert len(result["visible_items"]) == 2 and result["withheld_for_permissions"] == 0
+
+
+def test_a_principal_without_a_verified_email_sees_nothing_under_the_filter(service, monkeypatch):
+    kb, identifier, version = _retained_snapshot(service, 2, text="x")
+    _grant_items(service, identifier, version, {"item-0": _grant(anyone=True), "item-1": _grant(domains=["contoso.com"])})
+    _set_limits(monkeypatch, {"permission_filter": "by_email"})
+    result = native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb, authority=_reader(""))
+    assert result["visible_items"] == [] and result["withheld_for_permissions"] == 2
+
+
+def test_an_old_snapshot_without_permission_data_is_withheld_until_refreshed(service, monkeypatch):
+    kb, identifier, version = _retained_snapshot(service, 3, text="x")
+    _grant_items(service, identifier, version, {})
+    _set_limits(monkeypatch, {"permission_filter": "by_email"})
+    result = native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb, authority=_reader())
+    assert result["visible_items"] == [] and result["withheld_for_permissions"] == 3
+
+
+def test_a_document_withheld_by_permission_is_refused_at_use(service, monkeypatch):
+    kb, identifier, version = _retained_snapshot(service, 2, text="x")
+    _grant_items(service, identifier, version, {"item-0": _grant(emails=["bob@contoso.com"]),
+                                                "item-1": _grant(domains=["contoso.com"])})
+    _set_limits(monkeypatch, {"permission_filter": "by_email"})
+    snapshot = service.snapshots.get("KNV-" + native.digest([identifier, version])[:32])
+    by_id = {item["remote_id"]: item for item in snapshot["items"]}
+    native.require_remote_document_authority(TENANT, by_id["item-1"]["collection"], by_id["item-1"]["document_sha256"], _reader())
+    with pytest.raises(PermissionError):
+        native.require_remote_document_authority(TENANT, by_id["item-0"]["collection"], by_id["item-0"]["document_sha256"], _reader())
+
+
+def _capturing_publish(service, monkeypatch):
+    """Keep the manifest a refresh would retain, instead of registering it."""
+    captured = []
+
+    def publish(job, items, kb):
+        captured.append(items)
+        return {"id": "KNV-" + "c" * 32, "reference": {"id": "ref"}}
+
+    monkeypatch.setattr(service, "_publish", publish)
+    return captured
+
+
+def test_a_refresh_with_the_filter_off_reads_and_stores_no_permissions(service, monkeypatch):
+    def unexpected(*args):
+        raise AssertionError("no permission is read while the filter is off")
+
+    monkeypatch.setattr(native.readers, "permissions", unexpected)
+    captured = _capturing_publish(service, monkeypatch)
+    result = _start_refresh(service, monkeypatch, {"first": "a" * 600}, {})
+    assert result["state"] == "completed"
+    assert captured and all("permissions" not in item for item in captured[0])
+
+
+def test_a_refresh_with_the_filter_on_stores_each_items_permission_record(service, monkeypatch):
+    records = {"first": _grant(emails=["alice@contoso.com"]), "second": _grant(anyone=True)}
+    monkeypatch.setattr(native.readers, "permissions", lambda binding, actor, item, guard: records[item["id"]])
+    captured = _capturing_publish(service, monkeypatch)
+    result = _start_refresh(service, monkeypatch, {"first": "a" * 600, "second": "b" * 600}, {"permission_filter": "by_email"})
+    assert result["state"] == "completed"
+    stored = {item["remote_id"]: item for item in captured[0]}
+    assert stored["first"]["permissions"] == records["first"]
+    assert stored["second"]["permissions"] == records["second"]
+    # Only the reviewed record fields are kept: no token, no raw provider payload.
+    assert all(set(item["permissions"]) == set(records["first"]) for item in captured[0])
+    assert "token" not in repr(captured[0]).lower()
+
+
+def test_a_permission_read_failure_marks_the_item_unknown_and_the_refresh_completes(service, monkeypatch):
+    captured = _capturing_publish(service, monkeypatch)
+    # The real reader refuses this test's binding, which is the same as a provider read that fails.
+    result = _start_refresh(service, monkeypatch, {"first": "a" * 600}, {"permission_filter": "by_email"})
+    assert result["state"] == "completed", result["message"]
+    assert captured[0][0]["permissions"] == _grant(unknown=True)
+
+
+def test_the_projection_shows_only_the_visible_items_and_keeps_the_commitment(service, monkeypatch, tmp_path):
+    kb = _real_knowledge_base(tmp_path)
+    try:
+        source, version = _retained_real_snapshot(service, kb, ["Shared handbook WORDMARK-ALPHA text.",
+                                                                "Restricted payroll WORDMARK-BETA text."])
+        _grant_items(service, source, version, {"item-0": _grant(emails=["alice@contoso.com"]),
+                                                "item-1": _grant(emails=["bob@contoso.com"])})
+        ref = native.source_ref(source, version)
+        _set_limits(monkeypatch, {})
+        full = inspect_existing_source(TENANT, ref, knowledge_base=kb)
+        _set_limits(monkeypatch, {"permission_filter": "by_email"})
+        filtered = inspect_existing_source(TENANT, ref, knowledge_base=kb, include_retrieval_chunks=True, remote_authority=_reader())
+    finally:
+        kb.close()
+    # The commitment covers every retained item, so the registered version still matches for every reader.
+    assert filtered["content_sha256"] == full["content_sha256"]
+    assert "WORDMARK-ALPHA" in filtered["summary"] and "WORDMARK-BETA" not in filtered["summary"]
+    assert filtered["retrieval_chunks"] and all("WORDMARK-BETA" not in chunk for chunk in filtered["retrieval_chunks"])
+    assert filtered["permissions_withheld"] == 1
+
+
+def _refresh_same_source(service, monkeypatch, identifier, texts, limits, *, knowledge_base, operation):
+    """Queue and run another refresh of an existing saved source, reusing the knowledge base it wrote."""
+    rows = [{"id": name, "name": f"{name}.txt", "revision": "r1", "mime": "text/plain", "size": None,
+             "citation": "", "kind": "file"} for name in texts]
+    monkeypatch.setattr(native.readers, "inventory", lambda binding, actor, guard: rows)
+    monkeypatch.setattr(native.readers, "document", lambda binding, actor, item, guard: (texts[item["id"]], "r" * 64, {"warnings": []}))
+    monkeypatch.setattr(service, "_open", lambda: knowledge_base)
+    row = service.sources.get(identifier)
+    prepared = {"source": identifier, "plan_sha256": row["plan_sha256"], "revision": row["revision"], "embedding": _embedding()}
+    _set_limits(monkeypatch, limits)
+    job = service.start(dict(prepared, inventory_sha256=native.digest(rows)), operation)
+    return service.run(job["id"])
+
+
+def _publish_as_current_snapshot(service, monkeypatch):
+    """Retain each refresh's manifest as the source's current snapshot, without the registry step."""
+    def publish(job, items, kb):
+        identifier = "KNV-" + native.digest([job["id"]])[:32]
+        service.snapshots.create({"id": identifier, "tenant": TENANT, "owner": OWNER, "version": native.digest([job["id"]])[:32],
+                                  "source": job["source"], "plan_sha256": native.content_binding(job["plan"]),
+                                  "items": sorted(items, key=lambda row: row["remote_id"]), "binding": job["plan"]["binding"],
+                                  "name": job["plan"]["name"], "observed_at": time.time(), "reference": None},
+                                 action="test.snapshot", actor=OWNER)
+        source = service.sources.get(job["source"])
+        service.sources.update(job["source"], lambda current: current.update(snapshot=identifier), expected_revision=source["revision"],
+                               action="test.snapshot_link", actor=OWNER)
+        return {"id": identifier, "reference": {"id": "ref"}}
+
+    monkeypatch.setattr(service, "_publish", publish)
+
+
+def test_a_filter_off_refresh_drops_the_permission_records_it_reuses(service, monkeypatch):
+    # A sharing grant read while the filter was on must not govern the item after a filter-off refresh.
+    kb, texts = _KnowledgeBase(), {"first": "a" * 600}
+    monkeypatch.setattr(native.readers, "permissions", lambda binding, actor, item, guard: _grant(emails=["alice@contoso.com"]))
+    _publish_as_current_snapshot(service, monkeypatch)
+    assert _start_refresh(service, monkeypatch, texts, {"permission_filter": "by_email"}, knowledge_base=kb)["state"] == "completed"
+    identifier = service.jobs.get("KNJ-" + "e" * 32)["source"]
+    assert _refresh_same_source(service, monkeypatch, identifier, texts, {}, knowledge_base=kb, operation="1" * 32)["state"] == "completed"
+    # The revision is unchanged, so the item was reused; its stored record must not keep the old grant.
+    snapshot = service.snapshots.get(service.sources.get(identifier)["snapshot"])
+    stored = snapshot["items"][0]
+    assert stored["provider_revision"] == "r1" and "permissions" not in stored
+    # Filter back on without a refresh: the item is withheld, and the page asks for a refresh.
+    _set_limits(monkeypatch, {"permission_filter": "by_email"})
+    assert native._visible(stored, "alice@contoso.com") is False
+    assert service.public(service.sources.get(identifier))["permissions_need_refresh"] is True
+
+
+def test_a_projection_without_an_authority_projects_no_item_under_the_filter(service, monkeypatch):
+    kb, identifier, version = _retained_snapshot(service, 2, text="x")
+    _grant_items(service, identifier, version, {"item-0": _grant(anyone=True), "item-1": _grant(domains=["contoso.com"])})
+    _set_limits(monkeypatch, {"permission_filter": "by_email"})
+    result = native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb)
+    assert result["visible_items"] == [] and result["withheld_for_permissions"] == 2
+    assert len(result["items"]) == 2  # the commitment still covers every item
