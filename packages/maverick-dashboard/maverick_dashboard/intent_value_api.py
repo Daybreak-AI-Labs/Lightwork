@@ -132,8 +132,12 @@ def records(request, *, scope="own", refresh=True):
         raise ValueError("Work value history exceeds the supported reporting population.")
     owner = auth.goal_owner_filter(request)
     if scope != "company":
-        rows = [row for row in rows if row["owner"] == owner and all(
-            auth.can_access_goal(request, world.get_goal(gid)) for gid in row["source"]["goal_ids"])]
+        # One batched read supplies every candidate's source goals; each goal still
+        # passes the same per-goal access check, and a missing goal is refused.
+        candidates = [row for row in rows if row["owner"] == owner]
+        goals = world.get_goals({gid for row in candidates for gid in row["source"]["goal_ids"]})
+        rows = [row for row in candidates if all(
+            auth.can_access_goal(request, goals.get(gid)) for gid in row["source"]["goal_ids"])]
     authority(request, company=scope == "company")
     rows = [row for row in rows if not row.get("deleted")]
     withheld = _gone_sources(rows, world)

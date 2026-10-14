@@ -973,3 +973,28 @@ def test_saving_assumptions_fails_closed_when_work_cannot_be_read(context, monke
         "revision": before["revision"], "hourly_rate": 90, "currency": "USD", "completion_confirmation": False})
     assert saved.status_code == 200, saved.text
     assert client.get(BASE + "/settings", headers=headers("root")).json()["hourly_rate"] == 90
+
+
+def test_report_and_suggestions_read_source_goals_in_one_batch_with_identical_output(context, monkeypatch):
+    from maverick.world_model import WorldModel
+
+    client, world = context
+    seed(world, count=4)
+    get(client)
+    single = []
+    per_goal = WorldModel.get_goal
+
+    def counting(self, goal_id):
+        single.append(goal_id)
+        return per_goal(self, goal_id)
+    monkeypatch.setattr(WorldModel, "get_goal", counting)
+    batched = {path: client.get(BASE + path, headers=headers()) for path in ("", "/opportunities")}
+    assert all(response.status_code == 200 for response in batched.values())
+    assert single == []  # Source access checks read each row's goals in one batch, not one read per goal.
+
+    # The batch must answer exactly as one read per goal does.
+    monkeypatch.setattr(WorldModel, "get_goals", lambda self, goal_ids: {
+        goal_id: goal for goal_id in goal_ids if (goal := per_goal(self, goal_id)) is not None})
+    for path, response in batched.items():
+        # The report's default period end is the read time, so compare without it.
+        assert stable(client.get(BASE + path, headers=headers()).json()) == stable(response.json()), path
