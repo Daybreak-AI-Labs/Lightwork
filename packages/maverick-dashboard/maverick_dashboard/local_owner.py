@@ -58,11 +58,60 @@ def _read():
         bytes.fromhex(row["password_hash"])
     except ValueError as exc:
         raise HTTPException(503, "Local owner authority is unavailable.") from exc
+    if not _second_factor_shape_ok(row):
+        raise HTTPException(503, "Local owner authority is unavailable.")
     return row
+
+
+def _hex_of(value: object, length: int) -> bool:
+    if not isinstance(value, str) or len(value) != length:
+        return False
+    try:
+        bytes.fromhex(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _second_factor_shape_ok(row: dict) -> bool:
+    """The optional authenticator-app keys (see :mod:`local_owner_second_factor`)."""
+    from . import owner_totp
+    if "totp" in row and not isinstance(row["totp"], str):
+        return False
+    if "totp_step" in row and (type(row["totp_step"]) is not int or row["totp_step"] < 0):
+        return False
+    setup = row.get("totp_setup")
+    if setup is not None and (not isinstance(setup, dict) or not isinstance(setup.get("secret"), str)
+                              or type(setup.get("created")) not in {int, float}):
+        return False
+    recovery = row.get("recovery")
+    if recovery is not None and (not isinstance(recovery, list)
+                                 or len(recovery) > owner_totp.RECOVERY_CODE_COUNT
+                                 or not all(isinstance(e, dict) and _hex_of(e.get("salt"), 32)
+                                            and _hex_of(e.get("hash"), 64) for e in recovery)):
+        return False
+    pending = row.get("second_factor")
+    if pending is not None and (not isinstance(pending, dict) or len(pending) > 5
+                                or not all(_pending_ok(v) for v in pending.values())):
+        return False
+    return True
+
+
+def _pending_ok(value: object) -> bool:
+    return (isinstance(value, dict) and value.get("purpose") in {"sign_in", "enroll"}
+            and type(value.get("expires")) in {int, float} and math.isfinite(value["expires"])
+            and type(value.get("attempts")) is int and 0 <= value["attempts"] <= 5)
 
 
 def _write(row):
     file_lock.atomic_write_text(path(), json.dumps(row, sort_keys=True), mode=0o600)
+
+
+def _count_failure(row) -> None:
+    """One wrong passphrase or code: five in a row lock sign-in for a minute."""
+    row["failures"] = min(5, row["failures"] + 1)
+    row["locked_until"] = time.time() + 60 if row["failures"] == 5 else 0
+    _write(row)
 
 
 def _local(request: Request, *, mutate=False):
@@ -89,6 +138,9 @@ def sign_in_available_for(cfg: dict, *, bootstrap: bool = False) -> bool:
     auth_table = cfg.get("auth")
     if "auth" in cfg and not isinstance(auth_table, dict):
         return False
+    if isinstance(auth_table, dict) and "local_owner" in auth_table:
+        # [auth.local_owner] is the owner's own policy, not an identity provider.
+        auth_table = {k: v for k, v in auth_table.items() if k != "local_owner"}
     if auth_table:
         if bootstrap or not set(auth_table) <= {"oidc", "saml"}:
             return False
@@ -172,7 +224,12 @@ def _credentials(email, password):
     return email, password
 
 
-def _finish(row, request=None):
+def _finish(row, request=None, *, mfa_at=None):
+    """Complete a pending claim and mint the session.
+
+    ``mfa_at`` is given only after the owner's authenticator code (or recovery
+    code) was accepted; the session then records a second factor at that time.
+    """
     from . import auth, invites, rbac
     principal = "user:" + row["email"]
     if row["status"] == "pending":
@@ -196,7 +253,14 @@ def _finish(row, request=None):
         # the role list is lost, and it is how they reach the page that
         # starts a new one.
         raise HTTPException(403, "This local account no longer has an assigned role. Contact a current administrator.")
-    return invites.mint_local_session(row["email"], request=request)
+    if mfa_at is None:
+        return invites.mint_local_session(row["email"], request=request)
+    from maverick.oidc import validate_subject
+
+    from .oidc_login import mint_browser_session
+    return mint_browser_session(request, sub=validate_subject(row["email"]),
+                                secret=invites.local_session_secret(), via="invite", mfa=True,
+                                ttl=invites.session_ttl_seconds(), mfa_at=mfa_at)
 
 
 def enroll(request: Request, *, email: str, password: str, confirm: bool):
@@ -223,6 +287,8 @@ def enroll(request: Request, *, email: str, password: str, confirm: bool):
 
 
 def login(request: Request, *, email: str, password: str):
+    """A session token, or a second-step challenge when the owner's authenticator
+    app must be used first (see :mod:`local_owner_second_factor`)."""
     _local(request, mutate=True)
     _policy()
     email, password = _credentials(email, password)
@@ -234,14 +300,19 @@ def login(request: Request, *, email: str, password: str):
             raise HTTPException(429, "Wait one minute before trying owner sign-in again.")
         match = hmac.compare_digest(_password(password, row["salt"]), row["password_hash"])
         if not match or email != row["email"]:
-            row["failures"] = min(5, row["failures"] + 1)
-            row["locked_until"] = time.time() + 60 if row["failures"] == 5 else 0
-            _write(row)
+            _count_failure(row)
             raise HTTPException(401, "The email or passphrase was not accepted.")
         from maverick.oidc import VerifiedPrincipal
 
         from .auth import _enforce_scim_active
         _enforce_scim_active(VerifiedPrincipal(sub=email, issuer="invite-session", audience="", claims={}))
+        from .local_owner_second_factor import after_passphrase
+        # While a second factor is due the failure count is kept: clearing it here
+        # would let a passphrase holder reset the lock between code guesses.
+        challenge = after_passphrase(row)
+        if challenge is not None:
+            _write(row)
+            return challenge
         row.update(failures=0, locked_until=0)
         _write(row)
         return _finish(row, request)

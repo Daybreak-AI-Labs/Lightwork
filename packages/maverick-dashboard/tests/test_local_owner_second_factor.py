@@ -1,0 +1,448 @@
+"""The owner's authenticator app: set-up, the second sign-in step, disabling and recovery codes."""
+from __future__ import annotations
+
+import json
+import logging
+import re
+import time
+
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from starlette.requests import Request
+
+PASSPHRASE = "a long local owner fixture phrase"  # pragma: allowlist secret - test fixture passphrase
+WRONG = "an incorrect long fixture phrase"  # pragma: allowlist secret - deliberately wrong test passphrase
+EMAIL = "owner@example.com"
+ORIGIN = "http://127.0.0.1:8765"
+
+
+@pytest.fixture(autouse=True)
+def isolated(monkeypatch, tmp_path):
+    import os
+
+    from maverick_dashboard import local_passphrases
+    for name in tuple(os.environ):
+        if name.startswith(("MAVERICK_", "LIGHTWORK_")):
+            monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("maverick.config.load_global_config", lambda *a, **k: {})
+    monkeypatch.setattr("maverick.config.config_source_errors", lambda **k: [])
+    monkeypatch.setattr("maverick.world_model.DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setattr("maverick.audit.audit_event", lambda *a, **k: True)
+    local_passphrases.reset_attempt_limit()
+    yield
+    local_passphrases.reset_attempt_limit()
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """Second-step time, moved forward by the test. Starts at the real time."""
+    from maverick_dashboard import local_owner_second_factor as second
+    state = {"offset": 0.0}
+    monkeypatch.setattr(second, "_now", lambda: time.time() + state["offset"])
+
+    class Clock:
+        def advance(self, seconds):
+            state["offset"] += seconds
+
+        def now(self):
+            return time.time() + state["offset"]
+
+    return Clock()
+
+
+def request(*, origin=ORIGIN, extra=()):
+    return Request({"type": "http", "method": "POST", "scheme": "http", "path": "/auth/local-login",
+                    "query_string": b"", "server": ("127.0.0.1", 8765), "client": ("127.0.0.1", 1234),
+                    "headers": [(b"host", b"127.0.0.1:8765"), (b"origin", origin.encode()), *extra]})
+
+
+def session_request(token):
+    base = request()
+    scope = dict(base.scope)
+    scope["headers"] = [*scope["headers"], (b"cookie", f"mvk_session={token}".encode())]
+    return Request(scope)
+
+
+def enroll_owner():
+    from maverick_dashboard import local_owner
+    return local_owner.enroll(request(), email=EMAIL, password=PASSPHRASE, confirm=True)
+
+
+def set_mode(monkeypatch, mode):
+    cfg = {"auth": {"local_owner": {"totp": mode}}} if mode is not None else {}
+    monkeypatch.setattr("maverick.config.load_global_config", lambda *a, **k: cfg)
+
+
+def current_code(secret_text, clock, offset_steps=0):
+    from maverick_dashboard import owner_totp
+    key = owner_totp.decode_secret(secret_text)
+    return owner_totp.totp(key, clock.now() + offset_steps * owner_totp.STEP_SECONDS)
+
+
+def turn_on(clock):
+    """Enroll the owner through the signed-in set-up path. Returns (secret_text, recovery_codes)."""
+    from maverick_dashboard import local_owner_second_factor as second
+    secret, _uri = second.start_setup(PASSPHRASE)
+    codes = second.confirm_setup(current_code(secret, clock))
+    clock.advance(30)  # a new step, so the next code is not a replay of the setup code
+    return secret, codes
+
+
+def row():
+    from maverick_dashboard import local_owner
+    return json.loads(local_owner.path().read_text())
+
+
+def test_an_owner_table_does_not_switch_local_sign_in_off():
+    from maverick_dashboard import local_owner
+    assert local_owner.sign_in_available_for({"auth": {"local_owner": {"totp": "required"}}}, bootstrap=True) is True
+    assert local_owner.sign_in_available_for({"auth": {"mfa": {"require": True}}}) is False
+
+
+def test_without_an_authenticator_app_sign_in_is_unchanged(monkeypatch):
+    from maverick_dashboard import local_owner
+    enroll_owner()
+    result = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    assert isinstance(result, str) and result
+
+
+def test_set_up_needs_the_passphrase_and_a_valid_code(clock):
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    with pytest.raises(HTTPException) as wrong_passphrase:
+        second.start_setup(WRONG)
+    assert wrong_passphrase.value.status_code == 401
+    assert "totp_setup" not in row()
+    secret, uri = second.start_setup(PASSPHRASE)
+    assert uri.startswith("otpauth://totp/Lightwork:owner@example.com?") and f"secret={secret}" in uri
+    assert "totp" not in row()  # nothing is on until a code is accepted
+    wrong_code = "000000" if current_code(secret, clock) != "000000" else "111111"
+    with pytest.raises(HTTPException) as refused:
+        second.confirm_setup(wrong_code)
+    assert refused.value.status_code == 401
+    assert "totp" not in row()
+    codes = second.confirm_setup(current_code(secret, clock))
+    assert len(codes) == 10 and len(set(codes)) == 10
+    assert "totp" in row() and len(row()["recovery"]) == 10
+    with pytest.raises(HTTPException) as again:
+        second.start_setup(PASSPHRASE)
+    assert again.value.status_code == 409
+
+
+def test_the_secret_and_recovery_codes_are_never_stored_in_plain_text(clock):
+    from maverick.crypto_at_rest import is_sealed_str
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    secret, codes = turn_on(clock)
+    stored = local_owner.path().read_text()
+    assert secret not in stored and secret.replace(" ", "") not in stored
+    assert all(code not in stored for code in codes)
+    assert is_sealed_str(row()["totp"])
+    assert second.status(row())["unused_recovery"] == 10
+
+
+def test_sign_in_asks_for_a_code_and_the_session_records_a_second_factor(clock):
+    from maverick_dashboard import invites, local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    assert isinstance(challenge, second.Challenge) and challenge.purpose == "sign_in"
+    assert challenge.secret == "" and challenge.uri == ""
+    with pytest.raises(HTTPException) as wrong:
+        second.complete(request(), token=challenge.token, code="000000")
+    assert wrong.value.status_code == 401
+    finished = second.complete(request(), token=challenge.token, code=current_code(secret, clock))
+    principal = invites.local_session_principal(session_request(finished.session))
+    assert principal.principal == "user:" + EMAIL
+    assert principal.claims["mfa"] is True and principal.claims["mfa_at"] is not None
+    # The pending token is spent.
+    with pytest.raises(HTTPException):
+        second.complete(request(), token=challenge.token, code=current_code(secret, clock, 1))
+
+
+def test_a_code_cannot_open_two_sign_ins(clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    first = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    second.complete(request(), token=first.token, code=current_code(secret, clock))
+    again = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    with pytest.raises(HTTPException) as replay:
+        second.complete(request(), token=again.token, code=current_code(secret, clock))
+    assert replay.value.status_code == 401
+    # The next time step is accepted.
+    clock.advance(30)
+    second.complete(request(), token=again.token, code=current_code(secret, clock))
+
+
+def test_a_second_step_token_expires_after_five_minutes(clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    clock.advance(second.PENDING_SECONDS + 1)
+    with pytest.raises(HTTPException) as expired:
+        second.complete(request(), token=challenge.token, code=current_code(secret, clock))
+    assert expired.value.status_code == 401
+    assert second.challenge_for(challenge.token) is None
+
+
+def test_a_second_step_token_takes_five_codes_and_is_then_discarded(clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    turn_on(clock)
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    for _ in range(5):
+        with pytest.raises(HTTPException) as bad:
+            second.complete(request(), token=challenge.token, code="000000")
+        assert bad.value.status_code == 401
+    assert second.challenge_for(challenge.token) is None
+
+
+def test_wrong_codes_from_many_sign_ins_share_the_passphrase_lock(clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    for _ in range(5):
+        challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+        with pytest.raises(HTTPException):
+            second.complete(request(), token=challenge.token, code="000000")
+    # Five wrong codes lock the owner, even with a fresh correct passphrase.
+    with pytest.raises(HTTPException) as locked:
+        local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    assert locked.value.status_code == 429
+
+
+def test_a_recovery_code_opens_one_sign_in_and_is_audited(monkeypatch, clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    events = []
+    monkeypatch.setattr("maverick.audit.audit_event", lambda kind, **kw: events.append((kind, kw)) or True)
+    enroll_owner()
+    _secret, codes = turn_on(clock)
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    second.complete(request(), token=challenge.token, code=codes[2].lower())
+    assert len(row()["recovery"]) == 9
+    used = [kw for kind, kw in events if kw.get("verb") == "owner_recovery_code_used"]
+    assert len(used) == 1 and used[0]["actor"] == "user:" + EMAIL and codes[2] not in json.dumps(used[0])
+    again = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    with pytest.raises(HTTPException):
+        second.complete(request(), token=again.token, code=codes[2])
+
+
+def test_a_refused_audit_stops_a_recovery_code_sign_in(monkeypatch, clock):
+    from maverick.audit import AuditRefused
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    _secret, codes = turn_on(clock)
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+
+    def refuse(*a, **k):
+        raise AuditRefused("log unavailable")
+
+    monkeypatch.setattr("maverick.audit.audit_event", refuse)
+    with pytest.raises(HTTPException) as stopped:
+        second.complete(request(), token=challenge.token, code=codes[0])
+    assert stopped.value.status_code == 503
+    assert len(row()["recovery"]) == 10
+
+
+def test_turning_off_needs_the_passphrase_and_a_current_code(clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    secret, codes = turn_on(clock)
+    with pytest.raises(HTTPException) as no_passphrase:
+        second.disable(password=WRONG, code=current_code(secret, clock))
+    assert no_passphrase.value.status_code == 401
+    with pytest.raises(HTTPException) as no_code:
+        second.disable(password=PASSPHRASE, code="000000")
+    assert no_code.value.status_code == 401
+    assert "totp" in row()
+    second.disable(password=PASSPHRASE, code=codes[5])  # a recovery code is enough
+    assert "totp" not in row() and "recovery" not in row()
+    result = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    assert isinstance(result, str)
+
+
+def test_required_mode_does_not_allow_turning_off(monkeypatch, clock):
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    set_mode(monkeypatch, "required")
+    with pytest.raises(HTTPException) as refused:
+        second.disable(password=PASSPHRASE, code=current_code(secret, clock, 1))
+    assert refused.value.status_code == 409
+    assert "totp" in row()
+
+
+def test_new_recovery_codes_replace_the_old_ones(clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    secret, old_codes = turn_on(clock)
+    with pytest.raises(HTTPException):
+        second.regenerate(code="000000")
+    fresh = second.regenerate(code=current_code(secret, clock))
+    assert len(fresh) == 10 and not set(fresh) & set(old_codes)
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    with pytest.raises(HTTPException):
+        second.complete(request(), token=challenge.token, code=old_codes[0])
+    second.complete(request(), token=challenge.token, code=fresh[0])
+
+
+def test_off_hides_set_up_but_an_enrolled_owner_is_still_asked(monkeypatch, clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    set_mode(monkeypatch, "off")
+    with pytest.raises(HTTPException) as hidden:
+        second.start_setup(PASSPHRASE)
+    assert hidden.value.status_code == 409
+    set_mode(monkeypatch, None)
+    turn_on(clock)  # enrolled while the option was offered
+    set_mode(monkeypatch, "off")
+    assert isinstance(local_owner.login(request(), email=EMAIL, password=PASSPHRASE), second.Challenge)
+
+
+def test_required_mode_forces_set_up_before_any_session(monkeypatch, clock):
+    from maverick_dashboard import invites, local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    set_mode(monkeypatch, "required")
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    assert isinstance(challenge, second.Challenge) and challenge.purpose == "enroll"
+    assert challenge.secret and challenge.uri.startswith("otpauth://totp/")
+    assert "totp" not in row() and "totp_setup" in row()
+    finished = second.complete(request(), token=challenge.token,
+                               code=current_code(challenge.secret, clock))
+    assert len(finished.recovery_codes) == 10
+    principal = invites.local_session_principal(session_request(finished.session))
+    assert principal.claims["mfa"] is True
+    assert "totp" in row()
+
+
+def test_a_wrong_code_during_forced_set_up_shows_the_same_key_again(monkeypatch, clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    set_mode(monkeypatch, "required")
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    again = second.challenge_for(challenge.token)
+    assert again is not None and again.secret == challenge.secret and again.purpose == "enroll"
+    assert "totp" not in row()
+
+
+def test_nothing_secret_is_logged(caplog, clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    caplog.set_level(logging.DEBUG)
+    enroll_owner()
+    secret, codes = turn_on(clock)
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    with pytest.raises(HTTPException):
+        second.complete(request(), token=challenge.token, code="000000")
+    second.complete(request(), token=challenge.token, code=current_code(secret, clock))
+    text = caplog.text + "".join(r.getMessage() for r in caplog.records)
+    assert secret.replace(" ", "") not in text and challenge.token not in text
+    assert all(code not in text for code in codes)
+
+
+def test_the_owner_form_asks_for_a_code_and_sets_the_session_cookie(clock):
+    from maverick_dashboard import local_passphrases
+    from maverick_dashboard.app import app
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    local_passphrases.reset_attempt_limit()
+    with TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 53210),
+                    headers={"Origin": ORIGIN}, follow_redirects=False) as client:
+        step = client.post("/auth/local-login", data={"email": EMAIL, "password": PASSPHRASE})
+        assert step.status_code == 200, step.text
+        assert "Enter your code" in step.text
+        assert "mvk_session=" not in step.headers.get("set-cookie", "")
+        assert "mvk_owner_second_factor=" in step.headers.get("set-cookie", "")
+        local_passphrases.reset_attempt_limit()
+        done = client.post("/auth/owner-second-factor", data={"code": current_code(secret, clock)})
+        assert done.status_code == 303, done.text
+        assert done.headers["location"] == "/start"
+        assert "mvk_session=" in done.headers["set-cookie"]
+        assert client.get("/api/v1/features/modules").status_code == 200
+
+
+def test_the_account_page_turns_the_app_on_and_shows_codes_once(clock):
+    from maverick_dashboard import local_owner_second_factor as second
+    from maverick_dashboard import local_passphrases
+    from maverick_dashboard.app import app
+    enroll_owner()
+    local_passphrases.reset_attempt_limit()
+    with TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 53211),
+                    headers={"Origin": ORIGIN}, follow_redirects=False) as client:
+        response = client.post("/auth/local-login", data={"email": EMAIL, "password": PASSPHRASE})
+        assert response.status_code == 303 and "mvk_session=" in response.headers["set-cookie"]
+        local_passphrases.reset_attempt_limit()
+        page = client.get("/account/owner-authenticator")
+        assert page.status_code == 200 and "Set up an authenticator app" in page.text
+        setup = client.post("/account/owner-authenticator/setup", data={"password": PASSPHRASE})
+        assert setup.status_code == 200, setup.text
+        secret = re.search(r"<code>([A-Z2-7 ]+)</code>", setup.text).group(1).replace(" ", "")
+        assert second.status(row())["enrolled"] is False
+        confirmed = client.post("/account/owner-authenticator/confirm",
+                                data={"code": current_code(secret, clock)})
+        assert confirmed.status_code == 200, confirmed.text
+        codes = re.findall(r"<li><code>([A-Z0-9]{4}-[A-Z0-9]{4})</code></li>", confirmed.text)
+        assert len(codes) == 10
+        assert "Save these recovery codes" in confirmed.text
+        clock.advance(30)
+        status = client.get("/account/owner-authenticator")
+        assert "The authenticator app is <strong>on</strong>" in status.text
+        refused = client.post("/account/owner-authenticator/disable",
+                              data={"password": WRONG, "code": codes[0]})
+        assert refused.status_code == 401
+
+
+def test_the_account_page_refuses_a_visitor_who_is_not_signed_in(clock):
+    from maverick_dashboard.app import app
+    enroll_owner()
+    with TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 53212),
+                    headers={"Origin": ORIGIN}, follow_redirects=False) as client:
+        response = client.get("/account/owner-authenticator")
+        assert response.status_code != 200
+
+
+def test_a_form_with_extra_fields_is_refused(clock):
+    from maverick_dashboard import local_passphrases
+    from maverick_dashboard.app import app
+    enroll_owner()
+    local_passphrases.reset_attempt_limit()
+    with TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 53213),
+                    headers={"Origin": ORIGIN}, follow_redirects=False) as client:
+        client.post("/auth/local-login", data={"email": EMAIL, "password": PASSPHRASE})
+        local_passphrases.reset_attempt_limit()
+        bad = client.post("/auth/owner-second-factor", data={"code": "000000", "extra": "x"})
+        assert bad.status_code == 422
+
+
+def test_off_refuses_changes_but_still_asks_an_enrolled_owner_for_a_code(monkeypatch, clock):
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    secret, codes = turn_on(clock)
+    set_mode(monkeypatch, "off")
+    with pytest.raises(HTTPException) as no_disable:
+        second.disable(password=PASSPHRASE, code=codes[0])
+    assert no_disable.value.status_code == 409
+    with pytest.raises(HTTPException) as no_new_codes:
+        second.regenerate(code=current_code(secret, clock, 1))
+    assert no_new_codes.value.status_code == 409
+    assert isinstance(local_owner.login(request(), email=EMAIL, password=PASSPHRASE), second.Challenge)
+    assert "totp" in row() and len(row()["recovery"]) == 10
