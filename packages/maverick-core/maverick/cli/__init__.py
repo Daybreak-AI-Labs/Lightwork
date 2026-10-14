@@ -7565,6 +7565,7 @@ from . import (  # noqa: E402,F401
     _knowledge_groups,
     _learning_groups,
     _ops_groups,
+    _owner_groups,
     _reporting_groups,
     _training_groups,
     _trust_groups,
