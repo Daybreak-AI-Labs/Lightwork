@@ -2718,10 +2718,10 @@ def _https_or_empty(value: object) -> str:
     text = str(value or "").strip()
     try:
         parts = urlsplit(text)
-        port = parts.port
+        _ = parts.port  # raises ValueError for an out-of-range port
     except ValueError:
         return ""
-    if parts.scheme != "https" or not parts.hostname or parts.username or parts.password or port not in (None, 443):
+    if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
         return ""
     return text
 

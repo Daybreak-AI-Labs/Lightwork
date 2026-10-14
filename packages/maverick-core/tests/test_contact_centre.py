@@ -143,6 +143,19 @@ def test_webhook_address_must_be_https_without_credentials(tmp_path):
     assert config.get_contact_centre()["webhook_url"] == "https://hooks.acme.example/x"
 
 
+@pytest.mark.parametrize("address", [
+    "https://hooks.acme.example:8443/lightwork", "https://hooks.acme.example:443/lightwork",
+])
+def test_webhook_address_accepts_any_secure_port(tmp_path, address):
+    _configure(tmp_path, f'[contact_centre]\nprovider = "webhook"\nwebhook_url = "{address}"\n')
+    assert config.get_contact_centre()["webhook_url"] == address
+
+
+def test_webhook_address_with_an_invalid_port_reads_as_empty(tmp_path):
+    _configure(tmp_path, '[contact_centre]\nprovider = "webhook"\nwebhook_url = "https://hooks.acme.example:99999/x"\n')
+    assert config.get_contact_centre()["webhook_url"] == ""
+
+
 def test_incomplete_settings_record_a_plain_failure_and_send_nothing(tmp_path, monkeypatch):
     _configure(tmp_path, '[contact_centre]\nprovider = "zendesk"\nzendesk_subdomain = "acme-support"\n'
                          'zendesk_email = "agent@acme.example"\n')
