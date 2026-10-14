@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import re
 import secrets
 import sqlite3
@@ -32,6 +33,8 @@ from urllib.parse import urlsplit
 from maverick.crypto_at_rest import seal_bound, unseal_bound
 from maverick.file_lock import ensure_private_directory, ensure_private_file
 from maverick.paths import data_dir, tenant_scope
+
+logger = logging.getLogger(__name__)
 
 KEY_PREFIX = "lwpk_"
 SESSION_PREFIX = "lwps_"
@@ -421,36 +424,49 @@ def append_transcript(tenant: str | None, site: dict[str, Any], conversation_id:
         )
 
 
-def purge_expired(*, now: float) -> None:
+def purge_expired(*, now: float) -> list[str]:
     """Remove transcripts past their site's retention in every tenant that ever listed a site.
 
-    Rows whose site no longer exists are removed too. Each tenant's file is
-    opened in turn; no site state or key material is read. An installation that
-    never used the chat has no index, so nothing is created for it here.
+    Rows whose site no longer exists are removed too. Each tenant is handled on
+    its own: a tenant whose file cannot be read or written is logged and skipped,
+    and the others are still swept. Returns the tenants that failed, so the next
+    sweep, which covers every tenant again, tries them again. No site state or key
+    material is read. An installation that never used the chat has no index, so
+    nothing is created for it here.
     """
     if not index_path().exists():
-        return
+        return []
     with _connect(index_path(), _INDEX_SCHEMA) as index:
         tenants = [row[0] or None for row in index.execute(
             "SELECT DISTINCT tenant_id FROM chat_keys").fetchall()]
+    failed: list[str] = []
     for tenant in tenants:
-        with _write(sites_path(tenant), _TENANT_SCHEMA) as db:
-            db.execute("DELETE FROM chat_transcripts WHERE site_id NOT IN (SELECT id FROM chat_sites)")
-            db.execute(
-                "DELETE FROM chat_transcripts WHERE created_at < ? - ? * "
-                "(SELECT retention_days FROM chat_sites WHERE chat_sites.id = chat_transcripts.site_id)",
-                (now, float(_DAY_SECONDS)),
-            )
+        try:
+            with _write(sites_path(tenant), _TENANT_SCHEMA) as db:
+                db.execute("DELETE FROM chat_transcripts WHERE site_id NOT IN (SELECT id FROM chat_sites)")
+                db.execute(
+                    "DELETE FROM chat_transcripts WHERE created_at < ? - ? * "
+                    "(SELECT retention_days FROM chat_sites WHERE chat_sites.id = chat_transcripts.site_id)",
+                    (now, float(_DAY_SECONDS)),
+                )
+        except Exception as exc:  # one workspace's broken file must not stop the others
+            logger.warning("public chat retention sweep failed for workspace %s (%s)",
+                           tenant or "<shared>", type(exc).__name__)
+            failed.append(_tenant_key(tenant))
+    return failed
 
 
-def purge_expired_if_due(*, now: float) -> None:
-    """Run ``purge_expired`` at most once per ``_SWEEP_SECONDS`` of the injected clock."""
+def purge_expired_if_due(*, now: float) -> list[str]:
+    """Run ``purge_expired`` at most once per ``_SWEEP_SECONDS`` of the injected clock.
+
+    Returns the workspaces that failed in that run, or none when the sweep was not due.
+    """
     global _last_sweep
     with _sweep_lock:
         if _last_sweep is not None and 0 <= now - _last_sweep < _SWEEP_SECONDS:
-            return
+            return []
         _last_sweep = now
-    purge_expired(now=now)
+    return purge_expired(now=now)
 
 
 def read_transcripts(tenant: str | None, site: dict[str, Any], *, now: float, limit: int) -> list[dict[str, Any]]:

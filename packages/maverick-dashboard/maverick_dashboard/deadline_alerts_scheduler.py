@@ -72,9 +72,13 @@ def _sweep_public_chat(now: float) -> None:
     from . import public_chat_store
 
     try:
-        public_chat_store.purge_expired_if_due(now=now)
+        failed = public_chat_store.purge_expired_if_due(now=now)
     except Exception:
         log.exception("public chat retention sweep failed")
+        return
+    if failed:
+        log.warning("public chat retention sweep did not finish for %d workspace(s); it is tried again "
+                    "at the next pass", len(failed))
 
 
 def _tick(now: float, next_eval: dict[str, float]) -> None:

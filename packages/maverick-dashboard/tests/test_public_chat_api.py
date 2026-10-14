@@ -363,7 +363,6 @@ def test_the_daily_client_cap_is_counted_separately_for_each_site(chat, model):
 def _visitor(address):
     """A client on its own peer address, for the same site: the daily count is kept per address."""
     from fastapi.testclient import TestClient
-
     from maverick_dashboard import app as dash_app
 
     return TestClient(dash_app.app, client=(address, 50000))
@@ -682,6 +681,26 @@ def test_an_idle_install_purges_expired_transcripts_on_the_background_schedule(c
     assert _stored_rows(None, site_id) == 1
 
 
+def test_a_workspace_with_a_broken_file_does_not_stop_the_others_being_swept(chat, model, monkeypatch, caplog):
+    from maverick_dashboard import public_chat_store as store
+
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+    broken = _site(chat, retention_days=1)
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-b")
+    healthy = _site(chat, origins=[OTHER], retention_days=1)
+    t0 = chat.clock["now"]
+    for tenant, created in (("tenant-a", broken), ("tenant-b", healthy)):
+        site = store.get_site(tenant, created["site"]["id"])
+        store.append_transcript(tenant, site, "conversation", "visitor", "two days old", now=t0 - 2 * 86_400)
+    assert _stored_rows("tenant-b", healthy["site"]["id"]) == 1
+    # tenant-a's sites file is damaged, so it can be neither read nor written.
+    store.sites_path("tenant-a").write_bytes(b"this is not a database\n" * 100)
+    failed = store.purge_expired(now=t0)
+    assert failed == ["tenant-a"]
+    assert _stored_rows("tenant-b", healthy["site"]["id"]) == 0
+    assert "retention sweep failed for workspace tenant-a" in caplog.text
+
+
 def test_auth_exemption_covers_only_the_public_prefix(chat):
     from maverick_dashboard import auth
 
@@ -926,9 +945,8 @@ def test_a_non_admin_gets_no_site_admin_route_and_no_channels_page(chat, model, 
 
 @pytest.mark.parametrize("role", ["operator", "viewer"])
 def test_the_section_context_is_empty_for_a_non_admin_principal(chat, model, monkeypatch, role):
-    from starlette.requests import Request
-
     from maverick_dashboard import auth
+    from starlette.requests import Request
 
     request = Request({"type": "http", "method": "GET", "path": "/channels", "headers": [],
                        "client": ("203.0.113.9", 40000), "query_string": b""})
