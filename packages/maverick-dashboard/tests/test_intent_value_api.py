@@ -1043,7 +1043,11 @@ def _ekko_with_an_expired_event(monkeypatch, tmp_path):
     writer.append_event(WorkEvent(event_id="event-1", session_id="expired-session", sequence=1, occurred_at=now,
                                   app="chrome", action="download", object_type="report", duration_seconds=8),
                         policy=policy, collector_id="collector-test-capability")
-    monkeypatch.setattr(ekko_routes, "_store", lambda request, device_id: ekko(now + 15 * 86_400.0, device_id))
+    def store(request, device_id):
+        # The real route checks the device name before it opens a store.
+        return ekko(now + 15 * 86_400.0, ekko_routes._device_id(device_id))
+
+    monkeypatch.setattr(ekko_routes, "_store", store)
     return path
 
 
@@ -1065,6 +1069,17 @@ def test_the_sync_deletes_expired_ekko_events_for_the_device_it_is_called_for(co
 
     assert client.post(BASE + "/sync", headers=headers()).status_code == 200
     assert _ekko_event_ids(path) == []
+
+
+def test_a_sync_naming_an_invalid_device_still_records_and_deletes_no_ekko_events(context, monkeypatch, tmp_path):
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+
+    response = client.post(BASE + "/sync?device_id=not%20a%20device", headers=headers())
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "recorded"
+    assert _ekko_event_ids(path) == ["event-1"]
 
 
 def test_a_viewer_sync_does_not_delete_expired_ekko_events(context, monkeypatch, tmp_path):

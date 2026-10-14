@@ -141,6 +141,15 @@ def _purge_expired(store) -> int:
     return removed
 
 
+def _purge_expired_for_device(request: Request, device_id: str) -> int:
+    """The work-value sync's purge for the device it names. A name that is not a device name purges nothing."""
+    try:
+        store = _store(request, device_id)
+    except HTTPException:
+        return 0
+    return _purge_expired(store)
+
+
 def _public_enrollment(value) -> dict | None:
     if value is None:
         return None
