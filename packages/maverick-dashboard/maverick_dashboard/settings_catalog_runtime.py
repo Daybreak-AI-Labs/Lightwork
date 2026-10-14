@@ -127,6 +127,20 @@ def _models(S, C) -> tuple:
           "AI models", False, "maverick.agent_tests_policy", subgroup="Effort and planning", weaker=False,
           warning="A reason alone is enough to publish changed instructions without a passing run.",
           aliases="four eyes approval reason publish gate test cases answer checks"),
+        S("agent_tests", "canary_percent", "Share of new goals that try a changed specialist first",
+          "0 publishes changed instructions straight away, as today. From 1 to 50, a changed specialist "
+          "is first tried on that share of new goals, chosen by goal, while the rest keep the current "
+          "version. Goals already running are not changed. Promote the new version for everyone, or roll it back, "
+          "in Workforce.", "number", "AI models", 0, "maverick.agent_tests_policy",
+          subgroup="Effort and planning", minimum=0, maximum=50, integer=True, unit="percent", weaker="higher",
+          warning="Some new goals would use changed instructions before everyone does.",
+          aliases="canary gradual rollout trial share percent candidate changed instructions"),
+        S("agent_tests", "canary_auto_rollback", "Roll back a trial version that fails clearly more often",
+          "After at least 10 finished goals on the trial version, roll it back automatically when its share of "
+          "failed goals is more than 20 percentage points above the current version. The roll back is recorded.",
+          "toggle", "AI models", False, "maverick.agent_tests_policy", subgroup="Effort and planning", weaker=False,
+          warning="A trial version that fails more often would stay live until someone rolls it back.",
+          aliases="canary automatic rollback trial failures"),
 
         # ------------------------------------------------ conversation length
         S("context", "max_output_tokens", "Longest reply per step",

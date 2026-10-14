@@ -36,7 +36,7 @@ def test_the_check_questions_default_to_todays_behaviour(monkeypatch):
     monkeypatch.setattr(wizard, "_q_text", fake_text)
     assert wizard.pick_agent_test_rules() == {
         "max_cases_per_specialist": 20, "require_for_new_specialists": False,
-        "bypass_requires_second_person": False}
+        "bypass_requires_second_person": False, "canary_percent": 0, "canary_auto_rollback": False}
     assert any("saved answer checks" in message for message in asked)
 
 
@@ -67,6 +67,32 @@ def test_changed_answers_write_the_table_and_the_kernel_reads_them(tmp_path, mon
         assert agent_tests_policy.bypass_requires_second_person() is True
     finally:
         config.reset_config_cache()
+
+
+def test_a_canary_share_is_written_only_when_on_and_the_kernel_reads_it(tmp_path, monkeypatch):
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = _write(cfg_dir, monkeypatch, {"max_cases_per_specialist": 20, "require_for_new_specialists": False,
+                                        "bypass_requires_second_person": False, "canary_percent": 25,
+                                        "canary_auto_rollback": True})
+    assert "canary_percent = 25" in cfg and "canary_auto_rollback = true" in cfg
+    monkeypatch.setenv("MAVERICK_CONFIG", str(cfg_dir / "config.toml"))
+    from maverick import agent_tests_policy, config
+    config.reset_config_cache()
+    try:
+        assert agent_tests_policy.canary_percent() == 25
+        assert agent_tests_policy.canary_auto_rollback() is True
+    finally:
+        config.reset_config_cache()
+
+
+def test_auto_rollback_without_a_canary_is_not_written(tmp_path, monkeypatch):
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = _write(cfg_dir, monkeypatch, {"max_cases_per_specialist": 20, "require_for_new_specialists": False,
+                                        "bypass_requires_second_person": False, "canary_percent": 0,
+                                        "canary_auto_rollback": True})
+    assert "canary_percent" not in cfg and "canary_auto_rollback" not in cfg
 
 
 def test_the_check_limit_question_accepts_only_one_to_two_hundred(monkeypatch):

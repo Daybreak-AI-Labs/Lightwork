@@ -13,6 +13,15 @@ of those checks on exactly the draft being published. No reason overrides it.
 without a passing run, with a reason, needs another administrator's approval of
 that reason first.
 
+``canary_percent`` (0 to 50, default 0 = off): when above 0, publishing a CHANGED
+existing specialist makes the new version a canary candidate instead of replacing
+the current one. That share of new goals (chosen by goal id) uses the candidate.
+A value that is not a whole number in range reads as 0.
+
+``canary_auto_rollback`` (default off): roll the candidate back automatically once
+enough candidate goals have finished and it fails clearly more often than the
+current version. Read with the same switch rule as the two switches above.
+
 Unreadable settings keep the stricter reading for the two switches and the
 default for the number. A switch whose value is not true or false is read as on.
 """
@@ -20,6 +29,7 @@ from __future__ import annotations
 
 DEFAULT_MAX_CASES = 20
 MAX_CASES_LIMIT = 200
+MAX_CANARY_PERCENT = 50
 _UNREADABLE = object()
 NEW_SPECIALIST_NEEDS_TESTS = (
     "A new specialist needs at least one saved check and a full passing run of those checks on its exact draft "
@@ -76,5 +86,22 @@ def bypass_requires_second_person() -> bool:
     return _switch("bypass_requires_second_person")
 
 
-__all__ = ["DEFAULT_MAX_CASES", "MAX_CASES_LIMIT", "NEW_SPECIALIST_NEEDS_TESTS", "NewSpecialistNeedsTests",
-           "bypass_requires_second_person", "max_cases_per_specialist", "require_for_new_specialists"]
+def canary_percent() -> int:
+    """The ``[agent_tests] canary_percent`` knob: 0 (off) or a whole share from 1 to 50."""
+    section = _section()
+    if section is _UNREADABLE:
+        return 0
+    value = section.get("canary_percent", 0)
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_CANARY_PERCENT:
+        return 0
+    return value
+
+
+def canary_auto_rollback() -> bool:
+    """The ``[agent_tests] canary_auto_rollback`` knob."""
+    return _switch("canary_auto_rollback")
+
+
+__all__ = ["DEFAULT_MAX_CASES", "MAX_CANARY_PERCENT", "MAX_CASES_LIMIT", "NEW_SPECIALIST_NEEDS_TESTS",
+           "NewSpecialistNeedsTests", "bypass_requires_second_person", "canary_auto_rollback", "canary_percent",
+           "max_cases_per_specialist", "require_for_new_specialists"]

@@ -966,6 +966,13 @@ require_for_new_specialists = false    # true: a specialist never published befo
 bypass_requires_second_person = false  # true: publishing changed instructions without a passing run (with a reason) needs
                                        # another administrator's approval on the Approvals page or in chat. The requester cannot approve it
                                        # on either. Rejecting is never refused.
+canary_percent = 0                     # 0 (off): publishing changed instructions replaces the current version, as before.
+                                       # 1 to 50: the changed version is a trial on that share of NEW goals (chosen by goal id);
+                                       # the rest keep the current version. Goals already running are not changed. Each goal
+                                       # records which version it used. Promote or roll back the trial in Workforce. Only one
+                                       # trial per specialist; a second change is refused until then. A new specialist publishes normally.
+canary_auto_rollback = false           # true: roll the trial back on its own once at least 10 of its goals have finished and its
+                                       # failed share is more than 20 percentage points above the current version's. Recorded in the activity log.
 
 [autonomy]
 confirm_plan = false          # show the plan in Approvals and wait before a task's first action that reaches outside Lightwork

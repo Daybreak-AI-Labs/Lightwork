@@ -282,7 +282,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "agent_factory": {"jd_hiring", "require_passing_tests"},
     # Saved answer checks (maverick.agent_tests_policy).
     "agent_tests": {"max_cases_per_specialist", "require_for_new_specialists",
-                    "bypass_requires_second_person"},
+                    "bypass_requires_second_person", "canary_percent", "canary_auto_rollback"},
     "practice": {"enable", "daily_spend_cap"},
     "collaboration": {"comments", "suggestions", "ai_suggestions"},
     "first_outcome": {"department", "sample_workspace_created"},
@@ -694,7 +694,7 @@ _INTEGER_KEYS: dict[str, set[str]] = {
         "max_refresh_minutes",
     },
     "customer_sandbox_lifecycle": {"source_revision"},
-    "agent_tests": {"max_cases_per_specialist"},
+    "agent_tests": {"max_cases_per_specialist", "canary_percent"},
     "ai_entity_tasks": {
         "max_tasks",
         "retention_seconds",
@@ -780,7 +780,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
     },
     "analytics": {"mcp_client_language", "task_questions", "usability_survey", "usage_measures", "web_vitals"},
     "agent_factory": {"jd_hiring", "require_passing_tests"},
-    "agent_tests": {"require_for_new_specialists", "bypass_requires_second_person"},
+    "agent_tests": {"require_for_new_specialists", "bypass_requires_second_person", "canary_auto_rollback"},
     "practice": {"enable"},
     "collaboration": {"comments", "suggestions", "ai_suggestions"},
     "self_learning": {
@@ -1518,6 +1518,7 @@ for _provider in (
 
 _NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
     (("agent_tests",), "max_cases_per_specialist"): (1, 200),
+    (("agent_tests",), "canary_percent"): (0, 50),
     (("governance_inventory",), "retention_seconds"): (86_400, 315_360_000),
     (("governance_inventory",), "max_source_records"): (1, 100_000),
     (("governance_inventory",), "max_entities"): (1, 100_000),
