@@ -149,6 +149,9 @@ class Lightwork:
         parts = urllib.parse.urlsplit(base_url)
         if parts.scheme not in {"http", "https"} or not parts.netloc or parts.query or parts.fragment:
             raise ValueError("base_url must be an absolute http:// or https:// URL without a query")
+        if parts.username is not None or parts.password is not None:
+            # Never echo the URL: it is the thing that carries the secret.
+            raise ValueError("base_url must not contain a username or password; pass the key as token")
         if transport is None and token and parts.scheme == "http" and not _is_loopback(parts.hostname):
             raise ValueError("refusing to send a bearer token over plain http to a non-loopback host; use https")
         if not timeout > 0:
