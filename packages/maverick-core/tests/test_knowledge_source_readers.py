@@ -203,3 +203,106 @@ def test_a_confluence_page_within_its_read_limit_is_extracted(monkeypatch):
         status="complete", omitted_regions=(), text="Leave text", metadata=lambda: {"pages": 1}))
     text, _sha, _metadata = readers.document(CONFLUENCE, "user:alice", CONFLUENCE_ITEM, lambda: None)
     assert text == "Leave text"
+
+
+GRAPH_BINDING = {"kind": "sharepoint", "connection": "sp", "revision": "r1", "connector": "msgraph",
+                 "origin": "https://graph.microsoft.com", "selection": {"site": "s1", "drive": "d1", "folder": "root"}}
+PERM_GRAPH_ITEM = {"id": "item-9", "name": "Leave.txt", "revision": "r1", "mime": "text/plain", "size": None,
+              "citation": "", "kind": "file"}
+PERM_DRIVE_ITEM = dict(PERM_GRAPH_ITEM, mime="text/plain")
+PERM_CONFLUENCE_ITEM = dict(PERM_GRAPH_ITEM, mime="text/html")
+
+
+def _serve_permission_rows(monkeypatch, rows=None, error=None, body=None):
+    """Answer the permission listing (collection) and the Confluence restriction read (read_json)."""
+    def collection(binding, actor, path, guard, *, key="value"):
+        if error is not None:
+            raise error
+        return rows
+
+    def read_json(binding, actor, path, guard):
+        if error is not None:
+            raise error
+        return body
+
+    monkeypatch.setattr(readers, "collection", collection)
+    monkeypatch.setattr(readers, "read_json", read_json)
+
+
+def _unknown():
+    return {"emails": [], "domains": [], "anyone": False, "has_group_grants": False, "unknown": True}
+
+
+def test_graph_permissions_record_emails_domains_and_anyone_links(monkeypatch):
+    rows = [
+        {"id": "p1", "roles": ["read"], "grantedToIdentitiesV2": [{"user": {"email": "Alice@Contoso.com"}}]},
+        {"id": "p2", "roles": ["read"], "invitation": {"email": "bob@partner.example", "signInRequired": True}},
+        {"id": "p3", "roles": ["read"], "link": {"scope": "anonymous", "type": "view"}},
+    ]
+    _serve_permission_rows(monkeypatch, rows=rows)
+    assert readers.permissions(GRAPH_BINDING, "user:alice", PERM_GRAPH_ITEM, lambda: None) == {
+        "emails": ["alice@contoso.com", "bob@partner.example"], "domains": [], "anyone": True,
+        "has_group_grants": False, "unknown": False}
+
+
+def test_graph_group_grants_are_recorded_without_expanding_the_group(monkeypatch):
+    rows = [{"id": "p1", "roles": ["write"], "grantedToIdentitiesV2": [{"group": {"id": "g1", "displayName": "HR"}}]}]
+    _serve_permission_rows(monkeypatch, rows=rows)
+    result = readers.permissions(GRAPH_BINDING, "user:alice", PERM_GRAPH_ITEM, lambda: None)
+    assert result == {"emails": [], "domains": [], "anyone": False, "has_group_grants": True, "unknown": False}
+
+
+@pytest.mark.parametrize("row", [
+    {"id": "p1", "roles": ["read"], "link": {"scope": "organization", "type": "view"}},
+    {"id": "p2", "roles": ["read"], "grantedToIdentitiesV2": [{"user": {"id": "u1"}}]},
+    {"id": "p3", "roles": ["read"]},
+])
+def test_an_unrecognised_graph_grant_is_unknown_not_silently_empty(monkeypatch, row):
+    _serve_permission_rows(monkeypatch, rows=[row])
+    assert readers.permissions(GRAPH_BINDING, "user:alice", PERM_GRAPH_ITEM, lambda: None) == _unknown()
+
+
+def test_drive_permissions_record_users_domains_anyone_and_groups(monkeypatch):
+    rows = [
+        {"id": "a", "type": "user", "emailAddress": "Carol@Example.com", "role": "reader"},
+        {"id": "b", "type": "domain", "domain": "Example.com", "role": "reader"},
+        {"id": "c", "type": "anyone", "role": "reader"},
+        {"id": "d", "type": "group", "emailAddress": "staff@example.com", "role": "reader"},
+        {"id": "e", "type": "user", "emailAddress": "old@example.com", "role": "reader", "deleted": True},
+    ]
+    _serve_permission_rows(monkeypatch, rows=rows)
+    result = readers.permissions(DRIVE, "user:alice", PERM_DRIVE_ITEM, lambda: None)
+    assert result == {"emails": ["carol@example.com"], "domains": ["example.com"], "anyone": True,
+                      "has_group_grants": True, "unknown": False}
+
+
+def test_a_drive_user_grant_without_an_email_is_unknown(monkeypatch):
+    _serve_permission_rows(monkeypatch, rows=[{"id": "a", "type": "user", "role": "reader"}])
+    assert readers.permissions(DRIVE, "user:alice", PERM_DRIVE_ITEM, lambda: None) == _unknown()
+
+
+def test_confluence_restrictions_record_user_emails_and_group_grants(monkeypatch):
+    body = {"restrictions": {"user": {"results": [{"accountId": "a1", "email": "Dana@acme.example"}]},
+                             "group": {"results": [{"name": "managers"}]}}}
+    _serve_permission_rows(monkeypatch, body=body)
+    assert readers.permissions(CONFLUENCE, "user:alice", PERM_CONFLUENCE_ITEM, lambda: None) == {
+        "emails": ["dana@acme.example"], "domains": [], "anyone": False, "has_group_grants": True, "unknown": False}
+
+
+@pytest.mark.parametrize("body", [
+    {"restrictions": {"user": {"results": []}, "group": {"results": []}}},  # inherits space permissions
+    {"restrictions": {"user": {"results": [{"accountId": "a1"}]}}},  # no email to match
+    {"results": []},  # shape not understood
+])
+def test_an_unrestricted_or_unreadable_confluence_page_is_unknown(monkeypatch, body):
+    _serve_permission_rows(monkeypatch, body=body)
+    assert readers.permissions(CONFLUENCE, "user:alice", PERM_CONFLUENCE_ITEM, lambda: None) == _unknown()
+
+
+@pytest.mark.parametrize("provider", [GRAPH_BINDING, DRIVE, CONFLUENCE])
+def test_a_permission_read_failure_is_unknown_and_never_raises(monkeypatch, provider):
+    item = {"sharepoint": PERM_GRAPH_ITEM, "drive": PERM_DRIVE_ITEM, "confluence": PERM_CONFLUENCE_ITEM}[provider["kind"]]
+    _serve_permission_rows(monkeypatch, error=readers.SourceReadError("provider said no; token=abc123"))
+    result = readers.permissions(provider, "user:alice", item, lambda: None)
+    assert result == _unknown()
+    assert "abc123" not in repr(result) and set(result) == {"emails", "domains", "anyone", "has_group_grants", "unknown"}
