@@ -23,7 +23,7 @@ from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
-from .ediscovery import MatterExportError, build_scope
+from .ediscovery import MatterExportError, MatterExportTooLarge, build_scope
 from .file_lock import ensure_private_directory
 
 EXPORT_SCHEMA = "lightwork.ediscovery-matter-export.v1"
@@ -120,7 +120,7 @@ def export_matter(world: Any, matter: Mapping[str, Any], *, actor: str, out_dir:
                         size += len(line)
                         written += len(line)
                         if written > max_bytes:
-                            raise MatterExportError(
+                            raise MatterExportTooLarge(
                                 "This matter is too large to export in one file. Narrow its date range or custodians and try again.")
                         count += 1
                         digest.update(line)

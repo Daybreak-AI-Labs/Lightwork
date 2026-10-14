@@ -330,7 +330,7 @@ def test_export_contains_exactly_the_scoped_records_with_verifiable_signature(wo
 def test_export_is_bounded_and_leaves_no_partial_file(world, ledger, events, tmp_path):
     _seed(world)
     matter = ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values())
-    with pytest.raises(ediscovery.MatterExportError, match="too large"):
+    with pytest.raises(ediscovery.MatterExportTooLarge, match="too large"):
         ediscovery_export.export_matter(world, matter, actor="auditor", out_dir=tmp_path / "exports",
                                         max_bytes=10)
     assert list((tmp_path / "exports").glob("*.zip")) == []

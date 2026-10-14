@@ -85,6 +85,10 @@ class MatterExportError(EdiscoveryError):
     pass
 
 
+class MatterExportTooLarge(MatterExportError):
+    pass
+
+
 def enabled() -> bool:
     """True only when ``[ediscovery] enable`` is explicitly true."""
     try:
@@ -549,6 +553,7 @@ __all__ = [
     "LegalHoldApplies",
     "MatterConflict",
     "MatterExportError",
+    "MatterExportTooLarge",
     "MatterNotFound",
     "MatterScopeUnverifiable",
     "MatterStore",
