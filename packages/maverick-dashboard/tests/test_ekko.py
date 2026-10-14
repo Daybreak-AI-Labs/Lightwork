@@ -330,7 +330,7 @@ def test_ekko_inline_script_runs_after_shared_ui_helpers_load(tmp_path, monkeypa
 
     ui_tag = '<script src="/static/lightwork-ui.js'
     # The bootstrap must be a <script> element, not any element with these attributes.
-    bootstrap =re.search(r'<script\b[^>]*\bid="ekko-initial"[^>]*type="application/json">', html)
+    bootstrap = re.search(r'<script\b[^>]*\bid="ekko-initial"[^>]*type="application/json">', html)
     assert ui_tag in html
     assert bootstrap is not None
 
