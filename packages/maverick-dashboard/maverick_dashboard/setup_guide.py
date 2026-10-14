@@ -86,8 +86,9 @@ STEPS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ("security_suite", "Security and compliance", "The security and compliance modules.",
      ("governance_agents", "threat_hunt", "env_hunt"), ""),
     ("monitoring", "Monitoring and key management",
-     "Where timing traces, measurements and the activity record are sent, and the cloud key service.",
-     ("observability", "kms", "audit"), ""),
+     "Where timing traces, measurements and the activity record are sent, and the cloud key "
+     "service. In All settings they are under Performance and Security.",
+     ("observability", "kms", "audit"), "/settings/all"),
     ("advanced", "Advanced reasoning", "Planning, checking, showing the plan before acting and other advanced options.",
      ("reflexion", "planning", "verification", "autonomy"), ""),
     ("api_keys", "API access", "Personal and service-account keys for scripts and integrations.",

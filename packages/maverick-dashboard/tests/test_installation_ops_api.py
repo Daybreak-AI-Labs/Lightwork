@@ -457,6 +457,20 @@ def test_setup_guide_lists_every_assistant_step(client):
     assert 'href="/start/setup"' in client.get("/start").text
 
 
+def test_monitoring_step_link_reaches_every_setting_it_names(client):
+    from maverick_dashboard import settings_catalog
+    from maverick_dashboard.setup_guide import steps
+    row = next(r for r in steps() if r["id"] == "monitoring")
+    # The step's settings sit in two groups (Performance and Security), so its link is the
+    # page that lists every group, not one group's anchor.
+    assert row["in_app"] and row["href"] == "/settings/all"
+    assert client.get(row["href"]).status_code == 200
+    for setting_id in ("observability.otel_endpoint", "kms.key_id", "audit.siem_dest"):
+        found = client.get(row["href"], params={"id": setting_id})
+        assert found.status_code == 200
+        assert settings_catalog.BY_ID[setting_id].label in visible_text(found.text), setting_id
+
+
 def test_prepared_settings_file_is_checked_then_installed_with_a_backup(client, monkeypatch, tmp_path):
     bad = client.post("/api/v1/setup/settings-file/check", content=b"[safety\n").json()
     assert bad["valid"] is False and not _BANNED.search(bad["summary"])
