@@ -853,6 +853,17 @@ def _approval_undo_marker_id(tenant_id: str | None, approval_id: int, undo_round
     return _approval_audit_event_id(tenant_id, approval_id, APPROVAL_UNDO_STATUS, "", undo_round)
 
 
+_EPISODE_SPEND_COLS = (
+    "e.id, e.goal_id, e.started_at, e.ended_at, e.outcome, "
+    "COALESCE(e.cost_dollars, 0) AS cost_dollars, "
+    "COALESCE(e.input_tokens, 0) AS input_tokens, "
+    "COALESCE(e.output_tokens, 0) AS output_tokens, "
+    "COALESCE(e.tool_calls, 0) AS tool_calls, "
+    "COALESCE(e.cache_read_tokens, 0) AS cache_read_tokens, "
+    "COALESCE(e.cache_write_tokens, 0) AS cache_write_tokens "
+)
+
+
 @dataclass
 class EpisodeSpend:
     id: int
@@ -2871,15 +2882,7 @@ class WorldModel:
         Without this filter ``/api/v1/spend`` returned every user's runs + cost
         to any caller.
         """
-        cols = (
-            "e.id, e.goal_id, e.started_at, e.ended_at, e.outcome, "
-            "COALESCE(e.cost_dollars, 0) AS cost_dollars, "
-            "COALESCE(e.input_tokens, 0) AS input_tokens, "
-            "COALESCE(e.output_tokens, 0) AS output_tokens, "
-            "COALESCE(e.tool_calls, 0) AS tool_calls, "
-            "COALESCE(e.cache_read_tokens, 0) AS cache_read_tokens, "
-            "COALESCE(e.cache_write_tokens, 0) AS cache_write_tokens "
-        )
+        cols = _EPISODE_SPEND_COLS
         join = ("FROM episodes e JOIN goals g ON e.goal_id = g.id "
                 if owner is not None else "FROM episodes e ")
         where, params = [], []
@@ -2895,6 +2898,23 @@ class WorldModel:
         sql += "ORDER BY e.started_at DESC LIMIT ?"
         params.append(limit)
         rows = self._read_all(sql, tuple(params))
+        return _episode_spends_from_rows(rows)
+
+    def episodes_for_owner_goals(self, owner: str, *, goal_limit: int = 10_000,
+                                 limit: int = 500) -> list[EpisodeSpend]:
+        """The owner's runs for their newest ``goal_limit`` goals: newest goal
+        first, newest run first within a goal, at most ``limit`` rows.
+
+        Same rows and order as ``list_goals(owner=..., limit=goal_limit,
+        order="desc")`` followed by ``list_episodes(goal_id=...)`` for each goal
+        until ``limit`` rows, in one query and one decode.
+        """
+        rows = self._read_all(
+            "SELECT " + _EPISODE_SPEND_COLS + "FROM episodes e JOIN ("
+            "SELECT id FROM goals WHERE owner = ? ORDER BY id DESC LIMIT ?"
+            ") g ON e.goal_id = g.id ORDER BY g.id DESC, e.started_at DESC LIMIT ?",
+            (owner, max(1, int(goal_limit)), max(1, int(limit))),
+        )
         return _episode_spends_from_rows(rows)
 
     def episode_costs_since(self, since: float, *, limit: int = 100_000) -> list[tuple[str, float, float]]:

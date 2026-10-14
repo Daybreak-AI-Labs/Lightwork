@@ -92,3 +92,39 @@ def test_gather_reads_tag_from_episode_then_goal():
     tags = sorted(r["tag"] for r in rows)
     assert tags == ["direct", "from-goal"]
     assert render(split_by_tag(rows)).startswith("tag")
+
+
+def test_owner_episodes_in_one_query_match_the_per_goal_reads(tmp_path, monkeypatch):
+    # One owner-scoped query must return the rows the per-goal reads returned
+    # (newest goal first, newest run first, 500 raw rows), and tagging must not
+    # decrypt goal rows: the shipped Goal carries no tags to read.
+    from maverick.world_model import WorldModel
+
+    world = WorldModel(tmp_path / "w.db")
+    alice = [world.create_goal(f"alice {i}", owner="user:alice") for i in range(3)]
+    bob = world.create_goal("bob", owner="user:bob")
+    with world._writing() as conn:
+        for index in range(600):
+            goal = bob if index % 10 == 0 else alice[index % 3]
+            conn.execute(
+                "INSERT INTO episodes(goal_id, started_at, cost_dollars, input_tokens, "
+                "output_tokens) VALUES (?, ?, ?, ?, ?)",
+                (goal, 1_000.0 + index, 0.0 if index % 4 == 0 else 0.01 * (index % 7 + 1),
+                 index, index % 9),
+            )
+    goal_ids = [g.id for g in world.list_goals(owner="user:alice", limit=10_000, order="desc")]
+    reference = split_by_tag(gather(world, limit=500, goal_ids=goal_ids))
+    scoped = world.episodes_for_owner_goals("user:alice", limit=500)
+    assert len(scoped) == 500
+    assert [(e.goal_id, e.started_at) for e in scoped] == sorted(
+        [(e.goal_id, e.started_at) for e in scoped], key=lambda t: (-t[0], -t[1]))
+    assert split_by_tag(gather(world, episodes=scoped)) == reference
+    assert reference and all(b["runs"] > 0 for b in reference)
+
+    reads = []
+    real_get_goal = WorldModel.get_goal
+    monkeypatch.setattr(WorldModel, "get_goal",
+                        lambda self, goal_id: reads.append(goal_id) or real_get_goal(self, goal_id))
+    gather(world, episodes=scoped)
+    assert reads == []
+

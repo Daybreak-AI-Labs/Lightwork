@@ -11327,10 +11327,16 @@ def cost_by_tag_api(
     limit = max(1, min(int(limit), 10_000))
     w = _world()
     owner = goal_owner_filter(request)
-    goal_ids = None
-    if owner is not None:
-        goal_ids = [g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")]
-    buckets = split_by_tag(gather(w, tag_field=tag_field, limit=limit, goal_ids=goal_ids))
+    if owner is not None and hasattr(w, "episodes_for_owner_goals"):
+        # One owner-scoped query: the newest goals' runs, no per-goal reads.
+        rows = gather(w, tag_field=tag_field,
+                      episodes=w.episodes_for_owner_goals(owner, limit=limit))
+    else:
+        goal_ids = None
+        if owner is not None:
+            goal_ids = [g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")]
+        rows = gather(w, tag_field=tag_field, limit=limit, goal_ids=goal_ids)
+    buckets = split_by_tag(rows)
     return JSONResponse({"tag_field": tag_field, "buckets": buckets})
 
 
