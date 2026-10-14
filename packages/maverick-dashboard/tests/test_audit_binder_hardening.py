@@ -20,10 +20,15 @@ class _BinderWorld:
     def __init__(self, approvals: list[SimpleNamespace]) -> None:
         self.approvals = approvals
         self.requested_limit: int | None = None
+        self.requested_window: tuple[float, float] | None = None
 
     def list_approvals(self, limit: int = 500) -> list[SimpleNamespace]:
         self.requested_limit = limit
         return list(self.approvals)
+
+    def approvals_requested_between(self, since: float, until: float) -> list[SimpleNamespace]:
+        self.requested_window = (since, until)
+        return [a for a in self.approvals if since <= float(a.requested_at or 0) <= until]
 
     def approval_state(self, approval_id: int) -> dict[str, object]:
         return {
@@ -240,7 +245,9 @@ def test_binder_exact_window_is_inclusive_uncapped_and_verifies_each_segment_onc
     assert {1, 1_000}.issubset(approval_ids)
     assert payload["approvals_total"] == 303
     assert payload["approvals_truncated"] is False
-    assert observed.world.requested_limit == 2_147_483_647
+    assert observed.world.requested_window == (
+        payload["window"]["since"], payload["window"]["until"],
+    )
 
     assessment_ids = {row["id"] for row in payload["assessments"]}
     assert {"before", "after"}.isdisjoint(assessment_ids)

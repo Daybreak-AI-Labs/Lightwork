@@ -3728,6 +3728,17 @@ class WorldModel:
         )
         return _approvals_from_rows(rows)
 
+    def approvals_requested_between(self, since: float, until: float) -> list[Approval]:
+        """Approvals with ``since <= requested_at <= until``, in the order
+        :meth:`list_approvals` returns them. The window is applied in SQL, so
+        rows outside it are never decrypted (the audit binder reads one window)."""
+        rows = self._read_all(
+            "SELECT * FROM approvals WHERE requested_at >= ? AND requested_at <= ? "
+            "ORDER BY requested_at DESC, id DESC",
+            (float(since), float(until)),
+        )
+        return _approvals_from_rows(rows)
+
     def pending_approvals(self) -> list[Approval]:
         rows = self._read_all(
             "SELECT * FROM approvals WHERE status = 'pending' ORDER BY id"

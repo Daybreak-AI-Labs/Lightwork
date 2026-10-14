@@ -4673,12 +4673,9 @@ def _binder_payload(days: int = 90) -> dict:
     w = _world()
     approvals = []
     # A regulator-facing export must disclose every record in its exact window;
-    # it must not silently inherit the UI feed's default limit.
-    listed = [
-        approval
-        for approval in w.list_approvals(limit=2_147_483_647)
-        if cutoff <= float(approval.requested_at or 0) <= now
-    ]
+    # it must not silently inherit the UI feed's default limit. The window is
+    # filtered in SQL, so approvals outside it are never decrypted.
+    listed = w.approvals_requested_between(cutoff, now)
     # One batched read of the quorum state for the window, not three queries
     # per approval (2,400 ms for 2,000 approvals before).
     states = w.approval_states(listed)
