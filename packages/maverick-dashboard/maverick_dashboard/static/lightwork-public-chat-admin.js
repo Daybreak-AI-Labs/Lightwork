@@ -13,7 +13,8 @@
 
   function say(text, failed) { window.mvStatus(statusLine, text, { error: !!failed }); }
   function call(path, options, action) {
-    return window.mvFetchJSON(API + path, Object.assign({ cache: 'no-store', serverDetail: true }, options || {}), action);
+    // serverDetail: the server's own plain sentence is shown when it sends one; this is the fallback.
+    return window.mvFetchJSON(API + path, Object.assign({ cache: 'no-store', serverDetail: 'That did not work. Try again.' }, options || {}), action);
   }
   function el(tag, text, className) {
     var node = document.createElement(tag);
@@ -221,9 +222,9 @@
   });
 
   run(function () {
-    return loadSites().catch(function (error) {
+    return loadSites().catch(function () {
       sites.replaceChildren(el('p', 'Websites could not be loaded. Reload this page to try again.', 'muted'));
-      say(error && error.message ? error.message : 'Websites could not be loaded.', true);
+      say('Websites could not be loaded. Reload this page to try again.', true);
     });
   });
 })();
