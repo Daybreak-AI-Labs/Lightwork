@@ -60,7 +60,9 @@ test('narrow layout, keyboard explanations, unavailable state and accessibility'
   expect(widths[0]).toBeLessThanOrEqual(widths[1]+1);
   await page.locator('[data-metric="cost"]').focus();await page.keyboard.press('Enter');
   await expect(page.locator('#iv-contributions')).toBeFocused();
-  await page.addScriptTag({content:axe.source});
+  // page.evaluate runs the axe source as a script the page's CSP nonce does not
+  // govern (accessibility_axe.spec.js does the same); addScriptTag is blocked.
+  await page.evaluate(axe.source);
   const audit=await page.evaluate(async()=>await axe.run(document.getElementById('iv-app'),{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}}));
   expect(audit.violations).toEqual([]);
   await page.screenshot({path:testInfo.outputPath('work-value-narrow.png'),fullPage:true});
