@@ -376,3 +376,23 @@ def test_unreadable_ledger_refuses_erasure_and_bulk_purge(world, ledger, events)
         ediscovery.assert_no_active_matters()
     assert str(purge.value) == ediscovery.HOLD_UNVERIFIED_MESSAGE
     assert world.conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 2
+
+
+def test_whole_client_erasure_is_refused_while_a_matter_is_active(tmp_path, monkeypatch, events):
+    from maverick import client
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
+    monkeypatch.setenv("MAVERICK_BACKUP_SIGNING_KEY", bytes(range(32)).hex())
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    client.reset_client_cache()
+    try:
+        # The ledger lives in the client's own root, which is what erasure would remove.
+        ledger_path = ediscovery.store_path("acme")
+        ediscovery.MatterStore(ledger_path).create("acme", actor="auditor", values=_values())
+        with pytest.raises(client.ClientErasureError, match="legal hold is active"):
+            client.erase_client()
+        assert ledger_path.exists()
+    finally:
+        client.reset_client_cache()
