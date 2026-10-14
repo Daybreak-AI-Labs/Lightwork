@@ -51,25 +51,13 @@
     if (className) { node.className = className; }
     return node;
   }
-  function problem(response, body) {
-    var detail = body && typeof body.detail === "string" ? body.detail : "";
-    if (window.mvPlainDetail && detail) { return window.mvPlainDetail(detail); }
-    if (detail) { return detail; }
-    return response.status === 403 ? "You need audit access to manage legal holds."
-      : "The change could not be saved. Refresh the page and try again.";
-  }
-  function request(method, url, payload) {
-    var options = { method: method, credentials: "same-origin", headers: {} };
-    if (payload !== undefined) {
-      options.headers["Content-Type"] = "application/json";
-      options.body = JSON.stringify(payload);
-    }
-    return fetch(url, options).then(function (response) {
-      return response.json().catch(function () { return {}; }).then(function (body) {
-        if (!response.ok) { throw new Error(problem(response, body)); }
-        return body;
-      });
-    });
+  // Every request goes through the dashboard's shared fetch helper. The server's
+  // sentence shows only when it is plain; otherwise the failure is named by the action.
+  var AUDIT_ONLY = "You need audit access to manage legal holds.";
+  function request(method, url, payload, action) {
+    var options = { method: method, plainDetail: true, messages: { 403: AUDIT_ONLY } };
+    if (payload !== undefined) { options.body = payload; }
+    return window.mvFetchJSON(url, options, action);
   }
   function dates(matter) {
     if (!matter.date_from && !matter.date_to) { return "All dates"; }
@@ -134,7 +122,7 @@
         record_kinds: data.getAll("record_kinds")
       };
       announce("Saving changes…");
-      request("PATCH", API + "/" + encodeURIComponent(matter.id), payload)
+      request("PATCH", API + "/" + encodeURIComponent(matter.id), payload, "save the changes")
         .then(function () { announce("Changes saved."); reload(); })
         .catch(function (error) { announce(error.message); });
     });
@@ -155,7 +143,7 @@
     form.addEventListener("submit", function (event) {
       event.preventDefault();
       request("POST", API + "/" + encodeURIComponent(matter.id) + "/release",
-              { expected_revision: matter.revision })
+              { expected_revision: matter.revision }, "release the legal hold")
         .then(function () { announce("Legal hold released."); reload(); })
         .catch(function (error) { announce(error.message); });
     });
@@ -163,15 +151,9 @@
   }
   function exportMatter(matter) {
     announce("Preparing the export…");
-    fetch(API + "/" + encodeURIComponent(matter.id) + "/export", { credentials: "same-origin" })
-      .then(function (response) {
-        if (!response.ok) {
-          return response.json().catch(function () { return {}; }).then(function (body) {
-            throw new Error(problem(response, body));
-          });
-        }
-        return response.blob();
-      })
+    window.mvFetchJSON(API + "/" + encodeURIComponent(matter.id) + "/export",
+      { raw: true, plainDetail: true, messages: { 403: AUDIT_ONLY } }, "download the export")
+      .then(function (response) { return response.blob(); })
       .then(function (blob) {
         var url = URL.createObjectURL(blob);
         var link = document.createElement("a");
@@ -229,7 +211,7 @@
     }
   }
   function reload() {
-    request("GET", API).then(function (body) {
+    request("GET", API, undefined, "load the legal holds").then(function (body) {
       render(body.matters, reload, body.truncated);
       announce(body.matters.length ? "" : "No legal holds yet.");
     }).catch(function (error) { announce(error.message); });
@@ -248,7 +230,7 @@
       record_kinds: data.getAll("record_kinds")
     };
     announce("Starting the legal hold…");
-    request("POST", API, payload).then(function () {
+    request("POST", API, payload, "start the legal hold").then(function () {
       creator.reset();
       announce("Legal hold started. Bulk deletion is paused until it is released.");
       reload();
