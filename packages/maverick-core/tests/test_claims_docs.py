@@ -96,3 +96,17 @@ def test_queue_delivery_is_not_described_as_exactly_once():
     }
     for relpath, phrase in stale.items():
         assert phrase not in _read(relpath), f"{relpath} still says {phrase!r}"
+
+
+def test_benchmark_results_say_when_no_live_run_is_recorded():
+    """benchmarks/RESULTS.md holds only a dry-run CI smoke row. While that is the
+    case the file must say that no live-model result is recorded and give the
+    harness command that records one, so the table is not read as measured."""
+    text = _read("benchmarks/RESULTS.md")
+    rows = [line for line in text.splitlines() if line.startswith("| benchmarks/")]
+    if all("dry-run" in row for row in rows):
+        assert "no live-model results are recorded yet" in text.lower()
+    command = "python benchmarks/harness.py benchmarks/longhorizon/research-report.md"
+    assert command in text
+    harness = _read("benchmarks/harness.py")
+    assert '"--max-dollars"' in harness and '"--tag"' in harness
