@@ -1,6 +1,7 @@
 """Server-side session record: register, list, end one, end all, prune."""
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
@@ -130,6 +131,7 @@ def test_a_bearer_key_cannot_end_sessions_and_a_late_audit_refusal_is_reported_h
     assert late.value.status_code == 503 and "were signed out" in late.value.detail
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows keeps no store handle between calls (_KEEP_OPEN)")
 def test_the_store_connection_is_reused_until_the_file_is_replaced():
     with sr._connect() as first:
         pass
@@ -143,6 +145,20 @@ def test_the_store_connection_is_reused_until_the_file_is_replaced():
     _register("after-replace")
     assert sr.status("after-replace") is True
     assert sr.status("never-registered") is None
+
+
+def test_no_store_handle_outlives_a_call_where_the_file_cannot_be_replaced(monkeypatch):
+    # Windows: an open store file cannot be removed or swapped by an operator,
+    # so nothing may keep it open between calls.
+    monkeypatch.setattr(sr, "_KEEP_OPEN", False)
+    _register("s1")
+    assert sr._SHARED["conn"] is None
+    assert sr.status("s1") is True
+    assert sr._SHARED["conn"] is None
+    sr._path().unlink()
+    assert sr.status("s1") is None
+    _register("s2")
+    assert sr.status("s2") is True and sr._SHARED["conn"] is None
 
 
 def test_a_refresh_inside_the_window_does_not_reach_the_store(monkeypatch):

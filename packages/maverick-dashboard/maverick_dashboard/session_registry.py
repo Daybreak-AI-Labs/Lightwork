@@ -105,6 +105,12 @@ def _path() -> Path:
 # The store connection is kept open between calls, under _LOCK, and reopened
 # whenever the file it was opened on is no longer there (replaced, removed, or
 # this is a forked child). Every read still goes to the database.
+#
+# On Windows a file open in one process cannot be removed or replaced by
+# another: Python and SQLite do not request FILE_SHARE_DELETE (see file_lock).
+# There the connection is closed after each call, as it always was, so an
+# operator can still remove or swap the store file between requests.
+_KEEP_OPEN = os.name != "nt"
 _SHARED: dict = {"key": None, "conn": None}
 
 
@@ -156,7 +162,11 @@ def _connect():
             except BaseException:
                 conn.rollback()
                 raise
-            conn.commit()
+            else:
+                conn.commit()
+            finally:
+                if not _KEEP_OPEN:
+                    _drop_shared()
     except (OSError, sqlite3.Error) as exc:
         if isinstance(exc, sqlite3.Error):
             _drop_shared()
