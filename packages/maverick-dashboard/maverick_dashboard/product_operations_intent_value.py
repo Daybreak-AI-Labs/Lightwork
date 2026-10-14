@@ -39,7 +39,7 @@ class DecisionInput(ProposalInput):
 
 
 def metric_snapshot(request, _selection):
-    result = native.report_endpoint(request)
+    result = native.synced_report(request)
     return Snapshot(digest(result["totals"]), "Shared authorized work-value service",
         result["notice"], fields=[{"name": "scope", "label": "Scope", "kind": "select", "required": True,
             "choices": [{"value": "own", "label": "My work"}, {"value": "company", "label": "Company totals"}]},
@@ -48,7 +48,7 @@ def metric_snapshot(request, _selection):
 
 
 def metric_prepare(request, _selection, arguments):
-    result = native.report_endpoint(request, **arguments)
+    result = native.synced_report(request, **arguments)
     return Preview("Audit-backed work and economic estimates for the selected UTC period.", native={
         "Metrics": result["totals"], "Scope": result["scope"], "Assumptions": result["notice"],
         "Evidence": {"href": "/work-value", "label": "Inspect contributing work and calculations"}})
@@ -57,10 +57,11 @@ def metric_prepare(request, _selection, arguments):
 def snapshot_for(kind):
     def snapshot(request, _selection):
         native.authority(request, write=True)
+        native.settings.retry_pending()
         if kind in {"correct", "recalculate", "confirm"}:
             rows = native.records(request)
         else:
-            rows = native.opportunities_endpoint(request, include_decided=True)["opportunities"]
+            rows = native.synced_opportunities(request, include_decided=True)["opportunities"]
         fields = [{"name": "identifier", "label": "Work item" if kind in {"correct", "recalculate", "confirm"} else "Opportunity",
             "kind": "select", "required": True, "choices": [{"value": row["id"], "label": row["label"] + " · " + row["id"][-8:]} for row in rows]}]
         if kind == "correct":

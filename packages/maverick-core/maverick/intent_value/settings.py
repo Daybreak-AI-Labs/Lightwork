@@ -28,10 +28,8 @@ def settings() -> dict:
     value = config.get_value()
     row = SETTINGS.get(SETTINGS_ID)
     if row and row.get("_audit_pending"):
-        SETTINGS.retry_pending(limit=100)
-        row = SETTINGS.get(SETTINGS_ID)
-        if row.get("_audit_pending"):
-            raise RuntimeError("Company assumptions are waiting for their audit receipt.")
+        # Reads never write: the explicit sync or a write path retries the receipt.
+        raise RuntimeError("Company assumptions are waiting for their audit receipt.")
     configured = config.load_config().get("value", {}) or {}
     result = {"revision": 0, "completion_confirmation": policy()["completion_confirmation"],
               "hourly_rate": value["hourly_rate"], "currency": value["currency"],
@@ -78,11 +76,17 @@ def benchmark(identifier):
         return None
     row = BENCHMARKS.get("IVB-" + identifier.replace(".", "-"))
     if row and row.get("_audit_pending"):
-        BENCHMARKS.retry_pending(limit=100)
-        row = BENCHMARKS.get(row["id"])
-        if row.get("_audit_pending"):
-            raise RuntimeError("The company benchmark is waiting for its audit receipt.")
-    return row["benchmark"] if row and not row.get("_audit_pending") else item["benchmark"]
+        # Reads never write: the explicit sync or a write path retries the receipt.
+        raise RuntimeError("The company benchmark is waiting for its audit receipt.")
+    return row["benchmark"] if row else item["benchmark"]
+
+
+def retry_pending() -> int:
+    """Retry the audit receipts of company assumptions and benchmarks.
+
+    Only write-capable flows call this (the explicit sync, saves and prepared
+    actions); a read reports a pending receipt instead of writing it."""
+    return SETTINGS.retry_pending(limit=100) + BENCHMARKS.retry_pending(limit=100)
 
 
 def save_benchmark(identifier, *, minutes, low_minutes, high_minutes, attributable_share,

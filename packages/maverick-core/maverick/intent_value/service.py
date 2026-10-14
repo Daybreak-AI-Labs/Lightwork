@@ -61,11 +61,14 @@ def refresh(world):
     if not policy()["enabled"]:
         raise PermissionError("Work value intelligence is turned off in this workspace.")
     observations = sources.collect(world)
+    # One batched read of the recorded work replaces a read per observation. A
+    # record missing from the batch falls back to a direct read, as before.
+    known = {row["id"]: row for row in WORKS.list(limit=sources.MAX_RECORDS + 1)}
     live = set()
     for source in observations:
         identifier = "IVW-" + digest([source["key"], source["owner"]])[:32]
         live.add(identifier)
-        current = WORKS.get(identifier)
+        current = known[identifier] if identifier in known else WORKS.get(identifier)
         _retain_executed_intent(source, current)
         classified = source.get("executed_classification") or source["classification"]
         if current is None:

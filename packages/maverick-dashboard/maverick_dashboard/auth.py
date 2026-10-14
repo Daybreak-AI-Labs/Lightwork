@@ -907,6 +907,35 @@ def domain_suites_allowed(request: Request, domain: str | None) -> bool:
         raise HTTPException(status_code=503, detail="Access rules for agents and specialists are unavailable right now. Try again in a moment.") from exc
 
 
+def domain_suites_checker(request: Request):
+    """``domain_suites_allowed`` for many packs of one caller within one request.
+
+    A catalogue listing asks the same caller about every pack. The caller's
+    grants are read at most once for the listing; each pack then gets the same
+    suite test and the same fail-closed error as :func:`domain_suites_allowed`.
+    """
+    from maverick.domain import suites_for_domain
+
+    grants: list = []  # Read on first need; ``None`` (unrestricted) must stay distinct from unread.
+
+    def allowed(domain: str | None) -> bool:
+        if not domain:
+            return True
+        try:
+            for suite in suites_for_domain(domain):
+                if not grants:
+                    grants.append(caller_suites(request))
+                if suite is not None and grants[0] is not None and suite not in grants[0]:
+                    return False
+            return True
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Access rules for agents and specialists are unavailable right now. Try again in a moment.") from exc
+
+    return allowed
+
+
 BOARD_SCOPE_DETAIL = (
     "These charts can include work from departments you cannot access. "
     "Ask an administrator to review your access. Your permitted tasks remain available in Chat."

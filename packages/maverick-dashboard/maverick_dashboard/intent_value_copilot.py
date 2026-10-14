@@ -12,7 +12,7 @@ from maverick import crypto_at_rest
 
 from . import auth
 from .draft_api import context_for
-from .intent_value_api import _call, opportunities_endpoint, read_report
+from .intent_value_api import _call, read_report, synced_opportunities
 
 PURPOSE = "lightwork.intent-value-query.v1"
 FOLLOWUPS = {"why", "why did it fall", "why did that number fall", "what about last month",
@@ -209,13 +209,13 @@ def _answer(request, message, page, token, permissions):
         reply += (" Agent contributions by estimated gross labor value: " + "; ".join(
             row.get("label", row["id"]) + " " + _money(row["gross_estimated_labor_value"], row["currency"]) for row in entries[:5]) + ". Contributions overlap and are not additive.") if entries else " No attributed agent contributions are available in this scope."
     if "save more" in normalized or "improve" in normalized:
-        suggestions = opportunities_endpoint(request)
+        suggestions = synced_opportunities(request)
         proposals = suggestions["opportunities"]
         reply += (" " + suggestions["notice"] if not suggestions["recommendations_enabled"] else
                   f" There are {len(proposals)} suggestions for your accessible work. " +
                   (proposals[0]["label"] + ": " + proposals[0]["current_evidence"]["reason"] if proposals else "More identifiable work and completed examples are needed."))
     href = "/work-value?" + urlencode(query)
     return {"reply": reply, "mode": "live", "source": "Work value: shared metric service",
-            "checked_at": result["checked_at"], "metrics": result,
+            "checked_at": time.time(), "metrics": result,  # This answer's read recorded new work first.
             "conversation_token": _context_token(request, permissions, query),
             "action_link": {"href": href, "label": "Inspect contributing work and assumptions"}}

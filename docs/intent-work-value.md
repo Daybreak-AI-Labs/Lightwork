@@ -71,16 +71,29 @@ publication evidence survives later publication changes.
 | Recovery authority and persistence inventories | Derived analytics/assumptions restore as data and are rechecked against current sources; recommendation draft/adoption receipts retain the native restore hold until reconciled |
 | Domain profiles and owned native flows | Accessible capability matching prefers an existing process; reuse does not create a duplicate builder |
 | `flow.evolve`, node outcomes/tool traces | Existing supported evolution signals are shown in reuse explanations; linked execution costs update the next-review reference without overwriting forecasts |
-| Ekko `governed_candidate_projection` | Live owner/device/consent-bound patterns appear with native evidence/draft links; no raw event content is copied, no business intent or executed benefit is fabricated |
+| Ekko `governed_candidate_projection` | Live owner/device/consent-bound patterns appear with native evidence/draft links; no raw event content is copied, no business intent or executed benefit is fabricated. A read excludes expired events and never deletes them; expired ciphertext is removed by the store's own write and maintenance paths |
 | Copilot sealed conversation context, product operations | Provider-free metric answers call `read_report`; scoped follow-ups are sealed to tenant/account/current permissions. Reviewed correction, recalculation, optional confirmation, company assumptions, benchmark override, decision, use and draft operations call the native endpoints |
 | Dashboard route catalogue, Jinja shell, shared style tokens | `/work-value`, native explanation dialog, responsive report, opportunities, benchmark/rate controls, error and retry states |
 | Installer and All settings | `[intent_value] enabled` and `recommendations` controls; optional completion confirmation defaults off |
 
 There is no new world-schema migration or queue. Derived work is refreshed on
 demand from complete native reads, including page/Copilot requests. A bad source
-read returns unavailable rather than a zero report. Native governed stores
-support both existing storage backends; this feature does not change deployment,
-API authentication, billing, connection or activation policy.
+read returns unavailable rather than a zero report. Read endpoints do not record
+work or suggestions: `GET` reports the recorded ledger, and the page records newly
+observed work through `POST /api/v1/intent-value/sync` before it reads. A read
+never retries a pending audit receipt; the sync, saves and prepared actions do.
+A read withholds a work item whose recorded flow run, task or conversation turn
+has since been deleted, until the sync retires or re-derives it; the item's
+explanation answers not found. `recorded_as_of` in a report is the newest
+recorded change, not the time of the read. Each newly observed item keeps the
+estimate assumptions in force when it was first recorded. Saving company
+assumptions or a benchmark first records observed work. If that work cannot be
+read completely, the save is refused (503 or 422) and nothing changes, so an
+administrator cannot change the rate during a source outage. The guarantee
+covers work recorded before the save: work that finishes while a save runs is
+recorded afterwards under the new assumptions. Native governed stores support
+both existing storage backends; this feature does not change deployment, API
+authentication, billing, connection or activation policy.
 
 ## Economic and grouping contract
 

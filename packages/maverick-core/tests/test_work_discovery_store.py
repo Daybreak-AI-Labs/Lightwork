@@ -1225,3 +1225,34 @@ def test_session_quota_bounds_create_stop_churn(store, monkeypatch):
 
     with pytest.raises(WorkDiscoveryStoreError, match="session quota"):
         store.create_session(policy=policy)
+
+
+def _raw_event_rows(store):
+    with sqlite3.connect(store.path) as conn:
+        return conn.execute(
+            "SELECT event_id,event_digest,ingested_at,expires_at,payload FROM ekko_events "
+            "WHERE tenant_key=? AND owner_key=? AND device_key=? ORDER BY event_id",
+            store._scope,
+        ).fetchall()
+
+
+def test_governed_projection_excludes_expired_events_without_deleting_them(store):
+    # A read of the knowledge projection must not write: expired ciphertext is
+    # left for the store's own maintenance paths (append, list, status, prune).
+    policy = _policy()
+    store.enroll(policy)
+    store.create_session(policy=policy, session_id="expired-session")
+    _append(store, _event("expired-session"), policy)
+    stored = _raw_event_rows(store)
+    assert len(stored) == 1
+    # Events keep 14 days; enrollment lasts 30 days. Read 15 days later.
+    later = WorkDiscoveryStore(
+        "alice", "laptop-1", tenant="acme", path=store.path,
+        clock=lambda: NOW + 15 * 86_400.0, authority_check=_no_authority_check,
+    )
+
+    projection = later.governed_candidate_projection()
+
+    assert projection["lineage"]["event_count"] == 0
+    assert projection["candidates"] == []
+    assert _raw_event_rows(later) == stored
