@@ -484,6 +484,8 @@ def test_azure_sign_refused_by_the_vault_names_the_missing_permission():
     with pytest.raises(EncryptionUnavailable, match="keys/sign") as err:
         kek.wrap(b"\x42" * 32, context=b"c")
     assert marker not in str(err.value)
+    # The service error must not ride along as __context__ either (raised outside except).
+    assert err.value.__context__ is None
 
 
 @pytest.mark.parametrize("error, expected", [
@@ -493,8 +495,9 @@ def test_azure_sign_refused_by_the_vault_names_the_missing_permission():
 def test_azure_verify_refused_by_the_vault_refuses_the_envelope(error, expected):
     kek, fake = _azure_kek(verify_error=error)
     wrapped = kek.wrap(b"\x42" * 32, context=b"c")
-    with pytest.raises(EncryptionUnavailable, match=expected):
+    with pytest.raises(EncryptionUnavailable, match=expected) as err:
         kek.unwrap(wrapped, context=b"c")
+    assert err.value.__context__ is None
     assert not any(op == "unwrap" for op, *_ in fake.log)
 
 

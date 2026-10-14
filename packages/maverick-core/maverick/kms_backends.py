@@ -338,20 +338,26 @@ class AzureKeyVaultKEK:
         encrypted_key, key_id_bytes = bytes(wrapped.encrypted_key), key_id.encode("utf-8")
         digest = _azure_sig_digest(encrypted_key, key_id_bytes, nonce, sealed, context or b"")
         client = self._crypto(key_id)
+        refused = None
         try:
             signed = client.sign(_azure_sig_alg(), digest)
         except Exception as err:
-            raise _azure_refused("sign", "keys/sign", err) from None
+            refused = _azure_refused("sign", "keys/sign", err)
+        if refused is not None:
+            raise refused  # outside the except block, so the service error is not __context__
         return (_AZURE_MAGIC + _len2(encrypted_key) + _len2(key_id_bytes)
                 + _len2(bytes(signed.signature)) + nonce + sealed)
 
     def _check_signature(self, key_id: str, digest: bytes, signature: bytes) -> None:
         """Refuse unless the key identified by ``key_id`` signed ``digest`` (PS256)."""
         client = self._crypto(key_id)
+        refused = None
         try:
             verified = client.verify(_azure_sig_alg(), digest, signature)
         except Exception as err:
-            raise _azure_refused("verify", _AZURE_VERIFY_PERMISSION, err) from None
+            refused = _azure_refused("verify", _AZURE_VERIFY_PERMISSION, err)
+        if refused is not None:
+            raise refused  # outside the except block, so the service error is not __context__
         if not verified.is_valid:
             raise EncryptionUnavailable(
                 "Azure KMS envelope signature is not valid: it was not made by this Key Vault "
