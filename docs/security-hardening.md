@@ -470,22 +470,38 @@ the owner signs in with a code from the app (or a recovery code) and makes new
 codes, and the administrator then sets `off` again. Keep the recovery codes
 somewhere safe while the phone is still at hand.
 
-There is no reset that avoids a code. If the phone is lost and every recovery
-code has been used, nothing in Lightwork can give a code, so this computer's
-owner account cannot sign in until a decision is made about a code-free reset.
+If the phone is lost and every recovery code has been used, someone at this
+computer can reset the app from its command line:
 
-Open decision for the owner: the passphrase-only operations that change company
-sign-in do not ask for a code. They are the company sign-in recovery routes
-(`/auth/company-saml-recovery/...` and `/auth/company-signin-recovery/...`) and
-the review steps that call the same owner check (company SAML setup and company
-sign-in migration). These routes are reachable only from this computer's loopback
-address, carry no session, and check the original owner's passphrase on every
-request. An enrolled owner can therefore change company sign-in with the
-passphrase alone. Asking for a code here is not a one-line change: each step
-re-checks the passphrase, and a code is spent once, so every step would need its
-own fresh code or a recovery session. Until the owner decides, this is an accepted
-limit: the authenticator app protects sign-in to the dashboard, not these
-operations.
+```
+maverick owner reset-authenticator
+```
+
+The command asks for the owner's email to confirm. It then turns the app off,
+deletes its recovery codes, and removes any set-up under way and any pending
+sign-in or recovery steps. The change is recorded in the activity log first; if
+the log refuses it, nothing changes. The command prints that the owner must set
+the app up again. With `totp = "required"`, the owner's next passphrase sign-in
+forces that set-up before anything else. No dashboard route can do this, and it
+does not change the passphrase.
+
+Company sign-in changes and their recovery also check the owner's passphrase.
+An owner with an authenticator app must give a current code, or an unused
+recovery code, on the first step of each restricted flow: the company sign-in
+activation review, the company sign-in recovery form, the single-sign-on
+activation review and the single-sign-on recovery form. The code issues a
+recovery proof for that flow only. The proof is a random token, valid for ten
+minutes. The owner record keeps only a SHA-256 digest of it, bound to the owner
+and the flow name, and the browser receives it as an HttpOnly, SameSite=Strict
+cookie on that flow's own path. Later steps of the same flow accept the proof
+instead of a code, still check the passphrase, and refuse a proof issued to any
+other flow. The proof is spent when the flow completes or the owner cancels it.
+A wrong or missing code counts toward the same one-minute lock as a wrong
+passphrase, and a correct passphrase does not clear that lock while a code is
+due. Issuing and using a proof are recorded in the activity log without any code
+or token. The recovery routes are reachable only from this computer's loopback
+address and carry no session; the activation reviews need the owner's session.
+An owner without an authenticator app sees no change.
 
 ## OIDC SSO authentication
 
