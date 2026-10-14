@@ -67,10 +67,13 @@ def test_firecracker_is_described_as_a_scaffold_not_a_deploy_target():
     local scaffold unsupported. Any doc line that names Firecracker as a deploy
     target or shipped backend must say it is an experimental scaffold."""
     checked = {
+        "README.md": None,
         "SECURITY.md": None,
         "pitch/SECURITY-QUESTIONNAIRE.md": "deploy targets",
         "docs/architecture.md": None,
         "docs/handbook.md": None,
+        "docs/configuration.md": None,
+        "docs/env-vars.md": None,
         "docs/programs/press-and-case-studies.md": None,
     }
     enterprise = sorted(
@@ -79,9 +82,17 @@ def test_firecracker_is_described_as_a_scaffold_not_a_deploy_target():
     )
     for relpath in enterprise:
         checked.setdefault(relpath, None)
+    # The backend option list and the MAVERICK_FIRECRACKER_STRICT row name
+    # Firecracker as an accepted value, not as a shipped target.
+    accepted_values = {
+        "docs/configuration.md": "local | docker | ssh | podman | devcontainer | firecracker | kubernetes",
+        "docs/env-vars.md": "`MAVERICK_FIRECRACKER_STRICT`",
+    }
     for relpath, needle in checked.items():
         for line in _read(relpath).splitlines():
             if "firecracker" not in line.lower() or (needle and needle not in line):
+                continue
+            if relpath in accepted_values and accepted_values[relpath] in line:
                 continue
             assert "scaffold" in line.lower(), f"{relpath}: {line[:120]}"
 
