@@ -2945,24 +2945,24 @@ class WorldModel:
     def episodes_by_goal(self, goal_ids, *, per_goal: int = 50) -> dict[int, list[EpisodeSpend]]:
         """The newest ``per_goal`` runs of each listed goal, newest first: the
         rows ``list_episodes(goal_id=..., limit=per_goal)`` returns for each
-        goal, read in one query per 500 goals with one decode. Every listed
-        goal is a key, with an empty list when it has no runs."""
-        found: dict[int, list[EpisodeSpend]] = {}
+        goal, in the same order. Each goal is read by its own query, which the
+        (goal_id, started_at) index stops after ``per_goal`` rows, so a goal
+        with many runs is never read in full; the rows are then decoded in one
+        pass, resolving the encryption policy and keys once for all of them.
+        Every listed goal is a key, with an empty list when it has no runs.
+        """
         ids = list(dict.fromkeys(int(goal_id) for goal_id in goal_ids))
         cap = max(1, int(per_goal))
+        rows: list = []
         for gid in ids:
-            found[gid] = []
-        for chunk in self._chunks(ids):
-            placeholders = ",".join("?" * len(chunk))
-            rows = self._read_all(
-                "SELECT * FROM (SELECT " + _EPISODE_SPEND_COLS + ", ROW_NUMBER() OVER ("
-                "PARTITION BY e.goal_id ORDER BY e.started_at DESC, e.id DESC) AS rn "
-                f"FROM episodes e WHERE e.goal_id IN ({placeholders})) "
-                "WHERE rn <= ? ORDER BY goal_id, rn",
-                (*chunk, cap),
-            )
-            for episode in _episode_spends_from_rows(rows):
-                found[episode.goal_id].append(episode)
+            rows.extend(self._read_all(
+                "SELECT " + _EPISODE_SPEND_COLS + "FROM episodes e WHERE e.goal_id = ? "
+                "ORDER BY e.started_at DESC LIMIT ?",
+                (gid, cap),
+            ))
+        found: dict[int, list[EpisodeSpend]] = {gid: [] for gid in ids}
+        for episode in _episode_spends_from_rows(rows):
+            found[episode.goal_id].append(episode)
         return found
 
     def episodes_for_owner_goals(self, owner: str, *, goal_limit: int = 10_000,

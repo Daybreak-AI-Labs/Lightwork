@@ -150,3 +150,20 @@ def test_goal_costs_and_newest_runs_match_goal_by_goal_reads(tmp_path):
     assert goal_costs(world, limit=20) == goal_costs(_GoalByGoal(world), limit=20)
     assert len(goal_costs(world)) == 3
 
+
+def test_episodes_by_goal_keeps_the_runs_list_episodes_keeps_at_a_tied_cut_off(tmp_path):
+    # Runs that share a start time straddle the per-goal cut-off here. The batch
+    # must keep the same runs list_episodes(goal_id=..., limit=...) keeps.
+    from maverick.world_model import WorldModel
+
+    world = WorldModel(tmp_path / "w.db")
+    goals = [world.create_goal(f"tied {i}", owner="user:alice") for i in range(2)]
+    with world._writing() as conn:
+        for index in range(90):
+            conn.execute(
+                "INSERT INTO episodes(goal_id, started_at, cost_dollars) VALUES (?, ?, ?)",
+                (goals[index % 2], 5_000.0 + index // 15, 0.01),
+            )
+    batch = world.episodes_by_goal(goals, per_goal=7)
+    for gid in goals:
+        assert [e.id for e in batch[gid]] == [e.id for e in world.list_episodes(goal_id=gid, limit=7)]
