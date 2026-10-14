@@ -122,17 +122,46 @@ def test_trajectory_controls_have_aria_labels(monkeypatch, tmp_path):
 
 # ---------- no inline event-handler attributes (script-src carries no unsafe-inline) ----------
 
+INLINE_HANDLER_TAG = re.compile(r"<[A-Za-z][^<>]*>")
+# An on*= name follows whitespace, a quote, or the end of a Jinja tag, so an
+# unquoted value or a handler right after {% if %} is still found.
+INLINE_HANDLER_NAME = re.compile(r"(?<=[\s\"'%}])on[a-z]+\s*=", re.IGNORECASE)
+
+
+def _inline_handlers(text: str) -> list[tuple[int, str]]:
+    """The (offset, name) of each on*= attribute written inside an HTML tag. Only
+    tags are searched, so a JS property such as ``el.onerror =`` is not matched."""
+    found = []
+    for tag in INLINE_HANDLER_TAG.finditer(text):
+        for name in INLINE_HANDLER_NAME.finditer(tag.group(0)):
+            found.append((tag.start() + name.start(), name.group(0)))
+    return found
+
+
 def test_no_template_uses_an_inline_event_handler_attribute():
     """An ``onclick="..."`` attribute is an inline script: a script-src nonce
     does not admit it, so each handler is an addEventListener in a script."""
-    handlers = re.compile(r"\s(on[a-z]+)\s*=\s*[\"']", re.IGNORECASE)
     found = []
     for path in sorted(TEMPLATES.rglob("*.html")):
         text = path.read_text(encoding="utf-8")
-        for match in handlers.finditer(text):
-            line = text.count("\n", 0, match.start()) + 1
-            found.append(f"{path.relative_to(TEMPLATES)}:{line} {match.group(1)}=")
+        for offset, name in _inline_handlers(text):
+            line = text.count("\n", 0, offset) + 1
+            found.append(f"{path.relative_to(TEMPLATES)}:{line} {name}")
     assert found == []
+
+
+def test_inline_handler_scan_finds_jinja_and_unquoted_forms():
+    """The template scan is only as strong as its matcher, so it must find each
+    handler form that the templates could use, and ignore plain script code."""
+    def names(text):
+        return [name for _, name in _inline_handlers(text)]
+
+    assert names('<button onclick="x()">') == ["onclick="]
+    assert names('<button ONCLICK="x()">') == ["ONCLICK="]
+    assert names('<button{% if a %}onclick="x()"{% endif %}>') == ["onclick="]
+    assert names('<button onclick=x()>') == ["onclick="]
+    assert names('<button class="a"onchange="x()">') == ["onchange="]
+    assert names('<script>el.onerror = f; var one = 2;</script>') == []
 
 
 # ---------- every inline template script carries the response nonce ----------
