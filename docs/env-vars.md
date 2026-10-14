@@ -320,8 +320,12 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_RESIDENCY_STRICT` | config `[residency] strict` (off) | Refuse to boot when the declared data region is missing or outside the allowed set (`require_residency_or_die`). Off = informational only. |
 | `MAVERICK_DATA_REGION` | config `[residency] region` | The deployment's declared data region (ISO code or group, e.g. `DE`, `EU`). |
 | `MAVERICK_RESIDENCY_ALLOWED` | config `[residency] allowed_regions` | Comma-separated permitted storage regions; `EU`/`EEA` groups expand to members. Empty = region unconstrained. |
-| `MAVERICK_SIEM_DEST` | config `[audit] siem_dest` | Destination for `maverick audit forward`: `tcp://host:port` / `udp://host:port` (syslog) or `http(s)://host/path` (Splunk HEC `/raw`, etc.). |
+| `MAVERICK_SIEM_DEST` | config `[audit] siem_dest` | Destination for `maverick audit forward`: `tcp://host:port` / `udp://host:port` (syslog), `http(s)://host/path` (Splunk HEC `/raw`, etc.), `datadog://<site>` (Datadog Logs intake for a documented site such as `datadoghq.com` or `datadoghq.eu`), or `sentinel://<dce-host>/<dcr-immutable-id>/Custom-<stream>` (Microsoft Sentinel through the Azure Monitor Logs Ingestion API; the host must end in `.monitor.azure.com`). The Sentinel DCR stream must declare `TimeGenerated` (datetime) and `RawData` (string). Each line becomes one row with the event time from its `ts` field, or now. A Datadog log over 1 MB or a Sentinel line over 64 KB is refused instead of truncated. |
 | `MAVERICK_SIEM_TOKEN` | — | Bearer sent on HTTP(S) audit forwarding (read via the secret provider). |
+| `MAVERICK_DATADOG_API_KEY` | config `[audit] datadog_api_key` | Datadog API key for `datadog://` forwarding, sent in the `DD-API-KEY` header (read via the secret provider; never logged or put in the URI). |
+| `MAVERICK_SENTINEL_TENANT_ID` | config `[audit] sentinel_tenant_id` | Microsoft Entra directory (tenant) ID for `sentinel://` forwarding. |
+| `MAVERICK_SENTINEL_CLIENT_ID` | config `[audit] sentinel_client_id` | Application (client) ID of the Entra app registration that has the Monitoring Metrics Publisher role on the data collection rule. |
+| `MAVERICK_SENTINEL_CLIENT_SECRET` | config `[audit] sentinel_client_secret` | Client secret of that app registration (read via the secret provider; never logged). |
 
 ## Observability
 
@@ -433,6 +437,10 @@ variable still wins; with neither set, behaviour is unchanged.
 | `MAVERICK_FEDERATION_RATE_LIMIT` | `[federation] rate_limit` |
 | `MAVERICK_SIEM_TOKEN` | `[audit] siem_token` |
 | `MAVERICK_SIEM_ALLOW_INSECURE` | `[audit] siem_allow_insecure` |
+| `MAVERICK_DATADOG_API_KEY` | `[audit] datadog_api_key` |
+| `MAVERICK_SENTINEL_TENANT_ID` | `[audit] sentinel_tenant_id` |
+| `MAVERICK_SENTINEL_CLIENT_ID` | `[audit] sentinel_client_id` |
+| `MAVERICK_SENTINEL_CLIENT_SECRET` | `[audit] sentinel_client_secret` |
 | `MAVERICK_PUBLIC_BASE_URL` | `[channels] public_base_url` |
 
 `MAVERICK_SETTINGS_PATH_ROOTS` (deployment only) replaces the list of places a
