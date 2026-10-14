@@ -171,9 +171,18 @@ def test_flags_otlp_telemetry_switches_in_config(switch, value):
 
 
 @pytest.mark.parametrize(("switch", "value"), [
-    ("otel_exporter", ""), ("otlp_metrics", False), ("otlp_metrics", "false")])
+    ("otel_exporter", ""), ("otel_exporter", False), ("otel_exporter", "false"),
+    ("otel_exporter", "0"), ("otel_exporter", "off"), ("otel_exporter", "console"),
+    ("otlp_metrics", False), ("otlp_metrics", "false"), ("otlp_metrics", "0"),
+    ("otlp_metrics", "off")])
 def test_off_otlp_telemetry_switches_stay_clean(switch, value):
+    # A TOML false, or a word the runtime reads as off, is not a telemetry sink.
     assert audit(config=_fully_local_with({switch: value}))["clean"] is True
+
+
+@pytest.mark.parametrize("value", [False, "false", "0", "off", ""])
+def test_off_sentry_dsn_stays_clean(value):
+    assert audit(config=_fully_local_with({"sentry_dsn": value}))["clean"] is True
 
 
 def test_deny_all_egress_without_enterprise_mode_is_flagged():

@@ -14,6 +14,7 @@ otel-dependent tests.
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import importlib
 import sys
@@ -473,3 +474,279 @@ def test_mark_span_failed_sets_the_error_status(monkeypatch):
         StatusCode=types.SimpleNamespace(ERROR="ERROR")))
     obs.mark_span_failed(_Span())
     assert statuses == ["ERROR"]
+
+
+# ---------- failed spans name the exception type, never its message ----------
+
+class _SDKSpan:
+    """What the span keeps: attributes, events and the status."""
+
+    def __init__(self):
+        self.attributes = {}
+        self.events = []
+        self.status = None
+
+    def set_attribute(self, key, value):
+        self.attributes[key] = value
+
+    def set_status(self, status, description=None):
+        self.status = (status, description)
+
+
+class _SDKTracer:
+    """Stand-in for the SDK tracer, with its default exception handling.
+
+    Unless a caller turns them off, ``start_as_current_span`` records the exception
+    message as an event and sets an ERROR status carrying the message, as the SDK does.
+    """
+
+    def __init__(self):
+        self.spans = []
+        self.options = []
+
+    @contextlib.contextmanager
+    def start_as_current_span(self, name, record_exception=True,
+                              set_status_on_exception=True, **_kwargs):
+        span = _SDKSpan()
+        self.spans.append((name, span))
+        self.options.append((record_exception, set_status_on_exception))
+        try:
+            yield span
+        except BaseException as error:
+            if record_exception:
+                span.events.append(("exception", str(error)))
+            if set_status_on_exception:
+                span.status = ("ERROR", str(error))
+            raise
+
+
+@pytest.fixture
+def sdk_tracer(monkeypatch):
+    tracer = _SDKTracer()
+    monkeypatch.setattr(obs, "_initialized", True)
+    monkeypatch.setattr(obs, "_tracer", tracer)
+    monkeypatch.setattr(obs, "_trace_api", types.SimpleNamespace(
+        StatusCode=types.SimpleNamespace(ERROR="ERROR")))
+    monkeypatch.setattr(obs, "_sentry", None)
+    return tracer
+
+
+def test_failed_span_records_no_message_and_names_only_the_type(sdk_tracer):
+    secret = "sk-live-do-not-export"  # pragma: allowlist secret
+    with pytest.raises(RuntimeError):
+        with obs.trace_span("tool.run", attributes={"tool.name": "fetch"}):
+            raise RuntimeError(f"upstream rejected {secret}")
+    ((name, span),) = sdk_tracer.spans
+    assert name == "tool.run"
+    assert span.events == []
+    assert span.status == ("ERROR", "RuntimeError")
+    assert span.attributes["error.type"] == "RuntimeError"
+    assert secret not in repr((span.events, span.status, span.attributes))
+
+
+def test_every_trace_span_opens_with_sdk_exception_recording_off(sdk_tracer):
+    # Tool, provider and agent spans all come through trace_span().
+    with obs.trace_span("provider.call"):
+        pass
+    with pytest.raises(ValueError):
+        with obs.trace_span("agent.turn"):
+            raise ValueError("boom")
+    assert sdk_tracer.options == [(False, False), (False, False)]
+
+
+def test_successful_span_gets_no_error_status(sdk_tracer):
+    with obs.trace_span("agent.turn") as span:
+        assert span is not None
+    ((_, span),) = sdk_tracer.spans
+    assert span.status is None
+    assert "error.type" not in span.attributes
+
+
+@pytest.mark.parametrize("error", [asyncio.CancelledError("stop"), GeneratorExit()])
+def test_cancelled_span_is_not_marked_as_an_error(sdk_tracer, error):
+    # As the SDK does, only an Exception makes a span an error; a cancellation or a
+    # GeneratorExit propagates unchanged and leaves the status unset.
+    with pytest.raises(type(error)):
+        with obs.trace_span("tool.run"):
+            raise error
+    ((_, span),) = sdk_tracer.spans
+    assert span.status is None
+
+
+def test_real_sdk_failed_span_exports_type_and_no_message(monkeypatch):
+    pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry import trace as trace_api
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(obs, "_initialized", True)
+    monkeypatch.setattr(obs, "_sentry", None)
+    monkeypatch.setattr(obs, "_tracer", provider.get_tracer("test"))
+    monkeypatch.setattr(obs, "_trace_api", trace_api)
+    with pytest.raises(ValueError):
+        with obs.trace_span("tool.run"):
+            raise ValueError("token sk-live-do-not-export")
+    (span,) = exporter.get_finished_spans()
+    assert list(span.events) == []
+    assert span.status.status_code == trace_api.StatusCode.ERROR
+    assert span.status.description == "ValueError"
+    assert "sk-live-do-not-export" not in repr(span.attributes)
+
+
+# ---------- on/off settings: the same reading from the environment and from config ----------
+
+_OFF_VALUES = [False, "false", "0", "off", "no", ""]
+_ON_VALUES = [True, "1", "true", "yes", "on"]
+
+
+@pytest.fixture
+def no_config(monkeypatch):
+    """No configuration file and no DSN in the environment; each test sets one switch."""
+    import maverick.config as config_mod
+
+    monkeypatch.setattr(config_mod, "load_config", dict)
+    monkeypatch.delenv("MAVERICK_SENTRY_DSN", raising=False)
+    return config_mod
+
+
+def _config_switch(monkeypatch, config_mod, key, value):
+    monkeypatch.setattr(config_mod, "load_config", lambda: {"observability": {key: value}})
+
+
+@pytest.mark.parametrize("value", _OFF_VALUES)
+def test_off_spellings_are_off_and_blank_or_off(value):
+    assert obs.switch_is_on(value) is False
+    assert obs.setting_is_blank_or_off(value) is True
+
+
+@pytest.mark.parametrize("value", _ON_VALUES + ["  ON  ", "otlp"])
+def test_on_spellings_are_on_and_not_blank(value):
+    assert obs.switch_is_on(value, extra_on=frozenset({"otlp"})) is True
+    assert obs.setting_is_blank_or_off(value) is False
+
+
+@pytest.mark.parametrize("value", ["console", "otlp/http"])
+def test_unlisted_text_is_off(value):
+    # Only the documented exporter value (and the on-words) turn a switch on.
+    assert obs.switch_is_on(value, extra_on=frozenset({"otlp"})) is False
+
+
+# (env var, [observability] key, reader, values that turn it on)
+_SWITCHES = [
+    ("MAVERICK_OTEL_METRICS", "otlp_metrics", "_otlp_metrics_enabled", _ON_VALUES),
+    ("MAVERICK_OTEL_EXPORTER", "otel_exporter", "_otel_enabled", ["otlp", "OTLP", True, "1"]),
+]
+_SWITCH_OFF = [(env, key, fn, value) for env, key, fn, _on in _SWITCHES for value in _OFF_VALUES]
+_SWITCH_ON = [(env, key, fn, value) for env, key, fn, on in _SWITCHES for value in on]
+
+
+@pytest.mark.parametrize(("env", "key", "fn", "value"), _SWITCH_OFF)
+def test_switch_is_off_from_config(no_config, monkeypatch, env, key, fn, value):
+    _config_switch(monkeypatch, no_config, key, value)
+    assert getattr(obs, fn)() is False
+
+
+@pytest.mark.parametrize(("env", "key", "fn", "value"), _SWITCH_ON)
+def test_switch_is_on_from_config(no_config, monkeypatch, env, key, fn, value):
+    _config_switch(monkeypatch, no_config, key, value)
+    assert getattr(obs, fn)() is True
+
+
+@pytest.mark.parametrize(("env", "key", "fn"), [(e, k, f) for e, k, f, _on in _SWITCHES])
+@pytest.mark.parametrize("value", ["false", "0", "off", "no"])
+def test_switch_is_off_from_env(no_config, monkeypatch, env, key, fn, value):
+    # A blank env var is unset and falls through to config, so it is not listed here.
+    monkeypatch.setenv(env, value)
+    assert getattr(obs, fn)() is False
+
+
+@pytest.mark.parametrize(("env", "key", "fn", "value"), _SWITCH_ON)
+def test_switch_is_on_from_env(no_config, monkeypatch, env, key, fn, value):
+    monkeypatch.setenv(env, str(value))
+    assert getattr(obs, fn)() is True
+
+
+@pytest.mark.parametrize(("env", "key", "fn", "value"), _SWITCH_ON)
+def test_env_switch_wins_over_config_both_ways(no_config, monkeypatch, env, key, fn, value):
+    _config_switch(monkeypatch, no_config, key, value)
+    monkeypatch.setenv(env, "false")
+    assert getattr(obs, fn)() is False
+    _config_switch(monkeypatch, no_config, key, False)
+    monkeypatch.setenv(env, str(value))
+    assert getattr(obs, fn)() is True
+
+
+@pytest.mark.parametrize("value", _OFF_VALUES)
+def test_prometheus_port_off_values_do_not_publish(no_config, monkeypatch, value):
+    # A config false arrives as "0": without this, the exporter would bind a random port.
+    _config_switch(monkeypatch, no_config, "prometheus_port", value)
+    assert obs._prometheus_enabled() is False
+
+
+@pytest.mark.parametrize("value", [9100, "9100"])
+def test_prometheus_port_on_from_config(no_config, monkeypatch, value):
+    _config_switch(monkeypatch, no_config, "prometheus_port", value)
+    assert obs._prometheus_enabled() is True
+
+
+@pytest.mark.parametrize("value", ["0", "off", "false", "no"])
+def test_prometheus_port_off_from_env(no_config, monkeypatch, value):
+    monkeypatch.setenv("MAVERICK_PROMETHEUS_PORT", value)
+    assert obs._prometheus_enabled() is False
+
+
+def _fake_prometheus(monkeypatch):
+    started = []
+    fake = types.ModuleType("prometheus_client")
+
+    class _Metric:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+    fake.Counter = _Metric
+    fake.Histogram = _Metric
+    fake.start_http_server = lambda port, addr=None: started.append(port)
+    monkeypatch.setitem(sys.modules, "prometheus_client", fake)
+    return started
+
+
+def test_false_prometheus_port_never_starts_the_server(no_config, monkeypatch):
+    started = _fake_prometheus(monkeypatch)
+    _config_switch(monkeypatch, no_config, "prometheus_port", False)
+    obs._initialize()
+    assert started == []
+
+
+def test_numeric_prometheus_port_starts_the_server(no_config, monkeypatch):
+    # Positive control for the test above: a real port does start the server.
+    started = _fake_prometheus(monkeypatch)
+    _config_switch(monkeypatch, no_config, "prometheus_port", 9100)
+    obs._initialize()
+    assert started == [9100]
+
+
+@pytest.mark.parametrize("value", [False, "false", "0", "off", "no", ""])
+def test_sentry_dsn_off_values_mean_no_sentry(no_config, monkeypatch, value):
+    _config_switch(monkeypatch, no_config, "sentry_dsn", value)
+    assert obs._sentry_dsn() == ""
+    assert obs._sentry_enabled() is False
+
+
+@pytest.mark.parametrize("value", ["false", "0", "off", "no"])
+def test_sentry_dsn_off_words_from_env_mean_no_sentry(no_config, monkeypatch, value):
+    monkeypatch.setenv("MAVERICK_SENTRY_DSN", value)
+    assert obs._sentry_dsn() == ""
+
+
+def test_sentry_dsn_from_config_and_env_are_read(no_config, monkeypatch):
+    dsn = "https://k@o0.ingest.sentry.io/1"
+    _config_switch(monkeypatch, no_config, "sentry_dsn", dsn)
+    assert obs._sentry_dsn() == dsn
+    monkeypatch.setenv("MAVERICK_SENTRY_DSN", "  " + dsn + "  ")
+    assert obs._sentry_dsn() == dsn
