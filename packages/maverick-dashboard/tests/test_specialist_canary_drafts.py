@@ -232,3 +232,62 @@ def test_publishing_a_brand_new_specialist_is_not_a_trial(client, monkeypatch, t
     assert published.status_code == 200 and published.json()["confirmed"] is True, published.text
     assert canary.live(name) is None
     assert app.get("/api/v1/agents/" + name).json()["persona"] == NEW
+
+
+def _review_named(app, name, action):
+    context = app.get("/api/v1/agent-override-changes").json()["context"]
+    return app.post("/api/v1/agent-override-changes/review", json={"name": name, "action": action, "context": context})
+
+
+def test_a_reset_is_refused_while_a_trial_is_live_whether_reviewed_before_or_during(client, monkeypatch, tmp_path):
+    from maverick import domain_edit
+    from maverick import specialist_canary as canary
+
+    app = client
+    _question(app, 0)
+    _publish_changed(app, _saved_draft(app, {"persona": NEW}))
+    assert domain_edit.read_override(PACK).get("persona") == NEW
+    early = _review_named(app, PACK, "reset_builtin")
+    assert early.status_code == 200, early.text
+    _trials_on(monkeypatch, tmp_path, 40)
+    _publish_changed(app, _saved_draft(app, {"persona": NEWER}))
+    assert canary.live(PACK) is not None
+    # A review prepared before the trial started cannot be applied while it is live.
+    applied = app.post("/api/v1/agent-override-changes/apply", json={"token": early.json()["token"], "confirmed": True})
+    assert applied.status_code == 409 and "trial version" in applied.json()["detail"], applied.text
+    # Nor can a new review be prepared.
+    assert _review_named(app, PACK, "reset_builtin").status_code == 409
+    assert domain_edit.read_override(PACK).get("persona") == NEW
+    assert canary.live(PACK)["patch"]["persona"] == NEWER
+
+
+def test_a_removal_is_refused_while_a_trial_is_live(client, monkeypatch, tmp_path):
+    from maverick import domain_edit
+    from maverick import specialist_canary as canary
+
+    app = client
+    newcomer = "custom_canary_newcomer"
+    entered = {"persona": NEW, "description": "Chases overdue purchase orders for the buyer team.",
+               "allow_tools": ["read_file"], "deny_tools": ["shell"], "max_risk": "medium"}
+    saved = _confirm(app, _review_named_draft(app, newcomer, "save", entered=entered))
+    assert saved.status_code == 200 and saved.json()["confirmed"] is True, saved.text
+    published = _confirm(app, _review_named_draft(app, newcomer, "publish", selected="SPD-" + saved.json()["operation"],
+                                                  reason="Reviewed by the supplier lead"))
+    assert published.status_code == 200 and published.json()["confirmed"] is True, published.text
+    _trials_on(monkeypatch, tmp_path, 40)
+    _question(app, 0)
+    changed = _confirm(app, _review_named_draft(app, newcomer, "save", entered={"persona": NEWER}))
+    assert changed.status_code == 200 and changed.json()["confirmed"] is True, changed.text
+    trial = _confirm(app, _review_named_draft(app, newcomer, "publish", selected="SPD-" + changed.json()["operation"],
+                                              reason="Reviewed by the supplier lead"))
+    assert trial.status_code == 200 and trial.json()["confirmed"] is True, trial.text
+    assert canary.live(newcomer) is not None
+    refused = _review_named(app, newcomer, "remove_custom")
+    assert refused.status_code == 409 and "trial version" in refused.json()["detail"], refused.text
+    assert canary.live(newcomer) is not None
+    assert domain_edit.read_override(newcomer).get("persona") == NEW
+
+
+def _review_named_draft(app, name, action, **fields):
+    context = app.get(DRAFTS + "/history").json()["context"]
+    return app.post(DRAFTS + "/review", json={"name": name, "action": action, "context": context, **fields})

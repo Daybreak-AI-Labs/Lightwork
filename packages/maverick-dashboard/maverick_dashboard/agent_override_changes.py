@@ -75,11 +75,19 @@ def _damaged_snapshot(request, name):
             "builtin": asdict(built) if built is not None else None}
 
 
+def _refuse_while_trial_live(name):
+    """A live trial keeps the saved definition as it is; a reset or removal waits until it is promoted or rolled back."""
+    from .api import _refuse_while_trial_live as refuse
+
+    refuse(name)
+
+
 def prepare(request, name, action, *, context=None):
     current = authority(request, context, write=True)
     if action not in ACTIONS:
         raise HTTPException(422, "Choose Remove custom agent or Reset to built-in.")
     material = _snapshot(request, name)
+    _refuse_while_trial_live(name)
     expected = "reset_builtin" if material["view"]["is_builtin"] else "remove_custom"
     if action != expected:
         raise HTTPException(409, "This agent's origin changed. Review its current removal or reset controls.")
@@ -249,6 +257,7 @@ def apply(request, prepared, operation):
         def guard():
             nonlocal claim
             authority(request, context, write=True)
+            _refuse_while_trial_live(prepared["name"])
             expires = prepared.get("expires")
             if digest(_snapshot(request, prepared["name"], locked=True)) != prepared["source"]:
                 raise HTTPException(409, "This definition changed. Review its current version; nothing was changed.")
