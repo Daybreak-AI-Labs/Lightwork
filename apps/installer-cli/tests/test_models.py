@@ -157,3 +157,14 @@ def test_paid_dynamic_hosted_placeholders_fail_closed():
     for model in ("azure", "azure:azure", "bedrock", "bedrock:bedrock", "vertex", "vertex:vertex"):
         with pytest.raises(UnpricedModelError):
             _lookup_price(model)
+
+
+def test_a_typed_vertex_model_is_refused_with_the_google_billing_remedy():
+    """Google bills Vertex AI, so a typed Vertex id never falls back to a Claude API price."""
+    try:
+        from maverick.budget import UnpricedModelError, _lookup_price
+    except ImportError:
+        pytest.skip("maverick-core not installed in this environment")
+
+    with pytest.raises(UnpricedModelError, match="Google Cloud invoices"):
+        _lookup_price("vertex:claude-haiku-4-5@20251001", estimate_only=False)

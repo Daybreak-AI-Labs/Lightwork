@@ -61,18 +61,21 @@ def test_vertex_setup_is_saved_without_a_key_and_reaches_the_client(workspace):
 def test_vertex_refuses_a_key_and_values_that_could_reshape_the_request(workspace):
     from maverick import config
 
+    saved = {"project_id": "acme-ai", "region": "us-east5", "model_id": _HAIKU}
+    # The same form saves valid values first, so each refusal below is the
+    # Vertex-specific check for that field, not an unknown-provider error.
+    assert workspace.post("/settings/providers", data={"provider": "vertex", **saved},
+                          follow_redirects=False).status_code == 303
     assert workspace.post("/settings/providers", data={
         "provider": "vertex", "api_key": "not-a-vertex-credential",  # pragma: allowlist secret
-        "project_id": "acme-ai", "region": "us-east5", "model_id": _HAIKU,
+        **saved,
     }, follow_redirects=False).status_code == 400
     for field, value in (("project_id", "acme/../other"), ("region", "US-EAST5"),
                          ("model_id", "claude/../other:rawPredict")):
-        values = {"provider": "vertex", "project_id": "acme-ai", "region": "us-east5",
-                  "model_id": _HAIKU}
-        values[field] = value
+        values = {"provider": "vertex", **saved, field: value}
         assert workspace.post("/settings/providers", data=values,
                               follow_redirects=False).status_code == 400, field
-    assert config.get_provider_config("vertex") == {}
+    assert config.get_provider_config("vertex") == saved
 
 
 def test_vertex_setup_can_be_removed(workspace):
