@@ -28,7 +28,7 @@ with audit access.
 | Name, description | Shown to people with audit access only. |
 | Custodians | Principal ids, one per line: `user:<name>` for a dashboard user, or `user:<channel>:<identifier>` for a messaging account (for example `user:cli:local` for the local command line). A linked messaging account is written exactly as `account:<hash>:person:<hash>` (see below). A bare name is refused. |
 | From / To (optional) | Calendar dates in UTC. Both ends are inclusive. |
-| Records to keep | Any of: tasks and their runs, chat conversations (including employee companion history and conversation-inbox messages), attachments, approval requests. |
+| Records to keep | Any of: tasks and their runs, chat conversations (including employee companion history and conversation-inbox messages), attachments (including incident attachments the custodian uploaded), approval requests. |
 | Status | `active` or `released`. Releasing is final for that matter and is audited. |
 
 ### Linked messaging accounts
@@ -98,6 +98,9 @@ Each of these paths applies the check:
 - An employee clearing their own companion conversation, the companion history
   route, and disabling a companion. Disabling keeps any exchange a matter holds in
   scope, and the companion's retention clock never removes one either.
+- Deleting an incident attachment (only its uploader can delete it), and the
+  retention purge of incident attachment records. A held attachment is refused, or
+  skipped by the purge, until the matter is released.
 - Erasing a removed workspace (its whole tree), and whole-client erasure.
 
 ### Date rules
@@ -108,7 +111,7 @@ Each record is tested against its own timestamp:
 - chat: any turn in the range (a conversation with no turn in the range is out of scope);
 - companion exchange: the time it was saved;
 - conversation-inbox message: the time it was created;
-- attachment: upload time;
+- attachment and incident attachment: upload time;
 - approval request: request time.
 
 A closure that mixes in-scope and out-of-scope records is refused as a whole. A
@@ -125,7 +128,10 @@ An auditor exports a matter as a ZIP archive:
 - `goals.jsonl`, `chats.jsonl`, `attachments.jsonl`, `approvals.jsonl`: one file per
   selected record type, holding only the in-scope records, one JSON object per line.
   `chats.jsonl` holds conversation turns, companion exchanges and inbox messages,
-  each marked with its `record_type`.
+  each marked with its `record_type`. `attachments.jsonl` holds the attachment rows
+  and the incident attachment metadata rows (`record_type` `incident_attachment`),
+  never the file bytes. An incident attachment row names its uploader only by the
+  stored one-way reference.
 - `manifest.json`: the matter definition, the SHA-256 and size of every file, the
   record counts, what is not included, and a signature.
 
@@ -167,8 +173,10 @@ tamper evidence for an export.
 - **Unsent drafts, derived memory and other copies of chat text.** Recovery drafts,
   personal recall notes and similar derived stores are not part of a matter.
 - **Attachment file bytes** are not copied into the archive. Each attachment row has
-  its SHA-256 and size. The files stay in their own store. The incident-attachment
-  register has its own delete action, which does not check matters.
+  its SHA-256 and size. The files stay in their own store. A matter does not change
+  the files of incident attachments either. Only their metadata rows are held. If a
+  workspace holds more than 10,000 incident attachment records, a matter that keeps
+  attachments cannot be exported, and the export says so.
 - **Audit evidence, knowledge-base copies, model memory, backups and copies held by
   outside providers** are outside the matter. A matter does not change their retention.
 - **Approvals** are never deleted by any erasure path, so no erasure is refused for
