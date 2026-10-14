@@ -101,7 +101,8 @@ def new_recovery_codes() -> list[str]:
 
 def normalize_recovery(text: object) -> str | None:
     """The eight canonical characters of a typed recovery code, or None."""
-    if not isinstance(text, str):
+    # Text outside ASCII is refused before upper(), which can turn it into ASCII.
+    if not isinstance(text, str) or not text.isascii():
         return None
     cleaned = "".join(ch for ch in text.upper() if ch not in " -\t")
     if len(cleaned) != _RECOVERY_LENGTH or any(ch not in RECOVERY_ALPHABET for ch in cleaned):

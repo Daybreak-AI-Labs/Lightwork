@@ -107,3 +107,12 @@ def test_typed_recovery_codes_are_normalized_and_matched_once_per_entry():
     # Characters outside the alphabet are never a code, so nothing is hashed.
     assert owner_totp.normalize_recovery("ABCD-0EFG") is None
     assert owner_totp.normalize_recovery(None) is None
+
+
+def test_a_non_ascii_lookalike_is_never_a_recovery_code():
+    """R9: text outside ASCII is refused before any case folding (a long s uppercases to S)."""
+    from maverick_dashboard import owner_totp
+    assert "ſ".upper() == "S"
+    assert owner_totp.normalize_recovery("ABCD-EFGſ") is None
+    assert owner_totp.normalize_recovery("ABCD-EFG ") is None
+    assert owner_totp.normalize_recovery("abcd efgh") == "ABCDEFGH"
