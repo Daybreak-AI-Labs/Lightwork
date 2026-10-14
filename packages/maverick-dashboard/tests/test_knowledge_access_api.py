@@ -1027,4 +1027,4 @@ def test_saved_sources_panel_says_when_files_are_matched_to_their_sharing(custom
     page = client.get("/knowledge-access")
     assert page.status_code == 200, page.text
     assert ("shown only to the people it is shared with" in page.text) is stated
-    assert ("shows no files until it is refreshed again" in page.text) is stated
+    assert ("Files show only after a refresh made while this setting is on" in page.text) is stated
