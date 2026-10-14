@@ -282,7 +282,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "agent_factory": {"jd_hiring", "require_passing_tests"},
     # Saved answer checks (maverick.agent_tests_policy).
     "agent_tests": {"max_cases_per_specialist", "require_for_new_specialists",
-                    "bypass_requires_second_person"},
+                    "bypass_requires_second_person", "tool_checks"},
     "practice": {"enable", "daily_spend_cap"},
     "collaboration": {"comments", "suggestions", "ai_suggestions"},
     "first_outcome": {"department", "sample_workspace_created"},
@@ -780,7 +780,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
     },
     "analytics": {"mcp_client_language", "task_questions", "usability_survey", "usage_measures", "web_vitals"},
     "agent_factory": {"jd_hiring", "require_passing_tests"},
-    "agent_tests": {"require_for_new_specialists", "bypass_requires_second_person"},
+    "agent_tests": {"require_for_new_specialists", "bypass_requires_second_person", "tool_checks"},
     "practice": {"enable"},
     "collaboration": {"comments", "suggestions", "ai_suggestions"},
     "self_learning": {

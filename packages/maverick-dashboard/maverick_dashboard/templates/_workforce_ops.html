@@ -54,6 +54,18 @@
         <label><input id="wo-test-refusal" type="checkbox"> Must refuse</label>
         <label><input id="wo-test-citation" type="checkbox"> Must include a source reference</label>
       </div>
+      <div class="wo-row wo-test-tools-row" hidden>
+        <label><input id="wo-test-tools" type="checkbox"> Check which tools it calls</label>
+      </div>
+      <div class="wo-test-grid wo-test-tools-fields" hidden>
+        <label for="wo-test-tools-called">Must call <span class="muted">(one per line: tool name, or tool name | text its call must include)</span>
+          <textarea id="wo-test-tools-called" rows="2" placeholder="send_email | Acme"></textarea></label>
+        <label for="wo-test-tools-absent">Must not call <span class="muted">(one tool name per line)</span>
+          <textarea id="wo-test-tools-absent" rows="2" placeholder="delete_record"></textarea></label>
+        <label for="wo-test-tools-results">Fixed results <span class="muted">(one per line: tool name | the answer the tool gives)</span>
+          <textarea id="wo-test-tools-results" rows="2" placeholder="lookup_invoice | Invoice 77 is a duplicate."></textarea></label>
+      </div>
+      <p class="muted wo-test-tools-fields" hidden>Each tool is replaced by a test stub. The call is recorded and answered with the fixed result, or with a note that the tool is not available in a test. No real tool, file, network call or shell command runs.</p>
       <p class="muted">Phrase checks match text literally. A source check detects a reference marker; it does not verify the source.</p>
       <div class="wo-row"><button type="submit" class="btn" id="wo-test-save">Save check</button>
         <button type="button" class="btn btn--ghost" id="wo-test-cancel" hidden>Cancel editing</button></div>

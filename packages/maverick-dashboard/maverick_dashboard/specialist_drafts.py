@@ -23,7 +23,8 @@ API, PAGE = "/api/v1/specialist-drafts", "/agents#specialist-drafts"
 STORE = GovernedRecordStore("specialist-drafts", "SPD", "specialist_draft")
 TTL, MAX_RECORDS = 600, 10000
 NOTICE = ("Saving a draft does not change the specialist people use. Preview checks its entered setup. "
-          "Try and saved answer checks use the exact draft with no tools, files, company knowledge or shared learning. "
+          "Try and saved answer checks use the exact draft with no real tools, files, company knowledge or shared learning. "
+          "Checks that test tool use get recording test stubs instead; they answer with fixed results and run nothing real. "
           "Its complete instructions and fictional requests are sent to the configured AI service for those answer checks. "
           "They do not establish that connected actions work or that an answer is correct. Publishing or restoring changes new work; work already running can retain earlier instructions.")
 ACTIONS = {"save": "Saved a draft", "try": "Tried a draft answer", "check": "Checked the draft's saved questions",
@@ -340,7 +341,11 @@ def changes(request, prepared):
     from . import specialist_test_sets as tests
     from .plain_labels import model_label
     _guard(request, prepared)
-    limits = tests.draft_answer_limits(len(prepared["cases"]) if prepared["action"] == "check" else 1)
+    from maverick.agent_tests_policy import tool_checks_enabled
+
+    from .specialist_tool_checks import budget_questions
+    limits = tests.draft_answer_limits(budget_questions(prepared["cases"], enabled=tool_checks_enabled())
+                                       if prepared["action"] == "check" else 1)
     rows = [{"label": "Decision", "after": ACTIONS[prepared["action"]]},
             {"label": "Complete draft", "after": _readable(prepared["profile"], "definition")},
             {"label": "Currently used definition", "after": _readable(prepared["before"]["profile"], "definition") if prepared["before"]["profile"] else "No active custom agent"},

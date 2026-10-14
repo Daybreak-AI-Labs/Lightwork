@@ -13,8 +13,13 @@ of those checks on exactly the draft being published. No reason overrides it.
 without a passing run, with a reason, needs another administrator's approval of
 that reason first.
 
+``tool_checks`` (default off): lets a saved check ask which tools the specialist
+calls. Those checks run against recording stubs only, never the real tools. Off
+means such checks cannot be created and are skipped, never counted as passing.
+
 Unreadable settings keep the stricter reading for the two switches and the
-default for the number. A switch whose value is not true or false is read as on.
+default for the number. A switch whose value is not true or false is read as on,
+except ``tool_checks``, which is only ever on when it is exactly true.
 """
 from __future__ import annotations
 
@@ -76,5 +81,14 @@ def bypass_requires_second_person() -> bool:
     return _switch("bypass_requires_second_person")
 
 
+def tool_checks_enabled() -> bool:
+    """The ``[agent_tests] tool_checks`` knob: on only when exactly ``true``; unreadable settings keep it off."""
+    section = _section()
+    if section is _UNREADABLE:
+        return False
+    return section.get("tool_checks", False) is True
+
+
 __all__ = ["DEFAULT_MAX_CASES", "MAX_CASES_LIMIT", "NEW_SPECIALIST_NEEDS_TESTS", "NewSpecialistNeedsTests",
-           "bypass_requires_second_person", "max_cases_per_specialist", "require_for_new_specialists"]
+           "bypass_requires_second_person", "max_cases_per_specialist", "require_for_new_specialists",
+           "tool_checks_enabled"]
