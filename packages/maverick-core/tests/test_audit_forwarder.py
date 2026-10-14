@@ -315,10 +315,10 @@ def test_datadog_key_falls_back_to_audit_config(vendor_env):
 
 
 def test_datadog_documented_limits_are_the_batch_bounds():
-    # Datadog send-logs reference: 1000 entries per array, 5MB per payload,
-    # 1MB per log (larger logs are truncated by Datadog, so we refuse them).
+    # Datadog send-logs reference: 1000 entries per array, 5MB per payload, 1MB per
+    # log. The reference does not define MB, so the smaller decimal reading is used.
     assert (forwarder._DATADOG_MAX_ENTRIES, forwarder._DATADOG_MAX_BODY,
-            forwarder._DATADOG_MAX_LOG) == (1000, 5 * 1024 * 1024, 1024 * 1024)
+            forwarder._DATADOG_MAX_LOG) == (1000, 5_000_000, 1_000_000)
 
 
 def test_datadog_batches_at_entry_limit(vendor_env):
@@ -341,12 +341,15 @@ def test_datadog_batches_before_body_byte_limit(vendor_env):
     assert all(len(c["body"]) <= limit for c in calls)
 
 
-def test_datadog_refuses_log_over_one_megabyte_before_sending(vendor_env):
+def test_datadog_log_limit_is_one_million_bytes_and_refuses_one_more(vendor_env):
     calls = _record_posts(vendor_env)
     vendor_env.setenv("MAVERICK_DATADOG_API_KEY", _DD_KEY)
+    room = forwarder._DATADOG_MAX_LOG - len(forwarder._datadog_entry(""))
+    assert len(forwarder._datadog_entry("x" * room)) == 1_000_000
+    assert forwarder.forward(["x" * room], "datadog://datadoghq.com") == 1
     with pytest.raises(ValueError, match="Datadog"):
-        forwarder.forward(["ok", "x" * (1024 * 1024)], "datadog://datadoghq.com")
-    assert calls == []
+        forwarder.forward(["x" * (room + 1)], "datadog://datadoghq.com")
+    assert len(calls) == 1
 
 
 def test_datadog_failure_names_destination_and_never_the_key(vendor_env, caplog):
@@ -467,8 +470,9 @@ def test_datadog_key_with_line_break_is_refused_without_echoing_it(vendor_env, c
 
 
 def test_sentinel_documented_limits_are_the_batch_bounds():
-    # Logs Ingestion API: 1MB per call; fields over 64KB are truncated by Azure.
-    assert (forwarder._SENTINEL_MAX_BODY, forwarder._SENTINEL_MAX_FIELD) == (1024 * 1024, 64 * 1024)
+    # Logs Ingestion API: 1MB per call and 64KB per field value; Azure truncates a
+    # longer field. The service limits do not define the unit, so the decimal reading.
+    assert (forwarder._SENTINEL_MAX_BODY, forwarder._SENTINEL_MAX_FIELD) == (1_000_000, 64_000)
 
 
 def test_sentinel_token_is_fetched_once_and_refreshed_after_expiry(vendor_env):
@@ -537,27 +541,29 @@ def test_sentinel_rows_carry_event_time_or_now_and_the_raw_line(vendor_env):
     assert floor <= stamped <= after
 
 
-def test_sentinel_batches_at_one_megabyte_default(vendor_env):
+def test_sentinel_batches_at_one_million_byte_default(vendor_env):
     _sentinel_env(vendor_env)
     seen = _sentinel_fake(vendor_env)
-    big = "y" * (60 * 1024)  # 60 KiB rows: 17 fit in one 1 MB call, the 18th starts another
-    assert forwarder.forward([big] * 18, _SENTINEL_DEST) == 18
-    assert [len(json.loads(c["body"])) for c in seen["ingest"]] == [17, 1]
-    assert all(len(c["body"]) <= 1024 * 1024 for c in seen["ingest"])
+    big = "y" * 60_000  # 60 kB rows: the batch is cut before the row that would exceed 1,000,000 bytes
+    per_row = len(forwarder._sentinel_row(big)) + 1  # a row plus the comma that joins it
+    fit = (1_000_000 - 1) // per_row  # two brackets and n-1 commas: 1 + n * per_row bytes
+    assert forwarder.forward([big] * (fit + 1), _SENTINEL_DEST) == fit + 1
+    assert [len(json.loads(c["body"])) for c in seen["ingest"]] == [fit, 1]
+    assert all(len(c["body"]) <= 1_000_000 for c in seen["ingest"])
 
 
-def test_sentinel_refuses_field_over_64_kib_before_sending(vendor_env):
+def test_sentinel_refuses_field_over_64000_bytes_before_sending(vendor_env):
     _sentinel_env(vendor_env)
     seen = _sentinel_fake(vendor_env)
     with pytest.raises(ValueError, match="Sentinel"):
-        forwarder.forward(["ok", "x" * (64 * 1024 + 1)], _SENTINEL_DEST)
+        forwarder.forward(["ok", "x" * 64_001], _SENTINEL_DEST)
     assert seen["tokens"] == [] and seen["ingest"] == []
 
 
-def test_sentinel_accepts_field_at_64_kib_limit(vendor_env):
+def test_sentinel_accepts_field_at_64000_byte_limit(vendor_env):
     _sentinel_env(vendor_env)
     seen = _sentinel_fake(vendor_env)
-    assert forwarder.forward(["x" * (64 * 1024)], _SENTINEL_DEST) == 1
+    assert forwarder.forward(["x" * 64_000], _SENTINEL_DEST) == 1
     assert len(seen["ingest"]) == 1
 
 

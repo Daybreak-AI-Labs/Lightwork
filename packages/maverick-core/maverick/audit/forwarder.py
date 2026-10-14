@@ -54,20 +54,23 @@ _SUPPORTED = ("tcp", "udp", "http", "https", "datadog", "sentinel")
 _UDP_MAX = 65507
 _HTTP_BATCH_MAX = 1024 * 1024
 # Datadog Logs intake (send-logs reference): 1000 entries and 5MB per request,
-# 1MB per log. Datadog truncates a larger log, so it is refused here instead.
+# 1MB per log. Datadog truncates a larger log, so it is refused here instead. The
+# reference does not say whether MB is 10^6 or 2^20 bytes; the smaller reading is
+# used, so a log that Datadog would truncate under either reading is never sent.
 _DATADOG_MAX_ENTRIES = 1000
-_DATADOG_MAX_BODY = 5 * 1024 * 1024
-_DATADOG_MAX_LOG = 1024 * 1024
+_DATADOG_MAX_BODY = 5_000_000
+_DATADOG_MAX_LOG = 1_000_000
 # The intake host is ``http-intake.logs.<site>``; only these sites are accepted.
 _DATADOG_SITES = frozenset({
     "datadoghq.com", "datadoghq.eu", "us3.datadoghq.com", "us5.datadoghq.com",
     "ap1.datadoghq.com", "ap2.datadoghq.com", "uk1.datadoghq.com",
     "ddog-gov.com", "us2.ddog-gov.com",
 })
-# Azure Monitor Logs Ingestion API: 1MB per call. Azure truncates field values
-# over 64KB, so such a line is refused instead of being counted as sent.
-_SENTINEL_MAX_BODY = 1024 * 1024
-_SENTINEL_MAX_FIELD = 64 * 1024
+# Azure Monitor Logs Ingestion API: 1MB per call and 64KB per field value. Azure
+# truncates a longer field, so such a line is refused instead of being counted as
+# sent. The service limits do not define the unit; the smaller decimal reading is used.
+_SENTINEL_MAX_BODY = 1_000_000
+_SENTINEL_MAX_FIELD = 64_000
 _SENTINEL_API_VERSION = "2023-01-01"
 _SENTINEL_SCOPE = "https://monitor.azure.com/.default"
 # A cached Microsoft Entra token is replaced this long before it expires.
@@ -327,7 +330,7 @@ def _datadog_entry(line: str) -> bytes:
     entry = json.dumps({"ddsource": "lightwork", "service": "lightwork-audit", "message": line},
                        separators=(",", ":")).encode("ascii")
     if len(entry) > _DATADOG_MAX_LOG:
-        raise ValueError("rendered audit event exceeds Datadog's 1MB per-log limit; "
+        raise ValueError("rendered audit event exceeds Datadog's 1,000,000-byte per-log limit; "
                          "Datadog would truncate it")
     return entry
 
@@ -364,7 +367,7 @@ def _event_time(line: str) -> str:
 
 def _sentinel_row(line: str) -> bytes:
     if len(line.encode("utf-8", "surrogatepass")) > _SENTINEL_MAX_FIELD:
-        raise ValueError("rendered audit event exceeds Sentinel's 64KB field limit; "
+        raise ValueError("rendered audit event exceeds Sentinel's 64,000-byte field limit; "
                          "Azure would truncate it")
     row = {"TimeGenerated": _event_time(line), "RawData": line}
     return json.dumps(row, separators=(",", ":")).encode("ascii")
