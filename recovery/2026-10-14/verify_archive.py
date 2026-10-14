@@ -1,8 +1,11 @@
 """Verify recovery-package bytes without modifying files."""
 import hashlib
+import os
 from pathlib import Path
 
 root = Path(__file__).resolve().parent
+if os.name == 'nt' and not str(root).startswith('\\\\?\\'):
+    root = Path('\\\\?\\' + str(root))
 checked = 0
 errors = []
 for line in (root / "SHA256SUMS").read_text(encoding="utf-8").splitlines():

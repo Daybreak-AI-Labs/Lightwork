@@ -2,7 +2,7 @@
 
 Use a fresh recovery clone for each state. Do not apply these patches to current main or an existing working checkout. Different states can overlap or conflict.
 
-1. Download the complete archive directory, including the bundle and `states/`. Run `python verify_archive.py` from that directory. It checks the files listed in `SHA256SUMS`; any mismatch is a stop condition.
+1. Download the complete archive directory, including the bundle and `states/`. On Windows, use a short destination such as `C:\lw-recovery` and enable `core.longpaths=true` in a Git clone before checking out this archive. For example, use `git clone --no-checkout`, then `git config core.longpaths true`, then check out the preservation branch. This changes only that clone's configuration. Run `python verify_archive.py` from the archive directory. The verifier supports Windows extended paths and checks the files listed in `SHA256SUMS`; any mismatch is a stop condition.
 2. Read `manifest.json` and choose the exact `state` entry. Record its `base_head` and its listed staged patch, unstaged patch, and untracked files. Entries containing only exclusions do not represent a new implementation.
 3. Make a fresh clone of the private Lightwork repository without checking out files, then disable automatic line-ending conversion before the first checkout. Fetch the remote history needed by the bundle, including historical pull-request heads:
 
@@ -10,6 +10,7 @@ Use a fresh recovery clone for each state. Do not apply these patches to current
    git clone --no-checkout https://github.com/Daybreak-AI-Labs/Lightwork.git recovered-lightwork
    cd recovered-lightwork
    git config core.autocrlf false
+   git config core.longpaths true
    git fetch --tags origin
    git fetch origin "+refs/pull/*/head:refs/remotes/recovery-pr/*"
    git bundle verify "ABSOLUTE_PACKAGE_PATH/local-commits.bundle"
