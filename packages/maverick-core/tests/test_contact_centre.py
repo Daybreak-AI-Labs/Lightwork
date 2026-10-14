@@ -14,12 +14,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from maverick import audit as audit_package
 from maverick import config, contact_centre, webhook_subscriptions, webhooks
+from maverick.audit.errors import AuditRefused
 
 ZENDESK_TOKEN = "tok-SECRET-12345"  # pragma: allowlist secret
 WEBHOOK_SECRET = "whsec-test-secret-value"  # pragma: allowlist secret
 HANDOFF = "handoff-test-0123456789abcdef"
 REAL_START = contact_centre._start
+REAL_AUDIT_EVENT = audit_package.audit_event
 MAX = webhook_subscriptions.MAX_ATTEMPTS
 
 ZENDESK_CONFIG = f"""
@@ -372,6 +375,55 @@ def test_enterprise_egress_lock_blocks_the_send(tmp_path, monkeypatch):
     monkeypatch.setattr(contact_centre, "_post", receiver)
     assert _enqueue()["state"] == "failed"
     assert receiver.calls == []
+
+
+# ------------------------------------------------------------ audit refusal stops the send
+def _refuse_audit_records(monkeypatch):
+    """The real audit_event runs; only its low-level record() is refused, as a compliance profile would."""
+    def refuse(*args, **kwargs):
+        raise AuditRefused("the compliance profile requires a signed audit log")
+    monkeypatch.setattr(audit_package, "audit_event", REAL_AUDIT_EVENT)
+    monkeypatch.setattr(audit_package, "record", refuse)
+
+
+def test_an_audit_refusal_stops_the_handoff_before_anything_is_queued_or_sent(tmp_path, monkeypatch):
+    _configure(tmp_path, ZENDESK_CONFIG)
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    _refuse_audit_records(monkeypatch)
+    with pytest.raises(AuditRefused):
+        _enqueue()
+    assert receiver.calls == []
+    assert contact_centre.status_for(HANDOFF) is None
+
+
+def test_an_audit_refusal_before_the_send_marks_it_failed_and_sends_nothing(tmp_path, monkeypatch):
+    _configure(tmp_path, ZENDESK_CONFIG)
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    monkeypatch.setattr(contact_centre, "_start", lambda key: None)  # queue it without delivering
+    assert _enqueue()["state"] == "queued"
+    _refuse_audit_records(monkeypatch)
+    contact_centre.run_delivery("handoff:" + HANDOFF)
+    assert receiver.calls == []
+    status = contact_centre.status_for(HANDOFF)
+    assert status["state"] == "failed"
+    assert "audit log refused" in status["reason"]
+
+
+def test_a_refused_record_of_a_completed_send_does_not_undo_the_send(tmp_path, monkeypatch):
+    _configure(tmp_path, ZENDESK_CONFIG)
+    receiver = Receiver(CREATED)
+
+    def post_then_refuse(url, body, headers):
+        result = receiver(url, body, headers)
+        _refuse_audit_records(monkeypatch)  # the record of the outcome is refused after the send
+        return result
+
+    monkeypatch.setattr(contact_centre, "_post", post_then_refuse)
+    status = _enqueue()
+    assert status["state"] == "sent" and status["ticket_id"] == "4242"
+    assert len(receiver.calls) == 1
 
 
 # ------------------------------------------------------------ background, recovery, tenancy

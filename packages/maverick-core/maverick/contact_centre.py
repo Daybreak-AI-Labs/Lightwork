@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from . import config
+from .audit.errors import AuditRefused
 from .paths import current_tenant_id, data_dir
 from .webhook_subscriptions import MAX_ATTEMPTS, retry_delay
 from .webhooks import NotSent, build_envelope, build_headers, encode_body
@@ -57,6 +58,7 @@ STOPPED = ("Lightwork stopped while this was being sent, so the outcome is not c
 UNCONFIRMED_RESULT = ("Lightwork could not record the result of this send, so the outcome is not confirmed. "
                       "It was not sent again; check the contact centre before sending it by hand.")
 NOT_STARTED = "Lightwork could not record this handoff before sending it, so nothing was sent."
+AUDIT_REFUSED = "The audit log refused this send, so nothing was sent."
 _HANDOFF_ID_RE = re.compile(r"[A-Za-z0-9_-]{16,100}")
 _EMAIL_RE = re.compile(r"[^@\s]{1,64}@[^@\s]{1,255}")
 _TICKET_ID_RE = re.compile(r'"ticket"\s*:\s*\{[^}]*?"id"\s*:\s*(\d{1,20})')
@@ -248,10 +250,13 @@ def _public(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def _audit(key: str, provider: str, action: str, state: str) -> None:
+    """Record one step. An audit refusal propagates: the caller must not take the action. Other failures are ignored."""
     try:
         from .audit import audit_event
         audit_event("contact_centre_handoff", agent="contact_centre", action=action,
                     provider=provider, state=state, handoff=key)
+    except AuditRefused:
+        raise
     except Exception:  # pragma: no cover -- audit outage never blocks the handoff
         log.debug("contact centre: audit unavailable for %s", action)
 
@@ -290,9 +295,10 @@ def enqueue_handoff(*, handoff_id: str, title: str, reason: str, requester_name:
                  "state": "failed" if problem else "queued", "attempts": 0, "next_attempt_at": now,
                  "reason": problem or "Lightwork will send it in the background.", "ticket_id": "", "payload": content,
                  "created_at": now, "updated_at": now}
+        # Recorded before the entry is saved: a refused record leaves nothing queued to send later.
+        _audit(key, policy["provider"], "failed" if problem else "queued", entry["state"])
         data[key] = entry
         _save(path, data)
-    _audit(key, policy["provider"], "failed" if problem else "queued", entry["state"])
     if not problem:
         _start(key)
     return _public(entry)
@@ -428,10 +434,15 @@ def _attempt(key: str, *, honour_schedule: bool) -> tuple[str, float]:
             due = float(entry.get("next_attempt_at") or 0.0)
             if honour_schedule and due > now:
                 return "wait", due - now
+            _audit(key, entry["provider"], "send", "sending")  # refusal is handled below: nothing is sent
             entry.update(state="sending", attempts=int(entry.get("attempts") or 0) + 1, updated_at=now)
             _save(path, data)
             attempt = entry["attempts"]
             snapshot = dict(entry)
+    except AuditRefused:
+        log.warning("contact centre: the audit log refused a send; nothing was sent")
+        _mark(key, "failed", AUDIT_REFUSED)
+        return "done", 0.0
     except Exception as exc:
         # The 'sending' record was not saved, so nothing was sent; say so instead of leaving it queued.
         log.warning("contact centre: attempt not started (%s)", type(exc).__name__)
@@ -473,7 +484,12 @@ def _attempt(key: str, *, honour_schedule: bool) -> tuple[str, float]:
         log.warning("contact centre: result not saved (%s)", type(exc).__name__)
         _mark(key, "unknown", UNCONFIRMED_RESULT)
         return "done", 0.0
-    _audit(key, snapshot["provider"], outcome, entry["state"])
+    try:
+        _audit(key, snapshot["provider"], outcome, entry["state"])
+    except AuditRefused:
+        # The request was already made and its result saved, so a refused record cannot undo it.
+        # The next attempt is still stopped by the audit check before the send.
+        log.warning("contact centre: the audit log refused the record of a send (%s)", outcome)
     return ("wait", delay) if outcome == "retry" else ("done", 0.0)
 
 
