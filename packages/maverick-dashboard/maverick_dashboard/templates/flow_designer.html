@@ -505,21 +505,21 @@
   </form>
 </aside>
 
-<script id="fd-seed" type="application/json">{{ (seed_flow or none) | tojson }}</script>
-<script>
+<script nonce="{{ csp_script_nonce }}" id="fd-seed" type="application/json">{{ (seed_flow or none) | tojson }}</script>
+<script nonce="{{ csp_script_nonce }}">
 {% include "flow_designer_core.js" %}
 </script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 {% include "flow_designer_inputs.js" %}
 </script>
-<script>{% include "flow_designer_action_fields.js" %}</script>
+<script nonce="{{ csp_script_nonce }}">{% include "flow_designer_action_fields.js" %}</script>
 <script src="{{ asset('lightwork-flow-retirement.js') }}"></script>
 <script src="{{ asset('lightwork-workflow-step-checks.js') }}" defer></script>
-<script>{% include "flow_hardening_review.js" %}</script>
-<script>
+<script nonce="{{ csp_script_nonce }}">{% include "flow_hardening_review.js" %}</script>
+<script nonce="{{ csp_script_nonce }}">
 {% include "flow_designer.js" %}
 </script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
   // Steps ⇄ Canvas view switch. The Steps view lists the live flow as cards;
   // choosing a card opens that step's settings in the side rail, and each card
   // can be moved, removed, or a new step added at the end.

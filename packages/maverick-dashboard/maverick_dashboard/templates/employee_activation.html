@@ -26,6 +26,6 @@
 <section class="panel" id="activation-result" hidden><h2>{{ ui("Review the current result") }}</h2><a id="activation-task-link" href="/chat">{{ ui("Open task and evidence") }}</a><pre lang="und" dir="auto" data-user-content id="activation-result-text" class="wrap-pre"></pre><p id="activation-acceptance-state"></p><button class="btn btn--primary" type="button" id="activation-accept">{{ ui("Accept this exact result") }}</button><button class="btn btn--ghost" type="button" id="activation-workflow">{{ ui("Save reusable private workflow draft") }}</button><a id="activation-workflow-link" hidden>{{ ui("Review reusable workflow") }}</a></section>
 <h2>{{ ui("Your recent activation drafts") }}</h2><ul>{% for draft in activation.drafts %}<li><a href="/get-started/employee?draft={{ draft.id }}">{{ ui(draft.label) }}</a> · {{ draft.state|humanize }}</li>{% else %}<li>{{ ui("No saved drafts in this workspace. Use Save private draft above to keep your first one.") }}</li>{% endfor %}</ul>
 </section>
-<script id="activation-data" type="application/json">{{ activation|tojson }}</script>
+<script nonce="{{ csp_script_nonce }}" id="activation-data" type="application/json">{{ activation|tojson }}</script>
 <script src="/static/lightwork-employee-activation.js" defer></script>
 {% endblock %}

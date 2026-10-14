@@ -660,7 +660,7 @@
   {% endif %}
 
   <script src="/static/lightwork-department-team-updates.js"></script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // ---- shared page helpers: plain errors, readable names, action pickers ----
     function plainError(failure, what) {
       return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
@@ -1167,8 +1167,8 @@
 
   {% if (selected or creating) and editable %}
   {# Server values for the editor script below, so that script stays plain JavaScript. #}
-  <script type="application/json" id="agent-editor-data">{{ {"services": (selected.mcp_servers if selected else []), "model_options": (model_options | default([])), "model_roles": (model_roles | default([])), "models": (selected.models if selected else {})} | tojson }}</script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}" type="application/json" id="agent-editor-data">{{ {"services": (selected.mcp_servers if selected else []), "model_options": (model_options | default([])), "model_roles": (model_roles | default([])), "models": (selected.models if selected else {})} | tojson }}</script>
+  <script nonce="{{ csp_script_nonce }}">
     // ---- save / validate / reset (real agent-override endpoints) ----
     (function () {
       const form = document.getElementById('agent-form');
@@ -1698,7 +1698,7 @@
       <div class="jc-sec"><h3>Tools it can use</h3><div class="jc-chips" id="jc-tools"></div></div>
     </div>
   </dialog>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     var NAME = {{ selected.name | tojson }};

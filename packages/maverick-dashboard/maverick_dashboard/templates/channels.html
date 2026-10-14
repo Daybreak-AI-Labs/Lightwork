@@ -350,7 +350,7 @@
     @keyframes ch-spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .ch-spinner { animation: none; } }
   </style>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     var root = document.getElementById('channel-settings'), generation = 0, controllers = new Set();
@@ -486,7 +486,7 @@
     window.addEventListener('pagehide', function () { generation++; controllers.forEach(function (controller) { controller.abort(); }); });
   }());
   </script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     var capacity = document.querySelector('[data-ch-intake-capacity]');

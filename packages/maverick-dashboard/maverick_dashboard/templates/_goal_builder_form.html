@@ -62,9 +62,9 @@
   </div>
 </div>
 <noscript><p class="muted">The task builder needs JavaScript. Use <a href="/chat">Chat</a> instead.</p></noscript>
-<script id="gb-channels" type="application/json">{{ (channels or []) | tojson }}</script>
+<script nonce="{{ csp_script_nonce }}" id="gb-channels" type="application/json">{{ (channels or []) | tojson }}</script>
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 // Drag-and-drop goal builder. Blocks live in #gb-canvas as <li> rows; the
 // submit assembles {title, steps[], budget_dollars, channel, priority} and
 // POSTs /api/v1/goals/compose (which creates AND starts the run).

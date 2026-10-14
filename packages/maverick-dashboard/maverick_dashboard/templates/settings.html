@@ -64,7 +64,7 @@
     {% endfor %}{ display: none; }
   </style>
   <div id="settings-sections" data-settings-active="{{ settings_group }}" role="tabpanel" aria-labelledby="settings-tab-{{ settings_group }}">
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   // A link to /settings#settings-<group> (or an older section name) shows that
   // group, and selects its tab, from the first paint: the server cannot see
   // the address fragment. The page script below then takes over the tabs.
@@ -199,7 +199,7 @@
     </select></label>
     <p class="muted">Filters use reported evidence. Missing metadata does not mean a model lacks a capability. Other model (advanced) stays available and the approved-model policy still applies.</p>
     <p class="muted">Refresh model lists above checks availability with a bounded request; it does not run a paid generation or prove tool quality. Pricing is a dated planning reference, not a final invoice.</p>
-    <script type="application/json" id="model-guidance-data">{{ model_guidance|tojson }}</script>
+    <script nonce="{{ csp_script_nonce }}" type="application/json" id="model-guidance-data">{{ model_guidance|tojson }}</script>
   </div>
   {% endif %}
 
@@ -450,7 +450,7 @@
       </p>
       <p class="settings-foot"><button type="submit" class="btn">Save task limit</button></p>
     </form>
-    <script>
+    <script nonce="{{ csp_script_nonce }}">
     (function () {
       // A written error beside the amount, tied to the field, in place of the
       // browser's bubble: it says what is wrong and how to fix it.
@@ -998,7 +998,7 @@
     .model-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-1) 0; }
     .model-row input { width: 18px; height: 18px; accent-color: var(--brand); flex-shrink: 0; }
   </style>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     var index = document.querySelector('.settings-index');

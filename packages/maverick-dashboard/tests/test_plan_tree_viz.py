@@ -9,6 +9,8 @@ that fetches /api/v1/goals/{id}/tree and polls it. These tests lock in:
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 from maverick_dashboard.app import static_url
 
@@ -87,7 +89,7 @@ def test_plan_page_csp_uses_local_scripts(client, world_with_tree):
     plan_csp = client.get(f"/goals/{g1}/plan").headers.get("Content-Security-Policy", "")
     # The graph and the live poll both use only dashboard resources.
     assert "cdn.jsdelivr.net" not in plan_csp
-    assert "script-src 'self' 'unsafe-inline';" in plan_csp
+    assert re.search(r"script-src 'self' 'nonce-[A-Za-z0-9_-]+';", plan_csp)
     assert "connect-src 'self'" in plan_csp
     assert "object-src 'none'" in plan_csp
     # Other dashboard pages remain locked to 'self' (no CDN host).

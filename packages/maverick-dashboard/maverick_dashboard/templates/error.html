@@ -30,7 +30,7 @@
   </details>
   {% if gate == 'retry' %}
   <p class="muted" id="error-retry-status" role="status"></p>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // A retryable conflict settles by itself: reload a few times, then stop
     // and leave the Reload button (never loops on a page that stays busy).
     (function () {
@@ -51,7 +51,7 @@
     })();
   </script>
   {% endif %}
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     document.querySelectorAll('[data-copy-support]').forEach(function (b) {
       b.addEventListener('click', function () { if (window.mvCopy) mvCopy(b.getAttribute('data-copy-support')); });
     });

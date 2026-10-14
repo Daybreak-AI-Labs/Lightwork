@@ -46,7 +46,7 @@
       Only administrators can add or remove clients, because each one holds an address and possibly an access key. Anyone who can run tasks can check them.</p>
   </div>
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   function $(id) { return document.getElementById(id); }

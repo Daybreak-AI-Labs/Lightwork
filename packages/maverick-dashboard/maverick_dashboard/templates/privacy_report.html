@@ -134,7 +134,7 @@
       {% for t in ['prohibited', 'high', 'limited', 'minimal'] %}{% if r.ai.by_tier.get(t) %}{{ tier_labels[t] }} {{ r.ai.by_tier[t] }}{{ ' · ' if not loop.last }}{% endif %}{% endfor %}</p>
     {% endif %}
   </div>
-<script>
+<script nonce="{{ csp_script_nonce }}">
   (function () {
     var b = document.getElementById('rpt-print');
     if (b) b.addEventListener('click', function () { window.print(); });

@@ -43,7 +43,7 @@
     .cache-msg { min-height: 1em; margin-top: var(--space-3); }
   </style>
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     (function() {
       const msg = document.getElementById('cache-msg');
       document.querySelectorAll('button.purge').forEach(function(btn) {

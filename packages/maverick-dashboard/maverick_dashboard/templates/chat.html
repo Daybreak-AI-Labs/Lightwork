@@ -255,7 +255,7 @@
 <script src="/static/lightwork-file-selection.js" defer></script>
 <script src="/static/lightwork-task-model-selection.js" defer></script>
 {% if can_create_goal %}<script src="/static/lightwork-viewpoints.js" defer></script>{% endif %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
   function chatCopy(node, source, values) { if (window.LightworkI18n) window.LightworkI18n.set(node, source, values); else node.textContent = source.replace(/\{(\w+)\}/g, function (_, key) { return (values || {})[key] === undefined ? '{' + key + '}' : values[key]; }); }
   function chatText(source) { return window.LightworkI18n ? window.LightworkI18n.text(source) : source; }
   (function () {
