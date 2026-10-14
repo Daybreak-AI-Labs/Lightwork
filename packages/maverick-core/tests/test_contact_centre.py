@@ -300,6 +300,20 @@ def test_exhausted_retries_end_as_failed_with_bounded_attempts(tmp_path, monkeyp
     assert len(receiver.calls) == MAX
 
 
+def test_address_guard_refusals_are_permanent_not_retried():
+    outcome, reason, _ticket = contact_centre._classify(
+        "zendesk", None, webhooks.NotSent("blocked by the address guard: private address"), "")
+    assert outcome == "failed" and "address check" in reason
+    outcome, _reason, _ticket = contact_centre._classify("zendesk", None, NOT_CONNECTED[3], "")
+    assert outcome == "retry"
+
+
+def test_default_transport_goes_through_the_address_guard_without_a_network_call():
+    status, _latency, _snippet, error = contact_centre._post("https://127.0.0.1/hook", b"{}", {})
+    assert status is None
+    assert str(error).startswith("blocked")
+
+
 def test_enterprise_egress_lock_blocks_the_send(tmp_path, monkeypatch):
     _configure(tmp_path, ZENDESK_CONFIG)
     from maverick import enterprise
