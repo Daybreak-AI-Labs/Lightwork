@@ -448,7 +448,9 @@ def test_sentinel_rows_carry_event_time_or_now_and_the_raw_line(vendor_env):
     assert rows[0] == {"TimeGenerated": "2026-08-14T09:33:20.500Z", "RawData": audit_line}
     assert set(rows[1]) == {"TimeGenerated", "RawData"} and rows[1]["RawData"] == cef_line
     stamped = datetime.fromisoformat(rows[1]["TimeGenerated"].replace("Z", "+00:00"))
-    assert before <= stamped <= after
+    # The row carries millisecond precision, so compare at that precision.
+    floor = before.replace(microsecond=before.microsecond // 1000 * 1000)
+    assert floor <= stamped <= after
 
 
 def test_sentinel_batches_at_one_megabyte_default(vendor_env):
