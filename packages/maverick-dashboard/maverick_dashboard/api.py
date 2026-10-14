@@ -4144,12 +4144,14 @@ def _finance_sod() -> dict:
     """Structural SoD lint over the shipped finance/banking packs -- the
     record/authorize/custody/reconcile separation, checked statically."""
     try:
-        from maverick.domain import builtin_dir, load_domains
+        from maverick.domain import builtin_domains
         from maverick.finance.sod_linter import lint_roster
 
+        # The memoised shipped catalogue: re-parsing all ~2,000 packs per
+        # request cost ~700 ms for a roster of 122 finance and bank packs.
         packs = {
             n: d
-            for n, d in load_domains(builtin_dir()).items()
+            for n, d in builtin_domains().items()
             if n.startswith(("finance", "bank"))
         }
         conflicts = lint_roster(packs)

@@ -133,3 +133,27 @@ def test_binder_carries_finance_evidence():
     assert fin["licenses"]["total"] == 1
     assert "sod" in fin and "posture" in fin
     assert "disclaimer" in fin["posture"]
+
+
+def test_finance_sod_lint_matches_full_scan_and_reuses_the_catalogue(monkeypatch):
+    # The /finance/board SoD figure must equal a fresh scan of every shipped
+    # pack filtered to finance/bank names, and a warm call must not parse the
+    # ~2,000-pack catalogue again (it cost ~700 ms per request before).
+    import maverick_dashboard.api as api
+    from maverick import domain
+    from maverick.finance.sod_linter import lint_roster
+
+    packs = {n: d for n, d in domain.load_domains(domain.builtin_dir()).items()
+             if n.startswith(("finance", "bank"))}
+    conflicts = lint_roster(packs)
+    expected = {"packs": len(packs), "conflicts": len(conflicts),
+                "detail": [str(c) for c in conflicts[:5]]}
+    assert expected["packs"] > 100
+    assert api._finance_sod() == expected
+
+    parses = []
+    real_load = domain.load_domain
+    monkeypatch.setattr(domain, "load_domain",
+                        lambda path: (parses.append(path), real_load(path))[1])
+    assert api._finance_sod() == expected
+    assert parses == []
