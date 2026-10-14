@@ -219,6 +219,39 @@ def test_healthy_workspace_overlay_list_is_enforced(monkeypatch):
     assert ip_allowlist.workspace_allows(_req(host="192.0.2.9")) is True
 
 
+# The installation list is read through the same load as the workspace list, so
+# an active tenant's overlay can set it too, and a corrupt overlay fails closed.
+
+
+def test_corrupt_tenant_overlay_fails_closed_for_the_installation_list(monkeypatch):
+    _write_workspace_overlay(monkeypatch, "[auth.ip_allowlist\ncidrs = [")
+    assert ip_allowlist.installation_allows(_req(host="127.0.0.1")) is True
+    assert ip_allowlist.installation_allows(_req(host="203.0.113.7")) is False
+
+
+def test_a_tenant_overlay_that_breaks_during_the_load_fails_closed(monkeypatch):
+    # The healthy overlay passes the check before the load; it breaks just before
+    # the load reads it, so only the check after the load can notice the error.
+    _write_workspace_overlay(monkeypatch, "[auth.ip_allowlist]\ncidrs = [\"192.0.2.0/24\"]\n")
+    assert config.config_source_errors() == {}
+    overlay = config.tenant_config_path()
+    real_get = config.get_ip_allowlist
+
+    def get_after_the_overlay_breaks():
+        overlay.write_text("[auth.ip_allowlist\n", encoding="utf-8")
+        return real_get()
+
+    monkeypatch.setattr(config, "get_ip_allowlist", get_after_the_overlay_breaks)
+    assert ip_allowlist.installation_allows(_req(host="203.0.113.7")) is False
+    assert ip_allowlist.installation_allows(_req(host="127.0.0.1")) is True
+
+
+def test_healthy_tenant_overlay_list_is_enforced_for_the_installation_list(monkeypatch):
+    _write_workspace_overlay(monkeypatch, "[auth.ip_allowlist]\ncidrs = [\"192.0.2.0/24\"]\n")
+    assert ip_allowlist.installation_allows(_req(host="203.0.113.7")) is False
+    assert ip_allowlist.installation_allows(_req(host="192.0.2.9")) is True
+
+
 def test_workspace_gate_refuses_a_bound_principal(tmp_path):
     from maverick.oidc import VerifiedPrincipal
     from maverick_dashboard import auth
