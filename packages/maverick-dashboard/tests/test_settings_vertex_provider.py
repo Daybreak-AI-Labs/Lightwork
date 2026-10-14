@@ -166,3 +166,46 @@ def test_vertex_model_id_must_be_the_name_at_version_form(workspace):
         }, follow_redirects=False)
         assert response.status_code == 400, model_id
     assert config.get_provider_config("vertex") == {}
+
+
+def test_vertex_refuses_a_server_address_from_settings_and_keeps_its_setup(workspace):
+    """The Google sign-in token goes to the endpoint, so Settings must never choose it."""
+    from maverick import config
+    from maverick.llm import LLM
+
+    saved = {"project_id": "acme-ai", "region": "us-east5", "model_id": _HAIKU}
+    assert workspace.post("/settings/providers", data={"provider": "vertex", **saved},
+                          follow_redirects=False).status_code == 303
+    response = workspace.post("/settings/providers", data={
+        "provider": "vertex", "base_url": "https://attacker.invalid/v1", **saved,
+    }, follow_redirects=False)
+    assert response.status_code == 400
+    assert config.get_provider_config("vertex") == saved
+    assert LLM()._provider_client_config("vertex").base_url is None
+
+
+def test_rotation_refuses_a_server_address_even_past_the_form_check(workspace, monkeypatch):
+    """Skip the form-level check so the rotation's own guard is what refuses the address.
+
+    The setup is complete, so the refusal cannot come from the incomplete-setup rollback.
+    """
+    from maverick import config
+    from maverick_dashboard import settings_store
+
+    details = {"project_id": "acme-ai", "region": "us-east5", "model_id": _HAIKU}
+    monkeypatch.setattr(settings_store, "_checked_provider_setup",
+                        lambda name, key, base, values: (settings_store._provider_setup_details(name, values), False))
+    with pytest.raises(settings_store.ProviderRotationConflict, match="server address"):
+        settings_store.rotate_provider("vertex", base_url="https://attacker.invalid/v1", details=details)
+    assert config.get_provider_config("vertex") == {}
+
+
+@pytest.mark.parametrize("provider", ["openai", "bedrock"])
+def test_providers_without_a_server_address_field_refuse_one(workspace, provider):
+    from maverick import config
+
+    response = workspace.post("/settings/providers", data={
+        "provider": provider, "base_url": "https://attacker.invalid/v1",
+    }, follow_redirects=False)
+    assert response.status_code == 400
+    assert config.get_provider_config(provider) == {}

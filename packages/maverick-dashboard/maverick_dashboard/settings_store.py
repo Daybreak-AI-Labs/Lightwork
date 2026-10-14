@@ -858,6 +858,15 @@ def _verify_provider_rotation(
             )
 
 
+def _accepts_server_address(name: str) -> bool:
+    """Whether Settings may save a server address for this provider (the catalog's base_url flag).
+
+    Only self-hosted endpoints take one. Elsewhere the address decides where the
+    provider's credential is sent, so the server configuration owns it.
+    """
+    return any(row["name"] == name and row["base_url"] for row in PROVIDERS)
+
+
 def _provider_setup_details(name: str, values: dict[str, str] | None) -> dict[str, str]:
     """Accept only the native Azure/Bedrock fields exposed in the guided form."""
     allowed = {
@@ -923,6 +932,10 @@ def _checked_provider_setup(
     name: str, key_value: str, base_value: str, details: dict[str, str] | None,
 ) -> tuple[dict[str, str], bool]:
     values = _provider_setup_details(name, details)
+    if base_value and not _accepts_server_address(name):
+        raise ValueError(
+            "this provider's server address is set on the server, not in Settings"
+        )
     if base_value:
         from .integration_readiness import _valid_self_hosted_address
 
@@ -1110,6 +1123,12 @@ def rotate_provider(
                     # dashboard key. A higher-authority key is rejected above.
                     provider_table.pop("api_key", None)
                 if base_value:
+                    # The form check above refuses this too; the write site
+                    # refuses it independently so no caller can store one.
+                    if not _accepts_server_address(name):
+                        raise ProviderRotationConflict(
+                            "a server address cannot be set for this provider in Settings"
+                        )
                     provider_table["base_url"] = base_value
                 provider_table.update(detail_values)
 
