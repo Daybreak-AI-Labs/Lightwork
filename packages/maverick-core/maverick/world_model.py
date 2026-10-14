@@ -1193,6 +1193,20 @@ def _single_approver(approval, approvers: list[str]) -> list[str]:
     return approvers
 
 
+def _approval_state_view(approval, approvers: list[str], audit_pending: int) -> dict:
+    """The operator/UI quorum view of one approval (shared by the per-id and
+    the batched readers so both return the same shape and values)."""
+    return {
+        "status": approval.status,
+        "approvals_required": max(1, int(approval.approvals_required or 1)),
+        "approved_count": len(approvers),
+        "approvers": approvers,
+        "requested_by": approval.requested_by,
+        "audit_pending_count": audit_pending,
+        "effective": approval.status != "pending",
+    }
+
+
 def _approval_audit_event_from_row(row) -> ApprovalAuditEvent:
     return ApprovalAuditEvent(**_row_for(ApprovalAuditEvent, dict(row)))
 
@@ -4205,7 +4219,7 @@ class WorldModel:
             return None
         rows = self._read_all(
             "SELECT approver, decision FROM approval_signoffs "
-            "WHERE approval_id = ? ORDER BY decided_at", (approval_id,),
+            "WHERE approval_id = ? ORDER BY decided_at, approver", (approval_id,),
         )
         approvers = [r["approver"] for r in rows if r["decision"] == "approved"]
         approvers = _single_approver(appr, approvers)
@@ -4216,14 +4230,39 @@ class WorldModel:
                 (approval_id,),
             )[0]
         )
+        return _approval_state_view(appr, approvers, audit_pending)
+
+    def approval_states(self, approvals) -> dict[int, dict]:
+        """:meth:`approval_state` for approvals the caller has already listed,
+        in two queries for the whole set instead of three per approval (the
+        audit binder spent ~1.2 ms per approval re-reading each one). Each
+        value equals ``approval_state(id)`` for that approval."""
+        listed = {int(a.id): a for a in approvals}
+        approvers: dict[int, list[str]] = {approval_id: [] for approval_id in listed}
+        pending: dict[int, int] = dict.fromkeys(listed, 0)
+        ids = list(listed)
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            marks = ",".join("?" * len(chunk))
+            for approval_id, approver, decision in self._read_all(
+                "SELECT approval_id, approver, decision FROM approval_signoffs "
+                f"WHERE approval_id IN ({marks}) ORDER BY decided_at, approver",
+                tuple(chunk),
+            ):
+                if decision == "approved":
+                    approvers[approval_id].append(approver)
+            for approval_id, count in self._read_all(
+                "SELECT approval_id, COUNT(*) FROM approval_audit_outbox "
+                f"WHERE approval_id IN ({marks}) AND delivered_at IS NULL "
+                "GROUP BY approval_id",
+                tuple(chunk),
+            ):
+                pending[approval_id] = int(count)
         return {
-            "status": appr.status,
-            "approvals_required": max(1, int(appr.approvals_required or 1)),
-            "approved_count": len(approvers),
-            "approvers": approvers,
-            "requested_by": appr.requested_by,
-            "audit_pending_count": audit_pending,
-            "effective": appr.status != "pending",
+            approval_id: _approval_state_view(
+                appr, _single_approver(appr, approvers[approval_id]), pending[approval_id]
+            )
+            for approval_id, appr in listed.items()
         }
 
     def claim_approval(self, approval_id: int, principal: str) -> bool:
