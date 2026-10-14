@@ -309,8 +309,8 @@ def instruction_digest(system: str, model: str) -> str:
     return hashlib.sha256((model + "\n" + system).encode("utf-8")).hexdigest()
 
 
-def answer_system(profile) -> str:
-    """Use the current specialist's answer instructions with every action disabled."""
+def specialist_instructions(profile) -> str:
+    """The specialist's own instructions, shared by answer checks and public chat."""
     from maverick.agent_autonomy import default_profile_for, render_autonomy_prompt
     from maverick.domain import render_workflow_prompt
     from maverick.domain_discipline import augment_persona
@@ -319,7 +319,12 @@ def answer_system(profile) -> str:
     return (augment_persona(profile.name, profile.persona)
             + render_refusals(profile.name, profile.refuse)
             + render_autonomy_prompt(profile.name, profile.autonomy or default_profile_for(profile.name))
-            + render_workflow_prompt(profile.workflow)
+            + render_workflow_prompt(profile.workflow))
+
+
+def answer_system(profile) -> str:
+    """Use the current specialist's answer instructions with every action disabled."""
+    return (specialist_instructions(profile)
             + "\nThis is an answer check using fictional test material. No tools, files, knowledge sources "
               "or outside systems are connected. Answer the question directly. Never claim to have "
               "taken an action or checked a source you cannot access.")

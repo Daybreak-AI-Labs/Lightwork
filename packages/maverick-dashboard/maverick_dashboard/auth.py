@@ -186,7 +186,10 @@ def _self_authenticated_path(path: str) -> bool:
         ("/share/", "/scim/", "/form/", "/dsar/response/", "/unsubscribe/", "/saml/",
          "/auth/invite/", "/api/v1/external/",
          "/api/v1/public/consent/", "/api/v1/public/policies/",
-         "/api/v1/devices/pairing/", "/rights/", "/api/v1/public/rights/")
+         "/api/v1/devices/pairing/", "/rights/", "/api/v1/public/rights/",
+         # Public website chat: the publishable key and visitor session are the
+         # credentials, checked in public_chat_api. The admin prefix is not listed.
+         "/public/chat/v1/")
     )
 
 

@@ -5362,6 +5362,12 @@ def pick_advanced() -> dict[str, Any]:
             "Guidance is reviewed and read at the task's next safe point; existing task ownership, permissions and spending limits remain enforced.",
             default=True,
         ),
+        "allow_public_chat": _q_confirm(
+            "Allow a chat box on your public website for anonymous visitors? Off by default. "
+            "Each website is listed exactly and has a daily spending limit. Visitors can ask one "
+            "published specialist's questions only; they cannot use tools or see your records.",
+            default=False,
+        ),
         "allow_human_conversation_handoffs": _q_confirm(
             "Allow reviewed human help inside Chat? People select an on-duty helper "
             "and review the brief they share. AI pauses before the helper takes over; "
@@ -9717,6 +9723,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         _feature_locks.append("role_editing = false")
     if type(advanced.get("allow_human_conversation_handoffs")) is bool:
         _feature_locks.append("human_conversation_handoffs = " + str(advanced["allow_human_conversation_handoffs"]).lower())
+    if advanced.get("allow_public_chat") is True:
+        # Off by default: only a deliberate yes is written. Sites are added through the chat API (docs/public-chat.md).
+        lines.extend(["", "[public_chat]", "enabled = true"])
     if _feature_locks:
         lines.append("")
         lines.append("[features]")

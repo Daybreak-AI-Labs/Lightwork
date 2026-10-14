@@ -2316,6 +2316,16 @@ app.state.public_consent_error_origin_resolver = lambda request: public_consent_
     request, _public_consent_dependencies
 )
 app.include_router(create_consent_public_router(_public_consent_dependencies))
+# Public website chat: the visitor router is self-authenticated (publishable key
+# plus origin) and the admin router sits under dashboard auth. Both answer 404
+# while [public_chat] enabled is false, and store nothing until then.
+from .public_chat_api import (  # noqa: E402
+    create_public_chat_admin_router,
+    create_public_chat_router,
+)
+
+app.include_router(create_public_chat_router())
+app.include_router(create_public_chat_admin_router())
 # The public rights-request form: JSON API under /api/v1/public/rights and
 # the hosted pages under /rights/. Fail-closed on its module gate.
 from .public_rights_api import pages as _public_rights_pages  # noqa: E402
@@ -3248,6 +3258,9 @@ async def bearer_auth(request: Request, call_next):
         # design; gated, origin-checked and token-addressed in its router.
         or path.startswith("/rights/")
         or path.startswith("/api/v1/public/rights/")
+        # Public website chat (its own publishable key, origin and visitor
+        # session). The admin prefix /api/v1/public-chat stays authenticated.
+        or path.startswith("/public/chat/v1/")
     ):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
