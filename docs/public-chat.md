@@ -107,9 +107,11 @@ A visitor cannot:
   each message counts for 24 hours from when it was sent. Every message that
   passes the origin and size checks counts, including one that a session or
   minute limit then refuses. Visitors who share one address, such as people on
-  the same company network, share that limit. The count is kept in memory and
-  restarts with the dashboard; the spending cap is kept on disk and bounds the
-  cost.
+  the same company network, share that limit. The count is kept in memory for
+  at most 10,000 addresses and restarts with the dashboard. When that table is
+  full, the address whose latest counted message is oldest gives way, so a
+  burst of new addresses never refuses a new visitor; that address starts a new
+  count. The spending cap is kept on disk and bounds the cost.
 - **Answers.** Each answer is one tool-free provider call
   (`LLM.complete` with `tools=None`, one physical attempt, no failover),
   through the budgeted path. Before each call, the answer's share (5 cents)
@@ -128,9 +130,14 @@ A visitor cannot:
 - **Errors.** Refusal text is fixed and generic, but the status code is not the
   same for every refusal. A key that is unknown or revoked gets `401` whatever
   the origin. A live key used from an origin the site does not list gets `403`.
-  So a caller who holds a key can tell whether it is still live. That reveals
-  no secret: the key is public on the host page by design, and the server
-  stores only its digest, so the key cannot be recovered from the server.
+  So a caller who holds a key can tell whether it is still live, and, by trying
+  origins, whether a given origin is listed for the site (`201` for a listed
+  origin, `403` for an unlisted one). That reveals no secret: the key is public
+  on the host page by design, and the server stores only its digest, so the key
+  cannot be recovered from the server. An origin list is configuration, though,
+  and it can name hosts that are not public, such as a staging site. Anyone who
+  holds a live key can learn those names this way, so list only the origins
+  that should use the chat.
 - **Audit.** Creating, rotating and revoking a site, and viewing transcripts,
   are audit events without key material. A site is recorded once it exists; if
   the record cannot be written, the new site is revoked again and the request
@@ -141,8 +148,9 @@ A visitor cannot:
 - Each answer sees only the visitor's current message, not earlier turns.
 - The visitor waits for the answer in the same request. There is no polling.
 - Transcripts past retention are removed by the hourly background pass, so one
-  can outlive its retention by up to an hour. A sweep that fails is logged and
-  is tried again an hour later.
+  can outlive its retention by up to an hour. A workspace whose sweep fails is
+  logged and skipped for that pass; the other workspaces are still swept, and
+  the failed one is tried again at the next pass, an hour later.
 - The answer hold is a fixed 5 cents. A model whose estimated cost for one
   answer is above that is refused before the call, so a premium model needs a
   larger hold first. Not built.
