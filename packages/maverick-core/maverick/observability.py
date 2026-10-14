@@ -1,12 +1,15 @@
 """Opt-in OpenTelemetry + Prometheus exporters.
 
-Off by default. Three knobs:
+Off by default. Knobs:
 
   - ``MAVERICK_OTEL_EXPORTER=otlp``      enables OTLP span export
   - ``MAVERICK_OTEL_ENDPOINT=https://...``  override default collector URL
   - ``MAVERICK_OTEL_HEADERS=k1=v1,k2=v2`` per-request headers on the OTLP
     exporter (e.g. ``x-honeycomb-team=...`` / ``dd-api-key=...`` so traces
     reach a managed backend like Honeycomb / Datadog / Grafana Cloud)
+  - ``MAVERICK_OTEL_METRICS=1``          also export the measurements below over
+    OTLP, to the same collector (needs the OTLP exporter; the metrics URL is the
+    span endpoint with ``/v1/traces`` replaced by ``/v1/metrics``)
   - ``MAVERICK_PROMETHEUS_PORT=9100``    expose /metrics on this port
   - ``MAVERICK_PROMETHEUS_ADDR=127.0.0.1`` bind address for /metrics
 
@@ -19,6 +22,8 @@ When enabled, it wraps:
   - Tool invocations (one span per tool call, attributes = tool name +
     result-size + ms)
   - Provider dispatches (provider + model + tokens + cost in attributes)
+  - Dashboard HTTP requests: one server span each, named by route template
+    (``maverick_dashboard.request_spans``; never the raw path or query)
 
 Deps are heavyweight + optional. Install with:
     python -m pip install -e './packages/maverick-core[observability]'
@@ -33,7 +38,7 @@ import logging
 import os
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -42,12 +47,51 @@ log = logging.getLogger(__name__)
 _initialized = False
 _init_lock = threading.Lock()
 _tracer: Any = None
+# opentelemetry.trace itself (SpanKind, StatusCode), set together with _tracer.
+_trace_api: Any = None
 _sentry: Any = None
 _metrics: dict[str, Any] = {}
+# name -> (kind, OTLP instrument) for the metrics in _METRIC_SPECS (MAVERICK_OTEL_METRICS).
+_otel_instruments: dict[str, tuple[str, Any]] = {}
 _metric_series_lock = threading.Lock()
 _metric_label_series: dict[str, set[tuple[tuple[str, str], ...]]] = {}
 _MAX_LABEL_SERIES_PER_METRIC = 128
 _OVERFLOW_LABEL = "__other__"
+
+# Every metric record_metric() records. The Prometheus registry and, when
+# MAVERICK_OTEL_METRICS is on, the OTLP meter are both built from this table, so
+# a metric has the same name, kind and label names on both. Rows are
+# (kind, key, metric name, description, label names). Dashboards and alerts key
+# on the names, so renaming one is a breaking change.
+_METRIC_SPECS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
+    ("counter", "llm_calls", "maverick_llm_calls_total", "Total LLM API calls",
+     ("provider", "model")),
+    ("histogram", "llm_latency", "maverick_llm_latency_seconds", "LLM call latency",
+     ("provider", "model")),
+    ("counter", "llm_tokens", "maverick_llm_tokens_total", "Total tokens billed",
+     ("provider", "model", "direction")),
+    # Prompt-cache effectiveness: input tokens served from cache (~0.1x cost),
+    # written to cache (~1.25-2x), and processed fresh (full price). Hit rate =
+    # cache_read / (cache_read + input). A value stuck near zero across a run flags
+    # a silent cache invalidator (a date/UUID in the system prompt, an unstable
+    # tool order) -- the cheapest regression to catch and the dearest to miss.
+    ("counter", "llm_cache_tokens", "maverick_llm_cache_tokens_total",
+     "Prompt-cache input tokens", ("provider", "model", "kind")),
+    ("counter", "tool_calls", "maverick_tool_calls_total", "Tool invocations",
+     ("tool", "status")),
+    # Lifetime total -> a Counter (monotonic, accumulates via inc()). It used to be a
+    # Gauge fed `.set(budget.dollars)` from the per-goal Budget accumulator, so a
+    # second goal starting fresh at $0 stomped the running total back down. Callers
+    # now inc() by each call's delta, which sums to a true cross-goal lifetime spend.
+    ("counter", "budget_dollars", "maverick_budget_dollars_spent",
+     "Total dollars spent (lifetime)", ()),
+    # latency_budget.note_elapsed has always called record_metric with this name,
+    # but it was never registered -- and record_metric returns silently for an
+    # unknown metric, so every breach was recorded into nothing. The one signal that
+    # says a tool blew its latency budget was dropped at the last step.
+    ("counter", "tool_latency_budget_exceeded", "maverick_tool_latency_budget_exceeded_total",
+     "Tool calls that exceeded [tools] latency_budget_ms", ("tool",)),
+)
 
 _SAFE_TELEMETRY_LABEL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,63}$")
 
@@ -154,10 +198,84 @@ def _otlp_headers() -> dict[str, str]:
     return headers
 
 
+def _otlp_metrics_enabled() -> bool:
+    """``MAVERICK_OTEL_METRICS`` / ``[observability] otlp_metrics``: on for a true value only.
+
+    A config ``false`` reaches here as ``"0"``, which a plain ``bool()`` would read as on.
+    """
+    raw = (_setting("MAVERICK_OTEL_METRICS", "otlp_metrics") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _otlp_metrics_endpoint(traces_endpoint: str) -> str | None:
+    """The OTLP/HTTP metrics URL for the span endpoint, or ``None`` if there is none.
+
+    The HTTP exporter posts to an explicit endpoint verbatim, so the signal path
+    must be right: ``.../v1/traces`` becomes ``.../v1/metrics``, the path the
+    exporter uses by default. Any other span endpoint has no derivable metrics
+    path, so metrics stay off rather than post to a guessed URL.
+    """
+    suffix = "/v1/traces"
+    if traces_endpoint.endswith(suffix):
+        return traces_endpoint[: -len(suffix)] + "/v1/metrics"
+    return None
+
+
+def _initialize_otlp_metrics(endpoint: str, headers: dict[str, str], resource: Any) -> None:
+    """Create one OTLP instrument per ``_METRIC_SPECS`` row, on a meter of its own.
+
+    The meter provider is not made global (the traces provider is), and it uses the
+    span exporter's headers. The imports stay here, so with the knob off the metrics
+    SDK is never loaded. A failure logs and leaves metrics off; traces and
+    Prometheus are unaffected.
+    """
+    metrics_endpoint = _otlp_metrics_endpoint(endpoint)
+    if metrics_endpoint is None:
+        log.warning(
+            "observability: OTLP metrics need an endpoint ending in /v1/traces (got %s); "
+            "metrics stay off", endpoint,
+        )
+        return
+    try:
+        from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
+            OTLPMetricExporter,
+        )
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+    except ImportError:
+        log.warning(
+            "observability: OTLP metrics need opentelemetry-sdk and the OTLP HTTP exporter. "
+            "Install with: python -m pip install -e './packages/maverick-core[observability]'"
+        )
+        return
+    try:
+        # Same rule as the span exporter: pass headers only when set.
+        exporter = (
+            OTLPMetricExporter(endpoint=metrics_endpoint, headers=headers)
+            if headers
+            else OTLPMetricExporter(endpoint=metrics_endpoint)
+        )
+        provider = MeterProvider(
+            resource=resource,
+            metric_readers=[PeriodicExportingMetricReader(exporter)],
+        )
+        meter = provider.get_meter("maverick")
+        for kind, key, name, doc, _labels in _METRIC_SPECS:
+            if kind == "histogram":
+                instrument = meter.create_histogram(name, description=doc)
+            else:
+                instrument = meter.create_counter(name, description=doc)
+            _otel_instruments[key] = (kind, instrument)
+    except Exception as e:
+        log.warning("observability: OTLP metrics exporter init failed: %s", e)
+        return
+    log.info("observability: OTLP metrics -> %s", metrics_endpoint)
+
+
 def _initialize() -> None:
     """Idempotent setup. Imports happen here so the module is cheap to
     import when observability is off."""
-    global _initialized, _tracer, _sentry
+    global _initialized, _tracer, _sentry, _trace_api
     with _init_lock:
         if _initialized:
             return
@@ -224,9 +342,17 @@ def _initialize() -> None:
                 return
             trace.set_tracer_provider(provider)
             _tracer = trace.get_tracer("maverick")
+            _trace_api = trace
             log.info(
                 "observability: OTLP traces -> %s (%d header(s))",
                 endpoint, len(headers),
+            )
+            if _otlp_metrics_enabled():
+                _initialize_otlp_metrics(endpoint, headers, resource)
+        elif _otlp_metrics_enabled():
+            log.warning(
+                "observability: MAVERICK_OTEL_METRICS is set but MAVERICK_OTEL_EXPORTER "
+                "is not otlp; OTLP metrics stay off",
             )
 
         if _prometheus_enabled():
@@ -248,50 +374,9 @@ def _initialize() -> None:
                 return
             with _metric_series_lock:
                 _metric_label_series.clear()
-            _metrics["llm_calls"] = Counter(
-                "maverick_llm_calls_total",
-                "Total LLM API calls", ["provider", "model"],
-            )
-            _metrics["llm_latency"] = Histogram(
-                "maverick_llm_latency_seconds",
-                "LLM call latency", ["provider", "model"],
-            )
-            _metrics["llm_tokens"] = Counter(
-                "maverick_llm_tokens_total",
-                "Total tokens billed", ["provider", "model", "direction"],
-            )
-            # Prompt-cache effectiveness: input tokens served from cache
-            # (~0.1x cost), written to cache (~1.25-2x), and processed fresh
-            # (full price). Hit rate = cache_read / (cache_read + input). A
-            # value stuck near zero across a run flags a silent cache
-            # invalidator (a date/UUID in the system prompt, an unstable tool
-            # order) -- the cheapest regression to catch and the dearest to miss.
-            _metrics["llm_cache_tokens"] = Counter(
-                "maverick_llm_cache_tokens_total",
-                "Prompt-cache input tokens", ["provider", "model", "kind"],
-            )
-            _metrics["tool_calls"] = Counter(
-                "maverick_tool_calls_total",
-                "Tool invocations", ["tool", "status"],
-            )
-            # Lifetime total -> a Counter (monotonic, accumulates via inc()).
-            # It used to be a Gauge fed `.set(budget.dollars)` from the per-goal
-            # Budget accumulator, so a second goal starting fresh at $0 stomped
-            # the running total back down. Callers now inc() by each call's
-            # delta, which sums to a true cross-goal lifetime spend.
-            _metrics["budget_dollars"] = Counter(
-                "maverick_budget_dollars_spent",
-                "Total dollars spent (lifetime)",
-            )
-            # latency_budget.note_elapsed has always called record_metric with
-            # this name, but it was never registered -- and record_metric
-            # returns silently for an unknown metric, so every breach was
-            # recorded into nothing. The one signal that says a tool blew its
-            # latency budget was dropped at the last step.
-            _metrics["tool_latency_budget_exceeded"] = Counter(
-                "maverick_tool_latency_budget_exceeded_total",
-                "Tool calls that exceeded [tools] latency_budget_ms", ["tool"],
-            )
+            for kind, key, name, doc, labels in _METRIC_SPECS:
+                metric_type = Histogram if kind == "histogram" else Counter
+                _metrics[key] = metric_type(name, doc, list(labels))
             _register_computed_collector()
             log.info("observability: Prometheus /metrics on %s:%d", addr, port)
 
@@ -435,36 +520,121 @@ def trace_span(
                 raise
 
 
+@contextlib.contextmanager
+def http_request_span(method: str, *, carrier: Mapping[str, str] | None = None) -> Iterator[Any]:
+    """The OTLP server span for one dashboard HTTP request; ``None`` when span export is off.
+
+    The span is made current, so the spans a request starts (agent, tool,
+    provider) nest under it. Unlike trace_span() it never opens a Sentry
+    transaction: request spans are OTLP-only, so Sentry's performance quota is
+    not spent on every page. ``carrier`` is the caller's W3C trace context; when it
+    names a trace, the span joins that trace as a remote child.
+    """
+    _initialize()
+    if _tracer is None:
+        yield None
+        return
+    with _tracer.start_as_current_span(
+        f"HTTP {method}", context=_inbound_context(carrier),
+        kind=_trace_api.SpanKind.SERVER,
+        # The SDK would record an unhandled error's message and stack on the span.
+        # That text can carry a path value (a share token) or a secret, so the
+        # request span records neither; mark_span_failed sets the status instead.
+        record_exception=False, set_status_on_exception=False,
+    ) as span:
+        yield span
+
+
+def _inbound_context(carrier: Mapping[str, str] | None) -> Any:
+    """The context the caller's ``traceparent`` names, or ``None`` to start a new trace.
+
+    Only ``traceparent`` and ``tracestate`` are passed on, whatever the carrier holds,
+    and no value is recorded: the propagator reads them and nothing else.
+    """
+    if not carrier or "traceparent" not in carrier:
+        return None
+    try:
+        from opentelemetry import propagate
+
+        return propagate.extract({
+            key: carrier[key] for key in ("traceparent", "tracestate") if key in carrier})
+    except Exception:  # pragma: no cover -- a malformed header never breaks a request
+        log.debug("inbound trace context not read", exc_info=True)
+        return None
+
+
+def mark_span_failed(span: Any) -> None:
+    """Set the OTel status to ERROR on ``span``: a 5xx answer (exceptions set it themselves)."""
+    try:
+        span.set_status(_trace_api.StatusCode.ERROR)
+    except Exception:  # pragma: no cover -- a span never breaks a request
+        log.debug("span status not set", exc_info=True)
+
+
 def record_metric(
     name: str,
     value: float = 1.0,
     *,
     labels: dict[str, str] | None = None,
 ) -> None:
-    """Bump a known counter / observe a histogram / set a gauge."""
+    """Bump a known counter / observe a histogram / set a gauge.
+
+    The Prometheus metric and, with ``MAVERICK_OTEL_METRICS`` on, the OTLP
+    instrument of the same name both record the value under the same bounded
+    labels.
+    """
     _initialize()
     metric = _metrics.get(name)
-    if metric is None:
+    instrument = _otel_instruments.get(name)
+    if metric is None and instrument is None:
         return
     labels = labels or {}
     try:
-        if labels:
-            labels = _bounded_metric_labels(name, labels)
-        # Resolve the label child once. Calling metric.labels() with the
-        # wrong (or empty) label set raises in prometheus_client, so only
-        # scope when labels are actually provided.
-        scoped = metric.labels(**labels) if labels else metric
-        # Histograms expose observe(); gauges expose set() *and* inc();
-        # counters expose inc(). Prefer set() before inc() so gauges are
-        # updated as absolute values rather than accumulated.
-        if hasattr(scoped, "observe"):
-            scoped.observe(value)
-        elif hasattr(scoped, "set"):
-            scoped.set(value)
-        elif hasattr(scoped, "inc"):
-            scoped.inc(value)
+        labels = _bounded_metric_labels(name, labels) if labels else {}
     except Exception:  # pragma: no cover -- never crash on metric export
-        log.debug("metric %s failed", name, exc_info=True)
+        log.debug("metric %s labels failed", name, exc_info=True)
+        return
+    if metric is not None:
+        try:
+            # Resolve the label child once. Calling metric.labels() with the
+            # wrong (or empty) label set raises in prometheus_client, so only
+            # scope when labels are actually provided.
+            scoped = metric.labels(**labels) if labels else metric
+            # Histograms expose observe(); gauges expose set() *and* inc();
+            # counters expose inc(). Prefer set() before inc() so gauges are
+            # updated as absolute values rather than accumulated.
+            if hasattr(scoped, "observe"):
+                scoped.observe(value)
+            elif hasattr(scoped, "set"):
+                scoped.set(value)
+            elif hasattr(scoped, "inc"):
+                scoped.inc(value)
+        except Exception:  # pragma: no cover -- never crash on metric export
+            log.debug("metric %s failed", name, exc_info=True)
+    if instrument is not None:
+        _record_otlp_metric(name, instrument, value, labels)
+
+
+def _record_otlp_metric(
+    name: str,
+    instrument: tuple[str, Any],
+    value: float,
+    labels: dict[str, str],
+) -> None:
+    """Record on an OTLP instrument: a histogram observes, a counter adds."""
+    kind, otel = instrument
+    try:
+        if kind == "histogram":
+            otel.record(value, attributes=labels or None)
+        else:
+            otel.add(value, attributes=labels or None)
+    except Exception:  # pragma: no cover -- never crash on metric export
+        log.debug("OTLP metric %s failed", name, exc_info=True)
+
+
+def otlp_tracing_enabled() -> bool:
+    """True when OTLP span export is on (``MAVERICK_OTEL_EXPORTER=otlp``)."""
+    return _otel_enabled()
 
 
 def is_enabled() -> bool:
@@ -592,6 +762,7 @@ def gen_ai_tool_attributes(
 
 __all__ = [
     "trace_span", "record_metric", "is_enabled",
+    "http_request_span", "mark_span_failed", "otlp_tracing_enabled",
     "gen_ai_span_name", "gen_ai_attributes", "gen_ai_tool_attributes",
     "gen_ai_agent_attributes",
     "safe_agent_telemetry_label",

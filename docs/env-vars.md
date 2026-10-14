@@ -332,6 +332,7 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_LOG_TURNS` | unset | Set to log full LLM turns (verbose). |
 | `MAVERICK_OTEL_EXPORTER` | unset (off) | Set to enable the OpenTelemetry trace exporter. |
 | `MAVERICK_OTEL_ENDPOINT` | `http://localhost:4318/v1/traces` | OTLP collector endpoint. |
+| `MAVERICK_OTEL_METRICS` | config `[observability] otlp_metrics` (off) | Also send the Prometheus series over OTLP to the same collector, under the same names. Needs `MAVERICK_OTEL_EXPORTER=otlp`; the metrics URL is the endpoint with `/v1/traces` replaced by `/v1/metrics`, so the endpoint must end in `/v1/traces`. |
 | `MAVERICK_RESIDENCY_REGION` | config `[residency] region` (unset) | Declare a data-residency requirement (e.g. `eu`). `maverick doctor` then warns about any residency-sensitive feature still defaulting to a US region (`AWS_REGION`→us-east-1, `VERTEX_LOCATION`→us-central1). No effect unset. |
 | `MAVERICK_PROMETHEUS_PORT` | unset (off) | Set a port to expose Prometheus metrics. |
 | `MAVERICK_PROMETHEUS_ADDR` | `127.0.0.1` | Bind address for the Prometheus metrics server. |

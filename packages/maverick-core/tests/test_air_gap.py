@@ -1,6 +1,7 @@
 """Air-gapped preflight audit: flag remote providers / egress / sandbox network."""
 from __future__ import annotations
 
+import pytest
 from click.testing import CliRunner
 from maverick.air_gap import audit
 from maverick.cli import main
@@ -152,6 +153,27 @@ def test_flags_outbound_webhook_telemetry_sink():
     rep = audit(config=cfg)
     assert rep["clean"] is False
     assert any("webhooks" in v.lower() for v in rep["violations"])
+
+
+def _fully_local_with(observability: dict) -> dict:
+    return {"models": _all_local_models(), "egress": {"deny": ["*"]},
+            "sandbox": {"backend": "docker"}, "enterprise": {"mode": True},
+            "observability": observability}
+
+
+@pytest.mark.parametrize(("switch", "value"), [
+    ("otel_exporter", "otlp"), ("otlp_metrics", True), ("otlp_metrics", "1")])
+def test_flags_otlp_telemetry_switches_in_config(switch, value):
+    # The All settings page writes these into [observability]; the audit reads the table.
+    rep = audit(config=_fully_local_with({switch: value}))
+    assert rep["clean"] is False
+    assert any(switch in v for v in rep["violations"])
+
+
+@pytest.mark.parametrize(("switch", "value"), [
+    ("otel_exporter", ""), ("otlp_metrics", False), ("otlp_metrics", "false")])
+def test_off_otlp_telemetry_switches_stay_clean(switch, value):
+    assert audit(config=_fully_local_with({switch: value}))["clean"] is True
 
 
 def test_deny_all_egress_without_enterprise_mode_is_flagged():

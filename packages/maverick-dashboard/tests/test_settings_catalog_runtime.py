@@ -660,6 +660,8 @@ def _switch_cases():
          "MAVERICK_OTEL_EXPORTER", "otlp", True),
         ("observability.otel_headers", "x-team=abc", observability._otlp_headers,
          {"x-team": "abc"}, "MAVERICK_OTEL_HEADERS", "x-env=1", {"x-env": "1"}),
+        ("observability.otlp_metrics", True, observability._otlp_metrics_enabled, True,
+         "MAVERICK_OTEL_METRICS", "1", True),
         ("observability.prometheus_port", 9109, observability._prometheus_enabled, True,
          None, None, None),
         ("computer_use.ocr", True, computer._ocr_enabled, True, "MAVERICK_COMPUTER_OCR", "0", False),
@@ -699,7 +701,7 @@ def test_former_environment_switches_take_effect_from_the_page(monkeypatch, audi
 
 
 def test_unset_switches_keep_todays_behaviour():
-    from maverick import budget_receipts, tool_token
+    from maverick import budget_receipts, observability, tool_token
     from maverick.cache import llm as llm_cache
     from maverick.orchestrator import _bon_early_exit
     from maverick.providers import anthropic_provider as ap
@@ -713,6 +715,7 @@ def test_unset_switches_keep_todays_behaviour():
     assert http_fetch.is_blocked_host("10.0.0.7") is True
     assert database_tool._max_rows() == 1000
     assert budget_receipts.enabled() is False
+    assert observability._otlp_metrics_enabled() is False
     assert tool_token._ttl_seconds() == 30.0
     assert ap._adaptive_max_tokens_floor() == 8192
     assert guard._decode_disabled() is False

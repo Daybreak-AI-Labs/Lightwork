@@ -195,16 +195,32 @@ def _audit_telemetry(config: dict) -> list[str]:
 
     These reach the network directly, not through the ``[egress]`` deny list the
     LLM/tool paths honor, so the other passes are blind to them: Sentry error
-    reporting, SIEM audit forwarding, and outbound webhooks all ship run data
-    off-box. (Prometheus is an inbound 127.0.0.1 listener — not egress — and OTEL
-    is env-var driven and not config-visible, so neither is flagged here.)
+    reporting, OTLP trace and metrics export, SIEM audit forwarding, and outbound
+    webhooks all ship run data off-box. The OTLP switches are read from
+    ``[observability]`` as the All settings page writes them, with the runtime's own
+    truth rules, so a value the runtime would treat as on is flagged. (Prometheus is
+    an inbound 127.0.0.1 listener, not egress, so it is not flagged here.)
     """
     violations: list[str] = []
-    dsn = str((config.get("observability") or {}).get("sentry_dsn") or "").strip()
+    obs = config.get("observability") or {}
+    dsn = str(obs.get("sentry_dsn") or "").strip()
     if dsn:
         violations.append(
             "[observability] sentry_dsn is set — Sentry ships errors/traces off-box; "
             "clear it (and unset MAVERICK_SENTRY_DSN) for an air-gapped deployment")
+    exporter = obs.get("otel_exporter")
+    if exporter is not None and str(exporter).strip():
+        violations.append(
+            "[observability] otel_exporter is set — timing traces are sent to an OpenTelemetry "
+            "collector off-box; clear it (and unset MAVERICK_OTEL_EXPORTER) for an air-gapped "
+            "deployment")
+    # Parsed as the runtime parses MAVERICK_OTEL_METRICS: only a true value is on.
+    metrics = "" if obs.get("otlp_metrics") is None else str(obs.get("otlp_metrics"))
+    if metrics.strip().lower() in {"1", "true", "yes", "on"}:
+        violations.append(
+            "[observability] otlp_metrics is on — measurements are sent to an OpenTelemetry "
+            "collector off-box; turn it off (and unset MAVERICK_OTEL_METRICS) for an "
+            "air-gapped deployment")
     siem = str((config.get("audit") or {}).get("siem_dest") or "").strip()
     if siem:
         violations.append(

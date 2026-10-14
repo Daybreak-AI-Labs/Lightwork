@@ -4908,7 +4908,7 @@ attribute set** — `gen_ai.operation.name` / `system` / `request.model` /
 `execute_tool` tool-span attributes AND the `invoke_agent` agent-span leg
 (`gen_ai.agent.name/id` around every `Agent.run`) with semconv `error.type`
 stamped on failed spans — so any OTel-native backend reads them
-with no custom mapping), Prometheus `/metrics` — which serves the
+with no custom mapping), Prometheus `/metrics` (and, with `MAVERICK_OTEL_METRICS=1`, the same series over OTLP, plus one server span per dashboard request named by route template, `request_spans.py`) — which serves the
 platform series **and** Lightwork's own always-on counters from a
 dependency-free registry (`runtime_metrics.py`: dashboard requests by
 route TEMPLATE never raw path, request wall time, gateway calls,
