@@ -1,0 +1,84 @@
+"""The [agent_tests] switches that size and gate saved answer checks."""
+from __future__ import annotations
+
+import pytest
+
+
+@pytest.fixture
+def settings(monkeypatch, tmp_path):
+    from maverick import config
+
+    path = tmp_path / "config.toml"
+    monkeypatch.setenv("MAVERICK_CONFIG", str(path))
+
+    def write(text: str) -> None:
+        path.write_text(text, encoding="utf-8")
+        config.reset_config_cache()
+
+    write("")
+    yield write
+    config.reset_config_cache()
+
+
+def test_defaults_are_twenty_checks_and_both_switches_off(settings):
+    from maverick import agent_tests_policy as policy
+
+    assert policy.max_cases_per_specialist() == 20
+    assert policy.require_for_new_specialists() is False
+    assert policy.bypass_requires_second_person() is False
+
+
+def test_the_check_limit_follows_the_setting_between_one_and_two_hundred(settings):
+    from maverick import agent_tests_policy as policy
+
+    settings("[agent_tests]\nmax_cases_per_specialist = 35\n")
+    assert policy.max_cases_per_specialist() == 35
+    settings("[agent_tests]\nmax_cases_per_specialist = 200\n")
+    assert policy.max_cases_per_specialist() == 200
+    settings("[agent_tests]\nmax_cases_per_specialist = 1\n")
+    assert policy.max_cases_per_specialist() == 1
+
+
+@pytest.mark.parametrize("value", ["0", "201", "-5", "\"25\"", "2.5", "true"])
+def test_a_check_limit_outside_the_range_reads_as_the_default(settings, value):
+    from maverick import agent_tests_policy as policy
+
+    settings(f"[agent_tests]\nmax_cases_per_specialist = {value}\n")
+    assert policy.max_cases_per_specialist() == 20
+
+
+def test_the_switches_read_only_true_as_on(settings):
+    from maverick import agent_tests_policy as policy
+
+    settings("[agent_tests]\nrequire_for_new_specialists = true\nbypass_requires_second_person = true\n")
+    assert policy.require_for_new_specialists() is True
+    assert policy.bypass_requires_second_person() is True
+
+
+def test_unreadable_settings_keep_the_stricter_reading(settings):
+    from maverick import agent_tests_policy as policy
+
+    # A switch that is not a true/false value is read as on, never as off.
+    settings("[agent_tests]\nrequire_for_new_specialists = \"no\"\nbypass_requires_second_person = 0\n")
+    assert policy.require_for_new_specialists() is True
+    assert policy.bypass_requires_second_person() is True
+    # A broken settings file keeps both switches on and the check limit at its default.
+    settings("[agent_tests\nmax_cases_per_specialist = 50\n")
+    assert policy.require_for_new_specialists() is True
+    assert policy.bypass_requires_second_person() is True
+    assert policy.max_cases_per_specialist() == 20
+
+
+def test_the_config_checker_knows_the_section_and_its_limits():
+    from maverick.config_lint import lint_config
+
+    findings = lint_config({"agent_tests": {
+        "max_cases_per_specialist": 500, "require_for_new_specialists": "yes",
+        "bypass_requires_second_person": True, "mystery": 1}})
+    flagged = {(f.section, f.key) for f in findings}
+    assert ("agent_tests", "max_cases_per_specialist") in flagged
+    assert ("agent_tests", "require_for_new_specialists") in flagged
+    assert ("agent_tests", "mystery") in flagged
+    assert ("agent_tests", "bypass_requires_second_person") not in flagged
+    assert lint_config({"agent_tests": {"max_cases_per_specialist": 200,
+                                        "require_for_new_specialists": True}}) == []

@@ -921,6 +921,15 @@ client_token = ""             # MAVERICK_PROXY_CLIENT_TOKEN (sealed when set on 
 jd_hiring = true              # Agent Factory: draft or match agents from a job description
 require_passing_tests = true  # changed instructions publish only after every saved test passes (or with a recorded reason)
 
+[agent_tests]
+# Saved answer checks that gate publishing (maverick.agent_tests_policy). The defaults keep today's behaviour.
+max_cases_per_specialist = 20          # 1 to 200: saved checks one specialist can keep; one run checks at most this many.
+                                       # Lowering it keeps saved checks, but a set larger than the limit cannot pass a full run.
+require_for_new_specialists = false    # true: a specialist never published before needs a saved check and a passing full
+                                       # run of every check on its exact draft. A reason does not skip this.
+bypass_requires_second_person = false  # true: publishing changed instructions without a passing run (with a reason) needs
+                                       # another administrator's approval on the Approvals page. The requester cannot approve it.
+
 [autonomy]
 confirm_plan = false          # show the plan in Approvals and wait before a task's first action that reaches outside Lightwork
 

@@ -40,7 +40,7 @@ KNOWN_SECTIONS = frozenset({
     # [chat_message_actions] enabled: alternative conversation answers
     # (maverick.chat_message_actions), changeable on All settings.
     "chat_message_actions",
-    "a2a", "adaptive_compute", "agent", "agent_factory", "agent_trust",
+    "a2a", "adaptive_compute", "agent", "agent_factory", "agent_tests", "agent_trust",
     # [alerts] enabled: operational alerts (maverick.ops_alert), changeable
     # on Settings > All settings.
     "alerts",
