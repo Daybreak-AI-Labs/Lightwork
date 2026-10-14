@@ -55,6 +55,12 @@ _WORK_REF = re.compile(
 _CORRECTION_REF = re.compile(r"catalog:knowledge-correction/(knowledge-req-[0-9a-f]{40})\Z")
 _REMOTE_REF = re.compile(r"catalog:remote-knowledge/(KNS-[a-f0-9]{32})/([a-f0-9]{32})\Z")
 _MAX_SOURCE_BYTES = 256 * 1024
+# A saved remote source's record carries every chunk of its text, and the chunker
+# overlaps neighbouring chunks: measured with the default chunker, its canonical
+# JSON is about 1.43 times its text bytes. The bound is twice the text, plus
+# room for each item's manifest and extraction map (up to 256 regions).
+_REMOTE_TEXT_FACTOR = 2
+_REMOTE_ITEM_BYTES = 64 * 1024
 _PROJECTION_SCHEMA = "lightwork.knowledge-source-projection.v1"
 _CORRECTION_SCHEMA = "lightwork.knowledge-correction-source.v1"
 
@@ -63,7 +69,7 @@ class KnowledgeProjectionUnavailable(RuntimeError):
     """An exact source cannot be safely projected from its owning store."""
 
 
-def _canonical(value: object) -> bytes:
+def _canonical(value: object, *, limit: int = _MAX_SOURCE_BYTES) -> bytes:
     try:
         encoded = json.dumps(
             value,
@@ -74,9 +80,20 @@ def _canonical(value: object) -> bytes:
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise KnowledgeProjectionUnavailable("source record is not finite JSON") from exc
-    if len(encoded) > _MAX_SOURCE_BYTES:
+    if len(encoded) > limit:
         raise KnowledgeProjectionUnavailable("source record exceeds its projection boundary")
     return encoded
+
+
+def _remote_source_limit(record: Mapping[str, object]) -> int:
+    """The canonical bound for a retained remote source, from the text it holds.
+
+    exact_source_snapshot has already held that text to the source's current
+    max_text_kib, so the bound scales with the text the source actually holds.
+    """
+    text_bytes = int(record["text_bytes"])
+    items = len(record["items"])
+    return max(_MAX_SOURCE_BYTES, _REMOTE_TEXT_FACTOR * text_bytes + _REMOTE_ITEM_BYTES * items)
 
 
 def _payload(store: str, source_id: str, record: Mapping[str, object]) -> dict:
@@ -88,8 +105,8 @@ def _payload(store: str, source_id: str, record: Mapping[str, object]) -> dict:
     }
 
 
-def _commitment(payload: Mapping[str, object]) -> str:
-    return hashlib.sha256(_canonical(payload)).hexdigest()
+def _commitment(payload: Mapping[str, object], *, limit: int = _MAX_SOURCE_BYTES) -> str:
+    return hashlib.sha256(_canonical(payload, limit=limit)).hexdigest()
 
 
 def _bounded_summary(value: object) -> str:
@@ -430,7 +447,8 @@ def inspect_existing_source(
                     opened.close()
             summary = _bounded_summary("\n\n".join(chunk["text"] for item in record["items"] for chunk in item["document"]["chunks"]))
             payload = _payload("remote_knowledge", f"{remote[1]}/{remote[2]}", record)
-            inspected = {"source_ref": source_ref, "content_sha256": _commitment(payload), "title": _bounded_title(record["name"]),
+            inspected = {"source_ref": source_ref, "content_sha256": _commitment(payload, limit=_remote_source_limit(record)),
+                         "title": _bounded_title(record["name"]),
                          "summary": summary, "claim_state": "inferred", "observed_at": record["observed_at"], "verified_at": None,
                          "projection_schema": _PROJECTION_SCHEMA, "summary_truncated": len(summary.encode()) < record["text_bytes"]}
             if include_retrieval_chunks:

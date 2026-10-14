@@ -154,9 +154,12 @@ max_text_kib     = 256   # 1-8192: extracted text kept per refresh
 The defaults are the historical bounds. A value outside its range stops the
 saved-source list and refreshes with a message that names the setting. Each
 refresh reads the current values. A retained snapshot still validates after
-`max_items` is lowered, and its text is checked against the current
-`max_text_kib` whenever it is used. Listings read `max_pages` pages of 64 items,
-so raise `max_pages` along with `max_items`: the defaults cover 1,024 items.
+`max_items` is lowered. Its text is checked against the current `max_text_kib`
+whenever it is used, and the exact copy used by specialists is held to that same
+setting. Listings read `max_pages` pages of 64 items, so raise `max_pages` along
+with `max_items`: the defaults cover 1,024 items. The search chunker also limits
+one document to about 1.6 million characters, so a larger document cannot be
+imported whatever `max_text_kib` says.
 
 ## Starter corpora
 

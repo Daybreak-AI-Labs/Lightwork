@@ -8,7 +8,9 @@ from types import SimpleNamespace
 import pytest
 from maverick import config
 from maverick import knowledge_sources as native
+from maverick.knowledge_content_projection import inspect_existing_source
 from maverick.paths import tenant_scope
+from maverick.research_registry import ResearchAssetRef
 
 TENANT = "acme"
 OWNER = "user:alice"
@@ -21,6 +23,14 @@ class _Registry:
         return SimpleNamespace(tenant=tenant, decision_id=decision_id, decision_sha256=decision_sha256, asset_id="asset-1",
                                action="analyze", purpose_codes=("support",), purpose="support",
                                expires_at=4_000_000_000.0, authority_sha256=SHA)
+
+    @staticmethod
+    def preflight_dataset_ingestion(tenant, **_kwargs):
+        return None
+
+    @staticmethod
+    def register_dataset(tenant, actor, *, dataset_id, version, **_kwargs):
+        return ResearchAssetRef(kind="dataset", asset_id=dataset_id, version=version, manifest_sha256=SHA)
 
 
 def _embedding():
@@ -302,13 +312,13 @@ def test_an_invalid_limit_refuses_the_saved_source_listing_with_its_name(service
         service.public(row)
 
 
-def _start_refresh(service, monkeypatch, texts, limits):
+def _start_refresh(service, monkeypatch, texts, limits, *, knowledge_base=None):
     """Save a source, then queue and run a refresh under ``limits`` whose inventory lists one file per text."""
     rows = [{"id": name, "name": f"{name}.txt", "revision": "r1", "mime": "text/plain", "size": None,
              "citation": "", "kind": "file"} for name in texts]
     monkeypatch.setattr(native.readers, "inventory", lambda binding, actor, guard: rows)
     monkeypatch.setattr(native.readers, "document", lambda binding, actor, item, guard: (texts[item["id"]], "r" * 64, {"warnings": []}))
-    monkeypatch.setattr(service, "_open", lambda: _KnowledgeBase())
+    monkeypatch.setattr(service, "_open", lambda: knowledge_base if knowledge_base is not None else _KnowledgeBase())
     prepared, _ = _prepared(service, 3600)
     _set_limits(monkeypatch, limits)
     job = service.start(dict(prepared, inventory_sha256=native.digest(rows)), "e" * 32)
@@ -375,3 +385,69 @@ def test_the_projection_text_bound_follows_the_current_max_text_kib(service, mon
         native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb)
     _set_limits(monkeypatch, {"max_text_kib": 2})
     assert native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb)["text_bytes"] == 3 * 601
+
+
+def _prose(kib, seed):
+    """Plain ASCII prose of ``kib`` KiB, distinct for each ``seed``."""
+    line = f"Document {seed}: staff report each incident within one working day, and managers keep the record for seven years.\n"
+    return (line * (kib * 1024 // len(line) + 1))[: kib * 1024]
+
+
+def _real_knowledge_base(tmp_path):
+    """The real Knowledge writer (default chunking) on a local store."""
+    from maverick_knowledge import DeterministicEmbedder, KnowledgeBase, SqliteVectorStore
+
+    return KnowledgeBase(store=SqliteVectorStore(tmp_path / "knowledge.db"), embedder=DeterministicEmbedder(8))
+
+
+def _retained_real_snapshot(service, kb, texts):
+    """A complete snapshot whose documents went through the real Knowledge writer, as a refresh stores them."""
+    _, row = _prepared(service, 3600)
+    version = "f" * 32
+    identifier = "KNV-" + native.digest([row["id"], version])[:32]
+    manifest = []
+    for number, text in enumerate(texts):
+        collection = f"remote-{row['id'][4:]}-{number:016x}"
+        remote_id = f"item-{number}"
+        kb.ingest_text(collection, text, source=f"remote:{row['id']}:{remote_id}", trust_tier=1, sensitivity="internal",
+                       ingested_by=OWNER, extra_meta={"remote_source_id": row["id"], "remote_item_id": remote_id}, replace_source=True)
+        document_sha = hashlib.sha256(text.encode()).hexdigest()
+        record = kb.exact_document(collection, document_sha)
+        manifest.append({"remote_id": remote_id, "collection": collection, "document_sha256": document_sha,
+                         "native_document_sha256": native.digest(native._committed_document(record))})
+    service.snapshots.create({"id": identifier, "tenant": TENANT, "owner": OWNER, "version": version, "source": row["id"],
+                              "plan_sha256": native.content_binding(row["plan"]), "items": manifest, "binding": row["plan"]["binding"],
+                              "name": row["plan"]["name"], "observed_at": time.time(), "reference": None},
+                             action="test.snapshot", actor=OWNER)
+    return row["id"], version
+
+
+def test_a_retained_source_at_its_configured_text_bound_still_projects(service, monkeypatch, tmp_path):
+    # Every chunk is projected, and the chunker overlaps neighbours, so the
+    # exact projection is about 1.4 times the text. 390 KiB is within 512 KiB.
+    kb = _real_knowledge_base(tmp_path)
+    try:
+        source, version = _retained_real_snapshot(service, kb, [_prose(195, 1), _prose(195, 2)])
+        _set_limits(monkeypatch, {"max_text_kib": 512})
+        inspected = inspect_existing_source(TENANT, native.source_ref(source, version), knowledge_base=kb)
+    finally:
+        kb.close()
+    assert len(inspected["content_sha256"]) == 64
+
+
+def test_a_refresh_at_the_configured_text_bound_completes(service, monkeypatch, tmp_path):
+    kb = _real_knowledge_base(tmp_path)
+    result = _start_refresh(service, monkeypatch, {"first": _prose(195, 1), "second": _prose(195, 2)},
+                            {"max_text_kib": 512}, knowledge_base=kb)
+    assert result["state"] == "completed", result["message"]
+    assert [item["state"] for item in result["items"]] == ["imported", "imported"]
+
+
+@pytest.mark.parametrize("operation", [None, "d" * 32])
+def test_a_save_under_an_invalid_limit_writes_nothing(service, monkeypatch, operation):
+    _set_limits(monkeypatch, {"max_text_kib": 0})
+    with pytest.raises(config.KnowledgeSourcesConfigError, match=r"knowledge_sources\.max_text_kib must be a whole number"):
+        service.save(_plan(3600), expected_revision=0, operation=operation)
+    assert service.sources.list(limit=10) == []
+    if operation is not None:
+        assert native.DECISION_STORE.get("KNO-" + operation) is None
