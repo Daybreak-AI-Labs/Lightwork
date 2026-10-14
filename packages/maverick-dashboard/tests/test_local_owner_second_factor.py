@@ -466,10 +466,15 @@ def test_a_passphrase_only_recovery_check_does_not_reset_the_code_lock(clock):
         local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE, flow=FLOW)
     assert passphrase_only.value.status_code == 401
     assert row()["failures"] == 4 and row()["locked_until"] == 0
+    # The sign-in path keeps the count too: a correct passphrase gives a code challenge and no reset.
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    assert isinstance(challenge, second.Challenge) and challenge.purpose == "sign_in"
+    assert row()["failures"] == 4 and row()["locked_until"] == 0
     with pytest.raises(HTTPException) as fifth:
-        local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE, flow=FLOW, code="000000")
+        second.complete(request(), token=challenge.token, code="000000")
     assert fifth.value.status_code == 401
     assert row()["failures"] == 5
+    # The restricted recovery check is refused while the lock holds, as sign-in is.
     with pytest.raises(HTTPException) as locked:
         local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE, flow=FLOW, code="000000")
     assert locked.value.status_code == 429
