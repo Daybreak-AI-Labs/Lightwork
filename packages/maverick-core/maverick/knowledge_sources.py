@@ -766,9 +766,13 @@ def exact_source_snapshot(tenant, identifier, version, *, knowledge_base, author
                 raise PermissionError("The source document's exact native publication changed.")
             records.append({"item": item, "document": committed})
         # items keeps every record, so the commitment is the same for every reader. Only the
-        # records this authority may see under the permission filter are projected to it.
+        # records this authority may see under the permission filter are projected to it;
+        # with the filter on and no authority, none are.
         email = getattr(authority, "verified_email", "") if authority is not None else ""
-        visible = [record for record in records if _visible(record["item"], email)] if authority is not None and _by_email(bounds) else records
+        if _by_email(bounds):
+            visible = [record for record in records if _visible(record["item"], email)] if authority is not None else []
+        else:
+            visible = records
         return {"source": identifier, "version": version, "plan_sha256": snapshot["plan_sha256"], "items": records,
                 "visible_items": visible, "withheld_for_permissions": len(records) - len(visible),
                 "observed_at": snapshot["observed_at"], "name": snapshot["name"], "text_bytes": total}

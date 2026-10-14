@@ -700,3 +700,11 @@ def test_a_filter_off_refresh_drops_the_permission_records_it_reuses(service, mo
     assert native._visible(stored, "alice@contoso.com") is False
     assert service.public(service.sources.get(identifier))["permissions_need_refresh"] is True
 
+
+def test_a_projection_without_an_authority_projects_no_item_under_the_filter(service, monkeypatch):
+    kb, identifier, version = _retained_snapshot(service, 2, text="x")
+    _grant_items(service, identifier, version, {"item-0": _grant(anyone=True), "item-1": _grant(domains=["contoso.com"])})
+    _set_limits(monkeypatch, {"permission_filter": "by_email"})
+    result = native.exact_source_snapshot(TENANT, identifier, version, knowledge_base=kb)
+    assert result["visible_items"] == [] and result["withheld_for_permissions"] == 2
+    assert len(result["items"]) == 2  # the commitment still covers every item
