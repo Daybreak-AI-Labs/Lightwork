@@ -1,5 +1,5 @@
 {% extends "public_base.html" %}
-{% from "_passphrase_fields.html" import styles %}
+{% from "_passphrase_fields.html" import styles with context %}
 {% block title %}{% if view == 'codes' %}Recovery codes{% elif view == 'setup' %}Set up your authenticator app{% else %}Enter your code{% endif %} · Lightwork{% endblock %}
 {% block public_label %}Sign in{% endblock %}
 {% block public_footer %}Sign in to this workspace{% endblock %}
