@@ -123,12 +123,12 @@ A visitor cannot:
   once an hour, and also when a visit or an admin view happens. Each sweep
   covers every workspace. An installation that never used the chat creates no
   files for it.
-- **Errors.** Refusals use fixed, generic text. A key that is unknown or
-  revoked gets `401` whatever the origin. A live key used from an origin the
-  site does not list gets `403`. The two statuses differ, so a caller who
-  already holds a key can see whether it is still live. The key is public on
-  the host page, so this reveals no secret. Using one status for both cases is
-  an open decision.
+- **Errors.** Refusal text is fixed and generic, but the status code is not the
+  same for every refusal. A key that is unknown or revoked gets `401` whatever
+  the origin. A live key used from an origin the site does not list gets `403`.
+  So a caller who holds a key can tell whether it is still live. That reveals
+  no secret: the key is public on the host page by design, and the server
+  stores only its digest, so the key cannot be recovered from the server.
 - **Audit.** Creating, rotating and revoking a site, and viewing transcripts,
   are audit events without key material. A site is recorded once it exists; if
   the record cannot be written, the new site is revoked again and the request
