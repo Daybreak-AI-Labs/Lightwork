@@ -164,6 +164,7 @@ def test_episodes_by_goal_keeps_the_runs_list_episodes_keeps_at_a_tied_cut_off(t
                 "INSERT INTO episodes(goal_id, started_at, cost_dollars) VALUES (?, ?, ?)",
                 (goals[index % 2], 5_000.0 + index // 15, 0.01),
             )
-    batch = world.episodes_by_goal(goals, per_goal=7)
-    for gid in goals:
-        assert [e.id for e in batch[gid]] == [e.id for e in world.list_episodes(goal_id=gid, limit=7)]
+    for per_goal in (7, 0, -1):   # 0 and negative limits read as list_episodes reads them
+        batch = world.episodes_by_goal(goals, per_goal=per_goal)
+        for gid in goals:
+            assert [e.id for e in batch[gid]] == [e.id for e in world.list_episodes(goal_id=gid, limit=per_goal)]

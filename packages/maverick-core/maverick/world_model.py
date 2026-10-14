@@ -2952,13 +2952,13 @@ class WorldModel:
         Every listed goal is a key, with an empty list when it has no runs.
         """
         ids = list(dict.fromkeys(int(goal_id) for goal_id in goal_ids))
-        cap = max(1, int(per_goal))
+        limit = int(per_goal)   # passed to LIMIT as list_episodes does, so 0 and negatives match it
         rows: list = []
         for gid in ids:
             rows.extend(self._read_all(
                 "SELECT " + _EPISODE_SPEND_COLS + "FROM episodes e WHERE e.goal_id = ? "
                 "ORDER BY e.started_at DESC LIMIT ?",
-                (gid, cap),
+                (gid, limit),
             ))
         found: dict[int, list[EpisodeSpend]] = {gid: [] for gid in ids}
         for episode in _episode_spends_from_rows(rows):
