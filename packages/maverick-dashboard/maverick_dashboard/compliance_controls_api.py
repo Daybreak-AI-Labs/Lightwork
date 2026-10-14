@@ -640,11 +640,12 @@ def _run_erase(channel: str, user: str, actor: str = "local") -> dict:
     from maverick.cli import erase as erase_command
 
     world = _world_for_request()
+    from maverick.ediscovery import conversation_user_matches
+
     before = sum(
         1
         for conv in world.list_conversations(channel)
-        if conv.user_id == user
-        or (channel == "cli" and user == "local" and str(conv.user_id).startswith("local:"))
+        if conversation_user_matches(conv.user_id, user, channel)
     )
     if not before:
         return {"erased": False, "conversations": 0, "clean": False,

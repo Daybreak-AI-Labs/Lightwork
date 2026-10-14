@@ -5541,20 +5541,10 @@ def monitor(ctx, goal_id, interval) -> None:
 
 
 def _conversation_user_matches(conv_user_id: str, requested: str, channel: str) -> bool:
-    """Match a conversation's user_id for erase/export-user.
+    """Match a conversation's user_id for erase/export-user (see ``ediscovery``)."""
+    from ..ediscovery import conversation_user_matches
 
-    Most channels store externally supplied user ids and must match exactly:
-    identifiers such as Twilio WhatsApp ``whatsapp:+15551234567`` or Matrix
-    room ids naturally contain colons, so treating any ``<prefix>:`` as the
-    requested user can disclose or erase unrelated conversations.
-
-    The only family match Lightwork currently needs is the local CLI chat
-    namespace: each REPL session is stored as ``local:<uuid>``, while the
-    documented GDPR subject is ``--channel cli --user local``.
-    """
-    if conv_user_id == requested:
-        return True
-    return channel == "cli" and requested == "local" and conv_user_id.startswith("local:")
+    return conversation_user_matches(conv_user_id, requested, channel)
 
 
 def _erase_subject_knowledge(channel: str, user: str) -> dict[str, int]:
