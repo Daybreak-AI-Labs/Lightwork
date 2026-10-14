@@ -194,7 +194,11 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # signed-audit config looked like a typo (client-journey finding).
     "audit": {"sign", "worm", "unified",
               # Off-host key and SIEM forwarding (audit/writer.py, audit_siem.py).
-              "require_offhost_key", "siem_dest", "siem_token", "siem_allow_insecure"},
+              "require_offhost_key", "siem_dest", "siem_token", "siem_allow_insecure",
+              # Vendor SIEM credential fallbacks (audit/forwarder.py); the env vars
+              # MAVERICK_DATADOG_API_KEY and MAVERICK_SENTINEL_* are the preferred home.
+              "datadog_api_key", "sentinel_tenant_id", "sentinel_client_id",
+              "sentinel_client_secret"},
     "entity_graph": {"enable", "staleness_seconds"},
     # Commerce suite caps are money/quantity limits, so the schema is closed: a
     # misspelled cap must not silently fall back to the default.

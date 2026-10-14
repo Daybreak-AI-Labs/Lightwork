@@ -7140,9 +7140,10 @@ def audit_export(
 @click.option("--format", "fmt", type=click.Choice(["json", "cef"]), default="json",
               help="Wire format for the SIEM (default: json).")
 @click.option("--to", "dest", default=None,
-              help="Destination URI: tcp://host:port, udp://host:port, or "
-                   "http(s)://host/path. Default: MAVERICK_SIEM_DEST / "
-                   "[audit] siem_dest.")
+              help="Destination URI: tcp://host:port, udp://host:port, "
+                   "http(s)://host/path, datadog://<site>, or "
+                   "sentinel://<dce-host>/<dcr-id>/Custom-<stream>. Default: "
+                   "MAVERICK_SIEM_DEST / [audit] siem_dest.")
 @click.option("--day", default=None, help="YYYY-MM-DD (default: today).")
 @click.option("--all", "all_days", is_flag=True,
               help="Forward every YYYY-MM-DD.ndjson day-file in the audit dir.")

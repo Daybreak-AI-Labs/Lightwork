@@ -47,7 +47,8 @@ _BUCKET = r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]"
 _PREFIX = r"[A-Za-z0-9!_.*'()/{}-]{0,200}"
 _HOST = r"[A-Za-z0-9*]([A-Za-z0-9*.-]{0,251}[A-Za-z0-9])?"
 _HOST_PORT = r"[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?|\[[0-9A-Fa-f:.]{2,45}\](:[0-9]{1,5})?"
-_SIEM = r"(https?|tcp|udp)://[^\s\"'<>]{1,300}"
+_SIEM = r"(https?|tcp|udp|datadog|sentinel)://[^\s\"'<>]{1,300}"
+_AZURE_ID = r"[A-Za-z0-9][A-Za-z0-9.-]{0,254}"
 _REDIS = r"(rediss?|unix)://\S{1,500}"
 _PAGE = r"/[A-Za-z0-9/_.-]{0,200}"
 _ORIGIN = r"[a-z0-9][a-z0-9._-]{0,63}"
@@ -647,12 +648,12 @@ def _security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="The activity record may be signed with a key kept on this server.",
           aliases="off host signing key"),
         S("audit", "siem_dest", "Send the activity record to",
-          "Your security monitoring service's address, starting with https://, tcp:// or "
-          "udp://.",
+          "Your security monitoring service's address, starting with https://, tcp://, udp://, "
+          "datadog:// or sentinel://.",
           "text", grp, "", "maverick.cli", subgroup=custody, pattern=_SIEM,
           max_length=300, test="siem", env=("MAVERICK_SIEM_DEST",), weaker="change",
           warning="Activity records will be sent to a different place.",
-          aliases="siem splunk syslog forward"),
+          aliases="siem splunk syslog forward datadog sentinel azure"),
         S("audit", "siem_token", "Security monitoring access key",
           "The access key sent with the activity record to a web address. Stored sealed and "
           "never shown again.",
@@ -665,6 +666,27 @@ def _security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           env=("MAVERICK_SIEM_ALLOW_INSECURE",), weaker=True,
           warning="Activity records could be read by anyone on the network path.",
           aliases="insecure plaintext"),
+        S("audit", "datadog_api_key", "Datadog access key",
+          "The access key that lets Lightwork send activity records to Datadog. Stored sealed "
+          "and never shown again.",
+          "secret", grp, "", "maverick.audit.forwarder", subgroup=custody, max_length=1000,
+          env=("MAVERICK_DATADOG_API_KEY",), aliases="datadog dd key access"),
+        S("audit", "sentinel_tenant_id", "Microsoft Sentinel directory ID",
+          "The ID of the Microsoft directory that holds the app which sends activity records "
+          "to Sentinel.",
+          "text", grp, "", "maverick.audit.forwarder", subgroup=custody, pattern=_AZURE_ID,
+          max_length=255, env=("MAVERICK_SENTINEL_TENANT_ID",),
+          aliases="sentinel azure entra directory"),
+        S("audit", "sentinel_client_id", "Microsoft Sentinel app ID",
+          "The ID of the app registration that sends activity records to Sentinel.",
+          "text", grp, "", "maverick.audit.forwarder", subgroup=custody, pattern=_AZURE_ID,
+          max_length=255, env=("MAVERICK_SENTINEL_CLIENT_ID",),
+          aliases="sentinel azure entra app client"),
+        S("audit", "sentinel_client_secret", "Microsoft Sentinel app secret",
+          "The secret of the app registration that sends activity records to Sentinel. Stored "
+          "sealed and never shown again.",
+          "secret", grp, "", "maverick.audit.forwarder", subgroup=custody, max_length=1000,
+          env=("MAVERICK_SENTINEL_CLIENT_SECRET",), aliases="sentinel azure entra secret"),
         S("audit.unified", "enable", "Shared activity record",
           "Collect every workspace's activity into one signed record with its own reading "
           "position. Needs the signed activity record.",
