@@ -5139,6 +5139,14 @@ def pick_advanced() -> dict[str, Any]:
             "OFF by default.",
             default=False,
         ),
+        "ediscovery": _q_confirm(
+            "Legal holds and matter export? Hold the records of a legal matter for "
+            "named custodians and date ranges, so bulk deletion pauses and their "
+            "records cannot be erased, then export the matter as a signed archive "
+            "for counsel. Only auditors and administrators see matter details. "
+            "OFF by default.",
+            default=False,
+        ),
         "breach_notification": _q_confirm(
             "Breach-notification planner? Fourteen regimes' verified "
             "who/when/whether rules (GDPR, HIPAA, six US states, LGPD, "
@@ -9833,6 +9841,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("breach_notification"):
         lines.append("")
         lines.append("[breach_notification]")
+        lines.append("enable = true")
+    if advanced.get("ediscovery"):
+        lines.append("")
+        lines.append("[ediscovery]")
         lines.append("enable = true")
     if advanced.get("dsar_fulfillment"):
         lines.append("")

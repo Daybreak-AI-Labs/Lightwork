@@ -150,6 +150,7 @@ KNOWN_SECTIONS = frozenset({
     "consent_registry",
     "data_map",
     "breach_notification",
+    "ediscovery",
     "dsar_fulfillment",
     "grc_sync",
     # Registry drift, again: these are all read by real load_config() call sites

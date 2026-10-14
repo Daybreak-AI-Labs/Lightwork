@@ -13185,6 +13185,10 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Breach notifications",
         "requires": (),
     },
+    "ediscovery": {  # ediscovery.enable
+        "label": "Legal holds and matter export",
+        "requires": (),
+    },
     "privacy_automation.drop_management": {  # privacy_drop_management.enabled
         "label": "Data broker deletion requests",
         "requires": ("privacy_automation", "privacy_automation.rights_orchestration"),
