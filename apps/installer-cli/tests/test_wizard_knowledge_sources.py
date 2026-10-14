@@ -66,3 +66,20 @@ def test_saved_source_refresh_minutes_config_rejects_values_outside_the_runtime_
     values = {"max_items": 64, "max_pages": 16, "max_download_mib": 4, "max_text_kib": 256, "max_refresh_minutes": value}
     with pytest.raises(ValueError, match=r"knowledge_sources\.max_refresh_minutes must be a whole number from 1 to 60"):
         wizard._cfg_knowledge_sources(values)
+
+
+def test_the_permission_question_keeps_the_connection_rule_unless_email_matching_is_chosen(monkeypatch):
+    from maverick_installer import wizard
+
+    printed = []
+    monkeypatch.setattr(wizard.console, "print", lambda *args, **kwargs: printed.append(" ".join(map(str, args))))
+    monkeypatch.setattr(wizard, "_q_confirm", lambda prompt, *, default: False)
+    assert wizard.pick_knowledge_source_permissions() == {}
+    assert any("only with a group are left out" in text for text in printed)  # the group rule is stated before the choice
+
+
+def test_choosing_email_matching_writes_only_the_permission_filter(monkeypatch):
+    from maverick_installer import wizard
+
+    monkeypatch.setattr(wizard, "_q_confirm", lambda prompt, *, default: True)
+    assert wizard.pick_knowledge_source_permissions() == {"permission_filter": "by_email"}
