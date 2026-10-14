@@ -5,8 +5,10 @@
  *   <script src="https://<lightwork-host>/public/chat/v1/widget.js"
  *           data-key="lwpk_..." async></script>
  *
- * Every message is shown with text nodes only. The panel lives in a shadow root,
- * so the host page's styles cannot reach it and its code cannot read the chat.
+ * Every message is shown with text nodes only. The panel lives in a closed shadow
+ * root: the host page's styles cannot reach it, and its scripts cannot read it
+ * through host.shadowRoot. Closed mode is not a security boundary: a script on
+ * the host page shares the page's trust boundary and can still reach the chat.
  * The widget sends no cookies and keeps the visitor session in memory only.
  */
 (function () {
@@ -24,8 +26,8 @@
 
   var host = document.createElement("div");
   host.setAttribute("data-lightwork-chat", "");
+  var root = host.attachShadow({ mode: "closed" });
   document.body.appendChild(host);
-  var root = host.attachShadow({ mode: "open" });
 
   var style = document.createElement("style");
   style.textContent = [

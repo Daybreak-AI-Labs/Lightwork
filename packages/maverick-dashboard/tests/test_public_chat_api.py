@@ -151,6 +151,13 @@ def test_widget_inserts_text_only_and_never_evaluates_markup():
     assert "textContent" in source and "attachShadow" in source
 
 
+def test_widget_panel_uses_a_closed_shadow_root():
+    source = WIDGET.read_text(encoding="utf-8")
+    # Closed mode keeps the page's own scripts from reading the chat via host.shadowRoot.
+    assert 'attachShadow({ mode: "closed" })' in source
+    assert 'mode: "open"' not in source
+
+
 def test_admin_create_shows_key_once_and_stores_only_its_digest(chat, model):
     created = _site(chat)
     key = created["publishable_key"]
