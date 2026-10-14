@@ -410,13 +410,15 @@ def test_the_account_page_turns_the_app_on_and_shows_codes_once(clock):
         assert refused.status_code == 401
 
 
-def test_the_account_page_refuses_a_visitor_who_is_not_signed_in(clock):
+def test_the_account_page_refuses_a_visitor_who_is_not_signed_in():
     from maverick_dashboard.app import app
     enroll_owner()
     with TestClient(app, base_url=ORIGIN, client=("127.0.0.1", 53212),
                     headers={"Origin": ORIGIN}, follow_redirects=False) as client:
         response = client.get("/account/owner-authenticator")
-        assert response.status_code != 200
+        assert response.status_code == 401
+        assert response.json() == {"detail": "authenticated identity required"}
+        assert "otpauth://" not in response.text and "<code>" not in response.text
 
 
 def test_a_form_with_extra_fields_is_refused(clock):
