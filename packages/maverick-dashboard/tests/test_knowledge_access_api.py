@@ -985,7 +985,9 @@ def _signed_in(principal, claims):
 
 
 def test_the_verified_email_comes_only_from_the_signed_in_sessions_claims():
-    assert knowledge_access_api._verified_email(_signed_in("user:alice", {"idp_email": "alice@contoso.com"})) == "alice@contoso.com"
+    assert knowledge_access_api._verified_email(_signed_in("user:alice", {"verified_email": "alice@contoso.com"})) == "alice@contoso.com"
+    # The workspace invitation address is not the permission address.
+    assert knowledge_access_api._verified_email(_signed_in("user:alice", {"idp_email": "alice@contoso.com"})) == ""
     # An API key or a session without an asserted address has no email, so the permission filter withholds for it.
     assert knowledge_access_api._verified_email(_signed_in("user:key", {"via": "api_key"})) == ""
     assert knowledge_access_api._verified_email(SimpleNamespace(state=SimpleNamespace(principal=None))) == ""

@@ -213,10 +213,10 @@ _REQUEST_EMAIL: ContextVar[tuple[str, str] | None] = ContextVar("knowledge_reque
 
 
 def _verified_email(request: Request) -> str:
-    """The address the identity provider asserted for this sign-in, or "" (API keys, agents, unknown)."""
+    """The verified address the identity provider asserted for this sign-in, or "" (API keys, agents, unknown)."""
     principal = getattr(getattr(request, "state", None), "principal", None)
     claims = getattr(principal, "claims", None)
-    email = claims.get("idp_email") if isinstance(claims, dict) else None
+    email = claims.get("verified_email") if isinstance(claims, dict) else None
     return email if isinstance(email, str) else ""
 
 
