@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import uuid
 import zipfile
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
-from maverick import audit, ediscovery, ediscovery_export, records_gc
+from maverick import audit, config, ediscovery, ediscovery_export, records_gc
 from maverick.audit import preservation, retention
 from maverick.paths import tenant_scope
 from maverick.world_model import WorldModel
@@ -115,6 +117,7 @@ def test_matter_recorded_while_enabled_keeps_binding_after_disable(monkeypatch, 
     _values(name="bad\x07name"),
     _values(custodians=[]),
     _values(custodians=["user:cli:has space"]),
+    _values(custodians=["alice"]),
     _values(record_kinds=[]),
     _values(record_kinds=["goals", "goals"]),
     _values(record_kinds=["email"]),
@@ -432,3 +435,139 @@ def test_sweep_reports_a_held_workspace_as_held_in_preview_and_run_and_sweeps_th
             tenants, days=1, events_days=1, dry_run=dry_run, open_world=_SweepWorld)}
         assert rows["ws-a"]["held"] is True and rows["ws-a"]["conversations"] == 0
         assert rows["ws-a"]["activity"] == 0 and "held" not in rows["ws-b"]
+
+
+# ---- employee companion and conversation inbox -----------------------------------
+
+OWNER = "user:owner"
+ADMIN_USER = "user:admin"
+
+
+def _companion_store():
+    from maverick.employee_companion import EmployeeCompanionStore
+
+    return EmployeeCompanionStore()
+
+
+def _companion_exchange(store, owner=OWNER, message="companion private question"):
+    policy = store.policy(owner)
+    store.update_policy(owner, actor=ADMIN_USER, expected_revision=policy["revision"], enabled=True,
+                        allowed_sources=["own_tasks"], allowed_tools=["task_status"], retention_days=1)
+    return store.record_exchange(owner, message=message, response="You have one active task.",
+                                 source_refs=["task:17"], expected_revision=store.policy(owner)["revision"])
+
+
+@pytest.fixture()
+def inbox_setup(tmp_path, monkeypatch):
+    from maverick import paths
+
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    (tmp_path / "config.toml").write_text('[conversation_inbox]\nenabled=true\n', encoding="utf-8")
+    config.reset_config_cache()
+    monkeypatch.setattr(audit, "record", lambda *args, **kwargs: True)
+    from maverick import conversation_inbox
+
+    monkeypatch.setattr(conversation_inbox, "current_authority", lambda goal: (OWNER, None))
+    with WorldModel(tmp_path / "inbox-world.db") as world:
+        goal = world.create_goal("Original task", "Original private brief", owner=OWNER)
+        world.set_goal_status(goal, "active")
+        inbox = conversation_inbox.ConversationInbox(world, principal=OWNER, authorize=lambda goal: None)
+        yield SimpleNamespace(world=world, goal=goal, inbox=inbox, module=conversation_inbox, paths=paths)
+    config.reset_config_cache()
+
+
+def test_companion_clear_is_refused_for_a_held_exchange_and_keeps_it(events, ledger):
+    store = _companion_store()
+    _companion_exchange(store)
+    ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(custodians=[OWNER],
+                                                                                  record_kinds=["chats"]))
+    with pytest.raises(ediscovery.LegalHoldApplies) as refused:
+        store.clear_history(OWNER, actor=OWNER)
+    assert str(refused.value) == ediscovery.LEGAL_HOLD_MESSAGE
+    assert [item["message"] for item in store.held_exchanges(OWNER)] == ["companion private question"]
+    refusals = [payload for verb, payload in events if verb == "ediscovery_erasure_refused"]
+    assert refusals and refusals[-1]["chat_records"] == 1 and "private" not in json.dumps(refusals)
+
+
+def test_companion_clear_is_allowed_for_another_person_or_outside_the_dates(events, ledger):
+    store = _companion_store()
+    _companion_exchange(store)
+    ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(custodians=["user:someone"],
+                                                                                  record_kinds=["chats"]))
+    ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(custodians=[OWNER],
+                                                                                  record_kinds=["chats"],
+                                                                                  **PAST))
+    store.clear_history(OWNER, actor=OWNER)
+    assert store.held_exchanges(OWNER) == []
+
+
+def test_companion_retention_keeps_a_held_exchange_until_the_matter_is_released(events, ledger):
+    store = _companion_store()
+    _companion_exchange(store)
+    matter = ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(
+        custodians=[OWNER], record_kinds=["chats"]))
+    policy = store.policy(OWNER)
+    store.update_policy(OWNER, actor=ADMIN_USER, expected_revision=policy["revision"], enabled=False,
+                        allowed_sources=["own_tasks"], allowed_tools=["task_status"], retention_days=1)
+    assert len(store.history(OWNER)) == 1
+    ediscovery.MatterStore(ledger).release("ws-a", matter["id"], actor="auditor", expected_revision=1)
+    assert store.history(OWNER) == []
+
+
+def test_erasing_an_inbox_message_is_refused_for_a_held_conversation_and_keeps_it(inbox_setup, events, ledger):
+    s = inbox_setup
+    item = s.inbox.submit(s.goal, operation_id=uuid.uuid4().hex, mode="queue", text="Exact next request")
+    record_id = s.inbox._read(s.world.get_goal(s.goal))[0]["id"]
+    revision = s.module.STORE.get(record_id)["revision"]
+    ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(custodians=[OWNER],
+                                                                                  record_kinds=["chats"]))
+    assert [row["text"] for row in s.module.owned_items(OWNER)] == ["Exact next request"]
+    with pytest.raises(ediscovery.LegalHoldApplies):
+        s.module.erase_owned(OWNER, record_id, revision, uuid.uuid4().hex, actor=OWNER)
+    assert s.module.owned_items(OWNER)[0]["text"] == "Exact next request"
+    assert item["id"] in {row["id"] for row in s.module.owned_items(OWNER)}
+
+
+def test_inbox_message_outside_the_matter_dates_is_erasable(inbox_setup, events, ledger):
+    s = inbox_setup
+    s.inbox.submit(s.goal, operation_id=uuid.uuid4().hex, mode="queue", text="Exact next request")
+    record_id = s.inbox._read(s.world.get_goal(s.goal))[0]["id"]
+    revision = s.module.STORE.get(record_id)["revision"]
+    ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(custodians=[OWNER],
+                                                                                  record_kinds=["chats"], **PAST))
+    result = s.module.erase_owned(OWNER, record_id, revision, uuid.uuid4().hex, actor=OWNER)
+    assert result["status"] == "confirmed"
+    assert s.module.owned_items(OWNER) == []
+
+
+def test_export_includes_the_held_companion_exchanges_and_inbox_messages(inbox_setup, events, ledger, tmp_path):
+    s = inbox_setup
+    _companion_exchange(_companion_store())
+    s.inbox.submit(s.goal, operation_id=uuid.uuid4().hex, mode="queue", text="Exact next request")
+    matter = ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(
+        custodians=[OWNER], record_kinds=["chats"]))
+    result = ediscovery_export.export_matter(s.world, matter, actor="auditor", out_dir=tmp_path / "exports")
+    assert result["records"] == 2 and result["files"][0]["records"] == 2
+    from maverick.audit.signing import trusted_audit_public_keys
+
+    assert ediscovery_export.verify_export(result["path"], trusted_keys=trusted_audit_public_keys())["valid"] is True
+    with zipfile.ZipFile(result["path"]) as archive:
+        rows = [json.loads(line) for line in archive.read("chats.jsonl").splitlines()]
+    kinds = sorted(row["record_type"] for row in rows)
+    assert kinds == ["companion_exchange", "conversation_message"]
+    assert {row["owner"] for row in rows} == {OWNER}
+    assert any(row.get("text") == "Exact next request" for row in rows)
+
+
+def test_a_cli_custodian_holds_every_local_repl_session_like_the_cli_erase_does(world, ledger, events):
+    from maverick.cli import _conversation_user_matches
+
+    local = world.get_or_create_conversation("cli", "local:4f2a9c").id
+    other = world.get_or_create_conversation("cli", "localhost").id
+    ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(custodians=["user:cli:local"],
+                                                                                  record_kinds=["chats"]))
+    assert _conversation_user_matches("local:4f2a9c", "local", "cli") is True
+    assert ediscovery.erasure_refusal(world, conversation_ids=[local], goal_ids=[]) == ediscovery.LEGAL_HOLD_MESSAGE
+    assert ediscovery.erasure_refusal(world, conversation_ids=[other], goal_ids=[]) is None

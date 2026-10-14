@@ -251,7 +251,7 @@ def test_retention_review_shows_a_workspace_blocked_while_a_matter_is_active(env
     from maverick_dashboard import retention_runs as native
 
     monkeypatch.setattr(registry, "get_tenant", lambda tid: SimpleNamespace(id=tid, display_name="Acme"))
-    monkeypatch.setattr(native, "_policy", lambda: {})
+    monkeypatch.setattr(native, "_policy", dict)
     monkeypatch.setattr(retention_maintenance, "authorize", lambda request, expected_context=None: ("admin", {}))
     monkeypatch.setattr(retention_maintenance, "context_for", lambda request: {})
     request = SimpleNamespace(headers={})
@@ -261,3 +261,73 @@ def test_retention_review_shows_a_workspace_blocked_while_a_matter_is_active(env
     assert retention_maintenance.policy(request)["workspaces"][0]["blocked"] is True
     env.client.post(f"{BASE}/{created.json()['id']}/release", json={"expected_revision": 1})
     assert retention_maintenance.policy(request)["workspaces"][0]["blocked"] is False
+
+
+def _companion_with_one_exchange(owner: str):
+    from maverick.employee_companion import EmployeeCompanionStore
+
+    store = EmployeeCompanionStore()
+    policy = store.policy(owner)
+    store.update_policy(owner, actor="user:admin", expected_revision=policy["revision"], enabled=True,
+                        allowed_sources=["own_tasks"], allowed_tools=["task_status"], retention_days=1)
+    store.record_exchange(owner, message="companion private question", response="You have one active task.",
+                          source_refs=["task:17"], expected_revision=store.policy(owner)["revision"])
+    return store
+
+
+def test_companion_clear_is_held_on_the_review_path_the_employee_route_and_self_service(env, monkeypatch):
+    from fastapi import HTTPException
+    from maverick_dashboard import employee_companion_api, product_operations_companion
+
+    owner = "user:owner"
+    store = _companion_with_one_exchange(owner)
+    assert env.client.post(BASE, json=_body(custodians=[owner], record_kinds=["chats"])).status_code == 201
+    row = {"owner": owner, "reviewer": "admin", "channel": "dashboard", "user_id": "owner"}
+
+    outcome = personal_data_requests._erase_target(env.world, row, {"store": "companion_history"})
+    assert outcome == {"state": "held", "message": ediscovery.LEGAL_HOLD_MESSAGE,
+                       "retained": "No companion message was erased."}
+
+    monkeypatch.setattr(employee_companion_api, "_authority", lambda request, **kwargs: (owner, "ws-a", {}))
+    def clear(actor, tenant, context, companions):
+        return companions.clear_history(actor, actor=actor)
+
+    with pytest.raises(HTTPException) as route:
+        employee_companion_api._call_sync(SimpleNamespace(), clear, write=True)
+    assert route.value.status_code == 409 and route.value.detail == ediscovery.LEGAL_HOLD_MESSAGE
+
+    monkeypatch.setattr(product_operations_companion, "_current", lambda request: (owner, None))
+    prepared = {"revision": store.history_review(owner)["revision"]}
+    with pytest.raises(HTTPException) as self_service:
+        product_operations_companion.execute(SimpleNamespace(), None, {}, prepared, "a" * 32)
+    assert self_service.value.status_code == 409 and self_service.value.detail == ediscovery.LEGAL_HOLD_MESSAGE
+    assert [item["message"] for item in store.held_exchanges(owner)] == ["companion private question"]
+
+
+def test_inbox_erasure_request_is_held_before_any_message_is_erased(env, monkeypatch, tmp_path):
+    from maverick import audit as audit_module
+    from maverick import config
+    from maverick import conversation_inbox as inbox_module
+
+    owner = "user:owner"
+    (tmp_path / "config.toml").write_text('[conversation_inbox]\nenabled=true\n', encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    config.reset_config_cache()
+    monkeypatch.setattr(audit_module, "record", lambda *args, **kwargs: True)
+    monkeypatch.setattr(inbox_module, "current_authority", lambda goal: (owner, None))
+    goal = env.world.create_goal("Original task", "Original private brief", owner=owner)
+    env.world.set_goal_status(goal, "active")
+    inbox = inbox_module.ConversationInbox(env.world, principal=owner, authorize=lambda goal: None)
+    inbox.submit(goal, operation_id="b" * 32, mode="queue", text="Exact next request")
+    record_id = inbox._read(env.world.get_goal(goal))[0]["id"]
+    revision = inbox_module.STORE.get(record_id)["revision"]
+    assert env.client.post(BASE, json=_body(custodians=[owner], record_kinds=["chats"])).status_code == 201
+
+    row = {"owner": owner, "reviewer": "admin", "channel": "dashboard", "user_id": "owner", "id": "dsar-1"}
+    outcome = personal_data_requests._erase_target(env.world, row, {
+        "store": "conversation_inbox", "records": [{"id": record_id, "revision": revision}]})
+    assert outcome["state"] == "held" and outcome["message"] == ediscovery.LEGAL_HOLD_MESSAGE
+    assert [item["text"] for item in inbox_module.owned_items(owner)] == ["Exact next request"]
+    assert inbox_module.STORE.get(record_id)["revision"] == revision
+    config.reset_config_cache()

@@ -70,6 +70,12 @@ def _rows(kind: str, scope: Any) -> Iterator[dict[str, Any]]:
                 yield {"record_type": "turn", "conversation_id": conv.id, "channel": conv.channel,
                        "user_id": conv.user_id, "turn_id": turn.id, "goal_id": turn.goal_id,
                        "role": turn.role, "ts": turn.ts, "content": turn.content}
+        for owner, exchange in sorted(scope.companion_exchanges, key=lambda pair: (pair[0], pair[1]["time"])):
+            yield {"record_type": "companion_exchange", "owner": owner, **exchange}
+        from .conversation_inbox import public_item
+
+        for owner, item in sorted(scope.inbox_items, key=lambda pair: (pair[0], pair[1]["created_at"])):
+            yield {"record_type": "conversation_message", "owner": owner, **public_item(item)}
     elif kind == "attachments":
         for att in sorted(scope.attachments, key=lambda item: item.id):
             yield {"record_type": "attachment", "id": att.id, "goal_id": att.goal_id,

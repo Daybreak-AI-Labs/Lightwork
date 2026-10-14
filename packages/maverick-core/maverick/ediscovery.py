@@ -24,7 +24,7 @@ import re
 import secrets
 import sqlite3
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -164,8 +164,10 @@ def _custodians(value: object) -> list[str]:
         raise MatterValidationError(f"A matter can name at most {MAX_CUSTODIANS} custodians")
     found: set[str] = set()
     for item in value:
-        if not isinstance(item, str) or not _PRINCIPAL_RE.fullmatch(item.strip()):
-            raise MatterValidationError("Each custodian must be a principal identifier without spaces")
+        if (not isinstance(item, str) or not _PRINCIPAL_RE.fullmatch(item.strip())
+                or not item.strip().startswith("user:")):
+            raise MatterValidationError(
+                "Each custodian must be a principal id such as user:name or user:channel:identifier")
         found.add(item.strip())
     return sorted(found)
 
@@ -252,7 +254,9 @@ class MatterStore:
         self._clock = clock
         ensure_private_directory(self.path.parent)
         with self._connect() as connection:
-            connection.execute("PRAGMA journal_mode=WAL")
+            # Rollback journal, not WAL: a read never creates -wal or -shm files, so
+            # checking holds does not change a removed workspace's erasure review.
+            connection.execute("PRAGMA journal_mode=DELETE")
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS matters("
                 "tenant_id TEXT NOT NULL,matter_id TEXT NOT NULL,status TEXT NOT NULL,"
@@ -451,19 +455,37 @@ def _bounded(rows: Sequence[Any], label: str) -> list[Any]:
     return list(rows)
 
 
+def conversation_user_matches(conv_user_id: object, requested: str, channel: str) -> bool:
+    """Whether a stored conversation belongs to the subject ``requested`` on ``channel``.
+
+    Most channels store externally supplied user ids and must match exactly:
+    identifiers such as Twilio WhatsApp ``whatsapp:+15551234567`` or Matrix
+    room ids naturally contain colons, so treating any ``<prefix>:`` as the
+    requested user can disclose or erase unrelated conversations.
+
+    The only family match is the local CLI chat namespace: each REPL session is
+    stored as ``local:<uuid>``, while the documented GDPR subject is
+    ``--channel cli --user local``.  The CLI erase, the admin erase and matter
+    scope all use this rule.
+    """
+    if conv_user_id == requested:
+        return True
+    return channel == "cli" and requested == "local" and str(conv_user_id).startswith("local:")
+
+
 def _custodian_conversations(world: Any, owner: str, cache: dict[str, list[Any]]) -> list[Any]:
     """Conversations of one custodian.  Channel conversations are ``user:<channel>:<id>``;
-    dashboard principals are their own user id.  Empty channels never match."""
-    if owner.startswith("user:"):
-        parts = owner.split(":", 2)
-        if len(parts) != 3 or not parts[1] or not parts[2]:
-            return []
+    a dashboard user ``user:<name>`` is the dashboard conversation of that name."""
+    parts = owner.split(":", 2) if owner.startswith("user:") else []
+    if len(parts) == 3 and parts[1] and parts[2]:
         channel, user_id = parts[1], parts[2]
+    elif len(parts) == 2 and parts[1]:
+        channel, user_id = "dashboard", parts[1]
     else:
-        channel, user_id = "dashboard", owner
+        return []
     if channel not in cache:
         cache[channel] = list(world.list_conversations(channel))
-    return [conv for conv in cache[channel] if conv.user_id == user_id]
+    return [conv for conv in cache[channel] if conversation_user_matches(conv.user_id, user_id, channel)]
 
 
 @dataclass
@@ -476,6 +498,9 @@ class Scope:
     attachments: list[Any] = field(default_factory=list)
     approvals: list[Any] = field(default_factory=list)
     custodian_goal_ids: set[int] = field(default_factory=set)
+    # (custodian, record) pairs from the employee companion and the conversation inbox.
+    companion_exchanges: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    inbox_items: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
 
     def conversation_ids(self) -> set[int]:
         return set(self.conversations)
@@ -486,8 +511,36 @@ class Scope:
                 | {int(att.goal_id) for att in self.attachments})
 
 
+def _companion_exchanges(owner: str) -> list[dict[str, Any]]:
+    """Every saved companion exchange of one employee, read without changing anything."""
+    from .employee_companion import EmployeeCompanionStore
+
+    return EmployeeCompanionStore().held_exchanges(owner)
+
+
+def _inbox_items(owner: str) -> list[dict[str, Any]]:
+    """Every message still held for one person in the conversation inbox."""
+    from .conversation_inbox import owned_items
+
+    return owned_items(owner)
+
+
+def _personal_chats(scope: Scope, custodians: Sequence[str], low: float | None, high: float | None) -> None:
+    for owner in custodians:
+        for exchange in _bounded(_companion_exchanges(owner), "chats"):
+            if in_range(float(exchange["time"]), low, high):
+                scope.companion_exchanges.append((owner, exchange))
+        for item in _bounded(_inbox_items(owner), "chats"):
+            if in_range(float(item["created_at"]), low, high):
+                scope.inbox_items.append((owner, item))
+
+
 def build_scope(world: Any, matter: Mapping[str, Any], *, for_erasure: bool = False) -> Scope:
-    """Enumerate the in-scope records of ``matter``.  Fails closed when incomplete."""
+    """Enumerate the in-scope records of ``matter``.  Fails closed when incomplete.
+
+    Companion exchanges and inbox messages are part of the export only.  An erasure
+    of a channel closure does not remove them, so the erasure check skips them.
+    """
     custodians = list(matter["custodians"])
     kinds = set(matter["record_kinds"])
     low, high = bounds(matter)
@@ -510,6 +563,8 @@ def build_scope(world: Any, matter: Mapping[str, Any], *, for_erasure: bool = Fa
                 kept = [turn for turn in turns if in_range(float(turn.ts), low, high)]
                 if kept or (low is None and high is None):
                     scope.conversations[int(conv.id)] = (conv, kept)
+        if not for_erasure:
+            _personal_chats(scope, custodians, low, high)
     if "attachments" in kinds:
         for goal_id in sorted(scope.custodian_goal_ids):
             for attachment in world.list_attachments(goal_id):
@@ -524,12 +579,50 @@ def build_scope(world: Any, matter: Mapping[str, Any], *, for_erasure: bool = Fa
     return scope
 
 
-def _audit_refusal(matter: Mapping[str, Any], *, actor: str, conversations: int, goals: int) -> None:
+def _audit_refusal(matter: Mapping[str, Any], *, actor: str, **sizes: int) -> None:
     from .audit import EventKind, audit_event
 
     # Recorded for the audit reader; the refusal stands even if this record cannot be written.
     audit_event(EventKind.CONTROL_PLANE_ACTION, agent="ediscovery", verb="ediscovery_erasure_refused",
-                matter_id=matter["id"], actor=actor, conversations=conversations, goals=goals)
+                matter_id=matter["id"], actor=actor, **sizes)
+
+
+def personal_holds(owner: str) -> list[dict[str, Any]]:
+    """Active matters that name ``owner`` as a custodian and keep chat records.
+
+    Fails closed: an unreadable ledger raises :class:`LegalHoldApplies`.
+    """
+    try:
+        matters = active_matters()
+    except Exception as exc:  # failure-policy: fail_closed -- an unreadable ledger holds everything
+        raise LegalHoldApplies(HOLD_UNVERIFIED_MESSAGE) from exc
+    return [matter for matter in matters
+            if "chats" in matter["record_kinds"] and owner in matter["custodians"]]
+
+
+def assert_personal_chats_erasable(owner: str, times: Iterable[float], *, actor: str = "system") -> None:
+    """Refuse erasing an employee's companion or inbox records that a matter holds in scope.
+
+    ``times`` are the timestamps of the records the erasure would remove.  Only the
+    in-scope records block the erasure, and each refusal is audited with the actor
+    and a count, never content.
+    """
+    stamps = [float(stamp) for stamp in times]
+    for matter in personal_holds(owner):
+        low, high = bounds(matter)
+        inside = sum(1 for stamp in stamps if in_range(stamp, low, high))
+        if inside:
+            _audit_refusal(matter, actor=actor, chat_records=inside)
+            raise LegalHoldApplies(LEGAL_HOLD_MESSAGE)
+
+
+def personal_hold_windows(owner: str) -> list[tuple[float | None, float | None]]:
+    """Date windows of the matters that hold ``owner``'s chat records (see :func:`personal_holds`)."""
+    return [bounds(matter) for matter in personal_holds(owner)]
+
+
+def in_hold(moment: float, windows: Sequence[tuple[float | None, float | None]]) -> bool:
+    return any(in_range(moment, low, high) for low, high in windows)
 
 
 def assert_erasure_permitted(world: Any, *, conversation_ids: Sequence[int], goal_ids: Sequence[int],
@@ -590,10 +683,15 @@ __all__ = [
     "active_matters",
     "assert_erasure_permitted",
     "assert_no_active_matters",
+    "assert_personal_chats_erasable",
     "build_scope",
+    "conversation_user_matches",
     "enabled",
     "erasure_refusal",
+    "in_hold",
     "normalize",
+    "personal_hold_windows",
+    "personal_holds",
     "require_enabled",
     "store_path",
 ]
