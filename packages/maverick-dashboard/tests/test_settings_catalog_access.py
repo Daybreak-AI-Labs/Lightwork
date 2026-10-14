@@ -521,6 +521,14 @@ def test_the_key_service_check_opens_the_keys_already_in_use(tmp_path, monkeypat
     assert not settings_tests.check_kms({"kms.provider": "aws"}).ok
 
 
+
+def test_the_key_service_offers_azure_and_rejects_a_bare_key_name():
+    from maverick_dashboard.settings_catalog import BY_ID
+
+    assert "azure" in {key for key, _label in BY_ID["kms.provider"].choices}
+    assert not settings_tests.check_kms({"kms.provider": "azure", "kms.key_id": "tenant-kek"}).ok
+
+
 # ------------------------------------------------------------- safety
 def test_loosening_access_rows_needs_confirmation(as_token, audit_rows):
     for change in (
