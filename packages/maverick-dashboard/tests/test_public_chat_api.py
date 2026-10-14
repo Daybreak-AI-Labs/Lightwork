@@ -359,6 +359,17 @@ def test_answer_path_is_tool_free_budgeted_and_never_reaches_the_agent(chat, mod
     assert call["messages"] == [{"role": "user", "content": "What are your opening hours?"}]
 
 
+def test_a_shared_root_site_never_answers_inside_another_tenant(chat, model, monkeypatch):
+    # The site was created with no tenant, so it is stored under the shared root. A request
+    # whose active tenant is another one must not answer with that tenant's specialists or budget.
+    key = _site(chat)["publishable_key"]
+    token = _session(chat, key)
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-b")
+    response = _say(chat, token, "hello")
+    assert response.status_code == 503
+    assert model.calls == []
+
+
 def test_daily_cap_stops_answers_politely_before_each_call(chat, model):
     key = _site(chat, daily_cap_dollars=0.10)["publishable_key"]
     token = _session(chat, key)

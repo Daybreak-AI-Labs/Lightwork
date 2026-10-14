@@ -254,6 +254,9 @@ def _answer(tenant: str | None, site: dict[str, Any], text: str, now: float) -> 
     from maverick.budget import BudgetExceeded
     from maverick.paths import tenant_scope
 
+    if tenant is None and _tenant() is not None:
+        # A shared-root site has no tenant scope of its own, so it must not answer inside one.
+        raise RuntimeError("the chat site is not in the active workspace")
     cap = site["daily_cap_dollars"]
     reserve = min(store.ANSWER_RESERVE_DOLLARS, cap)
     day = store.reserve_spend(tenant, site["id"], cap=cap, amount=reserve, now=now)
