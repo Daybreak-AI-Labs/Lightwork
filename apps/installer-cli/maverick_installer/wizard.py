@@ -2133,7 +2133,9 @@ def pick_knowledge_source_permissions() -> dict[str, Any]:
         "[dim]By default, anyone the saved account is shared with can use a company folder's "
         "cached files. Matching each file's own sharing settings is stricter: a file is shown only "
         "to people it is shared with by email or email domain, or to anyone with its link. Files "
-        "shared only with a group are left out, because group members are not checked.[/dim]"
+        "shared only with a group are left out, because group members are not checked. People who "
+        "sign in with SAML, or whose provider does not confirm their email, see no saved company "
+        "files while this is on.[/dim]"
     )
     if not _q_confirm("Show each saved company file only to the people it is shared with?", default=False):
         return {}

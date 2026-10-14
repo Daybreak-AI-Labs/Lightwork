@@ -1888,7 +1888,9 @@ def get_knowledge_sources() -> dict:
     ``permission_filter`` (default "off") set to "by_email" reads each item's sharing
     permissions at refresh and shows an item only to a signed-in person whose verified
     email, or whose email domain, the item is shared with, or to anyone when it is shared
-    by link. Group grants are not expanded, so group-only items are withheld.
+    by link. The verified email is an OIDC ``email`` claim the provider marks
+    ``email_verified``; SAML sign-ins have none, so they see no items. Group grants are
+    not expanded, so group-only items are withheld.
     The defaults are the historical bounds. A malformed value raises instead of
     falling back, so a reviewed bound never changes silently.
     """

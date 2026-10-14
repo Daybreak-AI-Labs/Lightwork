@@ -76,6 +76,8 @@ def test_the_permission_question_keeps_the_connection_rule_unless_email_matching
     monkeypatch.setattr(wizard, "_q_confirm", lambda prompt, *, default: False)
     assert wizard.pick_knowledge_source_permissions() == {}
     assert any("only with a group are left out" in text for text in printed)  # the group rule is stated before the choice
+    # Everyone who cannot be matched to a verified address is told before the choice, not after.
+    assert any("sign in with SAML" in text and "see no saved company files" in text for text in printed)
 
 
 def test_choosing_email_matching_writes_only_the_permission_filter(monkeypatch):
