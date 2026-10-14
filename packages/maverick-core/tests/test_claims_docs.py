@@ -28,6 +28,6 @@ def test_security_policy_does_not_claim_an_unreleased_supported_line():
     section = text.split("## Supported versions", 1)[1].split("\n## ", 1)[0]
     assert "No release has been published" in section
     assert "v0.1.6" in section
-    cohort = re.search(r'^version = "([^"]+)"', _read("release-cohort.toml"), re.M)
+    cohort = re.search(r'^version = "([^"]+)"', _read("release-cohort.toml"), re.MULTILINE)
     assert cohort is not None
     assert cohort.group(1) in section
