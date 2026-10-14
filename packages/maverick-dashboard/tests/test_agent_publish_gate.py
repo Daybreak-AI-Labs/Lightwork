@@ -558,3 +558,52 @@ def test_business_setup_cannot_add_a_new_specialist_while_the_switch_is_on(clien
     config.reset_config_cache()
     saved = business_agent_ops_api._approve(profile, None, [], "user:admin", "user:admin")
     assert saved["saved"] is True and "acme_setup_helper" in available_domains()
+
+
+def test_a_chat_decision_on_a_bypass_follows_the_page_rules(client, monkeypatch, audit_rows):
+    """Slack and Teams decide a reasoned bypass like the Approvals page: a pack editor, never the requester."""
+    app, tmp = client
+    from maverick import config
+    from maverick.approval_cards import decode_approval_detail
+    from maverick_dashboard import approval_decisions, auth, rbac
+    from maverick_dashboard._shared import _world
+
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n"
+                                    "[agent_tests]\nbypass_requires_second_person = true\n", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:requester,user:reviewer")
+    config.reset_config_cache()
+    actor = {"who": "user:requester"}
+    monkeypatch.setattr(auth, "caller_principal", lambda request: actor["who"])
+    rbac.set_role("user:requester", "admin")
+    rbac.set_role("user:reviewer", "admin")
+    rbac.set_role("user:observer", "operator")
+    _save_tests(app, 2)
+    first = "You chase overdue purchase orders and always say which supplier to chase first."
+    reason = "Urgent supplier change approved by finance"
+    assert _publish(app, PACK, {"persona": first}, reason=reason).status_code == 409
+    aid = [row.id for row in _world().list_approvals(limit=50) if row.action == BYPASS][0]
+    binding = decode_approval_detail(_world().get_approval(aid).detail)["binding_sha256"]
+
+    def chat(principal):
+        return approval_decisions.decide_from_channel(
+            approval_id=aid, status="approved", principal=principal, binding=binding, channel="slack",
+            confirmed=True, acknowledgement={"acknowledged": True, "confirmation": "approve"}, world=_world())
+
+    # A linked person who can operate but cannot edit agents is refused, with the reason in plain words.
+    with pytest.raises(approval_decisions.ApprovalDecisionRefused) as observer:
+        chat("user:observer")
+    assert observer.value.status_code == 403 and "administrator who can edit agents" in observer.value.message
+    # The person who asked is refused even though they are an administrator.
+    with pytest.raises(approval_decisions.ApprovalDecisionRefused) as own:
+        chat("user:requester")
+    assert own.value.status_code == 403 and "You asked for this" in own.value.message
+    assert _world().get_approval(aid).status == "pending"
+
+    decided = chat("user:reviewer")
+    assert decided["status"] == "approved" and decided["decided_by"] == "user:reviewer"
+    actor["who"] = "user:requester"
+    published = _publish(app, PACK, {"persona": first}, reason=reason)
+    assert published.status_code == 200 and published.json()["confirmed"], published.text
+    logged = [row for row in audit_rows if row.get("verb") == "agent_published_without_passing_tests"]
+    assert logged[-1]["requested_by"] == "user:requester" and logged[-1]["approved_by"] == "user:reviewer"
+    assert logged[-1]["approval"] == aid and logged[-1]["reason"] == reason

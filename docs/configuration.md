@@ -930,7 +930,8 @@ require_for_new_specialists = false    # true: a specialist never published befo
                                        # customization bundles and the CLI (onboard, learn-demo) cannot add a new specialist
                                        # while it is on; add it in Agent Factory instead.
 bypass_requires_second_person = false  # true: publishing changed instructions without a passing run (with a reason) needs
-                                       # another administrator's approval on the Approvals page. The requester cannot approve it.
+                                       # another administrator's approval on the Approvals page or in chat. The requester cannot approve it
+                                       # on either. Rejecting is never refused.
 
 [autonomy]
 confirm_plan = false          # show the plan in Approvals and wait before a task's first action that reaches outside Lightwork

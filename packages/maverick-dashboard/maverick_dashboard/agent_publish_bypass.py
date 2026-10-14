@@ -127,6 +127,18 @@ def may_decide(request) -> bool:
     return auth.has_permission(request, "admin") and pack_editing_denial(request) is None
 
 
+def pack_editor(principal: str) -> bool:
+    """:func:`may_decide` for a chat decision, which has a linked person but no request: the pack-editor roster
+    and the pack-editing switch, as the dashboard's own check reads them."""
+    from maverick.config import get_features
+
+    from . import auth
+
+    if not principal or not auth.is_dashboard_admin(principal):
+        return False
+    return bool(get_features().get("pack_editing", True))
+
+
 def require_decider(request, approval, who: str, *, approving: bool) -> None:
     """Only a person who may publish decides a bypass request (the same check publishing makes),
     and never the person who asked for it."""
