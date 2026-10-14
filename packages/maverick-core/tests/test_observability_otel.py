@@ -473,3 +473,116 @@ def test_mark_span_failed_sets_the_error_status(monkeypatch):
         StatusCode=types.SimpleNamespace(ERROR="ERROR")))
     obs.mark_span_failed(_Span())
     assert statuses == ["ERROR"]
+
+
+# ---------- failed spans name the exception type, never its message ----------
+
+class _SDKSpan:
+    """What the span keeps: attributes, events and the status."""
+
+    def __init__(self):
+        self.attributes = {}
+        self.events = []
+        self.status = None
+
+    def set_attribute(self, key, value):
+        self.attributes[key] = value
+
+    def set_status(self, status, description=None):
+        self.status = (status, description)
+
+
+class _SDKTracer:
+    """Stand-in for the SDK tracer, with its default exception handling.
+
+    Unless a caller turns them off, ``start_as_current_span`` records the exception
+    message as an event and sets an ERROR status carrying the message, as the SDK does.
+    """
+
+    def __init__(self):
+        self.spans = []
+        self.options = []
+
+    @contextlib.contextmanager
+    def start_as_current_span(self, name, record_exception=True,
+                              set_status_on_exception=True, **_kwargs):
+        span = _SDKSpan()
+        self.spans.append((name, span))
+        self.options.append((record_exception, set_status_on_exception))
+        try:
+            yield span
+        except BaseException as error:
+            if record_exception:
+                span.events.append(("exception", str(error)))
+            if set_status_on_exception:
+                span.status = ("ERROR", str(error))
+            raise
+
+
+@pytest.fixture
+def sdk_tracer(monkeypatch):
+    tracer = _SDKTracer()
+    monkeypatch.setattr(obs, "_initialized", True)
+    monkeypatch.setattr(obs, "_tracer", tracer)
+    monkeypatch.setattr(obs, "_trace_api", types.SimpleNamespace(
+        StatusCode=types.SimpleNamespace(ERROR="ERROR")))
+    monkeypatch.setattr(obs, "_sentry", None)
+    return tracer
+
+
+def test_failed_span_records_no_message_and_names_only_the_type(sdk_tracer):
+    secret = "sk-live-do-not-export"
+    with pytest.raises(RuntimeError):
+        with obs.trace_span("tool.run", attributes={"tool.name": "fetch"}):
+            raise RuntimeError(f"upstream rejected {secret}")
+    ((name, span),) = sdk_tracer.spans
+    assert name == "tool.run"
+    assert span.events == []
+    assert span.status == ("ERROR", "RuntimeError")
+    assert span.attributes["error.type"] == "RuntimeError"
+    assert secret not in repr((span.events, span.status, span.attributes))
+
+
+def test_every_trace_span_opens_with_sdk_exception_recording_off(sdk_tracer):
+    # Tool, provider and agent spans all come through trace_span().
+    with obs.trace_span("provider.call"):
+        pass
+    with pytest.raises(ValueError):
+        with obs.trace_span("agent.turn"):
+            raise ValueError("boom")
+    assert sdk_tracer.options == [(False, False), (False, False)]
+
+
+def test_successful_span_gets_no_error_status(sdk_tracer):
+    with obs.trace_span("agent.turn") as span:
+        assert span is not None
+    ((_, span),) = sdk_tracer.spans
+    assert span.status is None
+    assert "error.type" not in span.attributes
+
+
+def test_real_sdk_failed_span_exports_type_and_no_message(monkeypatch):
+    pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry import trace as trace_api
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(obs, "_initialized", True)
+    monkeypatch.setattr(obs, "_sentry", None)
+    monkeypatch.setattr(obs, "_tracer", provider.get_tracer("test"))
+    monkeypatch.setattr(obs, "_trace_api", trace_api)
+    with pytest.raises(ValueError):
+        with obs.trace_span("tool.run"):
+            raise ValueError("token sk-live-do-not-export")
+    (span,) = exporter.get_finished_spans()
+    assert list(span.events) == []
+    assert span.status.status_code == trace_api.StatusCode.ERROR
+    assert span.status.description == "ValueError"
+    assert "sk-live-do-not-export" not in repr(span.attributes)
+

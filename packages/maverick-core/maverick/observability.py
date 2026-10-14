@@ -500,7 +500,13 @@ def trace_span(
         if _tracer is None:
             yield None
             return
-        with _tracer.start_as_current_span(name) as span:
+        with _tracer.start_as_current_span(
+            name,
+            # The SDK would record the exception's message and stack on the span. That
+            # text can carry a token, so this span records neither (as http_request_span
+            # does); the failure is marked with the exception type alone, below.
+            record_exception=False, set_status_on_exception=False,
+        ) as span:
             if attributes:
                 for k, v in attributes.items():
                     try:
@@ -511,10 +517,11 @@ def trace_span(
                 yield span
             except BaseException as e:
                 # OTel semconv: failed operations carry ``error.type`` (the
-                # exception class). The SDK records the exception itself; this
-                # adds the standard queryable attribute.
+                # exception class) and an ERROR status. Both name the type only.
+                error_type = type(e).__qualname__
                 try:
-                    span.set_attribute("error.type", type(e).__qualname__)
+                    span.set_attribute("error.type", error_type)
+                    span.set_status(_trace_api.StatusCode.ERROR, error_type)
                 except Exception:
                     pass
                 raise
