@@ -291,3 +291,24 @@ def test_a_removal_is_refused_while_a_trial_is_live(client, monkeypatch, tmp_pat
 def _review_named_draft(app, name, action, **fields):
     context = app.get(DRAFTS + "/history").json()["context"]
     return app.post(DRAFTS + "/review", json={"name": name, "action": action, "context": context, **fields})
+
+
+def test_an_independence_increase_is_recorded_when_the_trial_is_promoted_not_when_it_starts(client, monkeypatch, tmp_path):
+    from maverick_dashboard import api
+
+    recorded = []
+    real = api._record_agent_autonomy_intent
+
+    def spy(request, name, before, after, **kwargs):
+        recorded.append(name)
+        return real(request, name, before, after, **kwargs)
+
+    monkeypatch.setattr(api, "_record_agent_autonomy_intent", spy)
+    app = client
+    _trials_on(monkeypatch, tmp_path, 40)
+    _question(app, 0)
+    _publish_changed(app, _saved_draft(app, {"persona": NEW, "autonomy": {"default": "request"}}))
+    assert recorded == [], "a trial is only a candidate; its independence increase is not yet in effect"
+    promoted = _confirm(app, _review(app, "promote", reason="Reviewed by the supplier lead"))
+    assert promoted.status_code == 200 and promoted.json()["confirmed"] is True, promoted.text
+    assert recorded == [PACK]

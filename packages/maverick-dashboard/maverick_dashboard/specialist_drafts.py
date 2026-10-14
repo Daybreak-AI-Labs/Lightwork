@@ -749,7 +749,8 @@ def _publication_admission(request, prepared, payload) -> dict | None:
             raise HTTPException(503, "The reason could not be recorded. Read the original decision before another publication intent.")
     before = (prepared["before"]["profile"] or {}).get("autonomy") or {}
     after = prepared["profile"].get("autonomy") or {}
-    if before != after and after:
+    # A trial is only a candidate until it is promoted; its independence change is recorded then.
+    if before != after and after and not _starts_trial(prepared):
         _record_agent_autonomy_intent(request, prepared["name"], before, after)
     return second_person
 
