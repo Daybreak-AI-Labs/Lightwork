@@ -473,10 +473,18 @@ There is no reset that avoids a code. If the phone is lost and every recovery
 code has been used, nothing in Lightwork can give a code, so this computer's
 owner account cannot sign in until a decision is made about a code-free reset.
 
-Known limit: the passphrase-only operations that change company sign-in
-(company SAML setup and company sign-in migration, which call the owner
-recovery check) do not yet ask for a code. An enrolled owner can still complete
-those with the passphrase alone.
+Open decision for the owner: the passphrase-only operations that change company
+sign-in do not ask for a code. They are the company sign-in recovery routes
+(`/auth/company-saml-recovery/...` and `/auth/company-signin-recovery/...`) and
+the review steps that call the same owner check (company SAML setup and company
+sign-in migration). These routes are reachable only from this computer's loopback
+address, carry no session, and check the original owner's passphrase on every
+request. An enrolled owner can therefore change company sign-in with the
+passphrase alone. Asking for a code here is not a one-line change: each step
+re-checks the passphrase, and a code is spent once, so every step would need its
+own fresh code or a recovery session. Until the owner decides, this is an accepted
+limit: the authenticator app protects sign-in to the dashboard, not these
+operations.
 
 ## OIDC SSO authentication
 
