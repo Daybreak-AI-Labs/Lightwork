@@ -37,6 +37,9 @@ log = logging.getLogger(__name__)
 # When adding a new config section, add it here or migrate will lint it.
 KNOWN_SECTIONS = frozenset({
     "conversation_inbox",
+    # [public_chat] enabled / allow_localhost_origins: the public website chat
+    # widget (maverick_dashboard.public_chat_api), off by default; on All settings.
+    "public_chat",
     # [chat_message_actions] enabled: alternative conversation answers
     # (maverick.chat_message_actions), changeable on All settings.
     "chat_message_actions",

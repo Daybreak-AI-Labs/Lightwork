@@ -420,3 +420,16 @@ def test_public_routes_are_mounted_in_the_real_app(chat):
     assert "/api/v1/public-chat/sites" in app_module.app.openapi()["paths"]
     assert not any(path.startswith("/public/chat/") for path in app_module.app.openapi()["paths"])
     assert chat.anon.get("/public/chat/v1/widget.js").status_code == 200
+
+
+def test_settings_catalog_offers_the_two_public_chat_switches():
+    """Both switches are off by default, and the page reads them from the feature's own module."""
+    from maverick.migrate import KNOWN_SECTIONS
+    from maverick_dashboard import settings_catalog as catalog
+
+    assert "public_chat" in KNOWN_SECTIONS
+    enabled = catalog.BY_ID["public_chat.enabled"]
+    assert enabled.default is False
+    assert enabled.reader == "maverick_dashboard.public_chat_api"
+    local = catalog.BY_ID["public_chat.allow_localhost_origins"]
+    assert local.default is False and local.reader == enabled.reader
