@@ -78,7 +78,7 @@ class _GoalByGoal:
         return self._world.list_episodes(**kwargs)
 
 
-def test_rows_from_world_batches_episode_reads_without_changing_rows(tmp_path):
+def test_rows_from_world_reads_runs_in_one_batch_and_returns_the_goal_by_goal_rows(tmp_path, monkeypatch):
     from maverick.world_model import WorldModel
 
     world = WorldModel(tmp_path / "w.db")
@@ -89,7 +89,17 @@ def test_rows_from_world_batches_episode_reads_without_changing_rows(tmp_path):
                 "INSERT INTO episodes(goal_id, started_at, cost_dollars, outcome) VALUES (?, ?, ?, ?)",
                 (goals[index % 4], 2_000.0 + index, 0.01 * (index % 7), "done" if index % 3 else "failed"),
             )
+    reads: list = []
+    real_list_episodes = WorldModel.list_episodes
+
+    def counting(self, *args, **kwargs):
+        reads.append(kwargs.get("goal_id"))
+        return real_list_episodes(self, *args, **kwargs)
+
+    monkeypatch.setattr(WorldModel, "list_episodes", counting)
     rows = rows_from_world(world)
+    assert reads == []   # all four goals' runs came from the one batch read
     assert len(rows) == 200
     assert rows == rows_from_world(_GoalByGoal(world))
+    assert sorted(reads) == goals   # the reference reads goal by goal
 
