@@ -12,6 +12,7 @@ names are refused.
 | `anthropic`, `openai` | `api_key`, `base_url`, `default_headers` |
 | `azure` | `api_key`, `base_url`, `default_headers`, `auth_mode` |
 | `bedrock` | `api_key`, `base_url`, `default_headers`, `auth_mode`, `endpoint` |
+| `vertex` | `base_url`, `default_headers`, `project_id`, `region`, `model_id`; no `api_key` (Google Application Default Credentials only) |
 | `openrouter`, `gemini`, `moonshot`, `deepseek`, `xai`, `ollama`, `tgi`, `vllm`, `openai_compatible` | `api_key`, `base_url` |
 | `codex_cli` | `api_key`, `binary`, `sandbox_mode`, `timeout_seconds`, `cwd` |
 
@@ -52,6 +53,14 @@ bearer authentication while Lightwork selected IAM, construction fails before a
 request and closes the constructed client. Remove the conflicting bearer token,
 or explicitly configure `auth_mode = "api_key"` and the intended token. The
 adapter does not rewrite private signing state to conceal that conflict.
+
+Vertex AI takes no key. It signs in with Google Application Default Credentials;
+the `vertex` extra provides google-auth. The project and region are checked
+before any client exists. The model id must be the `name@version` form shown in
+the Vertex AI Model Garden: any other id is refused before a request is built,
+and before a cache warm-up is sent. `base_url` is accepted only from the server
+configuration or environment, never from Settings, because the Google token is
+sent to the endpoint. Constructor tests establish no live Google authentication.
 
 IAM role/profile refresh and Azure Identity credential acquisition remain the
 respective SDKs' credential authority. Immutable adapter configuration does not

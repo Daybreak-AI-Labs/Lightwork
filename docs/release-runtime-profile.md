@@ -7,7 +7,7 @@ optional integration, model or external engine is included.
 
 | Included dependency family | Included operation | Additional deployment requirement |
 | --- | --- | --- |
-| Anthropic and OpenAI-compatible SDKs | Provider client construction and requests through supported adapters | An approved model/account, credentials, endpoint and real task acceptance. Azure managed identity and native Bedrock have separate optional dependencies. |
+| Anthropic and OpenAI-compatible SDKs | Provider client construction and requests through supported adapters | An approved model/account, credentials, endpoint and real task acceptance. Azure managed identity, native Bedrock and native Vertex AI have separate optional dependencies (the `azure`, `bedrock` and `vertex` extras). |
 | OpenPyXL, lxml, PyPDF and pdfplumber | Local spreadsheet/XML/PDF parsing and packaged document worker source | Native recalculation, OCR and document rendering require the configured isolated worker image and engine binaries. |
 | SQLAlchemy and Psycopg binary/pool | Relational tool with SQLite or `postgresql+psycopg://`; optional PostgreSQL platform storage | Operator-controlled connection configuration and permissions, reachable database, live query and recovery acceptance. Other SQL dialects require their own drivers and qualification. |
 | latex2mathml and its symbol data | Local LaTeX-to-MathML conversion | PDF compilation still requires a TeX engine in the configured sandbox. |

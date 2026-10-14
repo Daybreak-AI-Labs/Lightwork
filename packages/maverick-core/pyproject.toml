@@ -140,6 +140,10 @@ s3              = ["boto3>=1.34"]
 # Native Bedrock with AWS IAM (SigV4) auth: the Anthropic SDK signs requests
 # through boto3/botocore. The bearer-token path needs no extra.
 bedrock         = ["anthropic[bedrock]>=0.40.0,<2"]
+# Claude on Google Cloud Vertex AI: the Anthropic SDK's Vertex client, plus
+# google-auth (with requests) for Google Application Default Credentials.
+# Checked at client construction; the extra is never required by the kernel.
+vertex          = ["anthropic[vertex]>=0.40.0,<2", "google-auth[requests]>=2,<3"]
 # Optional only because every non-AWS inventory adapter uses the core HTTP
 # transport. Bedrock imports boto3 lazily and remains injectable in tests.
 ai-inventory    = ["boto3>=1.34"]

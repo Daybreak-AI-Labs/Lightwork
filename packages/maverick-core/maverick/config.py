@@ -1039,12 +1039,15 @@ def provider_configuration_state(provider: str) -> dict[str, Any]:
                 base_source = f"environment:{env_name}"
                 break
 
-    sources = [source for source in (key_source, base_source) if source]
+    # Vertex AI has no key: its configured project is the set-up, so it counts.
+    project_present = name == "vertex" and bool(_text(effective.get("project_id")))
+    project_source = field_sources.get("project_id") if project_present else None
+    sources = [source for source in (key_source, base_source, project_source) if source]
     via = " + ".join(dict.fromkeys(sources)) or None
     protected_sources = {"operator overlay", "tenant config"}
     return {
         "name": name,
-        "configured": bool(key_present or base_url),
+        "configured": bool(key_present or base_url or project_present),
         "api_key_configured": key_present,
         "api_key_source": key_source,
         "api_key_env": key_env,
@@ -1092,6 +1095,12 @@ PROVIDER_KEY_ENV_VARS = tuple(
 PROVIDER_CREDENTIAL_ENV_MAP: dict[str, tuple[str, ...]] = {
     **PROVIDER_KEY_ENV_MAP,
     "azure": (*PROVIDER_KEY_ENV_MAP["azure"], "AZURE_OPENAI_AD_TOKEN"),
+    # Vertex AI signs in with Google Application Default Credentials, which
+    # have no provider variable. GOOGLE_APPLICATION_CREDENTIALS is deliberately
+    # not listed: it is shared with other Google tooling, so listing it here
+    # would make such a host look configured. The GitHub Action sanitizer
+    # registry still tracks it as a secret file.
+    "vertex": (),
 }
 PROVIDER_CREDENTIAL_ENV_VARS = tuple(
     dict.fromkeys(v for vs in PROVIDER_CREDENTIAL_ENV_MAP.values() for v in vs)
@@ -1352,6 +1361,10 @@ def any_provider_configured() -> bool:
         # Bedrock signing with AWS IAM credentials carries no key at all: the
         # explicit auth_mode is the configuration (W1-10).
         if provider == "bedrock" and str(pcfg.get("auth_mode", "")).strip().lower() == "iam":
+            return True
+        # Vertex AI signs in with Google Application Default Credentials: the
+        # configured project is the configuration (no key exists).
+        if provider == "vertex" and str(pcfg.get("project_id", "")).strip():
             return True
     return False
 
