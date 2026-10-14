@@ -85,7 +85,7 @@ flowchart LR
 ## Slide 5 — Product (show, don't tell)
 
 **On slide:**
-- **One command produces a signed evidence bundle** — `maverick proof-pack`: governance guarantees, reliability cert, performance SLA, and shield results, Ed25519-signed and verifiable offline.
+- **One command produces a signed evidence bundle** — `python -m maverick.proof_pack`: governance guarantees, reliability cert, performance SLA, and shield results, Ed25519-signed and verifiable offline.
 - **The governance is checkable, not claimed:** in a seeded demo, a finance specialist boots *sealed* (no shell, no payments), a $60k wire is **DENIED**, a $6k release **requires a human**, a runaway loop is **capped** — and altering one audited row is caught.
 - **The work lands where humans sign off:** a goal's result renders as a typed deliverable → a per-role **inbox** → a human **certifies** it → it routes into Salesforce/ServiceNow (signed, audited).
 

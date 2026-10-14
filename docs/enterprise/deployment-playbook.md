@@ -169,7 +169,7 @@ warns once). For any deployment running untrusted/multi-tenant work this is a
 **blocker**.
 ```toml
 [sandbox]
-backend = "docker"      # or "podman" / "gvisor" / "kubernetes" / "firecracker" — NOT "local"
+backend = "docker"      # or "podman" / "gvisor" / "kubernetes" — NOT "local" or "firecracker" (experimental scaffold)
 allow_root = false
 allow_network = false   # default-deny egress from agent code
 workdir = "/home/maverick/workspace"

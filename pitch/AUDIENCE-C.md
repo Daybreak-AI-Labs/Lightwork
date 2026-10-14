@@ -54,7 +54,7 @@
 
 ## Slide 5 — Governance you can prove (not claim)
 **On slide:**
-- `maverick proof-pack` → an **Ed25519-signed** evidence bundle (governance guarantees, reliability cert, SLA, shield results), verifiable **offline**.
+- `python -m maverick.proof_pack` → an **Ed25519-signed** evidence bundle (governance guarantees, reliability cert, SLA, shield results), verifiable **offline**.
 - **Live golden path:** a finance specialist boots **SEALED**, a **$60k wire is DENIED**, a **$6k release REQUIRES a human**, a runaway loop is **CAPPED** — and altering one audited row is **caught**.
 
 **Visual:** The "receipts" table (SEALED / DENY / REQUIRE_HUMAN / CAPPED / TAMPER-EVIDENT) + signed `PROOF.md`.

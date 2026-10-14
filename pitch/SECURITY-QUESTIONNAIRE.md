@@ -79,7 +79,7 @@
 |---|---|:---:|---|
 | 5.1 | Is there defense against prompt injection / jailbreaks? | ◑ | Agent Shield screens input, tool calls, and output at three sinks, with a decode pre-pass that re-scans de-obfuscated variants. Detector strength depends on the configured backend (built-in rules vs. full shield). |
 | 5.2 | Are runaway / cost-exhaustion loops bounded? | ✅ | Hard budget caps on dollars, wall-clock, input/output tokens, and tool calls — enforced atomically at record time. (Golden-path: a runaway loop is CAPPED.) |
-| 5.3 | Is model-generated code sandboxed? | ◑ | Pluggable sandboxes (local subprocess, Docker, gVisor, Podman, devcontainer, Kubernetes, Firecracker, SSH, Modal); network-off by default. |
+| 5.3 | Is model-generated code sandboxed? | ◑ | Pluggable sandboxes (local subprocess, Docker, gVisor, Podman, devcontainer, Kubernetes, SSH, Modal; Firecracker is an experimental scaffold); network-off by default. |
 | 5.4 | Is there a default-deny posture for tools / network? | ◑ | Tool allow-lists per pack; sandbox network denied by default; egress lock in Enterprise mode. |
 | 5.5 | Is provider/API rate-limiting handled safely? | ✅ | Reactive rate limiter plus a predictor; retries with backoff on provider rate-limit/connection errors. |
 | 5.6 | Can you run without any third-party model provider? | ◑ | Local/self-hosted models supported (Ollama, vLLM, TGI) for fully offline operation. |
@@ -92,7 +92,7 @@
 | 6.2 | Is there an air-gap readiness check? | ◑ | `maverick airgap check` verifies no outbound path before you trust the box. (Config audit, not OS-level enforcement — pair with network controls.) |
 | 6.3 | Is confidential computing supported? | 🟡 | SEV-SNP / TDX **detection** (`maverick confidential-compute`); detection only, not remote attestation. ⏳ attestation on roadmap. |
 | 6.4 | Is enterprise hardening verifiable, not just configured? | ◑ | `maverick enterprise verify --require` **exercises** the egress lock and at-rest round-trip rather than reading flags. |
-| 6.5 | What are the deploy targets? | ✅ | Docker, Kubernetes, single VPS, Firecracker microVMs; container image + native installers. |
+| 6.5 | What are the deploy targets? | ✅ | Docker, Kubernetes, single VPS; container image + native installers. Firecracker microVMs are an experimental local scaffold and not a supported deploy target. |
 
 ## 7. Privacy & Data Subject Rights (DSP)
 
@@ -119,7 +119,7 @@
 |---|---|:---:|---|
 | 9.1 | Are changes to the agent's learned behavior reversible? | ✅ | Every learned change is snapshotted and one command from rollback; a hindsight engine detects learning regressions before they ship. |
 | 9.2 | Is there an emergency stop for in-flight work? | ✅ | Global kill switch (see 2.6). |
-| 9.3 | Can you prove the system's guarantees on demand? | ✅ | `maverick proof-pack` emits an Ed25519-signed evidence bundle (governance, reliability, performance, shield) that verifies offline and refuses to fabricate. |
+| 9.3 | Can you prove the system's guarantees on demand? | ✅ | `python -m maverick.proof_pack` emits an Ed25519-signed evidence bundle (governance, reliability, performance, shield) that verifies offline and refuses to fabricate. |
 
 ---
 
@@ -140,7 +140,7 @@
    verifiable trail.
 2. **Verify the chain offline:** `maverick audit verify --pubkey <key>`.
 3. **Inspect the roster guarantees:** `maverick domains-lint` / `domains-audit`.
-4. **Get the evidence bundle:** `maverick proof-pack`.
+4. **Get the evidence bundle:** `python -m maverick.proof_pack`.
 
 > Numbers and control states above reflect the current alpha and are subject to
 > change. For your specific questionnaire (SIG, VSA, vendor-specific), send it

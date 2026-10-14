@@ -50,7 +50,7 @@ caps, a safety shield, and a signed, append-only audit log.
 | Fact | v1 said | v2 says (per `FEATURES.md`) |
 |---|---|---|
 | Channels | 14 | **17 wired** (adds WhatsApp Cloud API, Threads, RCS to the v1 set; IRC and the glasses/wearable adapter included) |
-| Sandboxes | 7 | **9 selectable backends**: local subprocess, Docker, SSH, Podman, devcontainer, Firecracker, Kubernetes, plus Modal cloud sandboxes and a gVisor hardened-runtime Docker variant |
+| Sandboxes | 7 | **9 selectable backends**: local subprocess, Docker, SSH, Podman, devcontainer, Firecracker (experimental scaffold), Kubernetes, plus Modal cloud sandboxes and a gVisor hardened-runtime Docker variant |
 | Platform | (not stated) | Multi-tenant control plane: tenant lifecycle + quotas, per-tenant envelope encryption (KMS), per-tenant egress policy, metering → invoices |
 | Interop | MCP + gRPC | MCP (server **and** client) + gRPC v1 (contract-gated) + A2A Agent Card + LangChain/AutoGen/CrewAI adapters |
 | Everything else | — | v1 facts stand: proprietary license (lite edition a stated possibility, not a commitment); Python 3.10-3.12, 2000+ tests in CI; alpha, installable today; maker: Day AI Labs (Christopher Day) |

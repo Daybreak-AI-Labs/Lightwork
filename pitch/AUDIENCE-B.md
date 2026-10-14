@@ -85,7 +85,7 @@
 
 ## Slide 8 — Proof it's real
 **On slide:**
-- **Built and installable today (alpha).** `maverick proof-pack` → an **Ed25519-signed** evidence bundle (governance guarantees, reliability cert, SLA, shield results), verifiable offline.
+- **Built and installable today (alpha).** `python -m maverick.proof_pack` → an **Ed25519-signed** evidence bundle (governance guarantees, reliability cert, SLA, shield results), verifiable offline.
 - **Golden path:** SEALED boot · **$60k wire DENIED** · **$6k release REQUIRE_HUMAN** · runaway loop **CAPPED** · altered audit row **caught**.
 - `[FILL: design partners / pilots / LOIs]`
 

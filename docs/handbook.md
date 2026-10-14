@@ -91,7 +91,7 @@ All shell execution is mediated — no tool calls `subprocess.run` directly;
 everything routes through `sandbox.exec()` (also a house rule). Nine
 selectable backends (`sandbox/`, `[sandbox] backend`): local subprocess,
 Docker, Podman, gVisor (Docker with the `runsc` userspace kernel),
-devcontainer, Kubernetes, Firecracker microVMs, SSH, and Modal cloud
+devcontainer, Kubernetes, Firecracker microVMs (experimental scaffold), SSH, and Modal cloud
 sandboxes. Third parties ship backends without forking via the Sandbox SDK
 v2 entry-point contract (`sandbox/sdk.py`). The interface itself is
 formally modeled and TLC-verified in TLA+

@@ -26,7 +26,7 @@ the next section for scope.
 | OS primitive | Agent analog | Lightwork today (file) |
 |---|---|---|
 | Kernel / scheduler | dispatch and schedule agents | recursive swarm with shared context, per-call fan-out cap (`MAVERICK_MAX_SWARM_FANOUT`, default 8) and a per-goal total-spawn cap (`[swarm] max_total_spawns` / `MAVERICK_MAX_TOTAL_SPAWNS`, default 64) with an optional per-goal model-call bound (`max_concurrent_model_calls`), parallel tool execution, plus a cron-style scheduler over a durable job queue (`swarm.py`, `tools/spawn.py`, `scheduler.py`, `job_queue.py`, `worker.py`) |
-| Processes / isolation | agents + execution sandboxing | 9 sandbox backends behind one `build_sandbox()` factory and a uniform `.exec()` interface — local subprocess, Docker, gVisor, Podman, devcontainer, Kubernetes, Firecracker, SSH, and Modal cloud (`sandbox/`) |
+| Processes / isolation | agents + execution sandboxing | 9 sandbox backends behind one `build_sandbox()` factory and a uniform `.exec()` interface — local subprocess, Docker, gVisor, Podman, devcontainer, Kubernetes, Firecracker (experimental scaffold), SSH, and Modal cloud (`sandbox/`) |
 | Syscalls / drivers | tools, providers, channels | 286 built-in tool modules (`tools/`) — incl. 2,877 write-capable token-authed REST/GraphQL connectors and 37 read-only primary-source data connectors — 12 LLM providers routable per role (`providers/`, `llm.py`), and MCP client over stdio **and** Streamable HTTP (`mcp_client.py`) |
 | IPC | inter-agent communication | append-only blackboard, parent↔child spawn handoffs, and a peer message bus — **in-process today** (`blackboard.py`, `tools/spawn.py`, `agent_bus.py`) |
 | Memory management | context = RAM, long-term = disk | turn-list compaction (drop/summarize, opt-in digest RAG), a model-curated cross-session memory directory, and per-goal KV memory (`compaction.py`, `tools/memory.py`, `tools/kv_memory.py`) |
@@ -89,7 +89,7 @@ any pack's envelope.
 
 **Strong.** The primitives a canonical academic agent kernel leaves unowned are
 exactly where Lightwork is built out: a hard per-run budget the loop refuses to
-exceed (`budget.py`), nine real execution sandboxes (`sandbox/`), tamper-evident
+exceed (`budget.py`), nine execution sandboxes (`sandbox/`; the Firecracker backend is an experimental scaffold), tamper-evident
 signed audit (`audit/signing.py`), and least-privilege attenuating capabilities
 (`capability.py`). Tenancy is namespaced on disk by a context-scoped `tenant_id`
 (`paths.py`), and content safety runs at three chokepoints via the shield (see
