@@ -31,7 +31,8 @@ Rules:
   accept the proof instead of a code. The proof is spent when the flow completes
   or is cancelled from the browser that holds it.
 * Enabling, turning off, making new recovery codes and using a recovery code are
-  recorded in the activity log first. If the log refuses, nothing changes.
+  recorded in the activity log first. If the log refuses, nothing changes. Ending
+  a recovery proof is recorded too, but a refused record does not stop it.
 """
 from __future__ import annotations
 
@@ -505,6 +506,15 @@ def attach_proof(request, response) -> None:
                         httponly=True, samesite="strict", secure=_cookie_secure(request))
 
 
+def _record_end(email: str, flow: str) -> None:
+    """Record a spent recovery proof. A refused log is logged, not raised: the step is already
+    done, and ending a proof only removes authority, so it must not fail the request."""
+    try:
+        _audit("owner_recovery_proof_ended", email, f"recovery flow {flow}")
+    except HTTPException:
+        log.warning("The activity log refused to record the end of a recovery flow; the proof was still spent.")
+
+
 def close_flow(response, *, flow: str, presented: str | None = None) -> None:
     """Spend a restricted flow's recovery proof when the flow completes or is cancelled.
 
@@ -531,6 +541,7 @@ def close_flow(response, *, flow: str, presented: str | None = None) -> None:
             else:
                 row.pop("flow_proofs", None)
             local_owner._write(row)
+            _record_end(row["email"], flow)
     response.delete_cookie(PROOF_COOKIE, path=FLOW_PATHS[flow])
 
 

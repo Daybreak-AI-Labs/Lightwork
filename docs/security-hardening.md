@@ -501,12 +501,14 @@ cookie on that flow's own path. Later steps of the same flow accept the proof
 instead of a code, still check the passphrase, and refuse a proof issued to any
 other flow. The proof is spent when the flow completes, or when the owner
 cancels the flow from the same browser; a cancel from any other request changes
-nothing. A wrong code counts toward the same one-minute lock as a wrong passphrase. A
-step sent with no code is refused and counts nothing. A correct passphrase does
-not clear that lock while a code is due. Issuing and using a proof are recorded
-in the activity log without any code or token. The recovery routes are reachable only from this computer's loopback
-address and carry no session; the activation reviews need the owner's session.
-An owner without an authenticator app sees no change.
+nothing. A wrong code counts toward the same one-minute lock as a wrong
+passphrase. A step sent with no code is refused and counts nothing. A correct
+passphrase does not clear that lock while a code is due. Issuing, using and
+ending a proof are recorded in the activity log without any code or token. If
+the log refuses the record of an ending, the proof is still ended. The recovery
+routes are reachable only from this computer's loopback address and carry no
+session; the activation reviews need the owner's session. An owner without an
+authenticator app sees no change.
 
 ## OIDC SSO authentication
 

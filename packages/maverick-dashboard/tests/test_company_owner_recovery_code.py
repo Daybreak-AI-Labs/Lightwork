@@ -212,6 +212,9 @@ def test_cancelling_a_flow_spends_its_proof(owner, clock, events):
                          headers={"cookie": f"mvk_owner_recovery_proof={token}"})
     assert spent.status_code == 401
     assert "flow_proofs" not in record()
+    ended = [kw for kind, kw in events if kw.get("verb") == "owner_recovery_proof_ended"]
+    assert len(ended) == 1 and ended[0]["actor"] == "user:" + EMAIL
+    assert token not in json.dumps(events, default=str)
 
 
 def test_a_cancel_spends_only_the_proof_its_own_browser_holds(owner, clock):

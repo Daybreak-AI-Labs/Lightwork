@@ -888,3 +888,40 @@ def test_a_refused_audit_stops_the_operator_reset(monkeypatch, clock):
         second.reset_by_operator(confirm_email=EMAIL, actor="os:posix:1000")
     assert stopped.value.status_code == 503
     assert row() == before
+
+
+def test_ending_a_flow_is_recorded_without_its_token_and_a_refused_log_does_not_keep_the_proof(monkeypatch, clock):
+    from maverick.audit import AuditRefused
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    from starlette.responses import Response
+    events = capture_audit(monkeypatch)
+    enroll_owner()
+    secret, _codes = turn_on(clock)
+    first = request()
+    local_owner.verify_recovery(first, email=EMAIL, password=PASSPHRASE, flow=FLOW, code=current_code(secret, clock))
+    _flow, token = first.state.owner_recovery_proof
+    second.close_flow(Response(), flow=FLOW, presented=token)
+    ended = [kw for kind, kw in events if kw.get("verb") == "owner_recovery_proof_ended"]
+    assert len(ended) == 1 and ended[0]["actor"] == "user:" + EMAIL
+    assert ended[0]["detail"] == f"recovery flow {FLOW}" and "flow_proofs" not in row()
+    assert token not in json.dumps(events, default=str)
+    # Nothing is recorded when there is nothing to end.
+    second.close_flow(Response(), flow=FLOW)
+    assert len([kw for kind, kw in events if kw.get("verb") == "owner_recovery_proof_ended"]) == 1
+    # A refused activity log is logged, not raised: the proof is still spent.
+    clock.advance(30)
+    again = request()
+    local_owner.verify_recovery(again, email=EMAIL, password=PASSPHRASE, flow=FLOW, code=current_code(secret, clock))
+    _flow, live = again.state.owner_recovery_proof
+
+    def refuse(*a, **k):
+        raise AuditRefused("log unavailable")
+
+    monkeypatch.setattr("maverick.audit.audit_event", refuse)
+    response = Response()
+    second.close_flow(response, flow=FLOW)
+    assert "flow_proofs" not in row()
+    assert f"Path={second.FLOW_PATHS[FLOW]}" in response.headers["set-cookie"]
+    with pytest.raises(HTTPException):
+        local_owner.verify_recovery(proof_request(live), email=EMAIL, password=PASSPHRASE, flow=FLOW)
