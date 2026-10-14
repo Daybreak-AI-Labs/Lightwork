@@ -1,7 +1,12 @@
 """UI hardening (csp_and_escaping): CSP + security headers, plan-tree escaping, trajectory a11y."""
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from fastapi.testclient import TestClient
+
+TEMPLATES = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
 
 
 def _client():
@@ -113,3 +118,18 @@ def test_trajectory_controls_have_aria_labels(monkeypatch, tmp_path):
         assert label in r.text
     # Keyboard handler wired.
     assert "ArrowLeft" in r.text and "ArrowRight" in r.text
+
+
+# ---------- no inline event-handler attributes (script-src carries no unsafe-inline) ----------
+
+def test_no_template_uses_an_inline_event_handler_attribute():
+    """An ``onclick="..."`` attribute is an inline script: a script-src nonce
+    does not admit it, so each handler is an addEventListener in a script."""
+    handlers = re.compile(r"\s(on[a-z]+)\s*=\s*[\"']", re.IGNORECASE)
+    found = []
+    for path in sorted(TEMPLATES.rglob("*.html")):
+        text = path.read_text(encoding="utf-8")
+        for match in handlers.finditer(text):
+            line = text.count("\n", 0, match.start()) + 1
+            found.append(f"{path.relative_to(TEMPLATES)}:{line} {match.group(1)}=")
+    assert found == []
