@@ -100,17 +100,33 @@
   function testPhrases(id) {
     return $(id).value.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean);
   }
+  // One tool per line: "name" or "name | text the call must include" (calls) or "name | fixed answer" (results).
+  function toolLines(id) {
+    return testPhrases(id).map(function (line) {
+      var bar = line.indexOf('|');
+      return bar < 0 ? [line.trim(), ''] : [line.slice(0, bar).trim(), line.slice(bar + 1).trim()];
+    });
+  }
+  function toolFieldsShown() {
+    var on = $('wo-test-tools').checked;
+    document.querySelectorAll('#wo-test-form .wo-test-tools-fields').forEach(function (n) { n.hidden = !on; });
+  }
   function testCriteria(c) {
     var parts = [];
     if (c.includes.length) parts.push('Must mention: ' + c.includes.join(', '));
     if (c.excludes.length) parts.push('Must never say: ' + c.excludes.join(', '));
     if (c.refusal) parts.push('Must refuse');
     if (c.citation) parts.push('Must reference a source');
+    if (c.with_tools) {
+      (c.tools_called || []).forEach(function (t) { parts.push('Must call ' + t.name + (t.contains ? ' with "' + t.contains + '"' : '')); });
+      (c.tools_not_called || []).forEach(function (name) { parts.push('Must not call ' + name); });
+    }
     return parts.join(' · ');
   }
   function clearTestEditor() {
     editingCase = null;
     $('wo-test-form').reset();
+    toolFieldsShown();
     $('wo-test-form-title').textContent = 'Add an answer check';
     $('wo-test-cancel').hidden = true;
   }
@@ -122,6 +138,11 @@
     $('wo-test-excludes').value = c.excludes.join('\n');
     $('wo-test-refusal').checked = c.refusal;
     $('wo-test-citation').checked = c.citation;
+    $('wo-test-tools').checked = !!c.with_tools;
+    $('wo-test-tools-called').value = (c.tools_called || []).map(function (t) { return t.contains ? t.name + ' | ' + t.contains : t.name; }).join('\n');
+    $('wo-test-tools-absent').value = (c.tools_not_called || []).join('\n');
+    $('wo-test-tools-results').value = (c.tool_results || []).map(function (t) { return t.name + ' | ' + t.text; }).join('\n');
+    toolFieldsShown();
     $('wo-test-cancel').hidden = false;
     $('wo-test-task').focus();
   }
@@ -129,6 +150,7 @@
     testCases = data.cases || [];
     MAX_RUN = Number(data.max_checks) || 20;
     testLiveEnabled = !!data.live_enabled;
+    document.querySelectorAll('#wo-test-form .wo-test-tools-row').forEach(function (n) { n.hidden = !data.tool_checks_enabled; });
     testBaseline = data.baseline_revision || ''; testInstructions = data.current_instructions || ''; testContext = data.context || '';
     $('wo-test-current-instructions').textContent = testInstructions;
     var list = [];
@@ -196,7 +218,11 @@
         '. Each check used the instructions shown by this version; no actions or company knowledge were used.'));
       var anchor = 'wo-run-' + r.id + '-current';
       if (r.results.length) box.appendChild(J.table(['Question', 'Answer', 'Result', 'Where it came from'], r.results.map(function (answer) {
-        return [answer.task, answer.answer, answer.passed ? 'Passed' : 'Needs review', sourceLink(r.specialist, anchor)];
+        var answerCell = el('span', null, answer.note || answer.answer);
+        (answer.tool_checks || []).forEach(function (check) {
+          answerCell.appendChild(el('div', 'muted', (check.passed ? 'Passed: ' : 'Needs review: ') + check.result));
+        });
+        return [answer.task, answerCell, answer.note ? 'Not run' : (answer.passed ? 'Passed' : 'Needs review'), sourceLink(r.specialist, anchor)];
       })));
       var used = el('details'); used.appendChild(el('summary', null, 'Instructions used'));
       var heading = el('h4', null, 'Instructions this run tested'); heading.id = anchor; heading.tabIndex = -1;
@@ -360,6 +386,7 @@
 
     $('wo-test-specialist').addEventListener('change', loadCustomerTests);
     $('wo-test-cancel').addEventListener('click', clearTestEditor);
+    $('wo-test-tools').addEventListener('change', toolFieldsShown);
     $('wo-test-form').addEventListener('submit', async function (event) {
       event.preventDefault();
       var specialist = $('wo-test-specialist').value;
@@ -367,9 +394,16 @@
       var save = $('wo-test-save'); save.disabled = true;
       $('wo-test-status').textContent = 'Saving…';
       try {
+        var withTools = $('wo-test-tools').checked;
         var body = { specialist: specialist, task: $('wo-test-task').value,
           includes: testPhrases('wo-test-includes'), excludes: testPhrases('wo-test-excludes'),
-          refusal: $('wo-test-refusal').checked, citation: $('wo-test-citation').checked };
+          refusal: $('wo-test-refusal').checked, citation: $('wo-test-citation').checked,
+          with_tools: withTools,
+          tools_called: withTools ? toolLines('wo-test-tools-called').filter(function (t) { return t[0]; })
+            .map(function (t) { return { name: t[0], contains: t[1] }; }) : [],
+          tools_not_called: withTools ? testPhrases('wo-test-tools-absent') : [],
+          tool_results: withTools ? toolLines('wo-test-tools-results').filter(function (t) { return t[0] && t[1]; })
+            .map(function (t) { return { name: t[0], text: t[1] }; }) : [] };
         if (editingCase) { body.identity = editingCase.id; body.expected_revision = editingCase.revision; }
         await J.request(API + '/test-suite/customer', {method: 'POST', json: body});
         await loadCustomerTests();

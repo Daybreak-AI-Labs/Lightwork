@@ -350,3 +350,11 @@ def test_the_publish_summary_counts_a_failed_tool_check_as_not_passing():
            "results": [result]}
     summary = gate._summary(run, "current", {"a" * 32: 1})
     assert result["checks"]["includes"] == 1 and summary["passed"] == 0 and summary["passing"] is False
+
+
+def test_the_workforce_page_says_whether_tool_checks_are_on(client):
+    app, tmp = client
+    _knob(tmp, "[models]\ncapability_tests = true\n")
+    assert app.get(API + "/customer", params={"specialist": "finance_ap"}).json()["tool_checks_enabled"] is False
+    _knob(tmp, "[models]\ncapability_tests = true\n[agent_tests]\ntool_checks = true\n")
+    assert app.get(API + "/customer", params={"specialist": "finance_ap"}).json()["tool_checks_enabled"] is True

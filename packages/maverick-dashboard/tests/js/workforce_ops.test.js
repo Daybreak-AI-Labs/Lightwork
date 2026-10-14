@@ -295,3 +295,63 @@ test("nothing coming due uses the shared empty state and offers a longer period"
   await settle();
   assert.doesNotMatch(window.document.getElementById("wo-up").textContent, /longer period/);
 });
+
+test("tool checks are offered only when the setting is on and save each named tool", async (t) => {
+  const base = defaults(true)["/api/v1/workforce-ops/test-suite/customer"];
+  const ui = await fixture(partial("_workforce_ops.html"), {
+    responses: { "/api/v1/workforce-ops/test-suite/customer": { ...base, tool_checks_enabled: true } } });
+  t.after(() => ui.window.close());
+  const select = ui.doc.getElementById("wo-test-specialist");
+  select.value = "finance_ap";
+  select.dispatchEvent(new ui.window.Event("change"));
+  await ui.settle();
+  assert.equal(ui.doc.querySelector("#wo-test-form .wo-test-tools-row").hidden, false);
+  const tools = ui.doc.getElementById("wo-test-tools");
+  assert.equal(ui.doc.querySelector("#wo-test-form .wo-test-tools-fields").hidden, true);
+  tools.checked = true;
+  tools.dispatchEvent(new ui.window.Event("change"));
+  assert.equal(ui.doc.querySelector("#wo-test-form .wo-test-tools-fields").hidden, false);
+  ui.doc.getElementById("wo-test-tools-called").value = "send_email | Acme\nlookup_invoice";
+  ui.doc.getElementById("wo-test-tools-absent").value = "delete_record";
+  ui.doc.getElementById("wo-test-tools-results").value = "lookup_invoice | Invoice 77 is a duplicate.";
+  ui.doc.getElementById("wo-test-form").dispatchEvent(new ui.window.Event("submit", {cancelable: true}));
+  await ui.settle();
+  const save = ui.calls.find((c) => c.url === "/api/v1/workforce-ops/test-suite/customer" && c.method === "POST");
+  const body = JSON.parse(save.body);
+  assert.equal(body.with_tools, true);
+  assert.deepEqual(body.tools_called, [{name: "send_email", contains: "Acme"}, {name: "lookup_invoice", contains: ""}]);
+  assert.deepEqual(body.tools_not_called, ["delete_record"]);
+  assert.deepEqual(body.tool_results, [{name: "lookup_invoice", text: "Invoice 77 is a duplicate."}]);
+});
+
+test("tool checks stay hidden while the setting is off", async (t) => {
+  const ui = await fixture(partial("_workforce_ops.html"));
+  t.after(() => ui.window.close());
+  const select = ui.doc.getElementById("wo-test-specialist");
+  select.value = "finance_ap";
+  select.dispatchEvent(new ui.window.Event("change"));
+  await ui.settle();
+  assert.equal(ui.doc.querySelector("#wo-test-form .wo-test-tools-row").hidden, true);
+});
+
+test("a run shows each tool check in plain words and a skipped check as not run", async (t) => {
+  const base = defaults(true)["/api/v1/workforce-ops/test-suite/customer"];
+  const run = { id: "b".repeat(32), state: "done", started_at: 1700000000, model: "m", spent_dollars: 0, total: 2,
+    passed: 0, instructions: "Check invoices.", case_snapshots: [], message: "",
+    results: [
+      { task: "Could these invoices be duplicates?", answer: "Duplicate.", passed: false, note: "",
+        tool_checks: [{ check: "Must call send_email", passed: false, result: "Did not call send_email." }] },
+      { task: "Second question", answer: "", passed: false, note: "Skipped: tool checks are turned off in All settings.", tool_checks: [] },
+    ] };
+  const ui = await fixture(partial("_workforce_ops.html"), {
+    responses: { "/api/v1/workforce-ops/test-suite/customer": { ...base, runs: [run] } } });
+  t.after(() => ui.window.close());
+  const select = ui.doc.getElementById("wo-test-specialist");
+  select.value = "finance_ap";
+  select.dispatchEvent(new ui.window.Event("change"));
+  await ui.settle();
+  const history = ui.doc.getElementById("wo-test-history").textContent;
+  assert.match(history, /Needs review: Did not call send_email\./);
+  assert.match(history, /Not run/);
+  assert.match(history, /Skipped: tool checks are turned off/);
+});

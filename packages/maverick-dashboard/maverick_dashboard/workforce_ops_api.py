@@ -278,6 +278,7 @@ def _test_profiles(request: Request) -> dict:
 async def customer_tests(request: Request, specialist: str = Query(max_length=100)) -> dict:
     require_permission(request, "view")
     profile = _test_profile(request, specialist)
+    from maverick.agent_tests_policy import tool_checks_enabled
     from maverick.llm import model_for_role
 
     from . import specialist_test_sets as saved
@@ -294,7 +295,8 @@ async def customer_tests(request: Request, specialist: str = Query(max_length=10
         _current_test_result(run, revision, cases)
     return {"specialist": specialist, "cases": cases, "max_checks": saved.max_cases_per_specialist(),
             "runs": runs, "current_instructions": profile.persona, "baseline_revision": revision,
-            "context": context_for(request), "live_enabled": _live_tests_enabled()}
+            "context": context_for(request), "live_enabled": _live_tests_enabled(),
+            "tool_checks_enabled": tool_checks_enabled()}
 
 
 def _current_test_result(row, current_revision, cases):
