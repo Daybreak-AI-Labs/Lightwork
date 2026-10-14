@@ -16,14 +16,14 @@
     // serverDetail: the server's own plain sentence is shown when it sends one; this is the fallback.
     return window.mvFetchJSON(API + path, Object.assign({ cache: 'no-store', serverDetail: 'That did not work. Try again.' }, options || {}), action);
   }
-  function el(tag, text, className) {
+  function el(tag, cls, text) {
     var node = document.createElement(tag);
+    if (cls) node.className = cls;
     if (text != null) node.textContent = text;
-    if (className) node.className = className;
     return node;
   }
   function button(label, name, onClick, danger) {
-    var node = el('button', label, danger ? 'btn btn--danger' : 'btn');
+    var node = el('button', danger ? 'btn btn--danger' : 'btn', label);
     node.type = 'button';
     node.setAttribute('aria-label', label + ' for ' + name);
     node.addEventListener('click', onClick);
@@ -83,17 +83,17 @@
     var newest = list.slice().reverse();
     var nodes = [];
     if (!newest.length) {
-      nodes.push(el('p', 'No messages are stored for this website yet.', 'muted'));
+      nodes.push(el('p', 'muted', 'No messages are stored for this website yet.'));
     } else {
       var listing = el('ol');
       newest.forEach(function (item) {
         var entry = el('li');
         var who = item.role === 'visitor' ? 'Visitor' : 'Assistant';
-        entry.append(el('p', who + ' · ' + when(item.created_at), 'muted ch-help'), el('p', String(item.text)));
+        entry.append(el('p', 'muted ch-help', who + ' · ' + when(item.created_at)), el('p', null, String(item.text)));
         listing.append(entry);
       });
       nodes.push(listing);
-      if (list.length >= 50) nodes.push(el('p', 'Showing the 50 most recent messages.', 'muted ch-help'));
+      if (list.length >= 50) nodes.push(el('p', 'muted ch-help', 'Showing the 50 most recent messages.'));
     }
     messageBody.replaceChildren(...nodes);
     messages.hidden = false;
@@ -141,7 +141,7 @@
 
   function renderSites(list) {
     if (!list.length) {
-      sites.replaceChildren(el('p', 'No websites yet. Add one to get a key for its website code.', 'muted'));
+      sites.replaceChildren(el('p', 'muted', 'No websites yet. Add one to get a key for its website code.'));
       return;
     }
     var table = el('table'), head = el('thead'), headRow = el('tr'), body = el('tbody');
@@ -161,11 +161,11 @@
         actions.append(' ', button('Stop website', site.display_name, function () { stop(site); }, true));
       }
       row.append(
-        el('td', site.display_name),
-        el('td', (site.origins || []).join(', ')),
-        el('td', String(site.specialist).replace(/_/g, ' ')),
-        el('td', active ? 'Active' : 'Stopped', active ? 'badge active' : 'badge'),
-        el('td', '$' + Number(site.spent_today_dollars || 0).toFixed(2) + ' of $' +
+        el('td', null, site.display_name),
+        el('td', null, (site.origins || []).join(', ')),
+        el('td', null, String(site.specialist).replace(/_/g, ' ')),
+        el('td', active ? 'badge active' : 'badge', active ? 'Active' : 'Stopped'),
+        el('td', null, '$' + Number(site.spent_today_dollars || 0).toFixed(2) + ' of $' +
           Number(site.daily_cap_dollars).toFixed(2) + ' today'),
         actions);
       body.append(row);
@@ -223,7 +223,7 @@
 
   run(function () {
     return loadSites().catch(function () {
-      sites.replaceChildren(el('p', 'Websites could not be loaded. Reload this page to try again.', 'muted'));
+      sites.replaceChildren(el('p', 'muted', 'Websites could not be loaded. Reload this page to try again.'));
       say('Websites could not be loaded. Reload this page to try again.', true);
     });
   });
