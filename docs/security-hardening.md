@@ -483,7 +483,11 @@ sign-in or recovery steps. The change is recorded in the activity log first; if
 the log refuses it, nothing changes. The command prints that the owner must set
 the app up again. With `totp = "required"`, the owner's next passphrase sign-in
 forces that set-up before anything else. No dashboard route can do this, and it
-does not change the passphrase.
+does not change the passphrase. Until the owner sets the app up again, the
+passphrase alone opens the restricted company sign-in and single sign-on steps
+below, as it does for any owner without the app. Under `totp = "required"` the
+window lasts until the owner's next passphrase sign-in completes set-up. While
+company sign-in is on, local sign-in is off, so set-up waits until it is off.
 
 Company sign-in changes and their recovery also check the owner's passphrase.
 An owner with an authenticator app must give a current code, or an unused

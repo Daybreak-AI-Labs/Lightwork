@@ -77,6 +77,8 @@ def test_the_right_email_turns_the_app_off_and_says_the_owner_must_set_it_up_aga
     assert result.exit_code == 0, result.output
     assert "must set up the authenticator app again" in result.output
     assert 'totp = "required"' in result.output and "next passphrase sign-in" in result.output
+    # Until set-up, the owner has no app: the passphrase alone opens the restricted steps, as for any owner without one.
+    assert "passphrase alone opens company sign-in" in result.output
     stored = record()
     for key in ("totp", "totp_step", "totp_setup", "recovery", "second_factor", "flow_proofs"):
         assert key not in stored

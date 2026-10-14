@@ -46,5 +46,7 @@ def owner_reset_authenticator() -> None:
         click.echo("No authenticator app was on. Any sign-in step in progress was removed.")
     click.echo('The owner must set up the authenticator app again. With [auth.local_owner] totp = "required", '
                "the owner's next passphrase sign-in forces that set-up before anything else.")
+    click.echo("Until the owner sets it up again, the passphrase alone opens company sign-in and single sign-on "
+               "changes and their recovery, as it does for any owner without the app.")
     if second.mode() == "off":
         click.echo('The setting [auth.local_owner] totp is "off", so the app cannot be set up again until it changes.')
