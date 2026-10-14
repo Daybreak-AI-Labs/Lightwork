@@ -119,6 +119,14 @@ def second_person_approval(request, name: str, profile: dict, reason: str, *, us
     raise HTTPException(status_code=409, detail=REQUESTED)
 
 
+def may_decide(request) -> bool:
+    """Whether this caller may read and decide a bypass request: the same pack-editing check publishing makes."""
+    from . import auth
+    from .api import pack_editing_denial
+
+    return auth.has_permission(request, "admin") and pack_editing_denial(request) is None
+
+
 def require_decider(request, approval, who: str, *, approving: bool) -> None:
     """Only a person who may publish decides a bypass request (the same check publishing makes),
     and never the person who asked for it."""
@@ -132,4 +140,4 @@ def require_decider(request, approval, who: str, *, approving: bool) -> None:
             "You asked for this publication without passing tests, so another administrator must approve it."))
 
 
-__all__ = ["ACTION", "PROVENANCE", "is_bypass", "require_decider", "second_person_approval"]
+__all__ = ["ACTION", "PROVENANCE", "is_bypass", "may_decide", "require_decider", "second_person_approval"]

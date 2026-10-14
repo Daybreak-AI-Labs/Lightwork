@@ -450,3 +450,24 @@ def test_an_administrator_can_read_a_bypass_card_to_decide_it(monkeypatch):
     monkeypatch.setattr(auth, "api_key_permissions", lambda request: None)
     monkeypatch.setattr(auth, "has_permission", lambda request, permission, api_scope=None: permission == "admin")
     assert content_access.can_read_approval(object(), card, world=object()) is True
+
+
+def test_an_administrator_who_may_not_edit_agents_cannot_read_a_bypass_card(monkeypatch):
+    """Department-scoped administrators are not pack editors, so they cannot read the card either."""
+    from types import SimpleNamespace
+
+    from maverick_dashboard import auth, content_access
+
+    card = SimpleNamespace(id=1, action=BYPASS, provenance="agent_publish.bypass.four_eyes.v1", status="pending",
+                           requested_by="user:requester", scope=PACK, detail=None, goal_id=None)
+    request = SimpleNamespace(state=SimpleNamespace(principal=SimpleNamespace(principal="user:dept-admin")))
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:pack-editor")
+    monkeypatch.setattr(auth, "api_key_permissions", lambda request: None)
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:dept-admin")
+    monkeypatch.setattr(auth, "has_permission", lambda request, permission, api_scope=None: permission == "admin")
+    monkeypatch.setattr(auth, "has_global_permission", lambda request, permission: False)
+    assert content_access.can_read_approval(request, card, world=object()) is False
+    # The pack editor on the same roster still reads it.
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:pack-editor")
+    request.state.principal.principal = "user:pack-editor"
+    assert content_access.can_read_approval(request, card, world=object()) is True
