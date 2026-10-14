@@ -108,7 +108,7 @@ def _problem(policy: dict[str, Any]) -> str:
 
 def _destination(policy: dict[str, Any]) -> str:
     if policy["provider"] == "zendesk":
-        # Endpoint form per Zendesk's API reference; see docs (not verified against a live tenant).
+        # Endpoint form not verified against Zendesk's reference or a live tenant; see docs/contact-centre-handoff.md.
         return f"https://{policy['zendesk_subdomain']}.zendesk.com/api/v2/tickets.json"
     return policy["webhook_url"]
 
