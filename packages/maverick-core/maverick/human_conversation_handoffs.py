@@ -153,7 +153,7 @@ class HumanConversations:
             visible.update(shared={"title":"Withheld","brief":"Current source permission is unavailable.","saved_reply":"Withheld"},
                            purpose="",recipient="",duty_label="",messages=[])
         from . import contact_centre
-        external = contact_centre.status_for(human["current"]) if session and not self.metadata_only else None
+        external = contact_centre.shown_status(human["current"]) if session and not self.metadata_only else None
         return {"goal_id": goal.id, "root_id": root.id, "owner": root.owner, "is_owner": self.actor == root.owner, "revision": record["revision"],
                 "session": visible, "held": bool(session and session["state"] in HELD), "contact_centre": external,
                 "audit_pending": bool(record.get("_audit_pending")), "source_unavailable": self.metadata_only,

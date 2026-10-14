@@ -50,7 +50,13 @@ MAX_REQUESTER = 120
 TIMEOUT = 10.0
 TERMINAL = frozenset({"sent", "failed", "unknown"})
 LABELS = {"queued": "Waiting to send", "sending": "Sending", "retrying": "Retrying",
-          "sent": "Sent", "failed": "Not sent", "unknown": "Not confirmed"}
+          "sent": "Sent", "failed": "Not sent", "unknown": "Not confirmed",
+          "unavailable": "Status unavailable", "not_recorded": "Not queued"}
+STOPPED = ("Lightwork stopped while this was being sent, so the outcome is not confirmed. "
+           "It was not sent again; check the contact centre before sending it by hand.")
+UNCONFIRMED_RESULT = ("Lightwork could not record the result of this send, so the outcome is not confirmed. "
+                      "It was not sent again; check the contact centre before sending it by hand.")
+NOT_STARTED = "Lightwork could not record this handoff before sending it, so nothing was sent."
 _HANDOFF_ID_RE = re.compile(r"[A-Za-z0-9_-]{16,100}")
 _EMAIL_RE = re.compile(r"[^@\s]{1,64}@[^@\s]{1,255}")
 _TICKET_ID_RE = re.compile(r'"ticket"\s*:\s*\{[^}]*?"id"\s*:\s*(\d{1,20})')
@@ -292,14 +298,36 @@ def enqueue_handoff(*, handoff_id: str, title: str, reason: str, requester_name:
     return _public(entry)
 
 
+def _notice(state: str, reason: str) -> dict[str, Any]:
+    """A status row that is not stored in the outbox: the outbox cannot be read, or nothing was recorded."""
+    return {"provider": "", "state": state, "label": LABELS[state], "reason": reason,
+            "ticket_id": "", "updated_at": 0.0}
+
+
 def status_for(handoff_id: str) -> dict | None:
-    """The public delivery status of one handoff, or ``None`` when it was never queued."""
+    """The public delivery status of one handoff, or ``None`` when it was never queued.
+
+    Never raises: an outbox that cannot be read is reported as unavailable, so the
+    conversation page still opens. Only the exception type is logged.
+    """
     key = _key(handoff_id)
-    if key is None or not _path().exists():
-        return None
-    with _locked(create=False) as path:
-        entry = _load(path).get(key)
+    try:
+        if key is None or not _path().exists():
+            return None
+        with _locked(create=False) as path:
+            entry = _load(path).get(key)
+    except Exception as exc:
+        log.warning("contact centre: delivery status unavailable (%s)", type(exc).__name__)
+        return _notice("unavailable", "The delivery status could not be read. The in-app handoff is not affected.")
     return _public(entry) if entry else None
+
+
+def shown_status(handoff_id: str) -> dict | None:
+    """What a conversation shows: the stored status, or "Not queued" when a provider is set and nothing was recorded."""
+    status = status_for(handoff_id)
+    if status is not None or config.get_contact_centre()["provider"] == "off":
+        return status
+    return _notice("not_recorded", "No contact-centre delivery was recorded for this handoff. The in-app handoff is not affected.")
 
 
 def _send(key: str, entry: dict[str, Any]) -> tuple[str, str, str]:
@@ -391,19 +419,30 @@ def _attempt(key: str, *, honour_schedule: bool) -> tuple[str, float]:
     crash during the request leaves it visibly unconfirmed instead of resending.
     """
     now = time.time()
-    with _locked(create=False) as path:
-        data = _load(path)
-        entry = data.get(key)
-        if entry is None or entry.get("state") not in {"queued", "retrying"}:
-            return "done", 0.0
-        due = float(entry.get("next_attempt_at") or 0.0)
-        if honour_schedule and due > now:
-            return "wait", due - now
-        entry.update(state="sending", attempts=int(entry.get("attempts") or 0) + 1, updated_at=now)
-        _save(path, data)
-        attempt = entry["attempts"]
-        snapshot = dict(entry)
-    outcome, reason, ticket = _send(key, snapshot)
+    try:
+        with _locked(create=False) as path:
+            data = _load(path)
+            entry = data.get(key)
+            if entry is None or entry.get("state") not in {"queued", "retrying"}:
+                return "done", 0.0
+            due = float(entry.get("next_attempt_at") or 0.0)
+            if honour_schedule and due > now:
+                return "wait", due - now
+            entry.update(state="sending", attempts=int(entry.get("attempts") or 0) + 1, updated_at=now)
+            _save(path, data)
+            attempt = entry["attempts"]
+            snapshot = dict(entry)
+    except Exception as exc:
+        # The 'sending' record was not saved, so nothing was sent; say so instead of leaving it queued.
+        log.warning("contact centre: attempt not started (%s)", type(exc).__name__)
+        _mark(key, "failed", NOT_STARTED)
+        return "done", 0.0
+    try:
+        outcome, reason, ticket = _send(key, snapshot)
+    except Exception as exc:
+        # Raised outside the request itself, or after it; the outcome is not known, so it is not repeated.
+        log.warning("contact centre: send stopped (%s)", type(exc).__name__)
+        outcome, reason, ticket = "unknown", STOPPED, ""
     now = time.time()
     delay = 0.0
     if outcome == "retry" and attempt >= MAX_ATTEMPTS:
@@ -415,21 +454,40 @@ def _attempt(key: str, *, honour_schedule: bool) -> tuple[str, float]:
             outcome, reason = "failed", f"Lightwork stopped retrying after {MAX_ATTEMPTS} tries. Nothing was sent twice."
         else:
             delay = scheduled
-    with _locked(create=False) as path:
-        data = _load(path)
-        entry = data.get(key)
-        if entry is None:
-            return "done", 0.0
-        entry.update(updated_at=now, reason=reason)
-        if outcome == "retry":
-            entry.update(state="retrying", next_attempt_at=now + delay)
-        else:
-            entry.update(state=outcome, payload={}, next_attempt_at=None)
-            if outcome == "sent":
-                entry["ticket_id"] = ticket
-        _save(path, data)
+    try:
+        with _locked(create=False) as path:
+            data = _load(path)
+            entry = data.get(key)
+            if entry is None:
+                return "done", 0.0
+            entry.update(updated_at=now, reason=reason)
+            if outcome == "retry":
+                entry.update(state="retrying", next_attempt_at=now + delay)
+            else:
+                entry.update(state=outcome, payload={}, next_attempt_at=None)
+                if outcome == "sent":
+                    entry["ticket_id"] = ticket
+            _save(path, data)
+    except Exception as exc:
+        # The request was made but its result could not be saved: show it as not confirmed, never as sending.
+        log.warning("contact centre: result not saved (%s)", type(exc).__name__)
+        _mark(key, "unknown", UNCONFIRMED_RESULT)
+        return "done", 0.0
     _audit(key, snapshot["provider"], outcome, entry["state"])
     return ("wait", delay) if outcome == "retry" else ("done", 0.0)
+
+
+def _mark(key: str, state: str, reason: str) -> None:
+    """Best effort after a save failed: show a final state instead of leaving the handoff in progress."""
+    try:
+        with _locked(create=False) as path:
+            data = _load(path)
+            entry = data.get(key)
+            if entry is not None:
+                entry.update(state=state, reason=reason, payload={}, next_attempt_at=None, updated_at=time.time())
+                _save(path, data)
+    except Exception as exc:
+        log.warning("contact centre: status not updated (%s)", type(exc).__name__)
 
 
 def run_delivery(key: str) -> None:
@@ -471,8 +529,7 @@ def resume_pending() -> int:
         for key, entry in data.items():
             if entry.get("state") == "sending":
                 entry.update(state="unknown", payload={}, updated_at=now,
-                             reason=("Lightwork stopped while this was being sent, so the outcome is unknown. "
-                                     "It was not sent again; check the contact centre before sending it by hand."))
+                             reason=STOPPED)
                 marked.append((key, str(entry.get("provider") or ""), "unknown"))
         if marked:
             _save(path, data)

@@ -89,6 +89,8 @@ Verify with the same rule as `maverick.webhooks.verify_signature`.
 | Sent | Accepted. For Zendesk, the ticket number is shown when the reply includes it. |
 | Not sent | Lightwork will not try again. The reason says what to fix. |
 | Not confirmed | A request may have reached the receiver but no clear answer came back. **It is not sent again.** Check the destination before you send it by hand. |
+| Not queued | The provider is set but no delivery was recorded for this handoff, for example because queueing failed. The in-app handoff is not affected. |
+| Status unavailable | Lightwork could not read its delivery record just now. The in-app handoff is not affected, and the status returns when the record can be read. |
 
 ## Retries and no duplicates
 

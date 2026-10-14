@@ -466,6 +466,115 @@ def test_conversation_link_opens_the_conversation_page_that_shows_the_handoff(tm
     assert contact_centre.conversation_link(7) == ""
 
 
+# ------------------------------------------------------------ status that always reads
+def _conversation_source(handoff_id=HANDOFF, actor="ana@example.com"):
+    """A HumanConversations whose stored records are stubbed, so state() reads only the outbox for real."""
+    from maverick.human_conversation_handoffs import HumanConversations
+    session = {"id": handoff_id, "state": "waiting", "recipient": "agent@acme.example", "goal_id": 7,
+               "owner": actor, "purpose": "Need a person", "expires_at": 0, "shared": {"title": "Card declined"},
+               "source": "v1", "tasks": [], "messages": [], "duty_label": "Agent"}
+    human = {"current": handoff_id, "sessions": {handoff_id: session}, "operations": {}}
+    goal = SimpleNamespace(id=7, owner=actor, title="Card declined")
+    root = SimpleNamespace(id=7, owner=actor)
+    source = HumanConversations.__new__(HumanConversations)
+    source.world, source.actor, source.metadata_only = object(), actor, False
+    source.authorize = lambda goal, session, write: None
+    source._load = lambda goal_id: (goal, root, None, {"revision": 1}, {}, human)
+    source._authorized = lambda goal, root, human, write=False: session
+    return source
+
+
+def test_an_unreadable_outbox_never_breaks_the_conversation_status(tmp_path, monkeypatch):
+    _configure(tmp_path, ZENDESK_CONFIG)
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    assert _enqueue()["state"] == "sent"
+    for path in _outbox_files(tmp_path):
+        path.write_bytes(b"not sealed")
+    status = contact_centre.status_for(HANDOFF)
+    assert status["state"] == "unavailable" and status["label"] == "Status unavailable"
+    assert "not affected" in status["reason"]
+    view = _conversation_source().state(7)
+    assert view["session"]["state"] == "waiting"
+    assert view["contact_centre"]["state"] == "unavailable"
+    assert len(receiver.calls) == 1
+
+
+def test_a_handoff_whose_queueing_failed_is_shown_as_not_queued(tmp_path, monkeypatch):
+    from maverick.chat_threads import ChatThreads
+    _configure(tmp_path, ZENDESK_CONFIG)
+
+    def full(**kwargs):
+        raise contact_centre.OutboxFull("full")
+
+    monkeypatch.setattr(contact_centre, "enqueue_handoff", full)
+    monkeypatch.setattr(ChatThreads, "__init__", lambda self, world: None)
+    monkeypatch.setattr(ChatThreads, "history", lambda self, goal_id, **kwargs: ([], False))
+    source = _conversation_source()
+    source._contact_centre_handoff({"shared": {"title": "Card declined"}, "purpose": "Need a person"},
+                                   SimpleNamespace(id=7, title="Card declined"), HANDOFF)
+    view = source.state(7)
+    assert view["contact_centre"]["state"] == "not_recorded"
+    assert view["contact_centre"]["label"] == "Not queued"
+    assert "not affected" in view["contact_centre"]["reason"]
+
+
+def test_no_status_row_is_shown_when_no_provider_is_set(tmp_path):
+    _configure(tmp_path, "")
+    assert _conversation_source().state(7)["contact_centre"] is None
+
+
+def test_a_result_that_cannot_be_saved_is_shown_as_not_confirmed_not_as_sending(tmp_path, monkeypatch):
+    _configure(tmp_path, ZENDESK_CONFIG)
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    real_save, saves = contact_centre._save, []
+
+    def failing_result_save(path, data):
+        saves.append(1)
+        if len(saves) == 3:  # 1: queued, 2: sending, 3: the result of the send
+            raise OSError("disk full")
+        return real_save(path, data)
+
+    monkeypatch.setattr(contact_centre, "_save", failing_result_save)
+    status = _enqueue()
+    assert status["state"] == "unknown"
+    assert "not sent again" in status["reason"]
+    assert len(receiver.calls) == 1
+
+
+def test_a_send_that_cannot_be_recorded_before_it_starts_is_not_sent(tmp_path, monkeypatch):
+    _configure(tmp_path, ZENDESK_CONFIG)
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+    real_save, saves = contact_centre._save, []
+
+    def failing_start_save(path, data):
+        saves.append(1)
+        if len(saves) == 2:  # the 'sending' record
+            raise OSError("disk full")
+        return real_save(path, data)
+
+    monkeypatch.setattr(contact_centre, "_save", failing_start_save)
+    status = _enqueue()
+    assert status["state"] == "failed"
+    assert receiver.calls == []
+
+
+def test_a_send_that_stops_while_it_is_prepared_is_not_confirmed(tmp_path, monkeypatch):
+    _configure(tmp_path, ZENDESK_CONFIG)
+    receiver = Receiver(CREATED)
+    monkeypatch.setattr(contact_centre, "_post", receiver)
+
+    def broken(content, key):
+        raise RuntimeError("prepared badly")
+
+    monkeypatch.setattr(contact_centre, "_zendesk_body", broken)
+    status = _enqueue()
+    assert status["state"] == "unknown"
+    assert receiver.calls == []
+
+
 # ------------------------------------------------------------ the in-app handoff is not blocked
 def test_queue_failure_never_blocks_the_in_app_handoff(tmp_path, monkeypatch, caplog):
     from maverick.chat_threads import ChatThreads
