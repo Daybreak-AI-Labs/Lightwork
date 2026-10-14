@@ -295,3 +295,20 @@ def test_concurrent_agent_edits_compare_inside_write_lock(tenant_dir):
     assert sum(result is not None for result in results) == 1
     winner = next(result for result in results if result is not None)
     assert resolved_view(name)["generation"] == winner["generation"]
+
+
+def test_a_name_without_a_builtin_pack_resolves_without_parsing_the_catalogue(monkeypatch):
+    """A new specialist has no built-in file. Its base lookup must answer from the
+    file layout, not parse all ~2,000 built-in packs; every guard of an answer
+    check repeats that lookup, so the full parse made a 25-answer check take minutes."""
+    from maverick import domain_edit
+
+    parsed = []
+    real_load_domains = domain_edit.load_domains
+    monkeypatch.setattr(domain_edit, "load_domains", lambda *args, **kwargs: parsed.append(args) or real_load_domains(*args, **kwargs))
+    for _ in range(3):
+        assert domain_edit._fresh_builtin_base("acme_po_helper") is None
+    assert parsed == []
+    name, base = _clean_builtin()
+    assert domain_edit._fresh_builtin_base(name).description == base.description
+    assert parsed == []

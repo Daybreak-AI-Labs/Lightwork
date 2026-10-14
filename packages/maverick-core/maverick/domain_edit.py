@@ -244,11 +244,14 @@ def overlay_toml(patch: dict) -> str:
 def _builtin_layout() -> tuple:
     directory = builtin_dir()
     files = []
-    for path in sorted(directory.glob("*.toml")):
-        info = path.lstat()
+    # One scan of the directory: Path objects per pack made this the slowest step of each base lookup.
+    with os.scandir(directory) as entries:
+        packs = sorted((entry for entry in entries if entry.name.endswith(".toml")), key=lambda entry: entry.name)
+    for entry in packs:
+        info = entry.stat(follow_symlinks=False)
         if not stat.S_ISREG(info.st_mode) or _unsafe_domain_alias(info):
             return ()
-        files.append((path.name, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns))
+        files.append((entry.name, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns))
     return (str(directory.resolve()), tuple(files))
 
 
@@ -268,6 +271,10 @@ def _fresh_builtin_base(name: str) -> DomainProfile | None:
     try:
         signature = _builtin_layout()
         if signature and _canonical_builtin_layout(signature) and _builtin_layout() == signature:
+            # Every built-in pack is named by its file, so a name with no file has no
+            # built-in base. Answer from the listing instead of parsing the catalogue.
+            if f"{name}.toml" not in {item[0] for item in signature[1]}:
+                return None
             profile = load_domain(Path(signature[0]) / f"{name}.toml")
             if profile.name == name:
                 return profile
