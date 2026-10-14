@@ -4634,6 +4634,21 @@ def pick_sign_in_security(sso_enabled: bool) -> dict[str, Any]:
             default=15,
         )
         result["step_up_minutes"] = max(1, min(minutes, 1440))
+    if not sso_enabled:
+        # Local sign-in only: the owner's authenticator app (read by
+        # maverick.config.get_auth_local_owner_totp). Optional is the default.
+        console.print(
+            "[dim]Owner's authenticator app. Optional lets the owner add a code from an "
+            "authenticator app to their passphrase. Required makes them set one up at their "
+            "next sign-in. Off hides the option.[/dim]"
+        )
+        totp = _q_select(
+            "Owner's authenticator app at sign-in",
+            ["optional", "required", "off"],
+            default="optional",
+        )
+        if totp in {"required", "off"}:
+            result["local_owner_totp"] = totp
     cidrs = _csv_list(
         _q_text(
             "Network addresses or ranges allowed to reach Lightwork "
@@ -10157,6 +10172,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("[auth.mfa]")
         lines.append("require = true")
         _emit_kv(lines, "step_up_minutes", int(security.get("step_up_minutes") or 15))
+    if isinstance(security, dict) and security.get("local_owner_totp") in {"required", "off"}:
+        # The owner's authenticator app at local sign-in. Read by
+        # maverick.config.get_auth_local_owner_totp (the dashboard's owner sign-in).
+        lines.append("")
+        lines.append("[auth.local_owner]")
+        _emit_kv(lines, "totp", str(security["local_owner_totp"]))
     if isinstance(security, dict) and security.get("cidrs"):
         # Network addresses allowed to reach the dashboard. Read by
         # maverick.config.get_ip_allowlist (the dashboard's ip_allowlist).

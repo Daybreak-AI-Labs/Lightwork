@@ -1670,6 +1670,44 @@ def get_auth_mfa() -> dict:
     }
 
 
+LOCAL_OWNER_TOTP_MODES: tuple[str, ...] = ("optional", "required", "off")
+
+
+def _unrecognised_local_owner_totp(value: object) -> None:
+    """Log that a mode was read as optional. A short plain word is named; anything else is not written out."""
+    shown = f'"{value}"' if isinstance(value, str) and re.fullmatch(r"[a-z]{1,20}", value) else "a value"
+    logging.getLogger(__name__).warning(
+        "[auth.local_owner] totp is %s, which is not one of optional, required or off; "
+        "reading it as optional. Fix the setting.", shown)
+
+
+def get_auth_local_owner_totp() -> str:
+    """``[auth.local_owner] totp``: the owner's authenticator app at local sign-in.
+
+    ``"optional"`` (the default): the owner may turn it on; nothing changes until
+    they do. ``"required"``: the owner must set it up right after the next
+    password sign-in, before anything else. ``"off"``: the option is hidden.
+    An unreadable or unrecognised value is read as ``"optional"``, and a
+    warning says so (``maverick config-lint`` reports it too).
+
+    This never turns off a second factor the owner already has: an enrolled
+    owner is asked for a code whatever this says.
+    """
+    try:
+        table = (load_global_config().get("auth") or {}).get("local_owner") or {}
+    except Exception:
+        return "optional"
+    if not isinstance(table, dict):
+        logging.getLogger(__name__).warning(
+            "[auth.local_owner] is not a table; reading the owner's authenticator app setting as optional.")
+        return "optional"
+    value = table.get("totp", "optional")
+    if isinstance(value, str) and value.strip().lower() in LOCAL_OWNER_TOTP_MODES:
+        return value.strip().lower()
+    _unrecognised_local_owner_totp(value)
+    return "optional"
+
+
 def get_ip_allowlist() -> dict:
     """``[auth.ip_allowlist]``: network addresses allowed to use the dashboard.
 

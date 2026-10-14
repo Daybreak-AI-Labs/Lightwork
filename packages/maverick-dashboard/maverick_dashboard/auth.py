@@ -63,6 +63,7 @@ _OIDC_EXEMPT_PATHS = frozenset(
         "/auth/error",
         "/auth/local-owner",
         "/auth/local-login",
+        "/auth/owner-second-factor",
     }
 )
 

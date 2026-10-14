@@ -282,6 +282,18 @@ def _sign_in_security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           item_error="a context value with no spaces", max_items=40, weaker="grow",
           warning="More SAML authentication contexts will count as a second factor.",
           aliases="saml authncontext"),
+        S("auth.local_owner", "totp", "Owner's authenticator app at sign-in",
+          "Whether the owner of this installation signs in with a code from an authenticator "
+          "app as well as the passphrase. Optional lets the owner turn it on; required makes "
+          "them set it up at their next sign-in; off hides the option. An owner who already "
+          "has it on is always asked for a code.",
+          "select", grp, "optional", "maverick.config", subgroup=sec,
+          choices=(("optional", "Optional: the owner may turn it on (recommended)"),
+                   ("required", "Required: the owner must set it up at sign-in"),
+                   ("off", "Off: hide the option")),
+          weaker=True, order=("required", "optional", "off"),
+          warning="The owner will no longer be asked to set up an authenticator app.",
+          aliases="totp authenticator owner passphrase 2fa two-factor recovery codes"),
         S("auth.ip_allowlist", "cidrs", "Network addresses allowed to use Lightwork",
           "Only these addresses or ranges may reach Lightwork; everyone else sees a plain "
           "refusal. Empty allows every address. The address you are saving from must be on "
