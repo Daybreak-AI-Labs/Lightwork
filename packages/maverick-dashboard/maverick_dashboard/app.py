@@ -14169,6 +14169,16 @@ def intent_value_styles(request: Request):
     return FileResponse(_STATIC_DIR / "intent-value.css", media_type="text/css")
 
 
+@app.get("/static/lightwork-archive-viewer.html")
+def archive_viewer_download(request: Request):
+    """The offline archive viewer the trajectory page offers. Sent only as a
+    download: it runs its own inline script when opened from disk, so it is
+    never rendered as a page under the dashboard's address."""
+    require_permission(request, "view")
+    return FileResponse(_STATIC_DIR / "lightwork-archive-viewer.html", media_type="text/html",
+                        filename="lightwork-archive-viewer.html")
+
+
 @app.get("/static/lightwork-analytics.js")
 async def embed_analytics_js() -> FileResponse:
     """The embeddable ``<lightwork-analytics>`` web component (plain JS, no
