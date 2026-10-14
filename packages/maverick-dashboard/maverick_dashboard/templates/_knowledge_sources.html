@@ -24,5 +24,5 @@
     </form>
   </details>
   <div data-ks-review hidden></div>
-  <p class="muted">Each refresh supports 64 documents or pages, downloads up to 4 MiB per document, and reads up to 256 KiB of source text. Choose a smaller folder when a source exceeds these limits. File errors, unsupported content and unknown outcomes remain visible in history. This does not prove permanent provider deletion. Attaching a source saves a complete specialist draft; its existing Publish review changes the specialist people use.</p>
+  <p class="muted">{% if knowledge_source_limits %}Each refresh supports {{ knowledge_source_limits.max_items }} documents or pages, downloads up to {{ knowledge_source_limits.max_download_mib }} MiB per document, and reads up to {{ knowledge_source_limits.max_text_kib }} KiB of source text.{% else %}Each refresh uses this workspace's configured document and text limits; the saved-source list names any setting that cannot be read.{% endif %} Choose a smaller folder when a source exceeds these limits. File errors, unsupported content and unknown outcomes remain visible in history. This does not prove permanent provider deletion. Attaching a source saves a complete specialist draft; its existing Publish review changes the specialist people use.</p>
 </section>

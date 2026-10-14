@@ -765,12 +765,19 @@ async def knowledge_access_page(request: Request, response: Response):
         sources_available = knowledge_sources.enabled()
     except Exception:  # noqa: BLE001 - the panel reports unreadable settings itself
         sources_available = True
+    try:
+        from maverick import config
+
+        source_limits = config.get_knowledge_sources()
+    except Exception:  # noqa: BLE001 - unreadable limits are named by the saved-source list
+        source_limits = None
     nonce = secrets.token_urlsafe(18)
     page = templates.TemplateResponse(
         request,
         "knowledge_access.html",
         {
             "knowledge_sources_available": sources_available,
+            "knowledge_source_limits": source_limits,
             "knowledge_context": context,
             "knowledge_tenant": tenant,
             "knowledge_actor": actor,

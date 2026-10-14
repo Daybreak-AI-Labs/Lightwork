@@ -252,7 +252,8 @@ def _reference_key(reference: ResearchAssetRef) -> tuple[str, str, str, str]:
 class KnowledgeDocument:
     """A bounded projection from an existing content authority.
 
-    Searchable chunks are bounded to the source projector's 256 KiB boundary.
+    Searchable chunks are bounded to the source projector's boundary: 256 KiB
+    for most stores, and the configured max_text_kib for a saved remote source.
     The owning store is reread on every access. The exact tenant, registry ref,
     and content digest stop a buggy adapter from crossing a tenant or version
     boundary.

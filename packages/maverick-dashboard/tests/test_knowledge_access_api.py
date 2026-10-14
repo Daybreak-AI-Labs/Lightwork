@@ -262,6 +262,36 @@ def test_saved_sources_panel_loads_only_when_document_search_is_on(customer, mon
     assert "data-knowledge-sources" in on.text and "data-ks-form" in on.text
 
 
+def test_saved_sources_panel_states_the_configured_limits(customer, monkeypatch):
+    from maverick import config, knowledge_sources
+
+    client, *_ = customer
+    monkeypatch.setattr(knowledge_sources, "enabled", lambda: True)
+    monkeypatch.setattr(config, "get_knowledge_sources", lambda: {
+        "max_items": 200, "max_pages": 16, "max_download_mib": 8, "max_text_kib": 512,
+    })
+    page = client.get("/knowledge-access")
+    assert page.status_code == 200, page.text
+    assert ("Each refresh supports 200 documents or pages, downloads up to 8 MiB per document, "
+            "and reads up to 512 KiB of source text.") in page.text
+
+
+def test_saved_sources_panel_still_renders_when_its_limits_are_invalid(customer, monkeypatch):
+    from maverick import config, knowledge_sources
+
+    client, *_ = customer
+    monkeypatch.setattr(knowledge_sources, "enabled", lambda: True)
+
+    def refuse():
+        raise config.KnowledgeSourcesConfigError("knowledge_sources.max_items must be a whole number from 1 to 1000")
+
+    monkeypatch.setattr(config, "get_knowledge_sources", refuse)
+    page = client.get("/knowledge-access")
+    assert page.status_code == 200, page.text
+    assert "data-knowledge-sources" in page.text
+    assert "Each refresh supports" not in page.text
+
+
 def test_page_assets_navigation_and_customer_language(customer):
     client, _service, _registry, _rights = customer
     page = client.get("/knowledge-access")

@@ -682,6 +682,12 @@ _INTEGER_KEYS: dict[str, set[str]] = {
         "minimum_train_families",
         "minimum_holdout_families",
     },
+    "knowledge_sources": {
+        "max_items",
+        "max_pages",
+        "max_download_mib",
+        "max_text_kib",
+    },
     "customer_sandbox_lifecycle": {"source_revision"},
     "ai_entity_tasks": {
         "max_tasks",

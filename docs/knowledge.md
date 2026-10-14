@@ -136,6 +136,42 @@ Retrieval respects the compartment bulkheads: a pack's `knowledge_search` is
 bound to its own `knowledge_sources`, so a finance specialist never retrieves
 another department's documents.
 
+## Saved company folders and spaces
+
+Saved SharePoint, OneDrive, Google Drive and Confluence sources read the selected
+folder's direct files or the selected space's current pages; subfolders need
+separate sources. Each refresh is bounded by the `[knowledge_sources]` table
+(also under Settings > All settings, Memory & learning):
+
+```toml
+[knowledge_sources]
+max_items        = 64    # 1-1000: direct items one refresh may list
+max_pages        = 16    # 1-200: provider listing pages (each holds up to 64 items)
+max_download_mib = 4     # 1-32: largest SharePoint, OneDrive or Drive file downloaded
+max_text_kib     = 256   # 1-8192: extracted text kept per refresh
+```
+
+`max_download_mib` applies to SharePoint, OneDrive and Google Drive files. A
+Confluence page is read as JSON under a fixed 2 MiB limit that this setting does
+not change, and a larger page is refused with a message that says so.
+
+The defaults are the historical bounds. A value outside its range stops the
+saved-source list, saving and refreshes with a message that names the setting;
+a save is refused before anything is written. Each refresh reads the current
+values. A retained snapshot still validates after
+`max_items` is lowered. Its text is checked against the current `max_text_kib`
+whenever it is used, and the exact copy used by specialists is held to that same
+setting. Listings read `max_pages` pages of 64 items, so raise `max_pages` along
+with `max_items`: the defaults cover 1,024 items. The search chunker also limits
+one document to about 1.6 million characters, so a larger document cannot be
+imported whatever `max_text_kib` says.
+
+Each refresh must also finish within five minutes. A refresh that runs past that
+fails and publishes no new snapshot, and the source stops supplying specialists
+until a complete refresh succeeds. Throughput has not been measured, so raise
+`max_items` or `max_download_mib` only for a folder that one refresh can read in
+that time.
+
 ## Starter corpora
 
 `maverick knowledge seed` ingests a small, licensing-clean grounding corpus —

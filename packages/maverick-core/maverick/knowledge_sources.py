@@ -14,24 +14,30 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from urllib.parse import urlsplit
 
-from . import connections
+from . import config, connections
 from . import knowledge_source_readers as readers
 from .authority_effects import authority_effect_fence
 from .governed_records import GovernedRecordCapacityError, GovernedRecordStore
 from .paths import canonical_tenant_id, tenant_scope
 from .privacy_ops import RecordConflict
 
-MAX_SOURCES, MAX_JOBS, MAX_TEXT_BYTES = 100, 10000, 256 * 1024
+MAX_SOURCES, MAX_JOBS = 100, 10000
 MAX_WALL_SECONDS = 300
 SOURCE_STORE = GovernedRecordStore("knowledge-remote-sources", "KNS", "knowledge_remote_source")
 JOB_STORE = GovernedRecordStore("knowledge-source-refreshes", "KNJ", "knowledge_source_refresh")
 SNAPSHOT_STORE = GovernedRecordStore("knowledge-source-snapshots", "KNV", "knowledge_source_snapshot")
 DECISION_STORE = GovernedRecordStore("knowledge-source-decisions", "KNO", "knowledge_source_decision")
-NOTICE = ("Refresh reads only the selected folder's direct files or the selected space's current pages. "
-          "Subfolders need separate sources. At most 64 items, 4 MiB per download and 256 KiB of extracted source text are supported. "
-          "Changed items are screened and indexed through the native Knowledge writer. A complete snapshot requires a different authorized registry reviewer before specialists may use it. "
-          "Connection sharing determines who can use its cached knowledge; attaching it never grants account or data-use rights. "
-          "A dated refresh does not confirm future provider delivery or permanent deletion. Interrupted outcomes are kept and are never repeated automatically.")
+
+
+def notice():
+    """The saved-source limits, stated with this workspace's configured bounds."""
+    bounds = config.get_knowledge_sources()
+    return ("Refresh reads only the selected folder's direct files or the selected space's current pages. "
+            f"Subfolders need separate sources. At most {bounds['max_items']} items, {bounds['max_download_mib']} MiB per download "
+            f"and {bounds['max_text_kib']} KiB of extracted source text are supported. "
+            "Changed items are screened and indexed through the native Knowledge writer. A complete snapshot requires a different authorized registry reviewer before specialists may use it. "
+            "Connection sharing determines who can use its cached knowledge; attaching it never grants account or data-use rights. "
+            "A dated refresh does not confirm future provider delivery or permanent deletion. Interrupted outcomes are kept and are never repeated automatically.")
 
 
 def digest(value):
@@ -62,7 +68,8 @@ def _safe_error(exc):
     from .secrets import scrub
 
     # Transport errors can contain provider-signed URLs. Never journal them.
-    if isinstance(exc, readers.SourceReadError):
+    # A refused [knowledge_sources] setting names only the setting, never its value.
+    if isinstance(exc, (readers.SourceReadError, config.KnowledgeSourcesConfigError)):
         return scrub(str(exc))[:500]
     return "This item could not be confirmed (" + type(exc).__name__ + "). Review the saved account and source before a separate refresh."
 
@@ -153,7 +160,7 @@ class KnowledgeSources:
                 "state": row["state"], "paused": row.get("paused", False), "last_refresh": row.get("last_refresh"),
                 "next_refresh": row.get("next_refresh"), "item_count": len(snapshot.get("items", [])) if snapshot else 0,
                 "registry_state": approval, "reference": reference, "active_job": self.job_public(active) if active else None,
-                "notice": NOTICE, "audit_pending": bool(row.get("_audit_pending"))}
+                "notice": notice(), "audit_pending": bool(row.get("_audit_pending"))}
 
     @staticmethod
     def job_public(row):
@@ -286,6 +293,9 @@ class KnowledgeSources:
 
     def save(self, plan, *, expected_revision, paused=False, operation=None):
         self._plan_guard(plan)
+        # An invalid [knowledge_sources] setting refuses the save before anything is
+        # written: the receipt built after the write states the configured limits.
+        config.get_knowledge_sources()
         existing_intent = self._save_intent(plan, expected_revision, paused, operation)
         if existing_intent is not None:
             return existing_intent
@@ -451,6 +461,8 @@ class KnowledgeSources:
             rows = readers.inventory(job["plan"]["binding"], self.actor, lambda: self._job_guard(job))
             if digest(rows) != job["prepared"]["inventory_sha256"]:
                 raise ValueError("The dated source inventory changed. Review its current refresh before importing.")
+            # The text bound is read at this refresh, so a changed setting applies to the next one.
+            text_kib = config.get_knowledge_sources()["max_text_kib"]
             source = self.sources.get(job["source"])
             prior = self.snapshots.get(source["snapshot"]) if source.get("snapshot") else None
             previous = {row["remote_id"]: row for row in prior.get("items", [])} if prior else {}
@@ -473,8 +485,8 @@ class KnowledgeSources:
                     try:
                         text, raw_sha, extraction = readers.document(job["plan"]["binding"], self.actor, item, lambda: self._job_guard(job))
                         text_bytes = len(text.encode())
-                        if total + text_bytes > MAX_TEXT_BYTES:
-                            raise readers.SourceReadError("The extracted source exceeds 256 KiB. Choose a smaller source.")
+                        if total + text_bytes > text_kib * 1024:
+                            raise readers.SourceReadError(f"The extracted source exceeds {text_kib} KiB. Choose a smaller source.")
                         document_sha = hashlib.sha256(text.encode()).hexdigest()
                         # KB's exact document digest owns immutable provenance.
                         # Mutable provider revision/byte-extraction commitments
@@ -500,7 +512,7 @@ class KnowledgeSources:
                         self._job_update(job, items=outcomes, changed=changed, unchanged=unchanged)
                         continue
                 total += text_bytes
-                if total > MAX_TEXT_BYTES:
+                if total > text_kib * 1024:
                     raise ValueError("The exact source exceeds its complete text bound.")
                 imported.append(candidate)
                 outcomes.append({"name": item["name"], "state": "unchanged" if candidate is old else "imported", "message": "Exact extracted text retained; dataset approval is separate.",
@@ -684,9 +696,13 @@ def exact_source_snapshot(tenant, identifier, version, *, knowledge_base, author
                     or authority.action != "analyze" or authority.purpose != source["plan"]["purpose"]):
                 raise PermissionError("The remote source needs a complete current refresh and use approval.")
             readers.account(source["plan"]["binding"], authority.principal)
+        # A manifest keeps the item limit it was retained under, which may since have
+        # been lowered, so it is checked against the hard ceiling rather than the
+        # current setting. The text bound is the current setting, read at this use.
         items = snapshot.get("items")
-        if not isinstance(items, list) or not 1 <= len(items) <= readers.MAX_ITEMS:
+        if not isinstance(items, list) or not 1 <= len(items) <= readers.MAX_ITEMS_CEILING:
             raise ValueError("The exact source item manifest is incomplete.")
+        text_limit = config.get_knowledge_sources()["max_text_kib"] * 1024
         records, total = [], 0
         for item in items:
             record = knowledge_base.exact_document(item["collection"], item["document_sha256"])
@@ -694,7 +710,7 @@ def exact_source_snapshot(tenant, identifier, version, *, knowledge_base, author
             if metadata.get("remote_source_id") != identifier or metadata.get("remote_item_id") != item["remote_id"]:
                 raise PermissionError("The source document's actual provenance changed.")
             total += len(record["text"].encode())
-            if total > MAX_TEXT_BYTES:
+            if total > text_limit:
                 raise ValueError("The exact remote source exceeds its bounded text projection.")
             committed = _committed_document(record)
             if digest(committed) != item["native_document_sha256"]:

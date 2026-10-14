@@ -1,0 +1,56 @@
+"""Installer coverage for the saved company folder and space limits."""
+
+from __future__ import annotations
+
+import pytest
+
+
+def test_saved_source_limits_are_kept_at_their_defaults_unless_changed(monkeypatch):
+    from maverick_installer import wizard
+
+    monkeypatch.setattr(wizard, "_q_confirm", lambda prompt, *, default: False)
+    assert wizard.pick_knowledge_sources() == {}
+
+
+def test_saved_source_limits_reask_until_each_value_is_a_whole_number_in_range(monkeypatch):
+    from maverick_installer import wizard
+
+    answers = iter(["lots", "5000", "100", "16", "8", "512"])
+    prompts = []
+
+    def text(prompt, default=""):
+        prompts.append(prompt)
+        return next(answers)
+
+    monkeypatch.setattr(wizard, "_q_confirm", lambda prompt, *, default: True)
+    monkeypatch.setattr(wizard, "_q_text", text)
+    assert wizard.pick_knowledge_sources() == {"max_items": 100, "max_pages": 16, "max_download_mib": 8, "max_text_kib": 512}
+    # The two refused answers ask the first question again, before the four accepted ones.
+    assert len(prompts) == 6
+    assert prompts[0] == prompts[1] == prompts[2]
+    assert "(1-1000" in prompts[0] and "(1-8192" in prompts[-1]
+
+
+def test_saved_source_limits_config_is_closed_integer_toml():
+    from maverick_installer import wizard
+
+    values = {"max_items": 100, "max_pages": 16, "max_download_mib": 8, "max_text_kib": 512}
+    assert wizard._cfg_knowledge_sources(values) == [
+        "",
+        "[knowledge_sources]",
+        "max_items = 100",
+        "max_pages = 16",
+        "max_download_mib = 8",
+        "max_text_kib = 512",
+    ]
+    assert wizard._cfg_knowledge_sources({}) == []
+    assert wizard._cfg_knowledge_sources(None) == []
+
+
+@pytest.mark.parametrize("value", [0, 1001, True, "64"])
+def test_saved_source_limits_config_rejects_values_outside_the_runtime_range(value):
+    from maverick_installer import wizard
+
+    values = {"max_items": value, "max_pages": 16, "max_download_mib": 4, "max_text_kib": 256}
+    with pytest.raises(ValueError, match=r"knowledge_sources\.max_items must be a whole number from 1 to 1000"):
+        wizard._cfg_knowledge_sources(values)
