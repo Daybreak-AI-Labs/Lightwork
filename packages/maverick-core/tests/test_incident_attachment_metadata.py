@@ -523,6 +523,21 @@ def test_matter_scope_and_export_list_the_uploaders_attachment_metadata_only(hel
         assert "uploader_ref" in incident_rows[0] and incident_rows[0]["uploader_ref"] == s.alice
 
 
+def test_a_matter_scope_lists_incident_attachments_only_in_the_matters_own_workspace(held_store, tmp_path):
+    from maverick import ediscovery
+    from maverick.world_model import WorldModel
+
+    s = held_store
+    with tenant_scope(tenant="alpha"):
+        _create(s.store, s.incident, s.document)
+        matter = _matter(s.ledger)
+    with tenant_scope(tenant="beta"), WorldModel(tmp_path / "world.db") as world:
+        with pytest.raises(ediscovery.MatterScopeUnverifiable):
+            ediscovery.build_scope(world, matter)
+        # An erasure does not list incident attachments, so the workspace check does not apply to it.
+        assert ediscovery.build_scope(world, matter, for_erasure=True).incident_attachments == []
+
+
 def ediscovery_module():
     from maverick import ediscovery
 

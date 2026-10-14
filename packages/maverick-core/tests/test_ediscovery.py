@@ -298,6 +298,19 @@ def test_closure_through_another_persons_chat_is_held_when_it_reaches_a_custodia
                                       goal_ids=[seeded["alice_goal"]]) == ediscovery.LEGAL_HOLD_MESSAGE
 
 
+def test_incident_attachment_refusal_reads_the_ledger_of_the_workspace_it_is_given(events):
+    from maverick import incident_attachment_metadata
+    from maverick.paths import tenant_scope
+
+    ediscovery.MatterStore(ediscovery.store_path("ws-a")).create("ws-a", actor="auditor", values=_values(
+        record_kinds=["attachments"]))
+    uploader = incident_attachment_metadata.principal_ref_for_subject("ws-a", ALICE)
+    with tenant_scope(tenant="ws-b"):  # the active workspace is not the matter's workspace
+        assert ediscovery.incident_attachment_refusal("ws-a", principal_ref=uploader,
+                                                      created_at=0.0) == ediscovery.LEGAL_HOLD_MESSAGE
+        assert ediscovery.incident_attachment_refusal("ws-b", principal_ref=uploader, created_at=0.0) is None
+
+
 def test_released_matter_no_longer_holds_erasure(world, ledger, events):
     seeded = _seed(world)
     store = ediscovery.MatterStore(ledger)

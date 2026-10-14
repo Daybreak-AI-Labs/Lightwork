@@ -550,13 +550,17 @@ def _incident_attachments(custodians: Sequence[str], tenant: str | None,
                           low: float | None, high: float | None) -> list[Any]:
     """Incident attachment records uploaded by a custodian, inside the matter's dates.
 
-    Fails closed: a register that cannot be listed completely refuses the matter's scope.
+    The register is read in the active workspace, so the matter's own workspace must be
+    the active one.  Fails closed: a register that cannot be listed completely, or a
+    matter whose workspace is not the active one, refuses the matter's scope.
     """
-    if not tenant:
-        return []
+    from .paths import current_tenant_id
+
+    if not any(owner.startswith("user:") for owner in custodians):
+        return []  # only dashboard users upload incident attachments
+    if not tenant or tenant != current_tenant_id():
+        raise MatterScopeUnverifiable("The incident attachments for this matter could not be listed completely")
     refs = _incident_principal_refs(custodians, tenant)
-    if not refs:
-        return []
     from .incident_attachment_metadata import records_for_principal_refs
 
     try:
@@ -684,9 +688,7 @@ def build_scope(world: Any, matter: Mapping[str, Any], *, for_erasure: bool = Fa
                 if in_range(float(attachment.created_at), low, high):
                     scope.attachments.append(attachment)
         if not for_erasure:
-            from .paths import current_tenant_id
-
-            scope.incident_attachments = _incident_attachments(custodians, current_tenant_id(), low, high)
+            scope.incident_attachments = _incident_attachments(custodians, matter.get("tenant_id"), low, high)
     if "approvals" in kinds and not for_erasure:
         owners = {goal_owner for owner in custodians for goal_owner in _goal_owners(owner)}
         for approval in _bounded(world.list_approvals(limit=MAX_SCOPE_ROWS + 1), "approvals"):
@@ -779,12 +781,13 @@ def incident_attachment_refusal(tenant_id: str, *, principal_ref: str, created_a
     """The plain refusal text when an active matter holds one incident attachment, or ``None``.
 
     An attachment is held when its uploader is a ``user:`` custodian of a matter that
-    keeps attachments and its upload time falls in the matter's dates.  An unreadable
-    matter ledger holds every attachment.  Each refusal is audited with the actor and
-    a count, never content.
+    keeps attachments and its upload time falls in the matter's dates.  The matters are
+    those of ``tenant_id`` (the attachment's workspace), whichever workspace is active.
+    An unreadable matter ledger holds every attachment.  Each refusal is audited with the
+    actor and a count, never content.
     """
     try:
-        matters = active_matters()
+        matters = _active_rows(store_path(tenant_id), tenant_id)
     except Exception:  # failure-policy: fail_closed -- an unreadable ledger holds everything
         return HOLD_UNVERIFIED_MESSAGE
     for matter in matters:
