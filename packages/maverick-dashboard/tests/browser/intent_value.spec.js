@@ -1,6 +1,10 @@
 const {test,expect}=require('@playwright/test');
 const axe=require('axe-core');
 const api='/api/v1/intent-value';
+// Reads never record newly observed work (docs/intent-work-value.md). The page
+// records it through POST /sync before it reads, so each journey read of the
+// totals below does the same first.
+const sync=async request=>{const response=await request.post(api+'/sync');expect(response.ok(),await response.text()).toBeTruthy();};
 
 test('intent to evidence, correction, retained controls and native draft',async({page,request,context,baseURL},testInfo)=>{
   await context.route('**/*',route=>new URL(route.request().url()).origin===new URL(baseURL).origin?route.continue():route.abort('blockedbyclient'));
@@ -107,13 +111,16 @@ test('recommendation to explicit publish, native approved execution, outcomes an
   await expect.poll(async()=> (await (await request.get('/__browser_fixture/intent-value-execution')).json()).provider_calls).toBe(1);
   await expect(page.locator('main')).toContainText('Synthetic financial analysis');
   await expect(page.getByRole('button',{name:'Approve',exact:true})).toBeVisible();
+  await sync(request);
   const paused=await (await request.get(api+'?entity_kind=processes&entity_id='+flowId)).json();
   expect(paused.totals.performed_work).toBe(1);expect(paused.totals.unvalued_work).toBe(1);
   await page.getByRole('button',{name:'Approve',exact:true}).click();
   await expect(page.locator('#fr-status')).toHaveText('Finished');
+  await sync(request);
   const delivered=await (await request.get(api+'?entity_kind=processes&entity_id='+flowId)).json();
   expect(delivered.totals.performed_work).toBe(1);expect(delivered.totals.unvalued_work).toBe(0);
   expect(delivered.totals.known_execution_costs.USD).toBe(1);
+  await sync(request);
   const after=await (await request.get(api)).json();
   expect(after.totals.performed_work).toBe(before.totals.performed_work+1);
   expect(after.totals.opportunity_value).toBeLessThan(before.totals.opportunity_value);
