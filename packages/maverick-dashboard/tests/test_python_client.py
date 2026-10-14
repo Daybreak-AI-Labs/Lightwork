@@ -63,7 +63,8 @@ def _in_process(*, drop_origin: bool = False, log: list | None = None):
         if log is not None:
             log.append((method, url, sent, timeout))
         # The in-process call has no socket to time out; the timeout is checked at the transport seam.
-        response = test_client.request(method, url, headers=sent, content=body)
+        # Redirects are not followed, matching the real transport: a 3xx is an answer, not a retry.
+        response = test_client.request(method, url, headers=sent, content=body, follow_redirects=False)
         return response.status_code, dict(response.headers), response.content
 
     return transport
@@ -95,9 +96,39 @@ def _structured_card() -> dict:
     )
 
 
+def _submit_once(lw, key, title, description="", **limits):
+    """The recovery policy README.md documents under "Recover an uncertain start", copied so the test runs it."""
+    for _attempt in range(3):
+        try:
+            return lw.submit_goal(title, description, idempotency_key=key, **limits)
+        except LightworkError as exc:
+            if exc.status is not None and exc.status < 500 and exc.status != 409:
+                raise  # a refusal such as 400, 403 or 422: fix the request, do not retry
+        try:
+            receipt = lw.goal_receipt(key)
+        except LightworkError as exc:
+            if exc.status == 404:
+                continue  # nothing was admitted under this key, so replaying the same key is safe
+            raise
+        if receipt["state"] == "accepted":
+            goal = lw.get_goal(receipt["goal"]["id"])
+            if goal["title"] != title.strip()[:200]:
+                raise LightworkError(409, "this key belongs to a different request; use a new key for new work")
+            return goal
+        # "not_dispatched": an admitted draft. Replaying the same key and inputs dispatches it.
+    raise LightworkError(None, "the start is not confirmed; read goal_receipt() with this key before anything else")
+
+
+def _binding(lw, approval_id):
+    row = next(item for item in lw.list_approvals()["approvals"] if item["id"] == approval_id)
+    return row["approval_card"]["binding_sha256"]
+
+
 def test_health_returns_the_degraded_answer_instead_of_raising(dashboard, monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from maverick_dashboard import app as dashboard_app
+
+    # Any configured provider counts as "key set", so pin the predicate rather than the host's environment.
+    monkeypatch.setattr(dashboard_app, "_any_provider_key_set", lambda: False)
     health = Lightwork(BASE, transport=_in_process()).health()
     assert isinstance(health, Health)
     assert health.ok is False and health.http_status == 503
@@ -129,6 +160,64 @@ def test_submit_goal_then_read_status_result_and_receipt(dashboard):
     assert receipt["execution_confirmed"] is False
 
 
+def test_a_lost_claim_is_recovered_by_replaying_the_same_key(dashboard, monkeypatch):
+    """A 409 leaves a draft goal that never ran; the documented recovery replays the same key and dispatches it."""
+    from maverick_dashboard import goal_submission
+
+    _world, runs = dashboard
+    real_claim = goal_submission.try_claim_api_dispatch
+    claims: list[int] = []
+
+    def lose_the_first_claim(*args, **kwargs):
+        claims.append(1)
+        return False if len(claims) == 1 else real_claim(*args, **kwargs)
+
+    monkeypatch.setattr(goal_submission, "try_claim_api_dispatch", lose_the_first_claim)
+    lw = Lightwork(BASE, transport=_in_process())
+    key = "client-test-recovery-key-0001"
+    with pytest.raises(LightworkError) as caught:
+        lw.submit_goal("Recover me", "Same inputs", max_dollars=0.5, idempotency_key=key)
+    assert caught.value.status == 409
+    assert "Reconcile" in caught.value.message
+    assert runs == []
+
+    receipt = lw.goal_receipt(key)
+    assert receipt["state"] == "not_dispatched"
+    assert receipt["execution_confirmed"] is False
+    goal = _submit_once(lw, key, "Recover me", "Same inputs", max_dollars=0.5)
+    assert goal["id"] == receipt["goal"]["id"]
+    assert goal["status"] == "pending"
+    assert runs == [goal["id"]], "the replay dispatches the admitted draft exactly once"
+    assert lw.goal_receipt(key)["state"] == "accepted"
+
+
+def test_a_key_reused_for_different_content_is_never_taken_as_the_new_goal(dashboard):
+    _world, runs = dashboard
+    lw = Lightwork(BASE, transport=_in_process())
+    key = "client-test-reused-key-0002"
+    first = lw.submit_goal("First task", idempotency_key=key)
+    with pytest.raises(LightworkError) as caught:
+        _submit_once(lw, key, "Second task")
+    assert caught.value.status == 409
+    assert "different request" in caught.value.message
+    assert runs == [first["id"]], "the conflicting content must not dispatch under the old key"
+
+
+def test_a_refusal_is_raised_at_once_and_never_replayed(dashboard):
+    _world, runs = dashboard
+    lw = Lightwork(BASE, transport=_in_process())
+    with pytest.raises(LightworkError) as caught:
+        _submit_once(lw, "client-test-refused-key-0003", "")
+    assert caught.value.status == 400
+    assert runs == []
+
+
+def test_an_unknown_key_has_no_receipt_yet(dashboard):
+    with pytest.raises(LightworkError) as caught:
+        Lightwork(BASE, transport=_in_process()).goal_receipt("client-test-never-used-key-0004")
+    assert caught.value.status == 404
+
+
 def test_list_goals_and_read_an_event_page(dashboard):
     world, _runs = dashboard
     goal_id = world.create_goal("Listed task", "")
@@ -139,6 +228,20 @@ def test_list_goals_and_read_an_event_page(dashboard):
     assert isinstance(page["events"], list)
     assert isinstance(page["next_id"], int)
     assert isinstance(page["terminal"], bool)
+
+
+def test_goal_events_pages_by_cursor_and_limit(dashboard):
+    world, _runs = dashboard
+    goal_id = world.create_goal("Paged events", "")
+    ids = [world.append_event(goal_id, "agent", "note", f"step {number}") for number in range(3)]
+    lw = Lightwork(BASE, transport=_in_process())
+    first = lw.goal_events(goal_id, since=0, limit=2)
+    assert [event["id"] for event in first["events"]] == ids[:2]
+    assert first["has_more"] is True
+    assert first["next_id"] == ids[1]
+    second = lw.goal_events(goal_id, since=first["next_id"], limit=2)
+    assert [event["id"] for event in second["events"]] == ids[2:]
+    assert second["has_more"] is False
 
 
 def test_answer_question_resolves_the_open_question(dashboard):
@@ -199,7 +302,48 @@ def test_approve_without_the_card_binding_is_refused(dashboard):
     assert world.get_approval(approval_id).status == "pending"
 
 
-def test_deny_an_approval_with_a_reason(dashboard):
+def test_critical_approval_needs_the_typed_confirmation(dashboard):
+    from maverick.approval_cards import encode_approval_detail
+
+    world, _runs = dashboard
+    approval_id = world.create_approval(
+        "browser.click", risk="critical", detail=encode_approval_detail(_structured_card()),
+        provenance="browser", requested_by="",
+    )
+    lw = Lightwork(BASE, transport=_in_process())
+    binding = _binding(lw, approval_id)
+    with pytest.raises(LightworkError) as caught:
+        lw.approve_approval(approval_id, binding=binding, acknowledged=True)
+    assert caught.value.status == 422
+    assert world.get_approval(approval_id).status == "pending"
+
+    decision = lw.approve_approval(approval_id, binding=binding, acknowledged=True, confirmation="approve")
+    assert decision.http_status == 204
+    assert world.get_approval(approval_id).status == "approved"
+
+
+def test_a_decision_whose_audit_is_pending_is_a_202_not_an_error(dashboard, monkeypatch):
+    from maverick.approval_cards import encode_approval_detail
+    from maverick_dashboard import api
+
+    world, _runs = dashboard
+    approval_id = world.create_approval(
+        "browser.click", risk="high", detail=encode_approval_detail(_structured_card()),
+        provenance="browser", requested_by="",
+    )
+    monkeypatch.setattr(api, "_audit_approval_decision", lambda *args, **kwargs: False)
+    lw = Lightwork(BASE, transport=_in_process())
+    decision = lw.approve_approval(approval_id, binding=_binding(lw, approval_id), acknowledged=True)
+    assert decision.http_status == 202
+    assert decision.audit == "pending"
+    assert decision.decision_id
+
+
+def test_deny_an_approval_with_a_reason(dashboard, monkeypatch):
+    import maverick.audit as audit
+
+    recorded: list[dict] = []
+    monkeypatch.setattr(audit, "record", lambda kind, **payload: recorded.append(payload) or True)
     world, _runs = dashboard
     approval_id = world.create_approval("force-push", risk="high", scope="main")
     decision = Lightwork(BASE, transport=_in_process()).deny_approval(
@@ -208,6 +352,8 @@ def test_deny_an_approval_with_a_reason(dashboard):
     assert decision.audit == "delivered"
     assert decision.approval_state == "denied"
     assert world.get_approval(approval_id).status == "denied"
+    reason = next(payload for payload in recorded if payload.get("action") == "approval_rejection_reason")
+    assert reason["reason"] == "Not during the freeze"
 
 
 def test_spend_reports_totals_and_episodes(dashboard):
@@ -364,3 +510,32 @@ def test_the_default_transport_does_not_follow_redirects(monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_the_default_transport_hands_the_timeout_to_the_opener(monkeypatch):
+    """The real transport, with only the opener replaced: the timeout must reach opener.open()."""
+    from lightwork_client import client as client_module
+
+    seen: list[tuple[float, str | None]] = []
+
+    class FakeResponse:
+        status = 200
+        headers: dict[str, str] = {}
+
+        def read(self):
+            return b'{"total": 0, "episodes": []}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            seen.append((timeout, request.get_header("Authorization")))
+            return FakeResponse()
+
+    monkeypatch.setattr(client_module.urllib.request, "build_opener", lambda *handlers: FakeOpener())
+    Lightwork("https://dashboard.example.test", "tok-timeout-check", timeout=4.25).spend()
+    assert seen == [(4.25, "Bearer tok-timeout-check")]
