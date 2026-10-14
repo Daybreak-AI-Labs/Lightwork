@@ -199,10 +199,18 @@
     }
     return article;
   }
+  function openNewHold() {
+    var details = document.getElementById("edh-new-details");
+    details.open = true;
+    var first = details.querySelector("input");
+    if (first) { first.focus(); }
+  }
   function render(matters, reload, truncated) {
     list.replaceChildren();
     if (!matters.length) {
-      list.appendChild(text("p", "No legal holds yet.", "muted"));
+      list.appendChild(window.mvEmpty("No legal holds yet.",
+        "Each legal hold for a matter appears here. Start one to keep its records while the matter is open.",
+        { label: "Start a legal hold", onClick: openNewHold }));
       return;
     }
     matters.forEach(function (matter) { list.appendChild(card(matter, reload)); });
@@ -213,7 +221,7 @@
   function reload() {
     request("GET", API, undefined, "load the legal holds").then(function (body) {
       render(body.matters, reload, body.truncated);
-      announce(body.matters.length ? "" : "No legal holds yet.");
+      announce(body.matters.length ? "" : "No legal holds yet. Start one below to keep its records.");
     }).catch(function (error) { announce(error.message); });
   }
 
