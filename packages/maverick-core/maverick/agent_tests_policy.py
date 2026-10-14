@@ -20,10 +20,13 @@ A value that is not a whole number in range reads as 0.
 
 ``canary_auto_rollback`` (default off): roll the candidate back automatically once
 enough candidate goals have finished and it fails clearly more often than the
-current version. Read with the same switch rule as the two switches above.
+current version. Only a true value turns it on; unreadable settings or a value
+that is not true leave it off, because this switch acts without a person.
 
-Unreadable settings keep the stricter reading for the two switches and the
+Unreadable settings keep the stricter reading for the two switches above and the
 default for the number. A switch whose value is not true or false is read as on.
+Publishing is turned away while settings cannot be read, before anything changes,
+so an unreadable file cannot publish a changed specialist straight to everyone.
 """
 from __future__ import annotations
 
@@ -98,8 +101,11 @@ def canary_percent() -> int:
 
 
 def canary_auto_rollback() -> bool:
-    """The ``[agent_tests] canary_auto_rollback`` knob."""
-    return _switch("canary_auto_rollback")
+    """The ``[agent_tests] canary_auto_rollback`` knob: on only when it is set to true."""
+    section = _section()
+    if section is _UNREADABLE:
+        return False
+    return section.get("canary_auto_rollback", False) is True
 
 
 __all__ = ["DEFAULT_MAX_CASES", "MAX_CANARY_PERCENT", "MAX_CASES_LIMIT", "NEW_SPECIALIST_NEEDS_TESTS",

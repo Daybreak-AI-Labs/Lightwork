@@ -112,3 +112,13 @@ def test_the_config_checker_knows_the_section_and_its_limits():
     assert ("agent_tests", "bypass_requires_second_person") not in flagged
     assert lint_config({"agent_tests": {"max_cases_per_specialist": 200,
                                         "require_for_new_specialists": True}}) == []
+
+
+@pytest.mark.parametrize("text", ["[agent_tests\ncanary_auto_rollback = true\n", "[agent_tests]\ncanary_auto_rollback = \"yes\"\n",
+                                  "[agent_tests]\ncanary_auto_rollback = 1\n"])
+def test_unreadable_or_non_boolean_settings_leave_automatic_roll_back_off(settings, text):
+    from maverick import agent_tests_policy as policy
+
+    # Automatic roll back is the one switch that acts without a person, so only a true value turns it on.
+    settings(text)
+    assert policy.canary_auto_rollback() is False
