@@ -586,3 +586,155 @@ def test_real_sdk_failed_span_exports_type_and_no_message(monkeypatch):
     assert span.status.description == "ValueError"
     assert "sk-live-do-not-export" not in repr(span.attributes)
 
+
+# ---------- on/off settings: the same reading from the environment and from config ----------
+
+_OFF_VALUES = [False, "false", "0", "off", "no", ""]
+_ON_VALUES = [True, "1", "true", "yes", "on"]
+
+
+@pytest.fixture
+def no_config(monkeypatch):
+    """No configuration file and no DSN in the environment; each test sets one switch."""
+    import maverick.config as config_mod
+
+    monkeypatch.setattr(config_mod, "load_config", dict)
+    monkeypatch.delenv("MAVERICK_SENTRY_DSN", raising=False)
+    return config_mod
+
+
+def _config_switch(monkeypatch, config_mod, key, value):
+    monkeypatch.setattr(config_mod, "load_config", lambda: {"observability": {key: value}})
+
+
+@pytest.mark.parametrize("value", _OFF_VALUES)
+def test_off_spellings_are_off_and_blank_or_off(value):
+    assert obs.switch_is_on(value) is False
+    assert obs.setting_is_blank_or_off(value) is True
+
+
+@pytest.mark.parametrize("value", _ON_VALUES + ["  ON  ", "otlp"])
+def test_on_spellings_are_on_and_not_blank(value):
+    assert obs.switch_is_on(value, extra_on=frozenset({"otlp"})) is True
+    assert obs.setting_is_blank_or_off(value) is False
+
+
+@pytest.mark.parametrize("value", ["console", "otlp/http"])
+def test_unlisted_text_is_off(value):
+    # Only the documented exporter value (and the on-words) turn a switch on.
+    assert obs.switch_is_on(value, extra_on=frozenset({"otlp"})) is False
+
+
+# (env var, [observability] key, reader, values that turn it on)
+_SWITCHES = [
+    ("MAVERICK_OTEL_METRICS", "otlp_metrics", "_otlp_metrics_enabled", _ON_VALUES),
+    ("MAVERICK_OTEL_EXPORTER", "otel_exporter", "_otel_enabled", ["otlp", "OTLP", True, "1"]),
+]
+_SWITCH_OFF = [(env, key, fn, value) for env, key, fn, _on in _SWITCHES for value in _OFF_VALUES]
+_SWITCH_ON = [(env, key, fn, value) for env, key, fn, on in _SWITCHES for value in on]
+
+
+@pytest.mark.parametrize(("env", "key", "fn", "value"), _SWITCH_OFF)
+def test_switch_is_off_from_config(no_config, monkeypatch, env, key, fn, value):
+    _config_switch(monkeypatch, no_config, key, value)
+    assert getattr(obs, fn)() is False
+
+
+@pytest.mark.parametrize(("env", "key", "fn", "value"), _SWITCH_ON)
+def test_switch_is_on_from_config(no_config, monkeypatch, env, key, fn, value):
+    _config_switch(monkeypatch, no_config, key, value)
+    assert getattr(obs, fn)() is True
+
+
+@pytest.mark.parametrize(("env", "key", "fn"), [(e, k, f) for e, k, f, _on in _SWITCHES])
+@pytest.mark.parametrize("value", ["false", "0", "off", "no"])
+def test_switch_is_off_from_env(no_config, monkeypatch, env, key, fn, value):
+    # A blank env var is unset and falls through to config, so it is not listed here.
+    monkeypatch.setenv(env, value)
+    assert getattr(obs, fn)() is False
+
+
+@pytest.mark.parametrize(("env", "key", "fn", "value"), _SWITCH_ON)
+def test_switch_is_on_from_env(no_config, monkeypatch, env, key, fn, value):
+    monkeypatch.setenv(env, str(value))
+    assert getattr(obs, fn)() is True
+
+
+@pytest.mark.parametrize(("env", "key", "fn", "value"), _SWITCH_ON)
+def test_env_switch_wins_over_config_both_ways(no_config, monkeypatch, env, key, fn, value):
+    _config_switch(monkeypatch, no_config, key, value)
+    monkeypatch.setenv(env, "false")
+    assert getattr(obs, fn)() is False
+    _config_switch(monkeypatch, no_config, key, False)
+    monkeypatch.setenv(env, str(value))
+    assert getattr(obs, fn)() is True
+
+
+@pytest.mark.parametrize("value", _OFF_VALUES)
+def test_prometheus_port_off_values_do_not_publish(no_config, monkeypatch, value):
+    # A config false arrives as "0": without this, the exporter would bind a random port.
+    _config_switch(monkeypatch, no_config, "prometheus_port", value)
+    assert obs._prometheus_enabled() is False
+
+
+@pytest.mark.parametrize("value", [9100, "9100"])
+def test_prometheus_port_on_from_config(no_config, monkeypatch, value):
+    _config_switch(monkeypatch, no_config, "prometheus_port", value)
+    assert obs._prometheus_enabled() is True
+
+
+@pytest.mark.parametrize("value", ["0", "off", "false", "no"])
+def test_prometheus_port_off_from_env(no_config, monkeypatch, value):
+    monkeypatch.setenv("MAVERICK_PROMETHEUS_PORT", value)
+    assert obs._prometheus_enabled() is False
+
+
+def _fake_prometheus(monkeypatch):
+    started = []
+    fake = types.ModuleType("prometheus_client")
+
+    class _Metric:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+    fake.Counter = _Metric
+    fake.Histogram = _Metric
+    fake.start_http_server = lambda port, addr=None: started.append(port)
+    monkeypatch.setitem(sys.modules, "prometheus_client", fake)
+    return started
+
+
+def test_false_prometheus_port_never_starts_the_server(no_config, monkeypatch):
+    started = _fake_prometheus(monkeypatch)
+    _config_switch(monkeypatch, no_config, "prometheus_port", False)
+    obs._initialize()
+    assert started == []
+
+
+def test_numeric_prometheus_port_starts_the_server(no_config, monkeypatch):
+    # Positive control for the test above: a real port does start the server.
+    started = _fake_prometheus(monkeypatch)
+    _config_switch(monkeypatch, no_config, "prometheus_port", 9100)
+    obs._initialize()
+    assert started == [9100]
+
+
+@pytest.mark.parametrize("value", [False, "false", "0", "off", "no", ""])
+def test_sentry_dsn_off_values_mean_no_sentry(no_config, monkeypatch, value):
+    _config_switch(monkeypatch, no_config, "sentry_dsn", value)
+    assert obs._sentry_dsn() == ""
+    assert obs._sentry_enabled() is False
+
+
+@pytest.mark.parametrize("value", ["false", "0", "off", "no"])
+def test_sentry_dsn_off_words_from_env_mean_no_sentry(no_config, monkeypatch, value):
+    monkeypatch.setenv("MAVERICK_SENTRY_DSN", value)
+    assert obs._sentry_dsn() == ""
+
+
+def test_sentry_dsn_from_config_and_env_are_read(no_config, monkeypatch):
+    dsn = "https://k@o0.ingest.sentry.io/1"
+    _config_switch(monkeypatch, no_config, "sentry_dsn", dsn)
+    assert obs._sentry_dsn() == dsn
+    monkeypatch.setenv("MAVERICK_SENTRY_DSN", "  " + dsn + "  ")
+    assert obs._sentry_dsn() == dsn

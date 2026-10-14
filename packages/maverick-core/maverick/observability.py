@@ -154,20 +154,49 @@ def _setting(env_name: str, key: str) -> str | None:
     return env_or_config(env_name, "observability", key)
 
 
+# The text an on/off setting reads as off. The environment and [observability] both
+# arrive as text, and a TOML ``false`` arrives as "0", so each spelling is listed.
+_OFF_TEXT = frozenset({"", "0", "false", "off", "no"})
+_ON_TEXT = frozenset({"1", "true", "yes", "on"})
+
+
+def _text(value: object) -> str:
+    return "" if value is None else str(value).strip().lower()
+
+
+def switch_is_on(value: object, *, extra_on: frozenset[str] = frozenset()) -> bool:
+    """True when an on/off setting's value turns it on.
+
+    ``1``, ``true``, ``yes`` and ``on`` (any case) turn it on, and so do the setting's own
+    documented values in ``extra_on``. Everything else is off: ``false``, ``0``, ``off``,
+    ``no``, blank, and text this list does not name. ``value`` is the text or the raw
+    TOML value.
+    """
+    text = _text(value)
+    return text in _ON_TEXT or text in extra_on
+
+
+def setting_is_blank_or_off(value: object) -> bool:
+    """True when a setting that is on by being set (a DSN, a port) is blank or switched off."""
+    return _text(value) in _OFF_TEXT
+
+
 def _otel_enabled() -> bool:
-    return bool(_setting("MAVERICK_OTEL_EXPORTER", "otel_exporter"))
+    """``MAVERICK_OTEL_EXPORTER`` / ``[observability] otel_exporter``: on for ``otlp``."""
+    return switch_is_on(_setting("MAVERICK_OTEL_EXPORTER", "otel_exporter"),
+                        extra_on=frozenset({"otlp"}))
 
 
 def _sentry_dsn() -> str:
-    """Sentry DSN from env or [observability] sentry_dsn (empty = off)."""
+    """Sentry DSN from env or [observability] sentry_dsn (empty = off, and so is ``false``)."""
     dsn = os.environ.get("MAVERICK_SENTRY_DSN", "").strip()
-    if dsn:
-        return dsn
-    try:
-        from .config import load_config
-        return str((load_config() or {}).get("observability", {}).get("sentry_dsn") or "").strip()
-    except Exception:  # pragma: no cover -- config never blocks init
-        return ""
+    if not dsn:
+        try:
+            from .config import load_config
+            dsn = str((load_config() or {}).get("observability", {}).get("sentry_dsn") or "").strip()
+        except Exception:  # pragma: no cover -- config never blocks init
+            return ""
+    return "" if setting_is_blank_or_off(dsn) else dsn
 
 
 def _sentry_enabled() -> bool:
@@ -175,7 +204,11 @@ def _sentry_enabled() -> bool:
 
 
 def _prometheus_enabled() -> bool:
-    return bool(_setting("MAVERICK_PROMETHEUS_PORT", "prometheus_port"))
+    """``MAVERICK_PROMETHEUS_PORT`` / ``[observability] prometheus_port``: a port turns it on.
+
+    A config ``false`` reaches here as ``"0"``, which would otherwise bind a random port.
+    """
+    return not setting_is_blank_or_off(_setting("MAVERICK_PROMETHEUS_PORT", "prometheus_port"))
 
 
 def _otlp_headers() -> dict[str, str]:
@@ -203,8 +236,7 @@ def _otlp_metrics_enabled() -> bool:
 
     A config ``false`` reaches here as ``"0"``, which a plain ``bool()`` would read as on.
     """
-    raw = (_setting("MAVERICK_OTEL_METRICS", "otlp_metrics") or "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    return switch_is_on(_setting("MAVERICK_OTEL_METRICS", "otlp_metrics"))
 
 
 def _otlp_metrics_endpoint(traces_endpoint: str) -> str | None:
@@ -770,6 +802,7 @@ def gen_ai_tool_attributes(
 __all__ = [
     "trace_span", "record_metric", "is_enabled",
     "http_request_span", "mark_span_failed", "otlp_tracing_enabled",
+    "switch_is_on", "setting_is_blank_or_off",
     "gen_ai_span_name", "gen_ai_attributes", "gen_ai_tool_attributes",
     "gen_ai_agent_attributes",
     "safe_agent_telemetry_label",

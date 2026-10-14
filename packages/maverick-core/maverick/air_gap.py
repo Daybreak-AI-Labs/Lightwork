@@ -201,22 +201,23 @@ def _audit_telemetry(config: dict) -> list[str]:
     truth rules, so a value the runtime would treat as on is flagged. (Prometheus is
     an inbound 127.0.0.1 listener, not egress, so it is not flagged here.)
     """
+    from .observability import setting_is_blank_or_off, switch_is_on
+
     violations: list[str] = []
     obs = config.get("observability") or {}
-    dsn = str(obs.get("sentry_dsn") or "").strip()
-    if dsn:
+    # Read as the runtime reads them, so a switch the runtime treats as off (a TOML false,
+    # "off") is not flagged.
+    if not setting_is_blank_or_off(obs.get("sentry_dsn")):
         violations.append(
             "[observability] sentry_dsn is set — Sentry ships errors/traces off-box; "
             "clear it (and unset MAVERICK_SENTRY_DSN) for an air-gapped deployment")
-    exporter = obs.get("otel_exporter")
-    if exporter is not None and str(exporter).strip():
+    if switch_is_on(obs.get("otel_exporter"), extra_on=frozenset({"otlp"})):
         violations.append(
             "[observability] otel_exporter is set — timing traces are sent to an OpenTelemetry "
             "collector off-box; clear it (and unset MAVERICK_OTEL_EXPORTER) for an air-gapped "
             "deployment")
     # Parsed as the runtime parses MAVERICK_OTEL_METRICS: only a true value is on.
-    metrics = "" if obs.get("otlp_metrics") is None else str(obs.get("otlp_metrics"))
-    if metrics.strip().lower() in {"1", "true", "yes", "on"}:
+    if switch_is_on(obs.get("otlp_metrics")):
         violations.append(
             "[observability] otlp_metrics is on — measurements are sent to an OpenTelemetry "
             "collector off-box; turn it off (and unset MAVERICK_OTEL_METRICS) for an "
