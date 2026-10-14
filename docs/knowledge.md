@@ -136,6 +136,28 @@ Retrieval respects the compartment bulkheads: a pack's `knowledge_search` is
 bound to its own `knowledge_sources`, so a finance specialist never retrieves
 another department's documents.
 
+## Saved company folders and spaces
+
+Saved SharePoint, OneDrive, Google Drive and Confluence sources read the selected
+folder's direct files or the selected space's current pages; subfolders need
+separate sources. Each refresh is bounded by the `[knowledge_sources]` table
+(also under Settings > All settings, Memory & learning):
+
+```toml
+[knowledge_sources]
+max_items        = 64    # 1-1000: direct items one refresh may list
+max_pages        = 16    # 1-200: provider listing pages (each holds up to 64 items)
+max_download_mib = 4     # 1-32: largest single document imported
+max_text_kib     = 256   # 1-8192: extracted text kept per refresh
+```
+
+The defaults are the historical bounds. A value outside its range stops the
+saved-source list and refreshes with a message that names the setting. Each
+refresh reads the current values. A retained snapshot still validates after
+`max_items` is lowered, and its text is checked against the current
+`max_text_kib` whenever it is used. Listings read `max_pages` pages of 64 items,
+so raise `max_pages` along with `max_items`: the defaults cover 1,024 items.
+
 ## Starter corpora
 
 `maverick knowledge seed` ingests a small, licensing-clean grounding corpus —
