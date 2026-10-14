@@ -549,11 +549,13 @@ def trace_span(
                 yield span
             except BaseException as e:
                 # OTel semconv: failed operations carry ``error.type`` (the
-                # exception class) and an ERROR status. Both name the type only.
+                # exception class). The ERROR status names the type only, and, as
+                # in the SDK, only an Exception is an error (not a cancellation).
                 error_type = type(e).__qualname__
                 try:
                     span.set_attribute("error.type", error_type)
-                    span.set_status(_trace_api.StatusCode.ERROR, error_type)
+                    if isinstance(e, Exception):
+                        span.set_status(_trace_api.StatusCode.ERROR, error_type)
                 except Exception:
                     pass
                 raise

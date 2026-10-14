@@ -14,6 +14,7 @@ otel-dependent tests.
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import importlib
 import sys
@@ -559,6 +560,17 @@ def test_successful_span_gets_no_error_status(sdk_tracer):
     ((_, span),) = sdk_tracer.spans
     assert span.status is None
     assert "error.type" not in span.attributes
+
+
+@pytest.mark.parametrize("error", [asyncio.CancelledError("stop"), GeneratorExit()])
+def test_cancelled_span_is_not_marked_as_an_error(sdk_tracer, error):
+    # As the SDK does, only an Exception makes a span an error; a cancellation or a
+    # GeneratorExit propagates unchanged and leaves the status unset.
+    with pytest.raises(type(error)):
+        with obs.trace_span("tool.run"):
+            raise error
+    ((_, span),) = sdk_tracer.spans
+    assert span.status is None
 
 
 def test_real_sdk_failed_span_exports_type_and_no_message(monkeypatch):
