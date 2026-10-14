@@ -9,7 +9,7 @@ from __future__ import annotations
 from urllib.parse import parse_qs, urlencode
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import auth, local_owner, local_passphrases
@@ -81,6 +81,35 @@ def _set_session(request: Request, response, session: str) -> None:
                 secure=_cookie_secure(request))
     response.delete_cookie(second.COOKIE, path=second.COOKIE_PATH)
     response.headers["Cache-Control"] = "no-store"
+
+
+def passphrase_step(request: Request, produce, *, headers: dict, completes: str = ""):
+    """The JSON answer for a restricted step that checks the owner's passphrase and code.
+
+    A proof that this step issued reaches the browser even when the step is then
+    refused, so an accepted code is never spent for nothing. ``completes`` names
+    the flow whose last step this is: its proof is spent once the step succeeds.
+    """
+    try:
+        response = JSONResponse(produce(), headers=headers)
+    except HTTPException as exc:
+        response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code,
+                                headers={**headers, **(exc.headers or {})})
+        second.attach_proof(request, response)
+        return response
+    if completes:
+        second.close_flow(response, flow=completes)
+    else:
+        second.attach_proof(request, response)
+    return response
+
+
+def cancel_flow(request: Request, flow: str) -> JSONResponse:
+    """Cancel a restricted flow, which spends its recovery proof. Needs no passphrase."""
+    local_owner._local(request, mutate=True)
+    response = JSONResponse({"cancelled": True}, headers={"Cache-Control": "private, no-store"})
+    second.close_flow(response, flow=flow)
+    return response
 
 
 def _retry_after(response, exc: HTTPException) -> None:

@@ -75,11 +75,13 @@ SELF_AUTH_SIGNIN_RECOVERY_PATHS = frozenset({
     "/auth/company-signin-recovery/original",
     "/auth/company-signin-recovery/review",
     "/auth/company-signin-recovery/apply",
+    "/auth/company-signin-recovery/cancel",
     "/auth/company-saml-recovery",
     "/auth/company-saml-recovery/lookup",
     "/auth/company-saml-recovery/original",
     "/auth/company-saml-recovery/review",
     "/auth/company-saml-recovery/apply",
+    "/auth/company-saml-recovery/cancel",
 })
 
 SELF_AUTH_WEBHOOK_PATHS = frozenset(
