@@ -57,6 +57,7 @@ def metric_prepare(request, _selection, arguments):
 def snapshot_for(kind):
     def snapshot(request, _selection):
         native.authority(request, write=True)
+        native.settings.retry_pending()
         if kind in {"correct", "recalculate", "confirm"}:
             rows = native.records(request)
         else:

@@ -869,3 +869,40 @@ def test_opportunities_read_with_ekko_enabled_leaves_expired_events_in_place(con
     assert response.json()["external_observations"]["state"] == "available"
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT event_id,event_digest,ingested_at,expires_at,payload FROM ekko_events").fetchall() == stored
+
+
+def test_pending_audit_receipts_are_retried_only_by_the_explicit_sync(context, monkeypatch, tmp_path):
+    from maverick import audit
+
+    client, world = context
+    seed(world)
+    settings_before = client.get(BASE + "/settings", headers=headers("root")).json()
+    item = client.get(BASE + "/benchmarks", headers=headers("root")).json()["benchmarks"][0]
+    real_record = audit.record
+    # The audit receipt cannot be written yet: both rows keep their pending receipts.
+    monkeypatch.setattr(audit, "record", lambda *args, **kwargs: None)
+    saved = client.put(BASE + "/settings", headers=headers("root"), json={
+        "revision": settings_before["revision"], "hourly_rate": 90, "currency": "USD", "completion_confirmation": False})
+    assert saved.status_code == 200 and saved.json()["state"] == "audit_pending", saved.text
+    benchmark = client.put(BASE + "/benchmarks/" + item["id"], headers=headers("root"), json={
+        "revision": item["revision"], "minutes": 10, "low_minutes": 5, "high_minutes": 15,
+        "attributable_share": 0.5, "review_minutes": 1, "reason": "Company time study"})
+    assert benchmark.status_code == 200 and benchmark.json()["state"] == "audit_pending", benchmark.text
+    pending = tree(tmp_path)
+
+    # Reads report the pending state; they neither retry the receipt nor write it.
+    assert client.get(BASE + "/settings", headers=headers("root")).status_code == 503
+    assert client.get(BASE + "/benchmarks", headers=headers("root")).status_code == 503
+    assert tree(tmp_path) == pending
+    monkeypatch.setattr(audit, "record", real_record)
+    assert client.get(BASE + "/settings", headers=headers("root")).status_code == 503
+    assert client.get(BASE + "/benchmarks", headers=headers("root")).status_code == 503
+    assert tree(tmp_path) == pending
+
+    # The explicit sync is the one read-path-adjacent write that retries receipts.
+    assert client.post(BASE + "/sync", headers=headers("root")).status_code == 200
+    settings_after = client.get(BASE + "/settings", headers=headers("root"))
+    assert settings_after.status_code == 200 and settings_after.json()["hourly_rate"] == 90
+    benchmarks_after = client.get(BASE + "/benchmarks", headers=headers("root"))
+    assert benchmarks_after.status_code == 200
+    assert next(row for row in benchmarks_after.json()["benchmarks"] if row["id"] == item["id"])["benchmark"]["minutes"] == 10

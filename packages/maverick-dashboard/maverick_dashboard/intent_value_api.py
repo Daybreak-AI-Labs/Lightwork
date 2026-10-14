@@ -139,7 +139,10 @@ def _label_entities(request, entities):
 
 def synced_report(request, **kwargs):
     """A report for an authorized write-capable flow: records new work first."""
-    return _call(lambda: read_report(request, **kwargs))
+    def run():
+        settings.retry_pending()
+        return read_report(request, **kwargs)
+    return _call(run)
 
 
 @router.get("")
@@ -157,6 +160,7 @@ def sync_endpoint(request: Request):
 
 def _record(request):
     authority(request)
+    settings.retry_pending()
     rows = records(request)
     enabled = settings.policy()["recommendations"]
     if enabled:
@@ -254,7 +258,7 @@ def settings_endpoint(request: Request):
 @router.put("/settings")
 def save_settings_endpoint(request: Request, body: SettingsIn):
     authority(request, admin=True)
-    _call(lambda: records(request))  # Work already observed keeps the assumptions in force when it was seen.
+    _call(lambda: _record_before_assumptions(request))
     return _mutation(_call(lambda: settings.save_settings(**body.model_dump(exclude={"revision"}),
         expected_revision=body.revision, actor=auth.caller_principal(request) or "local", guard=lambda: authority(request, admin=True))))
 
@@ -274,7 +278,7 @@ def benchmarks_endpoint(request: Request):
 @router.put("/benchmarks/{identifier}")
 def benchmark_endpoint(request: Request, identifier: str, body: BenchmarkIn):
     authority(request, admin=True)
-    _call(lambda: records(request))  # Work already observed keeps the benchmark in force when it was seen.
+    _call(lambda: _record_before_assumptions(request))
     return _mutation(_call(lambda: settings.save_benchmark(identifier, **body.model_dump(exclude={"revision"}),
         expected_revision=body.revision, actor=auth.caller_principal(request) or "local", guard=lambda: authority(request, admin=True))))
 
@@ -318,8 +322,20 @@ def opportunities_endpoint(request: Request, include_decided: bool = False, devi
     return _call(lambda: _opportunities(request, include_decided=include_decided, device_id=device_id, persist=False))
 
 
+def _record_before_assumptions(request):
+    """Records observed work, and retries pending receipts, before assumptions change.
+
+    Work recorded before the save keeps the assumptions in force when it was seen.
+    Work that finishes while the save runs is recorded afterwards under the new
+    assumptions; this is not a lock across the two steps."""
+    settings.retry_pending()
+    records(request)
+
+
 def _opportunities(request, *, include_decided, device_id, persist):
     authority(request)
+    if persist:
+        settings.retry_pending()
     enabled = settings.policy()["recommendations"]
     rows = records(request, refresh=persist) if enabled else []
     proposals = opportunities.evaluate(rows, owner=auth.goal_owner_filter(request), capabilities=capabilities(request),
