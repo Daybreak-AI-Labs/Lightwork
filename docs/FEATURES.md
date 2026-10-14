@@ -4719,7 +4719,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   [connection limits and validation](operations/governed-postgres-connections.md).
 - **Per-tenant KMS at fleet scale** — envelope encryption with a per-tenant DEK
   wrapped by a KEK in a pluggable `KMS` (`tenant/kms.py`; LocalKMS or AWS/GCP/
-  Vault BYOK via `kms_backends.py`). **Deterministic per-tenant BYOK**:
+  Vault/Azure Key Vault BYOK via `kms_backends.py`). **Deterministic per-tenant BYOK**:
   `get_kms(tenant_id)` reads each tenant's own `[kms]` overlay independent of the
   active context. A **DEK-cache TTL** (`MAVERICK_KMS_DEK_CACHE_TTL`) bounds how
   long a revoked cloud key keeps opening data. **Fleet KEK rotation** is operable
