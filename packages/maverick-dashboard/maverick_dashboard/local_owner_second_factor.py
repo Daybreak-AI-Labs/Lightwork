@@ -29,7 +29,7 @@ Rules:
   a random token, valid ten minutes, stored as a digest, sent as an HttpOnly
   SameSite=Strict cookie on the flow's own path. Later steps of the same flow
   accept the proof instead of a code. The proof is spent when the flow completes
-  or is cancelled.
+  or is cancelled from the browser that holds it.
 * Enabling, turning off, making new recovery codes and using a recovery code are
   recorded in the activity log first. If the log refuses, nothing changes.
 """
@@ -505,8 +505,13 @@ def attach_proof(request, response) -> None:
                         httponly=True, samesite="strict", secure=_cookie_secure(request))
 
 
-def close_flow(response, *, flow: str) -> None:
-    """Spend a restricted flow's recovery proof when the flow completes or is cancelled."""
+def close_flow(response, *, flow: str, presented: str | None = None) -> None:
+    """Spend a restricted flow's recovery proof when the flow completes or is cancelled.
+
+    A completed step spends every proof of its flow (``presented`` is None). A cancel
+    spends only the proof its own browser presents (``presented``, possibly empty), so
+    a request without that proof changes nothing.
+    """
     from . import local_owner
 
     if flow not in FLOW_PATHS:
@@ -514,8 +519,13 @@ def close_flow(response, *, flow: str) -> None:
     with local_owner._LOCK, file_lock.cross_process_lock(local_owner.path(), strict=True):
         row = local_owner._read()
         proofs = (row or {}).get("flow_proofs") or {}
-        kept = {k: v for k, v in proofs.items() if v["flow"] != flow}
-        if row is not None and len(kept) != len(proofs):
+        if presented is None:
+            spent = {k for k, v in proofs.items() if v["flow"] == flow}
+        else:
+            key = _proof_key(row, flow, presented) if row is not None and presented else ""
+            spent = {key} if key in proofs and proofs[key]["flow"] == flow else set()
+        if spent:
+            kept = {k: v for k, v in proofs.items() if k not in spent}
             if kept:
                 row["flow_proofs"] = kept
             else:

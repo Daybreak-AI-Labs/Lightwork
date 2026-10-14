@@ -105,10 +105,14 @@ def passphrase_step(request: Request, produce, *, headers: dict, completes: str 
 
 
 def cancel_flow(request: Request, flow: str) -> JSONResponse:
-    """Cancel a restricted flow, which spends its recovery proof. Needs no passphrase."""
+    """Cancel a restricted flow: spends the recovery proof this browser holds for it.
+
+    No passphrase is needed, because a cancel only ends authority. A request that
+    does not present the flow's proof changes nothing.
+    """
     local_owner._local(request, mutate=True)
     response = JSONResponse({"cancelled": True}, headers={"Cache-Control": "private, no-store"})
-    second.close_flow(response, flow=flow)
+    second.close_flow(response, flow=flow, presented=request.cookies.get(second.PROOF_COOKIE) or "")
     return response
 
 

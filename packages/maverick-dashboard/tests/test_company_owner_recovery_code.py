@@ -214,6 +214,22 @@ def test_cancelling_a_flow_spends_its_proof(owner, clock, events):
     assert "flow_proofs" not in record()
 
 
+def test_a_cancel_spends_only_the_proof_its_own_browser_holds(owner, clock):
+    """A cancel from a browser without the flow's proof changes nothing, so no local process can end a step."""
+    with client() as holder:
+        token = proof_token(holder.post(SAML + "/lookup", json=body(SAML, code=current_code(owner, clock))))
+    with client() as stranger:
+        refused = stranger.post(SAML + "/cancel")
+        wrong_flow = stranger.post(COMPANY + "/cancel", headers={"cookie": f"mvk_owner_recovery_proof={token}"})
+        wrong_token = stranger.post(SAML + "/cancel", headers={"cookie": "mvk_owner_recovery_proof=not-the-proof"})
+    assert refused.status_code == wrong_flow.status_code == wrong_token.status_code == 200
+    assert len(record()["flow_proofs"]) == 1
+    with client() as holder_again:
+        still = holder_again.post(SAML + "/original", json=body(SAML, operation=OPERATION),
+                                  headers={"cookie": f"mvk_owner_recovery_proof={token}"})
+    assert still.status_code == 200, still.text
+
+
 def test_a_wrong_code_counts_toward_the_owner_lock_on_the_route(owner):
     with client() as web:
         for _ in range(5):
