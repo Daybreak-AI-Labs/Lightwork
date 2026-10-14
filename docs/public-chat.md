@@ -22,7 +22,7 @@ chat. It is for development only. Never turn it on for a public website.
 ## Add a website
 
 Administrators with the admin permission manage sites through the API. A
-dashboard page for this is not part of this change.
+dashboard page for this is not built yet.
 
 `POST /api/v1/public-chat/sites`
 
@@ -43,7 +43,7 @@ its SHA-256 digest is stored, so copy it into the website at once.
 - `POST /api/v1/public-chat/sites/{id}/rotate` issues a new key. The old key
   and every live visitor session stop at once.
 - `POST /api/v1/public-chat/sites/{id}/revoke` stops the site. Its key,
-  origins and sessions end at once.
+  origins and sessions end at once, and its stored transcripts are deleted.
 - `GET /api/v1/public-chat/sites/{id}/transcripts` shows the stored messages,
   read-only, oldest first. Each view is an audit event.
 
@@ -58,8 +58,13 @@ but keep it to the sites you listed.
 ```
 
 `widget.js` is static and contains no key. It draws a "Chat with us" button
-and a panel in a shadow root. Every message is inserted as text, never as
-markup.
+and a panel in a closed shadow root. Every message is inserted as text, never
+as markup. The tag may go in the head or the body; if the page body does not
+exist yet, the panel appears once the page has loaded.
+
+Scripts on the host page share the page's trust boundary. The closed shadow
+root keeps them from reaching the panel through `host.shadowRoot`, but it is
+not a security boundary: such a script can still read the chat.
 
 ## What a visitor can and cannot reach
 
@@ -81,35 +86,65 @@ A visitor cannot:
   only. A bad, unknown or revoked key gets the same generic `401`.
 - **Origins.** A request must carry an `Origin` header that exactly matches
   one of the site's origins. A missing or other origin gets `403`. CORS is
-  granted only to those exact origins.
+  granted only to those exact origins. Any client can send any `Origin`
+  value, so this stops browsers on other websites, not a client that sends a
+  false origin on purpose. The key is public (it is in the page), so the daily
+  cap is the spending limit that matters.
 - **Visitor sessions.** `lwps_` tokens, valid for at most 30 minutes, stored
   as digests and bound to the origin they were issued for.
 - **No cookies.** Neither the widget nor these routes set or read a cookie,
   so there is no ambient credential for a cross-site request to ride on.
 - **Limits.** Message bodies are capped at 4 KiB. Starting sessions is rate
-  limited per site and per client address. Messages are limited per session
-  and per minute.
+  limited per site and per client address. The client address is the
+  forwarded visitor address only when the request comes from a proxy listed in
+  `[auth.proxy] trusted_proxies`; otherwise it is the direct address. Messages
+  are limited per session (at most 30) and per minute (at most 6 in any 60
+  seconds). A new session starts with new message limits, so one client can
+  send more messages across sessions. The daily cap bounds the cost.
 - **Answers.** Each answer is one tool-free provider call
   (`LLM.complete` with `tools=None`, one physical attempt, no failover),
   through the budgeted path. Before each call, the answer's share (5 cents)
-  of today's cap is held. The hold is settled to the real cost afterwards.
-  When the cap is used up, visitors get a "not available right now" answer.
+  of today's cap is held. The hold is then settled to what was billed,
+  including a call that went above the hold. When the cap is used up, visitors
+  get a "not available right now" answer. A call whose estimated cost is above
+  the hold is refused before it is sent. A provider failure gets a `503` and
+  keeps its hold.
 - **Transcripts.** Sealed with the at-rest helper, bound to the tenant, site,
   conversation and row. Stored per tenant. Removed after the site's retention
-  period when the site is next written or viewed.
-- **Errors.** Refusals use fixed, generic text and never say whether a key
-  exists.
+  period. Revoking a site deletes its transcripts at once. Retention runs when
+  a visit or an admin view happens; a visit sweeps every tenant, at most once
+  an hour.
+- **Errors.** Refusals use fixed, generic text. A key that is unknown or
+  revoked gets `401` whatever the origin. A live key used from an origin the
+  site does not list gets `403`. The two statuses differ, so a caller who
+  already holds a key can see whether it is still live. The key is public on
+  the host page, so this reveals no secret. Using one status for both cases is
+  an open decision.
 - **Audit.** Creating, rotating and revoking a site, and viewing transcripts,
-  are audit events without key material. Individual visitor requests are not
-  audited.
+  are audit events without key material. A site is recorded once it exists; if
+  the record cannot be written, the new site is revoked again and the request
+  fails. Individual visitor requests are not audited.
 
 ## Known limits
 
 - Each answer sees only the visitor's current message, not earlier turns.
 - The visitor waits for the answer in the same request. There is no polling.
-- Transcripts past retention are removed on use, not by a background timer.
+- Transcripts past retention are removed when a visit or an admin view runs,
+  not by a background timer. An installation with no visits and no admin views
+  keeps them until one happens. A scheduled sweep is not built yet.
+- Message limits are per session. A limit per client across sessions is not
+  built; whether to add one is an open decision for the owner.
+- The answer hold is a fixed 5 cents. A model whose estimated cost for one
+  answer is above that is refused before the call, so a premium model needs a
+  larger hold first. Not built.
+- An answer may use at most 4,000 input tokens, system prompt included. A
+  longer specialist prompt is billed and then refused on every visit, so keep
+  the instructions short. Raising the limit is a cost decision for the owner.
 - The widget's stylesheet is an inline `<style>` element inside its shadow
   root. A host page whose content security policy forbids inline styles may
   block it, so the panel would appear unstyled.
-- Rate limits use the client address the dashboard sees. Whether a proxy in
-  front of the dashboard passes the real visitor address was not verified.
+- The client address behind a proxy comes only from a pinned trusted proxy.
+  This is covered by a test of the address rule; it was not checked against a
+  real proxy deployment.
+- The widget was checked by reading its source. Its placement and text
+  insertion were not run in a real browser.
