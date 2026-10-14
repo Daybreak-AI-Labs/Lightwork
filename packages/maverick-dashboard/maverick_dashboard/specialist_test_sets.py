@@ -22,6 +22,8 @@ from maverick.file_lock import (
 )
 from maverick.paths import data_dir
 
+from .specialist_tool_checks import tool_check_results
+
 # A Copilot-reviewed run picks at most this many; a person can run the whole set.
 MAX_CASES_PER_RUN = 5
 _MAX_RUNS = 500
@@ -330,17 +332,40 @@ def answer_system(profile) -> str:
               "taken an action or checked a source you cannot access.")
 
 
-def grade(case: dict, output: str, *, retain_full: bool = False) -> dict[str, Any]:
+SKIPPED_TOOL_CHECK_NOTE = ("Skipped: tool checks are turned off in All settings, so this check did not run "
+                           "and does not count as passing.")
+
+
+def skipped_tool_check(case: dict, *, variant: str | None = None) -> dict[str, Any]:
+    """A tool check that did not run while its switch is off. It never counts as passing."""
+    row = {"case_id": case["id"], "task": case["task"], "passed": False, "score": 0.0, "checks": {},
+           "answer": "", "tool_checks": [], "tool_calls": [], "note": SKIPPED_TOOL_CHECK_NOTE}
+    if variant is not None:
+        row["variant"] = variant
+    return row
+
+
+def _tool_outcome(case: dict, tool_calls: list[dict] | None) -> tuple[dict[str, Any], bool]:
+    if not case.get("with_tools"):
+        return {}, True
+    checks = tool_check_results(case, list(tool_calls or []))
+    return {"tool_checks": checks, "tool_calls": list(tool_calls or [])}, all(row["passed"] for row in checks)
+
+
+def grade(case: dict, output: str, *, retain_full: bool = False,
+          tool_calls: list[dict] | None = None) -> dict[str, Any]:
     from maverick.domain_eval import EvalCase, score_output
     if retain_full and len(output.encode("utf-8")) > 64000:
         raise ValueError("The complete answer exceeds the supported result limit. Nothing was shortened or counted as passing.")
+    tools, tools_passed = _tool_outcome(case, tool_calls)
     if not output or not output.strip():
         return {"case_id": case["id"], "task": case["task"], "passed": False,
-                "score": 0.0, "checks": {"empty_answer": 0.0}, "answer": ""}
+                "score": 0.0, "checks": {"empty_answer": 0.0}, "answer": "", **tools}
     rubric = EvalCase(case["specialist"], case["task"],
                       expect_includes=tuple(case["includes"]),
                       expect_excludes=tuple(case["excludes"]),
                       expect_refusal=case["refusal"], expect_citation=case["citation"])
     result = score_output(rubric, output, pass_threshold=1.0)
-    return {"case_id": case["id"], "task": case["task"], "passed": result.passed,
-            "score": result.score, "checks": result.checks, "answer": output if retain_full else output[:2000]}
+    return {"case_id": case["id"], "task": case["task"], "passed": result.passed and tools_passed,
+            "score": result.score, "checks": result.checks, "answer": output if retain_full else output[:2000],
+            **tools}
