@@ -114,7 +114,8 @@ replaced by `/v1/metrics`, so the endpoint must end in `/v1/traces`.
 With the OTLP exporter on, each dashboard HTTP request is also one server span,
 named by its route template, for example `HTTP GET /goals/{goal_id}`. Raw paths,
 query strings, headers and identities are not recorded on it. A request that
-matches no route is named `HTTP GET`.
+matches no route is named `HTTP GET`. An unhandled error marks the span failed,
+but the error's message and stack trace are not recorded on it either.
 
 ## Helicone as a gateway
 

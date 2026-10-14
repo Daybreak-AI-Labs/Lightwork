@@ -34,6 +34,7 @@ class _Span:
         self.name = name
         self.kind = kind
         self.attributes = {}
+        self.events = []
         self.status = None
 
     def update_name(self, name):
@@ -51,13 +52,20 @@ class _Tracer:
         self.spans = []
 
     @contextlib.contextmanager
-    def start_as_current_span(self, name, kind=None, **_kwargs):
+    def start_as_current_span(
+        self, name, kind=None, record_exception=True, set_status_on_exception=True,
+        **_kwargs,
+    ):
         span = _Span(name, kind)
         self.spans.append(span)
         try:
             yield span
-        except BaseException:
-            span.status = "ERROR"  # what the SDK does for an exception it records
+        except BaseException as error:
+            # What the SDK does for an exception, unless the span is told not to.
+            if record_exception:
+                span.events.append(("exception", str(error)))
+            if set_status_on_exception:
+                span.status = "ERROR"
             raise
 
 
@@ -92,6 +100,10 @@ def _app(**fastapi_options: Any) -> FastAPI:
     @app.get("/crash")
     def crash():
         raise RuntimeError("internal detail that must not reach a span")
+
+    @app.get("/share/{token}")
+    def share(token: str):
+        raise KeyError(f"no share for token {token}")
 
     @app.get("/work")
     def work():
@@ -163,6 +175,28 @@ def test_an_unhandled_error_is_a_500_span_marked_failed(tracer):
         "http.response.status_code": 500,
     }
     assert span.status == "ERROR"
+    assert span.events == []  # the exception's text is not recorded on the span
+
+
+def test_an_unhandled_error_records_no_exception_text_on_the_real_span(monkeypatch):
+    """The SDK records an exception's message and stack on a span by default. A path
+    value (a share token) can be in that message, so the request span must not record it."""
+    pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry import trace
+
+    exporter, provider = _sdk_provider()
+    monkeypatch.setattr(observability, "_tracer", provider.get_tracer("maverick"))
+    monkeypatch.setattr(observability, "_trace_api", trace)
+
+    response = _client().get("/share/tok_SECRETTOKEN123?x=1")
+    assert response.status_code == 500
+    (span,) = exporter.get_finished_spans()
+    assert span.name == "HTTP GET /share/{token}"
+    assert span.status.status_code == trace.StatusCode.ERROR
+    assert len(span.events) == 0
+    exported = repr((span.name, dict(span.attributes), span.events))
+    assert "tok_SECRETTOKEN123" not in exported
+    assert "no share for token" not in exported
 
 
 def test_an_unmatched_request_is_named_by_method_alone(tracer):

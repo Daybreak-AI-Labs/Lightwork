@@ -535,6 +535,10 @@ def http_request_span(method: str) -> Iterator[Any]:
         return
     with _tracer.start_as_current_span(
         f"HTTP {method}", kind=_trace_api.SpanKind.SERVER,
+        # The SDK would record an unhandled error's message and stack on the span.
+        # That text can carry a path value (a share token) or a secret, so the
+        # request span records neither; mark_span_failed sets the status instead.
+        record_exception=False, set_status_on_exception=False,
     ) as span:
         yield span
 
