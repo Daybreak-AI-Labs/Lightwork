@@ -216,11 +216,14 @@ class Lightwork:
     def submit_goal(self, title: str, description: str = "", *, max_dollars: float | None = None,
                     max_wall_seconds: float | None = None, max_depth: int | None = None,
                     idempotency_key: str | None = None) -> dict[str, Any]:
-        """``POST /api/v1/goals``. Returns the goal; admission is not proof of execution.
+        """``POST /api/v1/goals`` (201). Needs the ``tasks:write`` key scope.
 
-        Pass a random ``idempotency_key`` that you persist before sending. Reuse
-        the same key and input to recover an uncertain start with
-        :meth:`goal_receipt`. Omitted limits use the server's configured defaults.
+        Admission is not proof of execution. Pass a random ``idempotency_key``
+        that you persist before sending. After a failure with no answer, a 5xx,
+        or a 409, read :meth:`goal_receipt` with the same key before deciding
+        anything: a 409 that says "reconcile before retrying" means the request
+        was kept under this key, not refused. Never send the same request under
+        a new key. Omitted limits use the server's configured defaults.
         """
         payload = {"title": title, "description": description, "max_dollars": max_dollars,
                    "max_wall_seconds": max_wall_seconds, "max_depth": max_depth}
@@ -229,7 +232,16 @@ class Lightwork:
                           body={k: v for k, v in payload.items() if v is not None})
 
     def goal_receipt(self, idempotency_key: str, *, kind: str = "api") -> dict[str, Any]:
-        """``GET /api/v1/goal-submissions/receipt``. Reads a start without submitting work."""
+        """``GET /api/v1/goal-submissions/receipt``. Reads a start without submitting work.
+
+        ``state`` is ``"accepted"`` (the goal exists and is no longer a draft:
+        poll it) or ``"not_dispatched"`` (an admitted draft that never started:
+        replay :meth:`submit_goal` with the same key and the same inputs to start
+        it). ``execution_confirmed`` is always false here. A 404 means no receipt
+        is visible for this key yet, and the first request may still be in
+        flight; replaying with the same key is safe. Needs the ``tasks:write``
+        key scope.
+        """
         return self._call("GET", "/api/v1/goal-submissions/receipt", params={"kind": kind},
                           headers={"Idempotency-Key": idempotency_key, "Cache-Control": "no-cache"})
 
@@ -257,7 +269,8 @@ class Lightwork:
     # ------------------------------------------------------------ approvals
 
     def list_approvals(self) -> dict[str, Any]:
-        """``GET /api/v1/approvals``. Needs the operate permission.
+        """``GET /api/v1/approvals``. Needs the ``approvals:decide`` key scope, or the
+        operator role when signed in.
 
         ``approvals`` rows carry ``approval_card.binding_sha256``, which
         :meth:`approve_approval` needs. ``private_requests`` lists requests
@@ -272,6 +285,11 @@ class Lightwork:
         ``binding`` is the card's ``binding_sha256``, sent as
         ``X-Lightwork-Approval-Binding``. High and critical risk need
         ``acknowledged=True``; critical risk also needs ``confirmation="approve"``.
+        Without them the server answers 422 and the approval stays pending. A 409
+        means the card is stale or expired, or a competing vote is still being
+        audited; a 404 can mean the approval was already decided. Read
+        :meth:`list_approvals` again before deciding. Needs the ``approvals:decide``
+        key scope.
         """
         if not binding:
             raise ValueError("binding is required: use approval_card.binding_sha256 from list_approvals()")
@@ -288,7 +306,11 @@ class Lightwork:
         return _decision(status, headers)
 
     def deny_approval(self, approval_id: int, *, reason: str | None = None) -> Decision:
-        """``POST /api/v1/approvals/{id}/deny``. The optional reason goes to the audit log."""
+        """``POST /api/v1/approvals/{id}/deny``. The optional reason goes to the audit log.
+
+        Needs the ``approvals:decide`` key scope. Like :meth:`approve_approval`,
+        a 202 means the vote is recorded but its audit is pending.
+        """
         status, headers, raw = self._send("POST", f"/api/v1/approvals/{approval_id}/deny",
                                           body={"reason": reason} if reason else None)
         if status not in (202, 204):
