@@ -3,6 +3,7 @@ Protocol. Fakes use real AES-GCM so context binding is actually exercised."""
 from __future__ import annotations
 
 import base64
+import enum
 import functools
 import hashlib
 import json
@@ -410,6 +411,34 @@ def test_azure_rejects_other_providers_envelopes():
 
 
 # ---- Azure envelopes are signed by the vault before anything is unwrapped ---
+
+
+class _SdkSignatureAlgorithm(str, enum.Enum):
+    """The shape of azure.keyvault.keys.crypto.SignatureAlgorithm: a str enum whose
+    ps256 member is "PS256"."""
+
+    ps256 = "PS256"
+
+
+def test_azure_sig_alg_is_the_sdk_enum_when_the_sdk_is_importable(monkeypatch):
+    # The SDK's local verify reads algorithm.value, which a bare "PS256" string lacks, so
+    # with the SDK present the client must be given the enum member, not the string.
+    stub = types.ModuleType("azure.keyvault.keys.crypto")
+    stub.SignatureAlgorithm = _SdkSignatureAlgorithm
+    monkeypatch.setitem(sys.modules, "azure.keyvault.keys.crypto", stub)
+    alg = kms_backends._azure_sig_alg()
+    assert alg is _SdkSignatureAlgorithm.ps256
+    assert alg.value == "PS256"
+
+
+def test_azure_sig_alg_is_the_plain_name_without_the_sdk(monkeypatch):
+    monkeypatch.setitem(sys.modules, "azure.keyvault.keys.crypto", None)
+    assert kms_backends._azure_sig_alg() == "PS256"
+
+
+def test_azure_sig_alg_is_the_installed_sdk_enum():
+    crypto = pytest.importorskip("azure.keyvault.keys.crypto")
+    assert kms_backends._azure_sig_alg() is crypto.SignatureAlgorithm.ps256
 
 
 def test_azure_round_trip_is_signed_by_the_vault_under_ps256_before_unwrap():
