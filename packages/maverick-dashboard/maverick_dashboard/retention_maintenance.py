@@ -29,7 +29,7 @@ def policy(request):
     selected, targets = native._scope()
     return {"context": context_for(request), "revision": native._fingerprint(selected, targets),
             "workspaces": [{"name": row["name"], "periods": [{"label": native.STORES[key][1], "days": days}
-                for key, days in row["policy"].items()], "blocked": row["preservation"].get("blocked", False)} for row in targets]}
+                for key, days in row["policy"].items()], "blocked": native._broad_blocked(row)} for row in targets]}
 
 
 def preview(request, expected_context=None, expected_policy=None, operation_id=None):

@@ -65,7 +65,7 @@ def sweep_workspaces(tenants: Iterable[Any], *, days: int, events_days: int, dry
     out a local workspace whose records database was never created (so a
     preview never creates one). Returns one row per workspace.
     """
-    from .ediscovery import LegalHoldApplies
+    from .ediscovery import LegalHoldApplies, assert_no_active_matters
     from .paths import tenant_scope
     from .world_model import close_world_if_owned
     from .world_model_backends import is_postgres_configured
@@ -85,7 +85,12 @@ def sweep_workspaces(tenants: Iterable[Any], *, days: int, events_days: int, dry
             world = open_world()
             try:
                 if dry_run:
-                    counts = preview_world(world, days=days, events_days=events_days)
+                    try:
+                        assert_no_active_matters()
+                        counts = preview_world(world, days=days, events_days=events_days)
+                    except LegalHoldApplies:
+                        # The preview must not promise removals a legal hold will refuse.
+                        counts = {"conversations": 0, "activity": 0, "held": True}
                 else:
                     try:
                         convs, events, dedup = prune_world(world, days=days, events_days=events_days)

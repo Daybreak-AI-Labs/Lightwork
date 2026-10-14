@@ -25,9 +25,18 @@ BASE = "/api/v1/ediscovery/matters"
 
 @pytest.fixture()
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from maverick import crypto_at_rest
+    from maverick.paths import tenant_scope
+
     state = {"enabled": True, "tenant": "ws-a", "role": "auditor"}
     ledger = tmp_path / "ledger.sqlite3"
     world = WorldModel(tmp_path / "world.db")
+    # The companion and inbox stores live under a private home and the active workspace.
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "1")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_PER_TENANT", "0")
+    monkeypatch.setenv("MAVERICK_ENCRYPTION_KEY", "27" * 32)
+    monkeypatch.setattr(crypto_at_rest, "_KEY_PATH", tmp_path / "unused.key")
 
     recorded: list[tuple[str, dict]] = []
     monkeypatch.setattr(audit, "audit_event",
@@ -55,7 +64,8 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app = FastAPI()
     app.include_router(api.router, prefix="/api/v1")
     client = TestClient(app, headers={"Origin": "http://testserver", "X-Role": "auditor"})
-    yield SimpleNamespace(client=client, state=state, world=world, recorded=recorded, ledger=ledger)
+    with tenant_scope(tenant="ws-a"):
+        yield SimpleNamespace(client=client, state=state, world=world, recorded=recorded, ledger=ledger)
     world.close()
 
 
@@ -208,3 +218,46 @@ def test_compliance_page_shows_legal_holds_only_when_enabled_and_nonced(monkeypa
 
     monkeypatch.setattr(ediscovery, "enabled", lambda: False)
     assert 'id="edh-title"' not in client.get("/compliance").text
+
+
+def test_switch_is_a_privacy_setting_off_by_default_that_the_settings_page_turns_on(tmp_path, monkeypatch):
+    from maverick import config
+    from maverick_dashboard import settings_catalog as catalog
+    from maverick_dashboard.app import app
+
+    from test_support.settings_pages import save_catalog
+
+    row = catalog.BY_ID["ediscovery.enable"]
+    assert row.default is False and row.group == "Privacy" and row.reader == "maverick.ediscovery"
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    config.reset_config_cache()
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+    assert ediscovery.enabled() is False
+    assert client.get(BASE).status_code == 404
+    saved = save_catalog(client, "/api/v1/settings/catalog",
+                         json={"changes": [{"id": "ediscovery.enable", "value": True}]})
+    assert saved.status_code == 200, saved.text
+    config.reset_config_cache()
+    assert ediscovery.enabled() is True
+    assert client.get(BASE).status_code != 404
+
+
+def test_retention_review_shows_a_workspace_blocked_while_a_matter_is_active(env, monkeypatch):
+    from maverick.tenant import registry
+    from maverick_dashboard import retention_maintenance
+    from maverick_dashboard import retention_runs as native
+
+    monkeypatch.setattr(registry, "get_tenant", lambda tid: SimpleNamespace(id=tid, display_name="Acme"))
+    monkeypatch.setattr(native, "_policy", lambda: {})
+    monkeypatch.setattr(retention_maintenance, "authorize", lambda request, expected_context=None: ("admin", {}))
+    monkeypatch.setattr(retention_maintenance, "context_for", lambda request: {})
+    request = SimpleNamespace(headers={})
+    assert retention_maintenance.policy(request)["workspaces"][0]["blocked"] is False
+    created = env.client.post(BASE, json=_body())
+    assert created.status_code == 201
+    assert retention_maintenance.policy(request)["workspaces"][0]["blocked"] is True
+    env.client.post(f"{BASE}/{created.json()['id']}/release", json={"expected_revision": 1})
+    assert retention_maintenance.policy(request)["workspaces"][0]["blocked"] is False

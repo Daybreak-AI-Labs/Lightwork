@@ -17,6 +17,21 @@ BOB = "user:cli:bob"
 PAST = {"date_from": "2001-01-01", "date_to": "2001-01-02"}
 
 
+@pytest.fixture(autouse=True)
+def _workspace_home(tmp_path, monkeypatch):
+    """A private home and workspace for the employee companion and inbox stores that exports read."""
+    from maverick import crypto_at_rest
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "1")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_PER_TENANT", "0")
+    # A synthetic test-only at-rest key; no deployment credentials are read.
+    monkeypatch.setenv("MAVERICK_ENCRYPTION_KEY", "27" * 32)
+    monkeypatch.setattr(crypto_at_rest, "_KEY_PATH", tmp_path / "unused.key")
+    with tenant_scope(tenant="ws-a"):
+        yield
+
+
 @pytest.fixture()
 def events(monkeypatch):
     recorded: list[tuple[str, dict]] = []
@@ -396,3 +411,24 @@ def test_whole_client_erasure_is_refused_while_a_matter_is_active(tmp_path, monk
         assert ledger_path.exists()
     finally:
         client.reset_client_cache()
+
+
+def test_sweep_reports_a_held_workspace_as_held_in_preview_and_run_and_sweeps_the_rest(monkeypatch, events):
+    from types import SimpleNamespace
+
+    from maverick import paths
+
+    class _SweepWorld(_FakeWorld):
+        def purge_goal_events_before(self, cutoff, dry_run=False):
+            return 0
+
+    matter = {"id": "mtr-0123456789abcdef", "custodians": [ALICE], "record_kinds": ["goals"],
+              "date_from": None, "date_to": None}
+    monkeypatch.setattr(ediscovery, "active_matters",
+                        lambda: [matter] if paths.current_tenant_id() == "ws-a" else [])
+    tenants = [SimpleNamespace(id="ws-a", display_name="Acme"), SimpleNamespace(id="ws-b", display_name="Beta")]
+    for dry_run in (True, False):
+        rows = {row["workspace"]: row for row in records_gc.sweep_workspaces(
+            tenants, days=1, events_days=1, dry_run=dry_run, open_world=_SweepWorld)}
+        assert rows["ws-a"]["held"] is True and rows["ws-a"]["conversations"] == 0
+        assert rows["ws-a"]["activity"] == 0 and "held" not in rows["ws-b"]
