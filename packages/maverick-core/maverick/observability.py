@@ -38,7 +38,7 @@ import logging
 import os
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -521,26 +521,46 @@ def trace_span(
 
 
 @contextlib.contextmanager
-def http_request_span(method: str) -> Iterator[Any]:
+def http_request_span(method: str, *, carrier: Mapping[str, str] | None = None) -> Iterator[Any]:
     """The OTLP server span for one dashboard HTTP request; ``None`` when span export is off.
 
     The span is made current, so the spans a request starts (agent, tool,
     provider) nest under it. Unlike trace_span() it never opens a Sentry
     transaction: request spans are OTLP-only, so Sentry's performance quota is
-    not spent on every page.
+    not spent on every page. ``carrier`` is the caller's W3C trace context; when it
+    names a trace, the span joins that trace as a remote child.
     """
     _initialize()
     if _tracer is None:
         yield None
         return
     with _tracer.start_as_current_span(
-        f"HTTP {method}", kind=_trace_api.SpanKind.SERVER,
+        f"HTTP {method}", context=_inbound_context(carrier),
+        kind=_trace_api.SpanKind.SERVER,
         # The SDK would record an unhandled error's message and stack on the span.
         # That text can carry a path value (a share token) or a secret, so the
         # request span records neither; mark_span_failed sets the status instead.
         record_exception=False, set_status_on_exception=False,
     ) as span:
         yield span
+
+
+def _inbound_context(carrier: Mapping[str, str] | None) -> Any:
+    """The context the caller's ``traceparent`` names, or ``None`` to start a new trace.
+
+    Only ``traceparent`` and ``tracestate`` are passed on, whatever the carrier holds,
+    and no value is recorded: the propagator reads them and nothing else.
+    """
+    if not carrier or "traceparent" not in carrier:
+        return None
+    try:
+        from opentelemetry import propagate
+
+        return propagate.extract({
+            key: carrier[key] for key in ("traceparent", "tracestate") if key in carrier})
+    except Exception:  # pragma: no cover -- a malformed header never breaks a request
+        log.debug("inbound trace context not read", exc_info=True)
+        return None
 
 
 def mark_span_failed(span: Any) -> None:

@@ -9,8 +9,9 @@ The span is named ``HTTP <METHOD> <route template>``, for example
 ids and query strings never reach the span name or its attributes. An unmatched
 request is named ``HTTP <METHOD>`` with no ``http.route``. Attributes are
 ``http.request.method``, ``http.route`` and ``http.response.status_code``; a 5xx,
-or an unhandled error, marks the span failed. Headers, cookies and the caller's
-identity are never read.
+or an unhandled error, marks the span failed. The W3C ``traceparent`` and
+``tracestate`` headers are read so the span joins the caller's trace. No other
+header, cookie or identity is read, and no header value is recorded.
 """
 from __future__ import annotations
 
@@ -59,6 +60,10 @@ def install(app: Any) -> bool:
     return True
 
 
+# The only request headers read: the W3C trace context, to join the caller's trace.
+_TRACE_CONTEXT_HEADERS = (b"traceparent", b"tracestate")
+
+
 class RequestSpanMiddleware:
     """Pure ASGI: one server span around each HTTP request, named once its route is known."""
 
@@ -70,7 +75,7 @@ class RequestSpanMiddleware:
             await self.app(scope, receive, send)
             return
         method = _method(scope)
-        with observability.http_request_span(method) as span:
+        with observability.http_request_span(method, carrier=_trace_carrier(scope)) as span:
             if span is None:
                 await self.app(scope, receive, send)
                 return
@@ -90,6 +95,15 @@ class RequestSpanMiddleware:
                 raise
             finally:
                 _describe(span, scope, method, status[0] if status else None)
+
+
+def _trace_carrier(scope: Any) -> dict[str, str]:
+    """The caller's ``traceparent`` / ``tracestate`` headers, and no other header."""
+    carrier: dict[str, str] = {}
+    for name, value in scope.get("headers") or ():
+        if name.lower() in _TRACE_CONTEXT_HEADERS:
+            carrier[name.decode("latin-1").lower()] = value.decode("latin-1")
+    return carrier
 
 
 def _method(scope: Any) -> str:

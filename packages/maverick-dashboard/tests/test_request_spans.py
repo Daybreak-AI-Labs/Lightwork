@@ -312,6 +312,56 @@ def test_with_tracing_off_fastapi_keeps_its_own_span_as_a_plain_app_does(monkeyp
     assert not any(name.startswith("HTTP ") for name in names)
 
 
+def test_the_request_span_joins_the_callers_trace(monkeypatch):
+    pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry import trace
+
+    exporter, provider = _sdk_provider()
+    monkeypatch.setattr(observability, "_tracer", provider.get_tracer("maverick"))
+    monkeypatch.setattr(observability, "_trace_api", trace)
+    trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+    parent_id = "00f067aa0ba902b7"
+
+    _client().get(
+        "/goals/42",
+        headers={"traceparent": f"00-{trace_id}-{parent_id}-01",
+                 "Cookie": "session=cookie-secret"},
+    )
+    (span,) = exporter.get_finished_spans()
+    assert format(span.context.trace_id, "032x") == trace_id
+    assert format(span.parent.span_id, "016x") == parent_id
+    assert span.parent.is_remote
+    assert "cookie-secret" not in repr((span.name, dict(span.attributes), span.events))
+
+
+def test_a_request_without_trace_headers_starts_a_new_trace(monkeypatch):
+    pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry import trace
+
+    exporter, provider = _sdk_provider()
+    monkeypatch.setattr(observability, "_tracer", provider.get_tracer("maverick"))
+    monkeypatch.setattr(observability, "_trace_api", trace)
+
+    _client().get("/goals/42")
+    (span,) = exporter.get_finished_spans()
+    assert span.parent is None
+
+
+def test_only_the_trace_context_headers_are_read():
+    scope = {"headers": [
+        (b"traceparent", b"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"),
+        (b"tracestate", b"vendor=opaque"),
+        (b"cookie", b"session=secret"),
+        (b"authorization", b"Bearer secret"),
+        (b"x-tenant", b"tenant-7"),
+    ]}
+    assert request_spans._trace_carrier(scope) == {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "tracestate": "vendor=opaque",
+    }
+    assert request_spans._trace_carrier({}) == {}
+
+
 def test_fastapi_own_server_span_is_switched_off_so_no_raw_url_is_exported(monkeypatch):
     """FastAPI 0.143+ opens its own server span once a provider is set; it records the
     raw url.path and url.query. The dashboard's options switch it off."""
