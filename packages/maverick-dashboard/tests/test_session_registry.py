@@ -13,7 +13,12 @@ def _home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     config.reset_config_cache()
+    # The throttle and the open store connection are process-wide: one test's
+    # refresh must not throttle the next test's touch, nor keep its file open.
+    sr._TOUCHED.clear()
     yield
+    sr._drop_shared()
+    sr._TOUCHED.clear()
     config.reset_config_cache()
 
 
