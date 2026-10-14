@@ -6,6 +6,7 @@ it with :meth:`Lightwork.goal_receipt` and the same ``idempotency_key``.
 """
 from __future__ import annotations
 
+import http.client
 import ipaddress
 import json
 import ssl
@@ -181,7 +182,8 @@ class Lightwork:
         sent.update(headers or {})
         try:
             status, response_headers, raw = self._transport(method, url, sent, data, self._timeout)
-        except OSError as exc:  # URLError and TimeoutError are OSError subclasses
+        # URLError and TimeoutError are OSError subclasses; IncompleteRead (a body cut short) is not.
+        except (OSError, http.client.HTTPException) as exc:
             reason = getattr(exc, "reason", None) or exc
             raise LightworkError(None, _scrub(
                 f"request to {self._origin} failed: {reason}", self._token)) from exc

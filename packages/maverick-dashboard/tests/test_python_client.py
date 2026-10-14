@@ -615,3 +615,31 @@ def test_other_hosts_still_use_the_environment_proxy(monkeypatch):
     finally:
         proxy_server.shutdown()
         proxy_server.server_close()
+
+
+def test_a_response_cut_short_is_a_lightwork_error(monkeypatch):
+    """http.client raises IncompleteRead (not an OSError) for a body shorter than its Content-Length."""
+
+    class Truncated(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server naming
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b'{"total"')
+
+        def log_message(self, *args):
+            return
+
+    server = _loopback_server(Truncated)
+    try:
+        for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"):
+            monkeypatch.delenv(name, raising=False)
+        lw = Lightwork(f"http://127.0.0.1:{server.server_address[1]}")
+        with pytest.raises(LightworkError) as caught:
+            lw.spend()
+        assert caught.value.status is None
+        assert "failed" in caught.value.message
+    finally:
+        server.shutdown()
+        server.server_close()
