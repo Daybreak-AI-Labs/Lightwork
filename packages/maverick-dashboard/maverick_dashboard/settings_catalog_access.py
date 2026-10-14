@@ -613,7 +613,8 @@ def _security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           aliases="kms byok key management"),
         S("kms", "key_id", "Key name at the key service",
           "The full name of the key at your key service. For Azure, the key's address, "
-          "such as https://<vault>.vault.azure.net/keys/<name>.",
+          "such as https://<vault>.vault.azure.net/keys/<name>/<version>. Without the version, "
+          "the account needs the keys/get permission.",
           "text", grp, "", "maverick.kms_backends", subgroup=keys, max_length=300,
           pattern=r"[A-Za-z0-9:/._-]{1,300}", restart=True, test="kms",
           env=("MAVERICK_KMS_KEY_ID",), aliases="key id arn"),
