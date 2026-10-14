@@ -9,6 +9,7 @@ unless the request confirms it.
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 from fastapi.testclient import TestClient
@@ -622,3 +623,34 @@ def test_saving_the_contact_centre_token_sends_a_waiting_handoff_without_a_resta
     assert status["state"] == "sent" and status["ticket_id"] == "4242"
     assert len(calls) == 1
     assert token not in repr(audit_rows)
+
+
+def test_the_contact_centre_resume_runs_after_the_settings_writer_lock_is_released(monkeypatch, audit_rows):
+    from maverick import contact_centre
+    from maverick_dashboard import settings_store
+
+    def writer_lock_is_free() -> bool:
+        # Another thread can take the settings writer lock only once the save has released it.
+        taken = []
+
+        def probe():
+            if settings_store._SETTINGS_LOCK.acquire(timeout=2):
+                taken.append(True)
+                settings_store._SETTINGS_LOCK.release()
+
+        thread = threading.Thread(target=probe)
+        thread.start()
+        thread.join()
+        return bool(taken)
+
+    seen = []
+    monkeypatch.setattr(contact_centre, "resume_all_workspaces",
+                        lambda *, restarted=True: seen.append(writer_lock_is_free()) or 0)
+    assert _save([{"id": "contact_centre.provider", "value": "zendesk"},
+                  {"id": "contact_centre.zendesk_subdomain", "value": "acme-support"},
+                  {"id": "contact_centre.zendesk_email", "value": "agent@acme.example"}]).status_code == 200
+    assert seen == [True]
+    # A save that touches no contact-centre setting resumes nothing.
+    assert _save([{"id": "sandbox.timeout", "value": 30}]).status_code == 200
+    assert seen == [True]
+

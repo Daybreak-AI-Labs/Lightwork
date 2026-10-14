@@ -1661,20 +1661,26 @@ async def catalog_update(request: Request, body: CatalogUpdate, full: bool = Fal
                 raise HTTPException(422, "Confirm the complete reviewed changes before saving.")
             from .settings_catalog_requests import apply
             value, status = apply(request, body.reviewed_token, full=full)
+            _resume_contact_centre(value)  # apply has released the writer lock
             return JSONResponse(value, status_code=status, headers={"Cache-Control": "private, no-store"})
         with settings_store._locked(strict=True):
-            return _catalog_update_locked(request, body, full)
+            response = _catalog_update_locked(request, body, full)
+        _resume_contact_centre(json.loads(response.body))  # the writer lock is released
+        return response
 
     return await run_in_threadpool(save)
 
 
-def _resume_contact_centre(writes) -> None:
+def _resume_contact_centre(saved) -> None:
     """Handoffs waiting for contact-centre settings are sent now, not at the next restart.
 
-    The save is already recorded, so a failure here is logged and the handoffs keep their
-    state for the next save or restart.
+    This runs after the settings writer lock is released, so the outbox files of every
+    workspace are not read while other settings writers wait. The settings are
+    deployment-wide, so every active workspace's waiting handoffs are checked.
+    The save is already recorded, so a failure here is logged and the handoffs keep
+    their state for the next save or restart.
     """
-    if not any(path[0] == "contact_centre" for path in writes):
+    if not any(str(item).startswith("contact_centre.") for item in (saved or {}).get("changed") or []):
         return
     try:
         from maverick.contact_centre import resume_all_workspaces
@@ -1768,7 +1774,6 @@ def _catalog_update_locked(request: Request, body: CatalogUpdate, full: bool=Fal
         from .automation_queue import refresh_runtime
 
         refresh_runtime(request)
-    _resume_contact_centre(writes)
     state = _saved_state(before, asked)
     return JSONResponse({'changed': [c['setting'].id for c in changes], 'restart': any(c['setting'].restart for c in changes), **state}, headers={'Cache-Control': 'no-store'})
 
