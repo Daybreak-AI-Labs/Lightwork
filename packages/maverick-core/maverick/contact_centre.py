@@ -146,7 +146,7 @@ def _credential_problem(policy: dict[str, Any]) -> str:
         if not policy["zendesk_email"]:
             return "Enter the Zendesk agent email in Settings."
         if not _secret(ZENDESK_TOKEN_ENV, "zendesk_api_token"):
-            return "Set the Zendesk API token in Settings."
+            return "Set the Zendesk access token (the API token) in Settings."
     elif policy["provider"] == "webhook":
         if not _secret(WEBHOOK_SECRET_ENV, "webhook_secret"):
             return "Set the webhook signing secret in Settings."
@@ -399,7 +399,7 @@ def _send(key: str, entry: dict[str, Any]) -> tuple[str, str, str]:
         token = _secret(ZENDESK_TOKEN_ENV, "zendesk_api_token")
         email = config.get_contact_centre()["zendesk_email"]
         if not token or not email:
-            return "failed", "Set the Zendesk email and API token in Settings. Nothing was sent.", ""
+            return "failed", "Set the Zendesk email and access token (the API token) in Settings. Nothing was sent.", ""
         credential = base64.b64encode(f"{email}/token:{token}".encode()).decode("ascii")
         headers = {"Content-Type": "application/json", "Accept": "application/json",
                    "User-Agent": "Lightwork-ContactCentre/1.0", "Authorization": "Basic " + credential}

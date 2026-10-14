@@ -16,8 +16,8 @@ Settings > Integrations > **Contact centre**, or the `[contact_centre]` table in
 |---|---|
 | Provider | `off` (default), `zendesk` or `webhook`. An unknown value is treated as `off`. |
 | Zendesk subdomain | The part before `.zendesk.com`, such as `acme-support`. Letters, digits and hyphens only, up to 63 characters. |
-| Zendesk agent email | The agent whose API token is used. Tickets are created as that agent. |
-| Zendesk API token | Stored sealed and never shown again. Environment variable `MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN` overrides it. |
+| Zendesk agent email | The agent whose access token is used. Tickets are created as that agent. |
+| Zendesk access token | Stored sealed and never shown again. Environment variable `MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN` overrides it. |
 | Webhook address | A secure `https://` address. Plain `http://` and addresses with a username or password are refused. |
 | Webhook signing secret | Stored sealed and never shown again. Environment variable `MAVERICK_CONTACT_CENTRE_WEBHOOK_SECRET` overrides it. Without it, nothing is sent to the webhook. |
 | Lightwork web address | Used for the link back to the conversation. Leave it empty to send without a link. |

@@ -131,12 +131,12 @@ def _contact_centre_rows(S) -> tuple:
           "text", group, "", "maverick.config", subgroup=sub, max_length=63,
           pattern=r"[a-z0-9][a-z0-9-]{0,62}", aliases="zendesk account"),
         S("contact_centre", "zendesk_email", "Zendesk agent email",
-          "The email address of the Zendesk agent whose API token is used. Tickets are created "
+          "The email address of the Zendesk agent whose access token is used. Tickets are created "
           "as that agent.",
           "text", group, "", "maverick.config", subgroup=sub, max_length=254,
           pattern=_EMAIL),
-        S("contact_centre", "zendesk_api_token", "Zendesk API token",
-          "The API token for the agent above, created in Zendesk under Apps and integrations, "
+        S("contact_centre", "zendesk_api_token", "Zendesk access token",
+          "The access token for the agent above, created in Zendesk under Apps and integrations, "
           "then APIs. It is stored sealed and never shown again. A value set on the server is "
           "used instead.",
           "secret", group, "", "maverick.contact_centre", subgroup=sub, max_length=300,
