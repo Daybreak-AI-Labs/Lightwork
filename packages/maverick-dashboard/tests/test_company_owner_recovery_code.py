@@ -280,3 +280,12 @@ def test_a_completed_step_spends_the_flow_proof_through_the_helper(clock, owner)
     done = routes.passphrase_step(step, lambda: {"done": True}, headers={}, completes="company-signin-recovery")
     assert "flow_proofs" not in record()
     assert isinstance(done, Response) and "mvk_owner_recovery_proof=" in " ".join(done.headers.getlist("set-cookie"))
+
+
+def test_the_restricted_recovery_pages_ask_for_the_owner_code():
+    with client() as web:
+        company = web.get(COMPANY)
+        saml = web.get(SAML)
+    assert company.status_code == 200 and 'id="company-migration-code"' in company.text
+    assert saml.status_code == 200 and "data-saml-code" in saml.text
+    assert "<script>" not in company.text and "onclick=" not in company.text

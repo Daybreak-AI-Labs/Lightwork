@@ -82,3 +82,53 @@ test('the recovery page keeps its entries on a gateway failure that is not a ref
   assert.equal(phrase.value, 'owner passphrase');
   assert.equal(choices.value, 'op1');
 });
+
+const SAML_RECOVERY = `<main><section data-saml-recovery>
+  <input data-saml-email value="owner@example.com">
+  <input data-saml-phrase value="owner passphrase">
+  <input data-saml-code value="">
+  <button data-saml-lookup></button>
+  <select data-saml-recovery-original><option value="">Choose a dated request</option><option value="${'b'.repeat(32)}">Dated</option></select>
+  <button data-saml-original-read></button>
+  <button data-saml-restore-review></button>
+  <div data-saml-recovery-review hidden></div>
+  <p data-saml-recovery-status></p>
+</section></main>`;
+
+test('the activation review sends the owner code with the passphrase', async () => {
+  const sent = [];
+  const ui = load(setupMarkup(), (url, options) => {
+    if (options.method === 'POST') sent.push({url, body: JSON.parse(options.body)});
+    return json(200, loaded);
+  });
+  await settle();
+  ui.doc.querySelector('[data-saml-activation-phrase]').value = 'owner passphrase';
+  ui.doc.querySelector('[data-saml-activation-code]').value = '123456';
+  ui.doc.querySelector('[data-saml-activation-review]').click();
+  await settle();
+  const review = sent.find(item => item.url.endsWith('/activation-review'));
+  assert.ok(review, 'the review was sent');
+  assert.equal(review.body.password, 'owner passphrase');
+  assert.equal(review.body.code, '123456');
+});
+
+test('the restricted SAML recovery sends the owner code, and cancelling a review ends its proof', async () => {
+  const sent = [];
+  const ui = load(SAML_RECOVERY, (url, options) => {
+    sent.push({url, body: options.body ? JSON.parse(options.body) : null});
+    if (url.endsWith('/review')) return json(200, {operation: 'b'.repeat(32), token: 't', changes: {Current: 'Restored'}, notice: 'n'});
+    return json(200, {requests: [{value: 'b'.repeat(32), label: 'Dated'}]});
+  });
+  ui.doc.querySelector('[data-saml-code]').value = '123456';
+  ui.doc.querySelector('[data-saml-lookup]').click();
+  await settle();
+  assert.deepEqual(sent[0].body, {email: 'owner@example.com', password: 'owner passphrase', code: '123456'});
+  ui.doc.querySelector('[data-saml-recovery-original]').value = 'b'.repeat(32);
+  ui.doc.querySelector('[data-saml-restore-review]').click();
+  await settle();
+  const cancel = [...ui.doc.querySelectorAll('[data-saml-recovery-review] button')].find(button => button.textContent === 'Cancel');
+  assert.ok(cancel, 'the review offers a cancel button');
+  cancel.click();
+  await settle();
+  assert.ok(sent.some(item => item.url === '/auth/company-saml-recovery/cancel'));
+});
