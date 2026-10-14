@@ -830,3 +830,16 @@ def test_the_admin_form_sends_whole_dollar_limits_the_api_accepts(chat, model):
     created = _site(chat, daily_cap_dollars=5, messages_per_client_per_day=5000)
     assert created["site"]["daily_cap_dollars"] == 5.0
 
+
+def test_the_catalog_and_docs_say_where_websites_are_managed():
+    from pathlib import Path
+
+    from maverick_dashboard import settings_catalog as catalog
+
+    enabled = catalog.BY_ID["public_chat.enabled"]
+    assert "Channels page" in enabled.help
+    assert "does not exist" not in enabled.help and "not built" not in enabled.help
+    docs = (Path(__file__).resolve().parents[3] / "docs" / "public-chat.md").read_text(encoding="utf-8")
+    assert "dashboard page for this is not built" not in docs
+    assert "A scheduled sweep is not built" not in docs
+    assert "Channels page" in docs

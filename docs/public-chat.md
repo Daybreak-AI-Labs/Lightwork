@@ -21,8 +21,10 @@ chat. It is for development only. Never turn it on for a public website.
 
 ## Add a website
 
-Administrators with the admin permission manage sites through the API. A
-dashboard page for this is not built yet.
+Administrators with the admin permission manage websites on the Channels page,
+under "Chat on your public website". The page adds a website, rotates its key,
+stops it and shows its recent messages. It appears only while the chat is on.
+The same actions are available through the API:
 
 `POST /api/v1/public-chat/sites`
 
