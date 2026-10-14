@@ -264,6 +264,25 @@ def test_each_refusal_is_audited_with_the_actor_and_no_content(world, ledger, ev
     assert "alice" not in json.dumps(refusals) and "remark" not in json.dumps(refusals)
 
 
+def test_a_refused_audit_record_still_refuses_the_erasure_with_the_hold_message(world, ledger, events, monkeypatch):
+    from maverick import incident_attachment_metadata
+    from maverick.audit import AuditRefused
+
+    seeded = _seed(world)
+    ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(
+        record_kinds=["chats", "attachments"]))
+
+    def refuse_audit(kind, **payload):
+        raise AuditRefused("audit is required")
+
+    monkeypatch.setattr(audit, "audit_event", refuse_audit)
+    assert ediscovery.erasure_refusal(world, conversation_ids=[seeded["alice_conv"]], goal_ids=[],
+                                      actor="reviewer-1") == ediscovery.LEGAL_HOLD_MESSAGE
+    uploader = incident_attachment_metadata.principal_ref_for_subject("ws-a", ALICE)
+    assert ediscovery.incident_attachment_refusal("ws-a", principal_ref=uploader,
+                                                  created_at=0.0, actor="reviewer-1") == ediscovery.LEGAL_HOLD_MESSAGE
+
+
 def test_matter_kinds_limit_what_is_held(world, ledger, events):
     seeded = _seed(world)
     ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(record_kinds=["approvals"]))

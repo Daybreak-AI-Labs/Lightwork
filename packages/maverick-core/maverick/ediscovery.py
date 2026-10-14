@@ -697,11 +697,15 @@ def build_scope(world: Any, matter: Mapping[str, Any], *, for_erasure: bool = Fa
 
 
 def _audit_refusal(matter: Mapping[str, Any], *, actor: str, **sizes: int) -> None:
-    from .audit import EventKind, audit_event
+    from .audit import AuditRefused, EventKind, audit_event
 
     # Recorded for the audit reader; the refusal stands even if this record cannot be written.
-    audit_event(EventKind.CONTROL_PLANE_ACTION, agent="ediscovery", verb="ediscovery_erasure_refused",
-                matter_id=matter["id"], actor=actor, **sizes)
+    # The caller raises its hold refusal next, so an audit refusal here must not replace it.
+    try:
+        audit_event(EventKind.CONTROL_PLANE_ACTION, agent="ediscovery", verb="ediscovery_erasure_refused",
+                    matter_id=matter["id"], actor=actor, **sizes)
+    except AuditRefused:
+        pass
 
 
 def personal_holds(owner: str) -> list[dict[str, Any]]:
