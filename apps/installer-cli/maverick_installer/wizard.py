@@ -2113,6 +2113,7 @@ _KNOWLEDGE_SOURCE_LIMITS: tuple[tuple[str, str, int, int, int], ...] = (
     ("max_pages", "Most listing pages for one saved source", 16, 1, 200),
     ("max_download_mib", "Largest SharePoint, OneDrive or Drive file (MiB)", 4, 1, 32),
     ("max_text_kib", "Most source text kept per refresh (KiB)", 256, 1, 8192),
+    ("max_refresh_minutes", "Longest time one saved refresh may run (minutes)", 5, 1, 60),
 )
 
 
@@ -2126,8 +2127,8 @@ def pick_knowledge_sources() -> dict[str, Any]:
     console.print()
     console.print(
         "[dim]Saved company folders and spaces use these limits for each refresh. "
-        "Defaults: 64 items, 16 listing pages, 4 MiB per document and 256 KiB of "
-        "source text. Keep the defaults unless a folder or space is larger.[/dim]"
+        "Defaults: 64 items, 16 listing pages, 4 MiB per document, 256 KiB of "
+        "source text and 5 minutes per refresh. Keep the defaults unless a folder or space is larger.[/dim]"
     )
     if not _q_confirm("Change the size limits for saved company folders and spaces?", default=False):
         return {}
