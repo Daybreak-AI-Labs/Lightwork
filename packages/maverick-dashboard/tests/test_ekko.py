@@ -328,12 +328,12 @@ def test_ekko_inline_script_runs_after_shared_ui_helpers_load(tmp_path, monkeypa
     html = page.text
 
     ui_tag = '<script src="/static/lightwork-ui.js'
-    bootstrap_tag = '<script id="ekko-initial" type="application/json">'
+    bootstrap_tag = 'id="ekko-initial" type="application/json">'
     assert ui_tag in html
     assert bootstrap_tag in html
 
     first_mv_el = html.index("mvEl(")
-    inline_script_open = html.rfind("<script>", 0, first_mv_el)
+    inline_script_open = html.rfind('<script nonce="', 0, first_mv_el)
     assert inline_script_open != -1
     assert inline_script_open > html.index(ui_tag)
     # The JSON bootstrap must still precede the code that reads it.

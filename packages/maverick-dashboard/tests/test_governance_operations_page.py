@@ -377,7 +377,7 @@ def test_governance_operations_inline_javascript_has_valid_syntax(tmp_path):
     start = page.index('<section class="panel" id="governance-operations-panel"')
     end = page.index('<p><a class="back-link" href="/security">', start)
     fragment = page[start:end]
-    match = re.search(r"<script>(.*?)</script>", fragment, flags=re.DOTALL)
+    match = re.search(r'<script nonce="[^"]*">(.*?)</script>', fragment, flags=re.DOTALL)
     assert match is not None
     script_path = tmp_path / "governance-operations.js"
     script_path.write_text(match.group(1), encoding="utf-8")
