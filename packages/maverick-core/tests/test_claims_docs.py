@@ -73,6 +73,12 @@ def test_firecracker_is_described_as_a_scaffold_not_a_deploy_target():
         "docs/handbook.md": None,
         "docs/programs/press-and-case-studies.md": None,
     }
+    enterprise = sorted(
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in (REPO_ROOT / "docs" / "enterprise").rglob("*.md")
+    )
+    for relpath in enterprise:
+        checked.setdefault(relpath, None)
     for relpath, needle in checked.items():
         for line in _read(relpath).splitlines():
             if "firecracker" not in line.lower() or (needle and needle not in line):
