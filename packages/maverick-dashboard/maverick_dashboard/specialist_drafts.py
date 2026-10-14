@@ -198,6 +198,34 @@ def original_history(request):
     return {"context": context, "originals": choices}
 
 
+def unpublished_profiles(request, *, name=None) -> dict:
+    """The newest confirmed saved draft, per specialist this person has not published yet.
+
+    Saved answer checks can be kept for these before the first publication; they
+    are read against the draft. ``name`` limits the answer to one specialist.
+    Nothing is returned to a person without admin access or for an unreadable history.
+    """
+    from maverick import domain
+
+    try:
+        actor, context = authority(request)
+        rows = STORE.list(limit=MAX_RECORDS + 1)
+    except HTTPException:
+        return {}
+    if len(rows) > MAX_RECORDS:
+        return {}
+    published = domain.available_domains()
+    found: dict = {}
+    for row in sorted(rows, key=lambda item: (item["created_at"], item["id"]), reverse=True):
+        if (row.get("actor") != actor or row.get("context") != context or row.get("action") != "save"
+                or row.get("state") != "confirmed" or row.get("_audit_pending")):
+            continue
+        if row["name"] in published or row["name"] in found or (name is not None and row["name"] != name):
+            continue
+        found[row["name"]] = domain._coerce(row["name"], row["profile"])
+    return found
+
+
 def inventory(request, name):
     actor, context = authority(request)
     source = _source(request, name)
@@ -297,8 +325,12 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
                 "reason": reason, "cases": cases, "connection": connection, "expires": time.time() + TTL,
                 "uncertain": uncertain, "acknowledge_previous": acknowledge_previous}
     prepared["tool_services"] = _server_state(profile["mcp_servers"])
-    if action in {"publish", "restore"} and _publication_verdict(prepared)["blocked"] and len(reason.strip()) < 8:
-        raise HTTPException(409, "This complete draft needs a finished passing check of every current saved question, or a reason of at least eight characters for proceeding without one.")
+    if action in {"publish", "restore"}:
+        verdict = _publication_verdict(prepared)
+        if verdict["blocked"] and verdict.get("hard"):
+            raise HTTPException(409, verdict["message"])
+        if verdict["blocked"] and len(reason.strip()) < 8:
+            raise HTTPException(409, "This complete draft needs a finished passing check of every current saved question, or a reason of at least eight characters for proceeding without one.")
     _bounded(prepared)
     authority(request, current, write=True)
     return prepared
@@ -333,25 +365,46 @@ def changes(request, prepared):
     return rows
 
 
+NEW_SPECIALIST_NEEDS_CHECK = ("A new specialist needs at least one saved check before it can be published. "
+                              "Add a check in Workforce, run every saved check on this draft in Agent Factory, "
+                              "then publish it again. A reason cannot skip this.")
+NEW_SPECIALIST_NEEDS_RUN = ("A new specialist can be published only after a full run of every saved check on this "
+                            "exact draft has passed. Run the checks on this draft in Agent Factory, then publish it "
+                            "again. A reason cannot skip this.")
+
+
+def _complete_check(prepared) -> bool:
+    """Whether a finished run of every current saved check passed on exactly this complete draft."""
+    from . import specialist_test_sets as tests
+    current = {case["id"]: case["revision"] for case in tests.cases_for(prepared["name"])}
+    return any(run["state"] == "done" and run["model"] == prepared["connection"]["model"]
+        and run.get("comparison", {}).get("draft_profile") == prepared["profile"]
+        and run.get("comparison", {}).get("connection") == prepared["connection"]
+        and {case["id"]: case["revision"] for case in run["case_revisions"]} == current
+        and bool(current) and len(run["results"]) == len(current)
+        and all(result["passed"] for result in run["results"]) for run in tests.runs_for(prepared["name"]))
+
+
 def _publication_verdict(prepared):
     from maverick.agent_publish_policy import require_passing_tests
+    from maverick.agent_tests_policy import require_for_new_specialists
 
     from . import agent_publish_gate
     before = prepared["before"]["profile"] or {}
     verdict = agent_publish_gate.check(prepared["name"], model=prepared["connection"]["model"], current_instructions=before.get("persona", ""),
         new_instructions=prepared["profile"]["persona"], creating=not before, required=require_passing_tests())
-    if before and before != prepared["profile"] and require_passing_tests():
-        from . import specialist_test_sets as tests
-        current = {case["id"]: case["revision"] for case in tests.cases_for(prepared["name"])}
-        complete = any(run["state"] == "done" and run["model"] == prepared["connection"]["model"]
-            and run.get("comparison", {}).get("draft_profile") == prepared["profile"]
-            and run.get("comparison", {}).get("connection") == prepared["connection"]
-            and {case["id"]: case["revision"] for case in run["case_revisions"]} == current
-            and bool(current) and len(run["results"]) == len(current)
-            and all(result["passed"] for result in run["results"]) for run in tests.runs_for(prepared["name"]))
-        verdict.update(required=True, passing=complete, blocked=not complete,
-            message="Every current saved question passed on this complete draft." if complete else
-            "This complete draft has no finished passing check of every current saved question. Publishing needs a new complete check or an explicit recorded reason.")
+    # A specialist never published before is "hard": no reason publishes it without this proof.
+    new = not before and require_for_new_specialists()
+    if new or (before and before != prepared["profile"] and require_passing_tests()):
+        complete = _complete_check(prepared)
+        if complete:
+            message = "Every current saved question passed on this complete draft."
+        elif new:
+            from . import specialist_test_sets as tests
+            message = NEW_SPECIALIST_NEEDS_RUN if tests.cases_for(prepared["name"]) else NEW_SPECIALIST_NEEDS_CHECK
+        else:
+            message = "This complete draft has no finished passing check of every current saved question. Publishing needs a new complete check or an explicit recorded reason."
+        verdict.update(required=True, passing=complete, blocked=not complete, hard=new, message=message)
     return verdict
 
 
@@ -407,9 +460,10 @@ def original(request, operation, *, prepared=None):
               "recorded_at": row["updated_at"], "notice": NOTICE}
     try:
         source = _source(request, row["name"])
-        if source["profile"] is None:
-            return result
     except HTTPException:
+        return result
+    # A specialist not yet published has no live profile, but its own check outcome is still read here.
+    if source["profile"] is None and not row.get("run"):
         return result
     result.update(name=row["name"], draft=row["id"] if row["action"] == "save" and confirmed else None)
     if row.get("run"):
@@ -513,6 +567,10 @@ def _publication_admission(request, prepared, payload):
 
     from .api import _record_agent_autonomy_intent, _require_tested_instructions
     _guard(request, prepared)
+    verdict = _publication_verdict(prepared)
+    if verdict["blocked"] and verdict.get("hard"):
+        # A brand-new specialist is refused before any reasoned bypass is considered or recorded.
+        raise HTTPException(409, verdict["message"])
     _publication_current(request, prepared, payload)
     _require_tested_instructions(request, prepared["name"], payload, prepared["before"]["profile"])
     if _publication_verdict(prepared)["blocked"]:

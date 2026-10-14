@@ -264,3 +264,74 @@ def test_the_knob_defaults_on_and_stays_on_when_settings_are_unreadable(monkeypa
         assert agent_publish_policy.require_passing_tests() is False
     finally:
         config.reset_config_cache()
+
+
+NEW = "acme_po_helper"
+NEW_ENTERED = {"description": "PO helper", "persona": "You help with purchase orders.",
+               "allow_tools": ["read_file"], "max_risk": "low"}
+
+
+def _check_draft(app, name, draft):
+    """Check a retained complete draft against its saved checks; wait for its confirmed outcome."""
+    checked = _decide(app, name, "check", selected=draft)
+    assert checked.status_code == 200, checked.text
+    operation, original = checked.json()["operation"], checked.json()
+    deadline = time.time() + 20
+    while not (original["confirmed"] and (original.get("run") or {}).get("state") in {"done", "failed", "stopped", "unknown"}):
+        assert time.time() < deadline, original
+        time.sleep(.05)
+        original = app.get(DRAFTS + "/originals/" + operation).json()
+    return original
+
+
+def test_a_new_specialist_needs_a_full_passing_run_on_its_exact_draft_when_switched_on(client, monkeypatch, audit_rows):
+    app, tmp = client
+    from maverick import config
+
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n"
+                                    "[agent_tests]\nrequire_for_new_specialists = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    draft = _save_draft(app, NEW, NEW_ENTERED)
+    # A brand-new specialist can have saved checks before it is published.
+    listed = app.get("/api/v1/workforce-ops/test-suite/specialists").json()["specialists"]
+    assert any(row["value"] == NEW and "not published" in row["label"] for row in listed)
+
+    # Without a saved check, a reason does not publish it.
+    no_check = _decide(app, NEW, "publish", selected=draft, reason="Urgent PO helper needed by finance")
+    assert no_check.status_code == 409 and "at least one saved check" in no_check.json()["detail"]
+    assert "A reason cannot skip this" in no_check.json()["detail"]
+    added = app.post(API + "/customer", json={"specialist": NEW, "task": "A PO has no matching receipt; what now?",
+                                              "includes": ["receipt"], "excludes": [], "refusal": False, "citation": False})
+    assert added.status_code == 200, added.text
+    _answers(monkeypatch, text="Hold payment until a receipt matches.")
+    # A saved check that nobody has run on this draft does not count either.
+    not_run = _decide(app, NEW, "publish", selected=draft, reason="Urgent PO helper needed by finance")
+    assert not_run.status_code == 409 and "full run" in not_run.json()["detail"]
+    assert "A reason cannot skip this" in not_run.json()["detail"]
+    assert app.get("/api/v1/agents/" + NEW).json().get("persona") != NEW_ENTERED["persona"]
+
+    original = _check_draft(app, NEW, draft)
+    assert original["run"]["state"] == "done" and all(row["passed"] for row in original["run"]["results"])
+    published = _decide(app, NEW, "publish", selected=draft)
+    assert published.status_code == 200 and published.json()["confirmed"], published.text
+    assert app.get("/api/v1/agents/" + NEW).json()["persona"] == NEW_ENTERED["persona"]
+    assert not [row for row in audit_rows if row.get("verb") in {
+        "agent_published_without_passing_tests", "agent_draft_published_without_complete_check"}]
+
+
+def test_the_new_specialist_switch_leaves_the_default_and_existing_specialists_alone(client):
+    app, tmp = client
+    from maverick import config
+
+    # Switched off (the default): a brand-new specialist publishes straight away, as before.
+    created = _publish(app, NEW, NEW_ENTERED)
+    assert created.status_code == 200 and created.json()["confirmed"], created.text
+    # Switched on: an existing specialist's changes still take the reasoned route, not the new-specialist refusal.
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n"
+                                    "[agent_tests]\nrequire_for_new_specialists = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    view = _current(app)
+    described = _publish(app, PACK, {"persona": view["persona"], "description": "Chases late POs"},
+                         reason="Description wording approved by procurement")
+    assert described.status_code == 200 and described.json()["confirmed"], described.text
+    assert "saved check" not in str(described.json())

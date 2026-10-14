@@ -223,7 +223,10 @@ async def test_suite(request: Request) -> dict:
 
 def _test_profile(request: Request, name: str):
     from maverick.domain import available_domains
-    profile = available_domains().get(name)
+
+    from . import specialist_drafts
+    # A specialist not yet published keeps its saved checks against its own saved draft.
+    profile = available_domains().get(name) or specialist_drafts.unpublished_profiles(request, name=name).get(name)
     if profile is None:
         raise HTTPException(status_code=404, detail="Choose an agent or specialist from the list.")
     if not domain_suites_allowed(request, name):
@@ -234,17 +237,23 @@ def _test_profile(request: Request, name: str):
 @router.get("/test-suite/specialists")
 async def test_specialists(request: Request) -> dict:
     require_permission(request, "view")
+    from maverick.domain import available_domains
+
     from .plain_labels import pack_display_name
     profiles = _test_profiles(request)
-    return {"specialists": [{"value": name, "label": pack_display_name(name, profile.persona, profile.description)}
+    published = set(available_domains())
+    return {"specialists": [{"value": name, "label": pack_display_name(name, profile.persona, profile.description)
+                             + ("" if name in published else " · not published yet")}
                            for name, profile in sorted(profiles.items())]}
 
 
 def _test_profiles(request: Request) -> dict:
     from maverick.domain import available_domains, suites_for_domain
 
+    from . import specialist_drafts
     from .auth import caller_suites
-    profiles = available_domains()
+    # Published specialists first; a specialist not yet published appears once, from its own saved draft.
+    profiles = {**specialist_drafts.unpublished_profiles(request), **available_domains()}
     allowed = caller_suites(request)
     return {name: profile for name, profile in profiles.items()
             if allowed is None or suites_for_domain(name, profile) <= allowed}
