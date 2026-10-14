@@ -1,5 +1,7 @@
 # Lightwork — Platform Improvement Audit (September 2026)
 
+> **Status (2026-10-14): point-in-time record, not a tracker.** This audit reflects the September 2026 base commit `2d75929`. Its findings are not tracked one by one, so an item listed here may already be fixed. Some critical and high items have been fixed, and the status of the rest has not been recounted. Evidence of the main fixes: commit `3b2c9cf9` (#2452, "integrate the platform-audit fix branches") cites fixes for the critical item (W2-1) and several high items (for example W2-32, W2-33, W2-45, W1-47, W1-48, W1-2, W1-3) in its message. That does not show every high item is closed. Open items as of 2026-10-14 are listed in [docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md).
+
 > Base commit `2d75929` on `main` · branch `claude/platform-improvements-audit-8swoq2` · prepared 2026-09-07.
 > Companion to `CODE_QUALITY_AUDIT.md` (June 2026) and `ADVERSARY_COUNCIL_REVIEW.md` (July 2026).
 

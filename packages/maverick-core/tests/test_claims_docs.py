@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -110,3 +112,33 @@ def test_benchmark_results_say_when_no_live_run_is_recorded():
     assert command in text
     harness = _read("benchmarks/harness.py")
     assert '"--max-dollars"' in harness and '"--tag"' in harness
+
+
+AUDIT_DOCS = (
+    "PLATFORM_IMPROVEMENT_AUDIT.md",
+    "USER_EXPERIENCE_AUDIT.md",
+    "CODE_QUALITY_AUDIT.md",
+)
+
+
+@pytest.mark.parametrize("name", AUDIT_DOCS)
+def test_audit_documents_carry_a_point_in_time_status_note(name):
+    """The three audits list findings with no per-item status. Each must say it is
+    a point-in-time record and point readers at docs/OPEN_ITEMS.md."""
+    head = "\n".join(_read(name).splitlines()[:25])
+    assert "point-in-time" in head.lower()
+    assert "docs/OPEN_ITEMS.md" in head
+
+
+def test_open_items_lists_the_items_still_open():
+    """docs/OPEN_ITEMS.md must carry the candidate items that were verified as
+    open, and mark the first three as in progress in a separate change."""
+    text = _read("docs/OPEN_ITEMS.md")
+    for phrase in (
+        "row-level-security", "unsafe-inline", "SAML", "oidc.auto.tfvars",
+        "deployer.tf", "image_tag", "recovery_window_in_days", "sslmode",
+        "automountServiceAccountToken", "ingress", "use_lockfile",
+        "app.py", "prompt_dsl", "REWRITES", "DigestIndex", "at-least-once",
+    ):
+        assert phrase in text, phrase
+    assert text.count("In progress in a separate change") >= 3
