@@ -289,3 +289,17 @@ def test_the_restricted_recovery_pages_ask_for_the_owner_code():
     assert company.status_code == 200 and 'id="company-migration-code"' in company.text
     assert saml.status_code == 200 and "data-saml-code" in saml.text
     assert "<script>" not in company.text and "onclick=" not in company.text
+
+
+@pytest.mark.parametrize("path", [COMPANY + "/lookup", SAML + "/lookup"])
+def test_a_rejected_owner_code_or_passphrase_is_not_echoed_in_the_validation_error(path):
+    """A 422 names the field, never the rejected value: the code and the passphrase are both secrets."""
+    marker = "CODEMARK" * 5  # longer than the 32-character code field
+    short_phrase = "SHORTPHRASE"  # shorter than the 14-character passphrase minimum
+    with client() as web:
+        too_long = web.post(path, json={"email": EMAIL, "password": PASSPHRASE, "code": marker})
+        no_passphrase = web.post(path, json={"email": EMAIL, "code": marker})
+        too_short = web.post(path, json={"email": EMAIL, "password": short_phrase, "code": "123456"})
+    for refused in (too_long, no_passphrase, too_short):
+        assert refused.status_code == 422, refused.text
+        assert "CODEMARK" not in refused.text and short_phrase not in refused.text and "123456" not in refused.text
