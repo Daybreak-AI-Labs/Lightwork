@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -129,7 +130,8 @@ def test_widget_is_static_cacheable_and_contains_no_secret(chat):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/javascript")
     assert "max-age=" in response.headers["cache-control"]
-    assert "lwpk_" not in response.text and "lwps_" not in response.text
+    # The prefix is public text; a key-shaped token (prefix plus 32 random bytes) is not.
+    assert re.search(r"lwp[ks]_[A-Za-z0-9_-]{20,}", response.text) is None
     assert "data-key" in response.text
 
 
@@ -318,7 +320,8 @@ def test_failed_provider_call_keeps_its_reservation_and_is_not_retried(chat, mod
     token = _session(chat, key)
     model.error = RuntimeError("provider timeout")
     response = _say(chat, token, "one")
-    assert response.status_code == 503
+    assert response.status_code == 200
+    assert "not available right now" in response.json()["answer"]
     assert "provider timeout" not in response.text
     assert len(model.calls) == 1
     model.error = None
@@ -401,7 +404,6 @@ def test_admin_actions_are_audited_without_key_material(chat, model, monkeypatch
 
 def test_admin_routes_need_the_admin_permission(chat, model, monkeypatch):
     from fastapi import HTTPException
-
     from maverick_dashboard import auth
 
     def _deny(request, permission, **kwargs):
