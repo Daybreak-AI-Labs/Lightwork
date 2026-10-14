@@ -19,7 +19,8 @@ Config (``~/.maverick/config.toml``)::
                                            # GCP crypto-key resource name,
                                            # Vault transit key name, or Azure
                                            # https://<vault>.vault.azure.net/keys/<name>[/<version>]
-                                           # (also a Managed HSM key URL)
+                                           # (also a Managed HSM key URL; with no version the
+                                           # account must also have keys/get, or pin one)
     region   = "us-east-1"                 # AWS (or AWS_REGION)
     address  = "https://vault.internal:8200"   # Vault (or VAULT_ADDR)
     mount    = "transit"                   # Vault transit mount
@@ -276,10 +277,14 @@ class AzureKeyVaultKEK:
         aes_key = os.urandom(32)
         wrapped = self._crypto(self.key_id).wrap_key(_AZURE_WRAP_ALG, aes_key)
         key_id = str(wrapped.key_id or "")
-        parts = _azure_key_parts(key_id)
-        if not self._same_key(key_id) or not parts[2]:
+        if not self._same_key(key_id):
             raise EncryptionUnavailable(
-                "Azure Key Vault did not return a versioned id for the configured key")
+                "Azure Key Vault reported a different key (or no key id) than the configured one")
+        if not _azure_key_parts(key_id)[2]:
+            raise EncryptionUnavailable(
+                "Azure Key Vault did not return a versioned id for the configured key: pin a "
+                "version in [kms] key_id (https://<vault>/keys/<name>/<version>), or grant "
+                "keys/get so the current version can be read")
         nonce = os.urandom(_GCM_NONCE_BYTES)
         sealed = AESGCM(aes_key).encrypt(nonce, dek, _AZURE_AAD + (context or b""))
         return (_AZURE_MAGIC + _len2(bytes(wrapped.encrypted_key))

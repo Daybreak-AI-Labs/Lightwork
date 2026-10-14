@@ -241,6 +241,24 @@ def test_azure_wrap_refuses_a_result_that_is_not_a_pinned_version_of_the_key(con
         kek.wrap(b"\x42" * 32, context=b"c")
 
 
+def test_azure_unversioned_key_error_says_how_to_fix_it():
+    # Without keys/get the SDK cannot read the current version, so the operator must
+    # either pin one or grant keys/get; the error has to say so.
+    kek, _ = _azure_kek(key_id=_AZ_KEY, reported_id=_AZ_KEY)
+    with pytest.raises(EncryptionUnavailable, match="pin a version") as err:
+        kek.wrap(b"\x42" * 32, context=b"c")
+    assert "keys/get" in str(err.value)
+
+
+def test_azure_foreign_key_error_does_not_send_the_operator_to_pin_a_version():
+    kek, _ = _azure_kek(
+        key_id=_AZ_V1_ID,
+        reported_id=f"https://evil-kv.vault.azure.net/keys/tenant-kek/{_AZ_V1}")
+    with pytest.raises(EncryptionUnavailable, match="different key") as err:
+        kek.wrap(b"\x42" * 32, context=b"c")
+    assert "pin a version" not in str(err.value)
+
+
 @pytest.mark.parametrize("bad", [
     "http://acme-kv.vault.azure.net/keys/tenant-kek",              # not https
     "https://acme-kv.vault.azure.net/secrets/tenant-kek",          # a secret, not a key
