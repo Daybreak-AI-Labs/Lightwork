@@ -54,6 +54,7 @@ def chat(tmp_path, monkeypatch):
         limit_source=lambda: api.SESSION_KEY_PER_MINUTE, clock=lambda: clock["now"]))
     monkeypatch.setattr(api, "_SESSION_CLIENT_LIMITER", PublicConsentRateLimiter(
         limit_source=lambda: api.SESSION_CLIENT_PER_MINUTE, clock=lambda: clock["now"]))
+    monkeypatch.setattr(api, "_CLIENT_DAY_LIMITER", api._ClientDayLimiter())
     yield SimpleNamespace(
         client=TestClient(dash_app.app, headers={"Origin": "http://testserver"}),
         anon=TestClient(dash_app.app),
@@ -181,6 +182,8 @@ def test_admin_create_shows_key_once_and_stores_only_its_digest(chat, model):
     {"messages_per_session": 31},
     {"messages_per_minute": 7},
     {"retention_days": 0},
+    {"messages_per_client_per_day": 0},
+    {"messages_per_client_per_day": 5001},
     {"origins": ["http://shop.example"]},
     {"origins": ["https://*.example"]},
     {"origins": ["https://shop.example/path"]},
@@ -326,6 +329,147 @@ def test_message_limits_per_session_and_per_minute(chat, model):
     chat.clock["now"] += 61
     assert _say(chat, token, "three").status_code == 200
     assert _say(chat, token, "four").status_code == 429
+
+
+def test_a_client_address_is_capped_per_site_per_day_across_its_sessions(chat, model):
+    created = _site(chat, messages_per_session=10, messages_per_client_per_day=3)
+    key = created["publishable_key"]
+    first = _session(chat, key)
+    assert _say(chat, first, "one").status_code == 200
+    assert _say(chat, first, "two").status_code == 200
+    # A new session has its own per-session count, but the client's day is shared by all its sessions.
+    assert _say(chat, _session(chat, key), "three").status_code == 200
+    capped = _say(chat, _session(chat, key), "four")
+    assert capped.status_code == 429
+    assert capped.json()["detail"] == "you have reached the daily message limit for this chat. Try again later."
+    assert "access-control-allow-origin" in capped.headers
+    assert len(model.calls) == 3
+    # Each message counts for 24 hours from when it was sent: the first slot frees only after a full day.
+    chat.clock["now"] += 86_399
+    assert _say(chat, _session(chat, key), "still capped").status_code == 429
+    chat.clock["now"] += 1
+    assert _say(chat, _session(chat, key), "a day later").status_code == 200
+
+
+def test_the_daily_client_cap_is_counted_separately_for_each_site(chat, model):
+    first = _site(chat, messages_per_client_per_day=1)
+    second = _site(chat, origins=[OTHER], messages_per_client_per_day=1)
+    assert _say(chat, _session(chat, first["publishable_key"]), "one").status_code == 200
+    assert _say(chat, _session(chat, first["publishable_key"]), "two").status_code == 429
+    other_token = _start(chat, second["publishable_key"], origin=OTHER).json()["session_token"]
+    assert _say(chat, other_token, "one", origin=OTHER).status_code == 200
+
+
+def _visitor(address):
+    """A client on its own peer address, for the same site: the daily count is kept per address."""
+    from fastapi.testclient import TestClient
+    from maverick_dashboard import app as dash_app
+
+    return TestClient(dash_app.app, client=(address, 50000))
+
+
+def _visit(client, key, origin=SHOP, forwarded=None):
+    headers = {"Origin": origin, "Authorization": f"PublicChatKey {key}"}
+    if forwarded is not None:
+        headers["X-Forwarded-For"] = forwarded
+    response = client.post("/public/chat/v1/sessions", headers=headers, content=b"{}")
+    assert response.status_code == 201, response.text
+    return response.json()["session_token"]
+
+
+def _ask(client, token, text, origin=SHOP, forwarded=None):
+    headers = {"Authorization": f"PublicChatSession {token}", "Content-Type": "application/json",
+               "Origin": origin}
+    if forwarded is not None:
+        headers["X-Forwarded-For"] = forwarded
+    return client.post("/public/chat/v1/messages", headers=headers,
+                       content=json.dumps({"message": text}).encode("utf-8"))
+
+
+def test_the_daily_count_is_kept_per_client_address_on_one_site(chat, model):
+    key = _site(chat, messages_per_client_per_day=1)["publishable_key"]
+    first, second = _visitor("198.51.100.10"), _visitor("198.51.100.11")
+    assert _ask(first, _visit(first, key), "one").status_code == 200
+    assert _ask(first, _visit(first, key), "two").status_code == 429
+    # A different address on the same site has its own day, not the first address's exhausted one.
+    assert _ask(second, _visit(second, key), "one").status_code == 200
+    assert len(model.calls) == 2
+
+
+def test_an_untrusted_forwarded_address_cannot_move_a_client_to_another_day(chat, model):
+    key = _site(chat, messages_per_client_per_day=1)["publishable_key"]
+    visitor = _visitor("203.0.113.9")
+    # No proxy is trusted, so the forwarded header is ignored: each try is the same address.
+    assert _ask(visitor, _visit(visitor, key), "one", forwarded="198.51.100.7").status_code == 200
+    assert _ask(visitor, _visit(visitor, key), "two", forwarded="198.51.100.8").status_code == 429
+    # Nor does a forwarded header frame the address it names: that address keeps its own day.
+    named = _visitor("198.51.100.7")
+    assert _ask(named, _visit(named, key), "named").status_code == 200
+    assert len(model.calls) == 2
+
+
+def test_the_client_daily_cap_defaults_to_200_and_accepts_up_to_5000(chat, model):
+    created = _site(chat)
+    assert created["site"]["messages_per_client_per_day"] == 200
+    assert chat.client.get("/api/v1/public-chat/sites").json()["sites"][0]["messages_per_client_per_day"] == 200
+    assert _site(chat, origins=[OTHER], messages_per_client_per_day=5000)["site"][
+        "messages_per_client_per_day"] == 5000
+
+
+def test_the_client_day_limiter_keeps_bounded_memory(monkeypatch):
+    from maverick_dashboard import public_chat_api as api
+
+    limiter = api._ClientDayLimiter()
+    monkeypatch.setattr(api, "_MAX_CLIENT_DAY_BUCKETS", 2)
+    assert limiter.allow("site", "a", 1, 0.0) and limiter.allow("site", "b", 1, 1.0)
+    # The table is full. A new client is counted anyway, in place of the client counted longest ago.
+    assert limiter.allow("site", "c", 1, 2.0)
+    assert len(limiter._buckets) == 2
+    assert ("site", "a") not in limiter._buckets
+    # A client still in the table keeps its count: at its limit it is refused, and nothing is added.
+    assert not limiter.allow("site", "b", 1, 3.0)
+    assert not limiter.allow("site", "c", 1, 3.0)
+    assert len(limiter._buckets) == 2
+
+
+def test_a_burst_of_new_clients_never_refuses_a_new_visitor(monkeypatch):
+    from maverick_dashboard import public_chat_api as api
+
+    limiter = api._ClientDayLimiter()
+    monkeypatch.setattr(api, "_MAX_CLIENT_DAY_BUCKETS", 2)
+    assert limiter.allow("site", "old", 1, 0.0)  # its day ends at 86400
+    assert limiter.allow("site", "live", 1, 3_600.0)
+    # The table is full, and the old client's day has ended: it gives way, and the live client keeps its count.
+    assert limiter.allow("site", "new", 1, 86_400.0)
+    assert ("site", "old") not in limiter._buckets
+    assert ("site", "live") in limiter._buckets
+    # Nothing has expired now, so a burst of new addresses pushes out the least recently counted client each time.
+    assert all(limiter.allow("site", f"burst-{number}", 1, 86_401.0 + number) for number in range(10))
+    assert len(limiter._buckets) == 2
+    assert ("site", "burst-9") in limiter._buckets
+
+
+def test_a_site_store_from_before_the_client_cap_gains_the_column(chat, model):
+    import sqlite3
+
+    from maverick_dashboard import public_chat_store as store
+
+    path = store.sites_path(None)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    legacy = sqlite3.connect(str(path))
+    try:
+        legacy.execute("CREATE TABLE chat_sites (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, "
+                       "origins_json TEXT NOT NULL, specialist TEXT NOT NULL, greeting TEXT NOT NULL, "
+                       "daily_cap_dollars REAL NOT NULL, messages_per_session INTEGER NOT NULL, "
+                       "messages_per_minute INTEGER NOT NULL, retention_days INTEGER NOT NULL, "
+                       "state TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL)")
+        legacy.execute("INSERT INTO chat_sites VALUES ('old', 'Old shop', ?, 'finance_ap', '', 1.0, "
+                       "10, 6, 30, 'active', 1.0, 1.0)", (json.dumps([SHOP]),))
+        legacy.commit()
+    finally:
+        legacy.close()
+    assert store.get_site(None, "old")["messages_per_client_per_day"] == 200
+    assert store.get_site(None, "old")["messages_per_client_per_day"] == 200
 
 
 def test_per_minute_limit_is_a_sliding_window_not_a_fixed_one(chat, model):
@@ -512,6 +656,70 @@ def test_retention_is_enforced_for_every_tenant_on_a_visit_without_an_admin_read
     assert _stored_rows("tenant-a", kept["site"]["id"]) == 2  # inside its 30 days
 
 
+def test_the_background_sweep_creates_no_files_where_chat_was_never_used(chat, model, monkeypatch):
+    from maverick import compliance_history, deadline_alerts, webhook_subscriptions
+    from maverick_dashboard import deadline_alerts_scheduler as scheduler
+    from maverick_dashboard import public_chat_store as store
+
+    monkeypatch.setattr(deadline_alerts, "settings", lambda: {"enabled": False, "poll_seconds": 900})
+    monkeypatch.setattr(webhook_subscriptions, "process_due", lambda **kwargs: 0)
+    monkeypatch.setattr(compliance_history, "recheck_if_due", lambda **kwargs: None)
+    scheduler._tick(chat.clock["now"], {})
+    # The sweep ran on this pass (so the pass is what keeps it from creating files), and it still created none.
+    assert store._last_sweep == chat.clock["now"]
+    assert not (chat.home / "public_chat").exists()
+
+
+def test_an_idle_install_purges_expired_transcripts_on_the_background_schedule(chat, model, monkeypatch):
+    # No visit and no admin view happens: only the dashboard's scheduler pass runs the sweep.
+    from maverick import compliance_history, deadline_alerts, webhook_subscriptions
+    from maverick_dashboard import deadline_alerts_scheduler as scheduler
+    from maverick_dashboard import public_chat_store as store
+
+    monkeypatch.setattr(deadline_alerts, "settings", lambda: {"enabled": False, "poll_seconds": 900})
+    monkeypatch.setattr(webhook_subscriptions, "process_due", lambda **kwargs: 0)
+    monkeypatch.setattr(compliance_history, "recheck_if_due", lambda **kwargs: None)
+    created = _site(chat, retention_days=1)
+    site_id = created["site"]["id"]
+    site = store.get_site(None, site_id)
+    t0 = chat.clock["now"]
+    store.append_transcript(None, site, "conversation", "visitor", "inside retention", now=t0)
+    store.append_transcript(None, site, "conversation", "visitor", "two days old", now=t0 - 2 * 86_400)
+    assert _stored_rows(None, site_id) == 2
+    # The dashboard starts: the first pass sweeps at once. Nothing has expired yet except the old row.
+    scheduler._tick(t0, {})
+    assert store._last_sweep == t0
+    assert _stored_rows(None, site_id) == 1
+    # Half an hour later the sweep is not due, so it does not run.
+    store.append_transcript(None, site, "conversation", "visitor", "two days old again", now=t0 - 2 * 86_400)
+    scheduler._tick(t0 + 1_800, {})
+    assert _stored_rows(None, site_id) == 2
+    # An hour after the last sweep it runs again, with no visit needed.
+    scheduler._tick(t0 + 3_600, {})
+    assert store._last_sweep == t0 + 3_600
+    assert _stored_rows(None, site_id) == 1
+
+
+def test_a_workspace_with_a_broken_file_does_not_stop_the_others_being_swept(chat, model, monkeypatch, caplog):
+    from maverick_dashboard import public_chat_store as store
+
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+    broken = _site(chat, retention_days=1)
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-b")
+    healthy = _site(chat, origins=[OTHER], retention_days=1)
+    t0 = chat.clock["now"]
+    for tenant, created in (("tenant-a", broken), ("tenant-b", healthy)):
+        site = store.get_site(tenant, created["site"]["id"])
+        store.append_transcript(tenant, site, "conversation", "visitor", "two days old", now=t0 - 2 * 86_400)
+    assert _stored_rows("tenant-b", healthy["site"]["id"]) == 1
+    # tenant-a's sites file is damaged, so it can be neither read nor written.
+    store.sites_path("tenant-a").write_bytes(b"this is not a database\n" * 100)
+    failed = store.purge_expired(now=t0)
+    assert failed == ["tenant-a"]
+    assert _stored_rows("tenant-b", healthy["site"]["id"]) == 0
+    assert "retention sweep failed for workspace tenant-a" in caplog.text
+
+
 def test_auth_exemption_covers_only_the_public_prefix(chat):
     from maverick_dashboard import auth
 
@@ -632,3 +840,151 @@ def test_settings_catalog_offers_the_two_public_chat_switches():
     assert enabled.reader == "maverick_dashboard.public_chat_api"
     local = catalog.BY_ID["public_chat.allow_localhost_origins"]
     assert local.default is False and local.reader == enabled.reader
+
+
+PARTIAL = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "_public_chat_admin.html"
+ADMIN_JS = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static" / "lightwork-public-chat-admin.js"
+
+
+def test_the_channels_page_shows_the_public_chat_section_only_while_enabled(chat, model):
+    shown = chat.client.get("/channels")
+    assert shown.status_code == 200
+    assert 'id="pc-sites"' in shown.text and 'name="daily_cap_dollars"' in shown.text
+    assert '<option value="finance_ap"' in shown.text
+    assert "/static/lightwork-public-chat-admin.js" in shown.text
+    _write_config(chat.tmp, OFF)
+    hidden = chat.client.get("/channels")
+    assert hidden.status_code == 200
+    assert "Chat on your public website" not in hidden.text
+    assert "pc-sites" not in hidden.text and "lightwork-public-chat-admin.js" not in hidden.text
+
+
+def test_the_section_needs_the_same_admin_check_as_the_admin_api(chat, model, monkeypatch):
+    from maverick_dashboard import auth
+
+    assert chat.api.admin_section_context(object()) != {}
+    monkeypatch.setattr(auth, "has_permission", lambda request, permission, **kwargs: False)
+    assert chat.api.admin_section_context(object()) == {}
+    assert "pc-sites" not in chat.client.get("/channels").text
+
+
+def test_the_section_has_no_inline_handlers_styles_or_inline_scripts():
+    html = PARTIAL.read_text(encoding="utf-8")
+    assert re.search(r"\son[a-z]+\s*=", html) is None
+    assert "style=" not in html
+    # Behaviour lives in the static script, loaded with src; an inline script would need a nonce.
+    for tag in re.findall(r"<script[^>]*>", html):
+        assert "src=" in tag
+
+
+def test_the_section_script_renders_text_only_and_keeps_no_key_in_the_browser():
+    source = ADMIN_JS.read_text(encoding="utf-8")
+    for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "localStorage",
+                      "sessionStorage", "eval(", "Function("):
+        assert forbidden not in source, forbidden
+    assert "textContent" in source
+    # Recent messages: bounded to 50 and shown newest first.
+    assert "limit=50" in source and "slice().reverse()" in source
+
+
+def test_the_form_limits_are_the_api_limits():
+    from maverick_dashboard.public_chat_api import SiteIn
+
+    html = PARTIAL.read_text(encoding="utf-8")
+
+    def tag(name):
+        return re.search(rf'<input[^>]*name="{name}"[^>]*>', html).group(0)
+
+    def attribute(name, attr):
+        return re.search(rf'\s{attr}="([^"]+)"', tag(name)).group(1)
+
+    def bounds(name):
+        found = {}
+        for item in SiteIn.model_fields[name].metadata:
+            for attr in ("gt", "ge", "le", "max_length"):
+                if hasattr(item, attr):
+                    found[attr] = getattr(item, attr)
+        return found
+
+    for name in ("messages_per_session", "messages_per_minute", "messages_per_client_per_day",
+                 "retention_days", "daily_cap_dollars"):
+        limits = bounds(name)
+        assert float(attribute(name, "max")) == float(limits["le"]), name
+        if "ge" in limits:
+            assert float(attribute(name, "min")) == float(limits["ge"]), name
+    for name in ("display_name", "greeting"):
+        assert int(attribute(name, "maxlength")) == bounds(name)["max_length"], name
+
+
+def test_the_admin_form_sends_whole_dollar_limits_the_api_accepts(chat, model):
+    created = _site(chat, daily_cap_dollars=5, messages_per_client_per_day=5000)
+    assert created["site"]["daily_cap_dollars"] == 5.0
+
+
+def test_the_catalog_and_docs_say_where_websites_are_managed():
+    from pathlib import Path
+
+    from maverick_dashboard import settings_catalog as catalog
+
+    enabled = catalog.BY_ID["public_chat.enabled"]
+    assert "Channels page" in enabled.help
+    assert "does not exist" not in enabled.help and "not built" not in enabled.help
+    docs = (Path(__file__).resolve().parents[3] / "docs" / "public-chat.md").read_text(encoding="utf-8")
+    assert "dashboard page for this is not built" not in docs
+    assert "A scheduled sweep is not built" not in docs
+    assert "Channels page" in docs
+
+
+@pytest.mark.parametrize("role", ["operator", "viewer"])
+def test_a_non_admin_gets_no_site_admin_route_and_no_channels_page(chat, model, monkeypatch, role):
+    from maverick_dashboard import auth
+
+    # Made while auth is off, as the local administrator; the caller is a signed-in non-admin below.
+    created = _site(chat)
+    site_id = created["site"]["id"]
+    token = _session(chat, created["publishable_key"])
+    assert _say(chat, token, "a question").status_code == 200
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:staff")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: role)
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: role)
+    refused = [
+        chat.client.get("/api/v1/public-chat/sites"),
+        chat.client.post("/api/v1/public-chat/sites", json={"display_name": "x"}),
+        chat.client.post(f"/api/v1/public-chat/sites/{site_id}/rotate"),
+        chat.client.post(f"/api/v1/public-chat/sites/{site_id}/revoke"),
+        chat.client.get(f"/api/v1/public-chat/sites/{site_id}/transcripts"),
+    ]
+    assert [response.status_code for response in refused] == [403] * 5
+    # The refusals changed nothing: the key still works and the stored messages remain.
+    assert _start(chat, created["publishable_key"]).status_code == 201
+    assert _stored_rows(None, site_id) == 2
+    # The Channels page itself is closed to this role, so the section is never sent to it.
+    assert chat.client.get("/channels").status_code == 403
+
+
+@pytest.mark.parametrize("role", ["operator", "viewer"])
+def test_the_section_context_is_empty_for_a_non_admin_principal(chat, model, monkeypatch, role):
+    from maverick_dashboard import auth
+    from starlette.requests import Request
+
+    request = Request({"type": "http", "method": "GET", "path": "/channels", "headers": [],
+                       "client": ("203.0.113.9", 40000), "query_string": b""})
+    request.state.principal = SimpleNamespace(principal="user:staff")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: role)
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: role)
+    assert chat.api.admin_section_context(request) == {}
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: "admin")
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: "admin")
+    assert chat.api.admin_section_context(request)["public_chat_section"] is True
+
+
+def test_an_admin_caller_gets_the_routes_and_the_section(chat, model, monkeypatch):
+    from maverick_dashboard import auth
+
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:owner")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: "admin")
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: "admin")
+    assert chat.client.get("/api/v1/public-chat/sites").status_code == 200
+    shown = chat.client.get("/channels")
+    assert shown.status_code == 200
+    assert "pc-sites" in shown.text

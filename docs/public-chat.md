@@ -21,8 +21,10 @@ chat. It is for development only. Never turn it on for a public website.
 
 ## Add a website
 
-Administrators with the admin permission manage sites through the API. A
-dashboard page for this is not built yet.
+Administrators with the admin permission manage websites on the Channels page,
+under "Chat on your public website". The page adds a website, rotates its key,
+stops it and shows its recent messages. It appears only while the chat is on.
+The same actions are available through the API:
 
 `POST /api/v1/public-chat/sites`
 
@@ -35,6 +37,7 @@ dashboard page for this is not built yet.
 | `daily_cap_dollars` | Required. Above 0, at most 1000. |
 | `messages_per_session` | 1 to 30 (default 20) |
 | `messages_per_minute` | 1 to 6 (default 6) |
+| `messages_per_client_per_day` | 1 to 5000 (default 200). Messages per client address in any 24 hours, across all its sessions. |
 | `retention_days` | 1 to 365 (default 30) |
 
 The response includes `publishable_key` (`lwpk_...`). It is shown once. Only
@@ -99,8 +102,16 @@ A visitor cannot:
   forwarded visitor address only when the request comes from a proxy listed in
   `[auth.proxy] trusted_proxies`; otherwise it is the direct address. Messages
   are limited per session (at most 30) and per minute (at most 6 in any 60
-  seconds). A new session starts with new message limits, so one client can
-  send more messages across sessions. The daily cap bounds the cost.
+  seconds). A new session starts with new message limits, so the per-client
+  daily limit (`messages_per_client_per_day`) counts across a site's sessions:
+  each message counts for 24 hours from when it was sent. Every message that
+  passes the origin and size checks counts, including one that a session or
+  minute limit then refuses. Visitors who share one address, such as people on
+  the same company network, share that limit. The count is kept in memory for
+  at most 10,000 addresses and restarts with the dashboard. When that table is
+  full, the address whose latest counted message is oldest gives way, so a
+  burst of new addresses never refuses a new visitor; that address starts a new
+  count. The spending cap is kept on disk and bounds the cost.
 - **Answers.** Each answer is one tool-free provider call
   (`LLM.complete` with `tools=None`, one physical attempt, no failover),
   through the budgeted path. Before each call, the answer's share (5 cents)
@@ -111,15 +122,22 @@ A visitor cannot:
   keeps its hold.
 - **Transcripts.** Sealed with the at-rest helper, bound to the tenant, site,
   conversation and row. Stored per tenant. Removed after the site's retention
-  period. Revoking a site deletes its transcripts at once. Retention runs when
-  a visit or an admin view happens; a visit sweeps every tenant, at most once
-  an hour.
-- **Errors.** Refusals use fixed, generic text. A key that is unknown or
-  revoked gets `401` whatever the origin. A live key used from an origin the
-  site does not list gets `403`. The two statuses differ, so a caller who
-  already holds a key can see whether it is still live. The key is public on
-  the host page, so this reveals no secret. Using one status for both cases is
-  an open decision.
+  period. Revoking a site deletes its transcripts at once. Retention runs on
+  the dashboard's background schedule, once when it starts and then at most
+  once an hour, and also when a visit or an admin view happens. Each sweep
+  covers every workspace. An installation that never used the chat creates no
+  files for it.
+- **Errors.** Refusal text is fixed and generic, but the status code is not the
+  same for every refusal. A key that is unknown or revoked gets `401` whatever
+  the origin. A live key used from an origin the site does not list gets `403`.
+  So a caller who holds a key can tell whether it is still live, and, by trying
+  origins, whether a given origin is listed for the site (`201` for a listed
+  origin, `403` for an unlisted one). That reveals no secret: the key is public
+  on the host page by design, and the server stores only its digest, so the key
+  cannot be recovered from the server. An origin list is configuration, though,
+  and it can name hosts that are not public, such as a staging site. Anyone who
+  holds a live key can learn those names this way, so list only the origins
+  that should use the chat.
 - **Audit.** Creating, rotating and revoking a site, and viewing transcripts,
   are audit events without key material. A site is recorded once it exists; if
   the record cannot be written, the new site is revoked again and the request
@@ -129,11 +147,10 @@ A visitor cannot:
 
 - Each answer sees only the visitor's current message, not earlier turns.
 - The visitor waits for the answer in the same request. There is no polling.
-- Transcripts past retention are removed when a visit or an admin view runs,
-  not by a background timer. An installation with no visits and no admin views
-  keeps them until one happens. A scheduled sweep is not built yet.
-- Message limits are per session. A limit per client across sessions is not
-  built; whether to add one is an open decision for the owner.
+- Transcripts past retention are removed by the hourly background pass, so one
+  can outlive its retention by up to an hour. A workspace whose sweep fails is
+  logged and skipped for that pass; the other workspaces are still swept, and
+  the failed one is tried again at the next pass, an hour later.
 - The answer hold is a fixed 5 cents. A model whose estimated cost for one
   answer is above that is refused before the call, so a premium model needs a
   larger hold first. Not built.

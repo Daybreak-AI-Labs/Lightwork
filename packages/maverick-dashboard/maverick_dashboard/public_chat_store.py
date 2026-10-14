@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import re
 import secrets
 import sqlite3
@@ -32,6 +33,8 @@ from urllib.parse import urlsplit
 from maverick.crypto_at_rest import seal_bound, unseal_bound
 from maverick.file_lock import ensure_private_directory, ensure_private_file
 from maverick.paths import data_dir, tenant_scope
+
+logger = logging.getLogger(__name__)
 
 KEY_PREFIX = "lwpk_"
 SESSION_PREFIX = "lwps_"
@@ -69,6 +72,7 @@ _TENANT_SCHEMA = (
     "origins_json TEXT NOT NULL, specialist TEXT NOT NULL, greeting TEXT NOT NULL, "
     "daily_cap_dollars REAL NOT NULL, messages_per_session INTEGER NOT NULL, "
     "messages_per_minute INTEGER NOT NULL, retention_days INTEGER NOT NULL, state TEXT NOT NULL, "
+    "messages_per_client_per_day INTEGER NOT NULL DEFAULT 200, "
     "created_at REAL NOT NULL, updated_at REAL NOT NULL)",
     "CREATE TABLE IF NOT EXISTS chat_spend (site_id TEXT NOT NULL, day TEXT NOT NULL, "
     "dollars REAL NOT NULL DEFAULT 0, PRIMARY KEY (site_id, day))",
@@ -77,6 +81,11 @@ _TENANT_SCHEMA = (
     "role TEXT NOT NULL, sealed TEXT NOT NULL, created_at REAL NOT NULL)",
     "CREATE INDEX IF NOT EXISTS chat_transcripts_site ON chat_transcripts (site_id, created_at)",
 )
+
+
+# Columns a later release added: (table, column, definition). A file an earlier release
+# made gets each missing one added, once, under a write lock.
+_ADDED_COLUMNS = (("chat_sites", "messages_per_client_per_day", "INTEGER NOT NULL DEFAULT 200"),)
 
 
 class ChatStoreError(Exception):
@@ -147,9 +156,31 @@ def _connect(path: Path, schema: tuple[str, ...]) -> Iterator[sqlite3.Connection
         connection.execute("PRAGMA secure_delete=ON")
         for statement in schema:
             connection.execute(statement)
+        _add_missing_columns(connection)
         yield connection
     finally:
         connection.close()
+
+
+def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+
+
+def _add_missing_columns(connection: sqlite3.Connection) -> None:
+    """Add each column in ``_ADDED_COLUMNS`` that the file lacks."""
+    for table, column, definition in _ADDED_COLUMNS:
+        # A file without this table (the shared index) has nothing to add to.
+        if not _columns(connection, table) or column in _columns(connection, table):
+            continue
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            # Checked again under the lock: another connection may have added it first.
+            if column not in _columns(connection, table):
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        except BaseException:
+            connection.execute("ROLLBACK")
+            raise
+        connection.execute("COMMIT")
 
 
 @contextmanager
@@ -175,6 +206,7 @@ def _site(row: sqlite3.Row) -> dict[str, Any]:
         "greeting": row["greeting"], "daily_cap_dollars": row["daily_cap_dollars"],
         "messages_per_session": row["messages_per_session"],
         "messages_per_minute": row["messages_per_minute"],
+        "messages_per_client_per_day": row["messages_per_client_per_day"],
         "retention_days": row["retention_days"], "state": row["state"],
         "created_at": row["created_at"], "updated_at": row["updated_at"],
     }
@@ -198,11 +230,12 @@ def create_site(tenant: str | None, *, site_id: str, fields: dict[str, Any],
             raise ChatStoreError("site_limit")
         db.execute(
             "INSERT INTO chat_sites (id, display_name, origins_json, specialist, greeting, "
-            "daily_cap_dollars, messages_per_session, messages_per_minute, retention_days, state, "
-            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
+            "daily_cap_dollars, messages_per_session, messages_per_minute, messages_per_client_per_day, "
+            "retention_days, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
             (site_id, fields["display_name"], json.dumps(origins), fields["specialist"],
              fields["greeting"], fields["daily_cap_dollars"], fields["messages_per_session"],
-             fields["messages_per_minute"], fields["retention_days"], now, now),
+             fields["messages_per_minute"], fields["messages_per_client_per_day"],
+             fields["retention_days"], now, now),
         )
     key = new_key()
     try:
@@ -391,33 +424,49 @@ def append_transcript(tenant: str | None, site: dict[str, Any], conversation_id:
         )
 
 
-def purge_expired(*, now: float) -> None:
+def purge_expired(*, now: float) -> list[str]:
     """Remove transcripts past their site's retention in every tenant that ever listed a site.
 
-    Rows whose site no longer exists are removed too. Each tenant's file is
-    opened in turn; no site state or key material is read.
+    Rows whose site no longer exists are removed too. Each tenant is handled on
+    its own: a tenant whose file cannot be read or written is logged and skipped,
+    and the others are still swept. Returns the tenants that failed, so the next
+    sweep, which covers every tenant again, tries them again. No site state or key
+    material is read. An installation that never used the chat has no index, so
+    nothing is created for it here.
     """
+    if not index_path().exists():
+        return []
     with _connect(index_path(), _INDEX_SCHEMA) as index:
         tenants = [row[0] or None for row in index.execute(
             "SELECT DISTINCT tenant_id FROM chat_keys").fetchall()]
+    failed: list[str] = []
     for tenant in tenants:
-        with _write(sites_path(tenant), _TENANT_SCHEMA) as db:
-            db.execute("DELETE FROM chat_transcripts WHERE site_id NOT IN (SELECT id FROM chat_sites)")
-            db.execute(
-                "DELETE FROM chat_transcripts WHERE created_at < ? - ? * "
-                "(SELECT retention_days FROM chat_sites WHERE chat_sites.id = chat_transcripts.site_id)",
-                (now, float(_DAY_SECONDS)),
-            )
+        try:
+            with _write(sites_path(tenant), _TENANT_SCHEMA) as db:
+                db.execute("DELETE FROM chat_transcripts WHERE site_id NOT IN (SELECT id FROM chat_sites)")
+                db.execute(
+                    "DELETE FROM chat_transcripts WHERE created_at < ? - ? * "
+                    "(SELECT retention_days FROM chat_sites WHERE chat_sites.id = chat_transcripts.site_id)",
+                    (now, float(_DAY_SECONDS)),
+                )
+        except Exception as exc:  # one workspace's broken file must not stop the others
+            logger.warning("public chat retention sweep failed for workspace %s (%s)",
+                           tenant or "<shared>", type(exc).__name__)
+            failed.append(_tenant_key(tenant))
+    return failed
 
 
-def purge_expired_if_due(*, now: float) -> None:
-    """Run ``purge_expired`` at most once per ``_SWEEP_SECONDS`` of the injected clock."""
+def purge_expired_if_due(*, now: float) -> list[str]:
+    """Run ``purge_expired`` at most once per ``_SWEEP_SECONDS`` of the injected clock.
+
+    Returns the workspaces that failed in that run, or none when the sweep was not due.
+    """
     global _last_sweep
     with _sweep_lock:
         if _last_sweep is not None and 0 <= now - _last_sweep < _SWEEP_SECONDS:
-            return
+            return []
         _last_sweep = now
-    purge_expired(now=now)
+    return purge_expired(now=now)
 
 
 def read_transcripts(tenant: str | None, site: dict[str, Any], *, now: float, limit: int) -> list[dict[str, Any]]:
