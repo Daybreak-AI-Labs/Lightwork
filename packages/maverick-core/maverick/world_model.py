@@ -2647,6 +2647,35 @@ class WorldModel:
         rows = self._read_all(sql, params)
         return _goals_from_rows(rows)
 
+    def goal_states(self, *, owner: str | None = None, limit: int = 10_000,
+                    offset: int = 0, order: str = "asc") -> list[tuple[int, str, float | None]]:
+        """``(id, status, updated_at)`` for the goals ``list_goals`` returns for
+        the same owner, limit, offset and order, read without decrypting any
+        goal (the callers only count, compare or page on these columns)."""
+        direction = "DESC" if order.lower() == "desc" else "ASC"
+        where = " WHERE owner = ?" if owner is not None else ""
+        params = (owner,) if owner is not None else ()
+        rows = self._read_all(
+            f"SELECT id, status, updated_at FROM goals{where} ORDER BY id {direction} LIMIT ? OFFSET ?",
+            (*params, max(1, int(limit)), max(0, int(offset))),
+        )
+        return [(int(row[0]), row[1], row[2]) for row in rows]
+
+    def goals_due_by(self, horizon: float, *, owner: str | None = None,
+                     limit: int = 2000) -> list[Goal]:
+        """The pending or active goals with a non-zero deadline at or before
+        ``horizon`` among the ``limit`` oldest goals (owner-scoped), oldest
+        first. Filtering happens before decryption, so only matches are decoded."""
+        where = " WHERE owner = ?" if owner is not None else ""
+        params = (owner,) if owner is not None else ()
+        rows = self._read_all(
+            "SELECT * FROM (SELECT * FROM goals" + where + " ORDER BY id ASC LIMIT ?) "
+            "WHERE status IN ('pending', 'active') AND deadline IS NOT NULL "
+            "AND deadline != 0 AND deadline <= ? ORDER BY id ASC",
+            (*params, max(1, int(limit)), float(horizon)),
+        )
+        return _goals_from_rows(rows)
+
     def list_goal_results(self, *, owner: str, limit: int = 26,
                           offset: int = 0) -> list[Goal]:
         """Completed root tasks with saved output for the owner's Results page.
