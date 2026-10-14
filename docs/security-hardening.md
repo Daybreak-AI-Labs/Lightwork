@@ -683,6 +683,8 @@ want_assertions_signed = true
 session_secret = "<32+ random bytes>"   # SAML reuses the browser-login session secret
 ```
 
+Setting `want_assertions_signed = false` does not accept unsigned sign-ins: the SP then requires a signed response instead, so an unsigned assertion is still refused.
+
 **Needs the extra:** from the reviewed Lightwork checkout, run
 `python -m pip install -e './packages/maverick-core[saml]'` (pysaml2). The
 routes 503 with a hint if it's absent.
