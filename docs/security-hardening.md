@@ -426,14 +426,15 @@ totp = "optional"   # "optional" (default) | "required" | "off"
 | Value | What the owner sees |
 |---|---|
 | `optional` | Account > Authenticator app offers set-up. Nothing changes until the owner turns it on. |
-| `required` | After the next passphrase sign-in, the owner must set up the app before reaching anything else. |
+| `required` | The owner must set up the app before reaching anything else: at first owner set-up, and at the next passphrase sign-in for an owner who has none. |
 | `off` | The option is hidden and changes are refused. An owner who already has the app on is still asked for a code. |
 
 The rule, in full: an owner who already has the app on is asked for a code at
 every sign-in, whatever `totp` says, so an unreadable or invalid value never
 turns that second factor off. An unreadable or unrecognised `totp` value reads
-as `optional`. `required` only forces set-up on an owner who has not set one up,
-and `required` refuses turning the app off.
+as `optional`; the log warns about it, and `maverick config-lint` reports it.
+`required` only forces set-up on an owner who has not set one up, and `required`
+refuses turning the app off.
 
 How it works:
 
