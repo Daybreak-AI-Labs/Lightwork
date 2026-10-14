@@ -42,3 +42,18 @@ def test_readme_tamper_evidence_headline_names_its_key_custody():
     )
     assert "same host" in headline
     assert "MAVERICK_AUDIT_SIGNING_KEY" in headline
+
+
+def test_public_material_names_only_a_registered_proof_pack_command():
+    """`maverick proof-pack` is not a registered CLI command; the click group has
+    `proof` (the workforce value report) and no proof-pack. The signed evidence
+    bundle is built by `python -m maverick.proof_pack`, which has a __main__ block."""
+    module = _read("packages/maverick-core/maverick/proof_pack.py")
+    assert 'if __name__ == "__main__"' in module
+    paths = ["README.md"]
+    for root in ("pitch", "docs"):
+        for path in sorted((REPO_ROOT / root).rglob("*")):
+            if path.suffix in {".md", ".html"}:
+                paths.append(path.relative_to(REPO_ROOT).as_posix())
+    stale = [p for p in paths if "maverick proof-pack" in _read(p)]
+    assert stale == [], f"unregistered 'maverick proof-pack' command in: {stale}"

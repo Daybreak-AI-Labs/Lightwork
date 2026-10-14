@@ -45,7 +45,7 @@ repriced to **reward defensible IP and punish thin AI wrappers.**
 - **Grounded in primary sources:** **37 read-only public-data connectors**
   (SEC EDGAR, FRED, Treasury, CourtListener, openFDA, PubMed, …) auto-granted by
   suite, so analysts cite authoritative sources instead of model recall.
-- **The product proves its own guarantees:** `maverick proof-pack` emits an
+- **The product proves its own guarantees:** `python -m maverick.proof_pack` emits an
   **Ed25519-signed evidence bundle** (governance guarantees + reliability cert +
   performance SLA + shield results), verifiable offline.
 - **A governance demo that runs in front of you:** a finance specialist boots

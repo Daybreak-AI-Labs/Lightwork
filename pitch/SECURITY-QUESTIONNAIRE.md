@@ -119,7 +119,7 @@
 |---|---|:---:|---|
 | 9.1 | Are changes to the agent's learned behavior reversible? | ✅ | Every learned change is snapshotted and one command from rollback; a hindsight engine detects learning regressions before they ship. |
 | 9.2 | Is there an emergency stop for in-flight work? | ✅ | Global kill switch (see 2.6). |
-| 9.3 | Can you prove the system's guarantees on demand? | ✅ | `maverick proof-pack` emits an Ed25519-signed evidence bundle (governance, reliability, performance, shield) that verifies offline and refuses to fabricate. |
+| 9.3 | Can you prove the system's guarantees on demand? | ✅ | `python -m maverick.proof_pack` emits an Ed25519-signed evidence bundle (governance, reliability, performance, shield) that verifies offline and refuses to fabricate. |
 
 ---
 
@@ -140,7 +140,7 @@
    verifiable trail.
 2. **Verify the chain offline:** `maverick audit verify --pubkey <key>`.
 3. **Inspect the roster guarantees:** `maverick domains-lint` / `domains-audit`.
-4. **Get the evidence bundle:** `maverick proof-pack`.
+4. **Get the evidence bundle:** `python -m maverick.proof_pack`.
 
 > Numbers and control states above reflect the current alpha and are subject to
 > change. For your specific questionnaire (SIG, VSA, vendor-specific), send it
