@@ -10925,6 +10925,15 @@ def goal_cost_breakdown(request: Request, goal_id: int) -> JSONResponse:
     return JSONResponse({"goal_id": goal_id, "total_dollars": round(total, 4), "buckets": rows})
 
 
+def _owned_goal_ids(world, owner: str) -> set[int]:
+    """Ids of the owner's newest 10,000 goals. A world that reads the status
+    columns alone is asked for the ids only, so no goal is decrypted here."""
+    states = getattr(world, "goal_states", None)
+    if callable(states):
+        return {gid for gid, _status, _updated in states(owner=owner, limit=10_000, order="desc")}
+    return {g.id for g in world.list_goals(owner=owner, limit=10_000, order="desc")}
+
+
 @app.get("/api/v1/cost/anomalies")
 def cost_anomalies(
     request: Request,
@@ -10947,7 +10956,7 @@ def cost_anomalies(
     owner = goal_owner_filter(request)
     owned: set[int] | None = None
     if owner is not None:
-        owned = {g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")}
+        owned = _owned_goal_ids(w, owner)
     by_goal: dict[int, float] = {}
     for ep in w.list_episodes(limit=limit):
         gid = getattr(ep, "goal_id", None)
@@ -11345,10 +11354,16 @@ def cost_by_tag_api(
     limit = max(1, min(int(limit), 10_000))
     w = _world()
     owner = goal_owner_filter(request)
-    goal_ids = None
-    if owner is not None:
-        goal_ids = [g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")]
-    buckets = split_by_tag(gather(w, tag_field=tag_field, limit=limit, goal_ids=goal_ids))
+    if owner is not None and hasattr(w, "episodes_for_owner_goals"):
+        # One owner-scoped query: the newest goals' runs, no per-goal reads.
+        rows = gather(w, tag_field=tag_field,
+                      episodes=w.episodes_for_owner_goals(owner, limit=limit))
+    else:
+        goal_ids = None
+        if owner is not None:
+            goal_ids = [g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")]
+        rows = gather(w, tag_field=tag_field, limit=limit, goal_ids=goal_ids)
+    buckets = split_by_tag(rows)
     return JSONResponse({"tag_field": tag_field, "buckets": buckets})
 
 

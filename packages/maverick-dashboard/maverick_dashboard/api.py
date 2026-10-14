@@ -4144,12 +4144,14 @@ def _finance_sod() -> dict:
     """Structural SoD lint over the shipped finance/banking packs -- the
     record/authorize/custody/reconcile separation, checked statically."""
     try:
-        from maverick.domain import builtin_dir, load_domains
+        from maverick.domain import builtin_domains
         from maverick.finance.sod_linter import lint_roster
 
+        # The memoised shipped catalogue: re-parsing all ~2,000 packs per
+        # request cost ~700 ms for a roster of 122 finance and bank packs.
         packs = {
             n: d
-            for n, d in load_domains(builtin_dir()).items()
+            for n, d in builtin_domains().items()
             if n.startswith(("finance", "bank"))
         }
         conflicts = lint_roster(packs)
@@ -4671,11 +4673,14 @@ def _binder_payload(days: int = 90) -> dict:
     w = _world()
     approvals = []
     # A regulator-facing export must disclose every record in its exact window;
-    # it must not silently inherit the UI feed's default limit.
-    for approval in w.list_approvals(limit=2_147_483_647):
-        if not (cutoff <= float(approval.requested_at or 0) <= now):
-            continue
-        state = w.approval_state(approval.id) or {}
+    # it must not silently inherit the UI feed's default limit. The window is
+    # filtered in SQL, so approvals outside it are never decrypted.
+    listed = w.approvals_requested_between(cutoff, now)
+    # One batched read of the quorum state for the window, not three queries
+    # per approval (2,400 ms for 2,000 approvals before).
+    states = w.approval_states(listed)
+    for approval in listed:
+        state = states.get(approval.id) or {}
         approvers = list(state.get("approvers") or [])
         approvals.append(
             {

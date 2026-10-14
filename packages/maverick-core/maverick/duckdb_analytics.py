@@ -69,9 +69,13 @@ class WorldAnalytics:
                 "INSERT INTO goals VALUES (?, ?, ?)",
                 [(g.id, getattr(g, "title", "") or "", getattr(g, "status", None)) for g in goals],
             )
+        from .world_model import episodes_by_goal_batch
+
         erows = []
+        batch = episodes_by_goal_batch(world, [g.id for g in goals], per_goal=limit)
         for g in goals:
-            for e in world.list_episodes(goal_id=g.id, limit=limit):
+            for e in (batch[g.id] if batch is not None and g.id in batch
+                      else world.list_episodes(goal_id=g.id, limit=limit)):
                 erows.append(
                     (
                         g.id,

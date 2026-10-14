@@ -2130,6 +2130,27 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         return [_dec_approval_row(r) for r in rows]
 
+    def approvals_requested_between(self, since: float, until: float) -> list:
+        """The SQLite twin's window read: same bounds, same order, same
+        tenant scope as :meth:`list_approvals`."""
+        frag, params = _tenant_scope()
+        where = ["requested_at >= %s", "requested_at <= %s"]
+        p: list = [float(since), float(until)]
+        if frag:
+            where.insert(0, frag)
+            p = list(params) + p
+        sql = (
+            "SELECT id, action, risk, scope, detail, provenance, status, "
+            "requested_at, decided_at, claimed_by, claimed_at, decided_by, "
+            "approvals_required, requested_by, goal_id, department, undo_hold "
+            "FROM approvals WHERE " + " AND ".join(where)
+            + " ORDER BY requested_at DESC, id DESC"
+        )
+        with self._tx() as cur:
+            cur.execute(sql, tuple(p))
+            rows = cur.fetchall()
+        return [_dec_approval_row(r) for r in rows]
+
     def release_processed_message(self, channel: str, external_id: str) -> None:
         """Undo a ``mark_message_processed`` claim so a failed run can retry."""
         with self._tx() as cur:
@@ -4744,10 +4765,10 @@ class PostgresWorldModel:
         with self._tx() as cur:
             cur.execute(
                 "SELECT approver, decision FROM approval_signoffs "
-                "WHERE approval_id = %s ORDER BY decided_at", (approval_id,),
+                "WHERE approval_id = %s ORDER BY decided_at, approver", (approval_id,),
             )
             rows = cur.fetchall()
-        from ..world_model import _single_approver
+        from ..world_model import _approval_state_view, _single_approver
 
         approvers = _single_approver(appr, [r[0] for r in rows if r[1] == "approved"])
         scope, params = _approval_outbox_scope()
@@ -4758,14 +4779,43 @@ class PostgresWorldModel:
                 tuple([approval_id, *params]),
             )
             audit_pending = int(cur.fetchone()[0])
+        return _approval_state_view(appr, approvers, audit_pending)
+
+    def approval_states(self, approvals) -> dict[int, dict]:
+        """Batched :meth:`approval_state` for approvals the caller has already
+        listed (tenant-scoped): two queries for the set, each value equal to
+        ``approval_state(id)``."""
+        from ..world_model import _approval_state_view, _single_approver
+
+        listed = {int(a.id): a for a in approvals}
+        if not listed:
+            return {}
+        ids = list(listed)
+        signoffs: dict[int, list[str]] = {approval_id: [] for approval_id in ids}
+        pending: dict[int, int] = dict.fromkeys(ids, 0)
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT approval_id, approver, decision FROM approval_signoffs "
+                "WHERE approval_id = ANY(%s) ORDER BY decided_at, approver", (ids,),
+            )
+            for approval_id, approver, decision in cur.fetchall():
+                if decision == "approved":
+                    signoffs[int(approval_id)].append(approver)
+        scope, params = _approval_outbox_scope()
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT approval_id, COUNT(*) FROM approval_audit_outbox "
+                f"WHERE approval_id = ANY(%s) AND delivered_at IS NULL AND {scope} "
+                "GROUP BY approval_id",
+                tuple([ids, *params]),
+            )
+            for approval_id, count in cur.fetchall():
+                pending[int(approval_id)] = int(count)
         return {
-            "status": appr.status,
-            "approvals_required": max(1, int(appr.approvals_required or 1)),
-            "approved_count": len(approvers),
-            "approvers": approvers,
-            "requested_by": appr.requested_by,
-            "audit_pending_count": audit_pending,
-            "effective": appr.status != "pending",
+            approval_id: _approval_state_view(
+                appr, _single_approver(appr, signoffs[approval_id]), pending[approval_id]
+            )
+            for approval_id, appr in listed.items()
         }
 
     def claim_approval(self, approval_id: int, principal: str) -> bool:
