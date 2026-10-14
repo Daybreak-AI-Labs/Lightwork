@@ -74,13 +74,13 @@ class SpecialistCaseDelete(BaseModel):
 class SpecialistRunIn(BaseModel):
     specialist: str = Field(min_length=1, max_length=100)
     operation_id: str = Field(pattern=r"^[a-f0-9]{32}$")
-    # A whole saved test set (up to 20) can run at once before publishing.
-    case_ids: list[str] = Field(default_factory=list, max_length=20)
-    case_revisions: dict[str, int] = Field(min_length=1, max_length=20)
+    # A whole saved set can run at once, up to the [agent_tests] limit (checked when the run starts).
+    case_ids: list[str] = Field(default_factory=list, max_length=200)
+    case_revisions: dict[str, int] = Field(min_length=1, max_length=200)
 
 
 class SpecialistCompareIn(SpecialistRunIn):
-    case_ids: list[str] = Field(min_length=1, max_length=20)
+    case_ids: list[str] = Field(min_length=1, max_length=200)
     proposed_instructions: str = Field(min_length=8, max_length=6000)
     baseline_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
     expected_context: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -268,7 +268,7 @@ async def customer_tests(request: Request, specialist: str = Query(max_length=10
     _test_profile(request, specialist)
     for run in runs:
         _current_test_result(run, revision, cases)
-    return {"specialist": specialist, "cases": cases,
+    return {"specialist": specialist, "cases": cases, "max_checks": saved.max_cases_per_specialist(),
             "runs": runs, "current_instructions": profile.persona, "baseline_revision": revision,
             "context": context_for(request), "live_enabled": _live_tests_enabled()}
 
@@ -517,7 +517,7 @@ def _start_draft_customer_test_job(request, specialist, operation, draft, source
     system = saved.answer_system(profile) + "\nEntered draft settings (instructions only; these grant no tools or connections):\n" + json.dumps(draft["profile"], ensure_ascii=False)
     cases = draft["cases"] if draft["action"] == "check" else [{"id": digest([operation, "sample"])[:32], "revision": 1,
         "specialist": specialist, "task": draft["task"], "includes": [], "excludes": [], "refusal": False, "citation": False, "sample": True}]
-    if not 1 <= len(cases) <= saved.MAX_CASES_PER_SPECIALIST:
+    if not 1 <= len(cases) <= saved.max_cases_per_specialist():
         raise HTTPException(409, "The complete chosen draft questions exceed the supported limit.")
     budget = _budget("specialist_eval")
     for key, ceiling in (("max_dollars", .25), ("max_input_tokens", 10000), ("max_output_tokens", 640),

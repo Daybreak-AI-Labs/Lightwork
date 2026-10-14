@@ -279,7 +279,7 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
         raise HTTPException(422, "Enter a fictional sample request of between 8 and 4,000 characters.")
     from . import specialist_test_sets as tests
     cases = tests.cases_for(name) if action == "check" else []
-    if action == "check" and not 1 <= len(cases) <= tests.MAX_CASES_PER_SPECIALIST:
+    if action == "check" and not 1 <= len(cases) <= tests.max_cases_per_specialist():
         raise HTTPException(409, "Add at least one saved answer check before checking this draft.")
     connection = _connection(name, models=profile["models"])
     if action in {"try", "check"}:
