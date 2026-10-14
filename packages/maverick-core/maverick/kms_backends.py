@@ -231,14 +231,17 @@ def _azure_sig_digest(encrypted_key: bytes, key_id: bytes, nonce: bytes, sealed:
 
 def _azure_refused(operation: str, permission: str, err: Exception) -> EncryptionUnavailable:
     """The operator-facing error for a refused Key Vault operation. The service's own text
-    is not carried along (it can name the caller), and a 403 names the missing permission."""
+    is not carried along (it can name the caller). A 403 names the missing permission; any
+    other failure names both things to check: the key must allow the operation, and the
+    identity needs the permission."""
     if getattr(err, "status_code", None) == 403:
         return EncryptionUnavailable(
             f"Azure Key Vault refused the {operation} operation: the identity this server "
             f"uses needs the {permission} permission on the key")
     return EncryptionUnavailable(
-        f"Azure Key Vault {operation} operation failed ({type(err).__name__}); "
-        "the envelope is refused")
+        f"Azure Key Vault {operation} operation failed ({type(err).__name__}): the key must "
+        f"allow {operation} and the identity needs the {permission} permission; the envelope "
+        "is refused")
 
 
 def _azure_key_parts(key_id: str) -> tuple[str, str, str] | None:

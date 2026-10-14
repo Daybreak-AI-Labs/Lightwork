@@ -156,6 +156,12 @@ class _Forbidden(Exception):
     status_code = 403
 
 
+class _Refused(Exception):
+    """Shaped like azure.core's HttpResponseError for a refusal that is not a 403."""
+
+    status_code = 400
+
+
 class _FakeAzureVault:
     """The ``client_factory`` injected into AzureKeyVaultKEK: one CryptographyClient fake
     per key id, all backed by one real RSA key. ``log`` records each operation in order,
@@ -486,6 +492,33 @@ def test_azure_sign_refused_by_the_vault_names_the_missing_permission():
     assert marker not in str(err.value)
     # The service error must not ride along as __context__ either (raised outside except).
     assert err.value.__context__ is None
+
+
+@pytest.mark.parametrize("error", [
+    _Refused("400 for principal-7f3a-marker: bad request"),
+    RuntimeError("connection reset for principal-7f3a-marker"),
+])
+def test_azure_sign_failure_without_a_403_names_the_key_and_the_permission(error):
+    kek, _ = _azure_kek(sign_error=error)
+    with pytest.raises(EncryptionUnavailable, match="allow sign") as err:
+        kek.wrap(b"\x42" * 32, context=b"c")
+    assert "keys/sign" in str(err.value)
+    assert "principal-7f3a-marker" not in str(err.value)
+    assert err.value.__context__ is None
+
+
+@pytest.mark.parametrize("error", [
+    _Refused("400 for principal-7f3a-marker: bad request"),
+    RuntimeError("connection reset for principal-7f3a-marker"),
+])
+def test_azure_verify_failure_without_a_403_names_the_key_and_the_permission(error):
+    kek, fake = _azure_kek(verify_error=error)
+    wrapped = kek.wrap(b"\x42" * 32, context=b"c")
+    with pytest.raises(EncryptionUnavailable, match="allow verify") as err:
+        kek.unwrap(wrapped, context=b"c")
+    assert "keys/verify" in str(err.value)
+    assert "principal-7f3a-marker" not in str(err.value)
+    assert not any(op == "unwrap" for op, *_ in fake.log)
 
 
 @pytest.mark.parametrize("error, expected", [
