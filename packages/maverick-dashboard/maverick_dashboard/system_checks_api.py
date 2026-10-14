@@ -867,10 +867,12 @@ def _cleanup_preview(days: int, activity_days: int) -> dict[str, Any]:
 
 
 def _cleanup_run(days: int, activity_days: int) -> dict[str, int]:
-    from maverick.ediscovery import LegalHoldApplies, assert_no_active_matters
+    from maverick.ediscovery import LegalHoldApplies
+    from maverick.records_gc import assert_no_broad_holds
 
+    # The same gate as `maverick gc`: a recorded privacy-rights case hold or an active matter pauses it.
     try:
-        assert_no_active_matters()
+        assert_no_broad_holds()
     except LegalHoldApplies as exc:
         raise HTTPException(409, str(exc)) from exc
     world = _cleanup_world()

@@ -46,8 +46,12 @@ active matter still applies, including the ones not listed.
 retention enforcement, `maverick gc`, the dashboard "Tidy up old records" action,
 the all-workspaces clean-up, and the retention review (which shows the workspace as
 blocked). Any active matter blocks these, because the stores cannot reliably tell
-which records belong to which custodian. Whole-client erasure and the erasure of a
-removed workspace are also refused while a matter is active.
+which records belong to which custodian. A privacy-rights case hold recorded for the
+workspace (a legal hold, or a retention block on a privacy request) pauses the same
+actions. If the privacy-rights records cannot be read, the actions pause too. The
+all-workspaces clean-up skips such a workspace and reports it as held. Whole-client
+erasure and the erasure of a removed workspace are also refused while a matter is
+active.
 
 **Erasing a person is refused only for records in scope.** A closure is refused
 when it contains a record that is in the matter's:
@@ -155,8 +159,6 @@ tamper evidence for an export.
 - **Timing.** The hold check runs just before a deletion. The ledger is a separate
   database, so a matter created while a deletion is already running is not seen by
   that deletion. The next check sees it.
-- **Privacy-rights case holds** do not yet pause `maverick gc` or the Tidy up action.
-  They block retention enforcement only. Closing that gap is a separate change.
 
 ## Releasing a hold
 

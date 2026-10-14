@@ -422,3 +422,18 @@ def test_the_real_permission_gate_admits_only_admins_and_auditors(tmp_path, monk
     if not allowed:
         assert response.status_code == 403
     config.reset_config_cache()
+
+
+def test_tidy_up_is_paused_by_a_recorded_privacy_rights_hold(env, monkeypatch):
+    from maverick.audit import preservation
+
+    monkeypatch.setattr(preservation, "preservation_snapshot", lambda: {"blocked": True})
+    with pytest.raises(HTTPException) as refused:
+        system_checks_api._cleanup_run(30, 30)
+    assert refused.value.status_code == 409
+    assert refused.value.detail == "Recorded preservation holds block broad deletion in this workspace."
+
+
+def test_tidy_up_runs_unchanged_when_no_hold_is_recorded(env):
+    # No privacy-rights ledger exists in this temporary home, so nothing is held.
+    assert system_checks_api._cleanup_run(30, 30) == {"conversations": 0, "activity": 0, "duplicate_checks": 0}
