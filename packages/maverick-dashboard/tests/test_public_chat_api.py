@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 SHOP = "https://shop.example"
 EVIL = "https://evil.example"
+OTHER = "https://store.example"
 ON = "[public_chat]\nenabled = true\n"
 OFF = "[public_chat]\nenabled = false\n"
 WIDGET = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static" / "lightwork-public-chat-widget.js"
@@ -138,7 +139,9 @@ def test_widget_is_static_cacheable_and_contains_no_secret(chat):
 def test_widget_inserts_text_only_and_never_evaluates_markup():
     source = WIDGET.read_text(encoding="utf-8")
     for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
-                      "eval(", "new Function", "setTimeout(\""):
+                      "createContextualFragment", "DOMParser", "eval(", "Function(",
+                      "setTimeout(\"", "setTimeout('", "setInterval(\"", "setInterval('",
+                      "javascript:"):
         assert forbidden not in source, forbidden
     assert "textContent" in source and "attachShadow" in source
 
@@ -173,7 +176,8 @@ def test_admin_create_rejects_out_of_bounds_values(chat, model, bad):
             "greeting": "Hi", "daily_cap_dollars": 1.0}
     body.update(bad)
     response = chat.client.post("/api/v1/public-chat/sites", json=body)
-    assert response.status_code in {404, 409, 422}, response.text
+    # Each bad value is a validation refusal, not a missing route or a conflict.
+    assert response.status_code == 422, response.text
 
 
 def test_origin_normalization_is_exact_and_localhost_needs_the_dev_flag(chat):
@@ -207,6 +211,23 @@ def test_wrong_or_missing_origin_is_403(chat, model):
     assert _start(chat, key, origin=EVIL).status_code == 403
     assert _start(chat, key, origin=None).status_code == 403
     assert _start(chat, key, origin="null").status_code == 403
+
+
+@pytest.mark.parametrize("origin", [EVIL, None, OTHER])
+def test_message_with_wrong_or_missing_origin_is_refused_and_counted_nowhere(chat, model, origin):
+    # OTHER is a listed origin of the same site: only the session's own origin binding refuses it.
+    created = _site(chat, origins=[SHOP, OTHER], messages_per_session=2)
+    token = _session(chat, created["publishable_key"])
+    refused = _say(chat, token, "hello", origin=origin)
+    assert refused.status_code == 403
+    assert refused.json()["detail"] == "this website is not allowed to use this chat"
+    assert "access-control-allow-origin" not in refused.headers
+    assert model.calls == []
+    # The refusal used no message from the session and wrote no transcript row.
+    assert _say(chat, token, "hi").json()["remaining_messages"] == 1
+    site_id = created["site"]["id"]
+    viewed = chat.client.get(f"/api/v1/public-chat/sites/{site_id}/transcripts").json()
+    assert [row["text"] for row in viewed["messages"]] == ["hi", model.text]
 
 
 def test_cors_is_granted_only_to_the_sites_exact_origins(chat, model):
