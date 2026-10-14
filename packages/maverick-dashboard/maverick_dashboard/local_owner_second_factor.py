@@ -411,7 +411,7 @@ def disable(*, password: object, code: object) -> None:
             local_owner._count_failure(row)
             raise HTTPException(401, WRONG_CODE)
         _audit("owner_authenticator_disabled", row["email"])
-        for key in ("totp", "totp_step", "totp_setup", "recovery", "flow_proofs"):
+        for key in ("totp", "totp_step", "totp_setup", "recovery"):
             row.pop(key, None)
         row.update(failures=0, locked_until=0)
         local_owner._write(row)

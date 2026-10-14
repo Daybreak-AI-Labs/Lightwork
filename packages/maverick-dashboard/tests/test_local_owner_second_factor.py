@@ -824,7 +824,8 @@ def test_an_unenrolled_owner_passes_the_step_on_the_passphrase_alone_as_before(c
     assert "flow_proofs" not in row() and "totp" not in row()
 
 
-def test_turning_the_app_off_also_ends_recovery_proofs(monkeypatch, clock):
+def test_turning_the_app_off_leaves_recovery_proofs_alone(monkeypatch, clock):
+    """Turning the app off changes only the app: a recovery proof is spent by its flow, not by this."""
     from maverick_dashboard import local_owner
     from maverick_dashboard import local_owner_second_factor as second
     capture_audit(monkeypatch)
@@ -834,7 +835,7 @@ def test_turning_the_app_off_also_ends_recovery_proofs(monkeypatch, clock):
     local_owner.verify_recovery(step, email=EMAIL, password=PASSPHRASE, flow=FLOW, code=current_code(secret, clock))
     clock.advance(30)
     second.disable(password=PASSPHRASE, code=current_code(secret, clock))
-    assert "flow_proofs" not in row() and "totp" not in row()
+    assert "totp" not in row() and len(row()["flow_proofs"]) == 1
 
 
 def test_a_malformed_proof_record_makes_owner_authority_unavailable(clock):
