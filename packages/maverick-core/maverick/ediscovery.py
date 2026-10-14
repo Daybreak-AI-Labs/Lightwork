@@ -356,6 +356,18 @@ class MatterStore:
                         revision=payload["revision"], changed=sorted(fields))
             return self._save(connection, tenant_id, payload)
 
+    def record_read(self, *, actor: str, verb: str, matter_id: str = "", revision: int = 0, shown: int = 0) -> None:
+        """Audit a reading of matter details.  The record names no custodian and no matter definition.
+
+        Fails closed: the details are not shown when their access record cannot be written.
+        """
+        from .audit import EventKind, audit_event
+
+        written = audit_event(EventKind.CONTROL_PLANE_ACTION, agent="ediscovery", verb=verb,
+                              matter_id=matter_id, actor=actor, revision=revision, shown=shown)
+        if not written:
+            raise EdiscoveryError("Matter details were not shown because their access record could not be written.")
+
     def release(self, tenant: object, matter_id: object, *, actor: str, expected_revision: int) -> dict[str, Any]:
         tenant_id = self._tenant(tenant)
         matter_id = self._matter_id(matter_id)

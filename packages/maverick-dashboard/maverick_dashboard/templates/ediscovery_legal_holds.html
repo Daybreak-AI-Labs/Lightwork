@@ -13,9 +13,9 @@
       <label>Description (optional)
         <textarea class="input" name="description" maxlength="2000" rows="2"></textarea>
       </label>
-      <label>Custodians: one person or account per line
+      <label>Custodians: one person per line
         <textarea class="input" name="custodians" rows="3" required
-                  placeholder="dashboard user name, or user:channel:identifier for a messaging account"></textarea>
+                  placeholder="user:name for a dashboard user, or user:channel:identifier for a messaging account"></textarea>
       </label>
       <label>From (optional)
         <input class="input" type="date" name="date_from">
@@ -217,17 +217,20 @@
     }
     return article;
   }
-  function render(matters, reload) {
+  function render(matters, reload, truncated) {
     list.replaceChildren();
     if (!matters.length) {
       list.appendChild(text("p", "No legal holds yet.", "muted"));
       return;
     }
     matters.forEach(function (matter) { list.appendChild(card(matter, reload)); });
+    if (truncated) {
+      list.appendChild(text("p", "Only the first 500 legal holds are listed here. Every active hold still applies, including any not listed.", "muted"));
+    }
   }
   function reload() {
     request("GET", API).then(function (body) {
-      render(body.matters, reload);
+      render(body.matters, reload, body.truncated);
       announce(body.matters.length ? "" : "No legal holds yet.");
     }).catch(function (error) { announce(error.message); });
   }

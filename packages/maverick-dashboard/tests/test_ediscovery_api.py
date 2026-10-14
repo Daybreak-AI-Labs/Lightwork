@@ -129,6 +129,7 @@ def test_auditors_and_admins_manage_matters_and_export_them(env, role):
     assert exported.headers["cache-control"] == "no-store"
     with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
         assert "manifest.json" in archive.namelist()
+    assert list((env.ledger.parent / "exports").glob("*.zip")) == []
 
     released = env.client.post(f"{BASE}/{matter['id']}/release", headers=headers, json={"expected_revision": 3})
     assert released.status_code == 200 and released.json()["status"] == "released"
@@ -330,4 +331,94 @@ def test_inbox_erasure_request_is_held_before_any_message_is_erased(env, monkeyp
     assert outcome["state"] == "held" and outcome["message"] == ediscovery.LEGAL_HOLD_MESSAGE
     assert [item["text"] for item in inbox_module.owned_items(owner)] == ["Exact next request"]
     assert inbox_module.STORE.get(record_id)["revision"] == revision
+    config.reset_config_cache()
+
+
+def test_an_archive_is_removed_even_when_its_download_is_cut_off(tmp_path):
+    import asyncio
+
+    archive = tmp_path / "legal-matter.zip"
+    archive.write_bytes(b"personal data" * 100)
+    response = api._ArchiveResponse(archive, media_type="application/zip")
+    sent: list[str] = []
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        sent.append(message["type"])
+        if message["type"] == "http.response.body":
+            raise ConnectionResetError("the reviewer's connection dropped")
+
+    scope = {"type": "http", "method": "GET", "headers": []}
+    with pytest.raises(ConnectionResetError):
+        asyncio.run(response(scope, receive, send))
+    assert sent == ["http.response.start", "http.response.body"]
+    assert not archive.exists()
+
+
+def test_archives_left_by_an_export_that_never_finished_are_swept(env):
+    import os
+    import time
+
+    created = env.client.post(BASE, json=_body()).json()
+    exports = env.ledger.parent / "exports"
+    exports.mkdir(exist_ok=True)
+    stale = exports / "mtr-0000000000000000-deadbeef.zip"
+    stale.write_bytes(b"left behind")
+    old = time.time() - 7200
+    os.utime(stale, (old, old))
+    assert env.client.get(f"{BASE}/{created['id']}/export").status_code == 200
+    assert not stale.exists()
+
+
+def test_the_matter_list_is_capped_and_says_so(env, monkeypatch):
+    monkeypatch.setattr(api, "MAX_LISTED", 2)
+    for name in ("First", "Second", "Third"):
+        assert env.client.post(BASE, json=_body(name=name)).status_code == 201
+    body = env.client.get(BASE).json()
+    assert len(body["matters"]) == 2 and body["truncated"] is True
+    assert env.client.get(BASE).status_code == 200
+
+
+def test_reading_matter_details_is_audited_without_custodians_and_fails_closed(env, monkeypatch):
+    created = env.client.post(BASE, json=_body()).json()
+    env.client.get(BASE)
+    env.client.get(f"{BASE}/{created['id']}")
+    views = [payload for verb, payload in env.recorded if verb in {"ediscovery_matters_listed",
+                                                                   "ediscovery_matter_viewed"}]
+    assert [verb for verb, _ in env.recorded][-2:] == ["ediscovery_matters_listed", "ediscovery_matter_viewed"]
+    assert views[-1]["matter_id"] == created["id"] and views[-1]["actor"] == "local"
+    assert ALICE not in str(views) and "Acme dispute" not in str(views)
+
+    monkeypatch.setattr(audit, "audit_event", lambda kind, **payload: False)
+    refused = env.client.get(BASE)
+    assert refused.status_code == 503 and "were not shown" in refused.json()["detail"]
+    assert "Acme dispute" not in refused.text
+
+
+@pytest.mark.parametrize("role, allowed", [("admin", True), ("auditor", True),
+                                           ("operator", False), ("viewer", False)])
+def test_the_real_permission_gate_admits_only_admins_and_auditors(tmp_path, monkeypatch, role, allowed):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from maverick import config
+    from maverick_dashboard import auth
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    config.reset_config_cache()
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:reviewer")
+    rbac.set_role("user:reviewer", role)
+    monkeypatch.setattr(ediscovery, "enabled", lambda: True)
+    monkeypatch.setattr(ediscovery, "store_path", lambda tenant=None: tmp_path / "ledger.sqlite3")
+    monkeypatch.setattr(paths_module, "current_tenant_id_strict", lambda: "ws-a")
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api/v1")
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+    response = client.get(BASE)
+    assert (response.status_code == 200) is allowed, (role, response.status_code)
+    if not allowed:
+        assert response.status_code == 403
     config.reset_config_cache()

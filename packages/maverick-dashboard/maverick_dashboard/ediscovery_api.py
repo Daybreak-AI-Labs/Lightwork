@@ -7,12 +7,13 @@ permission; the admin role holds it too.  Refusals to erase name no matter.
 from __future__ import annotations
 
 import re
+import time
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
-from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from .auth import caller_principal, has_global_permission, require_global_permission
@@ -20,6 +21,8 @@ from .auth import caller_principal, has_global_permission, require_global_permis
 router = APIRouter(prefix="/ediscovery", tags=["ediscovery"])
 _ID_RE = re.compile(r"mtr-[0-9a-f]{16}\Z")
 RecordKind = Literal["goals", "chats", "attachments", "approvals"]
+MAX_LISTED = 500
+STALE_EXPORT_SECONDS = 3600
 
 
 class _Strict(BaseModel):
@@ -109,11 +112,23 @@ def _public(matter: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in matter.items() if key not in {"schema", "tenant_id"}}
 
 
+async def _record_read(request: Request, store, **detail: Any) -> None:
+    """Audit a reading of matter details before they are returned (fails closed)."""
+    actor = _actor(request)
+    try:
+        await run_in_threadpool(lambda: store.record_read(actor=actor, **detail))
+    except Exception as exc:  # noqa: BLE001 -- translated below; unknown errors re-raise
+        raise _translate(exc) from exc
+
+
 @router.get("/matters")
 async def list_matters(request: Request) -> dict[str, Any]:
     tenant = _gate(request)
-    rows = await run_in_threadpool(_store(tenant).list, tenant)
-    return {"matters": [_public(row) for row in rows]}
+    store = _store(tenant)
+    # One row beyond the cap tells the page that more matters exist. Holds still apply to all of them.
+    rows = await run_in_threadpool(store.list, tenant, limit=MAX_LISTED + 1)
+    await _record_read(request, store, verb="ediscovery_matters_listed", shown=min(len(rows), MAX_LISTED))
+    return {"matters": [_public(row) for row in rows[:MAX_LISTED]], "truncated": len(rows) > MAX_LISTED}
 
 
 @router.post("/matters", status_code=201)
@@ -131,10 +146,14 @@ async def create_matter(request: Request, body: MatterIn) -> dict[str, Any]:
 async def get_matter(request: Request, matter_id: str) -> dict[str, Any]:
     tenant = _gate(request)
     matter_id = _matter_id(matter_id)
+    store = _store(tenant)
     try:
-        return _public(await run_in_threadpool(_store(tenant).get, tenant, matter_id))
+        matter = await run_in_threadpool(store.get, tenant, matter_id)
     except Exception as exc:  # noqa: BLE001
         raise _translate(exc) from exc
+    await _record_read(request, store, verb="ediscovery_matter_viewed", matter_id=matter_id,
+                       revision=matter["revision"])
+    return _public(matter)
 
 
 @router.patch("/matters/{matter_id}")
@@ -167,10 +186,31 @@ async def release_matter(request: Request, matter_id: str, body: ReleaseIn) -> d
 
 def _discard(path) -> None:
     from contextlib import suppress
-    from pathlib import Path
 
     with suppress(OSError):
         Path(path).unlink()
+
+
+def _sweep_stale_exports(directory: Path) -> None:
+    """Remove archives left by an export that never finished, such as a stopped process."""
+    cutoff = time.time() - STALE_EXPORT_SECONDS
+    for path in Path(directory).glob("*.zip"):
+        if path.stat().st_mtime < cutoff:
+            _discard(path)
+
+
+class _ArchiveResponse(FileResponse):
+    """Streams one export and removes its file however the transfer ends.
+
+    Starlette runs a background task only after a complete send, so a download
+    cut off by the client would otherwise leave personal data on disk.
+    """
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            _discard(self.path)
 
 
 @router.get("/matters/{matter_id}/export")
@@ -185,6 +225,7 @@ async def export_matter(request: Request, matter_id: str) -> FileResponse:
     store = _store(tenant)
 
     def build():
+        _sweep_stale_exports(store.path.parent / "exports")
         matter = store.get(tenant, matter_id)
         return ediscovery_export.export_matter(_world(), matter, actor=actor, out_dir=store.path.parent / "exports")
 
@@ -192,12 +233,11 @@ async def export_matter(request: Request, matter_id: str) -> FileResponse:
         result = await run_in_threadpool(build)
     except ediscovery.EdiscoveryError as exc:
         raise _translate(exc) from exc
-    return FileResponse(
+    return _ArchiveResponse(
         result["path"],
         media_type="application/zip",
         filename=f"legal-matter-{matter_id}.zip",
         headers={"Cache-Control": "no-store"},
-        background=BackgroundTask(_discard, result["path"]),
     )
 
 
