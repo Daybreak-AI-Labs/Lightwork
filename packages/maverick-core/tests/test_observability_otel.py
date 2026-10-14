@@ -531,7 +531,7 @@ def sdk_tracer(monkeypatch):
 
 
 def test_failed_span_records_no_message_and_names_only_the_type(sdk_tracer):
-    secret = "sk-live-do-not-export"
+    secret = "sk-live-do-not-export"  # pragma: allowlist secret
     with pytest.raises(RuntimeError):
         with obs.trace_span("tool.run", attributes={"tool.name": "fetch"}):
             raise RuntimeError(f"upstream rejected {secret}")
