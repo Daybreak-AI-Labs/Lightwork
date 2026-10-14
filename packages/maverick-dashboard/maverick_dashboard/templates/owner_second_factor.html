@@ -1,5 +1,5 @@
 {% extends "public_base.html" %}
-{% from "_passphrase_fields.html" import styles %}
+{% from "_passphrase_fields.html" import styles with context %}
 {% block title %}{% if view == 'codes' %}Recovery codes{% elif view == 'setup' %}Set up your authenticator app{% else %}Enter your code{% endif %} · Lightwork{% endblock %}
 {% block public_label %}Sign in{% endblock %}
 {% block public_footer %}Sign in to this workspace{% endblock %}
@@ -35,7 +35,7 @@
       <input class="input" type="text" name="code" maxlength="6" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}">
     </label>
     <div class="own__actions">
-      <button type="submit" class="btn btn--primary">Turn on authenticator app</button>
+      <button type="submit" class="btn">Turn on authenticator app</button>
       <a href="{{ cancel }}">Cancel</a>
     </div>
   </form>
@@ -47,7 +47,7 @@
   </ol>
   <p class="own__hint">Keep them somewhere safe and away from your phone. Each one signs you in once if you lose your phone.</p>
   <div class="own__actions">
-    <a class="btn btn--primary" href="{{ next_href }}">Continue</a>
+    <a class="btn" href="{{ next_href }}">Continue to Lightwork</a>
   </div>
 {% endif %}
 </div>
