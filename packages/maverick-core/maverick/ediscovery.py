@@ -524,11 +524,21 @@ def build_scope(world: Any, matter: Mapping[str, Any], *, for_erasure: bool = Fa
     return scope
 
 
-def assert_erasure_permitted(world: Any, *, conversation_ids: Sequence[int], goal_ids: Sequence[int]) -> None:
+def _audit_refusal(matter: Mapping[str, Any], *, actor: str, conversations: int, goals: int) -> None:
+    from .audit import EventKind, audit_event
+
+    # Recorded for the audit reader; the refusal stands even if this record cannot be written.
+    audit_event(EventKind.CONTROL_PLANE_ACTION, agent="ediscovery", verb="ediscovery_erasure_refused",
+                matter_id=matter["id"], actor=actor, conversations=conversations, goals=goals)
+
+
+def assert_erasure_permitted(world: Any, *, conversation_ids: Sequence[int], goal_ids: Sequence[int],
+                             actor: str = "system") -> None:
     """Refuse an erasure closure that contains any in-scope record of an active matter.
 
     Approvals are never deleted by an erasure, so they are not part of the closure
-    check.  Any failure to enumerate a matter's scope refuses the erasure.
+    check.  Any failure to enumerate a matter's scope refuses the erasure.  Each
+    refusal is audited with the acting principal and closure sizes, never content.
     """
     try:
         matters = active_matters()
@@ -546,13 +556,15 @@ def assert_erasure_permitted(world: Any, *, conversation_ids: Sequence[int], goa
         except Exception as exc:  # failure-policy: fail_closed -- unknown read failures refuse erasure
             raise LegalHoldApplies(HOLD_UNVERIFIED_MESSAGE) from exc
         if wanted_conversations & scope.conversation_ids() or wanted_goals & scope.goal_ids():
+            _audit_refusal(matter, actor=actor, conversations=len(wanted_conversations), goals=len(wanted_goals))
             raise LegalHoldApplies(LEGAL_HOLD_MESSAGE)
 
 
-def erasure_refusal(world: Any, *, conversation_ids: Sequence[int], goal_ids: Sequence[int]) -> str | None:
+def erasure_refusal(world: Any, *, conversation_ids: Sequence[int], goal_ids: Sequence[int],
+                    actor: str = "system") -> str | None:
     """The plain refusal text for an erasure closure, or ``None`` when it may proceed."""
     try:
-        assert_erasure_permitted(world, conversation_ids=conversation_ids, goal_ids=goal_ids)
+        assert_erasure_permitted(world, conversation_ids=conversation_ids, goal_ids=goal_ids, actor=actor)
     except LegalHoldApplies as exc:
         return str(exc)
     return None

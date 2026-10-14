@@ -5685,7 +5685,7 @@ def _refuse_under_legal_hold(ctx, world, conversation_ids) -> None:
 
     plan_hook = getattr(world, "plan_conversation_erasure", None)
     goal_ids = plan_hook(conversation_ids)["goal_ids"] if callable(plan_hook) else []
-    message = erasure_refusal(world, conversation_ids=conversation_ids, goal_ids=goal_ids)
+    message = erasure_refusal(world, conversation_ids=conversation_ids, goal_ids=goal_ids, actor="cli")
     if message:
         ctx.obj["erase_refusal"] = message
         click.echo(message, err=True)

@@ -257,7 +257,8 @@ def _erase_conversations(world, row, target):
     from maverick.erasure_receipts import build_manifest, persist_receipt
     plan = target["scope"]
     # A legal matter holds only the in-scope closure. Nothing is erased or receipted then.
-    refusal = erasure_refusal(world, conversation_ids=plan["conversation_ids"], goal_ids=plan["goal_ids"])
+    refusal = erasure_refusal(world, conversation_ids=plan["conversation_ids"], goal_ids=plan["goal_ids"],
+                              actor=row.get("reviewer") or row.get("owner") or "system")
     if refusal:
         return {"state": "held", "message": refusal,
                 "retained": "No conversation, task or attachment in this closure was erased."}

@@ -232,6 +232,18 @@ def test_erasure_of_another_person_and_out_of_range_records_is_allowed(world, le
                                       goal_ids=[seeded["bob_goal"]]) == ediscovery.LEGAL_HOLD_MESSAGE
 
 
+def test_each_refusal_is_audited_with_the_actor_and_no_content(world, ledger, events):
+    seeded = _seed(world)
+    matter = ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values())
+    with pytest.raises(ediscovery.LegalHoldApplies):
+        ediscovery.assert_erasure_permitted(world, conversation_ids=[seeded["alice_conv"]],
+                                            goal_ids=[seeded["alice_goal"]], actor="reviewer-1")
+    refusals = [payload for verb, payload in events if verb == "ediscovery_erasure_refused"]
+    assert refusals == [{"verb": "ediscovery_erasure_refused", "matter_id": matter["id"], "actor": "reviewer-1",
+                         "conversations": 1, "goals": 1}]
+    assert "alice" not in json.dumps(refusals) and "remark" not in json.dumps(refusals)
+
+
 def test_matter_kinds_limit_what_is_held(world, ledger, events):
     seeded = _seed(world)
     ediscovery.MatterStore(ledger).create("ws-a", actor="auditor", values=_values(record_kinds=["approvals"]))
