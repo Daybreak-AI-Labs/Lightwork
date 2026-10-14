@@ -353,12 +353,15 @@ def _probe_native_cloud(name: str) -> dict[str, Any]:
             default_headers=route.headers_dict(), environment=route.environment_dict(),
         )
         model_id = client.deployment if name == "azure" else client.DEFAULT_MODEL
-        if name == "vertex" and not model_id:
-            return {
-                "verified": None,
-                "detail": "enter the model ID shown in your Vertex AI Model Garden",
-                "evidence": {"kind": "setup_incomplete", "external_live_verified": False},
-            }
+        if name == "vertex":
+            from maverick.providers.vertex_provider import valid_model_id
+
+            if not valid_model_id(model_id):
+                return {
+                    "verified": None,
+                    "detail": "enter the model ID exactly as shown in your Vertex AI Model Garden",
+                    "evidence": {"kind": "setup_incomplete", "external_live_verified": False},
+                }
         chosen = model_for_role("default")
         if chosen.startswith(f"{name}:") and chosen.partition(":")[2] != model_id:
             return {

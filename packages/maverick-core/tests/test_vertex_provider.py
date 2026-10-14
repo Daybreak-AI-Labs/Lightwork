@@ -322,7 +322,7 @@ def test_preflight_names_the_missing_vertex_prerequisites(monkeypatch):
 
 
 @pytest.mark.parametrize("bad", ["claude-haiku-4-5/../../other", "claude-haiku-4-5:rawPredict",
-                                 "claude haiku", "claude-haiku-4-5?x=1", ""])
+                                 "claude haiku", "claude-haiku-4-5?x=1", "claude-haiku-4-5", ""])
 def test_model_ids_cannot_reshape_the_request_path(fake_sdk, bad):
     from maverick.providers.vertex_provider import VertexClient
 
@@ -330,6 +330,33 @@ def test_model_ids_cannot_reshape_the_request_path(fake_sdk, bad):
     with pytest.raises((RuntimeError, ValueError)):
         c._build_request("sys", [{"role": "user", "content": "hi"}], None, 64, None, bad)
     assert c.client.calls == []
+
+
+@pytest.mark.parametrize("bad", ["claude-haiku-4-5/../../other@1", "claude-haiku-4-5:rawPredict@1",
+                                 "claude-haiku-4-5", "claude-haiku-4-5@2025/x", ""])
+def test_prewarm_sends_nothing_for_a_model_id_outside_the_vertex_form(fake_sdk, bad):
+    from maverick.providers.vertex_provider import VertexClient
+
+    c = VertexClient(environment=_ENV)
+    # Large enough that the cache-minimum gate would otherwise let the warm through.
+    assert c.prewarm("x" * 40_000, None, bad) is False
+    assert c.client.calls == []
+
+
+def test_prewarm_warms_the_cache_for_a_vertex_model(fake_sdk):
+    from maverick.providers.vertex_provider import VertexClient
+
+    c = VertexClient(environment=_ENV)
+    assert c.prewarm("x" * 40_000, None, _HAIKU) is True
+    assert [call["model"] for call in c.client.calls] == [_HAIKU]
+
+
+def test_a_hostile_configured_model_id_is_refused_at_construction(fake_sdk):
+    from maverick.providers.vertex_provider import VertexClient
+
+    with pytest.raises(ValueError, match="model"):
+        VertexClient(environment={**_ENV, "VERTEX_MODEL_ID": "claude-haiku-4-5/../../other@1"})
+    assert _FakeVertex.instances == []
 
 
 def test_a_vertex_model_can_be_put_on_the_allow_list(monkeypatch, tmp_path):

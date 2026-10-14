@@ -889,8 +889,8 @@ def _provider_setup_details(name: str, values: dict[str, str] | None) -> dict[st
             raise ValueError("enter the Google Cloud project ID")
         if "region" in details and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", details["region"]):
             raise ValueError("enter a Vertex AI region such as us-east5")
-        if "model_id" in details and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,119}", details["model_id"]):
-            raise ValueError("enter the Claude model ID exactly as shown in the Vertex AI Model Garden")
+        if "model_id" in details and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}@[A-Za-z0-9][A-Za-z0-9._-]{0,63}", details["model_id"]):
+            raise ValueError("enter the Claude model ID exactly as shown in the Vertex AI Model Garden, such as claude-haiku-4-5@20251001")
     return details
 
 

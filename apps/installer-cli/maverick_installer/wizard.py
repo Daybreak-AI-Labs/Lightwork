@@ -960,7 +960,7 @@ def pick_vertex() -> dict[str, Any]:
     while True:
         model_id = _q_text("  Claude model ID, exactly as shown in the Vertex AI Model Garden",
                            default="").strip()
-        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,119}", model_id):
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}@[A-Za-z0-9][A-Za-z0-9._-]{0,63}", model_id):
             break
         console.print("[yellow]Enter the model ID as shown in the Model Garden, for example claude-haiku-4-5@20251001.[/yellow]")
     return {"project_id": project, "region": region, "model_id": model_id}

@@ -120,3 +120,49 @@ def test_vertex_probe_refuses_to_guess_a_model(monkeypatch):
     result = probe_provider("vertex", {})
     assert result["verified"] is None
     assert result["evidence"]["kind"] == "setup_incomplete"
+
+
+def test_vertex_probe_sends_nothing_for_a_model_id_outside_the_vertex_form(monkeypatch):
+    from maverick.llm import LLM
+    from maverick_dashboard.integration_readiness import probe_provider
+
+    sent = []
+
+    class Messages:
+        def create(self, **values):
+            sent.append(values)
+            raise AssertionError("no request may carry a model id outside the Vertex form")
+
+    class Wire:
+        messages = Messages()
+
+        def with_options(self, **options):
+            return self
+
+    class HostileClient:
+        DEFAULT_MODEL = "claude-haiku-4-5/../../other@1"
+        client = Wire()
+
+    route = SimpleNamespace(api_key=None, base_url=None,
+                            headers_dict=lambda: None, environment_dict=dict)
+    monkeypatch.setattr(LLM, "_provider_client_config", lambda self, name: route)
+    monkeypatch.setattr("maverick.providers.get_provider_client", lambda *args, **kwargs: HostileClient())
+    monkeypatch.setattr("maverick.llm.model_for_role", lambda role: "anthropic:sample")
+    monkeypatch.setattr("maverick.llm._enforce_provider_cap", lambda name, cost: None)
+    monkeypatch.setattr("maverick.budget._lookup_price_quote", lambda spec:
+                        SimpleNamespace(input_per_mtok=1.0, output_per_mtok=1.0))
+    result = probe_provider("vertex", {})
+    assert result["verified"] is None
+    assert result["evidence"]["kind"] == "setup_incomplete"
+    assert sent == []
+
+
+def test_vertex_model_id_must_be_the_name_at_version_form(workspace):
+    from maverick import config
+
+    for model_id in ("claude-haiku-4-5", "claude-haiku-4-5@2025/10"):
+        response = workspace.post("/settings/providers", data={
+            "provider": "vertex", "project_id": "acme-ai", "region": "us-east5", "model_id": model_id,
+        }, follow_redirects=False)
+        assert response.status_code == 400, model_id
+    assert config.get_provider_config("vertex") == {}

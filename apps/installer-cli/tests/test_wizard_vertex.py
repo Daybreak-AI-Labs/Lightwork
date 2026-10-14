@@ -65,6 +65,13 @@ def test_vertex_step_asks_for_project_region_and_model_and_re_asks_bad_values(mo
     }
 
 
+def test_vertex_step_re_asks_a_model_id_without_the_version(monkeypatch):
+    """A bare id such as claude-haiku-4-5 is not the name@version form the client accepts."""
+    answers = iter(["acme-ai", "us-east5", "claude-haiku-4-5", _HAIKU])
+    monkeypatch.setattr(wizard, "_q_text", lambda message, default="": next(answers))
+    assert wizard.pick_vertex()["model_id"] == _HAIKU
+
+
 def test_typed_vertex_model_replaces_the_placeholder_in_role_choices(monkeypatch):
     offered: list[list[str]] = []
 

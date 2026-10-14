@@ -43,7 +43,7 @@ from typing import Any
 
 import anthropic
 
-from ..budget import vertex_rate_card_model_id
+from ..budget import Budget, vertex_rate_card_model_id
 from . import google_auth_hint
 from .anthropic_provider import AnthropicClient
 
@@ -52,8 +52,22 @@ from .anthropic_provider import AnthropicClient
 _PROJECT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.:_-]{0,127}")
 _REGION = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
 # The model id is a path segment of the request URL (models/{model}:rawPredict), so
-# it may carry the name@version form but never a slash, colon or query character.
-_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,127}")
+# it is the name@version form exactly: no slash, colon or query character, and one @.
+_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}@[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+_MODEL_ID_HINT = (
+    "the Vertex AI model id must look like claude-haiku-4-5@20251001, as shown in the "
+    "Vertex AI Model Garden"
+)
+
+
+def valid_model_id(model: str | None) -> bool:
+    """Whether ``model`` is a Vertex AI name@version id that may enter a request URL.
+
+    Every path that puts a model id on the wire checks it here first: the
+    constructor (a configured default), the request builder and the cache
+    prewarm. The dashboard probe uses it as well.
+    """
+    return _MODEL_ID.fullmatch(model or "") is not None
 
 
 def _sdk_clients() -> tuple[Any, Any]:
@@ -117,6 +131,9 @@ class VertexClient(AnthropicClient):
             )
         if not _REGION.fullmatch(region):
             raise ValueError("the Vertex AI region is not a valid region name (lowercase, for example us-east5)")
+        default_model = _first(env, "VERTEX_MODEL_ID") or ""
+        if default_model and not valid_model_id(default_model):
+            raise ValueError(_MODEL_ID_HINT)
 
         hint = google_auth_hint()
         if hint is not None:
@@ -141,7 +158,26 @@ class VertexClient(AnthropicClient):
         self.project_id = project
         self.region = region
         self.base_url = str(getattr(self.client, "base_url", "") or "")
-        self.DEFAULT_MODEL = _first(env, "VERTEX_MODEL_ID") or ""
+        self.DEFAULT_MODEL = default_model
+
+    def prewarm(
+        self,
+        system: str,
+        tools: list[dict] | None = None,
+        model: str | None = None,
+        *,
+        budget: Budget | None = None,
+    ) -> bool:
+        """Prompt-cache warm for a checked Vertex model id only.
+
+        The base class sends the id as-is, so it is checked here first. A
+        refused id returns ``False`` without a request, like any other warm
+        that cannot run (the base never raises into the caller either).
+        """
+        wire = model or self.DEFAULT_MODEL
+        if not valid_model_id(wire):
+            return False
+        return super().prewarm(system, tools, wire, budget=budget)
 
     def _build_request(
         self,
@@ -164,8 +200,8 @@ class VertexClient(AnthropicClient):
                 "Vertex AI needs a model id: set [providers.vertex] model_id to the id "
                 "shown in the Vertex AI Model Garden"
             )
-        if not _MODEL_ID.fullmatch(wire):
-            raise ValueError("the Vertex AI model id must look like claude-haiku-4-5@20251001, as shown in the Vertex AI Model Garden")
+        if not valid_model_id(wire):
+            raise ValueError(_MODEL_ID_HINT)
         canonical = vertex_rate_card_model_id(wire) or wire
         kwargs = super()._build_request(
             system, messages, tools, max_tokens, thinking_budget, canonical,
@@ -178,4 +214,4 @@ class VertexClient(AnthropicClient):
         return kwargs
 
 
-__all__ = ["VertexClient", "google_auth_hint"]
+__all__ = ["VertexClient", "google_auth_hint", "valid_model_id"]
