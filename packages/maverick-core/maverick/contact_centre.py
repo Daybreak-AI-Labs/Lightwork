@@ -68,6 +68,8 @@ _TICKET_ID_RE = re.compile(r'"ticket"\s*:\s*\{[^}]*?"id"\s*:\s*(\d{1,20})')
 
 _thread_lock = threading.RLock()
 _active: set[str] = set()
+# Handoffs whose settings were saved while a delivery thread held them: that thread checks them again.
+_rescan: set[str] = set()
 _sleep = time.sleep
 
 
@@ -573,24 +575,54 @@ def run_delivery(key: str) -> None:
         action, seconds = _attempt(key, honour_schedule=False)
 
 
-def _start(key: str) -> None:
-    """Deliver in a daemon thread that keeps the caller's workspace context."""
+def _start(key: str) -> bool:
+    """Deliver in a daemon thread that keeps the caller's workspace context.
+
+    Returns ``False`` when a thread already holds the handoff. That thread checks the
+    handoff once more before it stops, so the request is not lost.
+    """
     with _thread_lock:
         if key in _active:
-            return
+            _rescan.add(key)
+            return False
         _active.add(key)
     context = contextvars.copy_context()
 
     def _main() -> None:
         try:
             context.run(run_delivery, key)
+            while _take_rescan(key):
+                context.run(run_delivery, key)
         except Exception as exc:
             log.warning("contact centre: delivery stopped unexpectedly (%s)", type(exc).__name__)
-        finally:
-            with _thread_lock:
-                _active.discard(key)
+            _forget(key)
+        except BaseException:
+            _forget(key)
+            raise
 
     threading.Thread(target=_main, name="mvk-contact-centre", daemon=True).start()
+    return True
+
+
+def _take_rescan(key: str) -> bool:
+    """Called by a delivery thread before it stops. ``True``: a save asked for another check, so keep going.
+
+    ``False``: the thread has released the handoff. Both happen under one lock, so a save
+    cannot arrive between the check and the release and be left unanswered.
+    """
+    with _thread_lock:
+        if key in _rescan:
+            _rescan.discard(key)
+            return True
+        _active.discard(key)
+        return False
+
+
+def _forget(key: str) -> None:
+    """Release a handoff after its delivery thread stopped with an error."""
+    with _thread_lock:
+        _active.discard(key)
+        _rescan.discard(key)
 
 
 def resume_pending() -> int:
@@ -620,14 +652,13 @@ def start_pending() -> int:
     """While the server runs, after Settings are saved: start the waiting, queued and retrying handoffs now.
 
     Unlike resume_pending, no send is marked unconfirmed: a send may be in flight in this process.
+    Returns how many deliveries it started. A handoff a thread already holds is checked again by that thread.
     """
     if not _path().exists():
         return 0
     with _locked(create=False) as path:
         pending = [key for key, entry in _load(path).items() if entry.get("state") in PENDING]
-    for key in pending:
-        _start(key)
-    return len(pending)
+    return sum(1 for key in pending if _start(key))
 
 
 def resume_all_workspaces(*, restarted: bool = True) -> int:
