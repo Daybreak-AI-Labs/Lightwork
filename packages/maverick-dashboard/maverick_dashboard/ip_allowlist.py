@@ -141,9 +141,16 @@ def workspace_allows(request) -> bool:
     """The list for the pinned workspace (its config overlay is active now)."""
     addr = client_ip(request)
     try:
-        from maverick.config import get_ip_allowlist
+        from maverick.config import config_source_errors, get_ip_allowlist
 
-        entries = get_ip_allowlist()["workspace_cidrs"]
+        # The workspace overlay is a source too: unreadable means loopback only.
+        # Checked again after the load, which is what first reads a fresh overlay.
+        if config_source_errors(include_tenant=True):
+            raise PolicyUnreadable("workspace ip allowlist policy unreadable")
+        policy = get_ip_allowlist()
+        if config_source_errors(include_tenant=True):
+            raise PolicyUnreadable("workspace ip allowlist policy unreadable")
+        entries = policy["workspace_cidrs"]
     except Exception:
         return addr is not None and addr.is_loopback
     return address_allowed(addr, entries)

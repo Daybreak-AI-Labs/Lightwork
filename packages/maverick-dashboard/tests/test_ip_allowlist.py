@@ -173,6 +173,34 @@ def test_workspace_list_applies_after_the_workspace_is_known(tmp_path):
     assert ip_allowlist.workspace_allows(_req(host="192.0.2.9")) is True
 
 
+def _write_workspace_overlay(monkeypatch, text: str) -> None:
+    """The pinned workspace's own config.toml (``tenants/<id>/config.toml``)."""
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    path = config.tenant_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    config.reset_config_cache()
+
+
+def test_corrupt_workspace_overlay_fails_closed_to_loopback(monkeypatch):
+    # An unparsable overlay must not read as "no workspace list", which would
+    # allow every address: the workspace is then reachable from this computer only.
+    _write_workspace_overlay(monkeypatch, "[auth.ip_allowlist\nworkspace_cidrs = [")
+    assert ip_allowlist.workspace_allows(_req(host="127.0.0.1")) is True
+    assert ip_allowlist.workspace_allows(_req(host="203.0.113.7")) is False
+
+
+def test_healthy_empty_workspace_overlay_still_allows_everyone(monkeypatch):
+    _write_workspace_overlay(monkeypatch, "[auth.ip_allowlist]\nworkspace_cidrs = []\n")
+    assert ip_allowlist.workspace_allows(_req(host="203.0.113.7")) is True
+
+
+def test_healthy_workspace_overlay_list_is_enforced(monkeypatch):
+    _write_workspace_overlay(monkeypatch, "[auth.ip_allowlist]\nworkspace_cidrs = [\"192.0.2.0/24\"]\n")
+    assert ip_allowlist.workspace_allows(_req(host="203.0.113.7")) is False
+    assert ip_allowlist.workspace_allows(_req(host="192.0.2.9")) is True
+
+
 def test_workspace_gate_refuses_a_bound_principal(tmp_path):
     from maverick.oidc import VerifiedPrincipal
     from maverick_dashboard import auth
