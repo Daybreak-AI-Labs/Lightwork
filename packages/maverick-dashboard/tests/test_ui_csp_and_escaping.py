@@ -204,6 +204,27 @@ def test_html_csp_admits_scripts_by_a_fresh_nonce_not_unsafe_inline(monkeypatch,
     assert _script_nonce(client.get("/").headers["Content-Security-Policy"]) != _script_nonce(first)
 
 
+def _inline_scripts(html: str) -> list[str]:
+    """The attributes of each inline <script> (one without src=)."""
+    return [m.group(1) for m in INLINE_SCRIPT.finditer(html) if not re.search(r"\bsrc\s*=", m.group(1))]
+
+
+def _nonce_problems(response) -> list[str]:
+    """Each inline script must carry this response's nonce. A policy without a
+    nonce admits no inline code, so there an executable inline script is a
+    defect; a JSON data block is inert and may carry the unused nonce."""
+    nonce = _script_nonce(response.headers.get("Content-Security-Policy", ""))
+    problems = []
+    for attrs in _inline_scripts(response.text):
+        found = re.search(r'\bnonce="([^"]*)"', attrs)
+        if nonce is not None:
+            if found is None or found.group(1) != nonce:
+                problems.append(f"no matching nonce: <script{attrs}>")
+        elif not re.search(r'type\s*=\s*"application/json"', attrs):
+            problems.append(f"executable inline script under a nonce-less policy: <script{attrs}>")
+    return problems
+
+
 def test_every_inline_script_on_a_rendered_page_carries_that_responses_nonce(monkeypatch, tmp_path):
     from maverick import world_model
     from maverick_dashboard import app as dash_app
@@ -217,34 +238,37 @@ def test_every_inline_script_on_a_rendered_page_carries_that_responses_nonce(mon
     # Tenant-scoped pages render only with a selected workspace, as the fresh-process smoke test sets up.
     assert client.post("/api/v1/admin/tenants", json={"id": "csp-nonce-walk", "plan": "enterprise"}).status_code == 201
     assert client.put("/api/v1/workspace/active-tenant", json={"tenant_id": "csp-nonce-walk"}).status_code == 200
-    wm = world_model.WorldModel(tmp_path / "world.db")
-    goal = wm.create_goal("nonce walk", "x")
-    wm.conn.commit()
     dash_app._world_cache.clear()
-    paths = [page["path"] for page in ui_visibility.PAGES] + [
-        "/docs", "/docs/oauth2-redirect", "/redoc", f"/goals/{goal}/plan", f"/chat/goal/{goal}",
-    ]
-    rendered = stamped = 0
+    paths = [page["path"] for page in ui_visibility.PAGES] + ["/docs", "/docs/oauth2-redirect", "/redoc"]
+    rendered = inline_total = 0
     failures = []
     for path in paths:
         response = client.get(path, headers={"Accept": "text/html"})
         if response.status_code != 200 or not response.headers.get("content-type", "").startswith("text/html"):
             continue
         rendered += 1
-        nonce = _script_nonce(response.headers.get("Content-Security-Policy", ""))
-        for match in INLINE_SCRIPT.finditer(response.text):
-            attrs = match.group(1)
-            if re.search(r"\bsrc\s*=", attrs):
-                continue
-            stamped += 1
-            found = re.search(r'\bnonce="([^"]*)"', attrs)
-            if nonce is not None:
-                if found is None or found.group(1) != nonce:
-                    failures.append(f"{path}: {match.group(0)[:80]}")
-            elif not re.search(r'type\s*=\s*"application/json"', attrs):
-                # A page with its own script-src and no nonce runs no inline code;
-                # a JSON data block is inert, so it may carry the unused nonce.
-                failures.append(f"{path}: executable inline script under a nonce-less policy")
+        inline_total += len(_inline_scripts(response.text))
+        failures += [f"{path}: {problem}" for problem in _nonce_problems(response)]
     assert rendered >= 100, rendered
-    assert stamped >= 100, stamped
+    assert inline_total >= 100, inline_total
     assert failures == []
+
+
+def test_goal_pages_carry_the_response_nonce(monkeypatch, tmp_path):
+    """Goal pages are tenant-bound to the default workspace, so they are checked
+    without selecting one (as the goal page tests do)."""
+    from maverick import world_model
+    from maverick_dashboard import app as dash_app
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    dash_app._world_cache.clear()
+    world = world_model.WorldModel(tmp_path / "world.db")
+    goal = world.create_goal("nonce check", "x")
+    world.conn.commit()
+    client = _client()
+    for path in (f"/chat/goal/{goal}", f"/goals/{goal}/plan"):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert _inline_scripts(response.text), path
+        assert _nonce_problems(response) == [], path
