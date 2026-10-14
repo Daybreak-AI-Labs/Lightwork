@@ -2034,7 +2034,7 @@ def pick_knowledge() -> dict[str, Any]:
 _KNOWLEDGE_SOURCE_LIMITS: tuple[tuple[str, str, int, int, int], ...] = (
     ("max_items", "Most items in one saved folder or space", 64, 1, 1000),
     ("max_pages", "Most listing pages for one saved source", 16, 1, 200),
-    ("max_download_mib", "Largest document to import (MiB)", 4, 1, 32),
+    ("max_download_mib", "Largest SharePoint, OneDrive or Drive file (MiB)", 4, 1, 32),
     ("max_text_kib", "Most source text kept per refresh (KiB)", 256, 1, 8192),
 )
 
