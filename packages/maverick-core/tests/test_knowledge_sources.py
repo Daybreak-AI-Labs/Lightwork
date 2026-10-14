@@ -650,3 +650,53 @@ def test_the_projection_shows_only_the_visible_items_and_keeps_the_commitment(se
     assert "WORDMARK-ALPHA" in filtered["summary"] and "WORDMARK-BETA" not in filtered["summary"]
     assert filtered["retrieval_chunks"] and all("WORDMARK-BETA" not in chunk for chunk in filtered["retrieval_chunks"])
     assert filtered["permissions_withheld"] == 1
+
+
+def _refresh_same_source(service, monkeypatch, identifier, texts, limits, *, knowledge_base, operation):
+    """Queue and run another refresh of an existing saved source, reusing the knowledge base it wrote."""
+    rows = [{"id": name, "name": f"{name}.txt", "revision": "r1", "mime": "text/plain", "size": None,
+             "citation": "", "kind": "file"} for name in texts]
+    monkeypatch.setattr(native.readers, "inventory", lambda binding, actor, guard: rows)
+    monkeypatch.setattr(native.readers, "document", lambda binding, actor, item, guard: (texts[item["id"]], "r" * 64, {"warnings": []}))
+    monkeypatch.setattr(service, "_open", lambda: knowledge_base)
+    row = service.sources.get(identifier)
+    prepared = {"source": identifier, "plan_sha256": row["plan_sha256"], "revision": row["revision"], "embedding": _embedding()}
+    _set_limits(monkeypatch, limits)
+    job = service.start(dict(prepared, inventory_sha256=native.digest(rows)), operation)
+    return service.run(job["id"])
+
+
+def _publish_as_current_snapshot(service, monkeypatch):
+    """Retain each refresh's manifest as the source's current snapshot, without the registry step."""
+    def publish(job, items, kb):
+        identifier = "KNV-" + native.digest([job["id"]])[:32]
+        service.snapshots.create({"id": identifier, "tenant": TENANT, "owner": OWNER, "version": native.digest([job["id"]])[:32],
+                                  "source": job["source"], "plan_sha256": native.content_binding(job["plan"]),
+                                  "items": sorted(items, key=lambda row: row["remote_id"]), "binding": job["plan"]["binding"],
+                                  "name": job["plan"]["name"], "observed_at": time.time(), "reference": None},
+                                 action="test.snapshot", actor=OWNER)
+        source = service.sources.get(job["source"])
+        service.sources.update(job["source"], lambda current: current.update(snapshot=identifier), expected_revision=source["revision"],
+                               action="test.snapshot_link", actor=OWNER)
+        return {"id": identifier, "reference": {"id": "ref"}}
+
+    monkeypatch.setattr(service, "_publish", publish)
+
+
+def test_a_filter_off_refresh_drops_the_permission_records_it_reuses(service, monkeypatch):
+    # A sharing grant read while the filter was on must not govern the item after a filter-off refresh.
+    kb, texts = _KnowledgeBase(), {"first": "a" * 600}
+    monkeypatch.setattr(native.readers, "permissions", lambda binding, actor, item, guard: _grant(emails=["alice@contoso.com"]))
+    _publish_as_current_snapshot(service, monkeypatch)
+    assert _start_refresh(service, monkeypatch, texts, {"permission_filter": "by_email"}, knowledge_base=kb)["state"] == "completed"
+    identifier = service.jobs.get("KNJ-" + "e" * 32)["source"]
+    assert _refresh_same_source(service, monkeypatch, identifier, texts, {}, knowledge_base=kb, operation="1" * 32)["state"] == "completed"
+    # The revision is unchanged, so the item was reused; its stored record must not keep the old grant.
+    snapshot = service.snapshots.get(service.sources.get(identifier)["snapshot"])
+    stored = snapshot["items"][0]
+    assert stored["provider_revision"] == "r1" and "permissions" not in stored
+    # Filter back on without a refresh: the item is withheld, and the page asks for a refresh.
+    _set_limits(monkeypatch, {"permission_filter": "by_email"})
+    assert native._visible(stored, "alice@contoso.com") is False
+    assert service.public(service.sources.get(identifier))["permissions_need_refresh"] is True
+

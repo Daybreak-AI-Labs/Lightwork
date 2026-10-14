@@ -540,6 +540,9 @@ class KnowledgeSources:
                     raise ValueError("The exact source exceeds its complete text bound.")
                 if grants is not None:
                     candidate = {**candidate, "permissions": grants}
+                else:
+                    # A reused item keeps the record of an earlier filtered refresh, which this refresh did not read.
+                    candidate = {key: value for key, value in candidate.items() if key != "permissions"}
                 imported.append(candidate)
                 outcomes.append({"name": item["name"], "state": "unchanged" if reused else "imported", "message": "Exact extracted text retained; dataset approval is separate.",
                                  "coverage_notes": candidate["extraction"].get("warnings", [])})
