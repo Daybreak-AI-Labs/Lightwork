@@ -454,7 +454,8 @@ def inspect_existing_source(
             inspected = {"source_ref": source_ref, "content_sha256": _commitment(payload, limit=_remote_source_limit(committed_record)),
                          "title": _bounded_title(record["name"]),
                          "summary": summary, "claim_state": "inferred", "observed_at": record["observed_at"], "verified_at": None,
-                         "projection_schema": _PROJECTION_SCHEMA, "summary_truncated": len(summary.encode()) < record["text_bytes"]}
+                         "projection_schema": _PROJECTION_SCHEMA, "summary_truncated": len(summary.encode()) < record["text_bytes"],
+                         "permissions_withheld": record["withheld_for_permissions"]}
             if include_retrieval_chunks:
                 inspected["retrieval_chunks"] = tuple(chunk["text"] for item in visible for chunk in item["document"]["chunks"])
             inspected["permissions_withheld"] = record["withheld_for_permissions"]
@@ -605,6 +606,7 @@ class ExistingKnowledgeContentProjector:
             verified_at=inspected["verified_at"],
             retrieval_chunks=inspected["retrieval_chunks"],
             summary_truncated=inspected["summary_truncated"],
+            permissions_withheld=inspected.get("permissions_withheld", 0),
         )
 
     def __call__(

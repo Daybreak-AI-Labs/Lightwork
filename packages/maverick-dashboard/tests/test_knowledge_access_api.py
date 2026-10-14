@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 from maverick import config, governed_records, knowledge_access, world_model
+from maverick_dashboard import knowledge_access_api
 from maverick.knowledge_access import (
     KnowledgeAccessService,
     KnowledgeActorAuthority,
@@ -977,3 +978,35 @@ def test_copilot_archive_is_not_advertised_without_admin_authority(enabled, monk
     catalog = client.post(FEEDBACK_OPS_BASE + "/catalog", json={"page": "/knowledge-access", "selection": selected})
     assert catalog.status_code == 200, catalog.text
     assert "knowledge.archive_request" not in {row["id"] for row in catalog.json()["operations"]}
+
+
+def _signed_in(principal, claims):
+    return SimpleNamespace(state=SimpleNamespace(principal=SimpleNamespace(principal=principal, claims=claims)))
+
+
+def test_the_verified_email_comes_only_from_the_signed_in_sessions_claims():
+    assert knowledge_access_api._verified_email(_signed_in("user:alice", {"idp_email": "alice@contoso.com"})) == "alice@contoso.com"
+    # An API key or a session without an asserted address has no email, so the permission filter withholds for it.
+    assert knowledge_access_api._verified_email(_signed_in("user:key", {"via": "api_key"})) == ""
+    assert knowledge_access_api._verified_email(SimpleNamespace(state=SimpleNamespace(principal=None))) == ""
+
+
+def test_the_authority_carries_the_address_only_for_the_principal_that_asked(monkeypatch):
+    monkeypatch.setattr(knowledge_access_api, "role_for_principal", lambda principal: "member")
+    monkeypatch.setattr(knowledge_access_api.rbac, "permissions_for", lambda role: {"view", "operate"})
+    token = knowledge_access_api._REQUEST_EMAIL.set(("user:alice", "alice@contoso.com"))
+    try:
+        assert knowledge_access_api._actor_authority("acme", "user:alice", "analyze", "support").verified_email == "alice@contoso.com"
+        assert knowledge_access_api._actor_authority("acme", "user:bob", "analyze", "support").verified_email == ""
+    finally:
+        knowledge_access_api._REQUEST_EMAIL.reset(token)
+    assert knowledge_access_api._actor_authority("acme", "user:alice", "analyze", "support").verified_email == ""
+
+
+@pytest.mark.parametrize("email", ["Alice@Contoso.com", " alice@contoso.com", "alice@contoso.com x", "alice", "a@b@c.example"])
+def test_the_authority_refuses_an_address_that_is_not_normalised(email):
+    from maverick.knowledge_access import KnowledgeActorAuthority
+
+    with pytest.raises(ValueError, match="normalized address"):
+        KnowledgeActorAuthority(tenant="acme", principal="user:alice", action="analyze", purpose="support",
+                                authorization_sha256="a" * 64, verified_email=email)

@@ -154,6 +154,9 @@ class KnowledgeActorAuthority:
     purpose: str
     authorization_sha256: str
     schema: str = KNOWLEDGE_ACTOR_AUTHORITY_SCHEMA
+    # The signed-in person's address as their identity provider asserted it for this sign-in.
+    # Empty for keys, agents and workers, so the permission filter fails closed for them.
+    verified_email: str = ""
 
     def __post_init__(self) -> None:
         canonical_tenant_id(self.tenant)
@@ -169,6 +172,11 @@ class KnowledgeActorAuthority:
             raise ValueError("knowledge authorization_sha256 must be a lowercase SHA-256")
         if self.schema != KNOWLEDGE_ACTOR_AUTHORITY_SCHEMA:
             raise ValueError("knowledge actor authority schema is unsupported")
+        if self.verified_email:
+            if (not principal.startswith("user:") or not isinstance(self.verified_email, str)
+                    or len(self.verified_email) > 254 or self.verified_email != self.verified_email.strip().lower()
+                    or self.verified_email.count("@") != 1 or any(c.isspace() for c in self.verified_email)):
+                raise ValueError("knowledge verified email must be a normalized address of a named user")
 
 
 def _canonical(value: object) -> bytes:
@@ -271,6 +279,8 @@ class KnowledgeDocument:
     retrieval_chunks: tuple[str, ...] = ()
     search_coverage_complete: bool = True
     summary_truncated: bool = False
+    # Items of a saved remote source this reader may not see under its permission filter. Counted only.
+    permissions_withheld: int = 0
 
     def __post_init__(self) -> None:
         canonical_tenant_id(self.tenant)
@@ -285,7 +295,8 @@ class KnowledgeDocument:
             or any(not isinstance(chunk, str) for chunk in self.retrieval_chunks)
             or sum(len(chunk.encode("utf-8")) for chunk in self.retrieval_chunks) > 256 * 1024
             or type(self.search_coverage_complete) is not bool
-            or type(self.summary_truncated) is not bool):
+            or type(self.summary_truncated) is not bool
+            or type(self.permissions_withheld) is not int or self.permissions_withheld < 0):
             raise ValueError("knowledge retrieval chunks or coverage are malformed")
         if self.claim_state not in _CLAIM_STATES:
             raise ValueError("knowledge claim_state must be inferred or verified")
@@ -780,6 +791,7 @@ class KnowledgeAccessService:
             "summary": document.summary,
             "summary_truncated": document.summary_truncated,
             "search_coverage_complete": document.search_coverage_complete,
+            "permissions_withheld": document.permissions_withheld,
             "content_available": bool(document.summary),
             "claim_state": document.claim_state,
             "observed_at": document.observed_at,
@@ -885,7 +897,7 @@ class KnowledgeAccessService:
         )
         items: list[dict] = []
         projections: list[LexicalProjection] = []
-        unavailable = partial = 0
+        unavailable = partial = withheld = 0
         for row in page["items"]:
             try:
                 item = self._item(
@@ -901,6 +913,7 @@ class KnowledgeAccessService:
             # This projection contains no cached authority. _item has already
             # reread the owning content store and current source/actor rights.
             partial += not item["search_coverage_complete"]
+            withheld += item["permissions_withheld"]
             identity = LexicalProjection.key(tenant, item)
             with self._cache_lock:
                 projection = self._lexical.get(identity)
@@ -963,6 +976,7 @@ class KnowledgeAccessService:
             # Keep the transport field for existing clients without disclosing
             # how many inaccessible records exist in the registry.
             "omitted_ineligible": 0, "unavailable_sources": unavailable,
+            "permissions_withheld": withheld,
             "candidates_examined": len(items),
             "ranking": "lexical_bm25_v1_within_candidate_page",
         }
