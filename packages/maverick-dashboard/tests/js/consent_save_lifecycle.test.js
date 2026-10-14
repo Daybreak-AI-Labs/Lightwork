@@ -6,7 +6,7 @@ const {webcrypto} = require("node:crypto");
 const {JSDOM} = require("jsdom");
 const {shell} = require('./_shell');
 const root = path.resolve(__dirname, "../../maverick_dashboard");
-const read = name => fs.readFileSync(path.join(root, name), "utf8");
+const read = name => fs.readFileSync(path.join(root, name), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 // The SDK hashes with WebCrypto, which settles on the thread pool, not the
 // event loop: a fixed number of immediates loses that race under load. Give
 // the pool real time as well.

@@ -14,7 +14,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
 const BANNED = /json|sha-?256|digest|principal|revision|idempotency|tenant|endpoint|schema|uuid|ed25519/i;
 
 function pageHtml() {
-  let html = fs.readFileSync(path.join(base, "templates/_governance_operations.html"), "utf8");
+  let html = fs.readFileSync(path.join(base, "templates/_governance_operations.html"), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
   html = html.replace(/\{% macro[\s\S]*?\{% endmacro %\}/g, "");
   html = html.replace(/\{\{ asset_options\([^)]*\) \}\}/g,
     `<option value="">Choose an AI system</option><option value="MAA-1" data-revision="3" data-digest="${D}" data-version="2.1">Support bot</option>`);

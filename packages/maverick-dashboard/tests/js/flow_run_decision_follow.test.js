@@ -7,7 +7,7 @@ const path = require("node:path");
 const { JSDOM } = require("jsdom");
 
 const templates = path.resolve(__dirname, "../../maverick_dashboard/templates");
-const page = fs.readFileSync(path.join(templates, "flow_run.html"), "utf8");
+const page = fs.readFileSync(path.join(templates, "flow_run.html"), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const helpers = fs.readFileSync(path.join(templates, "_dash_helpers.js"), "utf8");
 const start = page.indexOf("<script>");
 const end = page.indexOf("</script>", start);

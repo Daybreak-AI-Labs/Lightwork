@@ -9,7 +9,7 @@ const fs = require("node:fs"), path = require("node:path");
 const {JSDOM} = require("jsdom");
 const root = path.resolve(__dirname, "../../maverick_dashboard");
 const ui = fs.readFileSync(path.join(root, "static/lightwork-ui.js"), "utf8");
-const template = name => fs.readFileSync(path.join(root, "templates", name), "utf8").replace(/\r\n/g, "\n");
+const template = name => fs.readFileSync(path.join(root, "templates", name), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>").replace(/\r\n/g, "\n");
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
 function page(url, body, scripts, setup) {

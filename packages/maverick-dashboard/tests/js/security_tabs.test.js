@@ -7,7 +7,7 @@ const {JSDOM} = require('jsdom');
 const {panelTabs, tabPanel, press} = require('./_tab_markup');
 
 const root = path.resolve(__dirname, '../../maverick_dashboard');
-const template = fs.readFileSync(path.join(root, 'templates/security.html'), 'utf8');
+const template = fs.readFileSync(path.join(root, 'templates/security.html'), 'utf8').replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const tabsScript = fs.readFileSync(path.join(root, 'static/lightwork-tabs.js'), 'utf8');
 const start = template.indexOf('<script>\n(function () {');
 // The page script, without its server-only hunter block (rendered for admins).

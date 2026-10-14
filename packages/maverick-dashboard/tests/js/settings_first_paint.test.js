@@ -11,7 +11,7 @@ const {JSDOM} = require('jsdom');
 const {panelTabs, press} = require('./_tab_markup');
 const tabsScript = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/static/lightwork-tabs.js'), 'utf8');
 
-const template = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/templates/settings.html'), 'utf8');
+const template = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/templates/settings.html'), 'utf8').replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const earlyScript = (() => {
   const sections = template.indexOf('<div id="settings-sections"');
   assert.ok(sections > 0, 'sections element found');

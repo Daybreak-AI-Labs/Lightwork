@@ -3,7 +3,7 @@
 const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
 const {JSDOM} = require('jsdom');
 
-const template = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/templates/approvals.html'), 'utf8');
+const template = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/templates/approvals.html'), 'utf8').replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const start = template.lastIndexOf('<script>');
 const script = template.slice(start + 8, template.indexOf('</script>', start));
 
