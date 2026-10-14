@@ -533,7 +533,7 @@ def test_a_complete_draft_check_of_many_questions_gets_a_limit_that_grows_with_t
     assert review.status_code == 200, review.text
     limits = " ".join(str(row["after"]) for row in review.json()["changes"] if row["label"] == "Limits and consequences")
     assert "$1.25" in limits and "50,000 input tokens" in limits, limits
-    original = _check_draft(app, NEW, draft, seconds=120)  # 25 answers take longer than a short check
+    original = _check_draft(app, NEW, draft, seconds=900)  # 25 answers took about two minutes on a loaded machine
     assert original["run"]["state"] == "done", original["run"]
     assert len(original["run"]["results"]) == 25 and all(row["passed"] for row in original["run"]["results"])
     published = _decide(app, NEW, "publish", selected=draft)
