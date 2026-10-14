@@ -881,6 +881,14 @@ def test_the_page_shows_the_new_controls_in_plain_language(workspaces):
     assert developer_terms(html) == []
 
 
+def test_the_page_renders_a_row_for_each_vendor_audit_control(workspaces):
+    # The plain-language test above checks wording only; this one checks the rows exist.
+    html = every_group(client)
+    for setting_id in ("audit.datadog_api_key", "audit.sentinel_tenant_id",
+                       "audit.sentinel_client_id", "audit.sentinel_client_secret"):
+        assert f'data-setting-id="{setting_id}"' in html, setting_id
+
+
 def test_vendor_destination_settings_reach_the_forwarder(monkeypatch, as_token, audit_rows):
     from maverick.audit import forwarder
 
