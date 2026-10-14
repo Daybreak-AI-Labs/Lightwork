@@ -76,9 +76,8 @@ def current_code(secret_text, clock, offset_steps=0):
     return owner_totp.totp(key, clock.now() + offset_steps * owner_totp.STEP_SECONDS)
 
 
-@pytest.fixture
-def owner(clock):
-    """An owner who has enrolled an authenticator app. Returns its secret."""
+def enrolled_owner_with_codes(clock):
+    """An owner who has enrolled an authenticator app. Returns its secret and its recovery codes."""
     from maverick_dashboard import local_owner, owner_totp
     from maverick_dashboard import local_owner_second_factor as second
     from starlette.requests import Request
@@ -87,8 +86,15 @@ def owner(clock):
              "headers": [(b"host", b"127.0.0.1:8765"), (b"origin", ORIGIN.encode())]}
     local_owner.enroll(Request(scope), email=EMAIL, password=PASSPHRASE, confirm=True)
     secret, _uri = second.start_setup(PASSPHRASE)
-    second.confirm_setup(current_code(secret, clock))
+    codes = second.confirm_setup(current_code(secret, clock))
     clock.advance(owner_totp.STEP_SECONDS)
+    return secret, codes
+
+
+@pytest.fixture
+def owner(clock):
+    """An owner who has enrolled an authenticator app. Returns its secret."""
+    secret, _codes = enrolled_owner_with_codes(clock)
     return secret
 
 
@@ -341,3 +347,64 @@ def test_a_refusal_after_the_code_keeps_the_proof_and_gets_the_app_wide_answer(o
     assert refused.headers["x-reauthenticate"] == "/auth/local-login?return_to=%2Fsettings"
     assert "no-store" in refused.headers["cache-control"]
     assert proof_cookies(refused) and f"Path={COMPANY}" in proof_cookies(refused)[0]
+
+
+def test_a_recovery_code_passes_the_lookup_once_and_is_refused_after_that(clock, events):
+    _secret, codes = enrolled_owner_with_codes(clock)
+    with client() as web:
+        first = web.post(COMPANY + "/lookup", json=body(COMPANY, code=codes[0]))
+        assert first.status_code == 200, first.text
+        assert proof_cookies(first)
+    with client() as another_browser:
+        spent = another_browser.post(COMPANY + "/lookup", json=body(COMPANY, code=codes[0]))
+    assert spent.status_code == 401 and proof_cookies(spent) == []
+    assert len(record()["recovery"]) == 9 and record()["failures"] == 1
+    used = [kw for kind, kw in events if kw.get("verb") == "owner_recovery_code_used"]
+    assert len(used) == 1 and codes[0] not in json.dumps(events, default=str)
+
+
+@pytest.mark.parametrize("prefix, module, route", [
+    (COMPANY, "company_signin_migration", "/apply"),
+    (SAML, "company_saml_setup", "/apply"),
+])
+def test_a_completed_recovery_spends_the_proof_and_clears_its_cookie(clock, monkeypatch, prefix, module, route):
+    import importlib
+    native = importlib.import_module("maverick_dashboard." + module)
+    monkeypatch.setattr(native, "recover", lambda request, token, email, password, code="": {
+        "confirmed": True, "message": "Restored."})
+    secret = enrolled_owner_with_codes(clock)[0]
+    with client() as web:
+        assert web.post(prefix + "/lookup", json=body(prefix, code=current_code(secret, clock))).status_code == 200
+        assert "flow_proofs" in record()
+        done = web.post(prefix + route, json=body(prefix, token="a" * 40, confirmed=True))
+    assert done.status_code == 200, done.text
+    assert "flow_proofs" not in record()
+    cleared = " ".join(proof_cookies(done))
+    assert f"Path={prefix}" in cleared and ("Max-Age=0" in cleared or "1970" in cleared)
+
+
+@pytest.mark.parametrize("prefix, module, review, activate", [
+    ("/api/v1/settings/sign-in-migration", "company_signin_migration", "/review", "/activate"),
+    ("/api/v1/settings/single-sign-on", "company_saml_setup", "/activation-review", "/activate"),
+])
+def test_a_completed_activation_spends_the_proof_and_clears_its_cookie(owner, clock, monkeypatch, prefix, module,
+                                                                       review, activate):
+    import importlib
+
+    from maverick_dashboard import local_owner, local_passphrases
+    native = importlib.import_module("maverick_dashboard." + module)
+    monkeypatch.setattr(native, "authority", lambda request, expected=None, **k: (CONTEXT, local_owner._read()))
+    monkeypatch.setattr(native, "activate", lambda request, token: {"confirmed": True, "message": "Activated."})
+    payload = {"check": "no-such-check", "context": CONTEXT, "password": PASSPHRASE}
+    with client() as web:
+        local_passphrases.reset_attempt_limit()
+        assert web.post("/auth/local-login", data={"email": EMAIL, "password": PASSPHRASE}).status_code == 200
+        local_passphrases.reset_attempt_limit()
+        assert web.post("/auth/owner-second-factor", data={"code": current_code(owner, clock)}).status_code == 303
+        clock.advance(30)
+        web.post(prefix + review, json={**payload, "code": current_code(owner, clock)})
+        assert "flow_proofs" in record()
+        done = web.post(prefix + activate, json={"token": "a" * 40, "confirmed": True})
+    assert done.status_code == 200, done.text
+    assert "flow_proofs" not in record()
+    assert f"Path={prefix}" in " ".join(proof_cookies(done))
