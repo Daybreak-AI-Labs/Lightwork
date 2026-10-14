@@ -99,7 +99,10 @@ Sequenced by leverage. Each phase is independently shippable.
   Key Vault / Managed HSM (`azure-kms` extra). `[kms] provider =
   aws|gcp|vault|azure` keeps the KEK in the customer's HSM (the tenant context
   binds as the KMS EncryptionContext / AAD; Azure binds it locally, since its RSA
-  wrap takes no context); a missing SDK or unknown provider fails closed (never
+  wrap takes no context, and the vault signs each envelope so a holder of the
+  public key alone cannot forge one. An Azure key must allow the wrapKey, unwrapKey,
+  sign and verify operations; the identity needs wrapKey, unwrapKey and sign, plus
+  verify or get); a missing SDK or unknown provider fails closed (never
   downgrades to in-process keys). Env-injected keys (`MAVERICK_ENCRYPTION_KEY` /
   `MAVERICK_KMS_KEK`) remain for self-managed.
 

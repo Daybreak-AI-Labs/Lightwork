@@ -127,7 +127,8 @@ audit-signing   = ["cryptography>=48.0.1"]
 # Azure Key Vault / Managed HSM BYOK ([kms] provider = "azure"); imported lazily by
 # maverick.kms_backends. Floors are the 4.10.0 and 1.25.3 releases, checked on the
 # package index: they export CryptographyClient.wrap_key/unwrap_key with key_id on
-# the results, and DefaultAzureCredential.
+# the results, CryptographyClient.sign/verify (SignResult.signature,
+# VerifyResult.is_valid), and DefaultAzureCredential.
 azure-kms       = ["azure-keyvault-keys>=4.10.0,<5", "azure-identity>=1.25.3,<2"]
 sigstore        = ["sigstore>=3.0"]
 oidc            = ["pyjwt[crypto]>=2.13.0"]
