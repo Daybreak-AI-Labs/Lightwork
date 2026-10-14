@@ -1,12 +1,16 @@
 """SIEM forwarder (#56): push rendered audit lines to tcp/udp/http collectors."""
 from __future__ import annotations
 
+import email.message
+import io
 import json
 import logging
 import socket
 import threading
 import urllib.error
 import urllib.parse
+import urllib.request
+import urllib.response
 from datetime import datetime, timezone
 
 import pytest
@@ -351,7 +355,7 @@ def test_datadog_failure_names_destination_and_never_the_key(vendor_env, caplog)
     def _refuse(req, timeout=None):
         raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None)
 
-    vendor_env.setattr("urllib.request.urlopen", _refuse)
+    vendor_env.setattr(forwarder, "_open_vendor", _refuse)
     with caplog.at_level(logging.DEBUG):
         with pytest.raises(RuntimeError) as info:
             forwarder.forward(["a"], "datadog://datadoghq.com")
@@ -367,7 +371,7 @@ def test_datadog_transport_error_names_destination_and_never_the_key(vendor_env)
     def _unreachable(req, timeout=None):
         raise urllib.error.URLError("connection refused")
 
-    vendor_env.setattr("urllib.request.urlopen", _unreachable)
+    vendor_env.setattr(forwarder, "_open_vendor", _unreachable)
     with pytest.raises(RuntimeError, match="Datadog") as info:
         forwarder.forward(["a"], "datadog://datadoghq.com")
     assert _DD_KEY not in str(info.value)
@@ -377,7 +381,7 @@ def test_https_post_refuses_plaintext_url_before_any_request(vendor_env):
     def _boom(*args, **kwargs):  # pragma: no cover -- must not be called
         raise AssertionError("network used for a plaintext URL")
 
-    vendor_env.setattr("urllib.request.urlopen", _boom)
+    vendor_env.setattr(forwarder, "_open_vendor", _boom)
     with pytest.raises(RuntimeError, match="TLS"):
         forwarder._https_post("http://intake.example/api", b"[]", {}, 5.0, "Datadog log intake")
 
@@ -403,6 +407,52 @@ def test_https_post_refuses_non_ascii_header_without_echoing_it(vendor_env, valu
                               {"DD-API-KEY": value}, 5.0, "Datadog log intake")
     assert "dd-key-part" not in str(info.value) and "line-two" not in str(info.value)
     assert info.value.__context__ is None
+
+
+def _scripted_https(monkeypatch, *replies):
+    """Answer successive https requests with (status, location) replies; record each request.
+
+    A plaintext http request raises, so a test fails if a credential is ever sent over http.
+    """
+    seen = []
+
+    def _https_open(self, req):
+        seen.append(("https", req.full_url, req.get_header("Dd-api-key")))
+        status, location = replies[len(seen) - 1]
+        headers = email.message.Message()
+        if location:
+            headers["Location"] = location
+        resp = urllib.response.addinfourl(io.BytesIO(b"ok"), headers, req.full_url, status)
+        resp.msg = "OK" if status == 200 else "Redirect"
+        return resp
+
+    def _http_open(self, req):  # pragma: no cover -- must not be called
+        seen.append(("http", req.full_url, req.get_header("Dd-api-key")))
+        raise AssertionError("plaintext request sent")
+
+    monkeypatch.setattr(urllib.request.HTTPSHandler, "https_open", _https_open)
+    monkeypatch.setattr(urllib.request.HTTPHandler, "http_open", _http_open)
+    return seen
+
+
+_DD_URL = "https://http-intake.logs.datadoghq.com/api/v2/logs"
+
+
+@pytest.mark.parametrize("status", [301, 302, 307])
+@pytest.mark.parametrize("location", [
+    "http://collector.example.net/api/v2/logs",   # plaintext: the key must not leave
+    "https://collector.example.net/api/v2/logs",  # another host
+    "/api/v2/logs-moved",                         # same origin: still not followed
+])
+def test_vendor_redirects_are_reported_not_followed(vendor_env, status, location):
+    # urllib would resend every custom header to the redirect target, and on 301-303
+    # would resend the POST body as a GET. A redirect is therefore an HTTP error.
+    seen = _scripted_https(vendor_env, (status, location), (200, None))
+    with pytest.raises(RuntimeError, match=f"returned HTTP {status}") as info:
+        forwarder._https_post(_DD_URL, b"[]", {"DD-API-KEY": _DD_KEY}, 5.0,
+                              "Datadog log intake")
+    assert seen == [("https", _DD_URL, _DD_KEY)]
+    assert _DD_KEY not in str(info.value)
 
 
 def test_datadog_key_with_line_break_is_refused_without_echoing_it(vendor_env, caplog):
@@ -543,7 +593,7 @@ def test_sentinel_sign_in_failure_names_destination_and_never_the_secret(vendor_
     def _refuse(req, timeout=None):
         raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, None)
 
-    vendor_env.setattr("urllib.request.urlopen", _refuse)
+    vendor_env.setattr(forwarder, "_open_vendor", _refuse)
     with caplog.at_level(logging.DEBUG):
         with pytest.raises(RuntimeError) as info:
             forwarder.forward(["a"], _SENTINEL_DEST)

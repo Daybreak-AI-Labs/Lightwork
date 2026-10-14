@@ -242,6 +242,23 @@ def _send_http(url: str, lines: Iterable[str], timeout: float) -> int:
     return n
 
 
+def _open_vendor(req, timeout: float):
+    """Open a vendor request without following any redirect.
+
+    urllib would resend every custom header (the Datadog key, the Entra token) to
+    the redirect target, and on 301-303 would resend the POST body as a GET, so a
+    batch could be dropped while still counted as sent. The vendor endpoints do not
+    redirect, so a 3xx is returned as an HTTP error instead.
+    """
+    import urllib.request
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, request, fp, code, msg, headers, newurl):
+            return None  # urllib then raises HTTPError for the 3xx status
+
+    return urllib.request.build_opener(_NoRedirect).open(req, timeout=timeout)
+
+
 def _https_post(url: str, body: bytes, headers: dict[str, str], timeout: float,
                 label: str) -> bytes:
     """POST over TLS to a vendor destination and return the response body.
@@ -265,7 +282,7 @@ def _https_post(url: str, body: bytes, headers: dict[str, str], timeout: float,
     for name, value in headers.items():
         req.add_header(name, value)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - https only
+        with _open_vendor(req, timeout) as resp:  # https only, redirects refused
             code = getattr(resp, "status", None) or resp.getcode()
             payload = resp.read()
     except urllib.error.HTTPError as exc:
