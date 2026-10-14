@@ -934,6 +934,38 @@ def pick_bedrock_auth() -> dict[str, Any]:
     return {"auth_mode": pick.split()[0]}
 
 
+def pick_vertex() -> dict[str, Any]:
+    """Where Lightwork reaches Claude on Google Cloud Vertex AI; written to
+    ``[providers.vertex]``. Google sign-in (Application Default Credentials)
+    replaces a key, so the step asks for the project, the region and the model
+    ID exactly as shown in the Vertex AI Model Garden."""
+    console.print(
+        "[dim]Vertex AI signs in with Google Cloud credentials -- a service account, "
+        "gcloud login, or workload identity (Application Default Credentials). No API "
+        "key is stored. It needs the vertex extra: google-auth.[/dim]"
+    )
+    project_default = (os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", "").strip()
+                       or os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip())
+    while True:
+        project = _q_text("  Google Cloud project ID", default=project_default).strip()
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:_-]{0,127}", project):
+            break
+        console.print("[yellow]Enter the Google Cloud project ID.[/yellow]")
+    while True:
+        region = _q_text("  Vertex AI region (for example us-east5)",
+                         default=os.environ.get("CLOUD_ML_REGION", "").strip()).strip()
+        if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", region):
+            break
+        console.print("[yellow]Enter a lowercase Vertex AI region such as us-east5.[/yellow]")
+    while True:
+        model_id = _q_text("  Claude model ID, exactly as shown in the Vertex AI Model Garden",
+                           default="").strip()
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,119}", model_id):
+            break
+        console.print("[yellow]Enter the model ID as shown in the Model Garden, for example claude-haiku-4-5@20251001.[/yellow]")
+    return {"project_id": project, "region": region, "model_id": model_id}
+
+
 def pick_per_tenant_keys() -> bool:
     """Offer per-tenant BYOK provider keys (multi-tenant deployments only).
 
@@ -964,7 +996,8 @@ def _local_first_model(providers: list[str]) -> str | None:
     return None
 
 
-def pick_models_per_role(providers: list[str]) -> dict[str, str]:
+def pick_models_per_role(providers: list[str],
+                         provider_options: dict[str, dict[str, Any]] | None = None) -> dict[str, str]:
     console.print()
     if _q_confirm(
         "Use the default model for each role?",
@@ -987,7 +1020,11 @@ def pick_models_per_role(providers: list[str]) -> dict[str, str]:
             if not info:
                 continue
             tag = "" if info["status"] == "ready" else " [v0.2]"
-            for m in info["models"]:
+            models = info["models"]
+            typed = str(((provider_options or {}).get(prov) or {}).get("model_id") or "").strip()
+            if prov == "vertex" and typed:
+                models = [{"id": typed, "notes": "Claude on Vertex AI, the model ID you entered"}]
+            for m in models:
                 choices.append(f"{prov}:{m['id']}{tag}  - {m['notes']}")
         choices.append("[skip - use default]")
 
@@ -7794,6 +7831,17 @@ def _cfg_providers(
                          '"legacy" for Opus 4.6 and earlier')
             lines.append("")
             continue
+        if prov == "vertex":
+            # Google sign-in: no key. The project, region and model ID the operator entered.
+            vertex = options.get("vertex") or {}
+            for field in ("project_id", "region", "model_id"):
+                value = str(vertex.get(field) or "").strip()
+                if value:
+                    _emit_kv(lines, field, value)
+            lines.append("# Google Application Default Credentials sign in (gcloud login, a "
+                         "service account, or workload identity); no key is stored.")
+            lines.append("")
+            continue
         if env_name:
             lines.append(f'api_key = "${{{env_name}}}"')
         if prov == "ollama":
@@ -11810,6 +11858,8 @@ def run(fast: bool = False, resume: bool = False) -> int:
         provider_options = {}
         if "bedrock" in providers:
             provider_options["bedrock"] = pick_bedrock_auth()
+        if "vertex" in providers:
+            provider_options["vertex"] = pick_vertex()
         state["provider_options"] = provider_options
         _save_partial(state)
 
@@ -11822,7 +11872,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     _announce()
     role_models = state.get("role_models")
     if role_models is None:
-        role_models = pick_models_per_role(providers)
+        role_models = pick_models_per_role(providers, provider_options)
         state["role_models"] = role_models
         _save_partial(state)
 

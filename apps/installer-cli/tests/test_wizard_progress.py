@@ -75,7 +75,7 @@ def test_run_prints_step_indicators(monkeypatch, tmp_path):
     # Stub every pick_* with a benign return matching its shape.
     monkeypatch.setattr(wizard, "pick_deployment", lambda: "desktop")
     monkeypatch.setattr(wizard, "pick_providers", lambda: ["anthropic"])
-    monkeypatch.setattr(wizard, "pick_models_per_role", lambda providers: {})
+    monkeypatch.setattr(wizard, "pick_models_per_role", lambda providers, provider_options=None: {})
     monkeypatch.setattr(wizard, "pick_channels", lambda deployment: ({}, set()))
     monkeypatch.setattr(wizard, "pick_safety", dict)
     monkeypatch.setattr(wizard, "pick_signed_skills", dict)
