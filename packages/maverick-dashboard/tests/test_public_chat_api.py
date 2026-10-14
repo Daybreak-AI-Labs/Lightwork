@@ -843,3 +843,59 @@ def test_the_catalog_and_docs_say_where_websites_are_managed():
     assert "dashboard page for this is not built" not in docs
     assert "A scheduled sweep is not built" not in docs
     assert "Channels page" in docs
+
+
+@pytest.mark.parametrize("role", ["operator", "viewer"])
+def test_a_non_admin_gets_no_site_admin_route_and_no_channels_page(chat, model, monkeypatch, role):
+    from maverick_dashboard import auth
+
+    # Made while auth is off, as the local administrator; the caller is a signed-in non-admin below.
+    created = _site(chat)
+    site_id = created["site"]["id"]
+    token = _session(chat, created["publishable_key"])
+    assert _say(chat, token, "a question").status_code == 200
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:staff")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: role)
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: role)
+    refused = [
+        chat.client.get("/api/v1/public-chat/sites"),
+        chat.client.post("/api/v1/public-chat/sites", json={"display_name": "x"}),
+        chat.client.post(f"/api/v1/public-chat/sites/{site_id}/rotate"),
+        chat.client.post(f"/api/v1/public-chat/sites/{site_id}/revoke"),
+        chat.client.get(f"/api/v1/public-chat/sites/{site_id}/transcripts"),
+    ]
+    assert [response.status_code for response in refused] == [403] * 5
+    # The refusals changed nothing: the key still works and the stored messages remain.
+    assert _start(chat, created["publishable_key"]).status_code == 201
+    assert _stored_rows(None, site_id) == 2
+    # The Channels page itself is closed to this role, so the section is never sent to it.
+    assert chat.client.get("/channels").status_code == 403
+
+
+@pytest.mark.parametrize("role", ["operator", "viewer"])
+def test_the_section_context_is_empty_for_a_non_admin_principal(chat, model, monkeypatch, role):
+    from starlette.requests import Request
+
+    from maverick_dashboard import auth
+
+    request = Request({"type": "http", "method": "GET", "path": "/channels", "headers": [],
+                       "client": ("203.0.113.9", 40000), "query_string": b""})
+    request.state.principal = SimpleNamespace(principal="user:staff")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: role)
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: role)
+    assert chat.api.admin_section_context(request) == {}
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: "admin")
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: "admin")
+    assert chat.api.admin_section_context(request)["public_chat_section"] is True
+
+
+def test_an_admin_caller_gets_the_routes_and_the_section(chat, model, monkeypatch):
+    from maverick_dashboard import auth
+
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:owner")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: "admin")
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: "admin")
+    assert chat.client.get("/api/v1/public-chat/sites").status_code == 200
+    shown = chat.client.get("/channels")
+    assert shown.status_code == 200
+    assert "pc-sites" in shown.text
