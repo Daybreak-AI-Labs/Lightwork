@@ -297,8 +297,9 @@ def capabilities(request):
                         "learning_evidence": [{"node_id": item.node_id, "reason": item.reason,
                             "support": item.n, "applicable": item.applicable,
                             "blocking_reason": item.blocking_reason} for item in maybe_propose(flow)]})
+    allowed = auth.domain_suites_checker(request)  # The caller's grants are read once for the whole catalogue.
     for name, profile in available_domains().items():
-        if not auth.domain_suites_allowed(request, name):
+        if not allowed(name):
             continue
         classified = taxonomy.classify(profile.description)
         if classified["intents"]:

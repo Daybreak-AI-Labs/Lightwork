@@ -789,3 +789,41 @@ def test_saved_rate_change_does_not_reprice_work_seen_before_it(context):
     assert estimate["assumptions"]["hourly_rate"] == 60.0
     assert get(client)["rows"][0]["revision"] == row["revision"]
 
+
+def test_catalogue_listing_reads_the_callers_grants_once(context, monkeypatch):
+    client, world = context
+    seed(world, count=2)
+    get(client)
+    reads = []
+    original = auth.caller_suites
+    monkeypatch.setattr(auth, "caller_suites", lambda request: reads.append(1) or original(request))
+    response = client.get(BASE + "/opportunities", headers=headers())
+    assert response.status_code == 200, response.text
+    assert len(reads) <= 1
+
+
+def test_domain_suites_checker_matches_each_pack_check(monkeypatch):
+    from fastapi import HTTPException
+    from maverick.domain import available_domains, suites_for_domain
+    names = sorted(available_domains())
+    suites = sorted({suite for name in names for suite in suites_for_domain(name) if suite})
+    assert suites
+    grants = {"unrestricted": None, "none": frozenset(), "half": frozenset(suites[::2]), "all": frozenset(suites)}
+    request = object()
+    reads = []
+    for label, granted in grants.items():
+        monkeypatch.setattr(auth, "caller_suites", lambda request, granted=granted: reads.append(1) or granted)
+        expected = {name: auth.domain_suites_allowed(request, name) for name in names}
+        reads.clear()
+        check = auth.domain_suites_checker(request)
+        assert {name: check(name) for name in names} == expected, label
+        assert len(reads) <= 1, label
+
+    def broken(request):
+        raise RuntimeError("grant store unavailable")
+    monkeypatch.setattr(auth, "caller_suites", broken)
+    with pytest.raises(HTTPException) as direct:
+        auth.domain_suites_allowed(request, next(name for name in names if suites_for_domain(name)))
+    with pytest.raises(HTTPException) as checked:
+        auth.domain_suites_checker(request)(next(name for name in names if suites_for_domain(name)))
+    assert checked.value.status_code == direct.value.status_code == 503
