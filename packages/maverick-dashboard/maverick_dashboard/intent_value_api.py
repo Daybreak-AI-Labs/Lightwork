@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import functools
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -346,11 +347,18 @@ def capabilities(request):
     for name, profile in available_domains().items():
         if not allowed(name):
             continue
-        classified = taxonomy.classify(profile.description)
-        if classified["intents"]:
+        intents = _domain_intents(profile.description)
+        if intents:
             out.append({"id": name, "kind": "specialist", "label": profile.description.split(":")[0][:100],
-                        "intents": classified["intents"], "href": "/chat?specialist=" + quote(name, safe="")})
+                        "intents": list(intents), "href": "/chat?specialist=" + quote(name, safe="")})
     return out
+
+
+@functools.lru_cache(maxsize=4096)
+def _domain_intents(description):
+    """The business activities a specialist's description names: a pure function
+    of its text, so the catalogue's 2,000-odd descriptions are parsed once per process."""
+    return tuple(taxonomy.classify(description)["intents"])
 
 
 def synced_opportunities(request, *, include_decided=False, device_id="local-device"):

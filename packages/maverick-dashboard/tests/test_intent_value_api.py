@@ -998,3 +998,16 @@ def test_report_and_suggestions_read_source_goals_in_one_batch_with_identical_ou
     for path, response in batched.items():
         # The report's default period end is the read time, so compare without it.
         assert stable(client.get(BASE + path, headers=headers()).json()) == stable(response.json()), path
+
+
+def test_specialist_intents_are_memoised_without_changing_the_classification():
+    from maverick.domain import available_domains
+    from maverick.intent_value import taxonomy
+    from maverick_dashboard import intent_value_api
+
+    domains = available_domains()
+    assert len(domains) > 100
+    for profile in domains.values():
+        direct = taxonomy.classify(profile.description)["intents"]
+        assert list(intent_value_api._domain_intents(profile.description)) == direct
+        assert list(intent_value_api._domain_intents(profile.description)) == direct
