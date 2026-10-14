@@ -2512,7 +2512,7 @@ _DOCS_CSP = (
     "default-src 'self'; "
     "img-src 'self' data: https:; "
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "script-src 'self' 'nonce-{script_nonce}' https://cdn.jsdelivr.net; "
     "connect-src 'self'; "
     "frame-ancestors 'none'; "
     "base-uri 'none'; "
@@ -2520,11 +2520,12 @@ _DOCS_CSP = (
     "object-src 'none'"
 )
 
+# {script_nonce} is filled per response by security_headers.
 _DEFAULT_CSP = (
     "default-src 'self'; "
     "img-src 'self' data:; "
     "style-src 'self' 'unsafe-inline'; "
-    "script-src 'self' 'unsafe-inline'; "
+    "script-src 'self' 'nonce-{script_nonce}'; "
     "connect-src 'self'; "
     "frame-ancestors 'none'; "
     "base-uri 'none'; "
@@ -3907,10 +3908,11 @@ async def security_headers(request: Request, call_next):
             "Strict-Transport-Security",
             "max-age=31536000; includeSubDomains",
         )
-    # Content-Security-Policy. The templates use first-party inline
-    # <style>, <script>, and style="" attributes, so script/style-src
-    # need 'unsafe-inline' for now (a nonce-based tightening is tracked
-    # tech debt). The value still hardens the dashboard meaningfully:
+    # Content-Security-Policy. Inline <script> tags carry this response's
+    # nonce, so script-src admits no 'unsafe-inline' and an injected inline
+    # script cannot run. The templates' first-party inline <style> and
+    # style="" attributes still need 'unsafe-inline' in style-src (out of
+    # scope for this change). The value still hardens the dashboard meaningfully:
     #   - default/connect/script/style 'self' → injected JS can't fetch()
     #     to an external exfil endpoint or pull a remote script
     #   - frame-ancestors 'none' → reinforces X-Frame-Options (clickjack)
@@ -3920,9 +3922,9 @@ async def security_headers(request: Request, call_next):
     # if any of it ever reaches an HTML sink, CSP is the backstop.
     path = route_path(request)
     if path == "/redoc":
-        csp = _DOCS_CSP
+        csp = _DOCS_CSP.format(script_nonce=script_nonce)
     else:
-        csp = _DEFAULT_CSP
+        csp = _DEFAULT_CSP.format(script_nonce=script_nonce)
     if path == "/connections" and str(request.base_url).rstrip("/") == "http://127.0.0.1:8765":
         from maverick.connection_oauth import desktop_return_enabled
 

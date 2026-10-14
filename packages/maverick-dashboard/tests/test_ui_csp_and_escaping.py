@@ -169,3 +169,82 @@ def test_macros_that_stamp_the_nonce_are_imported_with_context():
             if match.group(1) in stamping and "with context" not in match.group(0):
                 found.append(f"{path.relative_to(TEMPLATES)} imports {match.group(1)}")
     assert found == []
+
+
+# ---------- script-src admits the response nonce, not unsafe-inline ----------
+
+INLINE_SCRIPT = re.compile(r"<script\b([^>]*)>", re.IGNORECASE)
+
+
+def _script_src(csp: str) -> str:
+    return next((d.strip() for d in csp.split(";") if d.strip().startswith("script-src")), "")
+
+
+def _script_nonce(csp: str) -> str | None:
+    match = re.search(r"'nonce-([A-Za-z0-9_-]+)'", _script_src(csp))
+    return match.group(1) if match else None
+
+
+def test_html_csp_admits_scripts_by_a_fresh_nonce_not_unsafe_inline(monkeypatch, tmp_path):
+    from maverick import world_model
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    from maverick_dashboard import app as dash_app
+    dash_app._world_cache.clear()
+    client = _client()
+    first = client.get("/").headers.get("Content-Security-Policy", "")
+    for path in ("/", "/docs", "/redoc"):
+        csp = client.get(path).headers.get("Content-Security-Policy", "")
+        assert _script_nonce(csp), path
+        assert len(_script_nonce(csp)) >= 16, path
+        assert "'unsafe-inline'" not in _script_src(csp), path
+    # style-src is out of scope and keeps its inline allowance.
+    assert "style-src 'self' 'unsafe-inline'" in first
+    # Each response draws its own nonce.
+    assert _script_nonce(client.get("/").headers["Content-Security-Policy"]) != _script_nonce(first)
+
+
+def test_every_inline_script_on_a_rendered_page_carries_that_responses_nonce(monkeypatch, tmp_path):
+    from maverick import world_model
+    from maverick_dashboard import app as dash_app
+    from maverick_dashboard import ui_visibility
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    # Mutating /api/v1 calls need the same-origin header (CSRF guard); the local caller is admin.
+    client = TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    # Tenant-scoped pages render only with a selected workspace, as the fresh-process smoke test sets up.
+    assert client.post("/api/v1/admin/tenants", json={"id": "csp-nonce-walk", "plan": "enterprise"}).status_code == 201
+    assert client.put("/api/v1/workspace/active-tenant", json={"tenant_id": "csp-nonce-walk"}).status_code == 200
+    wm = world_model.WorldModel(tmp_path / "world.db")
+    goal = wm.create_goal("nonce walk", "x")
+    wm.conn.commit()
+    dash_app._world_cache.clear()
+    paths = [page["path"] for page in ui_visibility.PAGES] + [
+        "/docs", "/docs/oauth2-redirect", "/redoc", f"/goals/{goal}/plan", f"/chat/goal/{goal}",
+    ]
+    rendered = stamped = 0
+    failures = []
+    for path in paths:
+        response = client.get(path, headers={"Accept": "text/html"})
+        if response.status_code != 200 or not response.headers.get("content-type", "").startswith("text/html"):
+            continue
+        rendered += 1
+        nonce = _script_nonce(response.headers.get("Content-Security-Policy", ""))
+        for match in INLINE_SCRIPT.finditer(response.text):
+            attrs = match.group(1)
+            if re.search(r"\bsrc\s*=", attrs):
+                continue
+            stamped += 1
+            found = re.search(r'\bnonce="([^"]*)"', attrs)
+            if nonce is not None:
+                if found is None or found.group(1) != nonce:
+                    failures.append(f"{path}: {match.group(0)[:80]}")
+            elif not re.search(r'type\s*=\s*"application/json"', attrs):
+                # A page with its own script-src and no nonce runs no inline code;
+                # a JSON data block is inert, so it may carry the unused nonce.
+                failures.append(f"{path}: executable inline script under a nonce-less policy")
+    assert rendered >= 100, rendered
+    assert stamped >= 100, stamped
+    assert failures == []

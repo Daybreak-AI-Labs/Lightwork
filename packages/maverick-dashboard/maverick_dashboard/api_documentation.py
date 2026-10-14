@@ -31,7 +31,7 @@ def documentation(request: Request) -> HTMLResponse:
     # external Swagger validator. Interactive calls keep their native gates.
     parameters["validatorUrl"] = None
     redirect = app.swagger_ui_oauth2_redirect_url
-    return get_swagger_ui_html(
+    return _with_script_nonce(get_swagger_ui_html(
         openapi_url=root + app.openapi_url,
         title=app.title + " - Swagger UI",
         swagger_js_url=root + "/static/swagger-ui-5.33.1-bundle.js",
@@ -40,12 +40,21 @@ def documentation(request: Request) -> HTMLResponse:
         oauth2_redirect_url=root + redirect if redirect else None,
         init_oauth=app.swagger_ui_init_oauth,
         swagger_ui_parameters=parameters,
-    )
+    ), request)
 
 
 @router.get("/docs/oauth2-redirect", include_in_schema=False)
-def oauth_redirect() -> HTMLResponse:
-    return get_swagger_ui_oauth2_redirect_html()
+def oauth_redirect(request: Request) -> HTMLResponse:
+    return _with_script_nonce(get_swagger_ui_oauth2_redirect_html(), request)
+
+
+def _with_script_nonce(page: HTMLResponse, request: Request) -> HTMLResponse:
+    """FastAPI's Swagger pages carry inline <script> blocks (the UI's own init
+    code), which the nonce-based script-src blocks unless they carry this
+    response's nonce. Their src= scripts are untouched."""
+    nonce = getattr(request.state, "csp_script_nonce", "")
+    html = bytes(page.body).decode("utf-8").replace("<script>", f'<script nonce="{nonce}">')
+    return HTMLResponse(html)
 
 
 def _asset(name: str, media_type: str):
