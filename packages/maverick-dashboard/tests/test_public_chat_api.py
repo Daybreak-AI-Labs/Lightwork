@@ -360,6 +360,55 @@ def test_the_daily_client_cap_is_counted_separately_for_each_site(chat, model):
     assert _say(chat, other_token, "one", origin=OTHER).status_code == 200
 
 
+def _visitor(address):
+    """A client on its own peer address, for the same site: the daily count is kept per address."""
+    from fastapi.testclient import TestClient
+
+    from maverick_dashboard import app as dash_app
+
+    return TestClient(dash_app.app, client=(address, 50000))
+
+
+def _visit(client, key, origin=SHOP, forwarded=None):
+    headers = {"Origin": origin, "Authorization": f"PublicChatKey {key}"}
+    if forwarded is not None:
+        headers["X-Forwarded-For"] = forwarded
+    response = client.post("/public/chat/v1/sessions", headers=headers, content=b"{}")
+    assert response.status_code == 201, response.text
+    return response.json()["session_token"]
+
+
+def _ask(client, token, text, origin=SHOP, forwarded=None):
+    headers = {"Authorization": f"PublicChatSession {token}", "Content-Type": "application/json",
+               "Origin": origin}
+    if forwarded is not None:
+        headers["X-Forwarded-For"] = forwarded
+    return client.post("/public/chat/v1/messages", headers=headers,
+                       content=json.dumps({"message": text}).encode("utf-8"))
+
+
+def test_the_daily_count_is_kept_per_client_address_on_one_site(chat, model):
+    key = _site(chat, messages_per_client_per_day=1)["publishable_key"]
+    first, second = _visitor("198.51.100.10"), _visitor("198.51.100.11")
+    assert _ask(first, _visit(first, key), "one").status_code == 200
+    assert _ask(first, _visit(first, key), "two").status_code == 429
+    # A different address on the same site has its own day, not the first address's exhausted one.
+    assert _ask(second, _visit(second, key), "one").status_code == 200
+    assert len(model.calls) == 2
+
+
+def test_an_untrusted_forwarded_address_cannot_move_a_client_to_another_day(chat, model):
+    key = _site(chat, messages_per_client_per_day=1)["publishable_key"]
+    visitor = _visitor("203.0.113.9")
+    # No proxy is trusted, so the forwarded header is ignored: each try is the same address.
+    assert _ask(visitor, _visit(visitor, key), "one", forwarded="198.51.100.7").status_code == 200
+    assert _ask(visitor, _visit(visitor, key), "two", forwarded="198.51.100.8").status_code == 429
+    # Nor does a forwarded header frame the address it names: that address keeps its own day.
+    named = _visitor("198.51.100.7")
+    assert _ask(named, _visit(named, key), "named").status_code == 200
+    assert len(model.calls) == 2
+
+
 def test_the_client_daily_cap_defaults_to_200_and_accepts_up_to_5000(chat, model):
     created = _site(chat)
     assert created["site"]["messages_per_client_per_day"] == 200
@@ -592,11 +641,14 @@ def test_retention_is_enforced_for_every_tenant_on_a_visit_without_an_admin_read
 def test_the_background_sweep_creates_no_files_where_chat_was_never_used(chat, model, monkeypatch):
     from maverick import compliance_history, deadline_alerts, webhook_subscriptions
     from maverick_dashboard import deadline_alerts_scheduler as scheduler
+    from maverick_dashboard import public_chat_store as store
 
     monkeypatch.setattr(deadline_alerts, "settings", lambda: {"enabled": False, "poll_seconds": 900})
     monkeypatch.setattr(webhook_subscriptions, "process_due", lambda **kwargs: 0)
     monkeypatch.setattr(compliance_history, "recheck_if_due", lambda **kwargs: None)
     scheduler._tick(chat.clock["now"], {})
+    # The sweep ran on this pass (so the pass is what keeps it from creating files), and it still created none.
+    assert store._last_sweep == chat.clock["now"]
     assert not (chat.home / "public_chat").exists()
 
 
