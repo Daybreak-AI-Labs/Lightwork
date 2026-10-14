@@ -617,3 +617,14 @@ def test_read_release_evidence_is_returned_without_pinning(monkeypatch):
     recommendation = {"id": "IVR-" + "a" * 32, "revision": 1, "owner": "alice", "workflow_release": None}
     assert module._release_evidence(recommendation, {"flow_id": "f"}, pin=False) == release
 
+
+def test_refresh_reads_recorded_work_in_one_batch(world, monkeypatch):
+    goal(world, "Draft an RFP")
+    service.refresh(world)
+    reads = []
+    original = service.WORKS.get
+    monkeypatch.setattr(service.WORKS, "get", lambda identifier: reads.append(identifier) or original(identifier))
+    goal(world, "Review an RFP")
+    service.refresh(world)
+    assert len(reads) == 1  # Only the newly observed source needs a direct read; the recorded one comes from the batch.
+    assert len(service.WORKS.list(limit=10)) == 2
