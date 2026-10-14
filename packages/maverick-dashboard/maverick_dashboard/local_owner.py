@@ -347,6 +347,9 @@ def verify_recovery(request: Request, *, email: str, password: str):
         if role is None or "admin" not in rbac.permissions_for(role):
             raise HTTPException(403, "The original owner's current role cannot manage installation sign-in.")
         auth._enforce_scim_active(VerifiedPrincipal(sub=email, issuer="invite-session", audience="", claims={}))
-        row.update(failures=0, locked_until=0)
-        _write(row)
+        # An owner with an authenticator app keeps the wrong-code count: only a
+        # sign-in that the app completes clears it (local_owner_second_factor.complete).
+        if "totp" not in row:
+            row.update(failures=0, locked_until=0)
+            _write(row)
         return row

@@ -446,3 +446,29 @@ def test_off_refuses_changes_but_still_asks_an_enrolled_owner_for_a_code(monkeyp
     assert no_new_codes.value.status_code == 409
     assert isinstance(local_owner.login(request(), email=EMAIL, password=PASSPHRASE), second.Challenge)
     assert "totp" in row() and len(row()["recovery"]) == 10
+
+
+def test_a_passphrase_only_recovery_check_does_not_reset_the_code_lock(clock):
+    """R1: the restricted recovery check must not clear the wrong-code count of an enrolled owner."""
+    from maverick_dashboard import local_owner
+    from maverick_dashboard import local_owner_second_factor as second
+    enroll_owner()
+    turn_on(clock)
+    for _ in range(4):
+        challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+        with pytest.raises(HTTPException):
+            second.complete(request(), token=challenge.token, code="000000")
+    assert row()["failures"] == 4
+    local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE)
+    assert row()["failures"] == 4 and row()["locked_until"] == 0
+    challenge = local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    with pytest.raises(HTTPException) as fifth:
+        second.complete(request(), token=challenge.token, code="000000")
+    assert fifth.value.status_code == 401
+    assert row()["failures"] == 5
+    with pytest.raises(HTTPException) as locked:
+        local_owner.verify_recovery(request(), email=EMAIL, password=PASSPHRASE)
+    assert locked.value.status_code == 429
+    with pytest.raises(HTTPException) as still_locked:
+        local_owner.login(request(), email=EMAIL, password=PASSPHRASE)
+    assert still_locked.value.status_code == 429
