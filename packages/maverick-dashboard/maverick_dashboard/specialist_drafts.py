@@ -24,7 +24,7 @@ STORE = GovernedRecordStore("specialist-drafts", "SPD", "specialist_draft")
 TTL, MAX_RECORDS = 600, 10000
 NOTICE = ("Saving a draft does not change the specialist people use. Preview checks its entered setup. "
           "Try and saved answer checks use the exact draft with no real tools, files, company knowledge or shared learning. "
-          "A saved check that tests tool use gets recording test stubs instead; they answer with fixed results and run nothing real. "
+          "Checks that test tool use get recording test stubs instead; they answer with fixed results and run nothing real. "
           "Its complete instructions and fictional requests are sent to the configured AI service for those answer checks. "
           "They do not establish that connected actions work or that an answer is correct. Publishing or restoring changes new work; work already running can retain earlier instructions.")
 ACTIONS = {"save": "Saved a draft", "try": "Tried a draft answer", "check": "Checked the draft's saved questions",
