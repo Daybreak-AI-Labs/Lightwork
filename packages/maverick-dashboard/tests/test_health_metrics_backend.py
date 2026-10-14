@@ -97,3 +97,38 @@ def test_metrics_omits_world_db_bytes_under_postgres(monkeypatch, tmp_path):
     text = client.get("/metrics").text
     assert "maverick_world_db_bytes" not in text
     assert "# TYPE maverick_data_disk_free_bytes gauge" in text
+
+
+class _WorldOpenedAsSuperuser:
+    rls_bypass_reason = (
+        "the Postgres login is a superuser, which bypasses row-level security; "
+        "connect with a dedicated login that is neither a superuser nor BYPASSRLS"
+    )
+
+    def ping(self):
+        return True
+
+
+def test_healthz_degrades_when_the_login_bypasses_row_level_security(monkeypatch):
+    # A superuser or BYPASSRLS login skips every tenant policy: a degraded reason.
+    from maverick_dashboard import app as dash_app
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setattr(dash_app, "_world", lambda: _WorldOpenedAsSuperuser())
+    resp = client.get("/healthz")
+    body = resp.json()
+    assert resp.status_code == 503
+    assert body["status"] == "degraded"
+    assert body["checks"]["database_role"].startswith(
+        "fail: the Postgres login is a superuser, which bypasses row-level security"
+    )
+
+
+def test_healthz_is_unchanged_for_a_login_without_the_bypass(monkeypatch, tmp_path):
+    _use_sqlite(monkeypatch, tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    assert "database_role" not in resp.json()["checks"]
