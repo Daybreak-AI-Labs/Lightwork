@@ -101,7 +101,11 @@ def _scope() -> tuple[str | None, list[dict]]:
         with tenant_scope(tenant=tenant):
             policy = _policy()
             try:
-                preservation = preservation_snapshot()
+                # Admin review only: active legal matters also block this broad purge.
+                from maverick.ediscovery import active_matter_count
+
+                preservation = dict(preservation_snapshot())
+                preservation["broad_purge_blocked"] = bool(preservation["blocked"] or active_matter_count())
             except Exception as exc:
                 raise HTTPException(503, "Preservation holds could not be verified. Nothing can be deleted.") from exc
         targets.append({"tenant": tenant, "name": (record.display_name or record.id) if record else "Main workspace", "policy": policy, "preservation": preservation})
@@ -136,7 +140,7 @@ def preview(actor: str, *, context: str | None = None, run_id: str | None = None
     receipt = {"id": run_id or secrets.token_hex(16), "actor": actor, "created_at": now, "cutoff_time": now,
                "scope": selected, "policy_revision": _fingerprint(selected, targets),
                "targets": targets, "status": "review", "steps": [],
-               "holds": "Recorded privacy-rights holds block broad workspace deletion. External holds require separate confirmation with your records owner.",
+               "holds": "Recorded privacy-rights holds and active legal matters block broad workspace deletion. External holds require separate confirmation with your records owner.",
                "blocked_by_hold": any(_broad_blocked(target) for target in targets),
                "dependencies": "Task-history deletion removes provenance links from retained facts. Completed deletions cannot be undone."}
     if context is not None:

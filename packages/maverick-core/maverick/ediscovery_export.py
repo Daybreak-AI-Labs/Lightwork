@@ -55,7 +55,7 @@ def _rows(kind: str, scope: Any) -> Iterator[dict[str, Any]]:
             yield {"record_type": "goal", "id": goal.id, "parent_id": goal.parent_id, "title": goal.title,
                    "description": goal.description, "status": goal.status, "owner": goal.owner,
                    "domain": goal.domain, "project_id": goal.project_id, "created_at": goal.created_at,
-                   "updated_at": goal.updated_at, "completed_at": goal.completed_at,
+                   "updated_at": goal.updated_at, "completed_at": getattr(goal, "completed_at", None),
                    "deadline": goal.deadline, "result": goal.result}
         for run in sorted(scope.runs, key=lambda item: item.id):
             yield {"record_type": "run", "id": run.id, "goal_id": run.goal_id, "started_at": run.started_at,

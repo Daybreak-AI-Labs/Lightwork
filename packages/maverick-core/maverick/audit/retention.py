@@ -572,8 +572,15 @@ def _enforce(
         preservation = preservation_snapshot()
     except Exception as exc:  # failure-policy: fail_closed -- unverified holds prohibit deletion
         raise RetentionScopeError("Preservation holds could not be verified; no records were deleted.") from exc
-    if preservation.get("broad_purge_blocked", preservation["blocked"]) and not dry_run:
+    if preservation["blocked"] and not dry_run:
         raise RetentionScopeError("Recorded preservation holds block broad deletion in this workspace.")
+    if not dry_run:
+        from ..ediscovery import LegalHoldApplies, assert_no_active_matters
+
+        try:
+            assert_no_active_matters()
+        except LegalHoldApplies as exc:
+            raise RetentionScopeError(str(exc)) from exc
     report: dict = {"dry_run": dry_run, "preservation": preservation}
     if audit_days:
         report["audit"] = purge_audit_files(

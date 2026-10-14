@@ -181,8 +181,9 @@ def test_active_matter_blocks_broad_purge_and_release_lifts_it(events, monkeypat
         store = ediscovery.MatterStore(ediscovery.store_path())
         matter = store.create("ws-a", actor="auditor", values=_values())
         snapshot = preservation.preservation_snapshot()
-        assert snapshot["broad_purge_blocked"] is True and snapshot["blocked"] is False
-        assert snapshot["active_matters"] == 1
+        # People reviewing their own data see this snapshot: it must not reveal a matter.
+        assert snapshot["blocked"] is False
+        assert not {"active_matters", "broad_purge_blocked"} & set(snapshot)
         with pytest.raises(retention.RetentionScopeError):
             retention.enforce(config={"messages_days": 1}, _fleet_child=True)
         with pytest.raises(ediscovery.LegalHoldApplies):
@@ -190,7 +191,6 @@ def test_active_matter_blocks_broad_purge_and_release_lifts_it(events, monkeypat
         assert purged == []
 
         store.release("ws-a", matter["id"], actor="auditor", expected_revision=1)
-        assert preservation.preservation_snapshot()["broad_purge_blocked"] is False
         retention.enforce(config={"messages_days": 1}, _fleet_child=True)
         assert len(purged) == 1
         assert records_gc.prune_world(_FakeWorld(), days=1, events_days=1) == (0, 0, 0)
@@ -352,3 +352,15 @@ def test_unenumerable_scope_fails_closed(world, ledger, events, monkeypatch):
     monkeypatch.setattr(ediscovery, "MAX_SCOPE_ROWS", 0)
     with pytest.raises(ediscovery.LegalHoldApplies):
         ediscovery.assert_erasure_permitted(world, conversation_ids=[seeded["bob_conv"]], goal_ids=[])
+
+
+def test_unreadable_ledger_refuses_erasure_and_bulk_purge(world, ledger, events):
+    seeded = _seed(world)
+    ledger.write_bytes(b"this is not a sqlite ledger")
+    with pytest.raises(ediscovery.LegalHoldApplies) as erasure:
+        ediscovery.assert_erasure_permitted(world, conversation_ids=[seeded["bob_conv"]], goal_ids=[])
+    assert str(erasure.value) == ediscovery.HOLD_UNVERIFIED_MESSAGE
+    with pytest.raises(ediscovery.LegalHoldApplies) as purge:
+        ediscovery.assert_no_active_matters()
+    assert str(purge.value) == ediscovery.HOLD_UNVERIFIED_MESSAGE
+    assert world.conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 2

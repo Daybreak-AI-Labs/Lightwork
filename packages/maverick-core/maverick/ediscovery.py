@@ -38,6 +38,10 @@ LEGAL_HOLD_MESSAGE = (
     "A legal hold applies to some of these records, so they cannot be erased. "
     "Ask your records administrator before trying again."
 )
+HOLD_UNVERIFIED_MESSAGE = (
+    "Legal holds could not be checked, so nothing was deleted. Try again later or ask "
+    "your records administrator."
+)
 BROAD_PURGE_MESSAGE = (
     "A legal hold is active in this workspace, so bulk deletion of old records is "
     "paused. Ask your records administrator to review the hold before trying again."
@@ -431,7 +435,11 @@ def active_matter_count() -> int:
 
 def assert_no_active_matters() -> None:
     """Refuse a broad purge while any matter is active in the current workspace."""
-    if active_matter_count():
+    try:
+        count = active_matter_count()
+    except Exception as exc:  # failure-policy: fail_closed -- an unreadable ledger holds everything
+        raise LegalHoldApplies(HOLD_UNVERIFIED_MESSAGE) from exc
+    if count:
         raise LegalHoldApplies(BROAD_PURGE_MESSAGE)
 
 
@@ -522,7 +530,10 @@ def assert_erasure_permitted(world: Any, *, conversation_ids: Sequence[int], goa
     Approvals are never deleted by an erasure, so they are not part of the closure
     check.  Any failure to enumerate a matter's scope refuses the erasure.
     """
-    matters = active_matters()
+    try:
+        matters = active_matters()
+    except Exception as exc:  # failure-policy: fail_closed -- an unreadable ledger holds everything
+        raise LegalHoldApplies(HOLD_UNVERIFIED_MESSAGE) from exc
     if not matters:
         return
     wanted_conversations = {int(item) for item in conversation_ids}
@@ -532,6 +543,8 @@ def assert_erasure_permitted(world: Any, *, conversation_ids: Sequence[int], goa
             scope = build_scope(world, matter, for_erasure=True)
         except MatterScopeUnverifiable as exc:
             raise LegalHoldApplies(LEGAL_HOLD_MESSAGE) from exc
+        except Exception as exc:  # failure-policy: fail_closed -- unknown read failures refuse erasure
+            raise LegalHoldApplies(HOLD_UNVERIFIED_MESSAGE) from exc
         if wanted_conversations & scope.conversation_ids() or wanted_goals & scope.goal_ids():
             raise LegalHoldApplies(LEGAL_HOLD_MESSAGE)
 
@@ -549,6 +562,7 @@ __all__ = [
     "BROAD_PURGE_MESSAGE",
     "EdiscoveryDisabled",
     "EdiscoveryError",
+    "HOLD_UNVERIFIED_MESSAGE",
     "LEGAL_HOLD_MESSAGE",
     "LegalHoldApplies",
     "MatterConflict",
