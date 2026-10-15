@@ -18,6 +18,11 @@ on:
         description: 'Test paths to run, separated by spaces (default: every collected test)'
         type: string
         default: ''
+      slice:
+        description: 'Which of the four file slices to run (default: all four)'
+        type: choice
+        options: ['all', '1', '2', '3', '4']
+        default: 'all'
 
 # Same reviewed dependency set as ci.yml.
 env:
@@ -38,11 +43,11 @@ jobs:
     # 150 minutes, so the suite is split into the same four file slices as the
     # Linux test-shard jobs (conftest.py --shard). Each slice has room to
     # finish and print its own failure summary.
-    timeout-minutes: 120
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: ${{ fromJSON(inputs.slice == 'all' && '[1, 2, 3, 4]' || format('[{0}]', inputs.slice)) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -94,17 +99,25 @@ jobs:
         # Two phases, as in test-shard: everything under xdist, then the
         # heavy_concurrency files serially. pytest-timeout uses its thread
         # method here (Windows has no SIGALRM). Exit 5 (nothing collected) from
-        # the serial phase is a pass.
+        # the serial phase is a pass. -v names every test as it finishes, so a
+        # worker that crashes or never exits still leaves the names in the log.
+        # Each phase is bounded (Git Bash's GNU timeout) inside the job limit,
+        # so the log is always uploaded even if a worker hangs at shutdown.
         run: |
           set -o pipefail
           status=0
+          if timeout --version 2>/dev/null | grep -q coreutils; then
+            bound() { timeout --verbose --kill-after=30s "$@"; }
+          else
+            bound() { shift; "$@"; }
+          fi
           # shellcheck disable=SC2086 # TEST_PATHS is a space-separated list
-          python -m pytest -q -n auto --dist loadfile --shard "$SHARD/4" \
+          bound 100m python -m pytest -v -n auto --dist loadfile --shard "$SHARD/4" \
             -m "not heavy_concurrency" --tb=short --durations=50 --timeout=180 \
             --junitxml="test-results-windows-$SHARD.xml" $TEST_PATHS \
             2>&1 | tee "pytest-windows-$SHARD.log" || status=$?
           # shellcheck disable=SC2086
-          python -m pytest -q --shard "$SHARD/4" -m heavy_concurrency --tb=short --timeout=600 \
+          bound 30m python -m pytest -v --shard "$SHARD/4" -m heavy_concurrency --tb=short --timeout=600 \
             --junitxml="test-results-windows-$SHARD-serial.xml" $TEST_PATHS \
             2>&1 | tee -a "pytest-windows-$SHARD.log" || serial=$?
           if [ "${serial:-0}" -ne 0 ] && [ "${serial:-0}" -ne 5 ]; then status=$serial; fi
