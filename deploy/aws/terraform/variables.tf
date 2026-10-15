@@ -162,9 +162,20 @@ variable "task_memory" {
 }
 
 variable "image_tag" {
-  description = "ECR image tag the service runs."
+  description = "ECR image tag the service runs. A tag can be re-pushed (the repository is MUTABLE), so a running service follows whatever `latest` points at on its next task start; set image_digest to pin the exact image."
   type        = string
   default     = "latest"
+}
+
+variable "image_digest" {
+  description = "Optional sha256 digest of the image to run (sha256:<64 hex>). When set, the task definition names repository@digest, so the service runs exactly that image until the digest is changed here, whatever is pushed to image_tag later. Read it after a build with `aws ecr describe-images --repository-name <repo> --image-ids imageTag=<image_tag> --query 'imageDetails[0].imageDigest'`. Empty runs image_tag."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.image_digest == "" || can(regex("^sha256:[0-9a-f]{64}$", var.image_digest))
+    error_message = "image_digest must be empty or sha256:<64 hex characters>."
+  }
 }
 
 variable "db_instance_class" {

@@ -17,18 +17,15 @@ checked and are already fixed are listed at the end and are not in the tables.
 |---|---|---|
 | Off-host audit signing is off by default. Without enterprise mode, `[audit] require_offhost_key`, or `MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY`, a same-host Ed25519 key is generated on disk. That gives integrity only against accidental or non-privileged edits. | `packages/maverick-core/maverick/audit/signing.py:487-511` (`require_offhost_signing`), `:619` and `:677` (local key path and custody warning) | Turning it on by default would break local installs that have no external key. Owner decision. |
 | No release is published. The releases API lists none; tags run from `v0.1.0` to `v0.1.6`; `main` is at 0.1.7. | `release-cohort.toml` (`version = "0.1.7"`); `SECURITY.md` (Supported versions) | Cutting the first release is an owner decision. |
-| Personal identifiers in a tracked Terraform var file. `oidc.auto.tfvars` is tracked in git and holds personal email addresses in comments and `email_from`. The addresses are not repeated here. | `deploy/aws/terraform/oidc.auto.tfvars:9-20` | Owner review: confirm which identifiers are intended, then move them out of tracked files. |
-| Mutable `latest` image tag. The default `image_tag` is `latest`, and the ECR repository allows tag overwrite. | `deploy/aws/terraform/variables.tf:164-167`; `deploy/aws/terraform/ecr.tf:3` (`MUTABLE`) | Immutable tags need a versioned push from the release pipeline; the release process is an owner decision. |
-| Secrets Manager entries can be deleted immediately. Six entries use `recovery_window_in_days = 0`. The at-rest key and consent-root entries keep a 7-day window. | `deploy/aws/terraform/secrets.tf:17`, `:27`, `:42`, `:65`, `:80`, `:99` (0 days); `:118`, `:139` (7 days) | The recovery window trades recovery against cleanup; owner choice. |
-| No EFS backup policy. The filesystem has no AWS Backup resource. | `deploy/aws/terraform/efs.tf` (no backup resource; no `aws_backup` anywhere under `deploy/aws/terraform`) | Retention period and backup vault are owner decisions. |
+| Mutable `latest` image tag. The default `image_tag` is `latest` and the ECR repository allows tag overwrite, so a service follows re-pushes of the tag. `image_digest` now pins the task definition to `repository@digest` when set (`deploy/aws/terraform/variables.tf`, `ecs.tf`; NEXT_STEPS.md step 4b). | `deploy/aws/terraform/ecr.tf:3` (`MUTABLE`); `deploy/aws/terraform/variables.tf` (`image_tag`, `image_digest`) | Immutable tags need a versioned push from the release pipeline; the release process is an owner decision. Until then, set `image_digest` after each build. |
 | ALB has no access logs, no WAF association and no deletion protection. The database has deletion protection; the load balancer does not. | `deploy/aws/terraform/alb.tf:1` (`aws_lb.main`); `deploy/aws/terraform/rds.tf:36` (the only `deletion_protection` in the stack) | Log bucket, WAF rules and their cost are owner decisions. |
 
 ## Open: separate change
 
 | Item | Evidence | Why open |
 |---|---|---|
-| AWS deployer role has broad permissions. Service-wide wildcard actions for S3, CodeBuild, ECR, ECS and CloudWatch Logs. Broad EC2, ELB, RDS, EFS, ACM and SES actions on `resources = ["*"]`. | `deploy/aws/terraform/deployer.tf:51`, `:56`, `:61`, `:70`, `:90`, `:103-105` | Narrowing needs the exact action set the deploy path uses; separate change. |
 | Database URL uses `sslmode=require`, not `verify-full`. The `pg_dsn` secret now carries `?sslmode=require` (encrypted, server certificate not verified); `deploy/postgres/README.md` asks for `verify-full`. | `deploy/aws/terraform/secrets.tf` (`pg_dsn` secret version) | `verify-full` needs the RDS CA bundle shipped in the image and pinned; separate change. |
+| AWS deployer identity keeps unscoped create actions. Infrastructure the stack creates has no ARN before it exists, so EC2, ELB, RDS, EFS, ACM and SES actions stay on `resources = ["*"]`; they are now bound to the deploy region (`aws:RequestedRegion`), and a Deny (`NeverDeleteDataStores`) stops the identity deleting the database, its snapshots or the state volume. S3, CodeBuild, ECR, ECS, Logs and Secrets Manager actions were already resource-scoped. | `deploy/aws/terraform/deployer.tf` (`Infra`, `NeverDeleteDataStores`) | Tag-based conditions on the create actions would need every resource tagged consistently first; separate change. |
 | ECS task without container hardening. The container definition sets no read-only root filesystem and no capability drop. | `deploy/aws/terraform/ecs.tf:26-28` (container definition); `deploy/aws/terraform/ecs.tf:119` (writable state mount) | Read-only root needs the writable paths listed and a test deploy; separate change. |
 | Helm pods mount the default service-account token. The pod spec sets no `automountServiceAccountToken: false` and names no ServiceAccount. | `deploy/helm/maverick/templates/deployment.yaml:26` (pod spec); no `automountServiceAccountToken` anywhere in `deploy/helm` | Confirm the app never calls the Kubernetes API, then set it false; separate change. |
 | Helm ingress values are not rendered. `values.yaml` defines an `ingress` block (disabled by default), but `templates/` has no Ingress resource. | `deploy/helm/maverick/values.yaml:154-160`; `deploy/helm/maverick/templates/` (no ingress template); `NOTES.txt:11` tells the operator to add one | Separate change. |
@@ -48,6 +45,15 @@ checked and are already fixed are listed at the end and are not in the tables.
 
 - Terraform version floor. `required_version` is now `>= 1.10`, matching the S3
   backend's `use_lockfile = true` (`deploy/aws/terraform/versions.tf`).
+- Personal identifiers in a tracked Terraform var file. `oidc.auto.tfvars` now
+  holds only non-personal configuration; `dashboard_admins` and `email_from`
+  are read from the untracked `local.auto.tfvars` (template:
+  `deploy/aws/terraform/local.auto.tfvars.example`, ignored by `.gitignore`).
+  The git history still carries the earlier values.
+- Secrets Manager recovery window. Every entry in `deploy/aws/terraform/secrets.tf`
+  uses `recovery_window_in_days = 7`; none can be deleted immediately.
+- EFS backup. `aws_efs_backup_policy.state` enables AWS Backup for the state
+  volume (`deploy/aws/terraform/efs.tf`: daily, 35-day retention, default vault).
 - Postgres world-model login bypassing row-level security. On open,
   `PostgresWorldModel._check_database_role` reads the login's `rolsuper` and
   `rolbypassrls`. With `[world_model] rls` on, such a login is reported by

@@ -11,10 +11,16 @@ resource "random_password" "dashboard_token" {
 }
 
 # ---- Secrets Manager entries (injected into the task, never baked into the image) ----
+#
+# Every entry keeps the 7-day recovery window (the shortest AWS allows above
+# immediate deletion), so a secret destroyed by a wrong apply can be restored
+# with `aws secretsmanager restore-secret`. An intentional teardown that must
+# reuse a name at once deletes with
+# `aws secretsmanager delete-secret --force-delete-without-recovery` first.
 
 resource "aws_secretsmanager_secret" "db_password" {
   name                    = "${local.name}/db-password"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "db_password" {
@@ -24,7 +30,7 @@ resource "aws_secretsmanager_secret_version" "db_password" {
 
 resource "aws_secretsmanager_secret" "dashboard_token" {
   name                    = "${local.name}/dashboard-token"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "dashboard_token" {
@@ -39,7 +45,7 @@ resource "aws_secretsmanager_secret_version" "dashboard_token" {
 #     --secret-string 'sk-ant-...' --profile lightwork --region us-east-2
 resource "aws_secretsmanager_secret" "anthropic_api_key" {
   name                    = "${local.name}/anthropic-api-key"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "anthropic_api_key" {
@@ -62,7 +68,7 @@ resource "random_password" "oidc_session_secret" {
 
 resource "aws_secretsmanager_secret" "oidc_session_secret" {
   name                    = "${local.name}/oidc-session-secret"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "oidc_session_secret" {
@@ -77,7 +83,7 @@ resource "aws_secretsmanager_secret_version" "oidc_session_secret" {
 #     --secret-string '<auth0-client-secret>' --profile lightwork --region us-east-2
 resource "aws_secretsmanager_secret" "oidc_client_secret" {
   name                    = "${local.name}/oidc-client-secret"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "oidc_client_secret" {
@@ -99,7 +105,7 @@ resource "aws_secretsmanager_secret_version" "oidc_client_secret" {
 # bundle shipped and pinned first (still open in docs/OPEN_ITEMS.md).
 resource "aws_secretsmanager_secret" "pg_dsn" {
   name                    = "${local.name}/pg-dsn"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "pg_dsn" {
