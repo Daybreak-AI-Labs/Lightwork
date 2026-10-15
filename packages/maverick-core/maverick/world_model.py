@@ -3821,7 +3821,7 @@ class WorldModel:
             if refusal is not None:
                 return refusal
             decided_at = row["decided_at"]
-            if decided_at is None or time.time() - float(decided_at) > float(within_seconds):
+            if decided_at is None or time.time() - float(decided_at) >= float(within_seconds):
                 return "too_late"
             conn.execute(
                 "UPDATE approvals SET status = 'pending', decided_at = NULL, "

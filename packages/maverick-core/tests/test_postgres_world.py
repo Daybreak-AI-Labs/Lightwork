@@ -722,6 +722,26 @@ def test_only_a_held_decision_is_undone_and_settling_it_makes_it_final(world, mo
     assert world.undo_approval_decision(stopped, undone_by="ana", within_seconds=30) == "final"
 
 
+def test_the_undo_window_closes_at_its_end_even_on_an_equal_clock_reading(world, monkeypatch):
+    # Same boundary as the SQLite backend: a clock that reads the decision and
+    # the undo alike (a coarse Windows clock) is still inside a zero window,
+    # and the window ends exactly at decided_at + within_seconds.
+    import time
+
+    aid = world.create_approval("wire-funds", risk="high", undoable=True)
+    event = world.decide_approval_audited(aid, "approved", decided_by="ana")
+    assert event is not None and world.mark_approval_audit_delivered(event.event_id)
+    decided_at = world.get_approval(aid).decided_at
+    clock = {"now": decided_at}
+    monkeypatch.setattr(time, "time", lambda: clock["now"])
+    assert world.undo_approval_decision(aid, undone_by="ana", within_seconds=0) == "too_late"
+    clock["now"] = decided_at + 30
+    assert world.undo_approval_decision(aid, undone_by="ana", within_seconds=30) == "too_late"
+    clock["now"] = decided_at + 29.5
+    assert world.undo_approval_decision(aid, undone_by="ana", within_seconds=30) == "undone"
+    assert world.get_approval(aid).status == "pending"
+
+
 def test_decide_approval_rejects_bad_status(world):
     aid = world.create_approval("do thing")
     with pytest.raises(ValueError, match="approved.*denied"):

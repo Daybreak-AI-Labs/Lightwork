@@ -4262,7 +4262,7 @@ class PostgresWorldModel:
             refusal = approval_undo_refusal(row[0], row[2], row[3])
             if refusal is not None:
                 return refusal
-            if row[1] is None or time.time() - float(row[1]) > float(within_seconds):
+            if row[1] is None or time.time() - float(row[1]) >= float(within_seconds):
                 return "too_late"
             cur.execute(
                 "UPDATE approvals SET status = 'pending', decided_at = NULL, "
