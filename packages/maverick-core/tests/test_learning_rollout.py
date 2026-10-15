@@ -318,7 +318,9 @@ def test_live_rollout_reports_partial_store_restore_and_leaves_no_false_success(
     original_restore = dreaming._restore_private_directory
 
     def fail_skill_restore(src, destination, **kwargs):  # kwargs: the verified inventory
-        if destination == skills:
+        # Compare the directory, not its spelling: the rollback can hand over a
+        # different spelling of the same path (on Windows, the \\?\ form).
+        if Path(destination).samefile(skills):
             raise OSError("simulated learned-skills restore failure")
         return original_restore(src, destination, **kwargs)
 

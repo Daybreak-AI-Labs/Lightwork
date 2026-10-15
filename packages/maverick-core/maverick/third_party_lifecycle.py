@@ -2497,7 +2497,7 @@ class ThirdPartyLifecycleStore:
         )
         actor = self._actor()
         now = _timestamp(self._clock(), "current time")
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             lifecycle_raw, lifecycle_digest = self._get(
                 connection,
@@ -2727,7 +2727,7 @@ class ThirdPartyLifecycleStore:
         now = _timestamp(self._clock(), "current time")
         claimed: list[CallbackItem] = []
         affected_plans: set[str] = set()
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             rows = connection.execute(
                 "SELECT * FROM callbacks WHERE tenant_id=? AND "
@@ -2812,7 +2812,7 @@ class ThirdPartyLifecycleStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             request_sha, operation = self._operation(connection, tenant, idempotency_key, request)
             raw, stored_digest = self._get(
@@ -2905,7 +2905,7 @@ class ThirdPartyLifecycleStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             request_sha, operation = self._operation(connection, tenant, idempotency_key, request)
             raw, stored_digest = self._get(
@@ -2977,7 +2977,7 @@ class ThirdPartyLifecycleStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             request_sha, operation = self._operation(connection, tenant, idempotency_key, request)
             raw, stored_digest = self._get(
@@ -3075,7 +3075,7 @@ class ThirdPartyLifecycleStore:
             "expected_lifecycle_revision": expected_lifecycle,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             request_sha, operation = self._operation(connection, tenant, idempotency_key, request)
             if operation is not None:
@@ -3846,7 +3846,7 @@ class ThirdPartyLifecycleStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             request_sha, operation = self._operation(connection, tenant, idempotency_key, request)
             raw, stored_digest = self._get(
@@ -3955,7 +3955,7 @@ class ThirdPartyLifecycleStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             request_sha, operation = self._operation(connection, tenant, idempotency_key, request)
             raw, stored_digest = self._get(

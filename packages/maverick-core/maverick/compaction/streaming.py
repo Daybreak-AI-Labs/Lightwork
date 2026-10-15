@@ -32,6 +32,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 from ..context_compactor import _message_text
+from ..file_lock import _retry_permission_error, atomic_read_text
 from ..llm import model_for_role
 from ..paths import data_dir
 from . import KEEP_RECENT_TURNS, digest_cutoff
@@ -77,6 +78,13 @@ def _sidecar_path() -> Path:
     return data_dir(SIDECAR_BASENAME)
 
 
+# On Windows a reader that still has sidecar.json open (a concurrent fold's load)
+# makes the rename fail with PermissionError until that reader closes it, so the
+# save is retried briefly instead of being dropped. Elsewhere a PermissionError
+# is a real failure and is reported at once.
+_REPLACE_RETRY_SECONDS = 5.0 if os.name == "nt" else 0.0
+
+
 def _turn_line(turn: dict) -> str:
     text = " ".join(_message_text(turn).split())
     if len(text) > _LINE_CHARS:
@@ -105,15 +113,31 @@ class StreamingCompactor:
 
     # ---- sidecar I/O (fail-safe, atomic, 0600) ----
 
-    def _load(self) -> dict:
+    def _load(self, *, strict: bool = False) -> dict:
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            raw = json.loads(atomic_read_text(self.path))
             return raw if isinstance(raw, dict) else {}
         except FileNotFoundError:
             return {}
         except (OSError, ValueError) as e:
+            if strict and isinstance(e, OSError):
+                raise
             log.warning("compaction stream sidecar: cannot read %s: %s", self.path, e)
             return {}
+
+    def _reload_under_lock(self) -> dict | None:
+        """The sidecar as it is now, read while the cross-process lock is held.
+
+        Returns None when it cannot be read. Saving then would replace every
+        other conversation's state with this one's, so the caller keeps what is
+        stored instead.
+        """
+        try:
+            return self._load(strict=True)
+        except OSError as e:
+            log.warning("compaction stream sidecar: cannot reload %s, keeping stored state: %s",
+                        self.path, e)
+            return None
 
     def _prune_stale(self, data: dict) -> dict:
         """Drop entries untouched for longer than the TTL (one per stale
@@ -142,7 +166,8 @@ class StreamingCompactor:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     json.dump(data, f)
                 os.chmod(tmp, 0o600)
-                os.replace(tmp, self.path)
+                _retry_permission_error(lambda: os.replace(tmp, self.path),
+                                        retry_seconds=_REPLACE_RETRY_SECONDS)
             except BaseException:
                 try:
                     os.unlink(tmp)
@@ -253,7 +278,9 @@ class StreamingCompactor:
         # Reload-merge-save under the cross-process lock (the LLM fold above ran
         # outside it) so a concurrent fold on another conversation isn't lost.
         with self._cplock():
-            data = self._load()
+            data = self._reload_under_lock()
+            if data is None:
+                return summary
             if data.get(conversation_id) != initial_state:
                 # Another fold/reset won while native async I/O yielded. This
                 # caller's result is valid for its own source, but it cannot
@@ -292,7 +319,9 @@ class StreamingCompactor:
             folded_turns.extend(sent)
             summary = self._fold_once(summary, sent)
             with self._cplock():
-                data = self._load()
+                data = self._reload_under_lock()
+                if data is None:
+                    continue
                 data[conversation_id] = {
                     "cursor": cursor,
                     "summary": summary,

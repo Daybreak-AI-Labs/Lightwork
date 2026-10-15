@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import base64
 import codecs
+import contextlib
 import hashlib
 import hmac
 import json
@@ -2768,7 +2769,7 @@ class ThirdPartyCollaborationStore:
         actor = self._actor()
         now = _timestamp(self._clock(), "current time")
         request = {"action": "purge_expired", "before": cutoff, "actor_ref": actor}
-        with cross_process_lock(self.path, strict=True), self._connect() as connection:
+        with cross_process_lock(self.path, strict=True), contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             operation_sha, request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request

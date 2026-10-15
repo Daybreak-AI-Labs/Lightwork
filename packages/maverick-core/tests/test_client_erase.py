@@ -230,6 +230,133 @@ def test_nested_directory_alias_is_removed_without_touching_target(tmp_path):
     assert (outside / "must-stay.txt").read_text() == "other client's data"
 
 
+_WINDOWS_DIRECTORY = 0x10
+_WINDOWS_REPARSE_POINT = 0x400
+
+
+def _windows_directory_alias(monkeypatch, tmp_path, handle_attributes, *, root=None):
+    """A directory symlink erased through the Windows deletion path on any OS.
+
+    lstat reports a directory symlink as S_IFLNK with the DIRECTORY and
+    REPARSE_POINT attributes, and the deletion handle reports the same attributes.
+    ``handle_attributes`` is what the handle reports when deletion checks it.
+    """
+    import ctypes
+    import types
+
+    from maverick import client_erasure
+
+    outside = tmp_path / "other-client"
+    outside.mkdir()
+    (outside / "must-stay.txt").write_text("other client's data")
+    if root is None:
+        root = tmp_path / "client-root"
+        root.mkdir()
+    link = root / "outside-link"
+    _symlink_or_skip(link, outside)
+    real = link.lstat()
+    real_lstat = Path.lstat
+
+    def windows_lstat(self, *args, **kwargs):
+        info = real_lstat(self, *args, **kwargs)
+        if self != link:
+            return info
+        return types.SimpleNamespace(
+            st_mode=info.st_mode, st_ino=info.st_ino, st_dev=info.st_dev,
+            st_nlink=info.st_nlink,
+            st_file_attributes=_WINDOWS_DIRECTORY | _WINDOWS_REPARSE_POINT)
+
+    class HandleInfo(ctypes.Structure):
+        _fields_ = [("attributes", ctypes.c_uint32), ("index_high", ctypes.c_uint32),
+                    ("index_low", ctypes.c_uint32), ("links", ctypes.c_uint32)]
+
+    class Disposition(ctypes.Structure):
+        _fields_ = [("delete_file", ctypes.c_bool)]
+
+    inspections = []
+    deleted = []
+
+    def inspect_handle():
+        inspections.append(None)
+        return HandleInfo(attributes=handle_attributes, index_high=real.st_ino >> 32,
+                          index_low=real.st_ino & 0xFFFFFFFF,
+                          links=1 if len(inspections) == 1 else 0)
+
+    def set_disposition(handle, _cls, _info, _size):
+        # Delete-on-close of the opened object: the alias itself, never its target.
+        # Windows removes a directory link with rmdir; unlink refuses a directory.
+        deleted.append(handle)
+        (os.rmdir if os.name == "nt" else os.unlink)(link)
+        return True
+
+    api = (lambda *_args: 7, lambda _handle, _ref: True, set_disposition,
+           lambda _handle: True, inspect_handle, Disposition)
+    monkeypatch.setattr(Path, "lstat", windows_lstat)
+    monkeypatch.setattr(client_erasure, "_windows_erase_api", lambda: api)
+    return link, outside, deleted
+
+
+def test_windows_directory_alias_identity_matches_its_deletion_handle(monkeypatch, tmp_path):
+    """Windows: lstat set S_IFLNK on a directory symlink, so S_ISDIR was False while
+    the deletion handle reported FILE_ATTRIBUTE_DIRECTORY, and every directory alias
+    looked changed after the signed inventory. The alias must be removed as a link,
+    and the folder it points to must stay untouched."""
+    from maverick import client_erasure
+
+    link, outside, deleted = _windows_directory_alias(
+        monkeypatch, tmp_path, handle_attributes=_WINDOWS_DIRECTORY | _WINDOWS_REPARSE_POINT)
+    identity = client_erasure.windows_erase_target_identity(link)
+    assert identity[2:] == (True, True)
+    client_erasure.delete_windows_erase_target(link, identity)
+    assert deleted and not os.path.lexists(link)
+    assert (outside / "must-stay.txt").read_text() == "other client's data"
+
+
+def test_windows_alias_replaced_by_a_real_directory_is_refused_before_deletion(monkeypatch, tmp_path):
+    """The identity check still refuses a target that changed after the inventory:
+    here the alias was replaced by an ordinary directory, so nothing is deleted."""
+    from maverick import client_erasure
+
+    link, outside, deleted = _windows_directory_alias(
+        monkeypatch, tmp_path, handle_attributes=_WINDOWS_DIRECTORY)
+    identity = client_erasure.windows_erase_target_identity(link)
+    with pytest.raises(ValueError, match="changed after the signed inventory"):
+        client_erasure.delete_windows_erase_target(link, identity)
+    assert deleted == [] and os.path.islink(link)
+    assert (outside / "must-stay.txt").read_text() == "other client's data"
+
+
+def test_windows_directory_alias_erase_completes_and_keeps_its_target(monkeypatch, tmp_path):
+    """A whole erase on the Windows identity path. The signed inventory and the
+    removal must read the alias the same way, or the erase reports it as changed
+    and never completes. The erase must complete and leave the folder it points to."""
+    from maverick import client_erasure
+
+    root = _seed()
+    link, outside, deleted = _windows_directory_alias(
+        monkeypatch, tmp_path, handle_attributes=_WINDOWS_DIRECTORY | _WINDOWS_REPARSE_POINT,
+        root=root)
+    real_remove = client._remove_client_path
+
+    # The Windows-only steps of the erase, reproduced on this host: identities come
+    # from windows_erase_target_identity and the alias goes through its handle.
+    monkeypatch.setattr(client, "_windows_target_identities", lambda targets: {
+        p: client_erasure.windows_erase_target_identity(p) for p in targets})
+
+    def remove_path(path, identity):
+        if path != link:
+            return real_remove(path, None)
+        client_erasure.delete_windows_erase_target(path, identity)
+        return 1
+
+    monkeypatch.setattr(client, "_remove_client_path", remove_path)
+    res = client.erase_client()
+    assert res["removed"] >= 1 and deleted
+    assert not os.path.lexists(link)
+    assert not (root / "world.db").exists()
+    assert (outside / "must-stay.txt").read_text() == "other client's data"
+
+
 @pytest.mark.parametrize("alias_area", ["client", "receipt"])
 def test_redirected_folder_refuses_without_removing_outside_data(tmp_path, alias_area):
     from maverick.paths import data_dir

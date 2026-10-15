@@ -20,6 +20,7 @@ credentials, URLs, origins, or provider payloads.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -2023,7 +2024,7 @@ class PrivacyRightsOrchestrationStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -2192,7 +2193,7 @@ class PrivacyRightsOrchestrationStore:
             "source_ids": list(owned_sources) if owned_sources is not None else None,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             self._prune_claim_history(connection, tenant, now, idempotency_key)
             request_sha, operation = self._operation(
@@ -2640,7 +2641,7 @@ class PrivacyRightsOrchestrationStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -4362,7 +4363,7 @@ class PrivacyRightsOrchestrationStore:
             "cutoff": requested_cutoff,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request

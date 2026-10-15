@@ -1,4 +1,5 @@
 """Internal preservation gates; authored for deferred execution."""
+import contextlib
 import hashlib
 import json
 import sqlite3
@@ -12,7 +13,7 @@ def test_preservation_reads_every_case_even_when_feature_disabled(tmp_path, monk
     path = tmp_path / "rights.sqlite3"
     monkeypatch.setattr(paths, "data_dir", lambda *a, **kw: path)
     monkeypatch.setattr(paths, "current_tenant_id", lambda: "workspace")
-    with sqlite3.connect(path) as connection:
+    with contextlib.closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("CREATE TABLE rights_cases(tenant_id TEXT,case_id TEXT,payload_json TEXT,integrity_sha256 TEXT)")
         for n in range(1002):
             payload = {"tenant_id": "workspace", "legal_hold": n == 1001, "retention_blocks_deletion": False}
@@ -64,7 +65,7 @@ class _RecordingWorld:
 
 
 def _rights_ledger(path, cases):
-    with sqlite3.connect(path) as connection:
+    with contextlib.closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("CREATE TABLE rights_cases(tenant_id TEXT,case_id TEXT,payload_json TEXT,integrity_sha256 TEXT)")
         for case_id, payload in cases:
             encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -170,3 +171,34 @@ def test_maverick_gc_is_refused_under_a_recorded_hold_and_runs_without_one(priva
     ran = CliRunner().invoke(cli_mod.main, ["--db", str(db), "gc", "--yes"])
     assert ran.exit_code == 0, ran.output
     assert "pruned 0 conversation(s)" in ran.output
+
+
+def test_hold_check_closes_every_ledger_connection(privacy_ledger, monkeypatch):
+    """``with sqlite3.connect(...)`` commits but never closes, and CPython frees the
+    connection only in a later cyclic GC pass, so the gc hold check kept the
+    privacy-rights ledger open and unlink failed on Windows (WinError 32). Every
+    connection the check opens must be closed when it returns."""
+    from maverick import records_gc
+    from maverick.ediscovery import LegalHoldApplies
+
+    _rights_ledger(privacy_ledger, [("case-1", {"tenant_id": "workspace", "legal_hold": True,
+                                                 "retention_blocks_deletion": False})])
+    opened = []
+    real_connect = sqlite3.connect
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", recording_connect)
+    try:
+        with pytest.raises(LegalHoldApplies):
+            records_gc.prune_world(_RecordingWorld(), days=1, events_days=1)
+        assert opened, "the hold check should read the privacy-rights ledger"
+        for connection in opened:
+            with pytest.raises(sqlite3.ProgrammingError):  # a closed connection refuses work
+                connection.execute("SELECT 1")
+    finally:
+        for connection in opened:
+            connection.close()

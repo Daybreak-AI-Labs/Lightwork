@@ -11,6 +11,7 @@ to audit access.  Broad purges check matters themselves (see
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import sqlite3
@@ -28,7 +29,11 @@ def preservation_snapshot() -> dict:
     if path.exists():
         # Do not initialize a ledger or require its optional feature/key merely
         # to respect a hold that was recorded before the feature was disabled.
-        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5) as connection:
+        # The connection's own context manager only commits; close it explicitly so
+        # the ledger is released when this check returns (Windows keeps it locked).
+        with contextlib.closing(
+            sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
+        ) as connection:
             connection.row_factory = sqlite3.Row
             for row in connection.execute("SELECT * FROM rights_cases ORDER BY case_id"):
                 payload = PrivacyRightsOrchestrationStore._payload(row, "rights case")
