@@ -81,8 +81,11 @@
   `scripts/select_pr_tests.py` selects from the changed files (kernel,
   conftest, requirements, `.github/`, `scripts/` changes = full suite; a
   package change = its tests + every test naming its import package; other
-  files = tests naming them by path). The merge queue and `main` run
-  everything. Preview with `python scripts/select_pr_tests.py --git origin/main HEAD`.
+  files = tests naming them by path), and the heavier jobs (docker, postgres,
+  audit, release-cohort, redteam, eval-smoke, the benchmark gates, Windows
+  containment) run only when a changed file is under their inputs
+  (`JOB_PREFIXES`). The merge queue and `main` run everything. Preview with
+  `python scripts/select_pr_tests.py --git origin/main HEAD`.
 
 ### Lint / CI gates beyond ruff
 

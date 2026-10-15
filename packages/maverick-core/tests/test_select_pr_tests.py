@@ -74,6 +74,11 @@ def _select(root: Path, *changed: str) -> dict:
     return select_pr_tests.select(list(changed), root)
 
 
+def _jobs(**needed: bool) -> dict[str, bool]:
+    """The jobs map with every gated job False except those named."""
+    return {job: needed.get(job, False) for job in select_pr_tests.JOB_PREFIXES}
+
+
 @pytest.mark.parametrize(
     "changed",
     [
@@ -125,6 +130,7 @@ def test_changed_test_file_is_selected_itself(tree):
         "mode": "paths",
         "paths": ["packages/maverick-dashboard/tests/test_app.py"],
         "reasons": ["packages/maverick-dashboard/tests/test_app.py changed"],
+        "jobs": _jobs(docker=True, audit=True, postgres=True, **{"release-cohort": True}),
     }
 
 
@@ -145,6 +151,7 @@ def test_other_files_select_the_tests_that_name_them(tree):
         "mode": "none",
         "paths": [],
         "reasons": ["sdks/plugin-ts/src/index.ts: 0 files name it"],
+        "jobs": _jobs(audit=True),  # the SDK is a dependency surface the audit scans
     }
 
 
@@ -161,7 +168,7 @@ def test_selection_is_the_union_over_the_change_set(tree):
 
 def test_changed_paths_are_normalised(tree):
     assert _select(tree, "docs\\OPEN_ITEMS.md", "", "  ") == _select(tree, "docs/OPEN_ITEMS.md")
-    assert _select(tree) == {"mode": "none", "paths": [], "reasons": ["no files changed"]}
+    assert _select(tree) == {"mode": "none", "paths": [], "reasons": ["no files changed"], "jobs": _jobs()}
 
 
 def test_test_files_are_the_pytest_roots_minus_virtualenvs(tree):
@@ -174,6 +181,58 @@ def test_test_files_are_the_pytest_roots_minus_virtualenvs(tree):
     assert found == sorted(
         rel for rel in TREE if re.search(r"(^|/)test_[^/]+\.py$", rel)
     )
+
+
+# --- the heavier jobs ------------------------------------------------------
+
+
+def test_jobs_follow_the_changed_paths(tree):
+    """Each gated ci.yml job runs on a pull request only when a changed file is
+    under its inputs; a full-suite change runs every job."""
+    assert _select(tree, "docs/OPEN_ITEMS.md")["jobs"] == _jobs()
+    assert _select(tree, "deploy/helm/values.yaml")["jobs"] == _jobs(audit=True)
+    assert _select(tree, "packages/maverick-channels/maverick_channels/irc.py")["jobs"] == _jobs(
+        docker=True, audit=True, **{"release-cohort": True},
+    )
+    assert _select(tree, "packages/maverick-core/maverick/agent.py")["jobs"] == dict.fromkeys(
+        select_pr_tests.JOB_PREFIXES, True,
+    )
+    assert _select(tree, "apps/installer-cli/maverick_installer/wizard.py")["jobs"] == _jobs(
+        docker=True, audit=True, **{"release-cohort": True},
+    )
+
+
+def test_every_gated_job_exists_and_the_ungated_ones_stay_ungated():
+    jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    for job in select_pr_tests.JOB_PREFIXES:
+        assert job in jobs, job
+    for job in ("lint", "test-window", "posture", "windows-process-containment-window"):
+        assert "needs" not in jobs[job], job
+
+
+def test_gated_jobs_skip_only_when_the_selection_says_so():
+    """A gated job needs select-tests and runs unless the jobs map says False:
+    an empty map (the selection failed, or a non-PR event) runs everything, and
+    `!cancelled()` keeps a failed selection from skipping the job (a skipped
+    job would satisfy the required check)."""
+    jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    for job in select_pr_tests.JOB_PREFIXES:
+        if job == "windows-process-containment":
+            continue
+        assert jobs[job]["needs"] == "select-tests", job
+        assert jobs[job]["if"] == (
+            "${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')"
+            f"['{job}'] != false }}}}"
+        ), job
+    # The Windows job is a named matrix: a skipped job would not expand its
+    # matrix and the required context would vanish, so its steps are gated.
+    windows = jobs["windows-process-containment"]
+    assert windows["needs"] == "select-tests" and windows["if"] == "${{ !cancelled() }}"
+    gate = "fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment']"
+    assert windows["steps"][0]["name"] == "Not needed on this pull request"
+    assert windows["steps"][0]["if"] == f"{gate} == false"
+    for step in windows["steps"][1:]:
+        assert step["if"] == f"{gate} != false", step.get("name") or step.get("uses")
 
 
 # --- the git range ---------------------------------------------------------
@@ -244,9 +303,11 @@ def test_cli_writes_the_selection_and_the_workflow_outputs(repo, tmp_path, capsy
     selection = json.loads((out / "selection.json").read_text(encoding="utf-8"))
     assert selection["mode"] == "paths"
     assert selection["paths"] == ["packages/maverick-core/tests/test_claims_docs.py"]
-    assert github_output.read_text(encoding="utf-8") == (
-        'earlier=1\nmode=paths\npaths=["packages/maverick-core/tests/test_claims_docs.py"]\n'
+    written = github_output.read_text(encoding="utf-8")
+    assert written.startswith(
+        'earlier=1\nmode=paths\npaths=["packages/maverick-core/tests/test_claims_docs.py"]\njobs={'
     )
+    assert json.loads(written.split("jobs=", 1)[1]) == _jobs()
     stdout = capsys.readouterr().out
     assert "3 files changed since merge base" in stdout
     assert "mode=paths paths=1" in stdout
@@ -256,7 +317,9 @@ def test_cli_writes_the_selection_and_the_workflow_outputs(repo, tmp_path, capsy
         "--github-output", str(github_output),
     ])
     assert rc == 0
-    assert github_output.read_text(encoding="utf-8").endswith("mode=full\npaths=[]\n")
+    tail = github_output.read_text(encoding="utf-8").split("earlier=1\n", 1)[1]
+    assert "\nmode=full\npaths=[]\njobs=" in tail
+    assert json.loads(tail.rsplit("jobs=", 1)[1]) == dict.fromkeys(select_pr_tests.JOB_PREFIXES, True)
 
 
 # --- the real repository ---------------------------------------------------
@@ -302,7 +365,7 @@ def test_ci_pull_request_legs_take_the_selection_and_the_queue_runs_everything()
     jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
 
     select = jobs["select-tests"]
-    assert set(select["outputs"]) == {"mode", "paths"}
+    assert set(select["outputs"]) == {"mode", "paths", "jobs"}
     checkout, choose = select["steps"]
     assert checkout["uses"].startswith("actions/checkout@")
     # The merge base is not in a shallow clone.
@@ -314,7 +377,7 @@ def test_ci_pull_request_legs_take_the_selection_and_the_queue_runs_everything()
     assert choose["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
     run = choose["run"]
     assert 'if [ "$EVENT_NAME" != "pull_request" ]; then' in run
-    assert "printf 'mode=full\\npaths=[]\\n' >> \"$GITHUB_OUTPUT\"" in run
+    assert "printf 'mode=full\\npaths=[]\\njobs={}\\n' >> \"$GITHUB_OUTPUT\"" in run
     assert 'python3 scripts/select_pr_tests.py --git "$BASE_SHA" "$HEAD_SHA"' in run
     assert '--github-output "$GITHUB_OUTPUT"' in run
 

@@ -27,6 +27,9 @@ concurrency:
 
 jobs:
   document-engines:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['document-engines'] != false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -327,6 +330,9 @@ jobs:
         run: python -m maverick.control_data_plane_soak --ci
 
   audit:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['audit'] != false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -557,6 +563,9 @@ jobs:
           if-no-files-found: error
 
   release-cohort:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['release-cohort'] != false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -608,11 +617,20 @@ jobs:
     # merge queue's commit, pushes to main, workflow_dispatch -- the mode is
     # `full` and the legs run everything, so a selection that was too narrow
     # fails in the queue, before the commit reaches main, never on it.
+    #
+    # The same change set gates the heavier jobs below (`jobs` output, one
+    # boolean per job id from JOB_PREFIXES in the script): a job whose inputs
+    # the pull request cannot have touched is skipped on that pull request
+    # and runs on the queue's commit. A skipped job reports success to the
+    # required check; a job skipped because this selection failed would too,
+    # so every gated job runs under `!cancelled()` and treats a missing map
+    # (empty outputs) as "run".
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       mode: ${{ steps.select.outputs.mode }}
       paths: ${{ steps.select.outputs.paths }}
+      jobs: ${{ steps.select.outputs.jobs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -631,7 +649,7 @@ jobs:
           set -euo pipefail
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "$EVENT_NAME: the test legs run the whole suite."
-            printf 'mode=full\npaths=[]\n' >> "$GITHUB_OUTPUT"
+            printf 'mode=full\npaths=[]\njobs={}\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Merge-base to head is what the PR changes even after main moved;
@@ -728,6 +746,12 @@ jobs:
 
   windows-process-containment:
     name: Windows process containment (Python ${{ matrix.python-version }})
+    # Gated on its steps, not the job: a job skipped by `if` never expands its
+    # matrix, so the required check context would never appear (see
+    # test-window). The steps skip when the pull request's change set cannot
+    # reach the local sandbox backend (select-tests `jobs`).
+    needs: select-tests
+    if: ${{ !cancelled() }}
     runs-on: windows-2022
     timeout-minutes: 10
     permissions:
@@ -739,15 +763,24 @@ jobs:
         # windows-process-containment-window below (queue and main only).
         python-version: ["3.10"]
     steps:
+      - name: Not needed on this pull request
+        if: fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment'] == false
+        run: >-
+          echo "No changed file reaches the local sandbox backend; the merge
+          queue runs this job on the queue's commit."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment'] != false
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment'] != false
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install the focused test dependency
+        if: fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment'] != false
         run: python -m pip install "pytest==9.1.1"
       - name: Test Windows Job Object process-tree containment
+        if: fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment'] != false
         env:
           PYTHONPATH: ${{ github.workspace }}/packages/maverick-core
         run: >-
@@ -913,6 +946,9 @@ jobs:
           retention-days: 14
 
   redteam:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['redteam'] != false }}
     # Red-team CI (ROADMAP 2027-H1 safety): run the labelled adversarial
     # corpus through the shield's built-in detector and fail the build on any
     # missed attack or over-blocked benign case. A named job (not buried in
@@ -935,6 +971,9 @@ jobs:
         run: python -m maverick_shield.redteam --calibrate
 
   eval-smoke:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['eval-smoke'] != false }}
     # Eval-gated-release foundation (ROADMAP P3). Real evals drive `maverick
     # start` against a live provider -- no models/network in CI -- so this gate
     # runs the eval harness machinery (registry + scorers + tau2 verifier +
@@ -961,6 +1000,9 @@ jobs:
         run: python -m pytest -vvs --tb=long benchmarks/test_eval_smoke.py
 
   governance-frontier-offline:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['governance-frontier-offline'] != false }}
     # Forty deterministic control-path definitions, each in governed and
     # controls-disabled arms under three pinned order seeds. No provider key,
     # model, or network. Semantics and signed evidence are hard gates; local
@@ -1006,6 +1048,9 @@ jobs:
           --trusted-pubkey-file "$RUNNER_TEMP/governance-frontier.pub"
 
   harness-overhead:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['harness-overhead'] != false }}
     # What the governance record COSTS: identical deterministic tasks run in
     # governed and ungoverned arms, stubbed at the model boundary so both call
     # the same pure function. No provider key, model, or network. The
@@ -1049,6 +1094,9 @@ jobs:
           --trusted-pubkey-file "$RUNNER_TEMP/harness-overhead.pub"
 
   postgres:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['postgres'] != false }}
     # DB-backed tests for the Postgres world-model backend. The default `test`
     # job has no Postgres, so test_postgres_world.py skips there; this job
     # stands up a service + DSN so the backend is actually exercised in CI.
@@ -1132,6 +1180,9 @@ jobs:
           packages/maverick-knowledge/tests/test_knowledge.py -k PgVectorLive
 
   docker:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['docker'] != false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

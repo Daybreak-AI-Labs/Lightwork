@@ -24,6 +24,12 @@ toward running everything:
 * When nothing matches, the mode is ``none`` and the legs report success
   without running pytest.
 
+The same change set decides which of the heavier ci.yml jobs a pull request
+needs (``jobs`` in the output, one boolean per job id): each job runs when a
+changed path is under one of its ``JOB_PREFIXES`` or when the full suite is
+selected, and is skipped otherwise. The merge queue and ``main`` never consult
+this; they run every job.
+
 Usage::
 
     python scripts/select_pr_tests.py --git BASE HEAD --github-output "$GITHUB_OUTPUT"
@@ -72,6 +78,36 @@ PACKAGE_MODULES = {
 }
 
 _TEST_FILE = re.compile(r"(^|/)test_[^/]+\.py$")
+
+#: ci.yml jobs a pull request may skip, with the paths that make each one
+#: necessary. The job id is the key; a prefix ending in "/" is a directory.
+#: Anything under FULL_SUITE_PREFIXES / FULL_SUITE_FILES runs every job.
+#: Jobs not listed here (lint, test, test-window, posture, the Windows window
+#: legs) are never gated.
+JOB_PREFIXES: dict[str, tuple[str, ...]] = {
+    # LaTeX/document conversion tests plus the offline document-worker image.
+    "document-engines": ("packages/maverick-core/", "deploy/docker/"),
+    # The deploy image installs every package; its Dockerfile lives under deploy/docker.
+    "docker": ("packages/", "apps/installer-cli/", "deploy/docker/", ".dockerignore"),
+    # Live Postgres and pgvector tests of the core, knowledge and dashboard packages.
+    "postgres": ("packages/maverick-core/", "packages/maverick-knowledge/", "packages/maverick-dashboard/"),
+    # OSV/pip-audit/bandit/SBOM over every dependency surface and all Python code.
+    "audit": (
+        "packages/", "apps/", "benchmarks/", "demo/", "examples/", "rust/", "go/", "sdks/",
+        "web/", "extensions/", "deploy/", "osv-scanner.toml",
+    ),
+    # Wheel builds and package metadata of the release cohort.
+    "release-cohort": ("packages/", "apps/installer-cli/"),
+    # Shield red-team corpus.
+    "redteam": ("packages/maverick-core/", "packages/maverick-shield/"),
+    # Eval-harness smoke over the core.
+    "eval-smoke": ("packages/maverick-core/",),
+    # Governance-frontier and harness-overhead benchmarks over core + shield.
+    "governance-frontier-offline": ("packages/maverick-core/", "packages/maverick-shield/"),
+    "harness-overhead": ("packages/maverick-core/", "packages/maverick-shield/"),
+    # Windows Job Object containment of the local sandbox backend.
+    "windows-process-containment": ("packages/maverick-core/",),
+}
 
 
 def test_files(root: Path = REPO_ROOT) -> list[Path]:
@@ -153,14 +189,24 @@ def changed_files_from_git(base: str, head: str, root: Path = REPO_ROOT) -> tupl
     return diff.splitlines(), merge_base
 
 
+def jobs_needed(changed: list[str]) -> dict[str, bool]:
+    """Which gated ci.yml jobs the changed paths make necessary."""
+    return {
+        job: any(rel.startswith(prefixes) for rel in changed)
+        for job, prefixes in JOB_PREFIXES.items()
+    }
+
+
 def select(changed: list[str], root: Path = REPO_ROOT) -> dict:
-    """Return ``{"mode", "paths", "reasons"}`` for the changed repository paths."""
+    """Return ``{"mode", "paths", "reasons", "jobs"}`` for the changed repository paths."""
     changed = sorted({c.strip().replace("\\", "/") for c in changed if c.strip()})
     reasons: list[str] = []
     for rel in changed:
         reason = _full_reason(rel)
         if reason:
-            return {"mode": "full", "paths": [], "reasons": [reason]}
+            return {"mode": "full", "paths": [], "reasons": [reason],
+                    "jobs": dict.fromkeys(JOB_PREFIXES, True)}
+    jobs = jobs_needed(changed)
 
     all_tests = test_files(root)
     texts = {t: t.read_text(encoding="utf-8", errors="ignore") for t in all_tests}
@@ -189,11 +235,12 @@ def select(changed: list[str], root: Path = REPO_ROOT) -> dict:
         reasons.append(f"{rel}: {len(hits)} files name it")
 
     if not selected:
-        return {"mode": "none", "paths": [], "reasons": reasons or ["no files changed"]}
+        return {"mode": "none", "paths": [], "reasons": reasons or ["no files changed"], "jobs": jobs}
     return {
         "mode": "paths",
         "paths": sorted(_rel(t, root) for t in selected),
         "reasons": reasons,
+        "jobs": jobs,
     }
 
 
@@ -225,7 +272,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.git:
         changed, note = changed_files_from_git(*args.git, root=args.root)
         if changed is None:
-            result = {"mode": "full", "paths": [], "reasons": [note]}
+            result = {"mode": "full", "paths": [], "reasons": [note],
+                      "jobs": dict.fromkeys(JOB_PREFIXES, True)}
         else:
             print(f"{len(changed)} files changed since merge base {note}")
     else:
@@ -237,8 +285,12 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.output).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     if args.github_output:
         with open(args.github_output, "a", encoding="utf-8") as handle:
-            handle.write(f"mode={result['mode']}\npaths={json.dumps(result['paths'])}\n")
-    print(f"mode={result['mode']} paths={len(result['paths'])}")
+            handle.write(
+                f"mode={result['mode']}\npaths={json.dumps(result['paths'])}\n"
+                f"jobs={json.dumps(result['jobs'])}\n"
+            )
+    skipped = sorted(job for job, needed in result["jobs"].items() if not needed)
+    print(f"mode={result['mode']} paths={len(result['paths'])} jobs skipped={skipped or 'none'}")
     for reason in result["reasons"][:20]:
         print(f"  {reason}")
     return 0
