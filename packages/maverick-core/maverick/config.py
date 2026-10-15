@@ -36,6 +36,7 @@ import logging
 import math
 import os
 import re
+import stat
 import threading
 import time
 from contextlib import contextmanager
@@ -118,14 +119,17 @@ def config_path() -> Path:
     return _default_config_path()
 
 
-# Parsed-TOML cache keyed by absolute path -> (mtime_ns, size, raw_dict). Only
-# the expensive part (file read + TOML parse) is memoized; env-var interpolation
-# and the overlay deep-merge still run on every load_config() call, so a changed
-# ${VAR} or edited overlay is always reflected. Invalidated when the file's mtime
-# OR size changes (a rewrite). load_config() is on many hot paths (a single
-# inbound A2A delegate triggers ~6-10 full parses); this removes the redundant
-# I/O + tokenize while preserving exact semantics.
-_toml_cache: dict[str, tuple[int, int, dict]] = {}
+# Parsed-TOML cache keyed by absolute path -> (mtime_ns, size, raw_dict, digest).
+# Only the expensive part (file read + TOML parse) is memoized; env-var
+# interpolation and the overlay deep-merge still run on every load_config()
+# call, so a changed ${VAR} or edited overlay is always reflected. Invalidated
+# when the file's mtime OR size changes (a rewrite), or its content digest does
+# where st_ctime cannot show a rewrite (see _CTIME_IS_CHANGE_TIME). load_config()
+# is on many hot paths (a single inbound A2A delegate triggers ~6-10 full
+# parses); on POSIX this removes the redundant I/O + tokenize while preserving
+# exact semantics. On Windows the digest reads the file on every check, so only
+# the tokenize is saved there (not measured on Windows).
+_toml_cache: dict[str, tuple[int, int, dict, bytes | None]] = {}
 # General configuration remains fail-soft, but security boundaries need to
 # distinguish "file absent" from "present but unreadable/corrupt". Track the
 # latter alongside the parsed cache so trust/auth callers can fail closed.
@@ -224,7 +228,7 @@ def reset_config_cache() -> None:
 _ENV_FILE_BASENAME = ".env"
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _ENV_RECHECK_SECONDS = 1.0
-_env_file_cache: dict[str, tuple[int, int]] = {}
+_env_file_cache: dict[str, tuple[int, int, bytes | None]] = {}
 _env_last_check: float | None = None
 # Bound at import: tests that monkeypatch time.monotonic (a process-global
 # patch) to drive their OWN timeout logic must not have the values consumed
@@ -251,13 +255,14 @@ def _load_env_file(path: Path) -> None:
     except OSError:
         return  # no .env (or unreadable) -> nothing to load
     key = str(path)
-    if _env_file_cache.get(key) == (st.st_mtime_ns, st.st_size):
+    digest = _content_digest(path, st)  # None (never a hit) when the content is unreadable
+    if digest is not None and _env_file_cache.get(key) == (st.st_mtime_ns, st.st_size, digest):
         return
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return
-    _env_file_cache[key] = (st.st_mtime_ns, st.st_size)
+    _env_file_cache[key] = (st.st_mtime_ns, st.st_size, digest)
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -288,9 +293,12 @@ def _read_toml_raw(path: Path) -> dict:
             _toml_cache.pop(key, None)
             _record_source_error(key, f"{type(e).__name__}: {e}")
         return {}  # general callers stay fail-soft; security callers inspect health
+    # Taken before the parse below: a rewrite after this is seen by the next read.
+    digest = _content_digest(path, st)  # None (never a hit) when the content is unreadable
     with _toml_lock:
         cached = _toml_cache.get(key)
-        if cached is not None and cached[0] == st.st_mtime_ns and cached[1] == st.st_size:
+        if (digest is not None and cached is not None and cached[0] == st.st_mtime_ns
+                and cached[1] == st.st_size and cached[3] == digest):
             if isinstance(cached[2], _UnreadableTable):
                 # A reset may have cleared the entry while the corrupt table
                 # stayed cached: report it on every hit.
@@ -338,7 +346,7 @@ def _read_toml_raw(path: Path) -> dict:
         # source keeps its error: only a clean read or its absence clears it.
         while len(_toml_cache) >= _TOML_CACHE_MAX:
             _toml_cache.pop(next(iter(_toml_cache)))
-        _toml_cache[key] = (st.st_mtime_ns, st.st_size, raw)
+        _toml_cache[key] = (st.st_mtime_ns, st.st_size, raw, digest)
     return raw
 
 
@@ -754,8 +762,9 @@ class _KeptRead:
 # request's last clean read uses that read: a page asked about 29 times, each
 # reading the files, resolving the at-rest key and decrypting the saved
 # secrets again. "Unchanged" is the whole environment and the identity
-# (modification and change times, size, device, inode, links, mode, owner) of
-# every file a read depends on: config.toml, the Settings overlay, the
+# (modification and change times, size, device, inode, links, mode, owner, and
+# on Windows a content digest, see _CTIME_IS_CHANGE_TIME) of every file a read
+# depends on: config.toml, the Settings overlay, the
 # operator overlay, the wizard's .env, the at-rest key, its folder and its
 # keyring (their own entries, so a link put in their place shows too). A saved
 # policy, a rotated key or a changed permission changes one of them and the
@@ -781,6 +790,29 @@ def discard_kept_reads() -> None:
     _KEPT_READ.set(None)
 
 
+# st_ctime is the change time on POSIX but the creation time on Windows ("Changed
+# in version 3.12: st_ctime is deprecated on Windows", os.stat_result). An
+# in-place rewrite that restores the modification time and keeps the size then
+# changes nothing a stat reports, so there a file's fingerprint also carries a
+# SHA-256 of its content (one read of the file per check; not measured on
+# Windows). Module-level so a test can patch the platform choice.
+_CTIME_IS_CHANGE_TIME = os.name != "nt"
+
+
+def _content_digest(path: Path, st: os.stat_result) -> bytes | None:
+    """The content digest of a regular file where stat cannot show a rewrite,
+    ``b""`` (and no file read) everywhere else. None when that content cannot be
+    read; the caller must then treat the file as changed, never as unchanged."""
+    if _CTIME_IS_CHANGE_TIME or not stat.S_ISREG(st.st_mode):
+        return b""
+    try:
+        # No retry: a denied read only forces a miss, and the read that
+        # follows it keeps its own retry.
+        return hashlib.sha256(atomic_read_bytes(path, retry_seconds=0.0)).digest()
+    except OSError:
+        return None
+
+
 def _file_state(path: Path, *, key_material: bool = False, rechmodded: bool = False) -> object:
     try:
         # The key's own entries, not what they point to: a read refuses a
@@ -791,8 +823,11 @@ def _file_state(path: Path, *, key_material: bool = False, rechmodded: bool = Fa
     # Every read re-applies the key folder's private mode, which moves its
     # change time; its mode, owner and link count still show any change.
     changed = None if rechmodded else st.st_ctime_ns
+    digest = _content_digest(path, st)
+    if digest is None:
+        return None  # unreadable content: _read_witness takes no witness
     return (st.st_mtime_ns, changed, st.st_size, st.st_dev, st.st_ino, st.st_nlink,
-            st.st_mode, st.st_uid, st.st_gid)
+            st.st_mode, st.st_uid, st.st_gid, digest)
 
 
 def _environment() -> dict:
@@ -828,10 +863,13 @@ def _read_witness() -> tuple | None:
             keys.extend(sorted(keyring / e.name for e in entries if e.name.endswith(".key")))
     except OSError:
         pass
+    files = tuple(_file_state(path) for path in paths)
+    key_folder = _file_state(key.parent, key_material=True, rechmodded=True)
+    key_files = tuple(_file_state(path, key_material=True) for path in keys)
+    if key_folder is None or None in files or None in key_files:
+        return None  # a file whose content cannot be read is never the same as before
     return (tuple(str(path) for path in [*paths, key.parent, *keys]),
-            tuple(_file_state(path) for path in paths),
-            _file_state(key.parent, key_material=True, rechmodded=True),
-            tuple(_file_state(path, key_material=True) for path in keys),
+            files, key_folder, key_files,
             crypto_at_rest._FORCE_EXTERNAL_FLEET_KEY.get())
 
 

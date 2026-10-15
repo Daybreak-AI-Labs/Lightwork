@@ -498,6 +498,25 @@ def discover(subject: str, *, keywords: tuple[str, ...] | None = None,
     return out[:limit]
 
 
+# The document types an assessment's evidence is made of. Read here rather than
+# from the host's MIME database: mimetypes takes its values from the Windows
+# registry on Windows, and a registry can lack the Office entries.
+_DOCUMENT_MIMES = {
+    ".pdf": "application/pdf",
+    ".rtf": "application/rtf",
+    ".doc": "application/msword",
+    ".xls": "application/vnd.ms-excel",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".odt": "application/vnd.oasis.opendocument.text",
+    ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+    ".odp": "application/vnd.oasis.opendocument.presentation",
+    ".epub": "application/epub+zip",
+}
+
+
 def resolve_mime(name: str, mime: str) -> str:
     """A usable mime for a fetched document. Sources often serve Office files
     as ``application/octet-stream`` (Graph's /content does), which the
@@ -508,7 +527,8 @@ def resolve_mime(name: str, mime: str) -> str:
     if m and m != "application/octet-stream":
         return m
     import mimetypes
-    guessed, _ = mimetypes.guess_type(name)
+    guessed = _DOCUMENT_MIMES.get(os.path.splitext(name)[1].lower())
+    guessed = guessed or mimetypes.guess_type(name)[0]
     return guessed or m or "application/octet-stream"
 
 

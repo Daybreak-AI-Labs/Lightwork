@@ -793,8 +793,18 @@ def key_rotation_version() -> str:
     legacy = _key_path()
     if legacy.exists():
         entries.append(legacy)
-    source = "|".join(f"{item.name}:{item.stat().st_mtime_ns}:{item.stat().st_size}" for item in entries)
-    return hashlib.sha256(source.encode()).hexdigest()
+    # The content too: an in-place rewrite that keeps the size and restores the
+    # modification time changes no stat fact, on POSIX (os.utime) or Windows
+    # (st_ctime is the creation time there).
+    source = []
+    for item in entries:
+        try:
+            st = item.stat()
+            content = file_lock.atomic_read_bytes(item)
+        except OSError as e:
+            raise EncryptionUnavailable("the local key history could not be read") from e
+        source.append(f"{item.name}:{st.st_mtime_ns}:{st.st_size}:{hashlib.sha256(content).hexdigest()}")
+    return hashlib.sha256("|".join(source).encode()).hexdigest()
 
 
 def rotate_at_rest_key(*, operation_id: str | None = None, expected_version: str | None = None) -> str:

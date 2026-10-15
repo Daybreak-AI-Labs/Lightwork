@@ -423,6 +423,34 @@ class TestFetch:
         assert rm("mystery", "application/octet-stream") == \
             "application/octet-stream"
 
+    def test_resolve_mime_infers_office_docs_without_office_entries_in_the_host_database(
+            self, monkeypatch):
+        # A Windows runner's registry had no Office types, so mimetypes could
+        # not infer them. A database holding only the built-in types must
+        # still resolve the document types the module handles.
+        import mimetypes
+
+        builtin_only = mimetypes.MimeTypes(filenames=(), strict=True)
+        assert builtin_only.guess_type("Acme SOW.docx")[0] is None
+        monkeypatch.setattr(mimetypes, "guess_type", builtin_only.guess_type)
+        rm = doc_discovery.resolve_mime
+        assert rm("Acme SOW.DOCX", "application/octet-stream") == (
+            "application/vnd.openxmlformats-officedocument"
+            ".wordprocessingml.document")
+        assert rm("Budget.xlsx", "application/octet-stream") == (
+            "application/vnd.openxmlformats-officedocument"
+            ".spreadsheetml.sheet")
+        assert rm("Board.pptx", "application/octet-stream") == (
+            "application/vnd.openxmlformats-officedocument"
+            ".presentationml.presentation")
+        assert rm("legacy.doc", "application/octet-stream") == "application/msword"
+        assert rm("dpa.pdf", "application/octet-stream") == "application/pdf"
+        # epub is a document package the attachment layer accepts, so it is
+        # inferred here too rather than left to the host database.
+        assert rm("book.epub", "application/octet-stream") == "application/epub+zip"
+        assert rm("mystery", "application/octet-stream") == \
+            "application/octet-stream"
+
     def test_slack_allows_tenant_hosts(self):
         ok = doc_discovery._slack_url_allowed
         base = "https://slack.com/api"

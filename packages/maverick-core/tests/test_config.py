@@ -1414,6 +1414,186 @@ def test_a_key_rewritten_in_place_with_its_time_restored_is_read_again(config_ho
     assert len(reads) == 2
 
 
+def _windows_stat_without_change_time(monkeypatch, home):
+    """Report the stat results under ``home`` as Windows does: st_ctime is the
+    creation time, which an in-place rewrite leaves alone, so a rewrite that
+    restores the modification time and keeps the size shows no change at all."""
+    import os
+
+    from maverick import config
+
+    def without_change_time(real):
+        def stat_result(path, *args, **kwargs):
+            st = real(path, *args, **kwargs)
+            if not str(path).startswith(str(home)):
+                return st
+            return os.stat_result(
+                (st.st_mode, st.st_ino, st.st_dev, st.st_nlink, st.st_uid, st.st_gid,
+                 st.st_size, int(st.st_atime), int(st.st_mtime), 0),
+                {"st_atime": st.st_atime, "st_mtime": st.st_mtime, "st_ctime": 0.0,
+                 "st_atime_ns": st.st_atime_ns, "st_mtime_ns": st.st_mtime_ns,
+                 "st_ctime_ns": 0})
+        return stat_result
+
+    monkeypatch.setattr(os, "stat", without_change_time(os.stat))
+    monkeypatch.setattr(os, "lstat", without_change_time(os.lstat))
+    monkeypatch.setattr(config, "_CTIME_IS_CHANGE_TIME", False)
+
+
+def test_a_key_rewritten_in_place_on_windows_is_read_again_though_stat_shows_no_change(config_home, monkeypatch):
+    import os
+
+    from maverick import config, crypto_at_rest
+
+    home, reads = config_home
+    _windows_stat_without_change_time(monkeypatch, home)
+    with crypto_at_rest.deployment_key_scope():
+        key = crypto_at_rest._key_path()
+    with config.kept_reads():
+        assert "providers" in _decision(config)
+        before = os.stat(key)  # os.stat, not Path.stat: Python 3.10's pathlib binds it early
+        key.write_text("ab" * 32, encoding="utf-8")  # another key, the same size
+        os.utime(key, ns=(before.st_atime_ns, before.st_mtime_ns))
+        after = os.stat(key)
+        assert (after.st_size, after.st_mtime_ns, after.st_ctime_ns) == (
+            before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+        assert "providers" not in _decision(config)  # the saved secret no longer opens
+    assert len(reads) == 2
+
+
+def test_a_config_rewritten_in_place_on_windows_is_read_again_though_stat_shows_no_change(config_home, monkeypatch):
+    import os
+
+    from maverick import config
+
+    home, _ = config_home
+    _windows_stat_without_change_time(monkeypatch, home)
+    path = config.config_path()
+    assert _decision(config)["budget"]["max_dollars"] == 5.0
+    before = path.stat()
+    path.write_text("[budget]\nmax_dollars = 9.0\n", encoding="utf-8")  # the same size
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert _decision(config)["budget"]["max_dollars"] == 9.0
+
+
+def test_a_wizard_env_file_rewritten_in_place_on_windows_is_loaded_again(tmp_path, monkeypatch):
+    import os
+
+    from maverick import config
+
+    _windows_stat_without_change_time(monkeypatch, tmp_path)
+    name = "MAVERICK_TEST_ENV_REWRITE_IN_PLACE"
+    monkeypatch.setenv(name, "seed")  # so monkeypatch removes what the load exports
+    monkeypatch.delenv(name)
+    env = tmp_path / ".env"
+    env.write_text(f"{name}=first\n", encoding="utf-8")
+    config.reset_config_cache()
+    config._load_env_file(env)
+    assert os.environ[name] == "first"
+    before = env.stat()
+    os.environ.pop(name)
+    env.write_text(f"{name}=other\n", encoding="utf-8")  # the same size
+    os.utime(env, ns=(before.st_atime_ns, before.st_mtime_ns))
+    config._load_env_file(env)
+    assert os.environ[name] == "other"
+
+
+def test_a_key_whose_content_cannot_be_read_is_read_again_not_kept(config_home, monkeypatch):
+    # A digest read that is denied states no content. Two such statements must
+    # not count as the same file, or a key rewritten in place between the two
+    # decisions keeps opening the saved secret from the kept read.
+    import os
+
+    from maverick import config, crypto_at_rest
+
+    home, _ = config_home
+    _windows_stat_without_change_time(monkeypatch, home)
+    with crypto_at_rest.deployment_key_scope():
+        key = crypto_at_rest._key_path()
+    real_read = config.atomic_read_bytes
+
+    def denied_for_the_key(path, **kwargs):
+        if str(path) == str(key):
+            raise PermissionError(13, "The process cannot access the file", str(path))
+        return real_read(path, **kwargs)
+
+    monkeypatch.setattr(config, "atomic_read_bytes", denied_for_the_key)
+    with config.kept_reads():
+        assert "providers" in _decision(config)
+        before = os.stat(key)
+        key.write_text("ab" * 32, encoding="utf-8")
+        os.utime(key, ns=(before.st_atime_ns, before.st_mtime_ns))
+        assert "providers" not in _decision(config)  # the saved secret no longer opens
+
+
+def test_a_config_whose_content_cannot_be_read_is_parsed_again(config_home, monkeypatch):
+    import os
+
+    from maverick import config
+
+    home, _ = config_home
+    _windows_stat_without_change_time(monkeypatch, home)
+    path = config.config_path()
+    real_digest = config._content_digest
+    monkeypatch.setattr(
+        config, "_content_digest",
+        lambda p, st: None if str(p) == str(path) else real_digest(p, st))
+    assert _decision(config)["budget"]["max_dollars"] == 5.0
+    before = path.stat()
+    path.write_text("[budget]\nmax_dollars = 9.0\n", encoding="utf-8")  # the same size
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert _decision(config)["budget"]["max_dollars"] == 9.0
+
+
+def test_a_wizard_env_file_whose_content_cannot_be_read_is_loaded_again(tmp_path, monkeypatch):
+    import os
+
+    from maverick import config
+
+    _windows_stat_without_change_time(monkeypatch, tmp_path)
+    env = tmp_path / ".env"
+    real_digest = config._content_digest
+    monkeypatch.setattr(
+        config, "_content_digest",
+        lambda p, st: None if str(p) == str(env) else real_digest(p, st))
+    name = "MAVERICK_TEST_ENV_UNREADABLE_DIGEST"
+    monkeypatch.setenv(name, "seed")  # so monkeypatch removes what the load exports
+    monkeypatch.delenv(name)
+    env.write_text(f"{name}=first\n", encoding="utf-8")
+    config.reset_config_cache()
+    config._load_env_file(env)
+    assert os.environ[name] == "first"
+    before = env.stat()
+    os.environ.pop(name)
+    env.write_text(f"{name}=other\n", encoding="utf-8")  # the same size
+    os.utime(env, ns=(before.st_atime_ns, before.st_mtime_ns))
+    config._load_env_file(env)
+    assert os.environ[name] == "other"
+
+
+def test_content_digest_reads_nothing_on_posix_and_a_denied_read_does_not_retry(tmp_path, monkeypatch):
+    # The digest is the hot-path cost only where stat cannot show a rewrite:
+    # POSIX reads no file, and a denied Windows read is reported at once.
+    from maverick import config
+
+    path = tmp_path / "config.toml"
+    path.write_text("[budget]\nmax_dollars = 5.0\n", encoding="utf-8")
+    st = path.stat()
+    reads = []
+
+    def denied(p, **kwargs):
+        reads.append(kwargs)
+        raise PermissionError(13, "The process cannot access the file", str(p))
+
+    monkeypatch.setattr(config, "atomic_read_bytes", denied)
+    monkeypatch.setattr(config, "_CTIME_IS_CHANGE_TIME", True)
+    assert config._content_digest(path, st) == b""
+    assert reads == []
+    monkeypatch.setattr(config, "_CTIME_IS_CHANGE_TIME", False)
+    assert config._content_digest(path, st) is None
+    assert reads == [{"retry_seconds": 0.0}]
+
+
 def _knowledge_sources_section(monkeypatch, section):
     monkeypatch.setattr(config_module, "load_config", lambda: {"knowledge_sources": section})
 
