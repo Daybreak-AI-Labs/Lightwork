@@ -52,3 +52,6 @@ The September 12 baseline collected 29,254 tests. No type checker is configured;
 Ruff, Vulture and the contract/governance gates in .github/workflows/ci.yml are
 required. Run heavy_concurrency tests serially after the ordinary suite, matching
 .github/actions/test-shard/action.yml. Also validate MAVERICK_TEST_SECURE_DEFAULT=1.
+On a pull request the `test (3.10, n)` legs run only the test files
+scripts/select_pr_tests.py selects from the changed files; the merge queue and
+main run everything, so run the whole suite locally for a shared-code change.

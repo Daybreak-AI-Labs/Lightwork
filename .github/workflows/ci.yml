@@ -598,6 +598,48 @@ jobs:
           done
           test "$(find dist-cohort -maxdepth 1 -name '*.whl' | wc -l)" -eq 8
 
+  select-tests:
+    # On a pull request, choose the test files the floor-interpreter `test`
+    # legs run from the files the PR changes (scripts/select_pr_tests.py): a
+    # change to the kernel, a conftest, the pinned requirements, the
+    # workflows or the scripts still means the whole suite; a change inside
+    # another package means its tests plus every test that names it; any
+    # other file means the tests that name it by path. Everywhere else -- the
+    # merge queue's commit, pushes to main, workflow_dispatch -- the mode is
+    # `full` and the legs run everything, so a selection that was too narrow
+    # fails in the queue, before the commit reaches main, never on it.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.select.outputs.mode }}
+      paths: ${{ steps.select.outputs.paths }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          # The change set is diffed from the PR's merge base, which a
+          # shallow clone does not have.
+          fetch-depth: 0
+      - name: Select the test files the changed files can affect
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "$EVENT_NAME: the test legs run the whole suite."
+            printf 'mode=full\npaths=[]\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Merge-base to head is what the PR changes even after main moved;
+          # when git cannot answer the script selects the full suite.
+          python3 scripts/select_pr_tests.py --git "$BASE_SHA" "$HEAD_SHA" \
+            --output "$RUNNER_TEMP/test-selection.json" \
+            --github-output "$GITHUB_OUTPUT"
+
   test:
     runs-on: ubuntu-24.04
     # The complete deterministic suite is intentionally broad: ~39,000 tests
@@ -614,6 +656,16 @@ jobs:
     # matching required checks) over a longer ceiling. The ceiling below is
     # headroom for runner variance and setup, not the expected duration: a run
     # that needs all of it is hung, and pytest-timeout/GNU timeout say where.
+    #
+    # On a pull request these legs run only the test files `select-tests`
+    # chose from the changed files (mode=paths, or none when no test names a
+    # changed file); the merge queue's commit and main run the whole suite
+    # (mode=full), as do these legs when a shared file changed. `!cancelled()`
+    # runs them even if the selection job failed: its empty outputs mean
+    # mode=full to the action, whereas a skipped job would still satisfy the
+    # required check and let an untested PR through.
+    needs: select-tests
+    if: ${{ !cancelled() }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -633,6 +685,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           shard: ${{ matrix.shard }}
+          mode: ${{ needs.select-tests.outputs.mode }}
+          paths: ${{ needs.select-tests.outputs.paths }}
 
   test-window:
     # The rest of the supported window. A pull request proves the floor

@@ -76,8 +76,8 @@ or non-technical users can't reach it.
 - Every package has a `tests/` directory with `test_*.py` files.
 - Use the `FakeLLM` fixture in `packages/maverick-core/tests/conftest.py`
   for any test that touches the agent loop -- never burn API credits in CI.
-- Tests run in CI on Python 3.10/3.11/3.12 as three disjoint file-level
-  slices per interpreter (`--shard N/3`, defined in the root `conftest.py`),
+- Tests run in CI on Python 3.10/3.11/3.12 as four disjoint file-level
+  slices per interpreter (`--shard N/4`, defined in the root `conftest.py`),
   each under pytest-xdist with one worker per core and tests grouped by file
   (`-n auto --dist loadfile`). Run the whole suite the same way locally --
   `python -m pytest -q -n auto --dist loadfile` -- and it takes minutes
@@ -92,6 +92,12 @@ or non-technical users can't reach it.
   estate runner) carries `@pytest.mark.heavy_concurrency`; CI runs those in
   a short serial phase after each slice's parallel pass so they never share
   a two-core box with a second xdist worker.
+- On a pull request the `test (3.10, n)` legs run only the test files your
+  changed files can affect (`select-tests` in ci.yml, rules in
+  `scripts/select_pr_tests.py`; see the table below). The merge queue runs
+  everything, so run the whole suite locally before pushing a change to
+  shared code, and check the selection yourself with
+  `python scripts/select_pr_tests.py --git origin/main HEAD`.
 
 ## Continuous integration (read before merging)
 
@@ -127,7 +133,8 @@ pins that):
 | `lint`                             | `ruff check .`, vulture, the tomllib/shell=True greps, detect-secrets, and every `python -m maverick.<gate> --ci` contract gate |
 | `lint-pr-title`                    | Conventional-Commit PR title (see below)                              |
 | `no-ai-attribution`                | `scripts/check_attribution.py` over the PR's commits + title/body, the merge-queue commit, and pushes to `main`: no AI co-author trailers, generator footers, assistant session links or assistant author/committer identities (a squash merge turns every distinct commit author into a `Co-authored-by:` trailer) (CLAUDE.md) |
-| `test (3.10, 1/2/3/4)`             | the full `pytest` suite on the floor interpreter, four file-level slices, on every pull request |
+| `select-tests`                     | on a pull request, the test files the changed files can affect (`scripts/select_pr_tests.py`): a change to the kernel, a `conftest.py`, `pyproject.toml`, `requirements/`, `.github/` or `scripts/` selects the whole suite; a change inside another package selects its tests plus every test naming its import package; any other file selects the tests that name it by path. Everywhere else the mode is `full` |
+| `test (3.10, 1/2/3/4)`             | the `pytest` suite on the floor interpreter, four file-level slices, on every pull request -- narrowed to the `select-tests` selection on a pull request, the whole suite on the merge queue's commit and on `main` (so a selection that was too narrow fails in the queue, not on `main`) |
 | `test (3.11, 1/2/3/4)`, `test (3.12, 1/2/3/4)` | the same slices on the rest of the supported window (`test-window` in ci.yml): on a pull request the legs start, skip every step and report success within seconds; on the merge queue's commit and on `main` they run for real |
 | `posture (1/2/3/4)`                | the full suite again under the production security posture on 3.12, four slices. Gated the same way as `test-window`: it starts, skips and reports success on a pull request, and runs for real on the merge queue's commit and on `main` -- so the whole 3.12 + secure-defaults suite is proven at merge, not on every PR push |
 | `harness-overhead`, `governance-frontier-offline` | the tracked benchmark manifests verify against the current sources (regenerate them when a control-tree source changes) |

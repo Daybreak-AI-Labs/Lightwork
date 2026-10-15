@@ -77,6 +77,12 @@
   not just at `check()`: a test raising only `max_dollars` still dies on the
   default `max_output_tokens=200_000`. Raise every cap you'll cross.
 - pytest-asyncio runs in STRICT mode; async tests need explicit markers.
+- On a pull request the `test (3.10, n)` legs run only the test files
+  `scripts/select_pr_tests.py` selects from the changed files (kernel,
+  conftest, requirements, `.github/`, `scripts/` changes = full suite; a
+  package change = its tests + every test naming its import package; other
+  files = tests naming them by path). The merge queue and `main` run
+  everything. Preview with `python scripts/select_pr_tests.py --git origin/main HEAD`.
 
 ### Lint / CI gates beyond ruff
 
