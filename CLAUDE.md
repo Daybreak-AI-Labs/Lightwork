@@ -19,6 +19,10 @@
   resolve `maverick>=0.1` from PyPI), then runtime deps + dev tools, including
   `pyjwt[crypto]` (CI parity; test_oidc self-skips without it), `cffi`, and
   `build` — all three added after this harness run caught their absence.
+  Resolves under `PIP_CONSTRAINT=requirements/ci.txt` like CI and also installs
+  `sqlalchemy`, `pytest-xdist`, `pytest-timeout` and `detect-secrets`: an
+  unconstrained install failed 5 tests (3 import sqlalchemy; 2 encode Starlette
+  1.7.0 streaming behaviour and break on 1.8.0).
 - **Test:** `python3 -m pytest -q -n auto --dist loadfile` from repo root
   (pytest-xdist, one worker per core, grouped by file -- the CI invocation;
   ~27 min serial, minutes in parallel). NOT bare `pytest`.
@@ -63,6 +67,12 @@
   environments: live-LLM paths are untestable; `maverick doctor` reports it;
   `/healthz` returns 503 by design (deep check: no provider key = degraded).
   mkdocs is also not installed by post-create.sh.
+- A host-set provider variable makes the kernel believe a provider IS configured:
+  `config.any_provider_configured()` reads every `*_API_KEY` and `*_BASE_URL` name
+  (the cloud container's agent proxy sets `ANTHROPIC_BASE_URL` with no key). That
+  flipped 6 doctor / healthz / settings tests. The root `conftest.py` now scrubs
+  `test_support/provider_env.HOST_PROVIDER_ENV_VARS` at session start; a new
+  provider variable goes in that tuple (a test pins it against `config.py`).
 
 ### Testing
 
@@ -221,3 +231,4 @@ locally on unpushed commits with `bash scripts/pre-push-lint.sh`.
 | Write a test | failed-then-fixed | Budget token caps trip at record time, not only `check()` |
 | Rename + imports | success | 16/16 green; stale `docs/FEATURES.md` ref; `git mv` revert leaves untracked file |
 | Fix lint issue | n/a | nothing to fix: gates clean; 127 bugbear findings intentionally out of scope |
+| Full suite, fresh 3.12 venv (2026-10-15) | 11 failed, then 0 | 46,290 passed / 741 skipped in 34 min on 4 cores; the 11: host `ANTHROPIC_BASE_URL` (6), missing `sqlalchemy` (3), unconstrained Starlette 1.8 (2) — all environment, none code |

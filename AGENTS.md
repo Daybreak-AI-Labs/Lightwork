@@ -5,8 +5,9 @@ Lightwork: proprietary Python 3.10-3.12 uv-workspace monorepo. 8 pip packages
 
 ## Setup (verified)
 
-    bash .devcontainer/post-create.sh   # editable-installs all 8 packages +
-                                        # dev tools (pyjwt[crypto], cffi, build)
+    bash .devcontainer/post-create.sh   # editable-installs all 8 packages under
+                                        # PIP_CONSTRAINT=requirements/ci.txt (CI
+                                        # parity) + the test/lint toolchain
 
 `pip install -e .` at the root FAILS (workspace pyproject has no [project]).
 
@@ -48,7 +49,8 @@ Lightwork: proprietary Python 3.10-3.12 uv-workspace monorepo. 8 pip packages
     interfaces.
 
 The suite size changes frequently; collect and run it from the reviewed checkout.
-The September 12 baseline collected 29,254 tests. No type checker is configured;
+The September 12 baseline collected 29,254 tests. An October 15 full run (`-n auto --dist loadfile`,
+then the serial heavy_concurrency phase) collected 47,031 and passed 46,290 with 741 skipped. No type checker is configured;
 Ruff, Vulture and the contract/governance gates in .github/workflows/ci.yml are
 required. Run heavy_concurrency tests serially after the ordinary suite, matching
 .github/actions/test-shard/action.yml. Also validate MAVERICK_TEST_SECURE_DEFAULT=1.
