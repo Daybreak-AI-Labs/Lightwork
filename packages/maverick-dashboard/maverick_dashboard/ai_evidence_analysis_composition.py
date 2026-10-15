@@ -2411,6 +2411,28 @@ def _adapter_identity(
     return adapter.authority(valid_until=now + 3_600)
 
 
+def _require_adapter_enrolled(
+    registry: EvidenceAuthorityRegistry,
+    identity: evidence.EvidenceAdapterAuthority,
+) -> None:
+    # The registry key includes the adapter revision, so an upgrade to a new
+    # revision has no enrollment yet. Read-only paths must refuse until the
+    # adapter is enrolled again rather than reporting a generic unavailability.
+    key = registry._adapter_key(  # noqa: SLF001 - registry-owned enrollment check
+        identity.stage,
+        identity.adapter_id,
+        identity.revision,
+    )
+    if registry.current_registry_revision("adapter", key) == 0:
+        raise AIEvidenceAnalysisCompositionError(
+            "local evidence adapter authority is not enrolled for this revision; "
+            "after an upgrade the local evidence adapter must be enrolled again; "
+            "an analysis or authority request enrolls it on first use, and a global "
+            "administrator can enroll it now with "
+            "POST /api/v1/ai-evidence-analysis/authorities/bootstrap"
+        )
+
+
 def bootstrap_local_adapter_authorities(
     registry: EvidenceAuthorityRegistry,
     *,
@@ -2572,6 +2594,8 @@ def build_ai_evidence_analysis_composition(
         now = _timestamp(clock(), "clock")
         extraction_identity = _adapter_identity(extraction_adapter, now=now)
         analysis_identity = _adapter_identity(analysis_adapter, now=now)
+        _require_adapter_enrolled(registry, extraction_identity)
+        _require_adapter_enrolled(registry, analysis_identity)
         extraction_authority = registry.resolve_adapter(
             tenant,
             extraction_identity.stage,

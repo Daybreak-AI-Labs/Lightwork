@@ -145,17 +145,6 @@ RULE_1_UNCHANGED = {
     ),
 }
 
-# In the factory group, but left unchanged for a reason other than rule 1.
-ATTESTED_UNCHANGED = {
-    "packages/maverick-core/maverick/ai_evidence_analysis.py::EvidenceAnalysisStore._connect": (
-        1,
-        "not a rule-1 site: its bytes are hashed into the legacy XLS parser's attested "
-        "implementation identity (base_parser_sha256), so editing this file refuses every "
-        "existing evidence registry; closing it needs an extraction revision bump and "
-        "re-enrollment, which is an owner decision",
-    ),
-}
-
 # Pre-existing, outside the 42-module factory group of this change. These leaks are out of scope
 # here and are not rule-1 exemptions. They are pinned only so they cannot grow, and each entry is
 # deleted when its owner converts or removes the helper.
@@ -489,7 +478,7 @@ def test_ratchet_detector_flags_only_helpers_that_open_without_closing() -> None
 
 
 def test_every_connection_helper_in_the_repo_closes_its_connections() -> None:
-    groups = [RULE_1_UNCHANGED, ATTESTED_UNCHANGED, OUT_OF_SCOPE_BASELINE]
+    groups = [RULE_1_UNCHANGED, OUT_OF_SCOPE_BASELINE]
     allowed = {key: value for group in groups for key, value in group.items()}
     assert len(allowed) == sum(len(group) for group in groups), "a helper is listed twice"
     for key, (count, reason) in allowed.items():

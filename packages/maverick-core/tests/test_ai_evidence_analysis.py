@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import builtins
+import contextlib
+import gc
 import hashlib
 import json
 import sqlite3
 import sys
 import types
 import zipfile
+from collections.abc import Iterator
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
@@ -14,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 from maverick import ai_evidence_analysis as evidence
+from maverick.sqlite_closing import ClosingConnection
 
 TENANT = "tenant-alpha"
 NOW = 2_100_000_000.0
@@ -711,6 +715,193 @@ def test_retention_due_and_purge_remove_record_history_and_replays(tmp_path: Pat
         environment.store.get(TENANT, record.analysis_id)
     report = environment.store.verify_integrity(TENANT)
     assert (report.analyses, report.history_records, report.operations) == (0, 0, 0)
+
+
+@contextlib.contextmanager
+def _gc_disabled() -> Iterator[None]:
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if was_enabled:
+            gc.enable()
+
+
+def _record_sqlite_connections(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    factory: type[sqlite3.Connection] | None = None,
+) -> list[sqlite3.Connection]:
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+
+    def connect(*args, **kwargs):
+        if factory is not None:
+            kwargs["factory"] = factory
+        connection = real_connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    return opened
+
+
+def _run_and_expect_closed(opened: list[sqlite3.Connection], name: str, call):
+    start = len(opened)
+    result = call()
+    created = opened[start:]
+    assert created, f"{name} opened no store connection"
+    for connection in created:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+    return result
+
+
+def test_every_store_connection_is_closed_when_its_public_call_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment = _environment(tmp_path)
+    artifact = _artifact()
+    _register(environment, artifact)
+    store = environment.store
+    opened = _record_sqlite_connections(monkeypatch)
+    with _gc_disabled():
+        record = _run_and_expect_closed(opened, "analyze", lambda: _analyze(environment, artifact))
+        current = _run_and_expect_closed(
+            opened, "get", lambda: store.get(TENANT, record.analysis_id)
+        )
+        assert current.analysis_id == record.analysis_id
+        heads = _run_and_expect_closed(opened, "list_analyses", lambda: store.list_analyses(TENANT))
+        assert [item.analysis_id for item in heads] == [record.analysis_id]
+        assert (
+            _run_and_expect_closed(
+                opened,
+                "context_record_count",
+                lambda: store.context_record_count(TENANT),
+            )
+            == 1
+        )
+        approved = _run_and_expect_closed(
+            opened,
+            "review",
+            lambda: store.review(
+                TENANT,
+                record.analysis_id,
+                reviewer_ref="reviewer-one",
+                decision="approve",
+                expected_revision=1,
+                idempotency_key="approve-one",
+            ),
+        )
+        released = _run_and_expect_closed(
+            opened,
+            "get_released",
+            lambda: store.get_released(TENANT, record.analysis_id),
+        )
+        assert released.revision == approved.revision == 2
+        history = _run_and_expect_closed(
+            opened, "history", lambda: store.history(TENANT, record.analysis_id)
+        )
+        assert [item.revision for item in history] == [1, 2]
+        report = _run_and_expect_closed(
+            opened, "verify_integrity", lambda: store.verify_integrity(TENANT)
+        )
+        assert report.analyses == 1
+        revoked = _run_and_expect_closed(
+            opened,
+            "revoke",
+            lambda: store.revoke(
+                TENANT,
+                record.analysis_id,
+                reviewer_ref="reviewer-two",
+                reason_code="source-withdrawn",
+                expected_revision=2,
+                idempotency_key="revoke-one",
+            ),
+        )
+        assert revoked.status == "revoked"
+        environment.state.now = NOW + 2_001
+        due = _run_and_expect_closed(opened, "retention_due", lambda: store.retention_due(TENANT))
+        assert due == (record.analysis_id,)
+        purged = _run_and_expect_closed(
+            opened, "purge_expired", lambda: store.purge_expired(TENANT)
+        )
+        assert purged.analysis_ids == (record.analysis_id,)
+
+
+@pytest.mark.parametrize(
+    ("failing_step", "error"),
+    [
+        ("private_file", OSError),
+        ("row_factory", sqlite3.OperationalError),
+        ("foreign_keys", sqlite3.OperationalError),
+        ("busy_timeout", sqlite3.OperationalError),
+        ("journal_mode", sqlite3.OperationalError),
+        ("synchronous", sqlite3.OperationalError),
+        ("create_function", sqlite3.OperationalError),
+    ],
+)
+def test_store_connection_is_closed_when_a_setup_step_after_connect_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failing_step: str,
+    error: type[Exception],
+) -> None:
+    environment = _environment(tmp_path)
+    pragmas = {
+        "foreign_keys": "PRAGMA foreign_keys=ON",
+        "busy_timeout": "PRAGMA busy_timeout=30000",
+        "journal_mode": "PRAGMA journal_mode=DELETE",
+        "synchronous": "PRAGMA synchronous=FULL",
+    }
+
+    class FailingSetupConnection(ClosingConnection):
+        def execute(self, sql, *args):
+            if sql == pragmas.get(failing_step):
+                raise sqlite3.OperationalError("setup refused")
+            return super().execute(sql, *args)
+
+        @property
+        def row_factory(self):
+            return sqlite3.Connection.row_factory.__get__(self)
+
+        @row_factory.setter
+        def row_factory(self, value):
+            if failing_step == "row_factory":
+                raise sqlite3.OperationalError("setup refused")
+            sqlite3.Connection.row_factory.__set__(self, value)
+
+        def create_function(self, *args, **kwargs):
+            if failing_step == "create_function":
+                raise sqlite3.OperationalError("setup refused")
+            return super().create_function(*args, **kwargs)
+
+    def refuse_private_file(*_args, **_kwargs):
+        raise OSError("setup refused")
+
+    if failing_step == "private_file":
+        monkeypatch.setattr(evidence, "ensure_private_file", refuse_private_file)
+    opened = _record_sqlite_connections(monkeypatch, factory=FailingSetupConnection)
+    with _gc_disabled():
+        with pytest.raises(error, match="setup refused"):
+            environment.store._connect()  # noqa: SLF001 - the setup failure is under test
+        assert len(opened) == 1
+        with pytest.raises(sqlite3.ProgrammingError):
+            opened[0].execute("SELECT 1")
+
+
+def test_store_constructor_connection_is_closed_when_initialization_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened = _record_sqlite_connections(monkeypatch)
+    with _gc_disabled():
+        environment = _environment(tmp_path)
+        assert opened, "the store constructor opened no connection"
+        for connection in opened:
+            with pytest.raises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
+    assert environment.store.tenant_id == TENANT
 
 
 def _blocked_import(monkeypatch: pytest.MonkeyPatch, package: str) -> None:

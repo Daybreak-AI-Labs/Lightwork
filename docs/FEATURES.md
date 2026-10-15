@@ -5609,6 +5609,21 @@ tested without spawning py-spy.
   The schema-bound API result covers the public `aiEvidenceAnalysisResult`
   outcome locally without claiming OneTrust wire compatibility, calibrated
   detection quality, preview entitlement or customer acceptance.
+  **Upgrade note:** the local evidence adapter is now revision 4, because its
+  implementation identity changed when the store began closing its SQLite
+  connections. An existing registry must enroll it again after this upgrade.
+  Enrollment is `POST /api/v1/ai-evidence-analysis/authorities/bootstrap`
+  (global admin permission). The installed store and registry factories also
+  enroll it on the first analysis or authority request, including the purge
+  request `POST /api/v1/ai-evidence-analysis/retention/purge`, so those requests
+  need no separate step. No dashboard control or CLI command calls the bootstrap
+  yet. Until enrollment, the cross-suite context reports `integrity_unverified`
+  and readiness reports not ready. Analyses recorded before the upgrade carry the
+  revision 3 adapter authority: review and `get_released` refuse them, but `get`,
+  `history`, the analysis list and the cross-suite context still show their
+  stored status (for example `review_approved`). Do not treat a pre-upgrade
+  approved record as released; run a new analysis for each one that still needs
+  review.
 - **Cloud-agent governance research preview (not available in the shipped dashboard)**
   (`ai_cloud_agent_governance.py`, informational dashboard page
   `/assurance/cloud-agents`) — experimental
