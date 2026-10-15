@@ -32,9 +32,17 @@ concurrency:
 
 jobs:
   windows-suite:
-    name: Windows suite (Python ${{ inputs.python-version }})
+    name: Windows suite (Python ${{ inputs.python-version }}, slice ${{ matrix.shard }}/4)
     runs-on: windows-2022
-    timeout-minutes: 150
+    # The first whole-suite run on one two-core Windows runner reached 74% in
+    # 150 minutes, so the suite is split into the same four file slices as the
+    # Linux test-shard jobs (conftest.py --shard). Each slice has room to
+    # finish and print its own failure summary.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -80,6 +88,7 @@ jobs:
         shell: bash
         env:
           PYTHONFAULTHANDLER: "1"
+          SHARD: ${{ matrix.shard }}
           # Passed through the environment, never interpolated into the script.
           TEST_PATHS: ${{ inputs.paths }}
         # Two phases, as in test-shard: everything under xdist, then the
@@ -90,24 +99,24 @@ jobs:
           set -o pipefail
           status=0
           # shellcheck disable=SC2086 # TEST_PATHS is a space-separated list
-          python -m pytest -q -n auto --dist loadfile -m "not heavy_concurrency" \
-            --tb=short --durations=50 --timeout=180 \
-            --junitxml=test-results-windows.xml $TEST_PATHS \
-            2>&1 | tee pytest-windows.log || status=$?
+          python -m pytest -q -n auto --dist loadfile --shard "$SHARD/4" \
+            -m "not heavy_concurrency" --tb=short --durations=50 --timeout=180 \
+            --junitxml="test-results-windows-$SHARD.xml" $TEST_PATHS \
+            2>&1 | tee "pytest-windows-$SHARD.log" || status=$?
           # shellcheck disable=SC2086
-          python -m pytest -q -m heavy_concurrency --tb=short --timeout=600 \
-            --junitxml=test-results-windows-serial.xml $TEST_PATHS \
-            2>&1 | tee -a pytest-windows.log || serial=$?
+          python -m pytest -q --shard "$SHARD/4" -m heavy_concurrency --tb=short --timeout=600 \
+            --junitxml="test-results-windows-$SHARD-serial.xml" $TEST_PATHS \
+            2>&1 | tee -a "pytest-windows-$SHARD.log" || serial=$?
           if [ "${serial:-0}" -ne 0 ] && [ "${serial:-0}" -ne 5 ]; then status=$serial; fi
           exit "$status"
       - name: Upload test diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
-          name: pytest-windows-${{ inputs.python-version }}
+          name: pytest-windows-${{ inputs.python-version }}-${{ matrix.shard }}
           path: |
-            test-results-windows.xml
-            test-results-windows-serial.xml
-            pytest-windows.log
+            test-results-windows-${{ matrix.shard }}.xml
+            test-results-windows-${{ matrix.shard }}-serial.xml
+            pytest-windows-${{ matrix.shard }}.log
           if-no-files-found: warn
           retention-days: 14
