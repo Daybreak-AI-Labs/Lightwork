@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import sqlite3
 
 import pytest
@@ -549,3 +550,77 @@ def test_historical_metadata_window_reaches_past_recent_five_hundred(store):
     before = authority.history_window(oldest=True).snapshot
     authority.revoke(oldest.document_ref, principal_ref="actor-a", expected_revision=oldest.authority_revision)
     assert before != authority.history_window(oldest=True).snapshot
+
+
+def _assert_closed(connections):
+    for connection in connections:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
+
+def test_every_vault_connection_is_closed_when_its_call_returns(tmp_path, monkeypatch):
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: any connection left open by a call stays open.
+    monkeypatch.setenv("MAVERICK_ENCRYPTION_KEY", bytes(range(32)).hex())
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    opened = []
+    real_connect = sqlite3.connect
+    fail_pragma = {"on": True}
+
+    class _PragmaFails(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql == "PRAGMA foreign_keys=ON" and fail_pragma["on"]:
+                raise sqlite3.OperationalError("pragma failed")
+            return super().execute(sql, *args)
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, factory=_PragmaFails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(vault.sqlite3, "connect", recording_connect)
+    clock = Clock()
+    config = vault.GovernedDocumentVaultConfig(
+        enable=True,
+        retention_seconds=60,
+        grant_ttl_seconds=30,
+        claim_lease_seconds=5,
+    )
+
+    def build():
+        return vault.GovernedDocumentVault(
+            tmp_path / "private" / "vault.sqlite3",
+            tenant_id="tenant-a",
+            config=config,
+            clock=clock,
+        )
+
+    gc.disable()
+    try:
+        with pytest.raises(vault.VaultIntegrityError):
+            build()
+        fail_pragma["on"] = False
+        before = len(opened)
+        authority = build()
+        assert len(opened) > before, "__init__"
+        _assert_closed(opened[before:])
+        before = len(opened)
+        record = ingest((authority, clock))
+        assert len(opened) > before, "ingest"
+        _assert_closed(opened[before:])
+        calls = [
+            ("get", lambda: authority.get(record.document_ref)),
+            ("list_documents", authority.list_documents),
+            ("history_window", authority.history_window),
+            ("context_record_count", authority.context_record_count),
+            ("list_audit", authority.list_audit),
+            ("verify_integrity", authority.verify_integrity),
+        ]
+        for name, call in calls:
+            before = len(opened)
+            call()
+            assert len(opened) > before, name
+            _assert_closed(opened[before:])
+    finally:
+        gc.enable()
+    _assert_closed(opened)

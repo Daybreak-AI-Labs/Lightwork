@@ -26,7 +26,7 @@ import sqlite3
 import threading
 import time
 from collections.abc import Callable, Mapping
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -725,8 +725,9 @@ class DocumentAccessStore:
         self._clock = clock
         try:
             ensure_private_directory(self.path.parent)
-            with self._schema_lock, self._connect(initializing=True) as connection:
-                self._create_schema(connection)
+            with self._schema_lock:
+                with closing(self._connect(initializing=True)) as connection, connection:
+                    self._create_schema(connection)
             ensure_private_file(self.path)
         except DocumentAccessError:
             raise
@@ -736,12 +737,16 @@ class DocumentAccessStore:
     def _connect(self, *, initializing: bool = False) -> sqlite3.Connection:
         try:
             connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-            connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA foreign_keys=ON")
-            connection.execute("PRAGMA busy_timeout=30000")
-            if initializing:
-                connection.execute("PRAGMA journal_mode=WAL")
-                connection.execute("PRAGMA synchronous=FULL")
+            try:
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA foreign_keys=ON")
+                connection.execute("PRAGMA busy_timeout=30000")
+                if initializing:
+                    connection.execute("PRAGMA journal_mode=WAL")
+                    connection.execute("PRAGMA synchronous=FULL")
+            except BaseException:
+                connection.close()
+                raise
             return connection
         except sqlite3.DatabaseError as exc:
             raise DocumentAccessIntegrityError("document_access_store_invalid") from exc
@@ -1100,7 +1105,7 @@ class DocumentAccessStore:
         idempotency_sha256: str,
         request_sha256: str,
     ) -> MintedDocumentToken | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             self._verify_meta_on(connection)
             operation = connection.execute(
                 "SELECT * FROM document_access_operations WHERE idempotency_sha256=?",
@@ -1281,7 +1286,7 @@ class DocumentAccessStore:
 
     def get_token(self, token_id: str, *, principal_sha256: str) -> DocumentDownloadTokenRecord:
         selected = _opaque_id(token_id, label="token_id")
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             self._verify_meta_on(connection)
             record = self._get_record_on(connection, token_id=selected)
         if not hmac.compare_digest(record.principal_sha256, principal_sha256):
@@ -1305,7 +1310,7 @@ class DocumentAccessStore:
             values.append(state)
         query += " ORDER BY issued_at DESC,token_id DESC LIMIT ?"
         values.append(limit)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             self._verify_meta_on(connection)
             rows = connection.execute(query, values).fetchall()
         return [self._record_from_row(row) for row in rows]
@@ -1781,7 +1786,7 @@ class DocumentAccessStore:
 
     def list_audit(self, *, limit: int = 100) -> list[dict[str, object]]:
         _integer(limit, minimum=1, maximum=_MAX_AUDIT_LIMIT, label="limit")
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             self._verify_meta_on(connection)
             rows = connection.execute(
                 "SELECT * FROM document_access_audit ORDER BY sequence DESC LIMIT ?",
@@ -1792,7 +1797,7 @@ class DocumentAccessStore:
     def status(self) -> dict[str, object]:
         integrity = self.verify_integrity()
         now = _clock_value(self._clock)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 "SELECT state,COUNT(*) AS count FROM document_download_tokens GROUP BY state"
             ).fetchall()
@@ -1832,7 +1837,7 @@ class DocumentAccessStore:
 
     def verify_integrity(self) -> dict[str, object]:
         try:
-            with self._connect() as connection:
+            with closing(self._connect()) as connection, connection:
                 self._verify_meta_on(connection)
                 token_rows = connection.execute(
                     "SELECT * FROM document_download_tokens ORDER BY token_id"
@@ -2108,7 +2113,7 @@ class DocumentAccessService:
 
         # Read only the digest-selected retained record, then independently
         # re-resolve its server-owned opaque reference before consuming a use.
-        with self.store._connect() as connection:
+        with closing(self.store._connect()) as connection, connection:
             self.store._verify_meta_on(connection)
             record = self.store._get_record_on(connection, token_sha256=token_digest)
         if not hmac.compare_digest(record.principal_sha256, principal_sha):

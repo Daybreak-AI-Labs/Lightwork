@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import contextlib
+import gc
 import hashlib
+import sqlite3
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -989,3 +993,65 @@ def test_upload_registration_computes_the_fingerprint_on_the_server(
         headers={"Content-Type": "text/html"},
     )
     assert unsupported.status_code == 415
+
+
+def _assert_closed(connections):
+    for connection in connections:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
+
+def test_composition_owned_connections_are_closed_when_their_calls_return(tmp_path, monkeypatch):
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: any connection left open by a call stays open.
+    opened = []
+    real_connect = sqlite3.connect
+    fail_pragma = {"on": True}
+
+    class _PragmaFails(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql == "PRAGMA foreign_keys=ON" and fail_pragma["on"]:
+                raise sqlite3.OperationalError("pragma failed")
+            return super().execute(sql, *args)
+
+    def recording_connect(*args, **kwargs):
+        # Only connections opened by this module's helpers are under test; the
+        # analysis store in maverick.ai_evidence_analysis opens its own.
+        own = sys._getframe(1).f_code.co_filename == composition.__file__
+        factory = _PragmaFails if own else sqlite3.Connection
+        connection = real_connect(*args, factory=factory, **kwargs)
+        if own:
+            opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(composition.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            _build(tmp_path)
+        fail_pragma["on"] = False
+        before = len(opened)
+        comp = _build(tmp_path)
+        assert len(opened) > before, "__init__"
+        _assert_closed(opened[before:])
+        calls = [
+            ("list_usable_artifacts", comp.registry.list_usable_artifacts),
+            ("list_usable_criteria", comp.registry.list_usable_criteria),
+            ("verify_integrity", comp.registry.verify_integrity),
+            ("current_registry_revision", lambda: comp.registry.current_registry_revision("artifact", "missing")),
+            # A missing authority reads its retirement tombstone, then raises.
+            (
+                "_current_payload",
+                lambda: comp.registry._current_payload("artifact", "missing-artifact"),
+            ),
+            ("compact_expired", lambda: comp.registry.compact_expired(limit=10)),
+        ]
+        for name, call in calls:
+            before = len(opened)
+            with contextlib.suppress(composition.AIEvidenceAnalysisCompositionError):
+                call()
+            assert len(opened) > before, name
+            _assert_closed(opened[before:])
+    finally:
+        gc.enable()
+    _assert_closed(opened)

@@ -1089,8 +1089,8 @@ class ConsumerTrustCenterStore:
     def _connect(self):
         with cross_process_lock(self._lock_path):
             connection = sqlite3.connect(self._path, timeout=30.0)
-            connection.row_factory = sqlite3.Row
             try:
+                connection.row_factory = sqlite3.Row
                 yield connection
             finally:
                 connection.close()

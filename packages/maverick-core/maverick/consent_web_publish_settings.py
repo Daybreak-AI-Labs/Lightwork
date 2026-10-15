@@ -667,6 +667,16 @@ def _head_material(head: SettingsHead) -> dict[str, object]:
     return {"schema": HEAD_SCHEMA, **result}
 
 
+@contextmanager
+def _closing_sqlite(connection: Any):
+    """Close a per-call sqlite3 connection on exit; a shared (Postgres) session is left as before."""
+    try:
+        yield connection
+    finally:
+        if isinstance(connection, sqlite3.Connection):
+            connection.close()
+
+
 class WebPublishSettingsStore:
     """Tenant-bound immutable-version authority with CAS heads."""
 
@@ -710,8 +720,9 @@ class WebPublishSettingsStore:
         self._clock = clock
         try:
             ensure_private_directory(self.path.parent)
-            with self._schema_lock, self._connect(initializing=True) as connection:
-                self._create_schema(connection)
+            with self._schema_lock:
+                with _closing_sqlite(self._connect(initializing=True)) as connection, connection:
+                    self._create_schema(connection)
             if not consent_storage.shared():
                 ensure_private_file(self.path)
         except WebPublishSettingsError:
@@ -727,12 +738,17 @@ class WebPublishSettingsStore:
                 connection = consent_storage.connect(self.path, timeout=30)
             else:
                 connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-            connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA foreign_keys=ON")
-            connection.execute("PRAGMA busy_timeout=30000")
-            if initializing:
-                connection.execute("PRAGMA journal_mode=WAL")
-                connection.execute("PRAGMA synchronous=FULL")
+            try:
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA foreign_keys=ON")
+                connection.execute("PRAGMA busy_timeout=30000")
+                if initializing:
+                    connection.execute("PRAGMA journal_mode=WAL")
+                    connection.execute("PRAGMA synchronous=FULL")
+            except BaseException:
+                if isinstance(connection, sqlite3.Connection):
+                    connection.close()
+                raise
             return connection
         except sqlite3.DatabaseError as exc:
             raise WebPublishSettingsIntegrityError(
@@ -1652,7 +1668,7 @@ class WebPublishSettingsStore:
 
     def get_head(self, *, property_id: str) -> SettingsHead:
         authority = self._resolve_authority(property_id, require_usable=False)
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._verify_meta_on(connection)
             row = connection.execute(
                 "SELECT * FROM web_publish_settings_heads WHERE property_id=?",
@@ -1667,7 +1683,7 @@ class WebPublishSettingsStore:
     def get_version(self, *, property_id: str, version_id: str) -> SettingsVersion:
         authority = self._resolve_authority(property_id, require_usable=False)
         selected = _opaque(version_id, label="version_id")
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._verify_meta_on(connection)
             return self._select_version_on(
                 connection,
@@ -1681,7 +1697,7 @@ class WebPublishSettingsStore:
     ) -> list[SettingsVersion]:
         authority = self._resolve_authority(property_id, require_usable=False)
         selected_limit = _limit(limit)
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._verify_meta_on(connection)
             rows = connection.execute(
                 "SELECT * FROM web_publish_settings_versions WHERE property_id=? "
@@ -1706,7 +1722,7 @@ class WebPublishSettingsStore:
             base["reason"] = "publication_withdrawn_or_stale"
             return base
         try:
-            with self._connect() as connection:
+            with _closing_sqlite(self._connect()) as connection, connection:
                 self._verify_meta_on(connection)
                 row = connection.execute(
                     "SELECT * FROM web_publish_settings_heads WHERE property_id=?",
@@ -1789,7 +1805,7 @@ class WebPublishSettingsStore:
         if property_id is not None:
             self._resolve_authority(property_id, require_usable=False)
         selected_limit = _limit(limit)
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._verify_meta_on(connection)
             if property_id is None:
                 rows = connection.execute(
@@ -1959,7 +1975,7 @@ class WebPublishSettingsStore:
             return operation_result
 
     def verify_integrity(self) -> dict[str, object]:
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._verify_meta_on(connection)
             version_rows = connection.execute(
                 "SELECT * FROM web_publish_settings_versions ORDER BY property_id,version_number"
@@ -2065,7 +2081,7 @@ class WebPublishSettingsStore:
 
         integrity = self.verify_integrity()
         try:
-            with self._connect() as connection:
+            with _closing_sqlite(self._connect()) as connection, connection:
                 quick_check = connection.execute("PRAGMA quick_check").fetchone()
                 wal = connection.execute("PRAGMA journal_mode").fetchone()
         except sqlite3.DatabaseError as exc:

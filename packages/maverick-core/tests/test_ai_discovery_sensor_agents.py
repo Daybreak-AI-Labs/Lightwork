@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import os
 import sqlite3
@@ -842,3 +843,32 @@ def test_harness_refuses_missing_consent_and_cli_reports_privacy(tmp_path: Path,
     output = json.loads(capsys.readouterr().out)
     assert output["ok"] is True
     assert output["result"]["raw_source_persisted"] is False
+
+
+def test_spool_connection_closes_when_row_setup_fails(tmp_path: Path, monkeypatch) -> None:
+    # Same GC-disabled rule as above: an unclosed connection stays open until a GC pass.
+    spool = DiscoverySensorSpool(tmp_path / "spool.sqlite")
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+
+    class _RowSetupFails(sqlite3.Connection):
+        def __setattr__(self, name, value):
+            if name == "row_factory":
+                raise sqlite3.OperationalError("row setup failed")
+            super().__setattr__(name, value)
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, factory=_RowSetupFails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sensor_agents.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            spool._connect()
+    finally:
+        gc.enable()
+    assert len(opened) == 1
+    with pytest.raises(sqlite3.ProgrammingError):
+        opened[0].execute("SELECT 1")

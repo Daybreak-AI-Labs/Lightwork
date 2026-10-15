@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import hashlib
 import sqlite3
 import threading
@@ -615,3 +616,57 @@ def test_public_gate_stays_closed_for_a_changed_directory_and_without_an_applica
         _fresh_app(), public_dependencies=_public_dependencies()
     )
     assert fresh.gate() is False
+
+
+def test_revision_observer_closes_when_the_directory_is_released(tmp_path, monkeypatch) -> None:
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: an observer not closed on release stays open.
+    opened = []
+    real_connect = sqlite3.connect
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(composition.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        released = composition.NativeApplicationDirectory(tmp_path / "other" / "directory.db")
+        released.integrity_revision()
+        observer = opened[-1]
+        del released
+        with pytest.raises(sqlite3.ProgrammingError):
+            observer.execute("SELECT 1")
+    finally:
+        gc.enable()
+
+
+def test_revision_observer_stays_open_for_reuse_and_closes_on_close(tmp_path, monkeypatch) -> None:
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: a connection that is not closed on release stays open.
+    opened = []
+    real_connect = sqlite3.connect
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(composition.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        directory = composition.NativeApplicationDirectory(tmp_path / "global" / "directory.db")
+        before = len(opened)
+        directory.integrity_revision()
+        directory.integrity_revision()
+        observers = opened[before:]
+        # One observer serves every revision check: PRAGMA data_version needs the same handle.
+        assert len(observers) == 1
+        assert observers[0].execute("SELECT 1").fetchone() == (1,)
+        directory.close()
+        directory.close()
+        with pytest.raises(sqlite3.ProgrammingError):
+            observers[0].execute("SELECT 1")
+    finally:
+        gc.enable()

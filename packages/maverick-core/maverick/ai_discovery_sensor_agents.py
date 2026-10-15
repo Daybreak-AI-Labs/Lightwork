@@ -522,8 +522,8 @@ class DiscoverySensorSpool:
         connection = sqlite3.connect(
             str(self.path), timeout=30.0, isolation_level=None, check_same_thread=False
         )
-        connection.row_factory = sqlite3.Row
         try:
+            connection.row_factory = sqlite3.Row
             # Arm the busy handler before any connection-local pragma. Journal
             # mode is a database-wide setting and must not be rewritten by
             # every hot-path connection: concurrent workers used to race that

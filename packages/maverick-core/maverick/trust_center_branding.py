@@ -649,6 +649,16 @@ def _validated_deployment(
     return value
 
 
+@contextmanager
+def _closing_sqlite(connection: Any):
+    """Close a per-call sqlite3 connection on exit; a shared (Postgres) session is left as before."""
+    try:
+        yield connection
+    finally:
+        if isinstance(connection, sqlite3.Connection):
+            connection.close()
+
+
 class TrustCenterBrandingStore:
     """SQLite authority for encrypted assets, exact domains, and projections."""
 
@@ -684,7 +694,7 @@ class TrustCenterBrandingStore:
         )
         self._token_factory = token_factory or (lambda: secrets.token_urlsafe(32))
         ensure_private_directory(self.path.parent)
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._create_schema(connection)
         if not consent_storage.shared():
             ensure_private_file(self.path, 0o600)
@@ -694,11 +704,16 @@ class TrustCenterBrandingStore:
             connection = consent_storage.connect(self.path, timeout=30)
         else:
             connection = sqlite3.connect(str(self.path), timeout=30, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=30000")
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=FULL")
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA busy_timeout=30000")
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA synchronous=FULL")
+        except BaseException:
+            if isinstance(connection, sqlite3.Connection):
+                connection.close()
+            raise
         return connection
 
     @contextmanager
@@ -1466,7 +1481,7 @@ class TrustCenterBrandingStore:
     def get_asset(self, asset_id: str, asset_version: int) -> AssetAuthority:
         asset = _identifier(asset_id, "asset_id")
         version_number = _positive_int(asset_version, "asset_version", 1, 2_147_483_647)
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._verify_meta(connection)
             return self._asset_result(*self._asset_rows(connection, asset, version_number))
 
@@ -1758,7 +1773,7 @@ class TrustCenterBrandingStore:
             expected_authority_revision, "expected_authority_revision", 1, 2_147_483_647
         )
         now = _timestamp(self._clock(), "clock")
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             version, head, _ = self._domain_rows(connection, claim, version_number)
             if int(head["authority_revision"]) != expected or head["state"] != "challenged":
                 raise BrandingConflict("branding_domain_state_changed")
@@ -1813,7 +1828,7 @@ class TrustCenterBrandingStore:
             expected_authority_revision, "expected_authority_revision", 1, 2_147_483_647
         )
         now = _timestamp(self._clock(), "clock")
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             version, head, event = self._domain_rows(connection, claim, version_number)
             if int(head["authority_revision"]) != expected or head["state"] != "verified":
                 raise BrandingConflict("branding_domain_state_changed")
@@ -1879,7 +1894,7 @@ class TrustCenterBrandingStore:
             expected_authority_revision, "expected_authority_revision", 1, 2_147_483_647
         )
         now = _timestamp(self._clock(), "clock")
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             version, head, event = self._domain_rows(connection, claim, version_number)
             if int(head["authority_revision"]) != expected or head["state"] != "active":
                 raise BrandingConflict("branding_domain_state_changed")
@@ -2002,7 +2017,7 @@ class TrustCenterBrandingStore:
     def get_domain(self, claim_id: str, claim_version: int) -> DomainAuthority:
         claim = _identifier(claim_id, "claim_id")
         version_number = _positive_int(claim_version, "claim_version", 1, 2_147_483_647)
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._verify_meta(connection)
             return self._domain_result(*self._domain_rows(connection, claim, version_number))
 
@@ -2211,7 +2226,7 @@ class TrustCenterBrandingStore:
         if current.tenant_id != self.tenant_id:
             raise BrandingNotFound("branding_projection_unavailable")
         now = _timestamp(self._clock(), "clock")
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._verify_meta(connection)
             head = connection.execute(
                 "SELECT * FROM trust_brand_projection_heads WHERE property_id=?",
@@ -2301,7 +2316,7 @@ class TrustCenterBrandingStore:
             )
         ):
             raise BrandingNotFound("branding_asset_unavailable")
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             version, _, blob = self._asset_rows(
                 connection, projection.asset_id, projection.asset_version
             )
@@ -2336,7 +2351,7 @@ class TrustCenterBrandingStore:
         """Every logo/icon version with its current review state (read-only)."""
 
         bounded = _positive_int(limit, "limit", 1, 500)
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._verify_meta(connection)
             # Versions whose image was deleted after retention are not listed.
             heads = connection.execute(
@@ -2357,7 +2372,7 @@ class TrustCenterBrandingStore:
         """Every custom-domain claim version with its current state (read-only)."""
 
         bounded = _positive_int(limit, "limit", 1, 500)
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._verify_meta(connection)
             heads = connection.execute(
                 "SELECT claim_id,claim_version FROM trust_brand_domain_heads "
@@ -2375,7 +2390,7 @@ class TrustCenterBrandingStore:
         """The current brand projection of each website (read-only)."""
 
         bounded = _positive_int(limit, "limit", 1, 500)
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._verify_meta(connection)
             heads = connection.execute(
                 "SELECT * FROM trust_brand_projection_heads ORDER BY updated_at DESC LIMIT ?",
@@ -2393,7 +2408,7 @@ class TrustCenterBrandingStore:
             return tuple(items)
 
     def status(self) -> dict[str, object]:
-        with self._connect() as connection:
+        with _closing_sqlite(self._connect()) as connection, connection:
             self._verify_meta(connection)
             live_assets = int(
                 connection.execute("SELECT COUNT(*) FROM trust_brand_asset_blobs").fetchone()[0]

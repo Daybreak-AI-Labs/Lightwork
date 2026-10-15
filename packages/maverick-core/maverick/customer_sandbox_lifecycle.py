@@ -2719,9 +2719,13 @@ class CustomerSandboxLifecycleStore:
                 connection = sqlite3.connect(self._path, timeout=30, isolation_level=None)
         except sqlite3.Error as exc:
             raise CustomerSandboxConfigError("sandbox_existing_authority_invalid") from exc
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=30000")
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA busy_timeout=30000")
+        except BaseException:
+            connection.close()
+            raise
         return connection
 
     @contextmanager

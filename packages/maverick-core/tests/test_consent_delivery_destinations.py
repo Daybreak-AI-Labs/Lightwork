@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import hashlib
 import hmac
 import json
@@ -1438,3 +1439,70 @@ def test_turning_destinations_off_is_a_clean_off_with_services_still_listed() ->
     assert status["destinations"] == []
     with pytest.raises(ConsentDestinationConfigError, match="disabled"):
         registry.binding("sf-main")
+
+
+def test_every_operation_store_connection_closes_when_its_call_returns(tmp_path, monkeypatch):
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: any connection left open by a call stays open.
+    from maverick import consent_delivery_destinations as destinations
+
+    opened = []
+    real_connect = sqlite3.connect
+    fail_pragma = {"on": True}
+
+    class _PragmaFails(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql == "PRAGMA foreign_keys=ON" and fail_pragma["on"]:
+                raise sqlite3.OperationalError("pragma failed")
+            return super().execute(sql, *args)
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, factory=_PragmaFails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(destinations.sqlite3, "connect", recording_connect)
+    path = tmp_path / "operations.sqlite3"
+    gc.disable()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            ConsentDestinationOperationStore(path, clock=_Clock())
+        fail_pragma["on"] = False
+        operations = ConsentDestinationOperationStore(path, clock=_Clock())
+        operations.verify_integrity()
+    finally:
+        gc.enable()
+    assert len(opened) >= 2
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
+
+def test_shared_setup_failure_is_left_to_the_session_owner(tmp_path, monkeypatch):
+    from maverick import consent_storage
+
+    store = ConsentDestinationOperationStore(tmp_path / "operations.sqlite3", clock=_Clock())
+    sessions = []
+
+    class _SetupFails:
+        def __init__(self):
+            self.closes = []
+            self.row_factory = None
+            sessions.append(self)
+
+        def execute(self, sql, *args):
+            raise sqlite3.OperationalError("pragma failed")
+
+        def close(self):
+            self.closes.append(True)
+
+    monkeypatch.setattr(consent_storage, "shared", lambda: True)
+    monkeypatch.setattr(consent_storage, "connect", lambda path, **kwargs: _SetupFails())
+    gc.disable()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            with store._connect():
+                pass
+        assert len(sessions) == 1 and sessions[0].closes == []
+    finally:
+        gc.enable()

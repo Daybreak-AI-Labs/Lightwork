@@ -27,6 +27,7 @@ import re
 import sqlite3
 import threading
 import time
+import weakref
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
@@ -313,6 +314,21 @@ def _standards_contract_sha256(config: Mapping[str, Any]) -> str:
     return _sha256(body)
 
 
+class _RevisionObserver:
+    """The read-only connection whose PRAGMA data_version reports in-place commits."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.connection: sqlite3.Connection | None = None
+        self.file_identity: tuple[int, int] | None = None
+
+    def close(self) -> None:
+        with self.lock:
+            connection, self.connection, self.file_identity = self.connection, None, None
+        if connection is not None:
+            connection.close()
+
+
 class NativeApplicationDirectory:
     """Global application selector directory containing no device state."""
 
@@ -321,13 +337,18 @@ class NativeApplicationDirectory:
         self._clock = clock
         # PRAGMA data_version is comparable only on the SAME connection. Keep a
         # read-only observer open so rapid in-place updates are noticed even on
-        # filesystems whose timestamp/size do not move between requests.
-        self._revision_connection: sqlite3.Connection | None = None
-        self._revision_file_identity: tuple[int, int] | None = None
-        self._revision_lock = threading.Lock()
+        # filesystems whose timestamp/size do not move between requests. The
+        # finalizer closes the observer when this directory is released or the
+        # process exits; the observer is kept apart so it does not keep self alive.
+        self._revision = _RevisionObserver()
+        self._revision_finalizer = weakref.finalize(self, self._revision.close)
         ensure_private_directory(self.path.parent)
         with cross_process_lock(self.path, strict=True):
             self._initialize()
+
+    def close(self) -> None:
+        """Release the revision observer's file handle. Safe to call more than once."""
+        self._revision.close()
 
     @contextlib.contextmanager
     def _connect(self):
@@ -897,20 +918,25 @@ class NativeApplicationDirectory:
         if main is None:
             raise NativeConsentCompositionError("native directory file is unavailable")
         identity = main[:2]
-        with self._revision_lock:
-            if self._revision_connection is None or self._revision_file_identity != identity:
-                if self._revision_connection is not None:
-                    self._revision_connection.close()
-                self._revision_connection = None
-                self._revision_file_identity = None
+        observer = self._revision
+        with observer.lock:
+            if observer.connection is None or observer.file_identity != identity:
+                if observer.connection is not None:
+                    observer.connection.close()
+                observer.connection = None
+                observer.file_identity = None
                 connection = sqlite3.connect(
                     f"{self.path.resolve().as_uri()}?mode=ro", uri=True,
                     check_same_thread=False, timeout=5.0,
                 )
-                connection.execute("PRAGMA query_only=ON")
-                self._revision_connection = connection
-                self._revision_file_identity = identity
-            row = self._revision_connection.execute("PRAGMA data_version").fetchone()
+                try:
+                    connection.execute("PRAGMA query_only=ON")
+                except BaseException:
+                    connection.close()
+                    raise
+                observer.connection = connection
+                observer.file_identity = identity
+            row = observer.connection.execute("PRAGMA data_version").fetchone()
         if row is None:
             raise NativeConsentCompositionError("native directory revision is unavailable")
         return (main, stamp(Path(base + "-journal")),
