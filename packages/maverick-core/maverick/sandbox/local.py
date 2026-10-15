@@ -21,7 +21,7 @@ from pathlib import Path
 # REDIS_URL, *_OAUTH, *_BEARER). KEK/DEK: the tenant envelope-encryption key
 # material read by tenant/kms.py (MAVERICK_KMS_KEK) -- neither substring is
 # covered by KEY/SECRET/CREDENTIAL above (Sept 2026 fix,
-# PLATFORM_IMPROVEMENT_AUDIT.md W2-45; this key wraps every tenant's DEK, so
+# docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-45; this key wraps every tenant's DEK, so
 # leaking it into a sandboxed shell is a full data-at-rest compromise).
 _SECRET_ENV_RE = re.compile(
     r"(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|APIKEY|DSN|URI|URL|CONN"

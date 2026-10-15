@@ -2979,7 +2979,7 @@ def _donate_bestofn_candidates(llm, world, budget, goal_id, candidates, best) ->
 
 # Host-git RCE hardening (fsmonitor/filter-hook guard + scrubbed env) now
 # lives in git_safety.py so every host-side git caller shares it -- see
-# PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-2. Imported at module top as
+# docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-2. Imported at module top as
 # _git_env_without_user_config / _git_metadata_may_execute_filters; kept
 # under those private names since test_orchestrator_git_safety.py imports
 # them from here.

@@ -55,7 +55,9 @@ def test_public_material_names_only_a_registered_proof_pack_command():
     paths = ["README.md"]
     for root in ("pitch", "docs"):
         for path in sorted((REPO_ROOT / root).rglob("*")):
-            if path.suffix in {".md", ".html"}:
+            # The archived audits are point-in-time records, not public
+            # material; they record that the command was never registered.
+            if path.suffix in {".md", ".html"} and "docs/audits/" not in path.as_posix():
                 paths.append(path.relative_to(REPO_ROOT).as_posix())
     stale = [p for p in paths if "maverick proof-pack" in _read(p)]
     assert stale == [], f"unregistered 'maverick proof-pack' command in: {stale}"
@@ -111,7 +113,7 @@ def test_queue_delivery_is_not_described_as_exactly_once():
             "**exactly-once** — the contention",
         "docs/evidence/README.md":
             "**exactly-once** execution",
-        "STRESS_TEST.md":
+        "docs/audits/STRESS_TEST.md":
             "**JobQueue exactly-once**",
     }
     for relpath, phrase in stale.items():
@@ -133,10 +135,38 @@ def test_benchmark_results_say_when_no_live_run_is_recorded():
 
 
 AUDIT_DOCS = (
-    "PLATFORM_IMPROVEMENT_AUDIT.md",
-    "USER_EXPERIENCE_AUDIT.md",
-    "CODE_QUALITY_AUDIT.md",
+    "docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md",
+    "docs/audits/USER_EXPERIENCE_AUDIT.md",
+    "docs/audits/CODE_QUALITY_AUDIT.md",
 )
+
+#: The documents a reader needs today. Everything point-in-time (audits, ledgers,
+#: reviews, status boards) is archived under docs/audits/ and indexed there.
+ROOT_DOCUMENTS = {
+    "README.md", "ARCHITECTURE.md", "CHANGELOG.md", "CLAUDE.md", "AGENTS.md",
+    "CONTRIBUTING.md", "SECURITY.md", "CLA.md", "CODE_OF_CONDUCT.md", "MAINTAINERS.md",
+    "TRADEMARK.md", "THIRD-PARTY-NOTICES.md", "LAUNCH_CHECKLIST.md",
+}
+ARCHIVED_AUDITS = (
+    "USER_EXPERIENCE_AUDIT.md", "PLATFORM_IMPROVEMENT_AUDIT.md", "CODE_QUALITY_AUDIT.md",
+    "QA_FINDINGS.md", "ADVERSARY_COUNCIL_REVIEW.md", "STRESS_TEST.md",
+    "PUNCHLIST_RESOLUTION.md", "FIXES.md", "LAUNCH_AUDIT.md", "INFRA_AND_POLICY_DECISIONS.md",
+)
+
+
+def test_point_in_time_audits_are_archived_and_the_root_stays_live():
+    """The repository root holds only the documents a reader needs today; every
+    point-in-time audit, ledger or review lives under docs/audits/, is listed
+    in that directory's README, and docs/OPEN_ITEMS.md is the one live list of
+    findings. A new audit at the root fails here until it is archived."""
+    root = Path(__file__).resolve().parents[3]
+    root_docs = {p.name for p in root.glob("*.md")}
+    assert root_docs <= ROOT_DOCUMENTS, sorted(root_docs - ROOT_DOCUMENTS)
+    index = _read("docs/audits/README.md")
+    for name in ARCHIVED_AUDITS:
+        assert (root / "docs" / "audits" / name).is_file(), name
+        assert f"[{name}]({name})" in index, name
+    assert "docs/OPEN_ITEMS.md" in index
 
 
 @pytest.mark.parametrize("name", AUDIT_DOCS)

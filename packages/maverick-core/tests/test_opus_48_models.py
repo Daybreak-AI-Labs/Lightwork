@@ -136,7 +136,7 @@ def test_opus_48_uses_1024_min_cache_threshold():
     assert _min_cache_tokens("claude-opus-4-8-fast") == _MIN_CACHE_TOKENS_1024
 
 
-# --- PLATFORM_IMPROVEMENT_AUDIT.md W1-3: "claude-opus-4-8-fast" is a
+# --- docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-3: "claude-opus-4-8-fast" is a
 # catalog-only id -- the wire shape Anthropic actually requires is
 # model="claude-opus-4-8" + speed="fast" + the fast-mode beta, sent through
 # the beta messages endpoint. The tests above only ever asserted pricing and

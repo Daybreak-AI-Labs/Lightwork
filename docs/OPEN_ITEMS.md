@@ -1,8 +1,8 @@
 # Open items
 
 This is the current list of findings that are still open after the 2026 audits
-(`PLATFORM_IMPROVEMENT_AUDIT.md`, `USER_EXPERIENCE_AUDIT.md`,
-`CODE_QUALITY_AUDIT.md`). Those audits are point-in-time records and do not
+(`docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md`, `docs/audits/USER_EXPERIENCE_AUDIT.md`,
+`docs/audits/CODE_QUALITY_AUDIT.md`). Those audits are point-in-time records and do not
 track status per item, so use this file for what is still open.
 
 It was compiled on 2026-10-14 from commit `d8376beb`. Each row was checked in

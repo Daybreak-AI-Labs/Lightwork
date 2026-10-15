@@ -24,7 +24,7 @@ from .anthropic_limits import (
 )
 from .anthropic_limits import _is_opus_adaptive, effective_max_tokens
 
-# Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-3): fast mode is a real
+# Sept 2026 fix (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-3): fast mode is a real
 # Anthropic API feature (Claude Opus 5 / Opus 4.8 only, research preview),
 # but it needs a specific wire shape -- the beta messages endpoint, this
 # beta flag, and a top-level `speed="fast"` parameter -- none of which

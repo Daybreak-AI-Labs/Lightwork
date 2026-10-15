@@ -1,4 +1,4 @@
-"""PLATFORM_IMPROVEMENT_AUDIT.md W1-110: hand-written connectors interpolated
+"""docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-110: hand-written connectors interpolated
 unencoded model-supplied ids into API paths. httpx normalizes dot-segments
 before sending (verified below), so a model-emitted id like
 ``"../../api/1.0/goals/1"`` could retarget the request to an arbitrary

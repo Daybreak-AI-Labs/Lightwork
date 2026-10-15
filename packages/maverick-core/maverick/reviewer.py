@@ -160,7 +160,7 @@ def get_diff(workdir: Path, *, max_bytes: int = 100_000) -> str:
     execute on the host with this process's full environment (provider
     API keys included) -- refuse when such metadata is present, and run
     under a scrubbed environment either way. See
-    PLATFORM_IMPROVEMENT_AUDIT.md W2-1 / W2-2.
+    docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-1 / W2-2.
     """
     if not (workdir / ".git").exists():
         return ""
