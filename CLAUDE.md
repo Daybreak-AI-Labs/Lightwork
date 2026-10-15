@@ -114,8 +114,9 @@ All verified locally green; each is a build-failer:
 - Bugbear (B) is ON repo-wide (raise-from B904, zip strict= B905, loop-var
   capture B023...); FastAPI `Depends`/`Form`/`Query` called in argument
   defaults is whitelisted via extend-immutable-calls, not a violation.
-  Complexity capped at 20 with ~30 grandfathered `# noqa: C901` — new code
-  stays under the cap.
+  Complexity capped at 20 with 170 grandfathered `# noqa: C901` in non-test code
+  (October 2026; `test_complexity_waivers_do_not_grow` pins that ceiling) — new
+  code stays under the cap.
 - No mypy/pyright anywhere. Ruff is the only static gate; don't add type-only
   "fixes" expecting a checker to validate them.
 

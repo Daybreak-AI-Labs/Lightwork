@@ -2699,7 +2699,7 @@ limits are recorded in the [operation coverage register](post-install-operation-
 
 ## Tools
 
-286 built-in tool modules. Highlights by group (all under `tools/`):
+293 built-in tool modules. Highlights by group (all under `tools/`):
 
 - **Code & files** — `fs`, `str_edit`, `ast_edit` (tree-sitter), `apply_patch`
   (atomic multi-file), `repo_map`, `dep_graph`, `test_impact` (coverage-guided),

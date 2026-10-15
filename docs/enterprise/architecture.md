@@ -122,7 +122,7 @@ customers adopt ahead of the deadline, not under it.
 - **The recursive swarm** — the multi-agent substrate the fleet and supervisor
 - **Roster-wide governance invariant suite** — six governance invariants
   (tool-reachability, autonomy dial, capability attenuation, compartment
-  isolation, unstrippable hard refusals, budget caps) verified across ALL 2,020
+  isolation, unstrippable hard refusals, budget caps) verified across ALL 2,031
   specialist packs, each with a
   fault-injection control (property-fuzzed up to 5,000 iterations) proving the test is non-vacuous, plus hostile-argument
   fuzzing of every connector and tool. This is the machine-checkable evidence

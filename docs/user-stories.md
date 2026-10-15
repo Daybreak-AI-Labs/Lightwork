@@ -146,7 +146,7 @@
 
 ## Epic 03 — The Workforce: Agents & Roles
 
-- **US-0101** *(Operator — P1)* — As an Operator, I want to browse the full ~2,020-pack specialist catalog grouped by its 53 suites, so that I can find the right agent for a goal without knowing its exact name.
+- **US-0101** *(Operator — P1)* — As an Operator, I want to browse the full ~2,031-pack specialist catalog grouped by its 53 suites, so that I can find the right agent for a goal without knowing its exact name.
 - **US-0102** *(Operator — P1)* — As an Operator, I want to search the roster by free-text keyword across agent names, personas, and descriptions, so that I can locate a specialist by what it does rather than how it's labeled.
 - **US-0103** *(Team Lead — P2)* — As a Team Lead, I want to filter the catalog by suite, so that my team only sees the specialist packs relevant to our domain.
 - **US-0104** *(Operator — P2)* — As an Operator, I want to filter agents by risk level (low/medium/high), so that I can pick a safe specialist when working in a sensitive environment.
@@ -596,7 +596,7 @@
 - **US-0508** *(Knowledge Steward — P1)* — As a Knowledge Steward, I want to add a new behavioral golden case with an input, expected behavior, and rationale, so that newly discovered correct behaviors are locked in against future regressions.
 - **US-0509** *(Knowledge Steward — P2)* — As a Knowledge Steward, I want to mark a golden case as deprecated with a reason and removal date, so that obsolete expectations are retired in a governed way rather than silently deleted.
 - **US-0510** *(Agent Author — P0)* — As an Agent Author, I want to run `domains-lint` over the specialist catalog, so that structural and metadata errors in my pack definition are caught before audit.
-- **US-0511** *(Platform Admin — P0)* — As a Platform Admin, I want `domains-lint` to enforce that every one of the 2,020 specialist packs has a unique id, suite assignment, and required fields, so that the catalog stays internally consistent across all 53 suites.
+- **US-0511** *(Platform Admin — P0)* — As a Platform Admin, I want `domains-lint` to enforce that every one of the 2,031 specialist packs has a unique id, suite assignment, and required fields, so that the catalog stays internally consistent across all 53 suites.
 - **US-0512** *(Compliance Officer — P1)* — As a Compliance Officer, I want `domains-audit` to flag packs that lack a documented owner or governance tag, so that every specialist in the catalog is attributable and accountable.
 - **US-0513** *(Knowledge Steward — P1)* — As a Knowledge Steward, I want `domains-audit` to report packs with overlapping or contradictory scopes across suites, so that I can resolve catalog ambiguity before it confuses routing.
 - **US-0514** *(Agent Author — P2)* — As an Agent Author, I want `domains-lint` to warn when my pack references a tool or capability that is not registered, so that I catch dangling dependencies at lint time.

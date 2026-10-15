@@ -218,3 +218,87 @@ def test_channel_docs_name_every_server_wired_adapter():
     assert f"Phone ({len(wired)} channels)" in _read("README.md")
     assert f"{len(wired)} wired adapters" in _read("docs/handbook.md")
 
+
+PACK_COUNT_DOCS = (
+    "README.md", "docs/index.md", "docs/handbook.md", "CLAUDE.md",
+    "packages/maverick-shield/README.md", "docs/enterprise/architecture.md",
+    "docs/product-portfolio.md",
+)
+
+
+def test_docs_pack_counts_match_the_shipped_domains():
+    """Six documents still said 2,020 packs after the roster reached 2,031. Every
+    "N packs" / "N specialists" / "N agents" count in the public claims must equal
+    the number of domain TOML files that ship in ``maverick/domains``."""
+    shipped = len(list((REPO_ROOT / "packages" / "maverick-core" / "maverick" / "domains").glob("*.toml")))
+    pattern = re.compile(
+        r"(\d),(\d{3})(?:-pack)?\s+(?:lint-clean\s+)?(?:specialist\s+)?(?:prebuilt\s+)?(?:specialists|packs|agents)\b"
+    )
+    for relpath in PACK_COUNT_DOCS:
+        found = [int(a + b) for a, b in pattern.findall(_read(relpath))]
+        assert found, (relpath, "no pack count found")
+        assert set(found) == {shipped}, (relpath, found, shipped)
+
+
+def test_docs_tool_module_counts_match_the_tools_package():
+    """The docs said 286 built-in tool modules while ``maverick/tools`` holds 293
+    (every ``.py`` there except ``__init__`` and the ``_``-prefixed helpers)."""
+    tools = REPO_ROOT / "packages" / "maverick-core" / "maverick" / "tools"
+    shipped = len([p for p in tools.glob("*.py") if not p.name.startswith("_")])
+    for relpath in ("docs/architecture.md", "docs/FEATURES.md", "docs/comparison.md", "docs/press-kit.md"):
+        found = re.findall(r"(\d+) (?:built-in )?tool modules", _read(relpath))
+        assert found, relpath
+        assert {int(v) for v in found} == {shipped}, (relpath, found, shipped)
+
+
+def test_docs_connector_counts_match_the_specs():
+    """2,877 write-capable REST/GraphQL connectors and 37 read-only public-data
+    connectors are quoted across the docs; both must equal the spec tables."""
+    from maverick.tools import _connector_specs, enterprise_connectors
+
+    write_capable = len(_connector_specs._SPECS) + len(_connector_specs._GRAPHQL_SPECS)
+    public_data = len(enterprise_connectors._PUBLIC_DATA_SPECS)
+    for relpath in ("README.md", "docs/architecture.md", "docs/index.md", "docs/handbook.md"):
+        text = _read(relpath)
+        found = [int(v.replace(",", "")) for v in re.findall(r"([\d,]+) write-capable", text)]
+        assert found and set(found) == {write_capable}, (relpath, found, write_capable)
+    for relpath in ("README.md", "docs/architecture.md", "docs/handbook.md"):
+        found = [int(v) for v in re.findall(r"(\d+) read-only", _read(relpath))]
+        assert found and set(found) == {public_data}, (relpath, found, public_data)
+
+
+def test_press_kit_and_comparison_counts_match_the_code():
+    """The press kit and comparison page quote channel and provider counts too."""
+    from maverick.providers import KNOWN_PROVIDERS
+    from maverick.server import _WIRES
+
+    for relpath in ("docs/comparison.md", "docs/press-kit.md"):
+        found = re.findall(r"(\d+) channels\b", _read(relpath))
+        assert found and {int(v) for v in found} == {len(_WIRES)}, (relpath, found)
+    found = re.findall(r"(\d+) LLM providers", _read("docs/press-kit.md"))
+    assert found and {int(v) for v in found} == {len(KNOWN_PROVIDERS)}, found
+
+
+# The number of non-test functions carrying a complexity waiver. CLAUDE.md and
+# pyproject.toml quote it, and the house rule is that new code stays under the
+# cap, so this may only go down. Lower it when you remove a waiver; never raise
+# it without an explicit review of why a new function needs one.
+COMPLEXITY_WAIVER_CEILING = 170
+
+
+def test_complexity_waivers_do_not_grow():
+    """The ``# noqa: C901`` backlog is refactor debt (pyproject.toml). A new waiver
+    in non-test code fails here; removing one should lower the ceiling above."""
+    waivers = 0
+    for root in ("packages", "apps"):
+        for path in (REPO_ROOT / root).rglob("*.py"):
+            if "/tests/" in path.as_posix() or "/.venv/" in path.as_posix():
+                continue
+            waivers += path.read_text(encoding="utf-8", errors="ignore").count("noqa: C901")
+    assert waivers <= COMPLEXITY_WAIVER_CEILING, (
+        f"{waivers} complexity waivers in non-test code, ceiling {COMPLEXITY_WAIVER_CEILING}: "
+        "keep new functions under the cap instead of adding a waiver"
+    )
+    assert f"{COMPLEXITY_WAIVER_CEILING} grandfathered" in _read("CLAUDE.md")
+    assert f"the {COMPLEXITY_WAIVER_CEILING} functions already over it" in _read("pyproject.toml")
+

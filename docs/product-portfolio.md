@@ -106,7 +106,7 @@ environments*.
 **What a "pack" is:** a turnkey department of specialist agents. Each agent has a
 fixed job, a least-privilege tool set, a risk ceiling, and a built-in maker-checker
 discipline — it **drafts and recommends; a credentialed human reviews and commits**.
-You don't prompt-engineer them; you switch them on. **2,020 agents across 53 suites.**
+You don't prompt-engineer them; you switch them on. **2,031 agents across 53 suites.**
 
 Packs attach to any platform tier and get *more* valuable on Gold/Platinum (the
 governance and learning layers wrap around them).
@@ -313,4 +313,4 @@ placeholders.)
   multiplier (see the commercialization doc, "What would kill us").
 - The 53 suites all pass the quality gate (`maverick domains-lint`): every agent has a
   bounded persona, a least-privilege allow-list, an explicit deny-list, and a risk
-  ceiling — 0 errors, 0 warnings across all 2,020.
+  ceiling — 0 errors, 0 warnings across all 2,031.

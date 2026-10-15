@@ -49,7 +49,7 @@ deliberately coarse to avoid asserting details that may be stale.
 - **Self-host first.** Every capability that would otherwise need a hosted
   service ships with a self-hostable path (see the
   [reference architectures](./reference-architectures.md)).
-- **Breadth on a governed core.** 286 tool modules, 17 channels, 9 sandbox backends,
+- **Breadth on a governed core.** 293 tool modules, 18 channels, 9 sandbox backends,
   12 LLM providers — all behind config knobs and the shield.
 - **Long-horizon multi-agent work.** Planning topologies (tree-of-thought,
 - **Provable governance at roster scale.** A governance invariant test suite
