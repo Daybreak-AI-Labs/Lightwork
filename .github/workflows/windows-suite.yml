@@ -98,9 +98,13 @@ jobs:
           TEST_PATHS: ${{ inputs.paths }}
         # Two phases, as in test-shard: everything under xdist, then the
         # heavy_concurrency files serially. pytest-timeout uses its thread
-        # method here (Windows has no SIGALRM). Exit 5 (nothing collected) from
-        # the serial phase is a pass. -v names every test as it finishes, so a
-        # worker that crashes or never exits still leaves the names in the log.
+        # method here (Windows has no SIGALRM), which ends the whole worker with
+        # no traceback ("node down: Not properly terminated"). Exit 5 (nothing
+        # collected) from the serial phase is a pass. -v names every test as it
+        # starts and as it finishes, so a test that never finishes is named in
+        # the log. faulthandler_timeout, set just under each phase's timeout,
+        # writes every thread's stack to the log first, so the log also shows
+        # the line a hung test is blocked on.
         # Each phase is bounded (Git Bash's GNU timeout) inside the job limit,
         # so the log is always uploaded even if a worker hangs at shutdown.
         run: |
@@ -114,10 +118,12 @@ jobs:
           # shellcheck disable=SC2086 # TEST_PATHS is a space-separated list
           bound 100m python -m pytest -v -n auto --dist loadfile --shard "$SHARD/4" \
             -m "not heavy_concurrency" --tb=short --durations=50 --timeout=180 \
+            -o faulthandler_timeout=170 \
             --junitxml="test-results-windows-$SHARD.xml" $TEST_PATHS \
             2>&1 | tee "pytest-windows-$SHARD.log" || status=$?
           # shellcheck disable=SC2086
           bound 30m python -m pytest -v --shard "$SHARD/4" -m heavy_concurrency --tb=short --timeout=600 \
+            -o faulthandler_timeout=590 \
             --junitxml="test-results-windows-$SHARD-serial.xml" $TEST_PATHS \
             2>&1 | tee -a "pytest-windows-$SHARD.log" || serial=$?
           if [ "${serial:-0}" -ne 0 ] && [ "${serial:-0}" -ne 5 ]; then status=$serial; fi
