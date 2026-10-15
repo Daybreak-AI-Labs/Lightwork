@@ -154,12 +154,13 @@ ATTESTED_UNCHANGED = {
 # Pre-existing, outside the 42-module factory group of this change. These leaks are out of scope
 # here and are not rule-1 exemptions. They are pinned only so they cannot grow, and each entry is
 # deleted when its owner converts or removes the helper.
-_WITH_ITEM_LEAK = (
-    "with-item uses leak on CPython 3.12; outside the 42-module factory group, so not converted here"
+_CLOSED_AT_EVERY_WITH_SITE = (
+    "every with-site closes the connection through contextlib.closing (or the module's sqlite-only "
+    "closing helper), so nothing leaks; the helper itself is not converted"
 )
 OUT_OF_SCOPE_BASELINE = {
     "packages/maverick-core/maverick/administration_document_access.py::DocumentAccessStore._connect": (
-        1, _WITH_ITEM_LEAK,
+        1, _CLOSED_AT_EVERY_WITH_SITE,
     ),
     "packages/maverick-core/maverick/ai_discovery_sensor_agents.py::DiscoverySensorSpool._connect": (
         1,
@@ -172,7 +173,7 @@ OUT_OF_SCOPE_BASELINE = {
         "converted here",
     ),
     "packages/maverick-core/maverick/consent_web_publish_settings.py::WebPublishSettingsStore._connect": (
-        1, _WITH_ITEM_LEAK,
+        1, _CLOSED_AT_EVERY_WITH_SITE,
     ),
     "packages/maverick-core/maverick/customer_sandbox_lifecycle.py::CustomerSandboxLifecycleStore._connect": (
         2,
@@ -185,7 +186,7 @@ OUT_OF_SCOPE_BASELINE = {
         "converted here",
     ),
     "packages/maverick-core/maverick/governed_document_vault.py::GovernedDocumentVault._connect": (
-        1, _WITH_ITEM_LEAK,
+        1, _CLOSED_AT_EVERY_WITH_SITE,
     ),
     "packages/maverick-core/maverick/insight_exchange.py::_InsightReplayLedger._connect": (
         1,
@@ -208,10 +209,10 @@ OUT_OF_SCOPE_BASELINE = {
         "not converted here",
     ),
     "packages/maverick-core/maverick/trust_center_branding.py::TrustCenterBrandingStore._connect": (
-        1, _WITH_ITEM_LEAK,
+        1, _CLOSED_AT_EVERY_WITH_SITE,
     ),
     "packages/maverick-dashboard/maverick_dashboard/ai_evidence_analysis_composition.py::EvidenceAuthorityRegistry._connect": (
-        1, _WITH_ITEM_LEAK,
+        1, _CLOSED_AT_EVERY_WITH_SITE,
     ),
 }
 
