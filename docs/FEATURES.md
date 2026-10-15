@@ -1,11 +1,5 @@
 # Lightwork - Shipped Features
 
-- **Personal device pairing preview** — default-off `[device_pairing] enabled`
-  lets named members approve an expiring device code. Scoped credentials read
-  only their own work in one workspace, with protected renewal and explicit
-  removal in Your paired devices. Mobile/watch/vision settings store the
-  connection securely. See [scope, retention and qualification](device-pairing.md).
-
 What Lightwork **does today**, grounded in the current repository code. This is the
 catalogue of built features and tools; the forward backlog (what's *not* done
 yet) lives in [`ROADMAP.md`](./ROADMAP.md). When a roadmap item ships, it moves
@@ -15,15 +9,35 @@ here.
 > `packages/maverick-core/maverick/` unless noted. CLI verbs are shown as
 > `maverick <verb>`.
 
-- **First named local owner** — `maverick_dashboard.local_owner` and
-  `local_owner_routes` let a fresh loopback-only installation create its first
-  administrator inside Start. A salted local passphrase reopens the existing
-  signed invite session; the claim closes anonymous access before role setup.
-  Managed sign-in, existing identities, deployment invite policy, current roles,
-  and SCIM revocation remain authoritative. The installer exposes
-  `[dashboard] local_owner_setup`; see [first run](getting-started.md#first-run).
+<!-- toc:start -->
+## Contents
 
-## Agent kernel & orchestration
+| Section | Entries |
+| --- | ---: |
+| [Agent kernel and orchestration](#agent-kernel-and-orchestration) | 218 |
+| [Tools](#tools) | 10 |
+| [Channels](#channels) | prose |
+| [Sandboxes](#sandboxes) | prose |
+| [LLM providers and routing](#llm-providers-and-routing) | prose |
+| [MCP and agent interop](#mcp-and-agent-interop) | 20 |
+| [Safety and security](#safety-and-security) | 59 |
+| [Governed agent runtime and onboarding](#governed-agent-runtime-and-onboarding) | 38 |
+| [Hosted control plane and multi-tenancy](#hosted-control-plane-and-multi-tenancy) | 11 |
+| [Evaluation and benchmarks](#evaluation-and-benchmarks) | prose |
+| [Observability and reliability](#observability-and-reliability) | prose |
+| [UX surfaces](#ux-surfaces) | 66 |
+| [Packaged governance, evidence and external privacy control planes](#packaged-governance-evidence-and-external-privacy-control-planes) | 5 |
+| [Software development: the code vault](#software-development-the-code-vault) | 2 |
+| [Information-flow control](#information-flow-control) | 1 |
+| [Adaptive immunity](#adaptive-immunity) | 5 |
+| [Unified cross-suite audit projection](#unified-cross-suite-audit-projection) | 6 |
+| [Distribution and install](#distribution-and-install) | 23 |
+| [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 18 in 24 subsections |
+
+482 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+<!-- toc:end -->
+
+## Agent kernel and orchestration
 
 - **Conversation alternatives** — Try again, Edit and resend, and Branch from
   here open a complete review before starting a separate conversation. The
@@ -3215,7 +3229,7 @@ of a fresh `docker run --rm` per command (a cold start each time), keep one
 container alive and `docker exec` into it, so the 2nd..Nth command in a run
 skip container startup; torn down on `close()`.
 
-## LLM providers & routing
+## LLM providers and routing
 
 15 providers, routable per role (`llm.py`): Anthropic, OpenAI, OpenRouter,
 Ollama, Gemini, DeepSeek, Bedrock, Vertex AI, Azure, xAI, Moonshot, TGI, vLLM, and
@@ -3355,7 +3369,7 @@ when the response reports it, rather than pricing the whole write at one TTL.
 Opt-in **cache pre-warming** (`max_tokens=0` prefill at orchestrator start)
 and a `maverick_llm_cache_tokens_total` hit-rate metric.
 
-## MCP & agent interop
+## MCP and agent interop
 
 - **MCP server** (`packages/maverick-mcp/`) — stdio JSON-RPC **and** Streamable
   HTTP transport; tool `outputSchema`, resource subscriptions.
@@ -3552,7 +3566,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   decision gate (`non_python_share()`); off by default, consent step in the
   installer wizard (`maverick init` → Analytics).
 
-## Safety & security
+## Safety and security
 
 - **Consumer Consent & Preferences authority**
   (`consent_preferences.py`, `[consent_preferences] enable = true`) — an
@@ -4374,7 +4388,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   corpus via `MAVERICK_REDTEAM_CORPUS`).
 - **Sandbox-escape canaries**, per-tool rate limiter, killswitch.
 
-## Governed agent runtime & onboarding
+## Governed agent runtime and onboarding
 
 - **Conversational intake** — interviews a user, collects docs, and proposes a
   domain configuration (intake agent + LLM proposer + `run_intake`).
@@ -4781,7 +4795,15 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
 - **Scheduling** — recurring autonomous goals from a prompt; `worker --once`
   cron-friendly drain (`scheduler.py`, `job_queue.py`, `worker.py`).
 
-## Hosted control plane & multi-tenancy
+- **First named local owner** — `maverick_dashboard.local_owner` and
+  `local_owner_routes` let a fresh loopback-only installation create its first
+  administrator inside Start. A salted local passphrase reopens the existing
+  signed invite session; the claim closes anonymous access before role setup.
+  Managed sign-in, existing identities, deployment invite policy, current roles,
+  and SCIM revocation remain authoritative. The installer exposes
+  `[dashboard] local_owner_setup`; see [first run](getting-started.md#first-run).
+
+## Hosted control plane and multi-tenancy
 
 The backend for running Lightwork as a governed, multi-tenant platform (each piece
 opt-in; single-tenant/self-hosted deployments are unaffected):
@@ -4863,7 +4885,7 @@ opt-in; single-tenant/self-hosted deployments are unaffected):
   does not unwrap under B's AEAD context), and clean `set_tenant`/`reset_tenant`
   scope discipline.
 
-## Evaluation & benchmarks
+## Evaluation and benchmarks
 
 **Long-running plugin reliability drill** (`plugin_reliability.py`, `python -m
 maverick.plugin_reliability`): the plugin counterpart to the chaos game-day —
@@ -4915,7 +4937,7 @@ token bombs, runaway iterations — each asserted CLAMPED by the cache /
 output-cap / Budget ceilings; `main()` exits 1 on any unclamped scenario. All
 CI-runnable on shipped fixtures.
 
-## Observability & reliability
+## Observability and reliability
 
 OpenTelemetry traces (spans carry the **full OTel GenAI semantic-convention
 attribute set** — `gen_ai.operation.name` / `system` / `request.model` /
@@ -5571,6 +5593,12 @@ tested without spawning py-spy.
   and deliver immediately (flushing any pending batch first, so order holds). A
   daemon flusher drives the window; unconfigured, `notify()` is unchanged.
 
+- **Personal device pairing preview** — default-off `[device_pairing] enabled`
+  lets named members approve an expiring device code. Scoped credentials read
+  only their own work in one workspace, with protected renewal and explicit
+  removal in Your paired devices. Mobile/watch/vision settings store the
+  connection securely. See [scope, retention and qualification](device-pairing.md).
+
 ## Packaged governance, evidence and external privacy control planes
 
 - **Packaged governance agents** (`governance_agents.py`, dashboard
@@ -5767,7 +5795,7 @@ tested without spawning py-spy.
   crash/recovery, concurrency, scale and full provider/source completeness
   remain unverified.
 
-## Distribution & install
+## Distribution and install
 
 - **Private workbench recovery**: vendor onboarding, account connections,
   workspace members and knowledge access share response classification and

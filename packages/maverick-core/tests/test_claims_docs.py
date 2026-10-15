@@ -132,6 +132,34 @@ def test_benchmark_results_say_when_no_live_run_is_recorded():
     assert '"--max-dollars"' in harness and '"--tag"' in harness
 
 
+def _features_toc():
+    import importlib.util
+    import sys
+
+    path = REPO_ROOT / "scripts" / "features_toc.py"
+    spec = importlib.util.spec_from_file_location("features_toc", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses resolve annotations via sys.modules
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_features_catalogue_has_a_current_table_of_contents():
+    """docs/FEATURES.md is 6,000+ lines of `- **Name** -- ...` entries in `##`
+    sections; its generated contents block (section, entry count, anchor) must
+    match the sections it describes, every entry must sit under a section, and
+    section headings must slug the same way on GitHub and MkDocs (no `&`)."""
+    toc = _features_toc()
+    text = _read("docs/FEATURES.md")
+    assert toc.apply(text) == text, "run python scripts/features_toc.py --write"
+    found = toc.sections(text)
+    assert len(found) >= 19 and sum(s.entries for s in found) >= 480
+    assert toc.entries_before_first_section(text) == 0
+    for section in found:
+        assert "&" not in section.title, section.title
+        assert f"](#{toc.anchor(section.title)})" in text, section.title
+
+
 AUDIT_DOCS = (
     "PLATFORM_IMPROVEMENT_AUDIT.md",
     "USER_EXPERIENCE_AUDIT.md",
