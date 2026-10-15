@@ -36,6 +36,7 @@ from typing import Any, Protocol
 from .config import load_config
 from .data_use_provider_adapters import PROVIDER_RESULT_SCHEMA
 from .file_lock import ensure_private_directory
+from .sqlite_closing import ClosingConnection
 
 EXPECTATION_SCHEMA = "lightwork.data-use.provider-audit-expectation.v1"
 SNOWFLAKE_EVENT_SCHEMA = "lightwork.data-use.snowflake-audit-event.v2"
@@ -1036,7 +1037,9 @@ class DataUseProviderAuditStore:
             raise DataUseProviderAuditConfigError("provider audit gate rejected access") from exc
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path, timeout=30, isolation_level=None, factory=ClosingConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")

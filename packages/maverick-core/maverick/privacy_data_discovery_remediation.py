@@ -39,6 +39,7 @@ from .privacy_data_discovery import (
     ScanReport,
     require_enabled,
 )
+from .sqlite_closing import ClosingConnection
 
 SCHEMA_VERSION = 1
 WORK_SCHEMA = "lightwork.privacy-data-discovery-remediation-work.v1"
@@ -526,7 +527,7 @@ class PrivacyDataDiscoveryRemediationStore:
         )
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0)
+        connection = sqlite3.connect(self.path, timeout=30.0, factory=ClosingConnection)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")

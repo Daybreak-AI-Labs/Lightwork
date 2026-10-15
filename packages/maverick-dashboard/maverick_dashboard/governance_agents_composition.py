@@ -55,6 +55,7 @@ from maverick.file_lock import (
     ensure_private_file,
 )
 from maverick.paths import canonical_tenant_id, data_dir
+from maverick.sqlite_closing import ClosingConnection
 
 _KEYRING_SCHEMA = "lightwork.governance-agent.reference-keyring.v1"
 _INTENT_SCHEMA = "lightwork.governance-agent.internal-intent.v1"
@@ -582,7 +583,9 @@ class _TenantReferenceState:
         return _timestamp(self._clock(), "composition clock")
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path, timeout=30.0, isolation_level=None, factory=ClosingConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=30000")
         connection.execute("PRAGMA secure_delete=ON")
@@ -1001,7 +1004,7 @@ class _TenantReferenceState:
                 (self._now(), run),
             )
             connection.commit()
-        return changed.rowcount == 1
+            return changed.rowcount == 1
 
     def reconcile_tokens(self, store: agents.GovernanceAgentStore) -> int:
         if not isinstance(store, agents.GovernanceAgentStore):

@@ -41,6 +41,7 @@ from .consumer_trust_center import (
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 from .privacy_rights_orchestration import CALLBACK_PHASES
+from .sqlite_closing import ClosingConnection
 
 SCHEMA_VERSION = 1
 STATUS_SCHEMA = "lightwork.privacy-rights-ott-ctv-status.v1"
@@ -490,7 +491,7 @@ class OTTCTVPrivacyRightsStore:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0)
+        connection = sqlite3.connect(self.path, timeout=30.0, factory=ClosingConnection)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")

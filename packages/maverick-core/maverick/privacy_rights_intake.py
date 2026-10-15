@@ -29,6 +29,7 @@ from typing import Any
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 from .privacy_rights_orchestration import CALLBACK_PHASES, RIGHTS
+from .sqlite_closing import ClosingConnection
 
 SCHEMA_VERSION = 2
 AUTHORITY_SCHEMA = "lightwork.privacy-rights-intake-authority.v1"
@@ -538,7 +539,7 @@ class PrivacyRightsIntakeStore:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0)
+        connection = sqlite3.connect(self.path, timeout=30.0, factory=ClosingConnection)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
