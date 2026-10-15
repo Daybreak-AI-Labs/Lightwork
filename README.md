@@ -66,7 +66,7 @@ publishers are verified. See [`docs/getting-started.md`](./docs/getting-started.
 | GUI | Local web dashboard (`lightwork dashboard`) + chat at `/chat`; authenticated source-bootstrap shell is an internal engineering artifact | Self-contained, signed native installer + iOS/Android |
 | Sandbox | Local subprocess, Docker, gVisor, Podman, devcontainer, Kubernetes, SSH, Modal | Firecracker microVM (scaffold — exec path does not yet mount the workspace), Daytona |
 | AI providers | Anthropic (full), OpenAI, OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI, vLLM (per-role routable) | Cohere |
-| Channels | 16 wired into `lightwork serve` — Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon, Voice, IRC, Threads, RCS; WhatsApp (Cloud API + Twilio)/SMS (need Twilio), iMessage (macOS-only) | Glasses (adapter is a stub), push notifications |
+| Channels | 18 wired into `lightwork serve` — Telegram, Discord, Slack, Signal, Email, Matrix, Mattermost, Teams, Bluesky, Mastodon, Voice, IRC, Threads, RCS; WhatsApp (Cloud API + Twilio)/SMS (need Twilio), iMessage (macOS-only) | Glasses (adapter is a stub), push notifications |
 | Safety | Shield wired at 3 chokepoints; agent-shield SDK if installed, else a built-in rule set | Agent-shield full ~115 patterns |
 | Distribution | Release workflow for GHCR image, binaries, four reduced demo source archives, checksums, and SBOMs | PyPI (8-package lockstep cohort, gated pending namespace verification); self-contained code-signed installer; Homebrew tap |
 | Tests | Ruff, security gates, posture ratchet, and pytest on Python 3.10/3.11/3.12 | Broader deployment and browser journey coverage |
@@ -145,13 +145,15 @@ The CLI installs under two interchangeable names — `lightwork` (shown below) a
 ```
 packages/
   maverick-core/       Python agent kernel: recursive swarm, persistent world
-                       model (SQLite + FTS5, or Postgres; schema v36), 14 LLM provider adapters, 9
+                       model (SQLite + FTS5, or Postgres; schema v51), 15 LLM provider adapters, 9
                        sandboxes, MCP client, skills, templates, persona,
                        background runner, budget tracking
   maverick-shield/     Agent Shield integration + built-in fallback rule set
-  maverick-channels/   17 channel adapters: Telegram, Discord, Slack, Signal,
-                       Email, Matrix, Bluesky, Mastodon, Voice, WhatsApp, WhatsApp
-                       Cloud, SMS, iMessage, IRC, Threads, RCS, Glasses
+  maverick-channels/   18 channel adapters wired into `lightwork serve`: Telegram,
+                       Discord, Slack, Signal, Email, Matrix, Mattermost, Teams,
+                       Bluesky, Mastodon, Voice, WhatsApp, WhatsApp Cloud, SMS,
+                       iMessage, IRC, Threads, RCS; plus the CLI channel and the
+                       Glasses relay
                        (WhatsApp/SMS need Twilio; iMessage is macOS-only)
   maverick-dashboard/  Local FastAPI web UI + REST API at /api/v1 + OpenAPI
                        docs at /docs. Live progress streaming via short-poll.
@@ -217,7 +219,7 @@ See [docs/github-action.md](./docs/github-action.md).
 | **Wedge** | Long-horizon depth + true multi-agent coordination |
 | **Safety** | First-class. Every input, tool call, and output passes through Agent Shield. |
 | **Control** | You pick the models. Per-role. Multi-provider. |
-| **Deploy** | Desktop / Docker / VPS / Phone (16 channels) |
+| **Deploy** | Desktop / Docker / VPS / Phone (18 channels) |
 | **Privacy** | All detection runs locally. Your data never leaves your machine unless you choose a cloud LLM. |
 
 ## License

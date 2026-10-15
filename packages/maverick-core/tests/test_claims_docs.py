@@ -164,3 +164,57 @@ def test_open_items_lists_the_items_still_open():
     fixed = text.split("## Checked and already fixed (not open)", 1)[1]
     for phrase in ("row-level security", "rolbypassrls", "nonce", "want_response_signed"):
         assert phrase in fixed, phrase
+
+
+def test_docs_schema_version_matches_the_world_model():
+    """README, ARCHITECTURE.md and docs/architecture.md each named a schema version
+    (v36, v36 and v23) while the code was at v51. The three must say what
+    ``world_model.SCHEMA_VERSION`` says."""
+    from maverick.world_model import SCHEMA_VERSION
+
+    for relpath, pattern in (
+        ("README.md", r"schema v(\d+)"),
+        ("ARCHITECTURE.md", r"\(v1 → v(\d+)\)"),
+        ("docs/architecture.md", r"schema v(\d+)"),
+    ):
+        found = re.findall(pattern, _read(relpath))
+        assert found, (relpath, pattern)
+        assert {int(v) for v in found} == {SCHEMA_VERSION}, (relpath, found)
+
+
+def test_docs_provider_counts_match_the_registry():
+    """The README said 14 providers, docs/architecture.md 12 and the handbook 13
+    while ``providers.KNOWN_PROVIDERS`` held 15. Each count must equal the
+    registry's length."""
+    from maverick.providers import KNOWN_PROVIDERS
+
+    expected = {len(KNOWN_PROVIDERS)}
+    for relpath, pattern in (
+        ("README.md", r"(\d+) LLM provider adapters"),
+        ("docs/architecture.md", r"(\d+) LLM providers"),
+        ("docs/handbook.md", r"from (\d+) providers"),
+    ):
+        found = re.findall(pattern, _read(relpath))
+        assert found, (relpath, pattern)
+        assert {int(v) for v in found} == expected, (relpath, found)
+
+
+def test_channel_docs_name_every_server_wired_adapter():
+    """The channels README listed 10 adapters with stale readiness labels and
+    the package docstring counted 17 while ``server._WIRES`` wires 18. Every
+    wired adapter must appear, by its config table name, in the package README
+    and docstring, and the counts the README and handbook quote must match."""
+    from maverick.server import _WIRES
+
+    wired = sorted(_WIRES)
+    channels_readme = _read("packages/maverick-channels/README.md")
+    docstring = _read("packages/maverick-channels/maverick_channels/__init__.py")
+    for name in wired:
+        assert f"`{name}`" in channels_readme, name
+        assert name in docstring, name
+    assert f"Server-wired adapters ({len(wired)};" in docstring
+    assert f"{len(wired)} channel adapters" in _read("README.md")
+    assert f"| Channels | {len(wired)} wired into" in _read("README.md")
+    assert f"Phone ({len(wired)} channels)" in _read("README.md")
+    assert f"{len(wired)} wired adapters" in _read("docs/handbook.md")
+

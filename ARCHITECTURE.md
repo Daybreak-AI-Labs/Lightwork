@@ -40,7 +40,7 @@ The agent kernel. Ported from `cdayAI/research/maverick/` and evolved here.
 | `orchestrator.py` | Entry point `run_goal()` — wires SwarmContext, spawns external MCP clients, runs the root agent, distills the trajectory into a skill. |
 | `swarm.py` | `SwarmContext` shared by all agents in a run. |
 | `blackboard.py` | Append-only shared workspace for one run. Mirrors entries into `world.goal_events` when `attach_world()` is called so the dashboard can stream live progress. |
-| `world_model.py` | SQLite + FTS5: goals, episodes, facts, questions, messages, goal_events. WAL mode + `busy_timeout=5000` for safe concurrent dashboard+agent access. Forward-only, checksum-locked schema migrations (v1 → v36). |
+| `world_model.py` | SQLite + FTS5: goals, episodes, facts, questions, messages, goal_events. WAL mode + `busy_timeout=5000` for safe concurrent dashboard+agent access. Forward-only, checksum-locked schema migrations (v1 → v51). |
 | `budget.py` | Hard caps on tokens, $, wall-clock, tool calls. Raises `BudgetExceeded`. |
 | `llm.py` | Multi-provider adapter: Anthropic, OpenAI, Azure, Bedrock, Gemini, xAI, DeepSeek, Moonshot, OpenRouter, Ollama, TGI, vLLM (+ OpenAI-compatible). Per-role model routing via config. |
 | `providers/` | One adapter file per provider; OpenAI ↔ Anthropic message translation lives in `openai_provider.py`. |

@@ -98,9 +98,10 @@ formally modeled and TLC-verified in TLA+
 ([`docs/specs/tla/`](./specs/tla/README.md)).
 
 Two more threads run through all five: **per-role model choice** — you
-pick the models, per role, from 13 providers (`llm.py`; Anthropic, OpenAI,
+pick the models, per role, from 15 providers (`llm.py`; Anthropic, OpenAI,
 OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Vertex AI, Azure, xAI, Moonshot,
-TGI, vLLM), configured in `~/.maverick/config.toml`, never hard-coded — and the
+TGI, vLLM, the Codex CLI, and any OpenAI-compatible endpoint), configured in
+`~/.maverick/config.toml`, never hard-coded — and the
 **audit log**, a signed, hash-chained, append-only record of every action
 (`audit/`), verifiable offline.
 
@@ -311,7 +312,12 @@ screened by the same shield/budget/sandbox machinery:
   (`sdks/plugin-ts/`, `@maverick/plugin-sdk`) and a **gRPC plugin host**
   for any language. Single Python tools need only the `@tool` decorator
   (`tools/decorator.py`).
-- **Channels** — 17 wired adapters (`packages/maverick-channels/`):
+- **Channels** — 18 wired adapters (`packages/maverick-channels/`):
+  Telegram, Discord, Slack, Signal, Email, Matrix, Mattermost, Teams,
+  Bluesky, Mastodon, Voice, WhatsApp (Twilio + Cloud API), SMS, iMessage,
+  IRC, Threads, RCS, plus the CLI channel and a glasses/wearable bridge. New
+  ones subclass `Channel` in `base.py` — four steps, documented in
+  [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - **Connectors & primary-source grounding** — 2,877 write-capable enterprise
   REST/GraphQL connectors plus 37 read-only primary-source / public-data
   connectors (SEC EDGAR, FRED, Treasury, World Bank, FDIC, Census, BLS, EIA,
@@ -322,10 +328,6 @@ screened by the same shield/budget/sandbox machinery:
   grounding (GET-only, low-risk, deferred); on by default, kill-switch
   `[workforce] data_grounding = false` (or `MAVERICK_WORKFORCE_DATA_GROUNDING=off`),
   with an installer wizard step.
-  Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon,
-  Voice, WhatsApp (Twilio + Cloud API), SMS, iMessage, IRC, Threads, RCS,
-  and a glasses/wearable bridge. New ones subclass `Channel` in `base.py`
-  — four steps, documented in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - **MCP, both directions** — `maverick mcp` exposes the swarm to any MCP
   client (stdio + Streamable HTTP); `[mcp_servers]` makes Lightwork
   *consume* external MCP servers as tools, which still pass through the
