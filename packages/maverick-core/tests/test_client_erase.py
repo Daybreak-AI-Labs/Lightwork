@@ -57,6 +57,36 @@ def test_erase_removes_everything():
     assert events[0]["actor"].startswith("local:")
 
 
+def test_erase_closes_the_client_federation_state_before_removing_it(monkeypatch):
+    import sqlite3
+    import time
+
+    from maverick import federation
+
+    root = _seed()
+    state = federation._FederationState(root / "federation" / "inbound_state.sqlite3")
+    assert state.claim_replay("scope", "sig", expires_at=time.time() + 60, now=time.time()) is False
+    with federation._STATE_FILE_GATE.shared():
+        cached = state._connect()
+    closed_when_removed = []
+    real_remove = client._remove_client_path
+
+    def checked_remove(path, windows_identity):
+        if path.name == "inbound_state.sqlite3":
+            try:
+                cached.execute("SELECT 1")
+                closed_when_removed.append(False)
+            except sqlite3.ProgrammingError:
+                closed_when_removed.append(True)
+        return real_remove(path, windows_identity)
+
+    monkeypatch.setattr(client, "_remove_client_path", checked_remove)
+    res = client.erase_client()
+    assert res["removed"] >= 1
+    assert closed_when_removed == [True]
+    assert not (root / "federation" / "inbound_state.sqlite3").exists()
+
+
 def test_erase_keep_audit():
     root = _seed()
     res = client.erase_client(keep_audit=True, actor="user:offboarding-admin")

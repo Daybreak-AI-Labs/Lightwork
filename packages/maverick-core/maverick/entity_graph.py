@@ -138,8 +138,12 @@ def _connect(path: Path | None = None) -> sqlite3.Connection:
     target = path or _db_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(target)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+    except BaseException:
+        conn.close()
+        raise
     return conn
 
 

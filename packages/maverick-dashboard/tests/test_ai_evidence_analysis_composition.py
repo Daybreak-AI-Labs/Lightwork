@@ -1008,7 +1008,7 @@ def test_composition_owned_connections_are_closed_when_their_calls_return(tmp_pa
     real_connect = sqlite3.connect
     fail_pragma = {"on": True}
 
-    class _PragmaFails(sqlite3.Connection):
+    class _PragmaFailsMixin:
         def execute(self, sql, *args):
             if sql == "PRAGMA foreign_keys=ON" and fail_pragma["on"]:
                 raise sqlite3.OperationalError("pragma failed")
@@ -1016,12 +1016,15 @@ def test_composition_owned_connections_are_closed_when_their_calls_return(tmp_pa
 
     def recording_connect(*args, **kwargs):
         # Only connections opened by this module's helpers are under test; the
-        # analysis store in maverick.ai_evidence_analysis opens its own.
+        # analysis store in maverick.ai_evidence_analysis opens its own, and every
+        # other call keeps its arguments unchanged, including a caller's factory.
         own = sys._getframe(1).f_code.co_filename == composition.__file__
-        factory = _PragmaFails if own else sqlite3.Connection
-        connection = real_connect(*args, factory=factory, **kwargs)
-        if own:
-            opened.append(connection)
+        if not own:
+            return real_connect(*args, **kwargs)
+        base = kwargs.pop("factory", sqlite3.Connection)
+        pragma_fails = type("_PragmaFails", (_PragmaFailsMixin, base), {})
+        connection = real_connect(*args, factory=pragma_fails, **kwargs)
+        opened.append(connection)
         return connection
 
     monkeypatch.setattr(composition.sqlite3, "connect", recording_connect)

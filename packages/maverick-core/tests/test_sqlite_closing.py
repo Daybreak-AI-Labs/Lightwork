@@ -133,12 +133,15 @@ RULE_1_UNCHANGED = {
     "packages/maverick-core/maverick/federation.py::_FederationState._connect": (
         1,
         "one thread-local connection is cached and returned to every later call, so closing it "
-        "on with-exit would hand the next caller a closed connection",
+        "on with-exit would hand the next caller a closed connection; close_cached_connections() "
+        "and hold_state_file_closed() are the explicit releases, used at exit for the calling "
+        "thread and around every restore, purge and erasure that replaces the file",
     ),
     "packages/maverick-core/maverick/entity_graph.py::_connect": (
         1,
-        "rebuild() runs `with conn:` and then reads conn again after that block, so closing on "
-        "with-exit would make those reads fail",
+        "every caller closes the connection in a finally block; rebuild() runs `with conn:` and "
+        "then reads conn again after that block, so closing on with-exit would make those reads "
+        "fail",
     ),
 }
 
@@ -147,7 +150,9 @@ ATTESTED_UNCHANGED = {
     "packages/maverick-core/maverick/ai_evidence_analysis.py::EvidenceAnalysisStore._connect": (
         1,
         "not a rule-1 site: its bytes are hashed into the legacy XLS parser's attested "
-        "implementation identity, so converting it changes stored adapter authority",
+        "implementation identity (base_parser_sha256), so editing this file refuses every "
+        "existing evidence registry; closing it needs an extraction revision bump and "
+        "re-enrollment, which is an owner decision",
     ),
 }
 

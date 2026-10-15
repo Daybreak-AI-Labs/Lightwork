@@ -2,7 +2,12 @@
 edges with record provenance, and the three regulator queries."""
 from __future__ import annotations
 
+import contextlib
+import gc
+import sqlite3
+import sys
 import time
+from collections.abc import Iterator
 
 import pytest
 from maverick import entity_graph as eg
@@ -361,3 +366,87 @@ def test_pre_provenance_skill_reads_as_unknown_not_guessed(tmp_path, monkeypatch
     hood = eg.neighborhood("skill", "old-skill", depth=1)
     assert hood["found"]
     assert not [e for e in hood["edges"] if e["rel"] == "distilled_from"]
+
+
+# --- connection lifetime ----------------------------------------------------
+
+
+@contextlib.contextmanager
+def _gc_disabled() -> Iterator[None]:
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if was_enabled:
+            gc.enable()
+
+
+def _record_graph_connections(monkeypatch: pytest.MonkeyPatch) -> list[sqlite3.Connection]:
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, **kwargs)
+        # Only connections the entity graph itself opens are under test.
+        if sys._getframe(1).f_code.co_filename == eg.__file__:
+            opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(eg.sqlite3, "connect", recording_connect)
+    return opened
+
+
+def test_every_connection_the_graph_opens_is_closed_when_its_call_returns(
+    tmp_path, monkeypatch
+):
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: any connection a call leaves open stays open.
+    _approved_vendor("Acme Corp")
+    _dpa_review("Acme Corp")
+    opened = _record_graph_connections(monkeypatch)
+    calls = {
+        "rebuild": eg.rebuild,
+        "refresh": lambda: eg.refresh(max_age_seconds=0),
+        "stats": eg.stats,
+        "neighborhood": lambda: eg.neighborhood("vendor", "Acme Corp"),
+        "neighborhood, unknown": lambda: eg.neighborhood("vendor", "No Such Vendor"),
+        "dossier": lambda: eg.dossier("Acme Corp"),
+        "why": lambda: eg.why("Acme Corp"),
+        "blast_radius": lambda: eg.blast_radius("vendor", "Acme Corp"),
+        "blast_radius, unknown": lambda: eg.blast_radius("clause", "no-such-clause"),
+        "inventory_provenance_manifest": lambda: eg.inventory_provenance_manifest(
+            tenant_id="tenant-a", reference_key=b"g" * 32, max_entities=10, max_relationships=10
+        ),
+    }
+    with _gc_disabled():
+        for name, call in calls.items():
+            before = len(opened)
+            call()
+            assert len(opened) > before, name
+            for connection in opened[before:]:
+                with pytest.raises(sqlite3.ProgrammingError):
+                    connection.execute("SELECT 1")
+
+
+def test_connect_closes_the_connection_when_its_setup_fails(tmp_path, monkeypatch):
+    real_connect = sqlite3.connect
+    opened: list[sqlite3.Connection] = []
+
+    class _SetupFails(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql == "PRAGMA journal_mode=WAL":
+                raise sqlite3.OperationalError("setup failed")
+            return super().execute(sql, *args)
+
+    def connect(*args, **kwargs):
+        connection = real_connect(*args, factory=_SetupFails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(eg.sqlite3, "connect", connect)
+    with pytest.raises(sqlite3.OperationalError, match="setup failed"):
+        eg._connect(tmp_path / "graph.db")
+    assert len(opened) == 1
+    with pytest.raises(sqlite3.ProgrammingError):
+        opened[0].execute("SELECT 1")
