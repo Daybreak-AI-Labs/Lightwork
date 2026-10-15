@@ -92,7 +92,7 @@ def test_subprocess_tools_import_scrub_helper():
     tdir = pathlib.Path(T.__file__).parent
     for name in ["git_advanced", "preview_diff", "apply_patch", "ffmpeg_tool",
                  "imagemagick_tool", "pandoc_tool", "ocr", "a11y", "android", "ios_sim"]:
-        src = (tdir / f"{name}.py").read_text()
+        src = (tdir / f"{name}.py").read_text(encoding="utf-8")
         assert (
             "sandbox_run" in src
             or "scrub_child_env" in src
@@ -160,7 +160,7 @@ def test_media_tools_route_through_sandbox_chokepoint():
     import maverick.tools as T
     tdir = pathlib.Path(T.__file__).parent
     for name in ["ffmpeg_tool", "imagemagick_tool", "pandoc_tool", "ocr", "a11y"]:
-        src = (tdir / f"{name}.py").read_text()
+        src = (tdir / f"{name}.py").read_text(encoding="utf-8")
         if name == "ocr":
             # OCR now owns an immutable staged document job. The common job
             # service, not the caller, invokes the explicitly selected backend.

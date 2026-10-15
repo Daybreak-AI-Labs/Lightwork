@@ -7,7 +7,10 @@ lifecycle; what escalates is the governance posture around it
 """
 from __future__ import annotations
 
+import io
 from pathlib import Path
+
+import pytest
 
 try:
     import tomllib  # Python 3.11+
@@ -259,3 +262,47 @@ def test_express_regulated_adds_governance(monkeypatch, tmp_path: Path):
     assert config["self_improvement"]["require_signed_approval"] is True
     assert config["retention"]["audit_days"] == 365
     assert config["retention"]["messages_days"] == 365
+
+
+# ---------- reading the saved profile back ----------
+
+@pytest.fixture
+def windows_default_encoding(monkeypatch):
+    """Windows' default text encoding is the ANSI code page (cp1252). pathlib
+    takes its default from io.text_encoding(None), which follows UTF-8 mode
+    where it is on, so this makes that default cp1252 on any platform."""
+    def ansi_default(encoding=None, stacklevel=2):
+        return "cp1252" if encoding is None else encoding
+
+    monkeypatch.setattr(io, "text_encoding", ansi_default)
+
+
+def test_a_saved_profile_is_read_as_utf8_where_the_default_is_cp1252(
+        monkeypatch, tmp_path: Path, windows_default_encoding):
+    from maverick_installer import wizard
+    cfg = tmp_path / "config.toml"
+    # The wizard writes config.toml as UTF-8. "ō" is C5 8D and 0x8D is
+    # undefined in cp1252, so a read with the wrong encoding fails outright.
+    cfg.write_bytes('# Site: Tōkyō\n[governance]\nprofile = "regulated"\n'.encode())
+    monkeypatch.setattr(wizard, "CONFIG_FILE", cfg)
+    assert wizard._prior_governance_profile() == "regulated"
+
+
+def test_a_config_that_is_not_utf8_is_an_error_not_a_silent_no_prior(monkeypatch, tmp_path: Path):
+    """A saved regulated level must never turn into the essentials default
+    without anyone being told, so an unreadable file is raised, not hidden."""
+    from maverick_installer import wizard
+    cfg = tmp_path / "config.toml"
+    cfg.write_bytes(b'[governance]\nprofile = "regulated"\n# Site: T\xf4kyo\n')  # Latin-1 bytes
+    monkeypatch.setattr(wizard, "CONFIG_FILE", cfg)
+    with pytest.raises(UnicodeDecodeError):
+        wizard._prior_governance_profile()
+
+
+def test_no_saved_config_or_invalid_toml_means_no_prior(monkeypatch, tmp_path: Path):
+    from maverick_installer import wizard
+    cfg = tmp_path / "config.toml"
+    monkeypatch.setattr(wizard, "CONFIG_FILE", cfg)
+    assert wizard._prior_governance_profile() is None
+    cfg.write_text("[governance\nprofile = \"regulated\"\n", encoding="utf-8")
+    assert wizard._prior_governance_profile() is None

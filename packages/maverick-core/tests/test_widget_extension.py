@@ -34,7 +34,7 @@ def test_widget_js_parses():
 
 
 def test_widget_polls_the_real_goals_endpoint():
-    js = _JS.read_text()
+    js = _JS.read_text(encoding="utf-8")
     # /api/v1/goals is the real read endpoint (maverick_dashboard/api.py);
     # /api/v1/glance does not exist in the dashboard.
     assert '"/api/v1/goals?limit=100"' in js
@@ -42,7 +42,7 @@ def test_widget_polls_the_real_goals_endpoint():
 
 
 def test_widget_sends_exactly_the_bearer_header():
-    js = _JS.read_text()
+    js = _JS.read_text(encoding="utf-8")
     assert '"Authorization"' in js and '"Bearer " + token' in js
     # ?token= query auth was removed from the dashboard; never send it.
     assert "token=" not in re.sub(r"/\*.*?\*/", "", js, flags=re.DOTALL)
@@ -51,19 +51,19 @@ def test_widget_sends_exactly_the_bearer_header():
 def test_widget_is_self_contained_no_cdn():
     # No absolute URLs at all: the only network target is the configured
     # endpoint + the relative API path.
-    js = _JS.read_text()
+    js = _JS.read_text(encoding="utf-8")
     assert "https://" not in js and "http://" not in js
 
 
 def test_widget_is_read_only():
-    js = _JS.read_text()
+    js = _JS.read_text(encoding="utf-8")
     # Only GETs: fetch is never called with a method override or a body.
     assert "method:" not in js and "body:" not in js
     assert "POST" not in js and "DELETE" not in js and "PUT" not in js
 
 
 def test_status_buckets_match_world_model_reality():
-    js = _JS.read_text()
+    js = _JS.read_text(encoding="utf-8")
     # blocked/cancelled are the real failure statuses (world_model.py);
     # 'failed' is only a defensive extra.
     for status in ('"pending"', '"active"', '"done"', '"blocked"', '"cancelled"'):
@@ -71,7 +71,7 @@ def test_status_buckets_match_world_model_reality():
 
 
 def test_demo_page_embeds_widget_same_origin():
-    html = _DEMO.read_text()
+    html = _DEMO.read_text(encoding="utf-8")
     assert 'src="./maverick-widget.js"' in html
     assert 'data-endpoint=""' in html
     assert "https://" not in html  # no CDN, no hardcoded remote dashboards

@@ -40,7 +40,7 @@ def test_mkdocs_yml_navigation_references_existing_files():
 def test_docs_index_landing_exists():
     p = REPO_ROOT / "docs" / "index.md"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # Landing must mention the project's pitch fields.
     for keyword in ("Lightwork", "Quick start", "Pricing", "Roadmap"):
         assert keyword in body, f"index.md missing section: {keyword}"
@@ -58,7 +58,7 @@ def test_docs_workflow_exists():
 def test_reusable_agent_on_pr_workflow_exists():
     p = REPO_ROOT / ".github" / "workflows" / "agent-on-pr.yml"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # Must declare reusable workflow_call and required inputs.
     assert "workflow_call" in body
     assert "goal:" in body

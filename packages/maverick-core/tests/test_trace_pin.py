@@ -76,5 +76,5 @@ def test_pin_never_raises(tmp_path):
 def test_runner_stamps_trace(monkeypatch):
     """run_goal_in_thread pins the trace before dispatching the swarm."""
     import maverick.runner as runner_mod
-    src = open(runner_mod.__file__).read()
+    src = open(runner_mod.__file__, encoding="utf-8").read()
     assert "pin_trace(world, goal_id)" in src

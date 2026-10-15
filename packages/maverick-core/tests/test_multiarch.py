@@ -22,7 +22,7 @@ _KNOWN_INSTRUCTIONS = {
 def _instructions() -> list[str]:
     lines: list[str] = []
     continued = False
-    for raw in _DOCKERFILE.read_text().splitlines():
+    for raw in _DOCKERFILE.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -56,7 +56,7 @@ def test_base_image_is_arg_gated_with_slim_default():
 
 
 def test_riscv64_is_explicitly_unsupported():
-    text = _DOCKERFILE.read_text()
+    text = _DOCKERFILE.read_text(encoding="utf-8")
     script = (_MA / "build.sh").read_text()
     readme = (_MA / "README.md").read_text()
     assert "riscv64 is intentionally unsupported" in text
@@ -66,7 +66,7 @@ def test_riscv64_is_explicitly_unsupported():
 
 
 def test_image_uses_the_manifest_driven_reduced_cohort():
-    text = _DOCKERFILE.read_text()
+    text = _DOCKERFILE.read_text(encoding="utf-8")
     assert "scripts/install_release_cohort.py" in text
     assert "--only maverick-agent maverick-shield" in text
     assert "ARG INSTALL_DASHBOARD=0" in text

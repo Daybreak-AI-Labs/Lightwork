@@ -19,14 +19,14 @@ _STATE = "/home/maverick/.maverick"
 
 
 def test_readme_lists_all_four_platforms():
-    text = (_RA / "README.md").read_text()
+    text = (_RA / "README.md").read_text(encoding="utf-8")
     for platform in ("Kubernetes", "ECS", "Fly.io", "Railway"):
         assert platform in text
 
 
 def test_kubernetes_manifest_invariants():
     # PyYAML isn't a core dep; parse with a light regex contract instead.
-    text = (_RA / "kubernetes" / "maverick.yaml").read_text()
+    text = (_RA / "kubernetes" / "maverick.yaml").read_text(encoding="utf-8")
     docs = [d for d in text.split("\n---\n") if d.strip()]
     assert len(docs) == 3  # PVC + Deployment + Service
     assert "kind: PersistentVolumeClaim" in text
@@ -52,7 +52,7 @@ def test_ecs_task_definition_parses_and_matches_contract():
 
 
 def test_fly_toml_parses_and_matches_contract():
-    data = tomllib.loads((_RA / "fly" / "fly.toml").read_text())
+    data = tomllib.loads((_RA / "fly" / "fly.toml").read_text(encoding="utf-8"))
     assert data["http_service"]["internal_port"] == int(_PORT)
     assert data["mounts"]["destination"] == _STATE
     assert "dashboard" in data["processes"]["app"]
@@ -81,4 +81,4 @@ def test_no_baked_secrets_anywhere():
     suspicious = re.compile(r"sk-ant-[a-zA-Z0-9]{8,}|AKIA[A-Z0-9]{16}")
     for path in list(_RA.rglob("*")) + list((_REPO_ROOT / ".devcontainer").rglob("*")):
         if path.is_file():
-            assert not suspicious.search(path.read_text(errors="ignore")), path
+            assert not suspicious.search(path.read_text(encoding="utf-8", errors="ignore")), path

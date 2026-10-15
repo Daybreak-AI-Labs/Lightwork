@@ -44,7 +44,7 @@ def _strip_elisp(text: str) -> str:
 
 
 def test_emacs_package_structure():
-    text = _EMACS.read_text()
+    text = _EMACS.read_text(encoding="utf-8")
     assert text.startswith(";;; maverick.el ---")
     assert "lexical-binding: t" in text
     assert "(provide 'maverick)" in text
@@ -54,7 +54,7 @@ def test_emacs_package_structure():
 
 
 def test_emacs_commands_present_and_autoloaded():
-    text = _EMACS.read_text()
+    text = _EMACS.read_text(encoding="utf-8")
     for fn in ("maverick-start", "maverick-status", "maverick-monitor",
                "maverick-logs", "maverick-halt", "maverick-unhalt"):
         assert f"(defun {fn}" in text, f"missing {fn}"
@@ -64,7 +64,7 @@ def test_emacs_commands_present_and_autoloaded():
 
 
 def test_nvim_plugin_structure():
-    init = _NVIM_INIT.read_text()
+    init = _NVIM_INIT.read_text(encoding="utf-8")
     assert "local M = {}" in init and "return M" in init
     for fn in ("start", "status", "monitor", "logs", "halt", "unhalt", "setup"):
         assert f"function M.{fn}" in init, f"missing M.{fn}"
@@ -80,7 +80,7 @@ def test_editor_integrations_only_call_real_cli_verbs():
     from maverick.cli import main
     real = set(main.commands)
     used = set()
-    for text in (_EMACS.read_text(), _NVIM_INIT.read_text()):
+    for text in (_EMACS.read_text(encoding="utf-8"), _NVIM_INIT.read_text(encoding="utf-8")):
         used |= set(re.findall(
             r'"(start|status|monitor|logs|halt|unhalt|resume|ps|export)"', text))
     missing = used - real
@@ -102,7 +102,7 @@ def test_editor_status_cost_option_is_supported(tmp_path):
 
 
 def test_readmes_document_the_commands():
-    emacs_readme = (_REPO / "apps" / "emacs" / "README.md").read_text()
-    nvim_readme = (_REPO / "apps" / "nvim" / "README.md").read_text()
+    emacs_readme = (_REPO / "apps" / "emacs" / "README.md").read_text(encoding="utf-8")
+    nvim_readme = (_REPO / "apps" / "nvim" / "README.md").read_text(encoding="utf-8")
     assert "maverick-start" in emacs_readme
     assert ":MaverickStart" in nvim_readme

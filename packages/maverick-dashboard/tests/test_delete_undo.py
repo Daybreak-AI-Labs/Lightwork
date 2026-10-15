@@ -57,7 +57,7 @@ def _sites():
         lines = path.read_text(encoding="utf-8").splitlines()
         for number, line in enumerate(lines):
             if DELETE.search(line):
-                yield str(path.relative_to(ROOT)), number, line, lines
+                yield path.relative_to(ROOT).as_posix(), number, line, lines
 
 
 def test_every_delete_waits_for_undo_or_says_why_not():
