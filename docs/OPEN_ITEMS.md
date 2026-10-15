@@ -28,11 +28,10 @@ checked and are already fixed are listed at the end and are not in the tables.
 | Item | Evidence | Why open |
 |---|---|---|
 | AWS deployer role has broad permissions. Service-wide wildcard actions for S3, CodeBuild, ECR, ECS and CloudWatch Logs. Broad EC2, ELB, RDS, EFS, ACM and SES actions on `resources = ["*"]`. | `deploy/aws/terraform/deployer.tf:51`, `:56`, `:61`, `:70`, `:90`, `:103-105` | Narrowing needs the exact action set the deploy path uses; separate change. |
-| Database URL without `sslmode`. The `pg_dsn` secret is a `postgresql://` URL with no `sslmode` parameter, and nothing under `deploy/aws` adds one. | `deploy/aws/terraform/secrets.tf:104` | Enforcing `verify-full` needs the RDS CA bundle confirmed in the image first; separate change. |
+| Database URL uses `sslmode=require`, not `verify-full`. The `pg_dsn` secret now carries `?sslmode=require` (encrypted, server certificate not verified); `deploy/postgres/README.md` asks for `verify-full`. | `deploy/aws/terraform/secrets.tf` (`pg_dsn` secret version) | `verify-full` needs the RDS CA bundle shipped in the image and pinned; separate change. |
 | ECS task without container hardening. The container definition sets no read-only root filesystem and no capability drop. | `deploy/aws/terraform/ecs.tf:26-28` (container definition); `deploy/aws/terraform/ecs.tf:119` (writable state mount) | Read-only root needs the writable paths listed and a test deploy; separate change. |
 | Helm pods mount the default service-account token. The pod spec sets no `automountServiceAccountToken: false` and names no ServiceAccount. | `deploy/helm/maverick/templates/deployment.yaml:26` (pod spec); no `automountServiceAccountToken` anywhere in `deploy/helm` | Confirm the app never calls the Kubernetes API, then set it false; separate change. |
 | Helm ingress values are not rendered. `values.yaml` defines an `ingress` block (disabled by default), but `templates/` has no Ingress resource. | `deploy/helm/maverick/values.yaml:154-160`; `deploy/helm/maverick/templates/` (no ingress template); `NOTES.txt:11` tells the operator to add one | Separate change. |
-| Terraform version floor does not match `use_lockfile`. `required_version = ">= 1.9"` allows 1.9.x, but `use_lockfile = true` needs Terraform 1.10 or later, as the file's own comment says. | `deploy/aws/terraform/versions.tf:2`, `:15-16` (comment), `:23` | Raise the floor to 1.10 in a separate change. |
 | Queue side effects on the reclaim path are at-least-once. A worker frozen past its lease, or one that dies after its effect and before `complete()`, has its job run again. Handlers must be idempotent. | `packages/maverick-core/maverick/worker.py:526-548` (`_reclaim_stale` caveat); `packages/maverick-core/maverick/job_queue.py:718` (`reclaim_stale`) | Needs idempotency keys at each side-effect boundary, handler by handler. The soak metric `exactly_once_under_contention` measures claim atomicity only. |
 | CSP still allows inline styles: `style-src 'self' 'unsafe-inline'`. Inline scripts are closed (see the fixed list); the templates' inline `<style>` blocks and `style=""` attributes still need it. | `packages/maverick-dashboard/maverick_dashboard/app.py` (`_DEFAULT_CSP` and `_DOCS_CSP`, `style-src`) | Moving every inline style into stylesheets or nonce-stamped `<style>` blocks touches most templates; separate change. |
 | `app.py` is about 15,700 lines. | `packages/maverick-dashboard/maverick_dashboard/app.py` | Splitting it is a refactor with a broad test surface; separate change. |
@@ -47,6 +46,8 @@ checked and are already fixed are listed at the end and are not in the tables.
 
 ## Checked and already fixed (not open)
 
+- Terraform version floor. `required_version` is now `>= 1.10`, matching the S3
+  backend's `use_lockfile = true` (`deploy/aws/terraform/versions.tf`).
 - Postgres world-model login bypassing row-level security. On open,
   `PostgresWorldModel._check_database_role` reads the login's `rolsuper` and
   `rolbypassrls`. With `[world_model] rls` on, such a login is reported by

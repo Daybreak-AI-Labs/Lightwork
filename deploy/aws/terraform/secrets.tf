@@ -94,6 +94,9 @@ resource "aws_secretsmanager_secret_version" "oidc_client_secret" {
 
 # Full Postgres DSN, assembled from the RDS endpoint. Alphanumeric password
 # means no URL-encoding is required.
+# sslmode=require encrypts the connection to RDS without a CA bundle in the
+# image; deploy/postgres/README.md asks for verify-full, which needs the RDS CA
+# bundle shipped and pinned first (still open in docs/OPEN_ITEMS.md).
 resource "aws_secretsmanager_secret" "pg_dsn" {
   name                    = "${local.name}/pg-dsn"
   recovery_window_in_days = 0
@@ -101,7 +104,7 @@ resource "aws_secretsmanager_secret" "pg_dsn" {
 
 resource "aws_secretsmanager_secret_version" "pg_dsn" {
   secret_id     = aws_secretsmanager_secret.pg_dsn.id
-  secret_string = "postgresql://${var.db_username}:${random_password.db.result}@${aws_db_instance.main.address}:5432/${var.db_name}" # pragma: allowlist secret -- Terraform interpolation, no literal secret
+  secret_string = "postgresql://${var.db_username}:${random_password.db.result}@${aws_db_instance.main.address}:5432/${var.db_name}?sslmode=require" # pragma: allowlist secret -- Terraform interpolation, no literal secret
 }
 
 # At-rest encryption key. The kernel otherwise generates one on first use under
