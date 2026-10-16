@@ -190,6 +190,43 @@ from .api_schemas import (
     WorkflowRefineIn,
     WorkflowSaveIn,
 )
+
+# The flow handlers moved to flows_api, but sibling modules still reach these
+# schemas as ``api.<name>`` (product_operations_workflows uses FlowRetireIn and
+# FlowApplyIn), so they stay re-exported from here.
+from .api_schemas import (
+    FlowApplyIn as FlowApplyIn,
+)
+from .api_schemas import (
+    FlowApprovalPreviewIn as FlowApprovalPreviewIn,
+)
+from .api_schemas import (
+    FlowChatIn as FlowChatIn,
+)
+from .api_schemas import (
+    FlowDraftIn as FlowDraftIn,
+)
+from .api_schemas import (
+    FlowDryRunIn as FlowDryRunIn,
+)
+from .api_schemas import (
+    FlowPublishIn as FlowPublishIn,
+)
+from .api_schemas import (
+    FlowResumeIn as FlowResumeIn,
+)
+from .api_schemas import (
+    FlowRetireIn as FlowRetireIn,
+)
+from .api_schemas import (
+    FlowRollbackIn as FlowRollbackIn,
+)
+from .api_schemas import (
+    FlowRunIn as FlowRunIn,
+)
+from .api_schemas import (
+    FlowSaveIn as FlowSaveIn,
+)
 from .approval_decisions import (  # noqa: F401 -- re-exported for tests
     _audit_approval_decision,
     _deliver_approval_audit_event,
