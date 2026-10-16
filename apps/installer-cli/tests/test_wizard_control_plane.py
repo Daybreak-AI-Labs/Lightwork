@@ -36,11 +36,11 @@ def test_off_means_no_table(tmp_path, monkeypatch):
 
 
 def test_the_wizard_asks_the_question():
-    """The wizard is the UX source of truth: the toggle must be in pick_advanced."""
+    """The wizard is the UX source of truth: the advanced step must ask for the toggle."""
     import inspect
 
     from maverick_installer import wizard
-    source = inspect.getsource(wizard.pick_advanced)
+    source = inspect.getsource(inspect.getmodule(wizard.pick_advanced))
     assert '"control_plane": _q_confirm(' in source
     assert "Agent Control Plane" in source
     assert "over every agent" not in source

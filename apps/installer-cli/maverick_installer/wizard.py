@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -2334,7 +2335,23 @@ def pick_workspace_journal() -> dict[str, Any]:
     return out
 
 
-def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product prompts
+@dataclass
+class _ConsentChoices:
+    """What the Consent & Preferences questions decided.
+
+    The privacy-automation questions that follow depend on these answers and
+    may extend ``product`` (shared storage, the Global Opt-Out experience).
+    """
+
+    product: dict[str, Any] | None = None
+    publishing: bool = False
+    public_api: bool = False
+    identity: bool = False
+    trust_center: bool = False
+    native_sdk: dict[str, Any] | None = None
+
+
+def pick_assessments() -> dict[str, Any]:
     """Assessment-flow assists (doc discovery + learning), both default ON.
 
     Doc discovery searches connected sources (Microsoft Graph / Slack /
@@ -2342,6 +2359,10 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
     it only activates when a source has credentials. Learning suggests
     answers from the org's OWN past assessments -- advisory only. Returns a
     dict written under ``[assessments]`` only on divergence from defaults.
+
+    The product families are asked in this order: consent & preferences,
+    privacy automation, data-use governance, then vendor-paper review and
+    the entity graph.
     """
     console.print()
     console.print(
@@ -2357,493 +2378,698 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
         "Enable the privacy ops record types (DPA review, AI registry, RoPA, DSAR tracker)?",
         default=True,
     )
-    consent_preferences = _q_confirm(
+    consent = _pick_consent_preferences()
+    privacy_automation = _pick_privacy_automation(consent)
+    data_use_governance = _pick_data_use_governance()
+    draft, org_name, graph = _pick_paper_review_and_graph()
+    out: dict[str, Any] = {}
+    if not discovery:
+        out["doc_discovery"] = False
+    if not learn:
+        out["learn"] = False
+    if not ops:
+        out["privacy_ops"] = False
+    if consent.product is not None:
+        out["consent_preferences"] = consent.product
+    if privacy_automation is not None:
+        out["privacy_automation"] = privacy_automation
+    if data_use_governance is not None:
+        out["data_use_governance"] = data_use_governance
+    if not draft:
+        out["paper_review_use_model"] = False
+    if org_name:
+        out["paper_review_org"] = org_name
+    if not graph:
+        out["entity_graph"] = False
+    return out
+
+
+def _pick_consent_preferences() -> _ConsentChoices:
+    """Consumer Consent & Preferences: publishing, the public API, scanners,
+    signals, the native SDK, delivery, analytics and the Trust Center."""
+    consent = _ConsentChoices()
+    if not _q_confirm(
         "Enable consumer Consent & Preferences records, receipts, tracker "
         "governance, and fail-closed enforcement?",
         default=False,
+    ):
+        return consent
+    consent.publishing = _q_confirm(
+        "Enable versioned property, policy, notice, translation, and publication governance?",
+        default=True,
     )
-    consent_product: dict[str, Any] | None = None
-    consent_publishing = False
-    consent_public_api = False
-    consent_identity = False
-    consent_trust_center = False
-    consent_trust_center_branding = False
-    consent_native_sdk: dict[str, Any] | None = None
-    if consent_preferences:
-        consent_publishing = _q_confirm(
-            "Enable versioned property, policy, notice, translation, and publication governance?",
-            default=True,
-        )
-        consent_web_publish_settings = consent_publishing and _q_confirm(
-            "Enable governed website publish settings for SDK version, "
-            "geolocation reconsent, analytics, cookie scope, SPA reload, CSP "
-            "nonce requirements, and automatic refresh?",
-            default=False,
-        )
-        consent_public_api = consent_publishing and _q_confirm(
-            "Enable the external consumer consent API? Property/origin "
-            "bindings are still required before it serves traffic.",
-            default=False,
-        )
-        consent_identity = consent_public_api and _q_confirm(
-            "Enable verified consumer identity federation and one-time "
-            "cross-domain/device pairing? OIDC keys and subject-digest custody "
-            "must still be injected by the deployment.",
-            default=False,
-        )
-        consent_identity_config: dict[str, Any] | None = None
-        if consent_identity:
-            consent_identity_config = {
-                "enable": True,
-                "issuer": _q_text(
-                    "  Consumer OIDC issuer (exact signed iss value)",
-                    default="",
-                ).strip(),
-                "audience": _q_text(
-                    "  Consumer OIDC audience (exact app/API audience)",
-                    default="",
-                ).strip(),
-                "jwks_origin": _q_text(
-                    "  Pinned HTTPS JWKS origin (origin only; keys are injected at runtime)",
-                    default="",
-                ).strip(),
-                "token_ttl_seconds": 600,
-                "link_lifecycle_retention_seconds": 31_536_000,
-            }
-        consent_scanner = _q_confirm(
-            "Enable scheduled website tracker scanning? Only properties "
-            "explicitly enrolled by the privacy owner are eligible.",
-            default=False,
-        )
-        consent_scan_scheduler = consent_scanner and _q_confirm(
-            "Run the bounded consent scan scheduler automatically with the "
-            "dashboard? Enrolled schedules remain the only work authority.",
-            default=False,
-        )
-        consent_scan_notice_proposals = consent_scanner and _q_confirm(
-            "Enable independently reviewed scan-to-cookie/privacy disclosure "
-            "metadata proposals? This creates structured local proposals only; "
-            "it does not generate legal copy or publish a notice or site change.",
-            default=False,
-        )
-        consent_application_scanner = _q_confirm(
-            "Enable bounded mobile and OTT/CTV application manifest analysis? "
-            "Operators must supply already-extracted manifests; this does not "
-            "execute APKs/IPAs, inspect devices, or classify trackers or law.",
-            default=False,
-        )
-        consent_signals = _q_confirm(
-            "Enable GPC and DNT signal interpretation?",
-            default=True,
-        )
-        consent_adtech_standards = _q_confirm(
-            "Enable advertising interoperability (GPP, TCF, and Google "
-            "Consent Mode) after its conformance vectors are installed?",
-            default=False,
-        )
-        consent_native_enabled = (
-            consent_publishing
-            and consent_public_api
-            and _q_confirm(
-                "Enable the native mobile and OTT/CTV consent SDK runtime? "
-                "Production readiness requires an injected platform attestation "
-                "verifier; GPP/TCF also requires an injected standards-wire verifier.",
-                default=False,
-            )
-        )
-        if consent_native_enabled:
-            receipt_key_id = (
-                _q_text(
-                    "  Native receipt signing key id",
-                    default="native-consent-receipt",
-                ).strip()
-                or "native-consent-receipt"
-            )
-            receipt_key_secret_ref = (
-                _q_text(
-                    "  Environment variable holding the native receipt root secret",
-                    default="MAVERICK_NATIVE_CONSENT_RECEIPT_KEY",
-                ).strip()
-                or "MAVERICK_NATIVE_CONSENT_RECEIPT_KEY"
-            )
-            require_profile_linking = consent_identity and _q_confirm(
-                "Require each native consent request to link to a verified consumer profile? "
-                "The deployment must inject the profile-linking callback.",
-                default=False,
-            )
-            consent_native_sdk = {
-                "enable": True,
-                "receipt_key_id": receipt_key_id,
-                "receipt_key_revision": 1,
-                "receipt_key_secret_ref": receipt_key_secret_ref,
-                "max_applications": 1_000,
-                "max_devices": 100_000,
-                "max_requests": 1_000_000,
-                "requests_per_minute": 120,
-                "require_profile_linking": require_profile_linking,
-                "require_rights_requests": False,
-            }
-        consent_delivery = _q_confirm(
-            "Enable downstream preference delivery? Destinations remain "
-            "disabled until separately enrolled.",
-            default=False,
-        )
-        consent_delivery_worker = consent_delivery and _q_confirm(
-            "Run automatic consent delivery for subscriptions separately reviewed in Lightwork? "
-            "No destination is authorized by this installation choice.", default=False,
-        )
-        consent_destination_config: dict[str, Any] | None = None
-        if consent_delivery and _q_confirm(
-            "Configure named Salesforce, Marketo, Adobe Experience Platform, "
-            "or Snowflake consent destinations? Exact destination enrollment, "
-            "signing keys, deployment-held credentials, and an independent "
-            "reconciliation authority are still required.",
-            default=False,
-        ):
-            destination_providers = _q_checkbox(
-                "Select named consent delivery destinations",
-                [
-                    "salesforce",
-                    "marketo",
-                    "adobe_experience_platform",
-                    "snowflake",
-                ],
-                default=[],
-            )
-            destination_tables: dict[str, dict[str, Any]] = {}
-
-            def destination_text(label: str, default: str) -> str:
-                return _q_text(f"  {label}", default=default).strip() or default
-
-            def credential_reference(label: str, default: str) -> str:
-                name = destination_text(label, default)
-                if name.startswith("$"):
-                    return name
-                return "${" + name + "}"
-
-            if "salesforce" in destination_providers:
-                destination_tables["salesforce"] = {
-                    "destination_id": destination_text(
-                        "Salesforce destination id", "salesforce"
-                    ),
-                    "origin": destination_text(
-                        "Salesforce exact HTTPS origin",
-                        "https://tenant.my.salesforce.com",
-                    ),
-                    "credential_secret_ref": credential_reference(
-                        "Environment variable holding the Salesforce OAuth token",
-                        "MAVERICK_SALESFORCE_CONSENT_TOKEN",
-                    ),
-                    "credential_revision": 1,
-                    "api_version": destination_text(
-                        "Salesforce REST API version", "v65.0"
-                    ),
-                    "object_api_name": destination_text(
-                        "Salesforce consent-event object API name",
-                        "Lightwork_Consent_Event__c",
-                    ),
-                    "external_id_field": destination_text(
-                        "Salesforce external-id field",
-                        "Lightwork_Message_Id__c",
-                    ),
-                    "payload_digest_field": destination_text(
-                        "Salesforce payload-digest field",
-                        "Lightwork_Payload_SHA256__c",
-                    ),
-                }
-            if "marketo" in destination_providers:
-                destination_tables["marketo"] = {
-                    "destination_id": destination_text(
-                        "Marketo destination id", "marketo"
-                    ),
-                    "origin": destination_text(
-                        "Marketo exact HTTPS origin",
-                        "https://123-ABC-456.mktorest.com",
-                    ),
-                    "credential_secret_ref": credential_reference(
-                        "Environment variable holding the Marketo OAuth token",
-                        "MAVERICK_MARKETO_CONSENT_TOKEN",
-                    ),
-                    "credential_revision": 1,
-                    "custom_object_name": destination_text(
-                        "Marketo consent custom-object API name",
-                        "lightworkConsentEvent",
-                    ),
-                    "dedupe_field": destination_text(
-                        "Marketo dedupe field", "lightworkMessageId"
-                    ),
-                    "message_id_field": destination_text(
-                        "Marketo standalone searchable message-id field",
-                        "lightworkMessageId",
-                    ),
-                    "payload_digest_field": destination_text(
-                        "Marketo payload-digest field", "payloadSha256"
-                    ),
-                }
-            if "adobe_experience_platform" in destination_providers:
-                destination_tables["adobe_experience_platform"] = {
-                    "destination_id": destination_text(
-                        "Adobe Experience Platform destination id", "aep"
-                    ),
-                    "origin": destination_text(
-                        "Adobe Experience Platform exact streaming origin",
-                        "https://dcs.adobedc.net",
-                    ),
-                    "credential_secret_ref": credential_reference(
-                        "Environment variable holding the AEP credential JSON bundle",
-                        "MAVERICK_AEP_CONSENT_CREDENTIAL",
-                    ),
-                    "credential_revision": 1,
-                    "connection_id": destination_text(
-                        "AEP streaming connection id", "replace_connection_id"
-                    ),
-                    "flow_id": destination_text(
-                        "AEP dataflow id", "replace_flow_id"
-                    ),
-                    "dataset_id": destination_text(
-                        "AEP dataset id", "replace_dataset_id"
-                    ),
-                    "schema_id": destination_text(
-                        "AEP XDM schema id", "replace_schema_id"
-                    ),
-                    "ims_org_id": destination_text(
-                        "AEP IMS organization id", "replace@AdobeOrg"
-                    ),
-                }
-            if "snowflake" in destination_providers:
-                destination_tables["snowflake"] = {
-                    "destination_id": destination_text(
-                        "Snowflake destination id", "snowflake"
-                    ),
-                    "origin": destination_text(
-                        "Snowflake exact SQL API origin",
-                        "https://account.region.snowflakecomputing.com",
-                    ),
-                    "credential_secret_ref": credential_reference(
-                        "Environment variable holding the Snowflake OAuth token",
-                        "MAVERICK_SNOWFLAKE_CONSENT_TOKEN",
-                    ),
-                    "credential_revision": 1,
-                    "database": destination_text(
-                        "Snowflake database", "LIGHTWORK"
-                    ),
-                    "schema": destination_text(
-                        "Snowflake schema", "CONSENT"
-                    ),
-                    "table": destination_text(
-                        "Snowflake consent-event table", "PREFERENCE_EVENTS"
-                    ),
-                    "warehouse": destination_text(
-                        "Snowflake warehouse", "LIGHTWORK_WH"
-                    ),
-                    "role": destination_text(
-                        "Snowflake least-privilege role", "LIGHTWORK_CONSENT_WRITER"
-                    ),
-                }
-            if destination_tables:
-                consent_destination_config = {
-                    "enable": True,
-                    "enabled_providers": list(destination_tables),
-                    "timeout_seconds": 10.0,
-                    "max_response_bytes": 65_536,
-                    **destination_tables,
-                }
-        consent_analytics = _q_confirm(
-            "Enable privacy-safe aggregate consent analytics?",
-            default=False,
-        )
-        consent_experiments = _q_confirm(
-            "Enable privacy-preserving consent A/B experiments? Legal signals, "
-            "required purposes, accessibility, and symmetry of choice remain "
-            "non-experimental safety floors.",
-            default=False,
-        )
-        consent_profile_data = _q_confirm(
-            "Enable governed volunteered profile data and progressive consent "
-            "journeys? Values remain closed-schema and purpose-bound; raw free "
-            "text and protected-trait inference are not supported.",
-            default=False,
-        )
-        consent_custom_index = consent_profile_data and _q_confirm(
-            "Enable governed custom data-element indexes and exact profile search? "
-            "Search values are HMAC-tokenized under a deployment-custody key; "
-            "indexes fail closed when their source changes.",
-            default=False,
-        )
-        consent_bulk_jobs = _q_confirm(
-            "Enable governed bulk consent exports and lifecycle jobs? Jobs are "
-            "tenant-scoped, credit-limited, cancellable, and retain bounded "
-            "artifacts; operators must still hold the matching consent authority.",
-            default=False,
-        )
-        consent_trust_center = consent_public_api and _q_confirm(
-            "Enable the unified consumer Trust Center? It requires separately "
-            "approved capability grants before consumer data is shown.",
-            default=False,
-        )
-        consent_trust_center_branding = consent_trust_center and _q_confirm(
-            "Enable governed Trust Center logos and exact custom-domain claims? "
-            "PNG/JPEG assets require independent review; DNS/TLS/CDN deployment "
-            "authority and the encryption key must still be injected.",
-            default=False,
-        )
-        consent_product = {
+    consent_web_publish_settings = consent.publishing and _q_confirm(
+        "Enable governed website publish settings for SDK version, "
+        "geolocation reconsent, analytics, cookie scope, SPA reload, CSP "
+        "nonce requirements, and automatic refresh?",
+        default=False,
+    )
+    consent.public_api = consent.publishing and _q_confirm(
+        "Enable the external consumer consent API? Property/origin "
+        "bindings are still required before it serves traffic.",
+        default=False,
+    )
+    consent.identity = consent.public_api and _q_confirm(
+        "Enable verified consumer identity federation and one-time "
+        "cross-domain/device pairing? OIDC keys and subject-digest custody "
+        "must still be injected by the deployment.",
+        default=False,
+    )
+    consent_identity_config: dict[str, Any] | None = None
+    if consent.identity:
+        consent_identity_config = {
             "enable": True,
-            "publishing": {
-                "enable": consent_publishing,
-                **(
-                    {
-                        "web_settings": {
-                            "enable": True,
-                            "retention_seconds": 31_536_000,
-                            "max_history": 250,
-                        }
-                    }
-                    if consent_web_publish_settings
-                    else {}
-                ),
-            },
-            "public_api": {"enable": consent_public_api},
-            **(
-                {"identity": consent_identity_config} if consent_identity_config is not None else {}
-            ),
-            "scanner": {
-                "enable": consent_scanner,
-                "notice_proposals": {"enable": consent_scan_notice_proposals},
-                "scheduler": {
-                    "enable": consent_scan_scheduler,
-                    "poll_seconds": 60,
-                    "enqueue_limit": 100,
-                    "claim_limit": 4,
-                    "tenant_limit": 1_000,
-                },
-            },
-            **(
-                {
-                    "application_scanner": {
-                        "enable": True,
-                        "max_records": 25_000,
-                        "retention_seconds": 31_536_000,
-                    }
-                }
-                if consent_application_scanner
-                else {}
-            ),
-            "standards": {
-                "gpc": consent_signals,
-                "dnt": consent_signals,
-                "gpp": consent_adtech_standards,
-                "tcf": consent_adtech_standards,
-                "google_consent_mode": consent_adtech_standards,
-            },
-            **({"native_sdk": consent_native_sdk} if consent_native_sdk is not None else {}),
-            "delivery": {
-                "enable": consent_delivery,
-                "worker": {"enable": bool(consent_delivery_worker)},
-                **(
-                    {"destinations": consent_destination_config}
-                    if consent_destination_config is not None
-                    else {}
-                ),
-            },
-            "analytics": {"enable": consent_analytics},
-            "experiments": {"enable": consent_experiments},
-            "profile_data": {
-                "enable": consent_profile_data,
-                "custom_index": {
-                    "enable": consent_custom_index,
-                    "key_secret_ref": "MAVERICK_CONSENT_CUSTOM_INDEX_KEY",
-                    "key_version": 1,
-                    "max_indexes": 256,
-                    "max_page_size": 100,
-                    "retention_seconds": 31_536_000,
-                },
-            },
-            **(
-                {
-                    "bulk_jobs": {
-                        "enable": True,
-                        "initial_credits": 10_000,
-                        "max_jobs": 10_000,
-                        "max_items_per_job": 10_000,
-                        "max_artifact_bytes": 16_777_216,
-                        "lease_seconds": 60,
-                        "retention_seconds": 31_536_000,
-                        "worker_batch_size": 100,
-                    }
-                }
-                if consent_bulk_jobs
-                else {}
-            ),
-            "trust_center": {
-                "enable": consent_trust_center,
-                **(
-                    {
-                        "branding": {
-                            "enable": True,
-                            "max_asset_bytes": 2_097_152,
-                            "max_assets": 1_000,
-                            "max_width": 4_096,
-                            "max_height": 4_096,
-                            "max_pixels": 8_388_608,
-                            "max_domains": 100,
-                            "challenge_ttl_seconds": 3_600,
-                            "verification_ttl_seconds": 604_800,
-                            "retention_seconds": 7_776_000,
-                            "key_ref": "env:MAVERICK_TRUST_CENTER_BRAND_ASSET_KEY",
-                            "key_revision": 1,
-                        }
-                    }
-                    if consent_trust_center_branding
-                    else {}
-                ),
-            },
+            "issuer": _q_text(
+                "  Consumer OIDC issuer (exact signed iss value)",
+                default="",
+            ).strip(),
+            "audience": _q_text(
+                "  Consumer OIDC audience (exact app/API audience)",
+                default="",
+            ).strip(),
+            "jwks_origin": _q_text(
+                "  Pinned HTTPS JWKS origin (origin only; keys are injected at runtime)",
+                default="",
+            ).strip(),
+            "token_ttl_seconds": 600,
+            "link_lifecycle_retention_seconds": 31_536_000,
         }
+    consent_scanner = _q_confirm(
+        "Enable scheduled website tracker scanning? Only properties "
+        "explicitly enrolled by the privacy owner are eligible.",
+        default=False,
+    )
+    consent_scan_scheduler = consent_scanner and _q_confirm(
+        "Run the bounded consent scan scheduler automatically with the "
+        "dashboard? Enrolled schedules remain the only work authority.",
+        default=False,
+    )
+    consent_scan_notice_proposals = consent_scanner and _q_confirm(
+        "Enable independently reviewed scan-to-cookie/privacy disclosure "
+        "metadata proposals? This creates structured local proposals only; "
+        "it does not generate legal copy or publish a notice or site change.",
+        default=False,
+    )
+    consent_application_scanner = _q_confirm(
+        "Enable bounded mobile and OTT/CTV application manifest analysis? "
+        "Operators must supply already-extracted manifests; this does not "
+        "execute APKs/IPAs, inspect devices, or classify trackers or law.",
+        default=False,
+    )
+    consent_signals = _q_confirm(
+        "Enable GPC and DNT signal interpretation?",
+        default=True,
+    )
+    consent_adtech_standards = _q_confirm(
+        "Enable advertising interoperability (GPP, TCF, and Google "
+        "Consent Mode) after its conformance vectors are installed?",
+        default=False,
+    )
+    consent_native_enabled = (
+        consent.publishing
+        and consent.public_api
+        and _q_confirm(
+            "Enable the native mobile and OTT/CTV consent SDK runtime? "
+            "Production readiness requires an injected platform attestation "
+            "verifier; GPP/TCF also requires an injected standards-wire verifier.",
+            default=False,
+        )
+    )
+    if consent_native_enabled:
+        consent.native_sdk = _pick_consent_native_sdk(consent.identity)
+    consent_delivery = _q_confirm(
+        "Enable downstream preference delivery? Destinations remain "
+        "disabled until separately enrolled.",
+        default=False,
+    )
+    consent_delivery_worker = consent_delivery and _q_confirm(
+        "Run automatic consent delivery for subscriptions separately reviewed in Lightwork? "
+        "No destination is authorized by this installation choice.", default=False,
+    )
+    consent_destination_config: dict[str, Any] | None = None
+    if consent_delivery and _q_confirm(
+        "Configure named Salesforce, Marketo, Adobe Experience Platform, "
+        "or Snowflake consent destinations? Exact destination enrollment, "
+        "signing keys, deployment-held credentials, and an independent "
+        "reconciliation authority are still required.",
+        default=False,
+    ):
+        consent_destination_config = _pick_consent_destinations()
+    consent_analytics = _q_confirm(
+        "Enable privacy-safe aggregate consent analytics?",
+        default=False,
+    )
+    consent_experiments = _q_confirm(
+        "Enable privacy-preserving consent A/B experiments? Legal signals, "
+        "required purposes, accessibility, and symmetry of choice remain "
+        "non-experimental safety floors.",
+        default=False,
+    )
+    consent_profile_data = _q_confirm(
+        "Enable governed volunteered profile data and progressive consent "
+        "journeys? Values remain closed-schema and purpose-bound; raw free "
+        "text and protected-trait inference are not supported.",
+        default=False,
+    )
+    consent_custom_index = consent_profile_data and _q_confirm(
+        "Enable governed custom data-element indexes and exact profile search? "
+        "Search values are HMAC-tokenized under a deployment-custody key; "
+        "indexes fail closed when their source changes.",
+        default=False,
+    )
+    consent_bulk_jobs = _q_confirm(
+        "Enable governed bulk consent exports and lifecycle jobs? Jobs are "
+        "tenant-scoped, credit-limited, cancellable, and retain bounded "
+        "artifacts; operators must still hold the matching consent authority.",
+        default=False,
+    )
+    consent.trust_center = consent.public_api and _q_confirm(
+        "Enable the unified consumer Trust Center? It requires separately "
+        "approved capability grants before consumer data is shown.",
+        default=False,
+    )
+    consent_trust_center_branding = consent.trust_center and _q_confirm(
+        "Enable governed Trust Center logos and exact custom-domain claims? "
+        "PNG/JPEG assets require independent review; DNS/TLS/CDN deployment "
+        "authority and the encryption key must still be injected.",
+        default=False,
+    )
+    consent.product = {
+        "enable": True,
+        "publishing": {
+            "enable": consent.publishing,
+            **(
+                {
+                    "web_settings": {
+                        "enable": True,
+                        "retention_seconds": 31_536_000,
+                        "max_history": 250,
+                    }
+                }
+                if consent_web_publish_settings
+                else {}
+            ),
+        },
+        "public_api": {"enable": consent.public_api},
+        **(
+            {"identity": consent_identity_config} if consent_identity_config is not None else {}
+        ),
+        "scanner": {
+            "enable": consent_scanner,
+            "notice_proposals": {"enable": consent_scan_notice_proposals},
+            "scheduler": {
+                "enable": consent_scan_scheduler,
+                "poll_seconds": 60,
+                "enqueue_limit": 100,
+                "claim_limit": 4,
+                "tenant_limit": 1_000,
+            },
+        },
+        **(
+            {
+                "application_scanner": {
+                    "enable": True,
+                    "max_records": 25_000,
+                    "retention_seconds": 31_536_000,
+                }
+            }
+            if consent_application_scanner
+            else {}
+        ),
+        "standards": {
+            "gpc": consent_signals,
+            "dnt": consent_signals,
+            "gpp": consent_adtech_standards,
+            "tcf": consent_adtech_standards,
+            "google_consent_mode": consent_adtech_standards,
+        },
+        **({"native_sdk": consent.native_sdk} if consent.native_sdk is not None else {}),
+        "delivery": {
+            "enable": consent_delivery,
+            "worker": {"enable": bool(consent_delivery_worker)},
+            **(
+                {"destinations": consent_destination_config}
+                if consent_destination_config is not None
+                else {}
+            ),
+        },
+        "analytics": {"enable": consent_analytics},
+        "experiments": {"enable": consent_experiments},
+        "profile_data": {
+            "enable": consent_profile_data,
+            "custom_index": {
+                "enable": consent_custom_index,
+                "key_secret_ref": "MAVERICK_CONSENT_CUSTOM_INDEX_KEY",
+                "key_version": 1,
+                "max_indexes": 256,
+                "max_page_size": 100,
+                "retention_seconds": 31_536_000,
+            },
+        },
+        **(
+            {
+                "bulk_jobs": {
+                    "enable": True,
+                    "initial_credits": 10_000,
+                    "max_jobs": 10_000,
+                    "max_items_per_job": 10_000,
+                    "max_artifact_bytes": 16_777_216,
+                    "lease_seconds": 60,
+                    "retention_seconds": 31_536_000,
+                    "worker_batch_size": 100,
+                }
+            }
+            if consent_bulk_jobs
+            else {}
+        ),
+        "trust_center": {
+            "enable": consent.trust_center,
+            **(
+                {
+                    "branding": {
+                        "enable": True,
+                        "max_asset_bytes": 2_097_152,
+                        "max_assets": 1_000,
+                        "max_width": 4_096,
+                        "max_height": 4_096,
+                        "max_pixels": 8_388_608,
+                        "max_domains": 100,
+                        "challenge_ttl_seconds": 3_600,
+                        "verification_ttl_seconds": 604_800,
+                        "retention_seconds": 7_776_000,
+                        "key_ref": "env:MAVERICK_TRUST_CENTER_BRAND_ASSET_KEY",
+                        "key_revision": 1,
+                    }
+                }
+                if consent_trust_center_branding
+                else {}
+            ),
+        },
+    }
+    return consent
+
+
+def _pick_consent_native_sdk(identity: bool) -> dict[str, Any]:
+    """Receipt signing and profile linking for the native mobile / OTT-CTV consent SDK."""
+    receipt_key_id = (
+        _q_text(
+            "  Native receipt signing key id",
+            default="native-consent-receipt",
+        ).strip()
+        or "native-consent-receipt"
+    )
+    receipt_key_secret_ref = (
+        _q_text(
+            "  Environment variable holding the native receipt root secret",
+            default="MAVERICK_NATIVE_CONSENT_RECEIPT_KEY",
+        ).strip()
+        or "MAVERICK_NATIVE_CONSENT_RECEIPT_KEY"
+    )
+    require_profile_linking = identity and _q_confirm(
+        "Require each native consent request to link to a verified consumer profile? "
+        "The deployment must inject the profile-linking callback.",
+        default=False,
+    )
+    return {
+        "enable": True,
+        "receipt_key_id": receipt_key_id,
+        "receipt_key_revision": 1,
+        "receipt_key_secret_ref": receipt_key_secret_ref,
+        "max_applications": 1_000,
+        "max_devices": 100_000,
+        "max_requests": 1_000_000,
+        "requests_per_minute": 120,
+        "require_profile_linking": require_profile_linking,
+        "require_rights_requests": False,
+    }
+
+
+def _pick_consent_destinations() -> dict[str, Any] | None:
+    """Named consent delivery destinations; None when no destination was chosen."""
+    destination_providers = _q_checkbox(
+        "Select named consent delivery destinations",
+        [
+            "salesforce",
+            "marketo",
+            "adobe_experience_platform",
+            "snowflake",
+        ],
+        default=[],
+    )
+    destination_tables: dict[str, dict[str, Any]] = {}
+
+    def destination_text(label: str, default: str) -> str:
+        return _q_text(f"  {label}", default=default).strip() or default
+
+    def credential_reference(label: str, default: str) -> str:
+        name = destination_text(label, default)
+        if name.startswith("$"):
+            return name
+        return "${" + name + "}"
+
+    if "salesforce" in destination_providers:
+        destination_tables["salesforce"] = {
+            "destination_id": destination_text(
+                "Salesforce destination id", "salesforce"
+            ),
+            "origin": destination_text(
+                "Salesforce exact HTTPS origin",
+                "https://tenant.my.salesforce.com",
+            ),
+            "credential_secret_ref": credential_reference(
+                "Environment variable holding the Salesforce OAuth token",
+                "MAVERICK_SALESFORCE_CONSENT_TOKEN",
+            ),
+            "credential_revision": 1,
+            "api_version": destination_text(
+                "Salesforce REST API version", "v65.0"
+            ),
+            "object_api_name": destination_text(
+                "Salesforce consent-event object API name",
+                "Lightwork_Consent_Event__c",
+            ),
+            "external_id_field": destination_text(
+                "Salesforce external-id field",
+                "Lightwork_Message_Id__c",
+            ),
+            "payload_digest_field": destination_text(
+                "Salesforce payload-digest field",
+                "Lightwork_Payload_SHA256__c",
+            ),
+        }
+    if "marketo" in destination_providers:
+        destination_tables["marketo"] = {
+            "destination_id": destination_text(
+                "Marketo destination id", "marketo"
+            ),
+            "origin": destination_text(
+                "Marketo exact HTTPS origin",
+                "https://123-ABC-456.mktorest.com",
+            ),
+            "credential_secret_ref": credential_reference(
+                "Environment variable holding the Marketo OAuth token",
+                "MAVERICK_MARKETO_CONSENT_TOKEN",
+            ),
+            "credential_revision": 1,
+            "custom_object_name": destination_text(
+                "Marketo consent custom-object API name",
+                "lightworkConsentEvent",
+            ),
+            "dedupe_field": destination_text(
+                "Marketo dedupe field", "lightworkMessageId"
+            ),
+            "message_id_field": destination_text(
+                "Marketo standalone searchable message-id field",
+                "lightworkMessageId",
+            ),
+            "payload_digest_field": destination_text(
+                "Marketo payload-digest field", "payloadSha256"
+            ),
+        }
+    if "adobe_experience_platform" in destination_providers:
+        destination_tables["adobe_experience_platform"] = {
+            "destination_id": destination_text(
+                "Adobe Experience Platform destination id", "aep"
+            ),
+            "origin": destination_text(
+                "Adobe Experience Platform exact streaming origin",
+                "https://dcs.adobedc.net",
+            ),
+            "credential_secret_ref": credential_reference(
+                "Environment variable holding the AEP credential JSON bundle",
+                "MAVERICK_AEP_CONSENT_CREDENTIAL",
+            ),
+            "credential_revision": 1,
+            "connection_id": destination_text(
+                "AEP streaming connection id", "replace_connection_id"
+            ),
+            "flow_id": destination_text(
+                "AEP dataflow id", "replace_flow_id"
+            ),
+            "dataset_id": destination_text(
+                "AEP dataset id", "replace_dataset_id"
+            ),
+            "schema_id": destination_text(
+                "AEP XDM schema id", "replace_schema_id"
+            ),
+            "ims_org_id": destination_text(
+                "AEP IMS organization id", "replace@AdobeOrg"
+            ),
+        }
+    if "snowflake" in destination_providers:
+        destination_tables["snowflake"] = {
+            "destination_id": destination_text(
+                "Snowflake destination id", "snowflake"
+            ),
+            "origin": destination_text(
+                "Snowflake exact SQL API origin",
+                "https://account.region.snowflakecomputing.com",
+            ),
+            "credential_secret_ref": credential_reference(
+                "Environment variable holding the Snowflake OAuth token",
+                "MAVERICK_SNOWFLAKE_CONSENT_TOKEN",
+            ),
+            "credential_revision": 1,
+            "database": destination_text(
+                "Snowflake database", "LIGHTWORK"
+            ),
+            "schema": destination_text(
+                "Snowflake schema", "CONSENT"
+            ),
+            "table": destination_text(
+                "Snowflake consent-event table", "PREFERENCE_EVENTS"
+            ),
+            "warehouse": destination_text(
+                "Snowflake warehouse", "LIGHTWORK_WH"
+            ),
+            "role": destination_text(
+                "Snowflake least-privilege role", "LIGHTWORK_CONSENT_WRITER"
+            ),
+        }
+    if not destination_tables:
+        return None
+    return {
+        "enable": True,
+        "enabled_providers": list(destination_tables),
+        "timeout_seconds": 10.0,
+        "max_response_bytes": 65_536,
+        **destination_tables,
+    }
+
+
+def _pick_privacy_discovery() -> dict[str, Any]:
+    """Personal-data discovery and its bounded built-in source adapters.
+
+    Returns the ``data_discovery`` table (``enable`` is False when declined).
+    """
     privacy_data_discovery = _q_confirm(
         "Enable Privacy Automation structured and unstructured personal-data "
         "discovery? Sources remain inert until separately enrolled and provider "
         "adapters are attached.",
         default=False,
     )
-    privacy_discovery_adapter_providers: list[str] = []
-    privacy_discovery_remediation = False
-    privacy_discovery_data_map = False
-    privacy_discovery_scheduler = False
-    if privacy_data_discovery and _q_confirm(
+    config: dict[str, Any] = {"enable": privacy_data_discovery}
+    if not (privacy_data_discovery and _q_confirm(
         "Enable the bounded built-in privacy discovery source adapters? "
         "Each source requires an exact tenant enrollment and a saved connection or "
         "deployment-managed credential; evidence keys can be generated in the app.",
         default=False,
-    ):
-        privacy_discovery_adapter_providers = _q_checkbox(
-            "Select built-in privacy discovery adapters",
-            [
-                "aws_s3",
-                "azure_blob",
-                "google_cloud_storage",
-                "snowflake_metadata",
-                "servicenow_cmdb",
-                "entra_assets",
-            ],
-            default=[],
+    )):
+        return config
+    adapter_providers = _q_checkbox(
+        "Select built-in privacy discovery adapters",
+        [
+            "aws_s3",
+            "azure_blob",
+            "google_cloud_storage",
+            "snowflake_metadata",
+            "servicenow_cmdb",
+            "entra_assets",
+        ],
+        default=[],
+    )
+    if not adapter_providers:
+        return config
+    remediation = _q_confirm(
+        "Enable independently approved discovery-remediation outbox jobs and "
+        "the digest-only governed data-map target? Provider writes remain "
+        "disabled until a separate tenant authority is enrolled.",
+        default=False,
+    )
+    scheduler = (
+        remediation
+        and _q_confirm(
+            "Enable the managed privacy discovery remediation scheduler? "
+            "It runs bounded tenant-local digest-only retry and ambiguity "
+            "reconciliation; it never runs provider discovery or proves completeness.",
+            default=False,
         )
-        if privacy_discovery_adapter_providers:
-            privacy_discovery_remediation = _q_confirm(
-                "Enable independently approved discovery-remediation outbox jobs and "
-                "the digest-only governed data-map target? Provider writes remain "
-                "disabled until a separate tenant authority is enrolled.",
-                default=False,
-            )
-            privacy_discovery_data_map = privacy_discovery_remediation
-            privacy_discovery_scheduler = (
-                privacy_discovery_remediation
-                and _q_confirm(
-                    "Enable the managed privacy discovery remediation scheduler? "
-                    "It runs bounded tenant-local digest-only retry and ambiguity "
-                    "reconciliation; it never runs provider discovery or proves completeness.",
-                    default=False,
-                )
-            )
+    )
+    config["adapters"] = {
+        "enable": True,
+        "enabled_providers": adapter_providers,
+        "timeout_seconds": 15.0,
+        "max_response_bytes": 8_388_608,
+        "page_size": 250,
+        "max_pages": 500,
+        "max_attempts": 3,
+        "max_polls": 8,
+    }
+    config["remediation"] = {
+        "enable": remediation,
+        "max_attempts": 5,
+        "retention_seconds": 2_592_000,
+        "data_map": {
+            "enable": remediation,
+            "retention_seconds": 31_536_000,
+        },
+        "scheduler": {
+            "enable": scheduler,
+            "interval_seconds": 60,
+            "jitter_seconds": 10,
+            "retry_max_seconds": 300,
+            "tenant_limit": 1_000,
+            "worker_limit": 10,
+            "reconcile_limit": 10,
+            "lease_seconds": 60,
+        },
+    }
+    return config
+
+
+def _pick_privacy_rights_source_adapters() -> dict[str, Any]:
+    """Stock privacy-rights source adapters (directory, CRM and ITSM providers)."""
+    source_choices = _q_checkbox(
+        "Select privacy-rights source providers",
+        [
+            "Microsoft Graph users",
+            "Google Workspace users",
+            "Salesforce contacts",
+            "ServiceNow users",
+        ],
+        default=[],
+    )
+    provider_specs = {
+        "Microsoft Graph users": (
+            "microsoft_graph_users",
+            "directory-graph",
+            "https://graph.microsoft.com",
+            "env:GRAPH_RIGHTS_TOKEN",
+        ),
+        "Google Workspace users": (
+            "google_workspace_users",
+            "directory-google",
+            "https://admin.googleapis.com",
+            "env:GOOGLE_WORKSPACE_RIGHTS_TOKEN",
+        ),
+        "Salesforce contacts": (
+            "salesforce_contacts",
+            "crm-salesforce",
+            "https://tenant.salesforce.com",
+            "env:SALESFORCE_RIGHTS_TOKEN",
+        ),
+        "ServiceNow users": (
+            "servicenow_users",
+            "itsm-servicenow",
+            "https://tenant.service-now.com",
+            "env:SERVICENOW_RIGHTS_TOKEN",
+        ),
+    }
+    selected_providers: dict[str, Any] = {}
+    for choice in source_choices:
+        provider, source_id, origin, credential_ref = provider_specs[choice]
+        selected_providers[provider] = {
+            "enable": True,
+            "source_id": source_id,
+            "origin": origin,
+            "credential_ref": credential_ref,
+            "capabilities": [
+                "discover",
+                "retrieve",
+                "delete",
+                "verify_delete",
+            ],
+        }
+    return {
+        "enable": bool(selected_providers),
+        "timeout_seconds": 15,
+        "max_response_bytes": 1_048_576,
+        "max_retrieval_bytes": 8_388_608,
+        "max_records": 200,
+        "batch_size": 10,
+        "lease_seconds": 60,
+        "retry_delay_seconds": 30,
+        "claim_history_retention_seconds": 86_400,
+        "target_custody_retention_seconds": 2_592_000,
+        "providers": selected_providers,
+    }
+
+
+def _pick_notice_publication_binding() -> dict[str, Any]:
+    """The first privacy-notice publication binding (exact tenant and release IDs)."""
+    binding_tenant = (
+        _q_text(
+            "  Exact active tenant ID for the first publication binding",
+            default=os.environ.get("MAVERICK_TENANT", "default"),
+        ).strip()
+        or "default"
+    )
+    binding_id = (
+        _q_text("  Publication binding name", default="primary").strip()
+        or "primary"
+    )
+    return {
+        "binding_id": binding_id,
+        "tenant_id": binding_tenant,
+        "notice_id": (
+            _q_text("  Exact notice release ID", default="privacy-main").strip()
+            or "privacy-main"
+        ),
+        "consent_publication_ref": (
+            _q_text(
+                "  Exact notice release consent-publication reference",
+                default="consent-binding:1",
+            ).strip()
+            or "consent-binding:1"
+        ),
+        "property_id": (
+            _q_text("  Exact Consent Publishing property ID", default="property-main").strip()
+            or "property-main"
+        ),
+        "rule_group_id": (
+            _q_text("  Exact consent rule-group ID", default="production-rules").strip()
+            or "production-rules"
+        ),
+        "rule_group_version": max(
+            1,
+            _safe_int(
+                _q_text("  Exact consent rule-group version", default="1"),
+                default=1,
+            ),
+        ),
+        "notice_resource_id": (
+            _q_text("  Exact consent notice-resource ID", default="privacy-notice").strip()
+            or "privacy-notice"
+        ),
+        "notice_resource_version": max(
+            1,
+            _safe_int(
+                _q_text("  Exact consent notice-resource version", default="1"),
+                default=1,
+            ),
+        ),
+    }
+
+
+def _pick_privacy_automation(consent: _ConsentChoices) -> dict[str, Any] | None:
+    """Privacy Automation: discovery, regulatory research, rights orchestration,
+    DROP management, the public request form and notice governance.
+
+    Two answers extend the consent product (shared PostgreSQL storage and the
+    Global Opt-Out experience), so the consent choices are passed in. Returns
+    the ``privacy_automation`` table, or None when nothing was enabled.
+    """
+    data_discovery = _pick_privacy_discovery()
     privacy_regulatory_intelligence = _q_confirm(
         "Enable Privacy Automation regulatory research, collections, alerts, "
         "comparisons, and cited reports? No proprietary corpus is bundled; "
@@ -2863,70 +3089,7 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
         "credentials and raw subjects remain server-owned.",
         default=False,
     ):
-        source_choices = _q_checkbox(
-            "Select privacy-rights source providers",
-            [
-                "Microsoft Graph users",
-                "Google Workspace users",
-                "Salesforce contacts",
-                "ServiceNow users",
-            ],
-            default=[],
-        )
-        provider_specs = {
-            "Microsoft Graph users": (
-                "microsoft_graph_users",
-                "directory-graph",
-                "https://graph.microsoft.com",
-                "env:GRAPH_RIGHTS_TOKEN",
-            ),
-            "Google Workspace users": (
-                "google_workspace_users",
-                "directory-google",
-                "https://admin.googleapis.com",
-                "env:GOOGLE_WORKSPACE_RIGHTS_TOKEN",
-            ),
-            "Salesforce contacts": (
-                "salesforce_contacts",
-                "crm-salesforce",
-                "https://tenant.salesforce.com",
-                "env:SALESFORCE_RIGHTS_TOKEN",
-            ),
-            "ServiceNow users": (
-                "servicenow_users",
-                "itsm-servicenow",
-                "https://tenant.service-now.com",
-                "env:SERVICENOW_RIGHTS_TOKEN",
-            ),
-        }
-        selected_providers: dict[str, Any] = {}
-        for choice in source_choices:
-            provider, source_id, origin, credential_ref = provider_specs[choice]
-            selected_providers[provider] = {
-                "enable": True,
-                "source_id": source_id,
-                "origin": origin,
-                "credential_ref": credential_ref,
-                "capabilities": [
-                    "discover",
-                    "retrieve",
-                    "delete",
-                    "verify_delete",
-                ],
-            }
-        privacy_rights_source_adapters = {
-            "enable": bool(selected_providers),
-            "timeout_seconds": 15,
-            "max_response_bytes": 1_048_576,
-            "max_retrieval_bytes": 8_388_608,
-            "max_records": 200,
-            "batch_size": 10,
-            "lease_seconds": 60,
-            "retry_delay_seconds": 30,
-            "claim_history_retention_seconds": 86_400,
-            "target_custody_retention_seconds": 2_592_000,
-            "providers": selected_providers,
-        }
+        privacy_rights_source_adapters = _pick_privacy_rights_source_adapters()
     privacy_rights_consumer_delivery = privacy_rights_orchestration and _q_confirm(
         "Enable one-time consumer delivery for closed, redacted rights-response "
         "packages? Production use still requires the governed document vault, "
@@ -2936,9 +3099,9 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
     )
     privacy_rights_consumer_intake = (
         privacy_rights_orchestration
-        and consent_publishing
-        and consent_public_api
-        and consent_trust_center
+        and consent.publishing
+        and consent.public_api
+        and consent.trust_center
         and _q_confirm(
             "Enable authenticated consumer privacy-rights intake in the Trust "
             "Center? Requests remain profile-bound, identity evidence is "
@@ -2947,8 +3110,8 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             default=False,
         )
     )
-    if consent_native_sdk is not None and privacy_rights_consumer_intake:
-        consent_native_sdk["require_rights_requests"] = _q_confirm(
+    if consent.native_sdk is not None and privacy_rights_consumer_intake:
+        consent.native_sdk["require_rights_requests"] = _q_confirm(
             "Require native SDK privacy-rights requests? The deployment must inject "
             "the tenant-bound rights-request callback.",
             default=False,
@@ -2959,17 +3122,17 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
         "live device, service, customer-estate, and legal acceptance remain separate.",
         default=False,
     )
-    if consent_product is not None and _q_confirm(
+    if consent.product is not None and _q_confirm(
         "Keep consent records in a shared PostgreSQL database instead of files on "
         "this server? The connection is read from MAVERICK_CONSENT_PG_DSN on the server.",
         default=False,
     ):
-        consent_product["storage"] = {
+        consent.product["storage"] = {
             "backend": "postgres",
             "dsn_secret_ref": "$MAVERICK_CONSENT_PG_DSN",
         }
-    if consent_global_opt_out and consent_product is not None:
-        consent_product["global_opt_out"] = {
+    if consent_global_opt_out and consent.product is not None:
+        consent.product["global_opt_out"] = {
             "enable": True,
             "retention_seconds": 31_536_000,
             "submission_ttl_seconds": 900,
@@ -2977,8 +3140,8 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
         }
     privacy_ott_ctv_rights = (
         privacy_rights_orchestration
-        and consent_identity
-        and consent_trust_center
+        and consent.identity
+        and consent.trust_center
         and _q_confirm(
             "Enable the selector-free OTT/CTV service-client rights bridge? "
             "This is a local access/deletion control path only; it provides no "
@@ -3025,7 +3188,7 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
     privacy_notice_publication_runtime = False
     privacy_notice_publication_scheduler = False
     privacy_notice_publication_binding: dict[str, Any] | None = None
-    if privacy_notice_governance and consent_publishing:
+    if privacy_notice_governance and consent.publishing:
         privacy_notice_publication_runtime = _q_confirm(
             "Enable the local privacy-notice publication runtime? This consumes "
             "approved intents into the tenant-private Consent Publishing store "
@@ -3033,63 +3196,116 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
             default=False,
         )
     if privacy_notice_publication_runtime:
-        binding_tenant = (
-            _q_text(
-                "  Exact active tenant ID for the first publication binding",
-                default=os.environ.get("MAVERICK_TENANT", "default"),
-            ).strip()
-            or "default"
-        )
-        binding_id = (
-            _q_text("  Publication binding name", default="primary").strip()
-            or "primary"
-        )
-        privacy_notice_publication_binding = {
-            "binding_id": binding_id,
-            "tenant_id": binding_tenant,
-            "notice_id": (
-                _q_text("  Exact notice release ID", default="privacy-main").strip()
-                or "privacy-main"
-            ),
-            "consent_publication_ref": (
-                _q_text(
-                    "  Exact notice release consent-publication reference",
-                    default="consent-binding:1",
-                ).strip()
-                or "consent-binding:1"
-            ),
-            "property_id": (
-                _q_text("  Exact Consent Publishing property ID", default="property-main").strip()
-                or "property-main"
-            ),
-            "rule_group_id": (
-                _q_text("  Exact consent rule-group ID", default="production-rules").strip()
-                or "production-rules"
-            ),
-            "rule_group_version": max(
-                1,
-                _safe_int(
-                    _q_text("  Exact consent rule-group version", default="1"),
-                    default=1,
-                ),
-            ),
-            "notice_resource_id": (
-                _q_text("  Exact consent notice-resource ID", default="privacy-notice").strip()
-                or "privacy-notice"
-            ),
-            "notice_resource_version": max(
-                1,
-                _safe_int(
-                    _q_text("  Exact consent notice-resource version", default="1"),
-                    default=1,
-                ),
-            ),
-        }
+        privacy_notice_publication_binding = _pick_notice_publication_binding()
         privacy_notice_publication_scheduler = _q_confirm(
             "Run the bounded local notice-publication scheduler with the dashboard? "
             "Only the exact active tenant and target binding above are eligible.",
             default=False,
         )
+    if not (
+        data_discovery["enable"]
+        or privacy_regulatory_intelligence
+        or privacy_rights_orchestration
+        or privacy_rights_consumer_delivery
+        or privacy_rights_consumer_intake
+        or privacy_ott_ctv_rights
+        or privacy_drop_management
+        or privacy_notice_governance
+        or privacy_public_rights_form
+    ):
+        return None
+    return {
+        "enable": True,
+        "data_discovery": data_discovery,
+        "regulatory_intelligence": {
+            "enable": privacy_regulatory_intelligence,
+        },
+        "rights_orchestration": {
+            "enable": privacy_rights_orchestration,
+            **(
+                {"source_adapters": privacy_rights_source_adapters}
+                if privacy_rights_source_adapters is not None
+                else {}
+            ),
+        },
+        "rights_consumer_delivery": {
+            "enable": privacy_rights_consumer_delivery,
+            "digest_key_ref": "env:MAVERICK_PRIVACY_RIGHTS_DELIVERY_DIGEST_KEY",
+            "export_signing_key_ref": (
+                "env:MAVERICK_PRIVACY_RIGHTS_DELIVERY_EXPORT_KEY"
+            ),
+            "package_encryption_key_ref": "env:MAVERICK_ENCRYPTION_KEY",
+            "server_grant_ttl_seconds": 30,
+            "max_package_bytes": 16_777_216,
+        },
+        "rights_consumer_intake": {
+            "enable": privacy_rights_consumer_intake,
+            "request_ttl_seconds": 86_400,
+            "retention_seconds": 31_536_000,
+            "max_active_requests": 1_000,
+            "max_active_requests_per_subject": 25,
+        },
+        "ott_ctv_rights": {
+            "enable": privacy_ott_ctv_rights,
+        },
+        "drop_management": {
+            "enable": privacy_drop_management,
+            "principal_binding_key_ref": privacy_drop_key_ref,
+            "retention_seconds": 31_536_000,
+            "scheduler_enable": privacy_drop_scheduler,
+            "scheduler_interval_seconds": 3_600,
+            "scheduler_jitter_seconds": 60,
+            "scheduler_retry_max_seconds": 900,
+        },
+        **(
+            {
+                "public_rights_form": {
+                    "enable": True,
+                    "verification_ttl_hours": 24,
+                    "status_ttl_days": 90,
+                    "requests_per_ip_per_hour": 5,
+                    "requests_per_email_per_day": 3,
+                    "internal_target_days": 30,
+                    "max_message_chars": 4000,
+                }
+            }
+            if privacy_public_rights_form
+            else {}
+        ),
+        "notice_governance": {
+            "enable": privacy_notice_governance,
+            **(
+                {
+                    "publication_runtime": {
+                        "enable": True,
+                        "scheduler_enable": privacy_notice_publication_scheduler,
+                        "active_tenants": [
+                            str(privacy_notice_publication_binding["tenant_id"])
+                        ],
+                        "poll_seconds": 30,
+                        "retry_max_seconds": 300,
+                        "tenant_limit": 100,
+                        "lease_seconds": 60,
+                        "retry_delay_seconds": 60,
+                        "bindings": {
+                            str(privacy_notice_publication_binding["binding_id"]): {
+                                key: value
+                                for key, value in privacy_notice_publication_binding.items()
+                                if key != "binding_id"
+                            }
+                        },
+                    }
+                }
+                if privacy_notice_publication_binding is not None
+                else {}
+            ),
+        },
+    }
+
+
+def _pick_data_use_governance() -> dict[str, Any] | None:
+    """Data Use Governance: the policy compiler, background checks and an optional
+    native Snowflake/Databricks enforcement runtime. None when declined."""
     data_use_governance = _q_confirm(
         "Enable the Data Use Governance authority and policy compiler? "
         "Provider writes remain disabled until a native provider is enrolled.",
@@ -3159,6 +3375,56 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
                 "reconciliation scheduler in this dashboard process?",
                 default=False,
             )
+    if not data_use_governance:
+        return None
+    data_use_product: dict[str, Any] = {
+        "enable": True,
+        "compiler": {"enable": True},
+    }
+    if data_use_checks:
+        data_use_product["scheduler"] = {
+            "enable": True,
+            "poll_seconds": 3_600,
+            "lease_seconds": 900,
+            "history_limit": 50,
+        }
+    if data_use_native is not None:
+        data_use_product["enforcement"] = {
+            "enable": True,
+            "require_four_eyes": True,
+            "max_attempts": 3,
+        }
+        data_use_product[str(data_use_native["provider"])] = data_use_native["section"]
+        provider_audit_config: dict[str, Any] = {
+            "enable": data_use_provider_audit,
+            "audit_window_seconds": (
+                14_400
+                if data_use_provider_audit and data_use_native["provider"] == "snowflake"
+                else 3_600
+            ),
+            "retention_seconds": 31_536_000,
+            "max_attempts": 5,
+            "cursor_overlap_seconds": 300,
+            "max_pages_per_read": 20,
+            "scheduler": {
+                "enable": data_use_provider_audit_scheduler,
+                "poll_seconds": 60,
+                "claim_limit": 10,
+                "tenant_limit": 1_000,
+                "lease_seconds": 120,
+                "event_limit": 100,
+                "retry_backoff_seconds": 30,
+                "purge_limit": 100,
+            },
+        }
+        if data_use_provider_audit and data_use_native["provider"] == "snowflake":
+            provider_audit_config["snowflake_latency_watermark_seconds"] = 10_800
+        data_use_product["provider_audit"] = provider_audit_config
+    return data_use_product
+
+
+def _pick_paper_review_and_graph() -> tuple[bool, str, bool]:
+    """Vendor-paper review model use, the drafting entity name and the entity graph."""
     console.print()
     console.print(
         "[dim]Vendor-paper review compares a vendor's own DPA or privacy "
@@ -3194,196 +3460,7 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
         "stores anything they don't say.[/dim]"
     )
     graph = _q_confirm("Enable the entity graph (lineage & dossier queries)?", default=True)
-    out: dict[str, Any] = {}
-    if not discovery:
-        out["doc_discovery"] = False
-    if not learn:
-        out["learn"] = False
-    if not ops:
-        out["privacy_ops"] = False
-    if consent_product is not None:
-        out["consent_preferences"] = consent_product
-    if (
-        privacy_data_discovery
-        or privacy_regulatory_intelligence
-        or privacy_rights_orchestration
-        or privacy_rights_consumer_delivery
-        or privacy_rights_consumer_intake
-        or privacy_ott_ctv_rights
-        or privacy_drop_management
-        or privacy_notice_governance
-        or privacy_public_rights_form
-    ):
-        data_discovery_config: dict[str, Any] = {"enable": privacy_data_discovery}
-        if privacy_discovery_adapter_providers:
-            data_discovery_config["adapters"] = {
-                "enable": True,
-                "enabled_providers": privacy_discovery_adapter_providers,
-                "timeout_seconds": 15.0,
-                "max_response_bytes": 8_388_608,
-                "page_size": 250,
-                "max_pages": 500,
-                "max_attempts": 3,
-                "max_polls": 8,
-            }
-            data_discovery_config["remediation"] = {
-                "enable": privacy_discovery_remediation,
-                "max_attempts": 5,
-                "retention_seconds": 2_592_000,
-                "data_map": {
-                    "enable": privacy_discovery_data_map,
-                    "retention_seconds": 31_536_000,
-                },
-                "scheduler": {
-                    "enable": privacy_discovery_scheduler,
-                    "interval_seconds": 60,
-                    "jitter_seconds": 10,
-                    "retry_max_seconds": 300,
-                    "tenant_limit": 1_000,
-                    "worker_limit": 10,
-                    "reconcile_limit": 10,
-                    "lease_seconds": 60,
-                },
-            }
-        out["privacy_automation"] = {
-            "enable": True,
-            "data_discovery": data_discovery_config,
-            "regulatory_intelligence": {
-                "enable": privacy_regulatory_intelligence,
-            },
-            "rights_orchestration": {
-                "enable": privacy_rights_orchestration,
-                **(
-                    {"source_adapters": privacy_rights_source_adapters}
-                    if privacy_rights_source_adapters is not None
-                    else {}
-                ),
-            },
-            "rights_consumer_delivery": {
-                "enable": privacy_rights_consumer_delivery,
-                "digest_key_ref": "env:MAVERICK_PRIVACY_RIGHTS_DELIVERY_DIGEST_KEY",
-                "export_signing_key_ref": (
-                    "env:MAVERICK_PRIVACY_RIGHTS_DELIVERY_EXPORT_KEY"
-                ),
-                "package_encryption_key_ref": "env:MAVERICK_ENCRYPTION_KEY",
-                "server_grant_ttl_seconds": 30,
-                "max_package_bytes": 16_777_216,
-            },
-            "rights_consumer_intake": {
-                "enable": privacy_rights_consumer_intake,
-                "request_ttl_seconds": 86_400,
-                "retention_seconds": 31_536_000,
-                "max_active_requests": 1_000,
-                "max_active_requests_per_subject": 25,
-            },
-            "ott_ctv_rights": {
-                "enable": privacy_ott_ctv_rights,
-            },
-            "drop_management": {
-                "enable": privacy_drop_management,
-                "principal_binding_key_ref": privacy_drop_key_ref,
-                "retention_seconds": 31_536_000,
-                "scheduler_enable": privacy_drop_scheduler,
-                "scheduler_interval_seconds": 3_600,
-                "scheduler_jitter_seconds": 60,
-                "scheduler_retry_max_seconds": 900,
-            },
-            **(
-                {
-                    "public_rights_form": {
-                        "enable": True,
-                        "verification_ttl_hours": 24,
-                        "status_ttl_days": 90,
-                        "requests_per_ip_per_hour": 5,
-                        "requests_per_email_per_day": 3,
-                        "internal_target_days": 30,
-                        "max_message_chars": 4000,
-                    }
-                }
-                if privacy_public_rights_form
-                else {}
-            ),
-            "notice_governance": {
-                "enable": privacy_notice_governance,
-                **(
-                    {
-                        "publication_runtime": {
-                            "enable": True,
-                            "scheduler_enable": privacy_notice_publication_scheduler,
-                            "active_tenants": [
-                                str(privacy_notice_publication_binding["tenant_id"])
-                            ],
-                            "poll_seconds": 30,
-                            "retry_max_seconds": 300,
-                            "tenant_limit": 100,
-                            "lease_seconds": 60,
-                            "retry_delay_seconds": 60,
-                            "bindings": {
-                                str(privacy_notice_publication_binding["binding_id"]): {
-                                    key: value
-                                    for key, value in privacy_notice_publication_binding.items()
-                                    if key != "binding_id"
-                                }
-                            },
-                        }
-                    }
-                    if privacy_notice_publication_binding is not None
-                    else {}
-                ),
-            },
-        }
-    if data_use_governance:
-        data_use_product: dict[str, Any] = {
-            "enable": True,
-            "compiler": {"enable": True},
-        }
-        if data_use_checks:
-            data_use_product["scheduler"] = {
-                "enable": True,
-                "poll_seconds": 3_600,
-                "lease_seconds": 900,
-                "history_limit": 50,
-            }
-        if data_use_native is not None:
-            data_use_product["enforcement"] = {
-                "enable": True,
-                "require_four_eyes": True,
-                "max_attempts": 3,
-            }
-            data_use_product[str(data_use_native["provider"])] = data_use_native["section"]
-            provider_audit_config: dict[str, Any] = {
-                "enable": data_use_provider_audit,
-                "audit_window_seconds": (
-                    14_400
-                    if data_use_provider_audit and data_use_native["provider"] == "snowflake"
-                    else 3_600
-                ),
-                "retention_seconds": 31_536_000,
-                "max_attempts": 5,
-                "cursor_overlap_seconds": 300,
-                "max_pages_per_read": 20,
-                "scheduler": {
-                    "enable": data_use_provider_audit_scheduler,
-                    "poll_seconds": 60,
-                    "claim_limit": 10,
-                    "tenant_limit": 1_000,
-                    "lease_seconds": 120,
-                    "event_limit": 100,
-                    "retry_backoff_seconds": 30,
-                    "purge_limit": 100,
-                },
-            }
-            if data_use_provider_audit and data_use_native["provider"] == "snowflake":
-                provider_audit_config["snowflake_latency_watermark_seconds"] = 10_800
-            data_use_product["provider_audit"] = provider_audit_config
-        out["data_use_governance"] = data_use_product
-    if not draft:
-        out["paper_review_use_model"] = False
-    if org_name:
-        out["paper_review_org"] = org_name
-    if not graph:
-        out["entity_graph"] = False
-    return out
+    return draft, org_name, graph
 
 
 def _pick_evidence_local_parsers(enabled: bool) -> dict[str, Any]:
@@ -5022,9 +5099,52 @@ def pick_advanced() -> dict[str, Any]:
     Governed learning choices default on; higher-authority or infrastructure
     features retain explicit opt-ins. Many have reviewed in-product controls;
     deployment-only choices require a separate administrator change.
+
+    The toggles are asked in groups, in this order; the follow-up questions
+    that depend on them come after.
     """
     console.print()
     advanced: dict[str, Any] = {
+        **_pick_working_toggles(),
+        **_pick_learning_toggles(),
+        **_pick_memory_and_product_toggles(),
+        **_pick_governance_monitor_toggles(),
+        **_pick_feature_allowances(),
+        **_pick_learning_lifecycle_toggles(),
+        **_pick_workflow_and_extension_toggles(),
+        **_pick_enterprise_toggles(),
+        **_pick_data_protection_toggles(),
+        **_pick_runtime_toggles(),
+    }
+    _drop_self_connect_without_connections(advanced)
+    # The governed sidecar is an extension of the external-agent boundary: its
+    # clients authenticate through per-agent MCP credentials and then inherit
+    # the same trust/revocation/control-plane posture. Keep the deployment
+    # prompt behind that explicit higher-level opt-in so a normal wizard run is
+    # unchanged and the operator sees the dependency before enabling egress.
+    if advanced.get("external_agents"):
+        sidecar = pick_governed_mcp_sidecar()
+        if sidecar:
+            advanced["mcp_sidecar"] = sidecar
+    _ask_insight_exchange(advanced)
+    _ask_flow_followups(advanced)
+    if advanced.get("external_agents"):
+        _ask_external_agent_followups(advanced)
+    # Both governed-execution planes are off by default, so the helper guards
+    # each of its own questions rather than gating the call.
+    _ask_governed_execution_followups(advanced)
+    _ask_self_harness_followups(advanced)
+    _ask_chat_and_resource_followups(advanced)
+    _ask_regulated_deployment(advanced)
+    _ask_identity_followups(advanced)
+    _ask_dashboard_followups(advanced)
+    _ask_model_followups(advanced)
+    return advanced
+
+
+def _pick_working_toggles() -> dict[str, Any]:
+    """Cost, planning, context, voice, attachments, documents and compaction."""
+    return {
         "agent_budget_reporting": _pick_agent_budget_reporting(),
         "image_edit": _pick_image_edit_models(),
         "cost_aware": _q_confirm(
@@ -5106,6 +5226,12 @@ def pick_advanced() -> dict[str, Any]:
             ],
             default="default     - keep recent + trim big tool outputs",
         ).split()[0],
+    }
+
+
+def _pick_learning_toggles() -> dict[str, Any]:
+    """Reflexion, self-harness and the two recording opt-ins."""
+    return {
         "reflexion": _q_confirm(
             "Reflexion learning? Remember lessons from failed runs and recall them "
             "on the next similar goal.",
@@ -5129,6 +5255,12 @@ def pick_advanced() -> dict[str, Any]:
             "one task's next completed model call. It records instruction text, makes no extra AI call, "
             "and does not enable learning. OFF by default.", default=False,
         ),
+    }
+
+
+def _pick_memory_and_product_toggles() -> dict[str, Any]:
+    """Fleet memory, immune canaries, product modules, external agents and memory options."""
+    return {
         "fleet_memory": _q_confirm(
             "Fleet memory? Let EXTERNAL agents (Agentforce, Copilot, custom) "
             "deposit experience into and recall from Lightwork's governed "
@@ -5234,6 +5366,12 @@ def pick_advanced() -> dict[str, Any]:
             "date X, and why' for the Operating Record. OFF by default.",
             default=False,
         ),
+    }
+
+
+def _pick_governance_monitor_toggles() -> dict[str, Any]:
+    """Governance and compliance monitors."""
+    return {
         "fairness_monitor": _q_confirm(
             "Continuous fairness monitoring (ISO 42001 A.6.2.6)? Watch decision "
             "outcomes over a rolling window and raise a signed FAIRNESS_ALERT when "
@@ -5395,6 +5533,12 @@ def pick_advanced() -> dict[str, Any]:
             "capabilities/governance.",
             default=True,
         ),
+    }
+
+
+def _pick_feature_allowances() -> dict[str, Any]:
+    """The ``allow_*`` dashboard feature allowances."""
+    return {
         "allow_pack_editing": _q_confirm(
             "Allow editing agents (domain packs) from the dashboard? Operators "
             "can fork/tweak a specialist's persona, tools, and workflow per "
@@ -5602,6 +5746,12 @@ def pick_advanced() -> dict[str, Any]:
             "is configured separately.)",
             default=True,
         ),
+    }
+
+
+def _pick_learning_lifecycle_toggles() -> dict[str, Any]:
+    """Dreaming, verification, autonomy, rewards and the governed learning loops."""
+    return {
         "dreaming_llm_consolidation": _q_confirm(
             "  └ LLM-enriched consolidation? Have the cheap summarizer model "
             "rewrite each consolidated failure into a transferable lesson "
@@ -5840,6 +5990,12 @@ def pick_advanced() -> dict[str, Any]:
             "auto_graduate. Off by default.",
             default=False,
         ),
+    }
+
+
+def _pick_workflow_and_extension_toggles() -> dict[str, Any]:
+    """Flows, connections, the plugin workbench and the emergent protocol/codec."""
+    return {
         "flows": _q_confirm(
             "Flow engine? A deterministic skeleton -- branch, switch, loop, parallel, "
             "approval, delay, wait-for-event, try/catch -- over steps that are either a "
@@ -5883,6 +6039,12 @@ def pick_advanced() -> dict[str, Any]:
             "Off by default; pure telemetry, the audit/Shield path is untouched.",
             default=False,
         ),
+    }
+
+
+def _pick_enterprise_toggles() -> dict[str, Any]:
+    """Capabilities, quotas, spending, tenancy, enterprise, agent trust and the control plane."""
+    return {
         "enforce_capabilities": _q_confirm(
             "Enforce agent capabilities? Each agent runs under a scoped grant and "
             "spawned sub-agents can only narrow it, never exceed it (least privilege).",
@@ -5965,6 +6127,12 @@ def pick_advanced() -> dict[str, Any]:
             "operates agents.",
             default=False,
         ),
+    }
+
+
+def _pick_data_protection_toggles() -> dict[str, Any]:
+    """Logs, at-rest encryption, RLS, Copilot operations, audit sinks, SAML and approvals."""
+    return {
         "anonymous_logs": _q_confirm(
             "Anonymous mode? Scrub user-identifying content (goal text, user/channel "
             "ids, home paths, emails/phones) from logs and audit events — hashes or "
@@ -6068,6 +6236,12 @@ def pick_advanced() -> dict[str, Any]:
             "Writes [security] approvals_required = 2. Off by default.",
             default=False,
         ),
+    }
+
+
+def _pick_runtime_toggles() -> dict[str, Any]:
+    """Tool exposure, shield updates, eBPF, local runtime, caches, effort and hedging."""
+    return {
         "deferred_tools": _q_confirm(
             "Deferred tool loading? Show the model a small core toolset plus a "
             "find_tools search tool, loading the long tail (80+ integrations, MCP) "
@@ -6136,16 +6310,10 @@ def pick_advanced() -> dict[str, Any]:
             default=False,
         ),
     }
-    _drop_self_connect_without_connections(advanced)
-    # The governed sidecar is an extension of the external-agent boundary: its
-    # clients authenticate through per-agent MCP credentials and then inherit
-    # the same trust/revocation/control-plane posture. Keep the deployment
-    # prompt behind that explicit higher-level opt-in so a normal wizard run is
-    # unchanged and the operator sees the dependency before enabling egress.
-    if advanced.get("external_agents"):
-        sidecar = pick_governed_mcp_sidecar()
-        if sidecar:
-            advanced["mcp_sidecar"] = sidecar
+
+
+def _ask_insight_exchange(advanced: dict[str, Any]) -> None:
+    """Trusted peer keys for federated insight exchange (needs dreaming)."""
     # Federated insight exchange rides on dreaming: trusted peer keys are
     # only worth asking for when the loop that produces/consumes insights is
     # on. Imports are fail-closed without them.
@@ -6159,6 +6327,10 @@ def pick_advanced() -> dict[str, Any]:
             default="",
         )
         advanced["insight_pubkeys"] = [k.strip() for k in raw.split(",") if k.strip()]
+
+
+def _ask_flow_followups(advanced: dict[str, Any]) -> None:
+    """Self-correction, learned operators, action recipes and the approval-link URL (needs flows)."""
     # Autonomous self-correction only makes sense once flows are on. Human apply
     # + surfaced proposals work without it; this governs whether the loop may
     # UNDO a change on its own.
@@ -6243,11 +6415,10 @@ def pick_advanced() -> dict[str, Any]:
         ).strip()
         if flows_url:
             advanced["flows_public_url"] = flows_url
-    if advanced.get("external_agents"):
-        _ask_external_agent_followups(advanced)
-    # Both governed-execution planes are off by default, so the helper guards
-    # each of its own questions rather than gating the call.
-    _ask_governed_execution_followups(advanced)
+
+
+def _ask_self_harness_followups(advanced: dict[str, Any]) -> None:
+    """The optional self-harness paths (needs self-harness)."""
     # Self-harness has a handful of optional paths beyond the validation floors
     # written by default. Only worth asking once the loop itself is on; each
     # stays at its historical default unless the operator opts in here.
@@ -6369,6 +6540,10 @@ def pick_advanced() -> dict[str, Any]:
                 default=0,
             ),
         )
+
+
+def _ask_chat_and_resource_followups(advanced: dict[str, Any]) -> None:
+    """Chat answer streaming/verification, SQL and REST ceilings, IFC, codebase and swarm scale."""
     # Chat answers (maverick.agent): a live, redacted, Shield-scanned preview,
     # and whether plain prose replies also wait on the self-verifier.
     advanced["stream_answers"] = _q_confirm(
@@ -6387,6 +6562,10 @@ def pick_advanced() -> dict[str, Any]:
     _pick_ifc(advanced)
     _pick_codebase(advanced)
     _pick_swarm_scale(advanced)
+
+
+def _ask_regulated_deployment(advanced: dict[str, Any]) -> None:
+    """Signed tax-constants channel, data residency, disclosure and regulatory profiles."""
     # Tax-constants content channel: law changes ship as SIGNED bundles
     # (fail-closed against the publisher keys), auto-applied by
     # `maverick tax prepare` / `maverick tax update`.
@@ -6431,6 +6610,10 @@ def pick_advanced() -> dict[str, Any]:
     )
     if profiles:
         advanced["compliance_profiles"] = [str(p) for p in profiles]
+
+
+def _ask_identity_followups(advanced: dict[str, Any]) -> None:
+    """OIDC SSO, sign-in security, first-owner setup and department access."""
     # OIDC SSO is a string-bearing toggle (issuer/audience/jwks_uri), so it has
     # its own prompt; the result is nested under the "oidc" key and the writer
     # emits a single [auth.oidc] table for it.
@@ -6446,6 +6629,10 @@ def pick_advanced() -> dict[str, Any]:
     # Department (job-function) scoping only bites once sign-in is on, so it is
     # offered right after — writes under [dashboard]. Returns {} when declined.
     advanced["department_access"] = pick_department_access(bool(advanced["oidc"].get("enabled")))
+
+
+def _ask_dashboard_followups(advanced: dict[str, Any]) -> None:
+    """Compression, glass effects, the sidebar, mobile offline copies and device pairing."""
     # Response compression is on by default ([dashboard] compress); the only
     # reason to turn it off is a reverse proxy that already compresses.
     advanced["dashboard_compress"] = _q_confirm(
@@ -6481,6 +6668,10 @@ def pick_advanced() -> dict[str, Any]:
         "Allow mobile companions to save task copies for up to 24 hours and 2 MB? Shorter limits are available in All settings.", default=True,
     ), "max_age_seconds": 86400, "max_bytes": 2097152}
     advanced["device_pairing"] = _pick_device_pairing()
+
+
+def _ask_model_followups(advanced: dict[str, Any]) -> None:
+    """Model guidance, capability tests and provider model discovery in Settings."""
     advanced["model_guidance"] = _q_confirm(
         "Show dated model pricing evidence and provider-reported capabilities in Settings?",
         default=True,
@@ -6494,7 +6685,6 @@ def pick_advanced() -> dict[str, Any]:
         "only the shipped catalog.",
         default=True,
     )
-    return advanced
 
 
 def _pick_device_pairing() -> dict[str, Any]:
@@ -9523,14 +9713,47 @@ def _cfg_license(license_cfg: dict[str, Any] | None) -> list[str]:
     return lines
 
 
-def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
+def _cfg_advanced(
     advanced: dict[str, Any] | None,
     providers: list[str],
     *,
     siem_dest: str = "",
 ) -> list[str]:
+    """Render the advanced step's choices as ``config.toml`` sections.
+
+    Each helper renders one family of toggles and returns its lines; the
+    order here is the order the sections appear in the written file.
+    """
     if not advanced and not siem_dest:
         return []
+    lines: list[str] = []
+    lines += _cfg_advanced_running_tasks_and_images(advanced)
+    lines += _cfg_advanced_learning_opt_outs(advanced)
+    lines += _cfg_advanced_routing_and_answers(advanced, providers)
+    lines += _cfg_advanced_autonomy_and_workforce(advanced)
+    lines += _cfg_advanced_verification_and_rewards(advanced)
+    lines += _cfg_advanced_learning_governance(advanced)
+    lines += _cfg_advanced_flows_and_extensions(advanced)
+    lines += _cfg_advanced_quotas_and_tenancy(advanced)
+    lines += _cfg_advanced_trust_and_audit(advanced, siem_dest)
+    lines += _cfg_advanced_feature_locks(advanced)
+    lines += _cfg_advanced_context_and_attachments(advanced)
+    lines += _cfg_advanced_reflexion(advanced)
+    lines += _cfg_advanced_self_harness(advanced)
+    lines += _cfg_advanced_memory_and_immune(advanced)
+    lines += _cfg_advanced_products(advanced)
+    lines += _cfg_advanced_external_agents_and_memory(advanced)
+    lines += _cfg_advanced_governance_monitors(advanced)
+    lines += _cfg_advanced_dreaming_and_tax(advanced)
+    lines += _cfg_advanced_runtime_and_tools(advanced, providers)
+    lines += _cfg_advanced_oidc(advanced)
+    lines += _cfg_advanced_dashboard(advanced)
+    lines += _cfg_advanced_saml_and_sign_in(advanced)
+    return lines
+
+
+def _cfg_advanced_running_tasks_and_images(advanced: dict[str, Any]) -> list[str]:
+    """``[agent]`` running-task reporting and ``[image_edit]`` model choices."""
     lines: list[str] = []
     budget_reporting = advanced.get("agent_budget_reporting")
     if budget_reporting is not None:
@@ -9556,6 +9779,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
                 image_lines.append(field + " = " + _toml_str(value))
         if image_lines:
             lines.extend(["", "[image_edit]", *image_lines])
+    return lines
+
+
+def _cfg_advanced_learning_opt_outs(advanced: dict[str, Any]) -> list[str]:
+    """A deliberate no to a default-on learning section is written as ``enable = false``."""
+    lines: list[str] = []
     # These governed-learning sections are default-on in the kernel. Preserve a
     # deliberate "no" from the advanced wizard instead of silently omitting the
     # table (which would now mean on). True choices are emitted with their richer
@@ -9577,6 +9806,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     for choice, section in _learning_sections.items():
         if choice in advanced and advanced[choice] is False:
             lines.extend(["", f"[{section}]", "enable = false"])
+    return lines
+
+
+def _cfg_advanced_routing_and_answers(advanced: dict[str, Any], providers: list[str]) -> list[str]:
+    """``[routing]``, chat-answer verification/streaming and the SQL/REST ceilings."""
+    lines: list[str] = []
     # Advanced reasoning toggles -> the kernel's config sections. Each is
     # off unless the wizard wrote it, matching the modules' own defaults.
     if (
@@ -9618,6 +9853,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[connector_limits]")
         lines.append(f"max_attempts = {int(advanced['connector_max_attempts'])}")
+    return lines
+
+
+def _cfg_advanced_autonomy_and_workforce(advanced: dict[str, Any]) -> list[str]:
+    """Autonomy gate, governed actions, workforce levels and calibration enforcement."""
+    lines: list[str] = []
     if advanced.get("autonomy_gate") or advanced.get("headless_assume") or advanced.get("confirm_plan"):
         lines.append("")
         lines.append("[autonomy]")
@@ -9653,6 +9894,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             lines.append("# of its edge on natural traffic (the judge is being gamed). Needs")
             lines.append("# adversarial probes recorded (calibration.record_probe) to bite.")
             lines.append("min_resistance = 0.5")
+    return lines
+
+
+def _cfg_advanced_verification_and_rewards(advanced: dict[str, Any]) -> list[str]:
+    """Trajectory donation, adaptive compute, verifier, reward and learning-signal toggles."""
+    lines: list[str] = []
     if advanced.get("donate_trajectories"):
         lines.append("")
         lines.append("[telemetry]")
@@ -9699,6 +9946,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[credit]")
         lines.append("enable = true")
+    return lines
+
+
+def _cfg_advanced_learning_governance(advanced: dict[str, Any]) -> list[str]:
+    """The learning-policy ladder, self-modify, adapters and the governed learning loops."""
+    lines: list[str] = []
     # The [self_improvement] block carries several default-on sub-toggles; emit
     # explicit values when the wizard records a choice, and write
     # factory_learning=false when the user opts out.
@@ -9823,6 +10076,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# auto_graduate = true      # arm the dial (authority-widening)")
         lines.append('# max_auto_risk = "medium"  # raise to "high" only deliberately')
         lines.append("# min_streak = 10           # consecutive accurate predictions required")
+    return lines
+
+
+def _cfg_advanced_flows_and_extensions(advanced: dict[str, Any]) -> list[str]:
+    """Flows, workflow options, connections and the emergent protocol/codec."""
+    lines: list[str] = []
     if advanced.get("flows"):
         lines.append("")
         lines.append("[flows]")
@@ -9892,6 +10151,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# coordination stream: byte-stuffed cheap codes that save real tokens.")
         lines.append("# Telemetry only -- the rendered text agents/Shield see is unchanged.")
         lines.append("enable = true")
+    return lines
+
+
+def _cfg_advanced_quotas_and_tenancy(advanced: dict[str, Any]) -> list[str]:
+    """Quotas, spending limits, tenancy, enterprise, residency and compliance."""
+    lines: list[str] = []
     if advanced.get("enforce_quotas"):
         lines.append("")
         lines.append("[quotas]")
@@ -9956,6 +10221,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         if advanced.get("compliance_profiles"):
             lines.append("profiles = [" + ", ".join(
                 _toml_str(p) for p in advanced["compliance_profiles"]) + "]")
+    return lines
+
+
+def _cfg_advanced_trust_and_audit(advanced: dict[str, Any], siem_dest: str) -> list[str]:
+    """Agent trust, control plane, at-rest encryption, RLS and the audit sinks."""
+    lines: list[str] = []
     if advanced.get("agent_trust"):
         lines.append("")
         lines.append("[agent_trust]")
@@ -10055,18 +10326,67 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append('# prefix = "maverick/audit/"')
         lines.append('# mode = "COMPLIANCE"        # COMPLIANCE | GOVERNANCE')
         lines.append('# region = "us-east-1"')
-    # Dashboard editing locks. Both default on, so we only emit the disables --
-    # and as ONE [features] table (two tables would be a duplicate-key TOML
-    # error). The kernel reads these via config.get_features.
-    _feature_locks = []
+    return lines
+
+
+# ``allow_*`` wizard key, the answer that writes a lock, and the ``[features]``
+# line it writes. Order is the order the lines appear in the table.
+_FEATURE_LOCKS: tuple[tuple[str, bool, str], ...] = (
+    ("allow_employee_task_diagnostics", False, "employee_task_diagnostics = false"),
+    ("allow_employee_activation", False, "employee_activation = false"),
+    ("allow_copilot_operations", True, "copilot_operations = true"),
+    ("allow_workflow_readiness", False, "workflow_readiness = false"),
+    ("allow_project_reviews", True, "project_reviews = true"),
+    ("allow_task_handoffs", True, "task_handoffs = true"),
+    ("allow_deliverable_bundles", True, "deliverable_bundles = true"),
+    ("allow_project_workspaces", True, "project_workspaces = true"),
+    ("allow_employee_companions", True, "employee_companions = true"),
+    ("allow_employee_content_access_requests", True, "employee_content_access_requests = true"),
+    ("allow_personal_data_controls", True, "personal_data_controls = true"),
+    ("allow_permission_access_requests", True, "permission_access_requests = true"),
+    ("allow_employee_departures", True, "employee_departures = true"),
+    ("allow_outcome_measurement", True, "outcome_measurement = true"),
+    ("allow_commitment_viability", True, "commitment_viability = true"),
+    ("allow_work_restructuring", True, "work_restructuring = true"),
+    ("allow_portable_competence", True, "portable_competence = true"),
+    ("allow_private_task_computation", True, "private_task_computation = true"),
+    ("allow_procedure_interactions", True, "procedure_interactions = true"),
+    ("allow_operational_competence_acquisition", True, "operational_competence_acquisition = true"),
+    ("allow_request_program", True, "request_program = true"),
+    ("allow_commitment_economic_alternatives", True, "commitment_economic_alternatives = true"),
+    ("allow_workflow_step_checks", True, "workflow_step_checks = true"),
+    ("allow_applicability_regions", True, "applicability_regions = true"),
+    ("allow_governed_rule_evolution", True, "governed_rule_evolution = true"),
+    ("allow_recovery_visibility", True, "recovery_visibility = true"),
+    ("allow_semantic_rule_reuse", True, "semantic_rule_reuse = true"),
+    ("allow_commitment_capability_learning", True, "commitment_capability_learning = true"),
+    ("allow_shared_decision_evidence", True, "shared_decision_evidence = true"),
+    ("allow_workspace_recovery", True, "workspace_recovery = true"),
+    ("allow_signing_identity_transition", True, "signing_identity_transition = true"),
+    ("allow_configuration_profiles", False, "configuration_profiles = false"),
+    ("allow_personal_preferences", False, "personal_preferences = false"),
+    ("allow_draft_recovery", False, "draft_recovery = false"),
+    ("allow_support_center", False, "support_center = false"),
+    ("allow_record_search", False, "record_search = false"),
+    ("allow_action_center", False, "action_center = false"),
+    ("allow_guided_onboarding", False, "guided_onboarding = false"),
+    ("allow_pack_editing", False, "pack_editing = false"),
+    ("allow_role_editing", False, "role_editing = false"),
+)
+
+
+def _cfg_advanced_feature_locks(advanced: dict[str, Any]) -> list[str]:
+    """Dashboard feature locks: the ``[features]`` table plus its sibling tables.
+
+    The features default on, so only the disables (and the deliberate enables
+    of default-off features) are written -- as ONE ``[features]`` table, since
+    two tables would be a duplicate-key TOML error. The kernel reads these via
+    ``config.get_features``.
+    """
+    lines: list[str] = []
     if advanced.get("allow_runtime_configuration_status") is False:
         lines.extend(["[settings]", "runtime_status = false"])
-    if advanced.get("allow_employee_task_diagnostics") is False:
-        _feature_locks.append("employee_task_diagnostics = false")
-    if advanced.get("allow_employee_activation") is False:
-        _feature_locks.append("employee_activation = false")
     if advanced.get("allow_copilot_operations") is True:
-        _feature_locks.append("copilot_operations = true")
         families = advanced.get("copilot_operation_families", ["learning"])
         allowed_families = {"learning", "preferences", "tasks", "clarifications", "reviews", "schedules",
                             "connections", "artifacts", "notifications", "models", "budget", "plugins",
@@ -10075,92 +10395,19 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             raise ValueError("Choose registered Copilot action families.")
         lines.append("[copilot]")
         _emit_kv(lines, "operation_families", list(dict.fromkeys(families)))
-    if advanced.get("allow_workflow_readiness") is False:
-        _feature_locks.append("workflow_readiness = false")
-    if advanced.get("allow_project_reviews") is True:
-        _feature_locks.append("project_reviews = true")
     if "allow_work_details" in advanced:
         lines.extend(["[work_details]"])
         _emit_kv(lines, "enable", advanced["allow_work_details"] is True)
-    if advanced.get("allow_task_handoffs") is True:
-        _feature_locks.append("task_handoffs = true")
-    if advanced.get("allow_deliverable_bundles") is True:
-        _feature_locks.append("deliverable_bundles = true")
-    if advanced.get("allow_project_workspaces") is True:
-        _feature_locks.append("project_workspaces = true")
-    if advanced.get("allow_employee_companions") is True:
-        _feature_locks.append("employee_companions = true")
-    if advanced.get("allow_employee_content_access_requests") is True:
-        _feature_locks.append("employee_content_access_requests = true")
-    if advanced.get("allow_personal_data_controls") is True:
-        _feature_locks.append("personal_data_controls = true")
-    if advanced.get("allow_permission_access_requests") is True:
-        _feature_locks.append("permission_access_requests = true")
-    if advanced.get("allow_employee_departures") is True:
-        _feature_locks.append("employee_departures = true")
-    if advanced.get("allow_outcome_measurement") is True:
-        _feature_locks.append("outcome_measurement = true")
-    if advanced.get("allow_commitment_viability") is True:
-        _feature_locks.append("commitment_viability = true")
-    if advanced.get("allow_work_restructuring") is True:
-        _feature_locks.append("work_restructuring = true")
-    if advanced.get("allow_portable_competence") is True:
-        _feature_locks.append("portable_competence = true")
-    if advanced.get("allow_private_task_computation") is True:
-        _feature_locks.append("private_task_computation = true")
-    if advanced.get("allow_procedure_interactions") is True:
-        _feature_locks.append("procedure_interactions = true")
-    if advanced.get("allow_operational_competence_acquisition") is True:
-        _feature_locks.append("operational_competence_acquisition = true")
-    if advanced.get("allow_request_program") is True:
-        _feature_locks.append("request_program = true")
-    if advanced.get("allow_commitment_economic_alternatives") is True:
-        _feature_locks.append("commitment_economic_alternatives = true")
-    if advanced.get("allow_workflow_step_checks") is True:
-        _feature_locks.append("workflow_step_checks = true")
-    if advanced.get("allow_applicability_regions") is True:
-        _feature_locks.append("applicability_regions = true")
-    if advanced.get("allow_governed_rule_evolution") is True:
-        _feature_locks.append("governed_rule_evolution = true")
-    if advanced.get("allow_recovery_visibility") is True:
-        _feature_locks.append("recovery_visibility = true")
-    if advanced.get("allow_semantic_rule_reuse") is True:
-        _feature_locks.append("semantic_rule_reuse = true")
-    if advanced.get("allow_commitment_capability_learning") is True:
-        _feature_locks.append("commitment_capability_learning = true")
-    if advanced.get("allow_shared_decision_evidence") is True:
-        _feature_locks.append("shared_decision_evidence = true")
-    if advanced.get("allow_workspace_recovery") is True:
-        _feature_locks.append("workspace_recovery = true")
-    if advanced.get("allow_signing_identity_transition") is True:
-        _feature_locks.append("signing_identity_transition = true")
-    if advanced.get("allow_configuration_profiles") is False:
-        _feature_locks.append("configuration_profiles = false")
-    if advanced.get("allow_personal_preferences") is False:
-        _feature_locks.append("personal_preferences = false")
-    if advanced.get("allow_draft_recovery") is False:
-        _feature_locks.append("draft_recovery = false")
-    if advanced.get("allow_support_center") is False:
-        _feature_locks.append("support_center = false")
-    if advanced.get("allow_record_search") is False:
-        _feature_locks.append("record_search = false")
-    if advanced.get("allow_action_center") is False:
-        _feature_locks.append("action_center = false")
-    if advanced.get("allow_guided_onboarding") is False:
-        _feature_locks.append("guided_onboarding = false")
-    if advanced.get("allow_pack_editing") is False:
-        _feature_locks.append("pack_editing = false")
-    if advanced.get("allow_role_editing") is False:
-        _feature_locks.append("role_editing = false")
-    if type(advanced.get("allow_human_conversation_handoffs")) is bool:
-        _feature_locks.append("human_conversation_handoffs = " + str(advanced["allow_human_conversation_handoffs"]).lower())
     if advanced.get("allow_public_chat") is True:
         # Off by default: only a deliberate yes is written. Sites are added on the Channels page (docs/public-chat.md).
         lines.extend(["", "[public_chat]", "enabled = true"])
-    if _feature_locks:
+    locks = [line for key, wanted, line in _FEATURE_LOCKS if advanced.get(key) is wanted]
+    if type(advanced.get("allow_human_conversation_handoffs")) is bool:
+        locks.append("human_conversation_handoffs = " + str(advanced["allow_human_conversation_handoffs"]).lower())
+    if locks:
         lines.append("")
         lines.append("[features]")
-        lines.extend(_feature_locks)
+        lines.extend(locks)
     if advanced.get("allow_conversation_inbox") is True:
         lines.extend(["", "[conversation_inbox]", "enabled = true", "guidance = true", "queue = true", "independent = true", "max_pending = 20"])
     elif advanced.get("allow_conversation_inbox") is False:
@@ -10169,6 +10416,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if type(advanced.get("allow_chat_message_actions")) is bool:
         lines.extend(["", "[chat_message_actions]",
                       "enabled = " + str(advanced["allow_chat_message_actions"]).lower()])
+    return lines
+
+
+def _cfg_advanced_context_and_attachments(advanced: dict[str, Any]) -> list[str]:
+    """Planning, context compaction, voice, attachments and the recording opt-ins."""
+    lines: list[str] = []
     if advanced.get("tree_of_thought"):
         lines.append("")
         lines.append("[planning]")
@@ -10224,10 +10477,22 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[instruction_capture]")
         lines.append("enable = " + ("true" if advanced["instruction_capture"] else "false"))
+    return lines
+
+
+def _cfg_advanced_reflexion(advanced: dict[str, Any]) -> list[str]:
+    """``[reflexion]``."""
+    lines: list[str] = []
     if advanced.get("reflexion"):
         lines.append("")
         lines.append("[reflexion]")
         lines.append("enable = true")
+    return lines
+
+
+def _cfg_advanced_self_harness(advanced: dict[str, Any]) -> list[str]:
+    """The ``[self_harness]`` table: validation floors by default, options on opt-in."""
+    lines: list[str] = []
     if advanced.get("self_harness"):
         lines.append("")
         lines.append("[self_harness]")
@@ -10240,59 +10505,73 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("require_held_out = true")
         lines.append("min_held_out = 5")
         lines.append("min_delta = 0.02")
-        # Optional advanced paths, written only when the operator opted in above;
-        # each is at its historical default otherwise, so the block stays minimal.
-        if advanced.get("self_harness_eval_corpus"):
-            # Free-text path: escape via _toml_str so a path with a backslash or
-            # quote can't corrupt the config the wizard writes.
-            _emit_kv(lines, "eval_corpus", advanced["self_harness_eval_corpus"])
-            eval_budget = advanced.get("self_harness_eval_budget")
-            if eval_budget and eval_budget > 0:
-                lines.append(f"eval_budget_dollars = {float(eval_budget)}")
-        if advanced.get("self_harness_holdout_ledger"):
-            _emit_kv(
-                lines,
-                "holdout_ledger",
-                advanced["self_harness_holdout_ledger"],
-            )
-        if advanced.get("self_harness_holdout_container_image"):
-            _emit_kv(
-                lines,
-                "holdout_container_image",
-                advanced["self_harness_holdout_container_image"],
-            )
-        if advanced.get("self_harness_require_independent_custody"):
-            lines.append("holdout_require_independent_custody = true")
-        if advanced.get("self_harness_bucket_domain"):
-            lines.append('mine_bucket_by = ["domain"]')
-        if advanced.get("self_harness_semantic_mining"):
-            lines.append("semantic_mining = true")
-        if advanced.get("self_harness_efficacy_review"):
-            lines.append("efficacy_review = true")
-        if advanced.get("self_harness_canary"):
-            lines.append("promote_as_canary = true")
-        if advanced.get("self_harness_auto_run"):
-            lines.append("auto_run = true")
-        elif "self_harness_auto_run" in advanced:
-            lines.append("auto_run = false")
-        if advanced.get("self_harness_metamorphic"):
-            lines.append("metamorphic = true")
-        if advanced.get("self_harness_relapse"):
-            lines.append("relapse_failure_share = 0.5")
-        if advanced.get("self_harness_calibrate_judge"):
-            lines.append("calibrate_judge = true")
-        if advanced.get("self_harness_transfer_auto"):
-            lines.append("transfer_auto = true")
-        if advanced.get("self_harness_corpus_harvest"):
-            _emit_kv(lines, "corpus_harvest", advanced["self_harness_corpus_harvest"])
-        if advanced.get("self_harness_store"):
-            _emit_kv(lines, "store", advanced["self_harness_store"])
-        cands = advanced.get("self_harness_candidates")
-        if cands and cands > 1:
-            lines.append(f"candidates_per_signature = {int(cands)}")
-        retire_days = advanced.get("self_harness_retire_days")
-        if retire_days and retire_days > 0:
-            lines.append(f"retire_after_days = {int(retire_days)}")
+        lines.extend(_cfg_advanced_self_harness_options(advanced))
+    return lines
+
+
+def _cfg_advanced_self_harness_options(advanced: dict[str, Any]) -> list[str]:
+    """The optional self-harness paths, written only when the operator opted in.
+
+    Each is at its historical default otherwise, so the block stays minimal.
+    """
+    lines: list[str] = []
+    if advanced.get("self_harness_eval_corpus"):
+        # Free-text path: escape via _toml_str so a path with a backslash or
+        # quote can't corrupt the config the wizard writes.
+        _emit_kv(lines, "eval_corpus", advanced["self_harness_eval_corpus"])
+        eval_budget = advanced.get("self_harness_eval_budget")
+        if eval_budget and eval_budget > 0:
+            lines.append(f"eval_budget_dollars = {float(eval_budget)}")
+    if advanced.get("self_harness_holdout_ledger"):
+        _emit_kv(
+            lines,
+            "holdout_ledger",
+            advanced["self_harness_holdout_ledger"],
+        )
+    if advanced.get("self_harness_holdout_container_image"):
+        _emit_kv(
+            lines,
+            "holdout_container_image",
+            advanced["self_harness_holdout_container_image"],
+        )
+    if advanced.get("self_harness_require_independent_custody"):
+        lines.append("holdout_require_independent_custody = true")
+    if advanced.get("self_harness_bucket_domain"):
+        lines.append('mine_bucket_by = ["domain"]')
+    if advanced.get("self_harness_semantic_mining"):
+        lines.append("semantic_mining = true")
+    if advanced.get("self_harness_efficacy_review"):
+        lines.append("efficacy_review = true")
+    if advanced.get("self_harness_canary"):
+        lines.append("promote_as_canary = true")
+    if advanced.get("self_harness_auto_run"):
+        lines.append("auto_run = true")
+    elif "self_harness_auto_run" in advanced:
+        lines.append("auto_run = false")
+    if advanced.get("self_harness_metamorphic"):
+        lines.append("metamorphic = true")
+    if advanced.get("self_harness_relapse"):
+        lines.append("relapse_failure_share = 0.5")
+    if advanced.get("self_harness_calibrate_judge"):
+        lines.append("calibrate_judge = true")
+    if advanced.get("self_harness_transfer_auto"):
+        lines.append("transfer_auto = true")
+    if advanced.get("self_harness_corpus_harvest"):
+        _emit_kv(lines, "corpus_harvest", advanced["self_harness_corpus_harvest"])
+    if advanced.get("self_harness_store"):
+        _emit_kv(lines, "store", advanced["self_harness_store"])
+    cands = advanced.get("self_harness_candidates")
+    if cands and cands > 1:
+        lines.append(f"candidates_per_signature = {int(cands)}")
+    retire_days = advanced.get("self_harness_retire_days")
+    if retire_days and retire_days > 0:
+        lines.append(f"retire_after_days = {int(retire_days)}")
+    return lines
+
+
+def _cfg_advanced_memory_and_immune(advanced: dict[str, Any]) -> list[str]:
+    """Fleet memory, codebase mode, IFC, swarm scale and the immune canaries."""
+    lines: list[str] = []
     if advanced.get("fleet_memory"):
         lines.append("")
         lines.append("[fleet_memory]")
@@ -10329,6 +10608,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# Production twin (maverick.immune.twin): record tool results so a")
         lines.append("# goal can be replayed against exactly what production saw.")
         lines.append("twin_record = true")
+    return lines
+
+
+def _cfg_advanced_products(advanced: dict[str, Any]) -> list[str]:
+    """Cortex, commerce, shoring and Stripe billing."""
+    lines: list[str] = []
     if advanced.get("cortex"):
         lines.append("")
         lines.append("[cortex]")
@@ -10370,6 +10655,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("[billing.stripe.prices]")
         lines.append('# pro = "price_..."')
         lines.append('# enterprise = "price_..."')
+    return lines
+
+
+def _cfg_advanced_external_agents_and_memory(advanced: dict[str, Any]) -> list[str]:
+    """External agents, the governed MCP sidecar, the REPL, harness refinement and memory options."""
+    lines: list[str] = []
     if advanced.get("external_agents"):
         lines.append("")
         lines.append("[external_agents]")
@@ -10451,6 +10742,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             lines.append("temporal = true")
         if advanced.get("fact_tags"):
             lines.append("fact_tags = true")
+    return lines
+
+
+def _cfg_advanced_governance_monitors(advanced: dict[str, Any]) -> list[str]:
+    """The governance and compliance monitor sections."""
+    lines: list[str] = []
     if advanced.get("fairness_monitor"):
         lines.append("")
         lines.append("[fairness_monitor]")
@@ -10531,6 +10828,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[domains]")
         lines.append("discipline = false")
+    return lines
+
+
+def _cfg_advanced_dreaming_and_tax(advanced: dict[str, Any]) -> list[str]:
+    """``[dreaming]`` and the signed tax-constants channel."""
+    lines: list[str] = []
     if advanced.get("dreaming"):
         lines.append("")
         lines.append("[dreaming]")
@@ -10555,6 +10858,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         if tax_keys:
             # Same escaping concern as the insight pubkeys above.
             _emit_kv(lines, "trusted_constants_pubkeys", tax_keys)
+    return lines
+
+
+def _cfg_advanced_runtime_and_tools(advanced: dict[str, Any], providers: list[str]) -> list[str]:
+    """Effort, caches, tool exposure, shield updates, eBPF, local runtime and local-first."""
+    lines: list[str] = []
     if advanced.get("effort"):
         lines.append("")
         lines.append("[effort]")
@@ -10605,6 +10914,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             lines.append("")
             lines.append("[local_first]")
             _emit_kv(lines, "model", local_model)
+    return lines
+
+
+def _cfg_advanced_oidc(advanced: dict[str, Any]) -> list[str]:
+    """``[auth.oidc]`` for SSO ID-token verification and the browser login flow."""
+    lines: list[str] = []
     oidc = advanced.get("oidc") or {}
     if isinstance(oidc, dict) and oidc.get("enabled"):
         # SSO ID-token verification for `maverick serve`. Its own table
@@ -10628,6 +10943,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             val = oidc.get(key)
             if val:
                 _emit_kv(lines, key, val)
+    return lines
+
+
+def _cfg_advanced_dashboard(advanced: dict[str, Any]) -> list[str]:
+    """The single ``[dashboard]`` table and its group-role/suite sub-tables."""
+    lines: list[str] = []
     dept = advanced.get("department_access") or {}
     compress_off = advanced.get("dashboard_compress") is False
     glass_on = advanced.get("dashboard_glass") is True
@@ -10698,6 +11019,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             for group, suites in dept["group_suites"].items():
                 rendered = ", ".join(_toml_str(s) for s in suites)
                 lines.append(f"{_toml_str(group)} = [{rendered}]")
+    return lines
+
+
+def _cfg_advanced_saml_and_sign_in(advanced: dict[str, Any]) -> list[str]:
+    """``[auth.saml]`` template and the session, MFA, owner TOTP and IP allowlist tables."""
+    lines: list[str] = []
     if advanced.get("saml"):
         lines.append("")
         # The ordinary guided setup supplies real values and separately reviews

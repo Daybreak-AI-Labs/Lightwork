@@ -27,7 +27,7 @@ def test_local_owner_choice_roundtrips_beside_department_policy(enabled):
 
 
 def test_local_owner_wizard_discloses_identity_boundary():
-    source = inspect.getsource(wizard.pick_advanced)
+    source = inspect.getsource(inspect.getmodule(wizard.pick_advanced))
     assert 'advanced["local_owner_setup"] = _q_confirm(' in source
     assert "named owner creates a local passphrase" in source
     assert "existing identity assignments" in source
