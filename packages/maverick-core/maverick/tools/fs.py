@@ -163,11 +163,11 @@ def _write_text_contained(sandbox, target: Path, content: str, *, legacy_journal
 def _is_test_path(rel_path: str) -> bool:
     """Heuristic: is this path a test file the benchmark grader uses?
 
-    Wave 10 (S1): we block read access to these in opaque benchmark
+    We block read access to these in opaque benchmark
     mode so the agent can't hardcode to gold expected values it spied
     in the assertion bodies.
 
-    Wave 12 hardening pass: any path UNDER a tests/ directory is
+    Any path UNDER a tests/ directory is
     blocked, not just files that match the test-naming heuristic. The
     prior rule (file matches test_*.py AND lives in tests/) left
     tests/conftest.py, tests/__init__.py, tests/helpers.py, and the
@@ -179,7 +179,7 @@ def _is_test_path(rel_path: str) -> bool:
     name = parts[-1] if parts else ""
     in_test_dir = any(seg in {"tests", "test", "__tests__", "spec", "specs"}
                       for seg in parts[:-1])
-    # Wave 12: ANY file under tests/ is gated.
+    # ANY file under tests/ is gated.
     if in_test_dir:
         return True
     test_file = (
@@ -198,7 +198,7 @@ def _is_test_path(rel_path: str) -> bool:
 
 
 def _is_dotgit_path(rel_path: str) -> bool:
-    """Wave 12 (council F9d): block reads under `.git/`.
+    """Block reads under `.git/`.
 
     The .git directory leaks the gold answer via refs/objects:
       - `.git/refs/heads/main` → gold commit SHA
@@ -226,7 +226,7 @@ def _is_opaque_blocked(rel_path: str) -> bool:
 
 
 def _is_opaque_blocked_resolved(sandbox, rel_path: str) -> bool:
-    """Wave 12 hardening pass: re-check the opacity gate on the CANONICAL
+    """Re-check the opacity gate on the CANONICAL
     resolved path so symlink trickery cannot bypass it.
 
     The raw-input check `_is_opaque_blocked(rel_path)` catches the
@@ -253,7 +253,7 @@ def _is_opaque_blocked_resolved(sandbox, rel_path: str) -> bool:
 def read_file(sandbox) -> Tool:
     def fn(args: dict) -> str:
         path_arg = args["path"]
-        # Wave 10 (S1) + Wave 12 (F9d) + Wave 12 hardening: block test
+        # Block test
         # AND .git/ reads in opaque mode, on the CANONICAL resolved
         # path so symlinks can't bypass.
         if _is_opaque_blocked_resolved(sandbox, path_arg):

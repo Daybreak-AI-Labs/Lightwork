@@ -495,7 +495,7 @@ MIGRATIONS: dict[int, list[str]] = {
     4: [],  # conversations/turns tables are in SCHEMA (idempotent CREATE)
     5: [],  # attachments table is in SCHEMA (idempotent CREATE)
     6: [],  # processed_messages table is in SCHEMA (idempotent CREATE)
-    # Wave 12 (council F17): episodes.ended_at + goal_events.ts indexes.
+    # episodes.ended_at + goal_events.ts indexes.
     # list_episodes() does `ORDER BY ended_at DESC LIMIT N` which is a
     # full table scan without the index — visible above ~5k episodes;
     # SWE-bench Pro creates ~7500 episodes per sweep (1865 instances ×
@@ -1381,7 +1381,7 @@ class WorldModel:
         # with WAL + busy_timeout this is safe for the agent+dashboard
         # concurrency pattern (one writer process + many readers).
         #
-        # Council round-2 perf-seat fix: ``check_same_thread=False`` alone
+        # ``check_same_thread=False`` alone
         # is insufficient. Two threadpool workers driving execute()+commit()
         # on the same connection can interleave: thread A opens an implicit
         # transaction with INSERT, thread B's INSERT joins the same
@@ -1464,7 +1464,7 @@ class WorldModel:
         # opt into FULL (durable on every commit) via [world_model] synchronous
         # / MAVERICK_WORLD_SYNCHRONOUS. Default NORMAL — behaviour unchanged.
         self.conn.execute(f"PRAGMA synchronous = {_synchronous_mode()}")
-        # May 26 council fix (long-tail audit #4): bound WAL file
+        # Bound WAL file
         # growth. Default autocheckpoint=1000 pages is fine, but with
         # a dashboard reader holding a snapshot lock, autocheckpoint
         # can stall and the WAL file grows monotonically. Explicit
@@ -1627,11 +1627,11 @@ class WorldModel:
     def close(self) -> None:
         """Close the underlying SQLite connection.
 
-        Wave 9 fix (council H1): benchmark runs construct ~1865
+        Benchmark runs construct ~1865
         WorldModel instances in one process; without close() the
         FD count climbs and the host eventually OOMs.
 
-        May 26 council fix (long-tail audit #4): checkpoint + truncate
+        Checkpoint + truncate
         the WAL on close so the sidecar file doesn't persist into the
         next instance's open. Best-effort; close still runs even if
         checkpoint fails.
@@ -1670,7 +1670,7 @@ class WorldModel:
         set_goal_status('done'/'blocked') leaves the row 'active' forever
         and `active_goal()` returns a ghost.
 
-        Council security/integrity finding: previous default was 0,
+        The previous default was 0,
         which reclaimed every active row -- including goals running in
         a sibling process (dashboard restarting while `maverick serve`
         is mid-goal would flip the live goal to 'blocked'). Default now
@@ -1857,7 +1857,7 @@ class WorldModel:
         # A recovery point before any forward-only migration runs.
         if current < SCHEMA_VERSION:
             self._backup_before_migration(current)
-        # Wave 12 hardening: temporarily bump busy_timeout for the
+        # Temporarily bump busy_timeout for the
         # migration. CREATE INDEX on a multi-million-row table
         # (long-lived production DB) can take 30s+ and the 5s default
         # would raise "database is locked" against a running dashboard.

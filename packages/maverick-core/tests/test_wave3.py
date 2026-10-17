@@ -1,4 +1,4 @@
-"""Wave 3 council fixes: AI-safety + privacy + UX."""
+"""AI-safety, privacy and UX fixes."""
 from __future__ import annotations
 
 import pytest

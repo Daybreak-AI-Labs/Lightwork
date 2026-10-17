@@ -1,4 +1,4 @@
-"""Wave 11 (PROBE-lite): failure-class router for test-driven revision."""
+"""Failure-class router for test-driven revision."""
 from __future__ import annotations
 
 

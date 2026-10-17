@@ -100,7 +100,7 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
         r"[A-Za-z0-9+/=\s]{0,65536}"
         r")",
         re.DOTALL)),
-    # Council finding #14: coverage gaps that fed the tool-output exfil class.
+    # Coverage gaps that fed the tool-output exfil class.
     ("gitlab_pat",         re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b")),
     ("twilio_api_key",     re.compile(r"\bSK[0-9a-fA-F]{32}\b")),
     ("slack_webhook",      re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9/]+")),

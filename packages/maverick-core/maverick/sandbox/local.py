@@ -299,11 +299,11 @@ class LocalBackend:
         self, cmd: str | list[str], timeout: float | None = None,
         stdin: str | None = None,
     ) -> ExecResult:
-        # Wave 10: per-call `timeout` kwarg lets the test runner override
+        # Per-call `timeout` kwarg lets the test runner override
         # the default 60s (too short for real pytest on SWE-bench
         # instances). Falls back to self.timeout when unset, preserving
         # behaviour for shell-tool callers that pass no timeout.
-        # May 26 council fix (long-tail audit): `text=True` returns str
+        # `text=True` returns str
         # on success but TimeoutExpired.stdout is bytes — without
         # explicit decode the result.stdout types diverge. Pin both
         # branches to str.

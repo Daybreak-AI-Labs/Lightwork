@@ -490,7 +490,7 @@ def test_rls_apply_raises_when_policy_cannot_be_installed_or_verified(monkeypatc
         world._apply_rls()
 
 def test_rls_covers_tables_added_after_the_v10_tenant_migration():
-    # Council #7: projects (v15) and fact_history (v18) carry tenant_id but were
+    # projects (v15) and fact_history (v18) carry tenant_id but were
     # absent from the RLS set, so a PG deployment left them app-layer-only. They
     # must be RLS-scoped, while staying OUT of the v10 column-add migration list.
     assert "projects" in postgres._RLS_TABLES

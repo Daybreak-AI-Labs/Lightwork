@@ -4132,7 +4132,7 @@ async def tenant_pinning(request: Request, call_next):
 
 
 # ----- goal-creation rate limit -----
-# Council safety-seat (round 1): nothing throttled /chat/send or
+# Nothing throttled /chat/send or
 # POST /api/v1/goals. A runaway loop or a flood of same-origin posts
 # could spawn unbounded goals, each costing real money. This is an
 # in-process sliding-window limiter (no new dependency) shared by all
@@ -4297,7 +4297,7 @@ def check_goal_rate_limit(request: Request | None = None, *, source: str | None 
 
 
 # ----- SSE stream concurrency cap -----
-# Council security finding (exposed-deployment hardening): each open SSE
+# Exposed-deployment hardening: each open SSE
 # stream spawns a 300s task polling SQLite every 0.5s. Thousands of
 # EventSource opens exhaust file descriptors and the event loop. The cap now
 # lives in _shared so app and api share ONE process-wide semaphore (was a
@@ -7469,7 +7469,7 @@ async def providers_page(request: Request) -> HTMLResponse:
     )
 
 
-# ----- Control surface pages (council pass) -----
+# ----- Control surface pages -----
 
 
 def safe_audit_day(day: str | None) -> str | None:
@@ -14019,7 +14019,7 @@ def errors_page(request: Request, goal_id: int) -> HTMLResponse:
 def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
     """CSV rollup of episode spend, streamed.
 
-    Council perf finding: prior version fetched up to 100k episodes
+    The prior version fetched up to 100k episodes
     into memory, then filtered by month in Python before writing the
     CSV to a StringIO. Now: stream rows directly from the DB, with the
     month filter pushed to SQL.
@@ -14151,7 +14151,7 @@ async def api_goal_events_stream(
 ) -> StreamingResponse:
     """Server-Sent Events stream of new goal events.
 
-    Council perf-seat fix: client polled this route every 2s (visible
+    The client used to poll this route every 2s (visible
     tab) / 5s (hidden tab) over the lifetime of every open goal page,
     burning 30 req/min/tab idle on a goal that finished an hour ago.
     SSE holds one TCP connection open, server polls SQLite at 0.5s

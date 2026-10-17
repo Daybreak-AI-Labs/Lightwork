@@ -1934,7 +1934,7 @@ class LLM:
         self._client_cache: OrderedDict[
             tuple[str, str | None, str], Any
         ] = OrderedDict()
-        # Wave 12 (council F12a): lock the provider cache so two
+        # Lock the provider cache so two
         # concurrent calls don't double-init httpx connection pools.
         import threading as _threading
         self._clients_lock = _threading.Lock()

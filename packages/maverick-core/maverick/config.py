@@ -4229,7 +4229,7 @@ def get_value(*, config: dict | None = None) -> dict:
     (``[value.departments.<name>]`` tables with ``hourly_rate`` /
     ``hours_per_task``) so legal work can be priced differently from support.
     ``enable`` only shows/hides the dashboard page; the numbers are always safe
-    (read-only, they never tune anything -- the council's warning that cost
+    (read-only, they never tune anything -- cost
     pressure must not defund safety). Defaults are deliberately conservative so
     an out-of-box ROI claim is defensible, not inflated.
     Env override: ``MAVERICK_VALUE_HOURLY_RATE`` / ``MAVERICK_VALUE_HOURS``.

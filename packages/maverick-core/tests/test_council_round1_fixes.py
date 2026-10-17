@@ -1,4 +1,4 @@
-"""Regression tests for the adversarial-council round-1 fixes.
+"""Regression tests for the review round-1 fixes.
 
 Each test pins a specific finding so a future refactor can't silently
 reintroduce the bug. Findings are referenced by their seat tag.

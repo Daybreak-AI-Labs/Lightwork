@@ -78,9 +78,9 @@ def _any_provider_key_set() -> bool:
     """True iff some LLM provider is configured (env key, base-url env, or
     a ``[providers.<name>]`` config table with api_key/base_url).
 
-    Council UX fix round 1: the dashboard used to hard-fail on a missing
+    The dashboard used to hard-fail on a missing
     ANTHROPIC_API_KEY even when the user had OpenAI or Gemini set up.
-    Round 2 (platform test): it still rejected keyless self-hosted setups
+    Later it still rejected keyless self-hosted setups
     (Ollama/vLLM/TGI via config or *_BASE_URL) that the CLI accepted and ran
     fine — three components, three different predicates. Delegate to the one
     shared predicate in maverick.config; the name is kept for call sites.
@@ -232,7 +232,7 @@ def authenticated_subject(request, *, error_detail: str) -> str:
 
 
 def _world():
-    """Return a per-DB-path cached WorldModel (council perf fix).
+    """Return a per-DB-path cached WorldModel.
 
     Opening a new WorldModel on every request re-runs the PRAGMAs and the
     schema-migration check, leaks the connection (no close()), and

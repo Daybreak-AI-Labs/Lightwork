@@ -40,9 +40,9 @@ def test_council_sections_are_known():
     """The learning-engine sections the runtime reads (config.py get_* helpers)
     and the wizard writes -- enabling them must not make `maverick migrate` claim
     they 'do nothing', which would lead a user to delete a live feature."""
-    council = {"data_engine", "consequence", "emergent_protocol",
+    runtime_sections = {"data_engine", "consequence", "emergent_protocol",
                "emergent_codec", "operations_scientist"}
-    missing = council - KNOWN_SECTIONS
+    missing = runtime_sections - KNOWN_SECTIONS
     assert not missing, f"runtime reads these but migrate would flag them: {sorted(missing)}"
 
 

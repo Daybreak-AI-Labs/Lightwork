@@ -15,7 +15,7 @@ import click
 
 from ..sandbox_names import BUILTIN_SANDBOX_BACKENDS
 
-# Council round-2 perf-seat fix: keep the top-level import surface
+# Keep the top-level import surface
 # minimal so `maverick --help` and `maverick version` don't pay for
 # heavy submodules (orchestrator, agent, swarm, skills, sandbox) they
 # never use. Submodules import lazily inside the command bodies that
@@ -4095,7 +4095,7 @@ def start(
             max_wall_seconds=max_wall_seconds,
         )
 
-        # Council UX finding: `maverick start "..."` used to look hung
+        # `maverick start "..."` used to look hung
         # between "goal created" and the final printout. A background poller
         # streams goal_events to stderr so the user sees the swarm thinking
         # in real time. Non-tty output (e.g. piped to a file) skips the
@@ -5422,7 +5422,7 @@ def plugin_stats_cmd() -> None:
 def plugin_new(name: str, kind: str, dest: str) -> None:
     """Generate a working plugin skeleton at ./<NAME>/.
 
-    Closes the council ecosystem-seat gap: third-party contributors had
+    Third-party contributors had
     no on-ramp besides hand-writing pyproject.toml + the entry-point
     block + a manifest. This generates all four files with a working
     factory the contributor can ``pip install -e .`` and exercise
@@ -5800,7 +5800,7 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
         click.echo(f"This will erase {len(convs)} conversation(s) for {channel}:{user}.")
         click.confirm("Proceed?", abort=True)
 
-    # Council security finding: previous version left goals, messages,
+    # The previous version left goals, messages,
     # episodes, questions, goal_events, attachments-rows, and
     # processed_messages intact -- a documented Art. 17 violation. Full
     # cascade now wipes every row referencing goals tied to this user's
@@ -6387,7 +6387,7 @@ def export_user(ctx, channel: str, user: str, output) -> None:
 def gc(ctx, days: int, events_days: int, yes: bool) -> None:
     """Garbage-collect old conversations and goal_events.
 
-    Tier 1 council finding: retention was "forever" by default; this
+    Retention was "forever" by default; this
     command (plus the systemd timer in deploy/vps/) enforces a policy.
     """
     if not yes:

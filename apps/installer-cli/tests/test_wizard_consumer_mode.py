@@ -1,4 +1,4 @@
-"""Council round-2: consumer-mode flow + first-screen picker."""
+"""Consumer-mode flow + first-screen picker."""
 from __future__ import annotations
 
 from pathlib import Path

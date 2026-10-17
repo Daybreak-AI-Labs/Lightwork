@@ -1,4 +1,4 @@
-"""Regression tests for adversarial-council round-2 fixes."""
+"""Regression tests for the review round-2 fixes."""
 from __future__ import annotations
 
 import os

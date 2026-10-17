@@ -1,4 +1,4 @@
-"""Wave 12 (council F13): Anthropic API fixes.
+"""Anthropic API fixes.
 
   - F13a: cache TTL must be consistent across system/tools/messages
     breakpoints (was hardcoded "1h" for messages).
@@ -105,7 +105,7 @@ class TestToolsSorted:
 
 
 class TestInterleavedThinkingHeader:
-    """Wave 12 hotfix: header policy per Anthropic May 2026 docs.
+    """Header policy per Anthropic May 2026 docs.
     Opus 4.7 + Sonnet 4.6 + Haiku 4.5: adaptive thinking is built-in,
     NO header needed (and Opus 4.7 rejects manual `enabled`).
     Sonnet 4.5 / Opus 4.5: header still required to get interleaved.

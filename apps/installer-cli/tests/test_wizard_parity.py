@@ -1,4 +1,4 @@
-"""Council pass: wizard parity with kernel features.
+"""Wizard parity with kernel features.
 
 Confirms the eight new wizard steps emit correct TOML, the three new
 channel adapters round-trip, and the `_safe_*` helpers replace the
