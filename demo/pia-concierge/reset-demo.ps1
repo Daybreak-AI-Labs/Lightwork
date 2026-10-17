@@ -4,7 +4,7 @@
 # the full environment, waits for both servers, and prints a go/no-go
 # checklist. Run it before every pitch:
 #
-#   cd C:\Users\Cstep\Lightwork\demo\pia-concierge
+#   cd <your Lightwork checkout>\demo\pia-concierge
 #   powershell -ExecutionPolicy Bypass -File .\reset-demo.ps1
 #
 # The relaunch reseeds ~14 months of history (1-2 minutes) - the script waits

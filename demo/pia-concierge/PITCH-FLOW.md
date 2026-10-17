@@ -6,7 +6,7 @@ team can drive from this page. Total runtime ~10 minutes plus questions.
 ## Before the audience arrives
 
 ```powershell
-cd C:\Users\Cstep\Lightwork\demo\pia-concierge
+cd <your Lightwork checkout>\demo\pia-concierge
 powershell -ExecutionPolicy Bypass -File .\reset-demo.ps1
 ```
 

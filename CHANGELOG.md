@@ -89,6 +89,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plan moved beside its code at `benchmarks/benchmark-plan.md`; every
   remaining citation was rewritten, and a claims-docs test keeps the
   material from coming back.
+- **No point-in-time working material or personal identifiers in the
+  tracked tree.** The dated UX audit dump (`docs/ux-audit-2026-09-30/`) and
+  its delivered-fixes log left the repository and the pages that cited them
+  describe the evidence instead; personal workstation paths and the AWS
+  account id became placeholders, and the Terraform state bucket is now
+  supplied at `terraform init` time from a git-ignored `backend.hcl`. The
+  Homebrew README names the same tap as the formula and the logo moved
+  under `docs/assets/`.
 - **Ordinary tasks have optional limits** — omitted dollar, time, token,
   tool-call and step limits remain unset across customer entrypoints. Existing
   numeric settings stay intact; Settings can reversibly disable saved task

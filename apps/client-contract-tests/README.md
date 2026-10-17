@@ -21,7 +21,7 @@ token migration, host/credential changes and safe external-client failures, plus
 recovery. The latter uses pytest and requests from the Python development
 environment. Local qualification is now authorized. All 60 Node cases and all 14 controlled
 external Python example cases passed on 2026-09-30; two CLI budget-preview cases
-also passed. The exact source, pinned dependency versions, log hashes and limits
-are in [native-client-qualification.json](../../docs/ux-audit-2026-09-30/native-client-qualification.json).
+also passed; the dated qualification receipt (source, pinned dependency
+versions, log hashes and limits) is kept with the release evidence outside this tree.
 These use controlled host/transport APIs, including real Lua source in Fengari.
 They do not qualify installed IDEs, devices, accessibility or live providers.

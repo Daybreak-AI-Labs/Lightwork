@@ -35,8 +35,8 @@ Product validation adds a language-labelled error without modifying the draft.
 path; ordinary caller messages remain unchanged.
 
 Run `python scripts/journey_i18n_coverage.py --output
-docs/ux-audit-2026-09-30/web-localization-coverage.json` from the repository root
-to regenerate the engineering inventory. It reports literal HTML occurrences,
+<path>/web-localization-coverage.json` from the repository root to generate the
+engineering inventory (the output is a working file, not a tracked document). It reports literal HTML occurrences,
 with source locations. It deliberately does **not** qualify dynamic labels,
 shared includes, browser/API messages, linguistic quality or screen-reader
 behavior. The audit slice lists the remaining work rather than treating zero

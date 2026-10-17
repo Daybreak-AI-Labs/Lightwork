@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Daybreak%20Labs%20Logo.jpg" alt="Daybreak Labs" width="360">
+  <img src="docs/assets/daybreak-labs-logo.jpg" alt="Daybreak Labs" width="360">
 </p>
 
 # Lightwork

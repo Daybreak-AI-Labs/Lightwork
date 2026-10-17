@@ -32,7 +32,7 @@ Lightwork is a recursive multi-agent swarm with a safety layer at every chokepoi
 
 ### `packages/maverick-core/`
 
-The agent kernel. Ported from `cdayAI/research/maverick/` and evolved here.
+The agent kernel.
 
 | Module | Role |
 |---|---|
