@@ -57,7 +57,7 @@ quick visual check with the pre-installed Chromium: `npx playwright screenshot
 ## Deploy — live
 Hosted on **Cloudflare Pages**, project `daybreak-labs`:
 - Production: https://daybreak-labs.pages.dev
-- Redeploy: `CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… npx wrangler pages deploy pitch/site --project-name=daybreak-labs --branch=main`
+- Redeploy: `CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… npx wrangler pages deploy website --project-name=daybreak-labs --branch=main`
 
 **Custom domain `daybreakailabs.com`** (+ `www`) is attached to the project. Two
 things must both be true for it to serve: the domain's nameservers point at

@@ -2,7 +2,7 @@
 
 This procedure is for maintainers who already have approved access to the
 private repository. A Git clone transfers the whole tracked repository,
-including internal research, audit evidence and patent documents. Do not grant
+including engineering research and audit evidence. Do not grant
 repository access or send a repository archive merely to install Lightwork for
 a customer. Use an actual signed [release asset](../../README.md#install) for
 customer delivery when one exists for the target platform.

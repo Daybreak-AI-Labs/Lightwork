@@ -80,7 +80,7 @@ management, AI-incident communication procedure).
 
 ## 5. Certification roadmap
 
-Per `docs/research/commercialization/07-trust-certifications-roadmap.md`:
+Per the certification roadmap held with the business material:
 **4–6 months if ISO 27001 already exists** (6–12 months standalone).
 
 1. **Stack on the ISMS:** reuse the certified management system, risk

@@ -12,7 +12,7 @@
    name Web3Forms as a data processor and the vendor's data-handling terms
    must be reviewed — the policy is written to describe exactly what happens
    today (mailto only) and must be updated in the same change that turns this
-   on. See pitch/site/README.md. */
+   on. See website/README.md. */
 (function () {
   "use strict";
   // Resolve the key from deploy-time injection first, then the inline constant.

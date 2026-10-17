@@ -8,9 +8,9 @@ three-word status vocabulary: **shipped / preview / external**. This module is
 that vocabulary's authority; the product landing page and the module-off gate
 banner both read status from here so it can never drift between them.
 
-Status is assigned conservatively from the capability review in
-``docs/ONETRUST_PARITY_BREAKDOWN_2026-08-31.md`` and
-``docs/ONETRUST_FULL_PLATFORM_CAPABILITY_MATRIX_2026-08-30.md``:
+Status is assigned conservatively from the OneTrust capability review (the
+parity breakdown and the full-platform capability matrix, held with the
+business material outside this repository):
 
   * ``shipped``  <- an *Implemented* capability row: a coherent local product
                     path is mounted, configuration-ready and focused-test-

@@ -62,7 +62,7 @@ are driven by the [risk register](../risk-register.md) (AI risks R-19…R-25) an
 | A.6.1.2 | Objectives for responsible development | Y | Implemented | Verifier/anti-cheating; safety-by-default; POL-12 |
 | A.6.1.3 | Processes for responsible design & development | Y | Implemented | Secure-dev (POL-06); threat model; Shield in the loop |
 | A.6.2.2 | AI system requirements & specification | Y | Partial | Capability/governance specs; POL-12 |
-| A.6.2.3 | Documentation of design & development | Y | Partial | `docs/`; invention disclosures `docs/patents/`; to consolidate per-system |
+| A.6.2.3 | Documentation of design & development | Y | Partial | `docs/`; invention disclosures are held in the private business repository; to consolidate per-system |
 | A.6.2.4 | Verification & validation | Y | Implemented | Snapshot-replay regression (`hindsight.py`); calibration gating (`calibration.py`); eval-gated CI |
 | A.6.2.5 | Deployment | Y | Implemented | Staged rollout 10/50/100% with signed audit (`learning_rollout.py`) |
 | A.6.2.6 | Operation & monitoring | Y | Implemented | OpenTelemetry, health, circuit breakers; continuous fairness monitoring with signed `FAIRNESS_ALERT` (`fairness_monitor.py`) alongside on-demand `bias_eval` |

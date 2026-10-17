@@ -95,7 +95,7 @@ review, real records), not authoring.
 
 ## 6. Certification roadmap
 
-Per `docs/research/commercialization/07-trust-certifications-roadmap.md`,
+Per the certification roadmap held with the business material,
 ISO 27001 is ~6–10 months and largely reuses the SOC 2 backbone.
 
 1. **Readiness (months 0–3):** approve policies; ratify scope; populate and

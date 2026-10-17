@@ -86,7 +86,7 @@ for(const stage of ["fetch","body"])test(`status widget bounds hung ${stage}, re
 async function pitch(fetch) {
   const dom=new JSDOM('<html><head><meta name="web3forms-access-key" content="synthetic-key"></head><body><a data-demo href="#">Demo</a></body></html>',{url:"https://fixture.invalid/",runScripts:"outside-only"});
   const w=dom.window;await new Promise(resolve=>w.document.addEventListener("DOMContentLoaded",resolve,{once:true}));
-  w.fetch=fetch;w.eval(read("pitch/site/app.js"));const form=w.document.querySelector("#demo-form");
+  w.fetch=fetch;w.eval(read("website/app.js"));const form=w.document.querySelector("#demo-form");
   for(const name of ["name","email","company","message","botcheck"])Object.defineProperty(form,name,{value:form.elements.namedItem(name),configurable:true});
   form.elements.namedItem("name").value="Synthetic Name";form.elements.namedItem("email").value="person@example.invalid";
   return {dom,w,form,button:form.querySelector(".df-submit"),open(){w.document.querySelector("[data-demo]").click();},

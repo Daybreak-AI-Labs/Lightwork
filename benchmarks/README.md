@@ -80,7 +80,7 @@ falsifiable instead of marketing -- and, like `eval_smoke.py`, it runs in CI wit
 It reports a **prevention rate** (unsafe vectors contained) *and* a **utility
 rate** (legitimate paths preserved), so it can't be gamed by a control that
 blocks everything. This is the CI-runnable half of
-[`../docs/strategy/benchmark-plan.md`](../docs/strategy/benchmark-plan.md); the
+[`benchmark-plan.md`](benchmark-plan.md); the
 broader governed-vs-baseline frontier is implemented by
 `eval_governance_frontier.py`. Run the fast wiring smoke standalone:
 `python benchmarks/eval_governance.py`.

@@ -10,6 +10,7 @@ that look recorded when none are.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -69,7 +70,6 @@ def test_firecracker_is_described_as_a_scaffold_not_a_deploy_target():
     checked = {
         "README.md": None,
         "SECURITY.md": None,
-        "pitch/SECURITY-QUESTIONNAIRE.md": "deploy targets",
         "docs/architecture.md": None,
         "docs/handbook.md": None,
         "docs/configuration.md": None,
@@ -164,3 +164,33 @@ def test_open_items_lists_the_items_still_open():
     fixed = text.split("## Checked and already fixed (not open)", 1)[1]
     for phrase in ("row-level security", "rolbypassrls", "nonce", "want_response_signed"):
         assert phrase in fixed, phrase
+
+
+def test_business_material_stays_out_of_the_product_repository():
+    """Fundraising, strategy, competitor teardowns and patent material live in the
+    private business repository, not beside the product. A clone of this tree
+    must not hand a contractor or design partner the investor deck, the data
+    room, the pricing research or an invention disclosure."""
+    removed_directories = (
+        "pitch",
+        "docs/patents",
+        "docs/strategy",
+        "docs/research/commercialization",
+        "docs/research/competitive",
+    )
+    present = [d for d in removed_directories if (REPO_ROOT / d).exists()]
+    assert present == [], f"business material directories back in the product tree: {present}"
+    # Documentation and root files only: product skill packs legitimately carry
+    # names such as investor-update-author.md and due-diligence-data-room.md.
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "docs", "*.md", "*.pdf", "*.pptx", ":!docs/audits/*"],
+        capture_output=True, text=True, cwd=REPO_ROOT, check=True,
+    ).stdout.split("\n")
+    tracked = [path for path in tracked if path and (path.startswith("docs/") or "/" not in path)]
+    telltale = re.compile(
+        r"(investor|pitch[-_ ]?deck|fundrais|patent|seed[-_ ]deck|gtm[-_ ]outreach|"
+        r"purchase[-_ ]blockers|invention[-_ ](register|disclosure|implementation))",
+        re.IGNORECASE,
+    )
+    suspicious = sorted(path for path in tracked if telltale.search(path.rsplit("/", 1)[-1]))
+    assert suspicious == [], f"file names that look like business material: {suspicious}"

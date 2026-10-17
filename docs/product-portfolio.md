@@ -4,8 +4,8 @@
 > built, (2) pick product/tier/pack **names**, and (3) seed the website.
 >
 > **Pricing is a directional starting point, not validated.** The numbers are
-> hypotheses anchored to the competitor bands in
-> [`research/commercialization/02-packaging-pricing-editions.md`](./research/commercialization/02-packaging-pricing-editions.md).
+> hypotheses anchored to the competitor bands in the packaging and pricing
+> research, which is held with the business material outside this repository.
 > Re-confirm against design partners before any external use.
 
 ## The shape — 4 products
@@ -43,8 +43,8 @@ is plumbing *inside* Product 1, not a separate thing to sell.
 | **Billing-plan key** (multi-tenant entitlement) | `free` · `pro` · `enterprise` | Technical plan IDs an operator assigns *per tenant* for feature gating + quotas (`maverick.billing.DEFAULT_PLANS`) — **not** the sales-tier names. | Code (`billing.py`) |
 
 Working tier labels (Basic/Gold/Platinum) are placeholders pending the
-[Naming worksheet](#naming-worksheet). The earlier exploration in
-[`research/commercialization/02-packaging-pricing-editions.md`](./research/commercialization/02-packaging-pricing-editions.md)
+[Naming worksheet](#naming-worksheet). The earlier packaging and pricing
+exploration (held with the business material outside this repository)
 used **Community / Team / Enterprise** and a **$120K** entry-enterprise floor;
 that teardown is **superseded by this document** for current naming and numbers
 (the Platinum floor here is **$200K**). All pricing remains a directional
@@ -305,8 +305,8 @@ placeholders.)
 ## Notes & caveats
 
 - **All pricing is a directional hypothesis**, anchored to competitor bands
-  (OneTrust, Vanta, Drata, IBM watsonx.governance) documented in
-  [`research/commercialization/02-packaging-pricing-editions.md`](./research/commercialization/02-packaging-pricing-editions.md).
+  (OneTrust, Vanta, Drata, IBM watsonx.governance) documented in the
+  packaging and pricing research held with the business material.
   Validate with design partners before publishing.
 - **Don't meter the audit log or charge per-agent** — it punishes the exact behavior
   a recursive swarm exists to produce. Agent count is a soft tier *band*, never a

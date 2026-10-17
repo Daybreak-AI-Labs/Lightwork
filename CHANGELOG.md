@@ -78,6 +78,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connectors onto saved connections is not part of this change.
 
 ### Changed
+- **Business material left the product repository.** The fundraising and
+  go-to-market package (`pitch/`), patent material (`docs/patents/`), strategy
+  essays (`docs/strategy/`), commercialization and competitor research
+  (`docs/research/commercialization/`, `docs/research/competitive/`, the
+  invention register and purchase-blocker notes), the OneTrust gap analyses,
+  the Palantir playbook and three dated internal hand-off documents now live
+  in the private business repository. The public marketing site moved from
+  `pitch/site/` to `website/` (same Cloudflare Pages deploy); the benchmark
+  plan moved beside its code at `benchmarks/benchmark-plan.md`; every
+  remaining citation was rewritten, and a claims-docs test keeps the
+  material from coming back.
 - **Ordinary tasks have optional limits** — omitted dollar, time, token,
   tool-call and step limits remain unset across customer entrypoints. Existing
   numeric settings stay intact; Settings can reversibly disable saved task

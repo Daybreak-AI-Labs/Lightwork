@@ -33,8 +33,8 @@ For a customer installation, obtain the signed binary for your operating
 system from an [asset-bearing GitHub Release](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
 Verify the exact tag and attached signature, then open the local dashboard to
 complete setup in Lightwork. If the release has no binary for your platform,
-request a customer package. Repository access is an engineering arrangement:
-cloning the repository also copies internal research, audit and patent files.
+request a customer package. Repository access is an engineering arrangement,
+not a customer delivery channel.
 
 After connecting an AI service, a first task can be run in Chat or from the
 terminal without file or program access:

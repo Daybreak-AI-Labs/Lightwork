@@ -1,6 +1,6 @@
 name: Deploy marketing site
 
-# Publishes pitch/site to Cloudflare Pages (project: daybreak-labs) on every
+# Publishes website to Cloudflare Pages (project: daybreak-labs) on every
 # push to main that touches the site, and on manual dispatch. This is the
 # "connect the repo to Cloudflare" piece: before it, the site was published by
 # hand (`wrangler pages deploy`) and a merge to main did nothing on its own.
@@ -14,7 +14,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "pitch/site/**"
+      - "website/**"
       - ".github/workflows/pages-deploy.yml"
   workflow_dispatch: {}
 
@@ -44,5 +44,5 @@ jobs:
             echo "::error::CLOUDFLARE_API_TOKEN repository secret is not set. Add it under Settings > Secrets and variables > Actions, then re-run." >&2
             exit 1
           fi
-          npx --yes wrangler@4 pages deploy pitch/site \
+          npx --yes wrangler@4 pages deploy website \
             --project-name=daybreak-labs --branch=main --commit-dirty=true

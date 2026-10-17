@@ -626,8 +626,8 @@ limits are recorded in the [operation coverage register](post-install-operation-
   commits through the same SSRF-safe / egress-guarded path the tool form uses,
   and records lineage — so a real system-of-record write is governed, not just
   a confirm-gated tool call. Opt-in via `[governed_connectors] enable` +
-  `connectors` (`MAVERICK_GOVERNED_CONNECTORS`; wizard step). Palantir-style
-  action governance, for self-improving agents (see `docs/palantir-playbook.md`).
+  `connectors` (`MAVERICK_GOVERNED_CONNECTORS`; wizard step). Traceable
+  action governance for self-improving agents.
 - **Governed learning at scale** (`access_policy.py`, `learning_rollout.py`;
   opt-in, additive) — **PBAC**: a skill declares `purposes:` and
   `relevant_skills` recalls it only under a matching run purpose
@@ -5930,9 +5930,6 @@ tested without spawning py-spy.
   ([`docs/governance/safety-steering-group.md`](./governance/safety-steering-group.md))
   and the elected-TSC charter draft with explicit launch gates
   ([`docs/governance/governance-v2-tsc.md`](./governance/governance-v2-tsc.md)).
-  **Strategy**: the five-year vision essay
-  ([`docs/strategy/vision-2031.md`](./strategy/vision-2031.md)), every
-  backward-looking claim grounded in this catalogue.
 - **AR plan tree (visionOS scaffold)** (`apps/visionos-plan-tree/`):
   SwiftUI + RealityKit volumetric window rendering the goal forest from
   `GET /api/v1/goal-tree` — status-colored spheres, parent link bars,
