@@ -1,12 +1,8 @@
-# Lightwork — Product Portfolio & Pricing (Working Draft)
+# Lightwork — Product portfolio
 
-> **Purpose:** an internal working doc to (1) show the full scope of what's been
-> built, (2) pick product/tier/pack **names**, and (3) seed the website.
->
-> **Pricing is a directional starting point, not validated.** The numbers are
-> hypotheses anchored to the competitor bands in the packaging and pricing
-> research, which is held with the business material outside this repository.
-> Re-confirm against design partners before any external use.
+The four products, the three axes that describe what a customer gets, and the
+tier and pack catalogue that `maverick.billing`, `maverick.entitlements` and the
+vendor console gate against. Commercial terms are not part of this document.
 
 ## The shape — 4 products
 
@@ -39,16 +35,10 @@ is plumbing *inside* Product 1, not a separate thing to sell.
 | Axis | Values | What it means | Defined in |
 |---|---|---|---|
 | **Edition** (distribution) | **Community** *(planned — not yet shipped)* · **Enterprise** *(available now)* | Open-core split: a future stripped-down community on-ramp vs. the licensed commercial build. | [`enterprise/editions.md`](./enterprise/editions.md) |
-| **Platform tier** (commercial pricing, within Enterprise) | **Basic · Gold · Platinum** | The good/better/best pricing tiers in this doc. | This doc (canonical) |
+| **Platform tier** (commercial, within Enterprise) | **Basic · Gold · Platinum** | The good/better/best tiers in this doc. | This doc (canonical) |
 | **Billing-plan key** (multi-tenant entitlement) | `free` · `pro` · `enterprise` | Technical plan IDs an operator assigns *per tenant* for feature gating + quotas (`maverick.billing.DEFAULT_PLANS`) — **not** the sales-tier names. | Code (`billing.py`) |
 
-Working tier labels (Basic/Gold/Platinum) are placeholders pending the
-[Naming worksheet](#naming-worksheet). The earlier packaging and pricing
-exploration (held with the business material outside this repository)
-used **Community / Team / Enterprise** and a **$120K** entry-enterprise floor;
-that teardown is **superseded by this document** for current naming and numbers
-(the Platinum floor here is **$200K**). All pricing remains a directional
-hypothesis — see the note at the top.
+The tier labels (Basic/Gold/Platinum) are working names.
 
 ---
 
@@ -88,16 +78,7 @@ environments*.
 | Support | — | Community | Standard SLA | Dedicated CSM + premium SLA |
 
 > A free self-hosted **Community** on-ramp (runtime + safety primitives, single-tenant,
-> local auth) can sit *below* Basic as the top-of-funnel, per the open-core line in the
-> commercialization doc.
-
-### Pricing — starting point (annual, placeholder)
-
-| Tier | Anchor price | Why this band | Who buys it |
-|---|---|---|---|
-| **Basic** | **$18K / yr** | Above the ~$10K "this is a real system" credibility floor; near Vanta/Drata entry. | A team that wants a safe, working agent workforce, single-tenant. |
-| **Gold** | **$90K / yr** | Between Vanta enterprise and OneTrust entry; this is the governance/control-plane tier. | An enterprise that has to pass security + compliance review. |
-| **Platinum** | **$200K floor → $500K+** | OneTrust enterprise band; regulated, self-improving, federated. | Regulated/large enterprise: finance, health, gov, critical infra. |
+> local auth) can sit *below* Basic.
 
 ---
 
@@ -218,15 +199,6 @@ industry's regime/jurisdiction packs.
 | **Telecom, Media & Tech** | 5 | Content metadata, network NOC triage, rights clearance, royalty calculation, subscriber billing. |
 | **Hospitality** | 5 | Revenue management, guest-relations service recovery, group/events BEOs, reservations, property compliance. |
 
-### Pack pricing — starting point (annual, placeholder, attaches to a platform tier)
-
-| Pack type | Anchor price | Notes |
-|---|---|---|
-| Flagship (CFO / Tax / Legal) | **$60K / yr each** | Deepest workflows, highest willingness-to-pay. Tax can also be priced per-return or per-seat for firms. |
-| Corporate Function pack | **$25K / yr each** | Bundle all 13 functions for ~$150K (vs. $300K+ à la carte). |
-| Industry Vertical pack | **$75K / yr each** | Includes the industry's regime/jurisdiction packs. |
-| Outcome-priced labor (optional) | **per completed unit** | e.g., per completed DSAR, per filed-ready return, per resolved ticket — aligns price to value without taxing usage. |
-
 ---
 
 ## Product 3 — Fleet Governance & Memory
@@ -236,9 +208,7 @@ Copilot, custom in-house agents, open-source runtimes. They deposit their experi
 into one roster-gated, Shield-scanned, tenant-isolated memory and recall lessons
 from it; every read is audited, and value is broken out **per vendor**. It sells even
 to organizations that never run Lightwork's own runtime, which is what makes it a
-standalone product and not just a platform feature.
-
-**Pricing — starting point:** **$75K / yr** standalone, or **included at Platinum**.
+standalone product and not just a platform feature. Included at Platinum.
 
 ---
 
@@ -253,64 +223,13 @@ synthesizes a validated, fail-closed custom department pack):
 - Regulated / air-gapped deployment engagements.
 - White-glove onboarding and design-partner programs.
 
-**Pricing — starting point:** custom department authoring from **$25K**; regulated/
-air-gap deployment from **$50K**; outcome-priced labor modules per completed unit;
-everything else time-and-materials.
-
 ---
 
-## Consolidated pricing table (starting point)
+## Notes
 
-| Product | SKU | Anchor (annual) |
-|---|---|---|
-| Platform | Basic | $18K |
-| Platform | Gold | $90K |
-| Platform | Platinum | $200K → $500K+ |
-| Agent Pack | Flagship (each) | $60K |
-| Agent Pack | Corporate Function (each) | $25K |
-| Agent Pack | Industry Vertical (each) | $75K |
-| Fleet Governance & Memory | Standalone | $75K |
-| Custom Work | Engagement | from $25K |
-
-**Example deal shapes**
-- *Mid-market land:* Gold + Finance pack → **~$150K/yr**.
-- *Regulated expand:* Platinum + Banking pack + Fleet Governance → **~$350K/yr**.
-- *CPA firm:* Basic + Tax pack (or per-return) → **~$80K/yr**.
-
----
-
-## Naming worksheet
-
-The whole point of this doc — fill in the names. (Current labels are descriptive
-placeholders.)
-
-| Thing | Current placeholder | Proposed name |
-|---|---|---|
-| The company | Daybreak Labs | |
-| The platform | Lightwork Platform | |
-| Tier 1 | Basic | |
-| Tier 2 | Gold | |
-| Tier 3 | Platinum | |
-| The agent-pack line | Specialized Agent Packs | |
-| Flagship: finance | Office of the CFO | |
-| Flagship: tax | Tax | |
-| Flagship: legal | Legal & Privacy | |
-| Product 3 | Fleet Governance & Memory | |
-| Product 4 | Custom Work | |
-| The learning capability | Provable Learning | |
-| The causal engine | Cognitive Data Engine | |
-
----
-
-## Notes & caveats
-
-- **All pricing is a directional hypothesis**, anchored to competitor bands
-  (OneTrust, Vanta, Drata, IBM watsonx.governance) documented in the
-  packaging and pricing research held with the business material.
-  Validate with design partners before publishing.
-- **Don't meter the audit log or charge per-agent** — it punishes the exact behavior
-  a recursive swarm exists to produce. Agent count is a soft tier *band*, never a
-  multiplier (see the commercialization doc, "What would kill us").
+- The audit log is never metered and agents are never priced per head: agent
+  count is a soft tier *band*, never a multiplier, because per-agent pricing
+  punishes the behaviour a recursive swarm exists to produce.
 - The 53 suites all pass the quality gate (`maverick domains-lint`): every agent has a
   bounded persona, a least-privilege allow-list, an explicit deny-list, and a risk
   ceiling — 0 errors, 0 warnings across all 2,020.

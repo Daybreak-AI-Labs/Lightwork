@@ -397,19 +397,18 @@ for ex in ds:
   irrelevant.
 - **Lightwork produces no patch**: check the agent's `FINAL` is a
   unified diff. If it's prose, add a worker-system-prompt hint that
-  SWE-bench expects `--- a/... +++ b/...` format. Open an issue and
-  I'll wire a `--coding-mode` flag.
+  SWE-bench expects `--- a/... +++ b/...` format. A `--coding-mode`
+  flag that does this is not wired yet.
 - **Evaluator hangs on Docker build**: SWE-bench Pro images are ~5 GB
   each first time. Run with `--max_workers 1` for the first build pass,
   then crank it up.
 
-## What I built vs. what you bring
+## What the harness provides vs. what you bring
 
-- I built: the harness, the three baselines (one full, two scaffolded),
+- Provided: the harness, the three baselines (one full, two scaffolded),
   the cost tracker, the contamination guard, the Pareto-frontier helper.
 - You bring: the dataset, the Docker host, the API budget, the time.
 
-When you have a smoke-clean run, ping me with the predictions CSV and
-the evaluator's `results.json` — I'll wire the Pareto table generator
-into `benchmarks/_common/render_results.py` so future runs are
-one-command.
+When you have a smoke-clean run, the predictions CSV and the evaluator's
+`results.json` are the inputs to the Pareto table. A one-command generator
+for that table is not written yet.
