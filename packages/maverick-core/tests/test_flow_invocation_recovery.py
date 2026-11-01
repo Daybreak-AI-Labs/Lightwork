@@ -154,6 +154,7 @@ def test_production_flow_uses_actual_usage_without_a_generated_task_cap(monkeypa
     from maverick import runner
 
     calls = []
+    origins = []
 
     class World:
         def create_goal(self, *_args, **_kw):
@@ -161,6 +162,9 @@ def test_production_flow_uses_actual_usage_without_a_generated_task_cap(monkeypa
 
         def get_goal(self, _gid):
             return SimpleNamespace(status="done", result="customer result")
+
+        def record_goal_origin(self, gid, source, correlation):
+            origins.append((gid, source, correlation))
 
     def dispatch(_gid, **kwargs):
         calls.append(kwargs)
@@ -177,6 +181,7 @@ def test_production_flow_uses_actual_usage_without_a_generated_task_cap(monkeypa
                             action_runner=lambda *_: ("", 1.0))
     assert run.status == "completed" and run.data["answer"] == "customer result"
     assert run.cost_dollars == pytest.approx(0.246912)
+    assert origins == [(1, "flow_run", run.run_id), (2, "flow_run", run.run_id)]
     assert all(c["max_dollars"] is None and c["max_wall_seconds"] is None for c in calls)
 
 

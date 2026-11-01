@@ -1,4 +1,4 @@
-"""Tier 0 (Wave 11): cost-accumulation float precision.
+"""Tier 0: cost-accumulation float precision.
 
 The harness sums `row.cost_dollars` into `total_spend` via repeated
 float +=. Over 1865 instances at $1-3 each, IEEE754 rounding error can

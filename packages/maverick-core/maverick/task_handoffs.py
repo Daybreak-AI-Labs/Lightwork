@@ -211,8 +211,10 @@ class TaskHandoffs:
                 self._authorize(row)
             except BundleDenied:
                 continue
-            current = self.get(row["id"])
-            result.append({"id": row["id"], "title": row["preview"]["title"], "state": current["state"], "revision": row["revision"]})
+            # The listed row is already loaded and authorized: re-reading it
+            # through get() cost a store read and a fresh authorization per row.
+            state = "accepted" if self._accepted(row) else row["state"]
+            result.append({"id": row["id"], "title": row["preview"]["title"], "state": state, "revision": row["revision"]})
         return result
 
     def respond(self, identifier, *, action, expected_revision, operation_id):

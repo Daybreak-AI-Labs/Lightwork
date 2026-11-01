@@ -1,10 +1,10 @@
 site_name: Lightwork
-site_description: AI workers, company knowledge, repeatable workflows and governed learning, with controls for your team.
+site_description: A self-hosted runtime for multi-agent AI work.
 site_url: https://daybreak-ai-labs.github.io/Lightwork/
 repo_url: https://github.com/Daybreak-AI-Labs/Lightwork
 repo_name: Daybreak-AI-Labs/Lightwork
 edit_uri: edit/main/docs/
-copyright: Proprietary, commercially licensed (see LICENSE). Built for everyone, not just the technical few.
+copyright: Lightwork is licensed under the <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE">Apache License 2.0</a>.
 
 theme:
   name: material
@@ -51,7 +51,7 @@ theme:
 extra_css:
   - assets/brand/lightwork-docs.css
 
-# Theme assets are copied by MkDocs for both the private and public builds.
+# Theme assets are copied by MkDocs for both the full and the public builds.
 # They are not documents and must not become duplicate docs_dir outputs.
 exclude_docs: |
   /overrides/
@@ -86,7 +86,7 @@ markdown_extensions:
   - pymdownx.snippets:
       # Resolve includes only inside the active docs_dir. The public overlay
       # changes docs_dir to .public-docs, so an allowlisted page cannot inline
-      # internal repository documents with an --8<-- directive.
+      # a document outside the published set with an --8<-- directive.
       base_path:
         - !relative $docs_dir
       restrict_base_path: true
@@ -102,6 +102,7 @@ nav:
   - Home:
       - Welcome: index.md
       - Getting started: getting-started.md
+      - Install from source: source-install.md
       - Use Lightwork: using-lightwork.md
       - Operator first run: operator-first-run.md
   - Guides:
@@ -124,9 +125,9 @@ nav:
       - A2A (Agent2Agent): a2a.md
       - External agents (BYOA): external-agents.md
       - External agent quickstart: clients/external-agent-quickstart.md
-      - How Lightwork compares: comparison.md
+      - Public website chat: public-chat.md
   - Performance:
-      - Streaming parity: performance/streaming-parity.md
+      - Provider streaming support: performance/streaming-parity.md
   - Security:
       - Security & GRC suite: SECURITY_GRC.md
       - Model Risk & AI Assurance: MODEL_RISK_ASSURANCE.md
@@ -144,39 +145,33 @@ nav:
       - Adaptive immunity: immune.md
       - Information-flow control: ifc.md
       - Code vault: codebase.md
-  - Enterprise:
-      - Editions: enterprise/editions.md
+  - Architecture:
+      - Governed agent control plane: enterprise/architecture.md
       - Security & compliance overview: enterprise/security-overview.md
-      - Architecture: enterprise/architecture.md
-      - Diligence data room: enterprise/diligence.md
-  - Strategy:
-      - Lightwork vs the field: comparison.md
-      - Competitive landscape: strategy/competitive-landscape.md
-      - Moat & acquisition: strategy/moat-and-acquisition.md
-      - Design-partner scorecard: strategy/design-partner-scorecard.md
-      - Oversight experience: ux/oversight-experience.md
-  - Roadmap:
-      - 36-month plan: ROADMAP.md
+      - Security evidence map: enterprise/diligence.md
+  - Integrations:
+      - Observability integrations: integrations/observability-partners.md
+  - Project:
+      - Roadmap: ROADMAP.md
+      - RFC process: rfcs/README.md
       - "RFC 0001: Lightwork 2.0": rfcs/0001-maverick-2.0.md
       - "RFC 0002: Plugin API v2": rfcs/0002-plugin-api-v2.md
   - Community:
-      - Showcase: showcase.md
-      - Press kit: press-kit.md
-      - Observability integrations: integrations/observability-partners.md
       - Contributing: CONTRIBUTING.md
+      - Governance: https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/GOVERNANCE.md
+      - Contributor License Agreement: CLA.md
       - Code of Conduct: CODE_OF_CONDUCT.md
       - Security policy: SECURITY.md
+      - Trademark policy: TRADEMARK.md
 
 extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/Daybreak-AI-Labs/Lightwork
-    - icon: fontawesome/brands/python
-      link: https://pypi.org/project/maverick-agent/
   generator: false
 
-# How to preview locally:
-#   pip install 'mkdocs-material'
+# Preview the full documentation set locally:
+#   python -m pip install --requirement requirements/docs.txt
 #   mkdocs serve
-# Production build (gh-pages):
-#   mkdocs gh-deploy --force
+# The published site is built from mkdocs.public.yml and the
+# docs/public-docs.txt allowlist by .github/workflows/docs.yml.

@@ -1,4 +1,4 @@
-"""The adversarial-cost regression gate (ROADMAP 2027-H1 performance).
+"""The adversarial-cost regression gate.
 
 ``eval_adversarial_cost.run_suite()`` scripts the money-wasting failure modes
 (tool loop, token bomb, runaway iterations) against the real cost-control

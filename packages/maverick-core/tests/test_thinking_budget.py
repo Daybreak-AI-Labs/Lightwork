@@ -1,4 +1,4 @@
-"""Adaptive thinking-budget controller (ROADMAP Q4 2026, Performance)."""
+"""Adaptive thinking-budget controller."""
 from __future__ import annotations
 
 from maverick import thinking_budget as tb

@@ -8,7 +8,7 @@ const { JSDOM } = require("jsdom");
 const {shell} = require('./_shell');
 
 const dir = path.resolve(__dirname, "../../maverick_dashboard");
-const template = fs.readFileSync(path.join(dir, "templates/privacy_notice_governance.html"), "utf8");
+const template = fs.readFileSync(path.join(dir, "templates/privacy_notice_governance.html"), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const start = template.indexOf('<section class="panel" id="png-targets"');
 const panel = template.slice(start, template.indexOf("</section>", start) + "</section>".length);
 const scripts = [...template.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);

@@ -16,7 +16,7 @@ regresses, ``main()`` exits 1 and the CI job goes red. Self-runnable::
 
     python benchmarks/eval_governance.py
 
-It is the falsifiable, CI-runnable half of ``docs/strategy/benchmark-plan.md``:
+It is the falsifiable, CI-runnable half of ``benchmarks/benchmark-plan.md``:
 the unsafe-action prevention and evidence-integrity wiring, exercised against
 real machinery. This five-case smoke does not quantify the broader deterministic
 task-completion / false-positive frontier; ``eval_governance_frontier.py`` does.

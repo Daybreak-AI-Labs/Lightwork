@@ -136,13 +136,17 @@ def prepare_reply(world, msg, goal_id: int, text: str, *, owner: str,
         total += len(item["data"])
     require_source(source)
     names = [item["filename"] for item in files]
+    thread = msg.conversation_ref if msg.channel == "slack" else msg.message_id
     if msg.channel not in _FILE_CHANNELS:
         text += "\n\nSaved text exports: " + ", ".join(names) + ". File attachments cannot be delivered in this chat."
         link = task_link(goal_id)
         text += "\nOpen the task in Lightwork to read its saved output." + (" " + link if link else "")
-    elif rich:
+        # No send here reads files: keep the source for the access re-check at
+        # delivery, without sealing and storing files nothing will read.
+        msg._channel_reply_material = {"source": source, "files": []}
+        return Reply(text, thread_ref=thread)
+    if rich:
         text += "\n\nA rendered HTML copy is attached. It uses online display libraries; offline it retains the original text."
     # Runtime-only material comes from this native goal, never an inbound path.
     msg._channel_reply_material = {"source": source, "files": files}
-    thread = msg.conversation_ref if msg.channel == "slack" else msg.message_id
     return Reply(text, attachments=names, thread_ref=thread)

@@ -154,3 +154,11 @@ test("a broken output rejects and does not replay or leak an unhandled error", a
   input.end(request());
   await assert.rejects(done, /closed output/);
 });
+
+test("a validated tool without a parser is refused, even from plain JavaScript", () => {
+  // TypeScript requires parseArgs, but a JavaScript caller (or a typo) got a
+  // "validated" tool whose handler ran on unchecked input.
+  const untyped = defineValidatedTool as unknown as (def: Record<string, unknown>) => ToolDef;
+  assert.throws(() => untyped({name: "pay", description: "pays", inputSchema: {type: "object"},
+    parseArg: (input: unknown) => input, handler: () => "paid"}), /parseArgs must be a function/);
+});

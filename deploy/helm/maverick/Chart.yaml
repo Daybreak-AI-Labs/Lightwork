@@ -13,8 +13,11 @@ home: https://github.com/Daybreak-AI-Labs/Lightwork
 sources:
   - https://github.com/Daybreak-AI-Labs/Lightwork
 maintainers:
-  - name: Day AI Labs
+  - name: The Lightwork Authors
+    url: https://github.com/Daybreak-AI-Labs/Lightwork
 keywords:
   - ai-agent
   - dashboard
   - enterprise
+annotations:
+  artifacthub.io/license: Apache-2.0

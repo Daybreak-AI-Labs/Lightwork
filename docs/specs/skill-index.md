@@ -1,9 +1,10 @@
 # Skill marketplace index (spec)
 
-A static JSON manifest hosted at `https://skills.maverick.dev/index.json`
-that the `maverick skills search` / `maverick skills install` flow
-reads. Federated: users can configure additional index URLs in
-`~/.maverick/config.toml` under `[skills.indexes]`.
+**Status:** draft, not implemented. The shipped client (`maverick skill browse` /
+`maverick skill add` and the dashboard Store) reads the catalog index format in
+[`catalog.md`](./catalog.md). This document specifies a richer static JSON
+manifest for a future skill index. Federated: users configure index URLs in
+`~/.maverick/config.toml` under `[catalogs] indexes`.
 
 This doc is the **schema spec**. Tooling on the publisher side and the
 client side must agree on this shape; bumps are versioned via the
@@ -15,7 +16,7 @@ top-level `v` field.
 {
   "v": 1,
   "generated_at": "2026-04-01T12:00:00Z",
-  "source_repo": "https://github.com/cdayAI/awesome-maverick-skills",
+  "source_repo": "https://github.com/example/skill-index",
   "skills": [
     {
       "name": "pr-review",
@@ -71,14 +72,17 @@ Each skill entry MUST have:
 
 ## Client behavior
 
-`maverick skills search <q>`:
+Proposed client behavior for this index. (Today `maverick skill browse` and
+`maverick skill add` provide the equivalent flow over the catalog format.)
 
-1. Fetch each configured index URL (default: `skills.maverick.dev/index.json`).
+Search `<q>`:
+
+1. Fetch each configured index URL (`[catalogs] indexes`).
 2. Filter by substring match on `name`, `summary`, `tags`, `triggers`.
 3. Sort: trusted publisher first, then by stars desc, then install_count desc.
 4. Display: `name  v<version>  ✓<trusted-badge>  <summary>  (<stars>★)`
 
-`maverick skills install <name>[@<version>]`:
+Install `<name>[@<version>]`:
 
 1. Resolve the entry from the index.
 2. Verify `signature` if present and `require_signed = true`.
@@ -97,7 +101,7 @@ each entry is a base URL that serves `<base>/skills/index.json`:
 ```toml
 [catalogs]
 indexes = [
-  "https://skills.maverick.dev",
+  "https://skills.example.org",
   "https://my-internal-index.corp/catalog",
 ]
 
@@ -117,12 +121,12 @@ A skill author publishes by:
 1. Writing the skill as a GitHub repo with a top-level `maverick-skill.toml`
    matching `maverick.plugin_manifest` schema.
 2. Tagging a release.
-3. Opening a PR to `awesome-maverick-skills` adding their entry to
+3. Opening a PR to the index repository adding their entry to
    `_data/skills.yaml`.
-4. CI on the awesome-list repo regenerates `index.json` and publishes.
+4. CI on the index repository regenerates `index.json` and publishes.
 
-Signed publication is a Q2 2026 roadmap item; until then, `signature`
-is optional and `require_signed` defaults to false.
+Signed publication is not implemented; until it is, `signature` is optional
+and `require_signed` defaults to false.
 
 ## Versioning policy
 

@@ -308,7 +308,7 @@ def _format_tree_of_thought_plan(winning_plan: str, *, shield: Any | None = None
 
 
 def _unpriced_model_message(exc: BaseException, goal_id: Any) -> str:
-    """W1-30: a genuinely unpriced model is not a cap trip -- raising the cap
+    """A genuinely unpriced model is not a cap trip -- raising the cap
     and resuming (``_budget_exceeded_message``'s advice) fails identically,
     because the real problem is that Lightwork refuses to bill a model with
     no verified price, not that spend or time ran out.
@@ -352,7 +352,7 @@ def _budget_exceeded_message(budget: Any, goal_id: Any) -> str:
 
 
 def _usage_accounting_message(detail: str, goal_id: Any) -> str:
-    """A provider mis-reported token usage (W1-17): a gateway fault, not a cap."""
+    """A provider mis-reported token usage: a gateway fault, not a cap."""
     return (
         "Stopped: the model provider returned invalid usage accounting, so "
         "Lightwork could not bill the call against your spending cap and "
@@ -388,7 +388,7 @@ def _budget_stop_message(budget: Any, goal_id: Any, error: BudgetExceeded) -> st
 
 
 def _review_checkpoint_message(detail: str, goal_id: Any) -> str:
-    """The opt-in review checkpoint stopped the run (W1-33): a reviewer
+    """The opt-in review checkpoint stopped the run: a reviewer
     decision, not a HALT file -- so no `maverick unhalt` advice."""
     return (
         f"Paused: the review checkpoint stopped this run at {detail} because "
@@ -1171,7 +1171,7 @@ async def _build_orchestrator_brief(
     # Multi-turn: if this goal belongs to an ongoing conversation,
     # prepend the recent turn history so the orchestrator has context
     # for follow-up messages on the same channel.
-    # Council finding (Tier 0): persisted turns were re-injected
+    # Persisted turns were re-injected
     # unscanned, so a `user` message that passed scan_input once
     # could replay forever as a prompt-injection vector. Re-scan
     # each turn here and drop any that the shield now flags.
@@ -1598,7 +1598,7 @@ def _goal_already_ran(world: Any, goal_id: int) -> bool:
 
     ``resume=True`` only says the caller will pick up saved work if there is
     any -- the shared runner passes it for every dashboard, API, schedule, flow
-    and queue start, first starts included (UX-014) -- so it cannot stand for
+    and queue start, first starts included -- so it cannot stand for
     "a person already approved this". A recorded run can: the start check comes
     before the first run is recorded, so a task it held has none. When that
     cannot be read, the check applies."""
@@ -1788,7 +1788,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             f"{_safe_exception_text(exc, fallback='tenant lookup failed')}"
         )
     if not _tenant_reason:
-        # W2-83: budget_from_config clamps a run to $0 when the tenant's
+        # budget_from_config clamps a run to $0 when the tenant's
         # allowance is exhausted by in-flight holds (or unreadable) and says
         # why. Refuse here, before the run starts, rather than admit a
         # $0-cap run that dies on its first model call.
@@ -2031,6 +2031,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                         "goal_id": goal_id, "status": "blocked", "result": msg,
                     })
                     return msg
+                # A changed specialist may be on trial: this goal runs the trial
+                # version only when its recorded choice says so (see specialist_canary).
+                from .specialist_canary import profile_for_goal
+                _profile, _ = profile_for_goal(domain, _profile, goal_id, world=world, resume=resume)
                 if (allowed_suites is not None
                         and not suites_for_domain(domain, _profile) <= allowed_suites):
                     msg = ("This specialist is outside your department access. "
@@ -2070,7 +2074,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         try:
             result = await root.run()
         except UnpricedModelError as e:
-            # W1-30: a genuinely unpriced model, not a cap trip -- must be
+            # A genuinely unpriced model, not a cap trip -- must be
             # caught BEFORE the BudgetExceeded clause below (it's a
             # subclass) or it's reported as "raise your cap and resume",
             # advice that fails identically since spend was never the issue.
@@ -2099,7 +2103,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         except UsageAccountingError as e:
             # A provider mis-reported usage on a call made outside the agent
             # loop (verifier, summariser...). Same reporting as the in-loop
-            # path below: a provider fault, not a cap breach (W1-17).
+            # path below: a provider fault, not a cap breach.
             _lifecycle.end_episode(f"provider accounting: {e}", "failure")
             try:  # default-on local failure telemetry; no-op when disabled
                 from . import failure_telemetry as _ft
@@ -2218,7 +2222,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             )
 
         if result.error:
-            # Wave 12 hotfix: even when the agent loop errored (e.g. hit
+            # Even when the agent loop errored (e.g. hit
             # max_steps), it may have produced a usable patch via
             # str_replace_editor before exiting. salvage it.
             if result.final_patch and (
@@ -2262,7 +2266,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                     "result": message,
                 })
                 return message
-            # W1-30: an unpriced model inside a spawned child is swallowed by
+            # An unpriced model inside a spawned child is swallowed by
             # the agent into `result.error` (same reason a budget cap trip
             # is), not raised -- `budget.check()` above never sees it (it's
             # not a cap trip). Detect it via agent.py's "unpriced model:"
@@ -2284,7 +2288,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 # handler above, instead of doubling the label.
                 _detail = result.error.split(": ", 1)[-1]
                 return _unpriced_model_message(_detail, goal_id)
-            # W1-33: branch on the structured stop kind, not on substrings of
+            # Branch on the structured stop kind, not on substrings of
             # the error text. A review-checkpoint stop is a reviewer decision:
             # there is no HALT file and `maverick unhalt` would do nothing.
             if result.stop_kind == "review_checkpoint":
@@ -2375,7 +2379,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 f"[{budget.summary()}]"
             )
 
-        # Wave 12: prefer the rendered unified diff (set by the agent's
+        # Prefer the rendered unified diff (set by the agent's
         # FINAL handler when SEARCH/REPLACE blocks were applied) over
         # the raw FINAL text. Without this, extract_unified_diff on
         # downstream calls (best-of-N selector, harness CSV row) returns
@@ -2671,7 +2675,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         for _s in _finalize_specs:
             await _s.result()
 
-        # Wave 12 hotfix: in coding mode the orchestrator's return value
+        # In coding mode the orchestrator's return value
         # IS the benchmark CSV's `predicted_patch` after extract_unified_diff.
         # The trailing skill_note + budget summary then pollute the patch
         # (they sit AFTER the last hunk so `git apply` ignores them, but
@@ -2974,11 +2978,10 @@ def _donate_bestofn_candidates(llm, world, budget, goal_id, candidates, best) ->
 
 
 # Host-git RCE hardening (fsmonitor/filter-hook guard + scrubbed env) now
-# lives in git_safety.py so every host-side git caller shares it -- see
-# PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-2. Imported at module top as
-# _git_env_without_user_config / _git_metadata_may_execute_filters; kept
-# under those private names since test_orchestrator_git_safety.py imports
-# them from here.
+# lives in git_safety.py so every host-side git caller shares it. Imported at
+# module top as _git_env_without_user_config /
+# _git_metadata_may_execute_filters; kept under those private names since
+# test_orchestrator_git_safety.py imports them from here.
 
 
 def _reset_workdir_to_head(workdir) -> None:
@@ -3152,7 +3155,7 @@ async def run_goal_best_of_n(
             conversation_id=conversation_id,
         )
 
-    # Wave 12 (council F10c): per-attempt budget is RECOMPUTED each
+    # Per-attempt budget is RECOMPUTED each
     # iteration from REMAINING parent budget / REMAINING attempts.
     # When an early attempt crashes (spending only a fraction of its
     # quota) or finishes cheaply, the leftover redistributes to
@@ -3162,7 +3165,7 @@ async def run_goal_best_of_n(
     # — the (N-1)/N of unspent budget was lost.
     candidates: list[Candidate] = []
 
-    # Wave 11: heterogeneous best-of-N. Inter-model diversity beats
+    # Heterogeneous best-of-N. Inter-model diversity beats
     # intra-model temperature diversity on SWE-bench (RoBoN paper, arxiv
     # 2512.05542: +3.4pp over best individual at large N). The default
     # ladder is (Sonnet-cheap, Sonnet-warm, Opus) — first the cheap
@@ -3197,12 +3200,12 @@ async def run_goal_best_of_n(
         # attempt i's on-disk edits don't leak into i+1 (the loop reuses one
         # sandbox.workdir). No-op when the workdir isn't a local git repo.
         _reset_workdir_to_head(getattr(sandbox, "workdir", None))
-        # Wave 9 fix (council M12): respect parent dollar cap.
+        # Respect parent dollar cap.
         if budget.max_dollars is not None and budget.dollars >= budget.max_dollars * 0.95:
             log.info("best-of-N early break: parent budget 95%% spent")
             break
 
-        # Wave 12 (F10c): redistribute remaining budget across remaining
+        # Redistribute remaining budget across remaining
         # attempts. After crashes / early-cheap completions, the surviving
         # attempts get bigger caps instead of leaving budget on the table.
         remaining_attempts = len(ladder) - i
@@ -3245,7 +3248,6 @@ async def run_goal_best_of_n(
         _temp_token = set_sampling_temperature(float(per_temp))
         try:
             try:
-                # Wave 12 fix (council F14, biggest accuracy loss):
                 # Each best-of-N attempt MUST run against a fresh
                 # conversation history. The prior code passed the same
                 # `conversation_id` to every attempt, so attempt 2 read

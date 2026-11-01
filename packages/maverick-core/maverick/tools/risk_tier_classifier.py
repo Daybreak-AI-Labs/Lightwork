@@ -1,4 +1,4 @@
-"""Goal risk-tier auto-classifier (roadmap: 2028 H1 safety).
+"""Goal risk-tier auto-classifier.
 
 Score a proposed goal/action as LOW / MEDIUM / HIGH risk from a small set of
 boolean *signals* about what it does — is it irreversible, does it move money,

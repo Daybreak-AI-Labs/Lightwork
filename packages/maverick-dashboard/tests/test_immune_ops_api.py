@@ -217,3 +217,16 @@ def test_immune_page_shows_the_new_controls_plainly(client, monkeypatch):
     _as(monkeypatch, "auditor")
     page = client.get("/immune").text
     assert 'id="ops-canary-form"' not in page and 'id="ops-network-run"' in page
+
+
+@pytest.mark.parametrize(("undoable", "held"), [(None, True), (True, True), (False, False)])
+def test_a_written_reviewer_test_matches_the_undo_of_the_request_it_imitates(client, undoable, held):
+    # A task's step can be undone for a moment after a decision; a merge, a
+    # settings change or agent access cannot. The test approval matches.
+    from maverick.channel_approvals import held_for_undo
+    from maverick_dashboard import app as dash_app
+
+    body = dict(CANARY) if undoable is None else {**CANARY, "undoable": undoable}
+    assert client.post("/api/v1/immune/canaries/written", json=body).status_code == 200
+    (approval,) = dash_app._world().pending_approvals()
+    assert held_for_undo(approval) is held

@@ -1,4 +1,4 @@
-"""Opt-in MCP-client language analytics (ROADMAP language-bindings gate)."""
+"""Opt-in MCP-client language analytics."""
 from __future__ import annotations
 
 import pytest

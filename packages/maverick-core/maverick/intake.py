@@ -27,6 +27,11 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .agent_tests_policy import (
+    NEW_SPECIALIST_NEEDS_TESTS,
+    NewSpecialistNeedsTests,
+    require_for_new_specialists,
+)
 from .domain import (
     _DOMAIN_ID_RE,
     DomainProfile,
@@ -401,10 +406,10 @@ def save_profile(profile: DomainProfile, *, approved: bool,
                  dest_dir: str | Path | None = None) -> str:
     """Persist an APPROVED pack so ``available_domains()`` picks it up. Refuses
     to write a pack that hasn't been human-approved -- the safety gate is here."""
-    # Persisting a NEW custom specialist pack is the paid "custom_pack_factory"
+    # Persisting a NEW custom specialist pack is the tier-gated "custom_pack_factory"
     # (Platinum) feature. Fail-open: a no-op unless license enforcement is on AND
     # the deployment isn't entitled. Drafting/previewing (generate_profile /
-    # run_intake) stays free — only persistence gates.
+    # run_intake) is never gated — only persistence gates.
     try:
         from .entitlements import require
         allowed = require("custom_pack_factory")
@@ -425,6 +430,9 @@ def save_profile(profile: DomainProfile, *, approved: bool,
     path = d / f"{profile.name}.toml"
     if profile.name in load_domains(d):
         raise FileExistsError("specialist name belongs to an existing workspace specialist")
+    # Names that reach this point are new: existing specialists were refused above.
+    if require_for_new_specialists():
+        raise NewSpecialistNeedsTests(NEW_SPECIALIST_NEEDS_TESTS)
     created = False
     try:
         with path.open("x", encoding="utf-8") as target:

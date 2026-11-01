@@ -1,4 +1,4 @@
-"""Query-plan regression check (roadmap: 2027 H1 perf).
+"""Query-plan regression check.
 
 Compare a baseline query plan against a candidate plan and flag a performance
 regression before it ships. Deterministic and offline: the caller supplies both

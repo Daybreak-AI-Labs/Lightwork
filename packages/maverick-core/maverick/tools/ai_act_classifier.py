@@ -1,4 +1,4 @@
-"""EU AI Act risk classification helper (roadmap: 2027 H1 safety).
+"""EU AI Act risk classification helper.
 
 A deterministic, keyword-driven *triage* aid: describe an AI system/use-case
 and it returns the EU AI Act risk tier it most likely falls under —

@@ -1,7 +1,7 @@
 # maverick-widget
 
 A single self-contained JavaScript file (`maverick-widget.js` — no
-framework, no CDN, no build step) that customers drop into any page to get
+framework, no CDN, no build step) that you drop into any page to get
 a floating Lightwork status pill. Clicking it expands a panel with
 **active / done / failed** counts and the most recent finished result.
 
@@ -31,9 +31,9 @@ dashboard endpoint (`maverick_dashboard/api.py`, `APIRouter` mounted at
   outcome. The widget also counts a literal `failed` defensively in case
   that ever changes.
 
-> There is **no** `/api/v1/glance` roll-up endpoint in the dashboard today
-> (verified against `maverick_dashboard/api.py` and `app.py`); the widget
-> derives its glance from the goals list instead.
+> The widget derives its counts from the goals list. It does not use the
+> dashboard's `/api/v1/glance` endpoint, which serves the fixed-shape payload
+> for the watchOS glance (`maverick.glance`).
 
 ## Deployment: must be same-origin with the dashboard
 
@@ -105,14 +105,11 @@ of the CORS posture above, opening it from disk shows the widget in its
 "offline" state. To see live data, serve it same-origin with the dashboard
 (nginx snippet above), or temporarily run a dev proxy of your choice.
 
-## What was and wasn't verified here
+## Tests
 
-- `maverick-widget.js` syntax-checked with `node --check` and statically
+- `maverick-widget.js` is syntax-checked with `node --check` and statically
   tested (real endpoint path, auth header shape, no CDN references). The
-  demo page was **not** exercised against a live dashboard in this
-  environment (no dashboard process here); the endpoint shape and auth
-  behaviour were verified by reading `maverick_dashboard/api.py` and
-  `app.py` at authoring time.
+  tests do not exercise the demo page against a live dashboard.
 
 ```bash
 # Test lives with the other artifact contract tests (pytest doesn't

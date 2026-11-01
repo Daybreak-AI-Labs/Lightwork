@@ -1,4 +1,4 @@
-"""Long-form writing pipeline tool (roadmap: 2028 H2 — "long-form writing").
+"""Long-form writing pipeline tool.
 
 A deterministic *structuring* helper for the outline -> draft -> polish pipeline.
 It organizes text; it does not generate prose with a model. The caller supplies

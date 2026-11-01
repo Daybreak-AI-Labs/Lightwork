@@ -58,7 +58,7 @@
   </section>
   {% endif %}
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     {% include "_voice_mic.js" %}
 
     (function () {

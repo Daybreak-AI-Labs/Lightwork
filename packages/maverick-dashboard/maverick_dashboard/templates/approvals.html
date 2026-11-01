@@ -87,7 +87,7 @@
     {% include "_approvals_queue.html" %}
   </div>
   <script src="{{ static_url('lightwork-approvals-count.js') if static_url is defined else '/static/lightwork-approvals-count.js' }}" defer></script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     var note = document.getElementById('approval-missing'), decisions = document.getElementById('request-decision-history');
     function check() {

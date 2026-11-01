@@ -51,6 +51,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "settings": {"runtime_status"},
     "mobile_offline": {"enabled", "max_age_seconds", "max_bytes"},
     "workflows": {"versioning", "typed_inputs"},
+    "intent_value": {"enabled", "recommendations", "completion_confirmation"},
     "_dashboard_resets": None,  # Internal global-overlay reset metadata; removed before runtime config.
     "budget": {
         "task_limits_enabled",
@@ -102,6 +103,9 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "quorum_required",
         "quorum_protected_keys",
         "quorum_ttl_days",
+        # Goal-risk check before a task starts (safety/goal_risk.py).
+        "goal_risk_floor",
+        "goal_risk_require_human",
     },
     "sandbox": {
         "backend",
@@ -146,7 +150,24 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # names, so any key is allowed. The wizard writes this section by default;
     # without it here every wizard-written config warned "unknown section".
     "rate_limits": None,
-    "features": {"skills", "world_model", "streaming"},
+    # Every switch config.get_features() reads (the All settings page writes
+    # them); test_config_lint keeps the two in step.
+    "features": {
+        "action_center", "applicability_regions", "commitment_capability_learning",
+        "commitment_economic_alternatives", "commitment_viability", "configuration_profiles",
+        "copilot_operations", "deliverable_bundles", "draft_recovery", "employee_activation",
+        "employee_companions", "employee_content_access_requests", "employee_departures",
+        "employee_task_diagnostics", "governed_rule_evolution", "guided_onboarding",
+        "human_conversation_handoffs", "operational_competence_acquisition", "outcome_measurement",
+        "pack_editing", "permission_access_requests", "personal_data_controls",
+        "personal_preferences", "portable_competence", "private_task_computation",
+        "procedure_interactions", "project_reviews", "project_workspaces", "record_search",
+        "recovery_visibility", "request_program", "role_editing", "scheduling",
+        "semantic_rule_reuse", "shared_decision_evidence", "signing_identity_transition",
+        "skills", "streaming", "support_center", "task_handoffs", "triggers",
+        "work_restructuring", "workflow_readiness", "workflow_step_checks",
+        "workspace_recovery", "world_model",
+    },
     "capabilities": {
         "computer_use",
         "browser",
@@ -156,7 +177,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         # Governance knobs the runtime reads (capability.py / agent.py) that
         # were missing here -- so a client configuring the flagship
         # capability-enforcement feature, or the deferred-tools knob, got a
-        # false "unknown key" warning (client-journey finding).
+        # false "unknown key" warning.
         "enforce",
         "per_call_tokens",
         "deferred_tools",
@@ -170,9 +191,15 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # Tamper-evident audit log. The runtime reads [audit] sign (audit/writer.py)
     # and migrate.py already lists it; config-lint flagged the whole section as
     # unknown ("did you mean auth?"), telling a regulated client their flagship
-    # signed-audit config looked like a typo (client-journey finding).
-    "audit": {"sign", "worm", "unified"},
-    "entity_graph": {"enable"},
+    # signed-audit config looked like a typo.
+    "audit": {"sign", "worm", "unified",
+              # Off-host key and SIEM forwarding (audit/writer.py, audit_siem.py).
+              "require_offhost_key", "siem_dest", "siem_token", "siem_allow_insecure",
+              # Vendor SIEM credential fallbacks (audit/forwarder.py); the env vars
+              # MAVERICK_DATADOG_API_KEY and MAVERICK_SENTINEL_* are the preferred home.
+              "datadog_api_key", "sentinel_tenant_id", "sentinel_client_id",
+              "sentinel_client_secret"},
+    "entity_graph": {"enable", "staleness_seconds"},
     # Commerce suite caps are money/quantity limits, so the schema is closed: a
     # misspelled cap must not silently fall back to the default.
     "commerce": {
@@ -181,6 +208,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "max_session_spend",
         "max_line_quantity",
         "max_cart_lines",
+        "stripe_refunds",
     },
     "governance_inventory": {
         "enable",
@@ -238,12 +266,23 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "group_roles",
         "group_suites",
         "active_tenant",
+        # Sign-in, invitations, API keys and request limits (auth.py, app.py)
+        # and the switches the wizard and All settings page write.
+        "require_auth", "admins", "default_role", "session_secret", "scim_token",
+        "invites", "invite_email", "invite_session_days",
+        "api_keys", "api_key_default_days", "api_key_max_days", "api_key_rotation_grace_hours",
+        "api_key_prefix", "max_request_mb", "max_goals_per_min", "max_goals_global_per_min",
+        "max_sse", "shutdown_timeout_seconds", "local_owner_setup", "extension_form_values",
+        "extension_page_structure", "employee_activation_jobs",
     },
     "analytics": {"mcp_client_language", "task_questions", "usability_survey", "usage_measures",
                   "web_vitals", "web_vitals_sample_rate"},
     # Agent Factory: JD hiring (maverick.jd_hiring) and the publish gate
     # (maverick.agent_publish_policy).
     "agent_factory": {"jd_hiring", "require_passing_tests"},
+    # Saved answer checks (maverick.agent_tests_policy).
+    "agent_tests": {"max_cases_per_specialist", "require_for_new_specialists",
+                    "bypass_requires_second_person", "tool_checks", "canary_percent", "canary_auto_rollback"},
     "practice": {"enable", "daily_spend_cap"},
     "collaboration": {"comments", "suggestions", "ai_suggestions"},
     "first_outcome": {"department", "sample_workspace_created"},
@@ -276,11 +315,12 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # Definition import reaches third-party APIs and can materialize recurring
     # work, so both opt-ins are closed-schema booleans rather than permissive
     # string truthiness.
-    "automation_import": {"enable", "create_schedules"},
-    # Evidence release is a high-trust, fail-closed boundary.  V1 deliberately
-    # exposes only the master opt-in; misspelled enforcement keys must not
-    # silently create an open-ended policy surface.
-    "evidence_gateway": {"enable"},
+    "automation_import": {"enable", "create_schedules", "max_steps"},
+    # Evidence release is a high-trust, fail-closed boundary: the master opt-in
+    # and the receipt/packet size limits only, so misspelled enforcement keys
+    # do not silently create an open-ended policy surface.
+    "evidence_gateway": {"enable", "receipt_max_total", "receipt_segment_rows", "receipt_segment_bytes",
+                         "packet_max_total", "packet_segment_rows", "packet_segment_bytes"},
     # AI-governance admission capabilities are explicit, default-off
     # authorities. Keep these schemas closed so a misspelled safety limit does
     # not silently fall back to a more permissive value.
@@ -354,8 +394,9 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "consent_registry": {
         "enable", "subject_salt", "webhook_enable", "webhook_secret_env",
     },
-    "data_map": {"enable", "graph_token_env"},
+    "data_map": {"enable", "graph_token_env", "graph_token"},
     "breach_notification": {"enable"},
+    "ediscovery": {"enable"},
     "dsar_fulfillment": {"enable"},
     "grc_sync": {"enable", "connector", "findings_path", "acceptances_path",
                  "incidents_path", "backlink_base", "response_field_params"},
@@ -527,6 +568,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     },
     "privacy_automation": {
         "enable",
+        "discovery_data_use_bridge",
         "data_discovery",
         "regulatory_intelligence",
         "rights_orchestration",
@@ -595,7 +637,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
 # section the runtime actually reads as a typo. The two had drifted by ~59
 # sections -- a client configuring documented features like [provider_failover],
 # [enterprise], [egress], [governance], [encryption] got told they were
-# typos (client-journey finding). Sections with an explicit key schema above
+# typos. Sections with an explicit key schema above
 # keep it (setdefault won't overwrite); the rest accept any subkey (None),
 # exactly as migrate treats them.
 from .migrate import KNOWN_SECTIONS as _RUNTIME_SECTIONS  # noqa: E402
@@ -644,7 +686,15 @@ _INTEGER_KEYS: dict[str, set[str]] = {
         "minimum_train_families",
         "minimum_holdout_families",
     },
+    "knowledge_sources": {
+        "max_items",
+        "max_pages",
+        "max_download_mib",
+        "max_text_kib",
+        "max_refresh_minutes",
+    },
     "customer_sandbox_lifecycle": {"source_revision"},
+    "agent_tests": {"max_cases_per_specialist", "canary_percent"},
     "ai_entity_tasks": {
         "max_tasks",
         "retention_seconds",
@@ -704,6 +754,7 @@ _INTEGER_KEYS: dict[str, set[str]] = {
 # Keys that, when present, must be a bool. Section -> key. Plus the universal
 # ``enabled``/``enable`` toggle, handled separately for every known section.
 _BOOL_KEYS: dict[str, set[str]] = {
+    "intent_value": {"recommendations", "completion_confirmation"},
     "first_outcome": {"sample_workspace_created"},
     "safety": {"scan_input", "scan_tool_calls", "scan_output", "compartments"},
     "features": {"skills", "world_model", "streaming"},
@@ -729,6 +780,8 @@ _BOOL_KEYS: dict[str, set[str]] = {
     },
     "analytics": {"mcp_client_language", "task_questions", "usability_survey", "usage_measures", "web_vitals"},
     "agent_factory": {"jd_hiring", "require_passing_tests"},
+    "agent_tests": {"require_for_new_specialists", "bypass_requires_second_person", "tool_checks",
+                    "canary_auto_rollback"},
     "practice": {"enable"},
     "collaboration": {"comments", "suggestions", "ai_suggestions"},
     "self_learning": {
@@ -774,6 +827,7 @@ _IDENTITY_SCHEDULE_KEYS = {
 _NESTED_GOVERNANCE_SCHEMA: dict[tuple[str, ...], set[str]] = {
     ("audit", "unified"): {
         "enable",
+        "custody",
         "page_size",
         "lease_seconds",
         "max_lag_seconds",
@@ -1464,6 +1518,8 @@ for _provider in (
     ] = {"enable"}
 
 _NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
+    (("agent_tests",), "max_cases_per_specialist"): (1, 200),
+    (("agent_tests",), "canary_percent"): (0, 50),
     (("governance_inventory",), "retention_seconds"): (86_400, 315_360_000),
     (("governance_inventory",), "max_source_records"): (1, 100_000),
     (("governance_inventory",), "max_entities"): (1, 100_000),
@@ -2405,6 +2461,28 @@ def _lint_trust_root_keys(value: dict) -> list[Finding]:
                     )
                 )
     return findings
+
+
+def _lint_local_owner_totp(cfg: dict) -> list[Finding]:
+    """``[auth.local_owner] totp`` must be one of the three modes; anything else reads as optional."""
+    from .config import LOCAL_OWNER_TOTP_MODES
+
+    value = _at_path(cfg, ("auth", "local_owner", "totp"))
+    if value is _MISSING:
+        return []
+    if isinstance(value, str) and value.strip().lower() in LOCAL_OWNER_TOTP_MODES:
+        return []
+    # As in the runtime, only a short plain word is written out; never a pasted secret.
+    shown = f"{value!r}" if isinstance(value, str) and re.fullmatch(r"[a-z]{1,20}", value) else "a value"
+    return [
+        _nested_error(
+            "auth.local_owner",
+            "totp",
+            f"auth.local_owner.totp must be one of {', '.join(LOCAL_OWNER_TOTP_MODES)}, got {shown}; "
+            "until it is fixed the owner's authenticator app is read as optional",
+            severity="warning",
+        )
+    ]
 
 
 def _lint_identity_controls(cfg: dict) -> list[Finding]:
@@ -4744,6 +4822,7 @@ def _lint_governance_nested_tables(cfg: dict) -> list[Finding]:
             )
 
     findings.extend(_lint_identity_controls(cfg))
+    findings.extend(_lint_local_owner_totp(cfg))
     trust_roots = _at_path(cfg, ("ai_benchmark_exchange", "trust_roots"))
     if isinstance(trust_roots, dict):
         findings.extend(_lint_trust_root_keys(trust_roots))

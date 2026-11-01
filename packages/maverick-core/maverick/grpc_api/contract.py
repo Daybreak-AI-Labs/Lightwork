@@ -1,4 +1,4 @@
-"""gRPC API v1 stability contract (roadmap: 2028 H2 ecosystem).
+"""gRPC API v1 stability contract.
 
 ``maverick.proto`` (package ``maverick.v1``) is the external contract other
 languages build against. "v1 stable" is a *guarantee*, and a guarantee needs

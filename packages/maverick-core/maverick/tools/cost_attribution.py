@@ -1,4 +1,4 @@
-"""Cost-attribution API (roadmap: 2027 H1 performance — "cost-attribution API").
+"""Cost-attribution API.
 
 Aggregate a flat list of cost line-items along one or more dimensions
 (principal / tenant / tool / tag / model) into a ranked breakdown with each

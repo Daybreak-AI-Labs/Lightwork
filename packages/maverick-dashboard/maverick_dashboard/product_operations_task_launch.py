@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from fastapi import BackgroundTasks, HTTPException, Response
-from maverick.governed_operations import digest
+from maverick.governed_operations import dataclass_digest, digest
 from maverick.runner import (
     configured_goal_ceiling_dollars,
     configured_goal_ceiling_wall_seconds,
@@ -43,13 +43,20 @@ SPECIALIST_NOTICE = (
 )
 
 
-def published_specialists(request):
+def published_specialists(request, *, only=None, revisions=True):
     with auth.fresh_configuration():
-        return _published_specialists(request)
+        return _published_specialists(request, only=only, revisions=revisions)
 
 
-def _published_specialists(request):
-    """Current named choices only; the complete definition stays native."""
+def _published_specialists(request, *, only=None, revisions=True):
+    """Current named choices only; the complete definition stays native.
+
+    A caller that shows a few choices passes ``only(personal_default)``, the
+    names it will show; one that pages through them passes ``revisions=False``
+    and gets each choice's ``profile`` to digest for the page it returns. The
+    revision of all 2,031 specialists took about 93 ms of every /chat open,
+    which showed at most two.
+    """
     from maverick.domain import enabled_domains, suites_for_domain
 
     from .plain_labels import pack_display_name
@@ -59,11 +66,20 @@ def _published_specialists(request):
     current_authority(request)
     current = context_for(request)
     allowed = auth.caller_suites(request)
-    choices = [{"value": name, "label": pack_display_name(name, profile.persona, profile.description),
-                "revision": digest(asdict(profile))}
-               for name, profile in sorted(enabled_domains().items())
-               if len(name) <= 120 and (allowed is None or suites_for_domain(name, profile) <= allowed)]
     personal_default = personal_specialist_default(request)
+    wanted = None if only is None else only(personal_default)
+    choices = []
+    for name, profile in sorted(enabled_domains().items()):
+        if len(name) > 120 or (wanted is not None and name not in wanted):
+            continue
+        if allowed is not None and not suites_for_domain(name, profile) <= allowed:
+            continue
+        choice = {"value": name, "label": pack_display_name(name, profile.persona, profile.description)}
+        if revisions:
+            choice["revision"] = dataclass_digest(profile)
+        else:
+            choice["profile"] = profile
+        choices.append(choice)
     current_authority(request)
     if current != context_for(request):
         raise HTTPException(409, "Your account or workspace changed. Read the current specialist choices again.")

@@ -7,7 +7,6 @@ authority, document metadata, filenames and retention policy are server-owned.
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Literal
 
@@ -196,10 +195,14 @@ def _principal(request: Request, tenant_id: str) -> str:
     subject = authenticated_subject(
         request, error_detail="an authenticated principal is required for incident attachments",
     )
-    digest = hashlib.sha256(
-        f"lightwork.incident-attachment.identity.v1:{tenant_id}:{subject}".encode()
-    ).hexdigest()
-    return f"incident-principal-{digest[:32]}"
+    # The store's own derivation, so the uploader reference matches what it records.
+    try:
+        return _ops().principal_ref_for_subject(tenant_id, subject)
+    except ValueError as exc:  # a workspace id the store cannot name is unavailable, as in the store factory
+        raise HTTPException(
+            status_code=503,
+            detail="incident attachment authority is unavailable",
+        ) from exc
 
 
 def _dependency(request: Request, name: str, fallback: object) -> object:

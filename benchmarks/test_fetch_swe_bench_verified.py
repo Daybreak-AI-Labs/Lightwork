@@ -62,8 +62,8 @@ class TestRowConversion:
         assert len(out["pass_to_pass"]) == 2
 
     def test_gold_patch_carried_through(self):
-        """Required for defensive_validate's cheating detector after the
-        hotfix wired MAVERICK_GOLD_PATCH from manifest → env."""
+        """Required for defensive_validate's cheating detector: the fetcher
+        wires MAVERICK_GOLD_PATCH from manifest → env."""
         m = _load_fetcher()
         out = m._row_to_manifest(self._sample_hf_row())
         assert "diff --git" in out["gold_patch"]

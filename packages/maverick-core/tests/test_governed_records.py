@@ -17,7 +17,7 @@ from maverick.governed_records import (
     PostgresGovernedRecordBackend,
 )
 from maverick.paths import TenantPolicyError, tenant_scope
-from maverick.privacy_ops import PrivacyStateError, RecordConflict
+from maverick.privacy_ops import AuditOutboxError, PrivacyStateError, RecordConflict
 
 
 @pytest.fixture(autouse=True)
@@ -263,6 +263,15 @@ class _MemoryCursor:
             self.result = [(count,)]
             self.rowcount = 1
             return
+        if sql.startswith("SELECT namespace, revision, record_json"):
+            tenant, active, archived, record_id, _preferred = map(str, values)
+            for namespace in (active, archived):
+                row = self.database.rows.get((tenant, namespace, record_id))
+                if row is not None:
+                    self.result = [(namespace, *row)]
+                    break
+            self.rowcount = len(self.result)
+            return
         if sql.startswith("SELECT revision, record_json"):
             key = (str(values[0]), str(values[1]), str(values[2]))
             row = self.database.rows.get(key)
@@ -280,6 +289,18 @@ class _MemoryCursor:
                     float(values[5]),
                     float(values[6]),
                 )
+                self.rowcount = 1
+            return
+        if sql.startswith("UPDATE governed_records SET namespace="):
+            source = (str(values[1]), str(values[2]), str(values[3]))
+            target = (str(values[1]), str(values[0]), str(values[3]))
+            current = self.database.rows.get(source)
+            expected = int(values[4]) if "AND revision=%s" in sql else None
+            if (current is None or target in self.database.rows
+                    or (expected is not None and current[0] != expected)):
+                self.rowcount = 0
+            else:
+                self.database.rows[target] = self.database.rows.pop(source)
                 self.rowcount = 1
             return
         if sql.startswith("UPDATE governed_records"):
@@ -439,7 +460,7 @@ def test_local_full_namespace_archives_its_oldest_record_instead_of_refusing(mon
     events: list[dict] = []
     monkeypatch.setattr(audit, "record", lambda *_args, **row: events.append(row) or True)
     store = GovernedRecordStore("test_capacity", "TCP", "test_record")
-    first = store.create({"id": "TCP-first", "status": "open"}, action="create",
+    first = store.create({"id": "TCP-first", "status": "closed"}, action="create",
                          actor="operator", max_records=1)
 
     second = store.create({"id": "TCP-second", "status": "open"}, action="create",
@@ -447,18 +468,112 @@ def test_local_full_namespace_archives_its_oldest_record_instead_of_refusing(mon
 
     # The namespace stays at its cap; the oldest record is kept, not deleted.
     assert [row["id"] for row in store.list()] == [second["id"]]
+    assert [row["id"] for row in store.list_archived()] == [first["id"]]
     assert store.count() == 1
     kept = store.get(first["id"])
-    assert kept["status"] == "open" and kept["revision"] == first["revision"] + 1
+    assert kept["status"] == "closed" and kept["revision"] == first["revision"] + 1
     assert any(row.get("action") == "governed_record_archived" for row in events)
     # Archived records stay updatable by id with ordinary compare-and-swap.
-    changed = store.update(first["id"], lambda row: row.update(status="closed"),
-                           expected_revision=kept["revision"], action="close", actor="operator")
-    assert changed["status"] == "closed" and changed["revision"] == kept["revision"] + 1
+    changed = store.update(first["id"], lambda row: row.update(note="reopened"),
+                           expected_revision=kept["revision"], action="note", actor="operator")
+    assert changed["note"] == "reopened" and changed["revision"] == kept["revision"] + 1
     # Its id is still taken: creating it again conflicts exactly as before.
     with pytest.raises(RecordConflict):
         store.create({"id": "TCP-first", "status": "open"}, action="create",
                       actor="operator", max_records=10)
+
+
+def test_full_namespace_never_archives_open_work(monkeypatch):
+    # An archived record leaves the store's lists. A request still being worked
+    # on (or in a status the store does not declare final) must stay visible,
+    # so a namespace full of open work refuses rather than hiding the oldest.
+    import maverick.audit as audit
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(audit, "record", lambda *_args, **_row: True)
+    for n, record in enumerate(({"status": "requested"}, {"state": "processing"},
+                                {"status": "sent"}, {"status": "some-new-status"})):
+        store = GovernedRecordStore(f"test_open_{n}", "TOW", "test_record")
+        store.create({"id": "TOW-first", **record}, action="create", actor="operator", max_records=1)
+        with pytest.raises(GovernedRecordCapacityError, match="capacity has been reached"):
+            store.create({"id": "TOW-second", "status": "closed"}, action="create",
+                         actor="operator", max_records=1)
+        assert [row["id"] for row in store.list()] == ["TOW-first"]
+        assert store.list_archived() == []
+
+
+@pytest.fixture(params=["local", "postgres"])
+def archived_delete_store(request, monkeypatch):
+    import maverick.audit as audit
+
+    monkeypatch.setattr(audit, "record", lambda *_args, **_row: True)
+    if request.param == "postgres":
+        store, backend, database = _postgres_store("test_archived_delete", "TAD")
+        archive_backend = PostgresGovernedRecordBackend(
+            governed_records._archive_namespace(store.namespace),
+            "TAD",
+            dsn="postgresql://user:secret@db.internal/lightwork",  # pragma: allowlist secret
+            connect=database.connect,
+        )
+    else:
+        store = GovernedRecordStore("test_archived_delete", "TAD", "test_record")
+        backend = store._backend()
+        archive_backend = backend._archive
+    store.create({"id": "TAD-first", "status": "done", "owner": "ada"}, action="create",
+                 actor="operator", max_records=1)
+    store.create({"id": "TAD-second", "status": "done"}, action="create", actor="operator", max_records=1)
+    return store, backend, archive_backend
+
+
+def test_an_archived_record_can_still_be_deleted_by_id(archived_delete_store, monkeypatch):
+    # Personal-data erasure reaches archived records without briefly restoring
+    # them into a full active namespace, even when the deletion succeeds.
+    store, backend, _archive_backend = archived_delete_store
+
+    def unexpected_restore(_record_id):
+        pytest.fail("deletion must never restore an archived record")
+
+    monkeypatch.setattr(backend, "restore", unexpected_restore)
+    archived = store.list_archived()
+    assert [row["id"] for row in archived] == ["TAD-first"]
+
+    assert store.delete("TAD-first", expected_revision=archived[0]["revision"]) is True
+    assert store.get("TAD-first") is None
+    assert store.list_archived() == []
+    assert [row["id"] for row in store.list()] == ["TAD-second"]
+    assert store.delete("TAD-first", expected_revision=archived[0]["revision"]) is False
+
+
+def test_stale_archived_delete_preserves_record_and_active_capacity(archived_delete_store):
+    store, backend, _archive_backend = archived_delete_store
+    archived = store.list_archived()
+    active = store.list()
+
+    with pytest.raises(RecordConflict, match="expected revision"):
+        store.delete("TAD-first", expected_revision=archived[0]["revision"] - 1)
+
+    assert backend.load("TAD-first") is None
+    assert store.get("TAD-first") == archived[0]
+    assert store.list_archived() == archived
+    assert store.list() == active
+    assert store.count() == 1
+
+
+def test_archived_delete_with_pending_audit_preserves_archive(archived_delete_store):
+    store, backend, archive_backend = archived_delete_store
+    current = store.get("TAD-first")
+    governed_records._queue_audit(current, "retained", "operator")
+    pending = archive_backend.save(current, expected_revision=current["revision"])
+    active = store.list()
+
+    with pytest.raises(AuditOutboxError, match="pending audit receipts"):
+        store.delete("TAD-first", expected_revision=pending["revision"])
+
+    assert backend.load("TAD-first") is None
+    assert store.get("TAD-first") == pending
+    assert store.list_archived() == [pending]
+    assert store.list() == active
+    assert store.count() == 1
 
 
 def test_local_full_namespace_never_archives_a_record_with_undelivered_activity(monkeypatch):

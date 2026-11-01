@@ -1,4 +1,4 @@
-"""Plain-language run explanations (roadmap 2027-H1 UX).
+"""Plain-language run explanations.
 
 The trajectory page shows engineers raw events; a non-technical reviewer
 needs the same story in sentences: what was asked, what the team planned,

@@ -1,4 +1,4 @@
-"""Inbound elicitation handling in the MCP *client* (ROADMAP B1, Phase 1).
+"""Inbound elicitation handling in the MCP *client*.
 
 Before this, an external MCP server that sent ``elicitation/create`` (a request
 *to us*) got no reply and stalled the call -- the client only ever correlated

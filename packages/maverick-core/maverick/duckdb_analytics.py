@@ -1,8 +1,8 @@
-"""DuckDB analytics over the world model (roadmap: 2027 H2 ecosystem).
+"""DuckDB analytics over the world model.
 
-The roadmap lists a "DuckDB world-model". As the *live transactional* store
-that's the wrong tool — DuckDB is an OLAP engine, and the agent's world model
-is a concurrent OLTP write path that SQLite (WAL) / Postgres serve correctly.
+DuckDB is the wrong tool for the agent's *live transactional* store: it is an
+OLAP engine, and the world model is a concurrent OLTP write path that SQLite
+(WAL) / Postgres serve correctly.
 What DuckDB is genuinely great at is the **analytics** over that history:
 percentiles, time-bucketed spend, ad-hoc ``GROUP BY`` across thousands of
 goals — queries that are verbose and slow in hand-rolled Python.
@@ -69,9 +69,13 @@ class WorldAnalytics:
                 "INSERT INTO goals VALUES (?, ?, ?)",
                 [(g.id, getattr(g, "title", "") or "", getattr(g, "status", None)) for g in goals],
             )
+        from .world_model import episodes_by_goal_batch
+
         erows = []
+        batch = episodes_by_goal_batch(world, [g.id for g in goals], per_goal=limit)
         for g in goals:
-            for e in world.list_episodes(goal_id=g.id, limit=limit):
+            for e in (batch[g.id] if batch is not None and g.id in batch
+                      else world.list_episodes(goal_id=g.id, limit=limit)):
                 erows.append(
                     (
                         g.id,

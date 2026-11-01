@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from typing import Any
 
 from .governed_actions import ActionSpec, GovernedActions
@@ -33,10 +33,26 @@ class ActionReviewRequiredError(ValueError):
         self.code = code
 
 
-def digest(value: Any) -> str:
+def digest(value: Any, *, default: Any = None) -> str:
     return hashlib.sha256(json.dumps(
-        value, sort_keys=True, separators=(",", ":"), allow_nan=False,
+        value, default=default, sort_keys=True, separators=(",", ":"), allow_nan=False,
     ).encode("utf-8")).hexdigest()
+
+
+def _dataclass_fields(value: Any) -> dict[str, Any]:
+    if is_dataclass(value) and not isinstance(value, type):
+        return {field.name: getattr(value, field.name) for field in fields(value)}
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def dataclass_digest(value: Any) -> str:
+    """``digest(asdict(value))`` without first deep-copying the whole tree.
+
+    The encoder expands each dataclass as it meets it, so the JSON (and the
+    digest) is byte-identical; a 2,000-specialist list took 180 ms per page
+    the other way.
+    """
+    return digest(value, default=_dataclass_fields)
 
 
 @dataclass(frozen=True)

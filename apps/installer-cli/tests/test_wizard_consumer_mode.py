@@ -1,4 +1,4 @@
-"""Council round-2: consumer-mode flow + first-screen picker."""
+"""Consumer-mode flow + first-screen picker."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -196,7 +196,7 @@ def test_run_consumer_writes_safe_defaults(monkeypatch, tmp_path: Path):
     assert rc == 0
 
     config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
-    # Safe defaults per the safety seat.
+    # Safe defaults.
     assert config["safety"]["profile"] == "strict"
     assert config["safety"]["block_threshold"] == "medium"
     assert config["sandbox"]["backend"] == "local"          # no docker
@@ -270,7 +270,7 @@ def test_run_consumer_demo_command_runs_a_real_first_outcome(monkeypatch, tmp_pa
     out = " ".join(capsys.readouterr().out.replace("│", " ").split())  # Rich wraps the panel
     # Finance's sample runs the three-way match exception clerk, a specialist
     # that reads the bundled sample files and starts on a fresh install.
-    assert "--domain proc_p2p_exceptions" in out
+    assert "maverick start --sample finance" in out
     assert "--model" not in out
     assert "File changes and program execution are off" in out
     assert "Permissions" in out and "Allow file work" in out

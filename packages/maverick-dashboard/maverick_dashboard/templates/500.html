@@ -41,7 +41,7 @@
       <button type="button" class="btn btn--ghost" id="support-copy"{% if failure_reference %} data-failure-reference="{{ failure_reference }}"{% endif %} data-copy="Support reference: {{ failure_reference or 'Unavailable' }}{% if failure_time %} | Time: {{ failure_time }}{% endif %}">Copy support details</button>
     </details>
   {% endif %}
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     (function () { var b = document.getElementById('support-copy'); if (b) b.addEventListener('click', function () { if (window.mvCopy) mvCopy(b.getAttribute('data-copy')); }); })();
   </script>
 {% endblock %}

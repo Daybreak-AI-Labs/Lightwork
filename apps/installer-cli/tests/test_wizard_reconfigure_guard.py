@@ -143,3 +143,17 @@ def test_desktop_bridge_protocol_reports_existing_key_file(tmp_path):
     assert "CUSTOM_SECRET" not in result.stdout
     assert keys.read_text(encoding="utf-8") == "CUSTOM_SECRET=keep-me\n"
     assert not (home / "config.toml").exists()
+
+
+def test_a_setup_saved_meanwhile_leaves_the_work_folder_untouched(saved_setup, tmp_path):
+    # Both front ends check for saved setup before the questions; one saved by
+    # another installer while these were answered still refused the write,
+    # but only after the work folder and the sample files had been created.
+    home, config, secrets = saved_setup
+    workdir = tmp_path / "work"
+    with pytest.raises(FileExistsError):
+        wizard.write_consumer_config(user_name="Alex", keys={}, workdir=str(workdir),
+                                     budget={"max_dollars": 2.0}, first_outcome="finance",
+                                     protect_existing=True)
+    assert not workdir.exists()
+    assert wizard.CONFIG_FILE.read_bytes() == config and wizard.ENV_FILE.read_bytes() == secrets

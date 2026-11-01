@@ -127,7 +127,7 @@
       <div id="pv-transfer" aria-live="polite"></div>
     </div>
   </div>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     (function () {
       const RANK = ['overdue', 'd0_7', 'd8_14', 'd15_30', 'd30_plus'];
       const LABEL = { overdue: 'Overdue', d0_7: '7 days or less', d8_14: '8 to 14 days', d15_30: '15 to 30 days', d30_plus: 'More than 30 days' };
@@ -195,7 +195,7 @@
       <span class="muted" id="pv-bulk-msg" role="status" aria-live="polite" style="font-size: var(--text-sm);"></span>
     </div>
   </div>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     (function () {
       const TYPES = {{ templates | tojson }};
       const rowsBox = document.getElementById('pv-bulk-rows');
@@ -752,7 +752,7 @@
         </tbody>
       </table>
       </div>
-      <script type="application/json" id="pw-dsar-assignees">{{ (dsar_assignees or []) | tojson }}</script>
+      <script nonce="{{ csp_script_nonce }}" type="application/json" id="pw-dsar-assignees">{{ (dsar_assignees or []) | tojson }}</script>
       <div id="pe-worksheet-result"></div>
       <div id="pw-fulfill-out" role="status" aria-live="polite" style="font-size:var(--text-sm);"></div>
       <p class="muted" style="font-size:var(--text-xs);">&ldquo;Gather their data&rdquo; collects
@@ -1226,7 +1226,7 @@
 
   {% include "_ops_privacy.html" %}
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     (function () {
       'use strict';
       function post(url, body) {
@@ -1626,7 +1626,7 @@
 
   {% include "_workspace_memory_catalog.html" %}
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   // An incident's awareness time starts as now, in the viewer's own time
@@ -2490,7 +2490,7 @@
 </script>
 
 <script src="/static/board.js"></script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   var B = window.LWBoard;

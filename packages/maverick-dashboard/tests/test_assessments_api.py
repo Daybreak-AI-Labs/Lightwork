@@ -191,7 +191,7 @@ def test_page_uses_selectors_and_plain_language(monkeypatch, tmp_path):
     assert re.search(r"\b(JSON|lens|cadence|HTTP \d{3})\b", text, re.IGNORECASE) is None
     assert '<select id="as-agent"' in body and "<datalist" not in body
     assert "format=json" not in body and "Download spreadsheet" in text
-    script = main[main.index("<script>"):]
+    script = main[main.index('<script nonce="'):]
     for label in ("Approve ' + esc", "Add evidence", "Review again", "Every 6 months"):
         assert label in script
     assert "replace('_', ' ')" not in script and "(HTTP " not in script

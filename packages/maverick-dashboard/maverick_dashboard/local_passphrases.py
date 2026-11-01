@@ -13,9 +13,9 @@ attempts a minute (refused before any hashing). Only the
 hash is stored, in ``~/.maverick/dashboard-passphrases.json`` (0600). There is
 no reset by email, and an invitation never replaces an existing passphrase:
 otherwise anyone who can invite could set a colleague's passphrase and sign in
-as them. Only the installation owner, or a configured installation
-administrator, can reset a forgotten one (:mod:`passphrase_resets`). Any
-unreadable or malformed store fails closed.
+as them. Only the installation owner, while still an administrator, can reset
+a forgotten one (:mod:`passphrase_resets`). Any unreadable or malformed store
+fails closed.
 """
 from __future__ import annotations
 
@@ -56,8 +56,8 @@ NO_ACCESS = ("This account no longer has access to this workspace. "
 ACCOUNT_EXISTS = (
     "This email already has a sign-in on this installation, so it cannot be invited: accepting "
     "would replace that person's passphrase. If they have forgotten it, or have none yet, the "
-    "installation owner or an installation administrator can send them a link to choose one on "
-    "the Users page. To change their access, change their role there."
+    "installation owner can send them a link to choose one on the Users page. To change their "
+    "access, change their role there."
 )
 # The same refusal for everyone who may not see the installation's people: it
 # must read identically whatever made the invitation impossible, so it cannot

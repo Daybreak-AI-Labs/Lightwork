@@ -1,16 +1,16 @@
 """Self-contained scoring engine for the STANDALONE PIA Concierge product.
 
 This is the agent's own brain when it ships WITHOUT the Lightwork platform.
-It deliberately imports nothing from ``maverick`` — a client who buys the
-standalone agent gets exactly this: a deterministic yes/no/risk scorer over a
-small built-in questionnaire set, persisted to a plain local JSON store.
+It deliberately imports nothing from ``maverick`` — standalone mode uses
+exactly this: a deterministic yes/no/risk scorer over a small built-in
+questionnaire set, persisted to a plain local JSON store.
 
-What you DON'T get here (these are Lightwork platform benefits, gated on
-buying the platform): the full governed questionnaire catalog with immutable
+What you DON'T get here (these are Lightwork platform features, available in
+platform mode): the full governed questionnaire catalog with immutable
 content-addressed releases, the control-catalog citations, the Ed25519 signed
 audit chain, cross-run assessment memory / learning, and the governance
 workspace. The richer engine lives in ``maverick.assessment``; this vendored
-copy is intentionally minimal and may drift from it — it is a separate SKU.
+copy is intentionally minimal and may drift from it — it is a separate implementation.
 
 The result shape mirrors ``maverick.assessment.AssessmentResult`` so the same
 templates and app code render it unchanged.

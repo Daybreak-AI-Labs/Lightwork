@@ -135,6 +135,16 @@ class SlackChannel(Channel):
             return refuse
         return _authority_for("slack")
 
+    @staticmethod
+    def _status_scope():
+        """The dashboard's role and department rule for ``/lightwork status``;
+        without the dashboard, status shows only the person's own requests."""
+        try:
+            from maverick_dashboard.daily_digest_scheduler import status_scope
+        except Exception:  # noqa: BLE001 -- the kernel runs without the dashboard
+            return None
+        return status_scope
+
     def _authorized(self, msg, account):
         from maverick.oidc import oidc_enabled
 
@@ -347,7 +357,7 @@ class SlackChannel(Channel):
             result = await asyncio.to_thread(
                 handle_slash_command, form, world=self._approval_world(),
                 principal_for=self._principal_for, ask=None,
-                authorize=self._vote_authority(),
+                authorize=self._vote_authority(), status_scope=self._status_scope(),
             )
         await asyncio.to_thread(respond, str(form.get("response_url") or ""), result)
         return result
@@ -356,6 +366,17 @@ class SlackChannel(Channel):
         if not self._bot_user_id:
             return text
         return re.sub(rf"<@{re.escape(self._bot_user_id)}(\|[^>]*)?>", " ", text).strip()
+
+    async def _thread_admitted(self, event: dict) -> bool:
+        """Whether this thread's first message was admitted (the bot was asked
+        there). Without the identity to look it up, the checks that follow
+        refuse the event as before."""
+        from .delivery import DeliveryJournal, _record_id
+
+        if not self._account_id or not event.get("channel") or not event.get("thread_ts"):
+            return True
+        root = _record_id(self.name, self._account_id, f"{event['channel']}:{event['thread_ts']}")
+        return await asyncio.to_thread(DeliveryJournal().get, root) is not None
 
     def _addressed_to_bot(self, event: dict) -> bool:
         """DMs always; channels and groups only when the bot is mentioned."""
@@ -392,6 +413,13 @@ class SlackChannel(Channel):
                     and event.get("subtype") in (None, "file_share")
                     and is_allowed(sender, self.allowed_user_ids)
                     and (addressed or threaded_reply))
+        reply_only = threaded_reply and not addressed
+        if accepted and reply_only:
+            # A reply that does not mention the bot can only answer a question
+            # asked in that thread, and questions are asked in the thread of a
+            # message the bot admitted. Other threads are people talking to each
+            # other: admitting them (and their files) filled the intake.
+            accepted = await self._thread_admitted(event)
         if accepted:
             # auth_test binds this transport to its immutable workspace/bot.
             # Persist only the envelope before ACK; file downloads and agent
@@ -399,7 +427,8 @@ class SlackChannel(Channel):
             if (not self._account_id or req.payload.get("team_id") != self._team_id
                     or not event.get("channel") or not event.get("ts")):
                 raise PermissionError("Slack event has no verified account/message identity")
-            files = [{key: value for key, value in item.items() if key in {
+            # An answer is the reply's text: files sent with it are not fetched.
+            files = [] if reply_only else [{key: value for key, value in item.items() if key in {
                 "id", "name", "mimetype", "size", "url_private", "url_private_download",
             }} for item in (event.get("files") or [])[:10]]
             text = self._strip_mention(event.get("text") or "")
@@ -412,7 +441,7 @@ class SlackChannel(Channel):
                 sender_id=sender, message_id=event["ts"],
                 provider_tenant_id=self._team_id, provider_sender_id=sender,
                 conversation_ref=thread if in_room else None,
-                question_reply_only=threaded_reply and not addressed,
+                question_reply_only=reply_only,
             )
             account = self._account_id
             # A mention in a channel or group answers in its thread so the

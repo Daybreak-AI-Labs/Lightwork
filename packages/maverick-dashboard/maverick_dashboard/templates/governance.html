@@ -497,7 +497,7 @@
       </select>
     </label>
     <p class="muted gov-form__wide" id="literacy-training-count" role="status" aria-live="polite">{% if literacy_training_keys|length > 100 %}Showing the first 100 of {{ literacy_training_keys|length }} trainings. Type more of the name to find another training.{% endif %}</p>
-    <script type="application/json" id="literacy-training-choices">{{ literacy_training_keys|tojson }}</script>
+    <script nonce="{{ csp_script_nonce }}" type="application/json" id="literacy-training-choices">{{ literacy_training_keys|tojson }}</script>
     <label>Finished on
       <input class="input" name="completed_at" type="date" required>
     </label>
@@ -665,7 +665,7 @@
   {% endif %}
 </section>
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (() => {
   const prefix = "/api/v1/security/governance";
   const assurance = "/api/v1/security/assurance";

@@ -109,7 +109,7 @@
   {% include "_my_work_assets.html" %}
   {% endif %}
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     var input = document.getElementById('run-search-q');
     var listEl = document.getElementById('run-list');

@@ -1624,3 +1624,21 @@ def test_disabled_questionnaire_register_still_returns_missing(monkeypatch, tmp_
     from maverick import vendor_management
     monkeypatch.setattr(vendor_management, "enabled", lambda: False)
     assert _client().get("/form/unknown").status_code == 404
+
+
+def test_unknown_form_tokens_are_throttled_per_address_before_any_lookup(monkeypatch, tmp_path):
+    # Each lookup scans the registered triggers and vendor questionnaires; an
+    # anonymous guesser gets its own per-address limit (not the goal ceiling).
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import app as app_module
+
+    lookups = []
+    monkeypatch.setattr(app_module, "_registered_form_trigger", lambda token: lookups.append(token))
+    monkeypatch.setattr(app_module, "_vendor_questionnaire_for", lambda token: lookups.append(token))
+    monkeypatch.setattr(app_module, "_FORM_LOOKUPS_PER_MINUTE", 3)
+    client = _client()
+    statuses = [client.post(f"/form/guess-{n}", json={"a": "b"}).status_code for n in range(5)]
+    assert statuses[:3] == [404, 404, 404]
+    assert statuses[3:] == [429, 429]
+    assert client.get("/form/guess-page").status_code == 429
+    assert len(lookups) <= 6  # only the three admitted guesses reached a lookup

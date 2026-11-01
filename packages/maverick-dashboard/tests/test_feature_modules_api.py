@@ -274,13 +274,22 @@ def test_module_state_and_mutation_fail_closed_on_unreadable_sources(
     monkeypatch, request,
 ):
     from maverick import config
+    from maverick_dashboard import auth
 
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "module-state-test-token")
+    # Keep the authenticated audit tenant valid while corrupting the module's
+    # configuration source; otherwise token admission fails before this API.
+    monkeypatch.setenv("MAVERICK_CLIENT_ID", "module-state-test")
     monkeypatch.setenv(
         "MAVERICK_AUDIT_SIGNING_KEY",
         hashlib.sha256(request.node.nodeid.encode()).hexdigest(),
     )
     authorization = {"Authorization": "Bearer module-state-test-token"}
+    # The token's hourly use record is written while the configuration is
+    # readable, whichever test ran first in this process; otherwise that write
+    # is what fails closed below, not the module state under test.
+    monkeypatch.setattr(auth, "_break_glass_last_audit", [None])
+    assert client.get("/api/v1/features/modules", headers=authorization).status_code == 200
     original_source_errors = config.config_source_errors
     monkeypatch.setattr(
         config,

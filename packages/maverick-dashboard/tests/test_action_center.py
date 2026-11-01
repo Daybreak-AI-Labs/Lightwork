@@ -531,3 +531,25 @@ def test_approval_source_refuses_content_without_explicit_authority_callback():
     result = center.collect(World(), principal="user:alice", owner="user:alice", specs=[],
                             assessments=list, assessment_allowed=lambda row: False)
     assert not any(row["kind"] == "approval" for row in result["items"])
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_supplier_reconciliations_follow_the_vendor_onboarding_switch(monkeypatch, tmp_path, enabled):
+    # The source was gated on a [features] key no reader sets, so supplier
+    # cases waiting on reconciliation never reached Action Center.
+    (tmp_path / "config.toml").write_text(f"[vendor_onboarding]\nenable = {str(enabled).lower()}\n")
+    config.reset_config_cache()
+    seen, value = {}, model()
+
+    def collect(world, **kwargs):
+        seen.update(kwargs)
+        return copy.deepcopy(value)
+
+    monkeypatch.setattr(api.action_center, "collect", collect)
+    monkeypatch.setattr(api, "context_for", lambda request: CTX)
+    client = TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Action-Context": CTX})
+    try:
+        assert client.get("/api/v1/action-center").status_code == 200
+    finally:
+        config.reset_config_cache()
+    assert (seen["vendor_reconciliations"] is not None) is enabled

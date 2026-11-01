@@ -34,7 +34,7 @@
   {% endif %}
 </section>
 {% if can_turn_on %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   var btn = document.getElementById('sh-turn-on');
   var msg = document.getElementById('sh-turn-on-msg');
@@ -159,7 +159,7 @@
           </optgroup>
           {% endif %}
         </select>
-        <script type="application/json" id="sh-department-groups">{{ departments.groups | tojson }}</script>
+        <script nonce="{{ csp_script_nonce }}" type="application/json" id="sh-department-groups">{{ departments.groups | tojson }}</script>
         <span class="sh-note" id="sh-department-help">Lightwork counts finished work in this area.</span>
       </div>
       <div class="sh-field">
@@ -246,7 +246,7 @@
 </div>
 
 {% if can_manage %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   var form = document.getElementById('sh-form');

@@ -100,3 +100,17 @@ test("failures never show status codes", async (t) => {
   assert.equal(text, "Could not turn this protection on.");
   assert.doesNotMatch(text, /500|HTTP/);
 });
+
+test("a save that an installation policy overrides says so instead of a generic failure", async (t) => {
+  // The periods are saved, then a 409 explains the override in {message, effective};
+  // only string details were shown, so the admin was told retention was unavailable.
+  const ui = await fixture({ reply: (url, options) => (url.endsWith("/retention") && options.method === "POST")
+    ? json({ detail: { message: "The saved preference is overridden by installation policy. Effective periods have not changed; ask your installation administrator.", effective: {} } }, 409)
+    : null });
+  t.after(() => ui.window.close());
+  ui.doc.getElementById("cmp-retention-save").click();
+  await ui.settle();
+  const shown = ui.doc.getElementById("cmp-retention-result").textContent;
+  assert.match(shown, /overridden by installation policy/);
+  assert.doesNotMatch(shown, /Retention is unavailable/);
+});

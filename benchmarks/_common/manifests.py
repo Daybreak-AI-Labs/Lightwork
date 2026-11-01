@@ -1,9 +1,9 @@
 """Manifest definitions for Lightwork's benchmark suite (May 2026).
 
-Per Karpathy: SWE-bench Verified is contaminated; SWE-bench Pro is the
-new credible coding benchmark. GAIA Level 3 and OSWorld are where the
-swarm wedge actually wins. Headline metric we report is the
-(success_rate, $/task) Pareto frontier across all four baselines.
+SWE-bench Pro is the headline coding benchmark; SWE-bench Verified is
+treated as at risk of training-data contamination. GAIA Level 3 and OSWorld are where
+verifier-driven swarms are expected to do best. Headline metric we report
+is the (success_rate, $/task) Pareto frontier across all four baselines.
 
 Each manifest declares: where the dataset comes from, the format we
 expect on disk, how to score, the threshold to claim "competitive" vs
@@ -74,9 +74,9 @@ MANIFESTS: dict[str, Manifest] = {
         threshold_sota=0.70,
         scoring="exact-match",
         notes=(
-            "Lightwork's strongest wedge: long-horizon decomposable tasks where "
-            "verifier-driven swarms outperform single-shot. Filter HF GAIA "
-            "validation split to Level==3."
+            "Long-horizon decomposable tasks, where verifier-driven swarms are "
+            "expected to outperform single-shot. Filter HF GAIA validation "
+            "split to Level==3."
         ),
         headline=True,
     ),

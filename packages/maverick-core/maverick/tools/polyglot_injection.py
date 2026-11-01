@@ -1,4 +1,4 @@
-"""Polyglot injection defense scan (roadmap: 2028 H2 — injection defense).
+"""Polyglot injection defense scan.
 
 Scan a piece of untrusted text for *polyglot* injection payloads: input crafted
 to be malicious across several execution contexts at once (a string that is

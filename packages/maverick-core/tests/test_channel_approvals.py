@@ -159,7 +159,7 @@ def test_high_and_critical_need_a_second_confirmation(tmp_path, recorded):
 
     world = _world(tmp_path)
     card = _card()
-    aid = _park(world, risk="critical", card=card)
+    aid = _park(world, risk="critical", card=card, undoable=True)
     with pytest.raises(ChannelApprovalRefused) as exc:
         decide_from_channel(world, aid, "approved", principal="user:alice", channel="slack",
                             binding=card["binding_sha256"])
@@ -212,7 +212,7 @@ def test_undo_uses_the_shared_rule_and_audit(tmp_path, recorded, monkeypatch):
     )
 
     world = _world(tmp_path)
-    aid = _park(world, detail="x")
+    aid = _park(world, detail="x", undoable=True)
     with pytest.raises(ChannelApprovalRefused) as exc:
         undo_decision(world, aid, undone_by="user:a", channel="slack")
     assert exc.value.reason == "not_decided"
@@ -455,6 +455,19 @@ def test_an_action_label_with_a_non_ascii_character_can_still_be_approved(tmp_pa
     assert result["status"] == "approved"
 
 
+def test_a_queued_action_holding_a_lone_surrogate_is_a_stale_card_not_a_crash():
+    from types import SimpleNamespace
+
+    from maverick.approval_cards import encode_approval_detail
+    from maverick.channel_approvals import ChannelApprovalRefused, require_current_card
+
+    card = _card()
+    approval = SimpleNamespace(detail=encode_approval_detail(card), action="browser.\ud800")
+    with pytest.raises(ChannelApprovalRefused) as exc:
+        require_current_card(approval, binding=card["binding_sha256"])
+    assert exc.value.reason == "stale_card"
+
+
 def test_an_undo_the_audit_log_refuses_is_a_refusal_not_a_server_error(tmp_path, recorded, monkeypatch):
     import maverick.audit as audit
     from maverick.channel_approvals import (
@@ -464,7 +477,7 @@ def test_an_undo_the_audit_log_refuses_is_a_refusal_not_a_server_error(tmp_path,
     )
 
     world = _world(tmp_path)
-    aid = _park(world, detail="x")
+    aid = _park(world, detail="x", undoable=True)
     decide_from_channel(world, aid, "denied", principal="user:a", channel="slack")
 
     def refused(*args, **kwargs):
@@ -487,3 +500,22 @@ def test_an_unreadable_approval_state_never_claims_the_request_settled(tmp_path,
     result = decide_from_channel(world, aid, "approved", principal="user:a", channel="slack",
                                  binding=card["binding_sha256"])
     assert result["status"] == "pending" and result["effective"] is False and result["undo_seconds"] == 0.0
+
+
+def test_a_chat_card_offers_no_undo_for_a_decision_nothing_waits_on(tmp_path, recorded):
+    from maverick.channel_approvals import (
+        ChannelApprovalRefused,
+        decide_from_channel,
+        undo_decision,
+        undo_seconds_left,
+    )
+
+    world = _world(tmp_path)
+    aid = _park(world, detail="x", provenance="codebase")
+    result = decide_from_channel(world, aid, "denied", principal="user:a", channel="slack")
+    assert result["effective"] and result["undo_seconds"] == 0.0
+    assert undo_seconds_left(world.get_approval(aid)) == 0.0
+    with pytest.raises(ChannelApprovalRefused) as exc:
+        undo_decision(world, aid, undone_by="user:a", channel="slack")
+    assert exc.value.reason == "final" and exc.value.status_code == 409
+    assert world.get_approval(aid).status == "denied"

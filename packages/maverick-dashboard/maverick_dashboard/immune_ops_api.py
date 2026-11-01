@@ -40,6 +40,9 @@ class WrittenCanaryIn(BaseModel):
     flaw: str = Field(min_length=1, max_length=1000)
     risk: Literal["low", "medium", "high"] = "medium"
     requested_by: str | None = Field(default=None, max_length=300)
+    # Matches the kind of request imitated: a task's step can be undone for a
+    # moment after a decision; a merge, settings change or agent access cannot.
+    undoable: bool = True
 
 
 class NetworkIn(BaseModel):
@@ -95,7 +98,7 @@ async def plant_written_canary(request: Request, body: WrittenCanaryIn) -> dict:
         await run_in_threadpool(lambda: oversight.seed_canary(
             world, action=body.action.strip(), detail=body.detail.strip(),
             decision_class=body.decision_class.strip(), flaw=body.flaw.strip(),
-            risk=body.risk, requested_by=requested_by))
+            risk=body.risk, requested_by=requested_by, undoable=body.undoable))
     except PermissionError as exc:
         raise HTTPException(status_code=409, detail="Reviewer tests are turned off. Turn them on first.") from exc
     # The approval it hides in and the planted mistake stay private.

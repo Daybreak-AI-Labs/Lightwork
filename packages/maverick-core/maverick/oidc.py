@@ -168,7 +168,15 @@ def load_oidc_config() -> OIDCConfig:
 
     Env overrides config per field. ``algorithms`` accepts a comma-separated
     env value or a TOML list; it is always normalized to asymmetric-only.
+    The section and both secrets come from one configuration read.
     """
+    from .config import single_read
+
+    with single_read():
+        return _load_oidc_config()
+
+
+def _load_oidc_config() -> OIDCConfig:
     section = _load_oidc_section()
 
     enabled_env = _env_flag("MAVERICK_OIDC_ENABLED")

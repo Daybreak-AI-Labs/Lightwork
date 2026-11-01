@@ -185,8 +185,14 @@ def create(world, reviewed, *, token, message, answer_only, caps, admission, bef
                               "at": row["available_at"]} for row in reviewed["files"]]}})
 
 
-def require_copy_sources(world, goal_id, *, alternative=None, authorize=None):
-    """Historical copied text retains source ACLs, independently of new-work policy."""
+def require_copy_sources(world, goal_id, *, alternative=None, authorize=None, defer_errors=False):
+    """Historical copied text retains source ACLs, independently of new-work policy.
+
+    ``defer_errors``: a source that cannot be checked (an error other than a
+    ``PermissionError`` refusal) is set aside and the walk goes on, so a later
+    source that refuses still decides. At the end an error set aside is raised,
+    an outage ahead of a ``SourceContextUnavailable`` (which can also be a
+    refusal). For a check that must tell "cannot be read" from "refused"."""
     if alternative is None:
         alternative = _alternative(world, goal_id)
         if alternative is None:
@@ -197,7 +203,7 @@ def require_copy_sources(world, goal_id, *, alternative=None, authorize=None):
         raise PermissionError("The alternative conversation is unavailable.")
     if authorize is not None:
         authorize(goal)
-    pending, seen = list(alternative["source_goal_ids"]), {goal_id}
+    pending, seen, deferred = list(alternative["source_goal_ids"]), {goal_id}, []
     while pending:
         identity = pending.pop()
         if identity in seen:
@@ -205,19 +211,56 @@ def require_copy_sources(world, goal_id, *, alternative=None, authorize=None):
         seen.add(identity)
         if len(seen) > 1000:
             raise PermissionError("This copied conversation has too many source dependencies to verify completely. Start a new conversation with explicitly chosen context.")
+        try:
+            _check_copy_source(world, identity, goal, authorize, require_read, pending,
+                               deferred if defer_errors else None)
+        except PermissionError:
+            raise
+        except Exception as exc:
+            if not defer_errors:
+                raise
+            deferred.append(exc)
+    if deferred:
+        from .knowledge_task_context import SourceContextUnavailable
+
+        # An outage outranks an "unavailable source", which can also be a
+        # refusal: the answer does not depend on the order sources were walked.
+        raise next((exc for exc in deferred if not isinstance(exc, SourceContextUnavailable)), deferred[0])
+    from .attachments import _verify_stored_attachment
+    for item in world.list_attachments(goal_id):
+        _verify_stored_attachment(Path(item.path), item.sha256)
+    return alternative
+
+
+def _check_copy_source(world, identity, goal, authorize, require_read, pending, deferred=None):
+    """Check one copied source and queue its own copied sources. With
+    ``deferred`` (a list), a step that cannot be checked is set aside there
+    while the others still run, and the nested sources are queued first, so
+    they are walked even when this source cannot be checked (or read)."""
+    def check():
         source_goal = world.get_goal(identity)
         if source_goal is None or source_goal.owner != goal.owner:
             raise PermissionError("A copied source is no longer available to this account.")
         if authorize is not None:
             authorize(source_goal)
         require_read(source_goal, goal.owner)
+
+    def queue_nested():
         nested = SubmissionStore(world).for_goal(identity)
         if nested and nested["detail"].get("kind") in KINDS:
             pending.extend(nested["detail"]["alternative"]["source_goal_ids"])
-    from .attachments import _verify_stored_attachment
-    for item in world.list_attachments(goal_id):
-        _verify_stored_attachment(Path(item.path), item.sha256)
-    return alternative
+
+    if deferred is None:
+        check()
+        queue_nested()
+        return
+    for step in (queue_nested, check):
+        try:
+            step()
+        except PermissionError:
+            raise
+        except Exception as exc:
+            deferred.append(exc)
 
 
 def _alternative(world, goal_id):

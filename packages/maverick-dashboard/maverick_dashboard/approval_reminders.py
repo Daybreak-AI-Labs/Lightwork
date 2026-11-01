@@ -3,10 +3,10 @@
 Ten minutes after a request is parked on the Approvals page with no decision,
 each person who could decide it in Lightwork gets one in-app alert (the bell,
 through the personal alerts that are on by default for approvals waiting).
-It goes out only while the step is still waiting (the task's wait,
-``[approval] dashboard_wait_seconds``, 30 minutes by default, has not ended)
-and only in the app: no email, Slack or Teams copy. The approval card then
-says "Reminder sent".
+It goes out only while the request can still be acted on: until its card
+expires and, for a task's risky step, until the task's wait (``[approval]
+dashboard_wait_seconds``, 30 minutes by default) ends. Only in the app: no
+email, Slack or Teams copy. The approval card then says "Reminder sent".
 
 The reminder is derived from the request, not stored: each person's bell keeps
 an alert once per request and parking time, so it is sent exactly once.
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 
-from maverick.channel_approvals import SETTINGS_PROVENANCE
+from maverick.channel_approvals import SETTINGS_PROVENANCE, held_for_undo
 
 REMINDER_AFTER_SECONDS = 600.0
 
@@ -37,14 +37,33 @@ def reminder_due_at(approval) -> float | None:
     requested_at = getattr(approval, "requested_at", None)
     if not isinstance(requested_at, (int, float)) or isinstance(requested_at, bool):
         return None
-    if dashboard_wait_seconds() <= REMINDER_AFTER_SECONDS:
+    if held_for_undo(approval) and dashboard_wait_seconds() <= REMINDER_AFTER_SECONDS:
         return None
     return float(requested_at) + REMINDER_AFTER_SECONDS
 
 
+def _acted_on_until(approval) -> float | None:
+    """When the request stops being one anyone can act on: its card's expiry
+    and, for a task's step, the end of the task's wait (one that timed out
+    leaves the request pending with no task waiting). None when neither is
+    known."""
+    from maverick.safety.consent import dashboard_wait_seconds
+
+    from .approval_private_cards import _expires_at
+
+    ends = [end for end in (_expires_at(approval),) if end is not None]
+    if held_for_undo(approval):
+        ends.append(float(approval.requested_at) + dashboard_wait_seconds())
+    return min(ends) if ends else None
+
+
 def _due(approval, now: float) -> bool:
+    """Ten minutes in, and the request can still be acted on."""
     due = reminder_due_at(approval)
-    return due is not None and now >= due
+    if due is None or now < due:
+        return False
+    end = _acted_on_until(approval)
+    return end is None or now < end
 
 
 def reminded(world, approval, principal: str) -> bool:

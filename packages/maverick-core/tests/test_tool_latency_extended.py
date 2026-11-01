@@ -1,4 +1,4 @@
-"""Extended per-tool latency stats (ROADMAP 2028 H1)."""
+"""Extended per-tool latency stats."""
 from __future__ import annotations
 
 from maverick import tool_latency

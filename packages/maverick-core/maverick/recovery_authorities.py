@@ -45,6 +45,9 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "ai_regulatory_notices": "regulatory_notice_authority",
     "ai_regulatory_staleness": "regulatory_staleness_authority",
     "ai_roi_assumptions": "roi_assumption_authority",
+    # A restored draft reservation or adoption decision is not fresh consent
+    # and must not create a second native workflow from an old replay receipt.
+    "intent_value_recommendations": "intent_value_draft_decision_authority",
     "ai_serious_incidents": "serious_incident_authority",
     "assessment_evidence_proposals": "assessment_evidence_authority",
     "channel-deliveries": "channel_execution_delivery_authority",
@@ -175,6 +178,9 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     "personal-alert-tests": "personal_alert_test_dispatch_authority",
     # Reviewed specialist publication and vendor identity decisions.
     "specialist-drafts": "specialist_draft_publication_authority",
+    # A restored trial must not route goals to a version that was since promoted or rolled back.
+    "specialist-canaries": "specialist_canary_trial_authority",
+    "specialist-canary-goals": "specialist_canary_goal_authority",
     "vendor-profile-decisions": "vendor_profile_decision_authority",
     # Exact retained safety-settings copies and reviewed restore requests are
     # runtime-override authority: a restored copy must not reapply itself.
@@ -197,6 +203,10 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
 # authority. Consumers still validate schema, owner and current source access.
 NON_AUTHORIZING_GOVERNED_NAMESPACES = frozenset({
     "action_center_preferences", "personal_budget_warnings", "project_workspace_defaults",
+    # Derived analytics and economic assumptions never admit work, alter
+    # source evidence, grant access or set spending limits. Source access and
+    # complete execution evidence are checked again when reporting resumes.
+    "intent_value_work", "intent_value_settings", "intent_value_benchmarks",
 })
 
 # File authorities from customer workflows have the same anti-rollback needs

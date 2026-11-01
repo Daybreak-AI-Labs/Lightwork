@@ -1,4 +1,4 @@
-"""UX-014: the start-of-task risk hold must apply to the product's own entry
+"""The start-of-task risk hold must apply to the product's own entry
 points, not only to ``run_goal(resume=False)`` from the terminal.
 
 Every dashboard chat, REST, schedule, flow and queue-worker start goes through

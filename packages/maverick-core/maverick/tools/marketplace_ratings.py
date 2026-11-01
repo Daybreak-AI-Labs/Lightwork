@@ -1,5 +1,4 @@
-"""Marketplace ratings + install verification (roadmap: 2027 H1 — ecosystem /
-plugin marketplace).
+"""Marketplace ratings + install verification.
 
 Two pure, offline helpers for a plugin/tool marketplace: aggregate user star
 ratings into a robust ranking score, and verify a downloaded artifact against its

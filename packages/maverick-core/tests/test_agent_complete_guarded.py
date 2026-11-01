@@ -29,7 +29,7 @@ class _FakeLLM:
 
 def _agent(budget: Budget, llm: _FakeLLM):
     # Duck-typed stand-in: _complete_guarded only touches self.ctx.budget,
-    # self.ctx.llm, self._HALT_POLL_SECONDS, and (via the shared W1-31 guard)
+    # self.ctx.llm, self._HALT_POLL_SECONDS, and (via the shared guard)
     # self._await_wall_clock_guarded -- bind the real method so the shared
     # wall-clock/killswitch polling loop it delegates to actually runs.
     obj = types.SimpleNamespace(

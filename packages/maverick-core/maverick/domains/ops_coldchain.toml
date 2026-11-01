@@ -1,4 +1,4 @@
-# Operations / Supply Chain — council-added — Cold-Chain / Serialization.
+# Operations / Supply Chain — Cold-Chain / Serialization.
 # Integration targets (connectors to build): track-and-trace; the quality & logistics towers.
 name = "ops_coldchain"
 compartment = "ops_quality"

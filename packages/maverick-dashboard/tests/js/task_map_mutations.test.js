@@ -3,7 +3,7 @@ const test=require('node:test'), assert=require('node:assert/strict');
 const fs=require('node:fs'), path=require('node:path'), {webcrypto}=require('node:crypto');
 const {JSDOM}=require('jsdom');
 const {shell} = require('./_shell');
-const template=fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/templates/graph_editor.html'),'utf8');
+const template=fs.readFileSync(path.join(__dirname,'../../maverick_dashboard/templates/graph_editor.html'),'utf8').replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const script=template.slice(template.indexOf('<script>')+8,template.lastIndexOf('</script>'));
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function until(condition){

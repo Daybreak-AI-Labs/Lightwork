@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-import hmac
 import json
 import re
 import secrets
@@ -11,6 +10,7 @@ from pathlib import Path
 
 from . import backup, file_lock
 from . import installation_recovery as recovery
+from .constant_time import text_equals
 from .installation_handoff import _release
 
 
@@ -71,7 +71,7 @@ def review(folder: str, *, public_key: str) -> dict:
         metadata = json.loads(payload)
     except (ValueError, OSError) as exc:
         raise recovery.MaintenanceError("The offline release metadata is unreadable.") from exc
-    if not isinstance(metadata, dict) or metadata.get("identity_transition") is not None or not hmac.compare_digest(str(metadata.get("public_key", "")).encode(), public_key.encode()):
+    if not isinstance(metadata, dict) or metadata.get("identity_transition") is not None or not text_equals(str(metadata.get("public_key", "")), public_key):
         raise recovery.MaintenanceError("Offline repair cannot change the installed update key or publisher identity.")
     release = _release(metadata.get("new"))
     if release["version"] != recovery.workspace_recovery.version():

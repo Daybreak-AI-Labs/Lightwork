@@ -161,6 +161,16 @@ PROVIDERS: dict[str, dict] = {
             {"id": "anthropic.claude-haiku-4-5", "notes": "Claude Haiku 4.5 on Bedrock (global endpoint)."},
         ],
     },
+    "vertex": {
+        "status": "ready",
+        "label": "Google Cloud Vertex AI (Claude; Google sign-in, no key)",
+        "env": None,
+        "models": [
+            # Placeholder only: the wizard asks for the model ID exactly as shown in
+            # the Vertex AI Model Garden and offers that id here instead.
+            {"id": "vertex", "notes": "Claude on Vertex AI. Needs your Google Cloud project, region and the model ID from the Vertex AI Model Garden."},
+        ],
+    },
 }
 
 

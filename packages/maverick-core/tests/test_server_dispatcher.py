@@ -176,6 +176,28 @@ def test_queued_question_lookup_rechecks_goal_owner_and_conversation(monkeypatch
         world.close()
 
 
+def test_a_watch_for_an_erased_or_handed_off_task_is_retired(monkeypatch, tmp_path):
+    from maverick import server as server_mod
+    from maverick.world_model import WorldModel
+
+    world = WorldModel(tmp_path / "world.db")
+    monkeypatch.setattr("maverick.world_model.open_world", lambda: world)
+    monkeypatch.setattr("maverick.world_model.close_world_if_owned", lambda _: None)
+    monkeypatch.setattr(server_mod, "_linked_channel_refusal", lambda *a: None)
+    monkeypatch.delenv("MAVERICK_TENANT_BY_USER", raising=False)
+    try:
+        conv = world.get_or_create_conversation("slack", "U1:conversation:x")
+        watch = {"goal_id": 999, "conversation_id": conv.id, "tenant": None,
+                 "owner": "user:slack:U1", "execution_principal": "user:slack:U1"}
+        msg = ChannelMessage("slack", "C1", "U1", "answer", "root")
+        assert server_mod.queued_channel_question(watch, msg, "") == (None, True)
+        theirs = world.create_goal("Report", "Prepare report", owner="user:slack:U9",
+                                   execution_principal="user:slack:U9")
+        assert server_mod.queued_channel_question({**watch, "goal_id": theirs}, msg, "") == (None, True)
+    finally:
+        world.close()
+
+
 def test_answer_to_queued_question_watches_same_goal_for_next_question(monkeypatch, tmp_path):
     from maverick import runner
     from maverick import server as server_mod

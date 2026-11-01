@@ -112,7 +112,8 @@ async def page(request: Request):
 async def controller(request: Request):
     from pathlib import Path
     name = request.url.path.rsplit("/", 1)[-1]
-    return FileResponse(Path(__file__).parent / "static" / name, media_type="text/css" if name.endswith(".css") else "application/javascript")
+    return FileResponse(Path(__file__).parent / "static" / name, media_type="text/css" if name.endswith(".css") else "application/javascript",
+                        headers={"Cache-Control": "public, max-age=300"})
 
 
 @router.get(BASE)

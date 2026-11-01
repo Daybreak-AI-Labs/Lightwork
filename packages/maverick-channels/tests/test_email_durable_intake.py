@@ -250,3 +250,83 @@ def test_one_recovery_pass_looks_past_finished_receipts(environment):
     # The scan still has a hard bound on receipts inspected per pass.
     rows, _ = journal.recovery_window(channel="email", account=channel._account(), limit=2, scan_limit=2)
     assert len(rows) <= 2
+
+
+def test_a_refused_attachment_never_stops_the_mailbox(environment, monkeypatch):
+    # A file type the store refuses raised inside the poll before the email was
+    # marked read, so it stayed first among the unread and every later poll
+    # stopped at it: no newer email was ever taken in.
+    channel, _ = environment
+    def with_program():
+        msg = email.message.EmailMessage()
+        msg["From"], msg["Subject"] = "alice@example.test", "Tool"
+        msg["Authentication-Results"] = "mx.example.test; dmarc=pass header.from=example.test"
+        msg.set_content("Please look at this")
+        msg.add_attachment(b"MZ\x90\x00binary", maintype="application", subtype="x-msdownload",
+                           filename="tool.exe")
+        return msg.as_bytes()
+    seen = []
+    _imap(monkeypatch, lambda: seen.append(True), with_program)
+    rows = channel._fetch_unseen()
+    assert seen == [True]
+    assert len(rows) == 1 and rows[0]["message"]["attachments"] == []
+    assert rows[0]["message"]["text"].startswith("Subject: Tool\n\nPlease look at this")
+    assert "attached files were not accepted" in rows[0]["message"]["text"]
+
+
+def test_an_email_admitted_differently_before_is_marked_read_not_retried_forever(environment, monkeypatch):
+    # An email admitted by an earlier build (a different intake fingerprint)
+    # and marked unread again: the earlier admission stands and the poll moves on.
+    channel, _ = environment
+    old = delivery.IncomingMessage(user_id="alice@example.test", text="Earlier text", channel="email",
+                                   message_id="42:7")
+    delivery.DeliveryJournal().admit(old, external_id="42:7", account=channel._account(),
+                                     route={"subject": "Re: Review"})
+    seen = []
+    _imap(monkeypatch, lambda: seen.append(True))
+    assert channel._fetch_unseen() == []
+    assert seen == [True]
+    assert len(delivery.DeliveryJournal().store.list(limit=5)) == 1
+
+
+def test_a_full_intake_still_leaves_the_email_unread_for_later(environment, monkeypatch):
+    from maverick.governed_records import GovernedRecordCapacityError
+
+    channel, _ = environment
+    def full(*args, **kwargs):
+        raise GovernedRecordCapacityError("full")
+    monkeypatch.setattr(delivery.DeliveryJournal, "admit", full)
+    seen = []
+    _imap(monkeypatch, lambda: seen.append(True))
+    with pytest.raises(GovernedRecordCapacityError):
+        channel._fetch_unseen()
+    assert seen == []
+
+
+def test_one_failing_row_does_not_pin_the_email_recovery_window(environment, monkeypatch):
+    # The email loop wrapped the whole batch in one try: a row that raised on
+    # every pass (an unconfirmed question send, say) skipped the rows after it
+    # and never advanced the window, so they were never handled.
+    channel, _ = environment
+    journal = delivery.DeliveryJournal()
+    for n in (1, 2):
+        message = delivery.IncomingMessage(user_id="alice@example.test", text=f"Request {n}",
+                                           channel="email", message_id=f"42:{n}")
+        journal.admit(message, external_id=f"42:{n}", account=channel._account(),
+                      route={"subject": "Re: Review", "sender_auth": "trusted_dmarc_pass"})
+    handled, finished = [], []
+
+    async def process(incoming, **kwargs):
+        if incoming.message_id == "42:1":
+            raise delivery.DeliveryUnknown("Prior channel send has no confirmed receipt")
+        handled.append(incoming.message_id)
+
+    monkeypatch.setattr(channel, "process_message", process)
+    monkeypatch.setattr(channel, "_fetch_unseen", list)
+    monkeypatch.setattr(delivery.DeliveryJournal, "finish_recovery_window",
+                        lambda self, checkpoint: finished.append(checkpoint))
+    async def no_sleep(*args):
+        channel._stop = True
+    monkeypatch.setattr("maverick_channels.email.asyncio.sleep", no_sleep)
+    asyncio.run(channel.start())
+    assert handled == ["42:2"] and len(finished) == 1

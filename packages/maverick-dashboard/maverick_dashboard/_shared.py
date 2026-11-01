@@ -78,9 +78,9 @@ def _any_provider_key_set() -> bool:
     """True iff some LLM provider is configured (env key, base-url env, or
     a ``[providers.<name>]`` config table with api_key/base_url).
 
-    Council UX fix round 1: the dashboard used to hard-fail on a missing
+    The dashboard used to hard-fail on a missing
     ANTHROPIC_API_KEY even when the user had OpenAI or Gemini set up.
-    Round 2 (platform test): it still rejected keyless self-hosted setups
+    Later it still rejected keyless self-hosted setups
     (Ollama/vLLM/TGI via config or *_BASE_URL) that the CLI accepted and ran
     fine — three components, three different predicates. Delegate to the one
     shared predicate in maverick.config; the name is kept for call sites.
@@ -173,8 +173,9 @@ def require_provider_or_400(*, role: str | None = None) -> None:
         status_code=400,
         detail=(
             "The selected AI model route is incomplete "
-            f"({missing_detail}). An administrator can run 'maverick init' and "
-            "'maverick preflight' before this operation."
+            f"({missing_detail}). An administrator can add the missing key in "
+            "Lightwork > Settings (or run 'maverick init' on a computer with no "
+            "Lightwork setup yet), then run 'maverick preflight'."
         ),
     )
 
@@ -183,7 +184,7 @@ def authenticated_subject(request, *, error_detail: str) -> str:
     """Resolve the caller's identity subject for a suite API's per-caller
     principal-ref digest.
 
-    Platform audit **W3-1**: 29 suite-API modules each copied a `_principal`/
+    29 suite-API modules each copied a `_principal`/
     `_principal_ref` helper that reads `request.state.principal` and 401s
     when it's empty. But `require_principal` (auth.py) deliberately leaves
     `request.state.principal` UNSET for two legitimate authenticated shapes,
@@ -231,7 +232,7 @@ def authenticated_subject(request, *, error_detail: str) -> str:
 
 
 def _world():
-    """Return a per-DB-path cached WorldModel (council perf fix).
+    """Return a per-DB-path cached WorldModel.
 
     Opening a new WorldModel on every request re-runs the PRAGMAs and the
     schema-migration check, leaks the connection (no close()), and

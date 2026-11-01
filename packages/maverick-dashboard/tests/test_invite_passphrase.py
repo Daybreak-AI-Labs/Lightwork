@@ -750,6 +750,9 @@ def test_an_admin_role_holder_cannot_make_themselves_an_administrator_to_reset(w
     assert _reset(boss).status_code == 403
     assert 'action="/users/passphrase-reset"' not in boss.get("/users").text
     assert _passphrase_row(tmp_path) == before
+    # So the refusal an invitation shows must not send people to an administrator for a link.
+    from maverick_dashboard import local_passphrases
+    assert "administrator can send" not in local_passphrases.ACCOUNT_EXISTS
     assert not (tmp_path / "dashboard-passphrase-resets.json").exists()
     assert _sign_in(_remote(), password=GOOD).status_code == 303  # the colleague is untouched
 
@@ -979,3 +982,17 @@ def test_a_workspace_name_at_the_longest_allowed_length_still_lets_everyone_sign
     assert getattr(refused.value, "status_code", None) == 422
     assert local_passphrases.has_account("pat@example.test") is False
     assert local_passphrases.has_account(COLLEAGUE) is True                  # the refusal left the store readable
+
+
+def test_a_reset_record_for_a_long_workspace_id_reads_back():
+    # A reset copies its workspace id from a passphrase row or a membership,
+    # which allow MAX_TENANT_SEGMENT_LENGTH; the reset store must read back
+    # what it wrote, or every later reset and invitation check fails.
+    from maverick.paths import MAX_TENANT_SEGMENT_LENGTH
+    from maverick_dashboard import passphrase_resets
+
+    row = {"email": "ana@corp.example", "tenant": "w" * MAX_TENANT_SEGMENT_LENGTH, "binding": "b" * 64,
+           "created_by": "user:owner@corp.example", "created_at": 1.0, "expires_at": 2.0,
+           "used_at": None, "outcome": "", "first": True}
+    assert passphrase_resets._valid("a" * 64, row)
+    assert not passphrase_resets._valid("a" * 64, {**row, "tenant": "w" * (MAX_TENANT_SEGMENT_LENGTH + 1)})

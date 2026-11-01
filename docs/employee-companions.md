@@ -1,14 +1,10 @@
 # Employee companions: bounded conversation preview
 
-Implementation began September 30, 2026. This remains a draft feature with
-executed local regression evidence and unqualified installed/provider boundaries.
-Local tests were subsequently authorized; the original test deferral no longer
-applies. This document describes the companion service, while the consolidated
-[195-entry register](ux-audit-2026-09-30/implementation-tracker.json) records the
-related task, privacy, memory and product-operation changes. Neither code delivery
-nor passing local tests establishes release or customer acceptance.
+This is a preview feature covered by local regression tests; installed-app and
+provider behavior are not qualified. Passing local tests does not establish
+release or customer acceptance.
 
-## What this increment provides
+## What the preview provides
 
 An employee has a personal companion home at **My companion** (`/companion`).
 They can converse, plan and write drafts while existing tasks continue. An
@@ -23,9 +19,9 @@ previously authorized links.
 
 This separate companion conversation does not acquire the active chat's
 single-turn admission fence, steer an active agent, start another task, or become
-a replacement agent runtime. The consolidated audit separately adds the
-[governed conversation inbox](conversation-inbox.md) to ordinary task chats;
-those queue/guidance controls are not companion capabilities.
+a replacement agent runtime. The separate
+[governed conversation inbox](conversation-inbox.md) serves ordinary task chats;
+its queue/guidance controls are not companion capabilities.
 
 The existing installation provider configuration is untouched. AI turns send
 the employee's message, up to six eligible retained exchanges and optional own
@@ -33,7 +29,7 @@ task title/status context to that configured provider. They use the existing
 LLM facade, Budget, provider and organization admission, emergency stop,
 spending limits and usage settlement. They do not start an Agent, invoke tools,
 read connector credentials, search enterprise documents, learn preferences or
-send audio. No model calls have been made during implementation.
+send audio.
 
 ## Setup and operation
 
@@ -145,25 +141,24 @@ updates; there is no scheduled purge worker. Already-rendered browser text and
 backups have separate lifecycles. The browser stores no companion text in local
 storage and clears its view when it detects an account/workspace change.
 
-## Remaining work and honest limits
+## Limits and remaining work
 
-This is **not the complete dot-style companion**. Cross-session learned memory, connector/document retrieval,
-write approvals, active-run steering/cancellation, notifications and live voice
-remain deferred. Source ACL propagation must be qualified before adding
-enterprise retrieval. Provider contracts and routing must be qualified before
-deployment. Every external effect will need current
-authority checks and exact approval/replay semantics at its execution boundary.
+The preview is **not a complete personal companion**. Cross-session learned
+memory, connector/document retrieval, write approvals, active-run
+steering/cancellation, notifications and live voice are not implemented. Source
+ACL propagation must be qualified before adding enterprise retrieval. Provider
+contracts and routing must be qualified before deployment. Every external effect
+will need current authority checks and exact approval/replay semantics at its
+execution boundary.
 
-The consolidated LW-095 implementation also removes automatic administrator
-content access to existing employee tasks and chats. Named accounts list their
-own task content; administrator policy authority does not itself authorize
-reading private employee content. Supported exceptional reads require an exact
-resource request, an independent current reviewer, expiry and an acknowledged
-audit receipt. Each exceptional read requires its own acknowledged receipt, and
+Administrators have no automatic content access to existing employee tasks and
+chats. Named accounts list their own task content; administrator policy
+authority does not itself authorize reading private employee content. Supported
+exceptional reads require an exact resource request, an independent current
+reviewer, expiry and an acknowledged audit receipt. Each exceptional read requires its own acknowledged receipt, and
 the grant does not authorize mutation or publication. Audit search and export
-use metadata projections instead of raw prompts or tool payloads. These changes
-are draft code, not a production migration or a deployment-wide privacy
-certification.
+use metadata projections instead of raw prompts or tool payloads. This is not a
+deployment-wide privacy certification.
 
 No-egress, compliance, privileged-host confidentiality and immutable audit
 retention are not promised. Operating-system/key holders remain trusted; the
@@ -177,7 +172,7 @@ offboarded employees' retained files are unfinished. A deployment that omits its
 replica-count declaration is not proof of single-host operation. Keep this
 preview disabled in distributed deployments until that storage work is complete.
 
-On Your companion, Global Copilot can now check the owner's saved-exchange
+On Your companion, Global Copilot can check the owner's saved-exchange
 count, retention and pending-reply state without exposing conversation text.
 It can clear saved history and cancel a pending reply only after a fresh review
 and explicit confirmation. The native page uses the same history revision, and
@@ -192,29 +187,15 @@ Regression tests cover policy validation, revision conflicts, tenant and employe
 isolation, administrator metadata privacy, retention, deletion, persistence
 failure, current membership/revocation, configured-model isolation, physical
 attempt guards, request replay, late-result suppression and API behavior. The
-three companion Python files passed all 190 cases in the complete ordinary run
-at `2c1e8a888eee011a2851836079b57c9929b8d745`: 90 store cases, 15 model-facade
-cases and 85 dashboard API cases, using synthetic providers and isolated stores.
-The source evidence is `audit/qualification-final-03-ordinary.xml`. This is the
-same 190-case cohort described below, not an additional count. That complete run
-had 17 unrelated failures subsequently repaired; it was not an all-green run.
+tests use synthetic providers and isolated stores.
 
-The [local qualification record](ux-audit-2026-09-30/local-qualification.md)
-tracks exact source revisions, later integrated runs, static checks and remaining
-failures. Final-source ordinary/secure and browser verification are coordinated
-there. Local mocked provider exchanges do not qualify real model behavior,
+The draft coordinator separates source admission and durable turn reservation
+(`_prepare_draft_turn`) from model I/O, which occurs outside authority locks;
+physical dispatch and publication keep their current-authority checks.
+
+Local mocked provider exchanges do not qualify real model behavior,
 provider retention or billing, an installed distribution, customer accessibility
 or distributed deployment. Desktop/narrow layouts, keyboard use, stale tabs,
 policy revocation, retention changes, missing encryption support, corrupted
 stores and account switches remain subject to their recorded browser/native
 coverage and any unexecuted installed acceptance checks before enablement.
-
-### Local regression checkpoint
-
-The draft coordinator now separates source admission and durable turn reservation
-into `_prepare_draft_turn`; model I/O still occurs outside authority locks, and
-physical dispatch and publication retain their existing current-authority checks.
-The companion API, model and store regression files passed locally: **190 tests**,
-using mocked providers and isolated workspace data. Ruff, Python 3.10 syntax and
-whitespace checks passed for the refactor. This is local regression evidence,
-not installed-app, live-provider or customer qualification.

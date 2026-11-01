@@ -41,6 +41,22 @@ def targets(role_map: dict[str, str], labels: dict[str, str], *, scope: str, cho
     return found[:MAX_PEOPLE + 1]
 
 
+_MAY_HAVE_CHANGED = ("The activity log refused this change and the role list could not be put back, "
+                     "so it may now hold the change. Check this person's role.")
+
+
+def _may_have_changed(row: dict, principal: str, attempted: str) -> None:
+    """The change was refused but not rolled back: report the role the list
+    holds now (read back), so the change is never shown as not made."""
+    from . import rbac
+
+    try:
+        now = rbac.list_users().get(principal, "")
+    except Exception:  # noqa: BLE001 -- the list is the thing that failed
+        now = attempted
+    row.update(outcome="uncertain", after=now, reason=_MAY_HAVE_CHANGED)
+
+
 def _store_reason(exc: Exception) -> str:
     if isinstance(exc, AuditRefused):
         return "The activity log refused this change, so it was not made."
@@ -65,6 +81,8 @@ def apply(people: list[str], role: str, *, actor: str) -> list[dict]:
                 row.update(outcome="refused", after=before, reason=str(exc))
             except ValueError:
                 row.update(outcome="refused", after=before, reason="That role or person is not valid.")
+            except rbac.RosterRollbackError:
+                _may_have_changed(row, principal, role)
             except (rbac.RbacStoreError, AuditRefused) as exc:
                 # The activity log or the role list refused this one change. The
                 # people already changed keep their report (and their undo).
@@ -77,7 +95,9 @@ def undo_tokens(report: list[dict]) -> list[str]:
     """What the Undo button posts back: each changed person, the role they had
     before and the role this change gave them."""
     return [f"{row['principal']}{_SEP}{row['before']}{_SEP}{row['after']}"
-            for row in report if row["outcome"] == "changed"]
+            for row in report
+            if row["outcome"] == "changed"
+            or (row["outcome"] == "uncertain" and row["after"] != row["before"])]
 
 
 def undo(tokens: list[str], *, actor: str) -> list[dict]:
@@ -112,6 +132,8 @@ def undo(tokens: list[str], *, actor: str) -> list[dict]:
             row.update(outcome="refused", after=now, reason=str(exc))
         except ValueError:
             row.update(outcome="refused", after=now, reason="That role or person is not valid.")
+        except rbac.RosterRollbackError:
+            _may_have_changed(row, principal, before)
         except (rbac.RbacStoreError, AuditRefused) as exc:
             row.update(outcome="refused", after=now, reason=_store_reason(exc))
         report.append(row)

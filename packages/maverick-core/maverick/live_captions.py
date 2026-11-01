@@ -1,4 +1,4 @@
-"""Live captions over the voice transcript seam (roadmap 2028-H1 UX).
+"""Live captions over the voice transcript seam.
 
 Turns a stream of transcript segments (the seam the voice tools' Whisper
 backends produce: finalized utterances plus in-flight partials) into a rolling

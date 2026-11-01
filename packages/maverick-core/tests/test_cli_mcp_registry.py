@@ -1,4 +1,4 @@
-"""`maverick mcp-registry` CLI: browse / add / remove / list (ROADMAP B2)."""
+"""`maverick mcp-registry` CLI: browse / add / remove / list."""
 from __future__ import annotations
 
 from click.testing import CliRunner

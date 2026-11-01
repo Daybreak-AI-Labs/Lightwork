@@ -1,4 +1,4 @@
-"""Council perf pass: regression tests for the wins.
+"""Performance regression tests.
 
 - WorldModel reused across requests (no per-request open/PRAGMA/migrate).
 - list_goals respects LIMIT (no full-table load to render 20 rows).

@@ -1,6 +1,6 @@
-# Customer workflow improvements
+# Customer workflows
 
-This branch adds customer workflow surfaces and recovery behavior. Local and
+This page describes customer workflow surfaces and recovery behavior. Local and
 synthetic verification does not establish live-provider or customer acceptance.
 
 ## Personal Action Center
@@ -33,7 +33,7 @@ The caller's role remains authoritative; selecting a path does not grant access.
 `[features] guided_onboarding` controls the path panel through Settings and the
 installer wizard. The default is enabled.
 
-The general checklist now includes an explicit reviewed-result step. Choosing
+The general checklist includes an explicit reviewed-result step. Choosing
 and using an existing agent or specialist satisfies the workflow-choice step; authoring
 a new agent is optional. Merely creating a task or schedule cannot satisfy the
 reviewed-result step. Deliverables require a current human approval. Privacy

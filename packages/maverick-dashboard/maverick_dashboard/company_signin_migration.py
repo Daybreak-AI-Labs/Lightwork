@@ -24,6 +24,8 @@ TTL = 600
 MAX_RECORDS = 1000
 PURPOSE = "lightwork.company-signin-migration.v1"
 SETTING = "auth.oidc.enabled"
+ACTIVATION_FLOW = "company-signin-activation"  # the owner's activation review (passphrase and code)
+RECOVERY_FLOW = "company-signin-recovery"  # the restricted recovery form (passphrase and code)
 NOTICE = ("Company sign-in replaces local passphrase sign-in. It does not give anyone a role. "
           "The verified company account must already have installation administrator access. "
           "On this computer, the original owner can separately review restoring only the previous "
@@ -207,10 +209,10 @@ def _deadline(value):
         raise HTTPException(409, "This sign-in review expired. Nothing was repeated; review current choices again.")
 
 
-def review(request, selected, expected, password):
+def review(request, selected, expected, password, code=""):
     current, owner = authority(request, expected)
     local_owner._local(request, mutate=True)
-    local_owner.verify_recovery(request, email=owner["email"], password=password)
+    local_owner.verify_recovery(request, email=owner["email"], password=password, flow=ACTIVATION_FLOW, code=code)
     with settings_store._locked(strict=True):
         authority(request, current)
         proof = _proof(request, selected)
@@ -345,32 +347,32 @@ def activate(request, token):
         return _perform(request, value, lambda: _activation_guard(request, value))
 
 
-def recovery_identity(request, email, password):
+def recovery_identity(request, email, password, code=""):
     local_owner._local(request, mutate=True)
     with authority_effect_fence():
         _policy(request)
-        row = local_owner.verify_recovery(request, email=email, password=password)
+        row = local_owner.verify_recovery(request, email=email, password=password, flow=RECOVERY_FLOW, code=code)
         return row
 
 
-def recovery_catalog(request, email, password):
-    owner = recovery_identity(request, email, password)
+def recovery_catalog(request, email, password, code=""):
+    owner = recovery_identity(request, email, password, code)
     rows = [row for row in _records() if row["actor"] == "user:" + owner["email"] and row["owner_claim"] == _claim_binding(owner)]
     return {"notice": NOTICE, "requests": [{"value": row["id"][4:], "kind": row["kind"],
             "label": ("Restore previous sign-in" if row["kind"] == "recovery" else "Enable company sign-in")
             + " / " + time.strftime("%b %d, %H:%M", time.localtime(row["created_at"]))} for row in rows]}
 
 
-def recovery_original(request, operation, email, password):
-    owner = recovery_identity(request, email, password)
+def recovery_original(request, operation, email, password, code=""):
+    owner = recovery_identity(request, email, password, code)
     row = _lookup(operation, owner)
     _policy(request)
     _owner()
     return {"operation": operation, **_original(row)}
 
 
-def recovery_review(request, operation, email, password):
-    owner = recovery_identity(request, email, password)
+def recovery_review(request, operation, email, password, code=""):
+    owner = recovery_identity(request, email, password, code)
     with settings_store._locked(strict=True):
         row = _lookup(operation, owner)
         if not row or row["kind"] != "activation" or row.get("_audit_pending"):
@@ -421,11 +423,11 @@ def _restoration_change(value):
     return {"id": setting, "value": choice["value"], "inherit": not choice["present"]}
 
 
-def recover(request, token, email, password):
+def recover(request, token, email, password, code=""):
     value = _opened(token)
     if value["kind"] != "recovery":
         raise HTTPException(409, "Choose the separately reviewed recovery request.")
-    owner = recovery_identity(request, email, password)
+    owner = recovery_identity(request, email, password, code)
     if "user:" + owner["email"] != value["actor"] or _claim_binding(owner) != value["owner_claim"]:
         raise HTTPException(403, "This review belongs to a different local owner.")
     from maverick.oidc import VerifiedPrincipal

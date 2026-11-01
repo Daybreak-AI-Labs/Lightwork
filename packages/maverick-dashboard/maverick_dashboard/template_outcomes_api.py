@@ -75,10 +75,11 @@ def _template(request, name):
 def template_outcomes(request: Request, name: str):
     context = _context(request)
     template, version = _template(request, name)
-    page = outcome_pilots.listing(context, limit=200)
+    # One read per pilot: reading each again was twice the work, and a pilot
+    # removed between the two reads failed the whole page.
+    page = outcome_pilots.listing(context, limit=200, records=True)
     evidence, choices = [], []
-    for summary in page["items"]:
-        record = outcome_pilots.get(summary["id"], context)
+    for record in page["items"]:
         choices.append({"id": record["id"], "title": record["title"], "revision": record["revision"], "workflow": record["workflow"]})
         association = (record.get("template_bindings") or {}).get(name)
         if association is None:

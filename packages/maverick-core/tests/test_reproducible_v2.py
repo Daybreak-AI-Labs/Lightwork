@@ -1,4 +1,4 @@
-"""Reproducible benchmark harness v2 (ROADMAP 2027 H1 Distribution).
+"""Reproducible benchmark harness v2.
 
 Offline + deterministic: a scripted oracle/divergent solver, no LLM, no
 network. Asserts the manifest is stable across runs, the signature round-trips,

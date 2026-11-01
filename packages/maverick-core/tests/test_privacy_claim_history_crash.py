@@ -91,7 +91,12 @@ def pause(connection):
     receipt = connection.execute(
         "SELECT COUNT(*) FROM rights_claim_batches WHERE tenant_id='tenant-a' AND batch_id=?", (batch,)
     ).fetchone()[0]
-    Path(ready).write_text(json.dumps({"pair": [operation, receipt], "transaction": connection.in_transaction}))
+    # Existence is the parent's ready signal: publish only the closed,
+    # complete checkpoint, never the empty file created by write_text.
+    ready_path = Path(ready)
+    pending = ready_path.with_suffix(".tmp")
+    pending.write_text(json.dumps({"pair": [operation, receipt], "transaction": connection.in_transaction}))
+    pending.replace(ready_path)
     while True:
         time.sleep(.01)
 class ObservedConnection:

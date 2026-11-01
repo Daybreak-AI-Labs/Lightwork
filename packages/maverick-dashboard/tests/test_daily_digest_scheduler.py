@@ -170,3 +170,26 @@ def test_failed_cycle_backs_off(monkeypatch):
     sched._scheduler_loop(Stop(), "h", 30.0)
     assert waits == [60.0, 120.0, 240.0]
     assert not stop.is_set()
+
+
+def test_an_administrators_scheduled_summary_lists_only_their_own_work(tmp_path, monkeypatch):
+    # The summary leaves Lightwork by chat or email. A configured administrator
+    # lists only their own work in the app (/me); lifting the owner filter here
+    # sent everyone's results, questions and keys to that inbox.
+    from maverick_dashboard import auth
+    from maverick_dashboard import daily_digest_scheduler as sched
+
+    _digest_enabled(tmp_path)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
+    assert auth.is_dashboard_admin("user:root") is True
+    lifted = []
+
+    def cycle(world, **kw):
+        everything = kw.get("sees_everything")
+        lifted.append(bool(everything and everything("user:root")))
+        return {"sent": 0}
+
+    monkeypatch.setattr("maverick.daily_digest.run_digest_cycle", cycle)
+    monkeypatch.setattr(sched, "_recipients", lambda: ["user:root"])
+    sched.scheduler_cycle("h1", now=1000.0)
+    assert lifted == [False]

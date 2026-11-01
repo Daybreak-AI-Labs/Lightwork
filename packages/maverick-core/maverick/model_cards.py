@@ -1,4 +1,4 @@
-"""Per-model usage cards (roadmap: 2027 H2 safety).
+"""Per-model usage cards.
 
 Governance reviews ask a deceptively simple question: *which models does this
 deployment actually use, for what, and how much?* The honest answer lives in

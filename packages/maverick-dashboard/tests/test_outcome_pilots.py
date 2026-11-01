@@ -1085,3 +1085,37 @@ def test_review_queue_lists_other_peoples_protected_pilots_in_this_workspace_onl
     assert listed.json() == {"items": queue, "context": "bob"}
     monkeypatch.setattr(api, "caller_principal", lambda request: "local:dashboard")
     assert client.get(route).status_code == 403
+
+
+def test_goal_choices_match_goal_by_goal_reads(tmp_path, monkeypatch):
+    # The goal branch reads each visible goal's newest run in one batch. The
+    # goals it offers, and the coverage, must equal the goal-by-goal reads.
+    from maverick.world_model import WorldModel
+    from maverick_dashboard import app as dashboard_app
+    from maverick_dashboard import vendor_onboarding_api
+
+    world = WorldModel(tmp_path / "w.db")
+    prepared = [world.create_goal(f"prepared {i}", owner="user:alice") for i in range(6)]
+    busy = [world.create_goal(f"busy {i}", owner="user:alice") for i in range(3)]
+    with world._writing() as conn:
+        for gid in prepared[:2]:   # blocked and prepared for a pilot, with no runs
+            conn.execute("UPDATE goals SET status = 'blocked', result = ? WHERE id = ?",
+                         (sources.PREPARED, gid))
+        for gid in busy:           # pending goals that already have a run
+            conn.execute("INSERT INTO episodes(goal_id, started_at, cost_dollars, outcome) "
+                         "VALUES (?, ?, ?, ?)", (gid, 1_000.0, 0.02, "done"))
+    request = SimpleNamespace()
+    monkeypatch.setattr(dashboard_app, "_world", lambda: world)
+    monkeypatch.setattr(dashboard_app, "_deliverable_specs", list)
+    monkeypatch.setattr(sources, "goal_owner_filter", lambda _request: None)
+    monkeypatch.setattr(sources, "can_access_goal", lambda _request, goal: goal.id % 5 != 0)
+    monkeypatch.setattr(sources, "domain_suites_allowed", lambda _request, _domain: True)
+    monkeypatch.setattr(vendor_onboarding_api, "_binding", lambda _request: None)
+    monkeypatch.setattr(vendor_onboarding_api, "_call", lambda *_args, **_kwargs: [])
+    batched = sources.choices(request)
+    monkeypatch.setattr(world_model, "episodes_by_goal_batch", lambda *_args, **_kwargs: None)
+    goal_by_goal = sources.choices(request)
+    assert batched == goal_by_goal
+    offered = [item["reference"] for item in batched["items"] if item["kind"] == "goal"]
+    assert offered == [str(gid) for gid in sorted(prepared, reverse=True) if gid % 5 != 0]
+    assert offered

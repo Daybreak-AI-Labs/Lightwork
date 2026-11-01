@@ -9,6 +9,11 @@ const fs = require("node:fs"), path = require("node:path");
 const {JSDOM} = require("jsdom");
 const queue = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/_approvals_queue.html"), "utf8").replace(/\r\n/g, "\n");
 const flush = async () => { for (let i = 0; i < 12; i++) await new Promise(setImmediate); };
+// The confirmation opens one frame after the click (requestAnimationFrame,
+// then setTimeout 0). A callback queued the same way after the click runs
+// after it, so the dialog is open by then however loaded the machine is; a
+// fixed wait let a busy run submit the form before the dialog opened.
+const nextFrame = (w) => new Promise(resolve => w.requestAnimationFrame(() => w.setTimeout(resolve, 0)));
 
 function card(id, risk, label) {
   return `<article class="approval-item" data-id="${id}" data-label="${label}" data-risk="${risk}" data-irreversible="no" id="approval-${id}" aria-labelledby="approval-title-${id}">
@@ -137,7 +142,8 @@ test("the acknowledgement error is tied to the box it is about", async () => {
   const f = fixture();
   try {
     f.press(f.item(3).querySelector('[data-action="approve"]'));
-    await flush();
+    await nextFrame(f.w); await flush();
+    assert.equal(f.doc.getElementById("approval-confirm").open, true);
     const ack = f.doc.getElementById("approval-confirm-ack");
     const form = f.doc.getElementById("approval-confirm-form");
     assert.equal(ack.hasAttribute("aria-invalid"), false);
@@ -167,7 +173,7 @@ test("the high-risk confirmation opens just after the click's frame, once", asyn
     const dialog = f.doc.getElementById("approval-confirm");
     assert.equal(dialog.open, false, "not inside the click's own task");
     f.press(approve);   // a second click while it opens does not open it twice
-    await new Promise(resolve => setTimeout(resolve, 30)); await flush();
+    await nextFrame(f.w); await flush();
     assert.equal(dialog.open, true);
     assert.equal(f.doc.activeElement, f.doc.getElementById("approval-confirm-ack"));
   } finally { f.dom.window.close(); }

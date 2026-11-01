@@ -1,4 +1,4 @@
-"""Tool-call inspector (roadmap: 2027 H1 UX — "tool-call inspector").
+"""Tool-call inspector.
 
 Aggregate a run's tool-call log into the at-a-glance health view: per-tool call
 counts and success rate, total + mean latency, total cost, and which tool is the

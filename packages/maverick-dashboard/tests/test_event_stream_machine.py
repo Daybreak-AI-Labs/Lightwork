@@ -160,3 +160,40 @@ def test_response_cancel_before_iterator_starts_releases_slot(monkeypatch):
         assert not sem.locked()
         await stream.aclose()
     asyncio.run(run())
+
+
+def test_a_committed_change_ends_the_wait_and_the_stream_stops_watching(tmp_path, monkeypatch):
+    """The poll backed off to two seconds while a model call ran, so a finished
+    answer reached the page about 1.2 s after it was saved. A write in this
+    process now ends the wait; the database read after it decides the frame."""
+    import threading
+    import time
+
+    from maverick import goal_wakeup, world_model
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    world = world_model.WorldModel(tmp_path / "w.db")
+    gid = world.create_goal("task", "")
+
+    async def run():
+        sem = asyncio.Semaphore(1)
+        await sem.acquire()
+        lease = streams.StreamLease(sem)
+        # A thirty-second poll: only a wake-up can deliver the event in time.
+        stream = streams.goal_stream(Request(), world, gid, since=0, lease=lease,
+                                     visible=lambda _state: True, poll=30.0, max_poll=30.0,
+                                     heartbeat=60.0)
+        assert (await stream.__anext__()).startswith(": connected")
+        writer = threading.Timer(0.3, lambda: world.append_event(gid, "agent", "plan", "next step"))
+        started = time.monotonic()
+        writer.start()
+        frame = await asyncio.wait_for(stream.__anext__(), timeout=10)
+        waited = time.monotonic() - started
+        assert "event: plan" in frame and waited < 5
+        key = (goal_wakeup.world_key(world.path), gid)
+        assert key in goal_wakeup._watchers, "watching while open"
+        await stream.aclose()
+        assert key not in goal_wakeup._watchers and not sem.locked()
+        writer.join()
+
+    asyncio.run(run())

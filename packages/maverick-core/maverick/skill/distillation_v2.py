@@ -1,4 +1,4 @@
-"""Auto-skill distillation v2 (roadmap: 2027 H1 capabilities).
+"""Auto-skill distillation v2.
 
 v1 (:mod:`maverick.skill_distillation_local`) distills recent successful runs
 into a ``SKILL.md`` — but it runs after *every* goal, so a learned-skills store

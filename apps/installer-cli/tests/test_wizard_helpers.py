@@ -1,4 +1,4 @@
-"""Council round-2: docker auto-detect, validation cache, error UI helpers."""
+"""Docker auto-detect, validation cache, error UI helpers."""
 from __future__ import annotations
 
 import json

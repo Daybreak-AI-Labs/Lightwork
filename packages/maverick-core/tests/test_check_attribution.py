@@ -123,7 +123,7 @@ HUMAN = ("Christopher Day", "131784708+cdayAI@users.noreply.github.com")
 def test_assistant_identity_is_caught_even_with_a_clean_message(tmp_path, capsys, role):
     """GitHub's squash merge adds a Co-authored-by trailer for every distinct
     commit author, so an assistant *identity* lands the banned trailer on main
-    with no offending line in any message (main went red this way at 3b2c9cf)."""
+    with no offending line in any message."""
     repo, shas = _repo(tmp_path, ["chore: base"])
     identities = {"author": HUMAN, "committer": HUMAN}
     identities[role] = ASSISTANT

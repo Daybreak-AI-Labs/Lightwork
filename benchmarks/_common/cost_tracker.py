@@ -1,6 +1,6 @@
 """Cost / latency / samples tracker for benchmark runs.
 
-Karpathy SOTA-review prescription: every benchmark row needs
+Every benchmark row needs
 `($/task, success, latency, samples_used, verifier_calls)` so we can
 plot the cost-vs-accuracy Pareto frontier and defend the swarm's
 compute cost against the three baselines.

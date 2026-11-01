@@ -1,14 +1,12 @@
 # Lightwork
 
-> AI workers, company knowledge and repeatable workflows — under your control.
-
-Lightwork brings AI workers, company knowledge, repeatable workflows and
-governed learning together, with operating controls for your team —
-deployed in your own environment. It supports
-configured model providers including Claude, GPT, Gemini, DeepSeek, Ollama, and OpenRouter, and
-ships a governed, auditable safety surface built for regulated teams.
-Lightwork is proprietary, commercially licensed software (see
-[`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)).
+Lightwork is a self-hosted runtime for multi-agent AI work. You give it a goal,
+and an orchestrator agent plans the work, hands parts of it to specialist
+sub-agents running on the models you choose, checks their results and returns
+an answer. Inputs, tool calls and answers are screened by a safety layer,
+commands run in a configurable sandbox, per-run spending and time limits are
+enforced, activity is recorded in a signed audit log, and state persists
+between runs in a world-model database. Lightwork is open source under the Apache License 2.0.
 
 ## What you can do with it
 
@@ -24,68 +22,92 @@ Lightwork is proprietary, commercially licensed software (see
 - **Messaging channels**: connect supported services such as Telegram,
   Discord, Slack, Signal, and email in the Channels page, then send a test
   message to confirm delivery.
-- **Primary-source data grounding**: analyst packs are auto-granted 37
-  read-only public-data connectors (SEC EDGAR, FRED, Treasury, World Bank,
+- **Primary-source data grounding**: analyst packs are granted their suite's
+  read-only public-data connectors (up to 16 per suite, 37 in total: SEC
+  EDGAR, FRED, Treasury, World Bank,
   FDIC, Census, BLS, EIA, openFDA, NPPES, ClinicalTrials, USAspending,
   SAM.gov, CourtListener, Federal Register, GLEIF, OpenCorporates,
   NWS/NOAA, EPA, Climatiq, …) so they cite authoritative sources instead of
   model recall. On by default; kill-switch via `[workforce] data_grounding
-  = false`. Alongside 2,877 write-capable enterprise REST/GraphQL connectors
-  and dedicated modules (Salesforce, HubSpot, Stripe, ServiceNow,
-  Snowflake, …).
-- **Proven governance**: a roster-wide invariant test suite checks six
+  = false`. These read-only connectors are separate from the 2,877
+  write-capable REST and GraphQL connectors and the dedicated modules for
+  systems such as Salesforce, HubSpot, Stripe, ServiceNow and Snowflake.
+- **Governance invariant tests**: a roster-wide invariant test suite checks six
   governance invariants (tool-reachability, autonomy dial, capability
   attenuation, compartment isolation, unstrippable hard refusals, budget
-  caps) across all 2,031 packs with a non-vacuous fault-injection control
-  (property-fuzzed up to 5,000 iterations),
+  caps) across all 2,031 packs with a non-vacuous fault-injection control,
   plus hostile-argument fuzzing of every connector and tool.
 - **Build an agent from a demonstration**: record a reviewed example of the job,
-  then synthesize the agent that does it — `maverick learn-demo <file>`
+  then synthesize the agent that does it — `lightwork learn-demo <file>`
   ingests that transcript, induces a profile through the same
   intake clamp + review gate, and provisions the skills/tools it needs.
-  The factory also improves itself: `maverick factory-learn` mines
-  provisioning/approval gaps back into future pack generation
-  (off by default, never widens an envelope).
+  `lightwork factory-learn` feeds provisioning and approval gaps back into
+  future pack generation (on by default, stops when the self-improvement
+  switch is off, and never widens an envelope).
 
 ## Quick start
 
-Request the customer package for your operating system from
-[Daybreak Labs](mailto:chris@daybreakailabs.com?subject=Lightwork%20customer%20package),
-verify its checksum and exact-tag signature, then run its `dashboard` command.
-Complete the owner and provider setup in the application. A repository clone
-copies internal research, audit and patent documents; source installation is
-for authorized engineering.
+Lightwork is installed from source. You need Python 3.10–3.12 and Git: clone
+the repository, create a virtual environment, and run
+`python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis`,
+which installs the eight Lightwork packages together. Then run
+`lightwork dashboard` and open <http://127.0.0.1:8765> to complete the owner
+and provider setup. [Install from source](source-install.md) has the exact
+commands for macOS, Linux and Windows.
+
+No prebuilt binary, PyPI package or container image is currently published,
+so install from `main`. Published releases will be listed on the
+[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+
+When setup finds no running Docker daemon, it switches off file changes and
+program execution, because the fallback `local` backend runs commands directly
+on the host without isolation. Lightwork can still answer questions and draft
+documents. [Getting started](getting-started.md) shows how to turn file work on
+once a container service is running, and walks through a first task.
 
 ## Watch it work
 
-Open the dashboard to review running work, its activity log and cost. Some
-in-product controls still need implementation and customer acceptance.
+Open the dashboard to review running work, its activity log and cost, or run
+`lightwork monitor` in a terminal to follow the orchestrator's plan as agents
+work through it.
 
-## Licensing & access
+## Pricing and cost controls
 
-Lightwork is **proprietary, commercially licensed** software (see
-[`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)). It is self-hostable — the runtime executes entirely
-in your own environment — and use requires a license. Pricing is handled
-per engagement; [contact us](mailto:chris@daybreakailabs.com?subject=Lightwork%20inquiry) for
-evaluation or enterprise access.
+Lightwork itself is free to use, modify and redistribute under its license.
+Model usage is billed by the provider you connect, if any.
+[Task limits and spend accounting](task-limits.md) explains per-task limits,
+and [Pricing governance](pricing-governance.md) explains how model prices are
+recorded and when a price may affect a budget.
 
-A deliberately stripped-down **open-source "lite" edition** may be released
-later as a community on-ramp; the full runtime and the governance/compliance
-platform remain proprietary.
+## Roadmap
+
+The [roadmap](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/ROADMAP.md)
+lists the themes and near-term work the maintainers are focused on. Shipped
+capabilities are catalogued in
+[`FEATURES.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/FEATURES.md).
+
+## License
+
+Lightwork is licensed under the Apache License 2.0 (see
+[`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)). It is self-hostable: the runtime executes entirely
+in your own environment. Contributions are accepted under the
+[Contributor License Agreement](CLA.md). The Lightwork name and logo are
+covered by the [trademark policy](https://daybreak-ai-labs.github.io/Lightwork/trademark/),
+not by the Apache License.
 
 ## Where to go next
 
 - [Getting started](getting-started.md) — install + first goal
-- [Architecture](enterprise/architecture.md) — the governed agent runtime (OS-style primitives)
+- [Install from source](source-install.md) — commands for macOS, Linux and Windows
+- [Governed agent control plane](enterprise/architecture.md) — oversight, compliance profiles, fleets and tenancy
 - [Configuration](configuration.md) — providers, channels, budgets
 - [Deployment](deployment.md) — desktop / docker / VPS / phone modes
 - [Safety](safety.md) — shield, audit log, kill switches, consent
 - [Threat model](security/threat-model.md) — trust boundaries, capabilities, tenancy, and security controls
 - [Security & compliance overview](enterprise/security-overview.md) — application egress controls, deployment boundaries, identity, audit/evidence
-- [Editions](enterprise/editions.md) — Community vs Enterprise
 - [Plugins](plugins.md) — extending the tool / channel / skill surface
 - [Governed model improvement](MODEL_IMPROVEMENT_PLATFORM.md) — the learning lifecycle, regression detection, and promotion controls
 - [Starter goals](starter-goals.md) — ready-to-run examples for common workflows
-- [How Lightwork compares](comparison.md) — shipped capabilities and platform positioning
-- Roadmap details are available during enterprise evaluation.
 - [Contributing](CONTRIBUTING.md) — how to send PRs
+- [Code of Conduct](CODE_OF_CONDUCT.md) — expected behavior in project spaces
+- [Security policy](https://daybreak-ai-labs.github.io/Lightwork/security-policy/) — how to report a vulnerability

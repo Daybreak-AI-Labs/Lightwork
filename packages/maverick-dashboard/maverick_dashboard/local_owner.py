@@ -58,11 +58,72 @@ def _read():
         bytes.fromhex(row["password_hash"])
     except ValueError as exc:
         raise HTTPException(503, "Local owner authority is unavailable.") from exc
+    if not _second_factor_shape_ok(row):
+        raise HTTPException(503, "Local owner authority is unavailable.")
     return row
+
+
+def _hex_of(value: object, length: int) -> bool:
+    if not isinstance(value, str) or len(value) != length:
+        return False
+    try:
+        bytes.fromhex(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _second_factor_shape_ok(row: dict) -> bool:
+    """The optional authenticator-app keys (see :mod:`local_owner_second_factor`)."""
+    from . import local_owner_second_factor as second
+    from . import owner_totp
+    if "totp" in row and not isinstance(row["totp"], str):
+        return False
+    if "totp_step" in row and (type(row["totp_step"]) is not int or row["totp_step"] < 0):
+        return False
+    setup = row.get("totp_setup")
+    if setup is not None and (not isinstance(setup, dict) or not isinstance(setup.get("secret"), str)
+                              or type(setup.get("created")) not in {int, float}):
+        return False
+    recovery = row.get("recovery")
+    if recovery is not None and (not isinstance(recovery, list)
+                                 or len(recovery) > owner_totp.RECOVERY_CODE_COUNT
+                                 or not all(isinstance(e, dict) and _hex_of(e.get("salt"), 32)
+                                            and _hex_of(e.get("hash"), 64) for e in recovery)):
+        return False
+    pending = row.get("second_factor")
+    if pending is not None and (not isinstance(pending, dict) or len(pending) > 5
+                                or not all(_pending_ok(v) for v in pending.values())):
+        return False
+    proofs = row.get("flow_proofs")
+    if proofs is not None and (not isinstance(proofs, dict)
+                               or len(proofs) > len(second.FLOW_PATHS)
+                               or not all(_hex_of(k, 64) and _proof_ok(v) for k, v in proofs.items())):
+        return False
+    return True
+
+
+def _pending_ok(value: object) -> bool:
+    return (isinstance(value, dict) and value.get("purpose") in {"sign_in", "enroll"}
+            and type(value.get("expires")) in {int, float} and math.isfinite(value["expires"])
+            and type(value.get("attempts")) is int and 0 <= value["attempts"] <= 5)
+
+
+def _proof_ok(value: object) -> bool:
+    from . import local_owner_second_factor as second
+    return (isinstance(value, dict) and value.get("flow") in second.FLOW_PATHS
+            and type(value.get("expires")) in {int, float} and math.isfinite(value["expires"]))
 
 
 def _write(row):
     file_lock.atomic_write_text(path(), json.dumps(row, sort_keys=True), mode=0o600)
+
+
+def _count_failure(row) -> None:
+    """One wrong passphrase or code: five in a row lock sign-in for a minute."""
+    row["failures"] = min(5, row["failures"] + 1)
+    row["locked_until"] = time.time() + 60 if row["failures"] == 5 else 0
+    _write(row)
 
 
 def _local(request: Request, *, mutate=False):
@@ -89,6 +150,9 @@ def sign_in_available_for(cfg: dict, *, bootstrap: bool = False) -> bool:
     auth_table = cfg.get("auth")
     if "auth" in cfg and not isinstance(auth_table, dict):
         return False
+    if isinstance(auth_table, dict) and "local_owner" in auth_table:
+        # [auth.local_owner] is the owner's own policy, not an identity provider.
+        auth_table = {k: v for k, v in auth_table.items() if k != "local_owner"}
     if auth_table:
         if bootstrap or not set(auth_table) <= {"oidc", "saml"}:
             return False
@@ -172,31 +236,50 @@ def _credentials(email, password):
     return email, password
 
 
-def _finish(row, request=None):
+def _claim(row) -> None:
+    """Complete a pending owner claim: the administrator role, then ``ready``. No session."""
+    from . import auth, invites, rbac
+    principal = "user:" + row["email"]
+    try:
+        existing = rbac.list_users()
+        if existing and existing != {principal: "admin"}:
+            raise HTTPException(409, "Owner setup conflicts with existing role assignments. No roles were changed.")
+        rbac.set_role(principal, "admin", actor=principal)
+    except rbac.RosterMissingError:
+        # A configured administrator is an administrator without a stored
+        # role, and can start a new role list from the Users page.
+        if not auth.is_dashboard_admin(principal):
+            raise
+    # Generate the session key before the claim is completed; any failure
+    # retains pending ownership rather than silently reopening bootstrap.
+    invites.local_session_secret()
+    row["status"] = "ready"
+    _write(row)
+
+
+def _finish(row, request=None, *, mfa_at=None):
+    """Complete a pending claim and mint the session.
+
+    ``mfa_at`` is given only after the owner's authenticator code (or recovery
+    code) was accepted; the session then records a second factor at that time.
+    """
     from . import auth, invites, rbac
     principal = "user:" + row["email"]
     if row["status"] == "pending":
-        try:
-            existing = rbac.list_users()
-            if existing and existing != {principal: "admin"}:
-                raise HTTPException(409, "Owner setup conflicts with existing role assignments. No roles were changed.")
-            rbac.set_role(principal, "admin", actor=principal)
-        except rbac.RosterMissingError:
-            # A configured administrator is an administrator without a stored
-            # role, and can start a new role list from the Users page.
-            if not auth.is_dashboard_admin(principal):
-                raise
-        # Generate the session key before the claim is completed; any failure
-        # retains pending ownership rather than silently reopening bootstrap.
-        invites.local_session_secret()
-        row["status"] = "ready"
-        _write(row)
+        _claim(row)
     elif not auth.is_dashboard_admin(principal) and rbac.get_stored_role(principal) is None:
         # A configured administrator is checked first: they keep access when
         # the role list is lost, and it is how they reach the page that
         # starts a new one.
         raise HTTPException(403, "This local account no longer has an assigned role. Contact a current administrator.")
-    return invites.mint_local_session(row["email"], request=request)
+    if mfa_at is None:
+        return invites.mint_local_session(row["email"], request=request)
+    from maverick.oidc import validate_subject
+
+    from .oidc_login import mint_browser_session
+    return mint_browser_session(request, sub=validate_subject(row["email"]),
+                                secret=invites.local_session_secret(), via="invite", mfa=True,
+                                ttl=invites.session_ttl_seconds(), mfa_at=mfa_at)
 
 
 def enroll(request: Request, *, email: str, password: str, confirm: bool):
@@ -219,10 +302,22 @@ def enroll(request: Request, *, email: str, password: str, confirm: bool):
                "password_hash": _password(password, salt), "status": "pending",
                "created_at": time.time(), "failures": 0, "locked_until": 0}
         _write(row)
+        from . import local_owner_second_factor as second
+        if second.mode() == "required":
+            # The owner claim is completed, but no session exists until the
+            # authenticator app is set up and its code accepted.
+            _claim(row)
+            challenge = second.after_passphrase(row)
+            if challenge is None:  # the policy changed meanwhile: nothing is minted
+                raise HTTPException(409, "Owner setup could not finish. Try again.")
+            _write(row)
+            return challenge
         return _finish(row, request)
 
 
 def login(request: Request, *, email: str, password: str):
+    """A session token, or a second-step challenge when the owner's authenticator
+    app must be used first (see :mod:`local_owner_second_factor`)."""
     _local(request, mutate=True)
     _policy()
     email, password = _credentials(email, password)
@@ -234,24 +329,32 @@ def login(request: Request, *, email: str, password: str):
             raise HTTPException(429, "Wait one minute before trying owner sign-in again.")
         match = hmac.compare_digest(_password(password, row["salt"]), row["password_hash"])
         if not match or email != row["email"]:
-            row["failures"] = min(5, row["failures"] + 1)
-            row["locked_until"] = time.time() + 60 if row["failures"] == 5 else 0
-            _write(row)
+            _count_failure(row)
             raise HTTPException(401, "The email or passphrase was not accepted.")
         from maverick.oidc import VerifiedPrincipal
 
         from .auth import _enforce_scim_active
         _enforce_scim_active(VerifiedPrincipal(sub=email, issuer="invite-session", audience="", claims={}))
+        from .local_owner_second_factor import after_passphrase
+        # While a second factor is due the failure count is kept: clearing it here
+        # would let a passphrase holder reset the lock between code guesses.
+        challenge = after_passphrase(row)
+        if challenge is not None:
+            _write(row)
+            return challenge
         row.update(failures=0, locked_until=0)
         _write(row)
         return _finish(row, request)
 
 
-def verify_recovery(request: Request, *, email: str, password: str):
+def verify_recovery(request: Request, *, email: str, password: str, flow: str, code: object = ""):
     """Verify the existing owner for one restricted operation; mint no session.
 
-    The caller must enforce its prospective managed policy. This primitive
-    never enrolls an owner, completes pending enrollment or restores a role.
+    An owner with an authenticator app must also give a current code or an unused
+    recovery code, or present the recovery proof that this ``flow`` issued to the
+    browser earlier (see :mod:`local_owner_second_factor`). The caller must
+    enforce its prospective managed policy. This primitive never enrolls an
+    owner, completes pending enrollment or restores a role.
     """
     from maverick.authority_effects import authority_effect_fence
     from maverick.oidc import VerifiedPrincipal
@@ -276,6 +379,12 @@ def verify_recovery(request: Request, *, email: str, password: str):
         if role is None or "admin" not in rbac.permissions_for(role):
             raise HTTPException(403, "The original owner's current role cannot manage installation sign-in.")
         auth._enforce_scim_active(VerifiedPrincipal(sub=email, issuer="invite-session", audience="", claims={}))
-        row.update(failures=0, locked_until=0)
-        _write(row)
+        if "totp" in row:
+            # The passphrase alone never opens a restricted step for an owner with an app.
+            # A code that is accepted is kept by the owner record; a wrong one counts toward the lock.
+            from . import local_owner_second_factor as second
+            second.recovery_step(request, row, flow=flow, code=code)
+        else:
+            row.update(failures=0, locked_until=0)
+            _write(row)
         return row

@@ -346,8 +346,8 @@ def _check_envelope(bundle: dict, observed: list[str] | None) -> ClaimResult:
 def _check_self_improvement(bundle: dict, receipts: list | None) -> ClaimResult:
     """Did self-improvement ever widen its own authority?
 
-    Bet 1's distinctive claim, and the one most easily faked, so it is graded
-    strictly. A promotion whose receipt does not say how authority was judged
+    The bundle's distinctive claim, and the one most easily faked, so it is
+    graded strictly. A promotion whose receipt does not say how authority was judged
     proves nothing about authority -- including a receipt written before the
     grading existed. Silence is ``INDETERMINATE``.
     """

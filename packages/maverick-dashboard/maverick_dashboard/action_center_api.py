@@ -161,8 +161,10 @@ def _model(request):
 
         def project_reviews():
             return _service(request).inbox()
+    from maverick import vendor_onboarding
+
     vendor_reconciliations = None
-    if config.get_features().get("vendor_onboarding") is True:
+    if vendor_onboarding.enabled():
         def vendor_reconciliations():
             return _vendor_reconciliation_rows(request)
     from .auth import can_access_goal

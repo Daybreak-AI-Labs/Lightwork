@@ -165,7 +165,7 @@ def enabled() -> bool:
             return False
     if not base:
         return False
-    # Fleet memory is a paid (Gold) add-on. Fail-open: the gate only bites when
+    # Fleet memory is a tier-gated (Gold) feature. Fail-open: the gate only bites when
     # a deployment has turned enforcement on and the license doesn't grant it.
     try:
         from .entitlements import require

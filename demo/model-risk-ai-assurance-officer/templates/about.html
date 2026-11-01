@@ -4,13 +4,13 @@
 <section class="hero">
   <p class="tag">{{ caps.mode }}</p>
   <h1>Capability and authority matrix</h1>
-  <p><strong>Analysis backend:</strong> <code>{{ caps.analysis_backend }}</code>. <strong>Authority:</strong> {{ caps.authority }}. This self-contained SKU never imports Lightwork core and never gains platform authority.</p>
+  <p><strong>Analysis backend:</strong> <code>{{ caps.analysis_backend }}</code>. <strong>Authority:</strong> {{ caps.authority }}. This self-contained app never imports Lightwork core and never gains platform authority.</p>
 </section>
 <section class="notice" aria-label="Important boundary">
   <strong>No certification, legal verdict, or DGM execution.</strong> NIST AI RMF, ISO/IEC 42001, and EU AI Act references are versioned advisory metadata. Legal role and applicability are human-asserted and default to <code>undetermined</code>. Current official sources and qualified counsel must be consulted because standards, guidance, and implementation timing change. A readiness report never promotes, deploys, rolls back, files, tickets, messages, or calls a provider.
 </section>
 <section class="card">
-  <h2>Capability and upsell matrix</h2>
+  <h2>Capability matrix</h2>
   <table>
     <caption>Every advertised capability, implementation binding, and authority boundary</caption>
     <thead><tr><th>Capability</th><th>Status</th><th>Implementation</th><th>Authority</th></tr></thead>
@@ -25,6 +25,6 @@
 </section>
 <section class="grid">
   <article class="card"><h2>Included locally</h2><ul>{% for item in caps.active %}<li>{{ item }}</li>{% endfor %}</ul></article>
-  <article class="card"><h2>Platform upsell or unavailable</h2><ul>{% for item in caps.gated %}<li>{{ item }}</li>{% endfor %}</ul></article>
+  <article class="card"><h2>Available with the full platform or unavailable</h2><ul>{% for item in caps.gated %}<li>{{ item }}</li>{% endfor %}</ul></article>
 </section>
 {% endblock %}

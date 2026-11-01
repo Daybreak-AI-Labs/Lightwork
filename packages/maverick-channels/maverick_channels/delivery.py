@@ -54,6 +54,19 @@ class DeliveryNotSent(RuntimeError):
     """Provider definitively rejected this attempt before accepting a message."""
 
 
+class DeliveryWithheld(DeliveryNotSent):
+    """The saved reply's task or sources are not available to this person now.
+
+    Nothing was sent and the check may pass again later, so the reply stays
+    retryable; the person's newer messages do not wait behind it."""
+
+
+def reply_withheld(row) -> bool:
+    """True when the reply waits only on the source check, not on the provider."""
+    return any(chunk.get("state") == "retryable" and chunk.get("withheld") is True
+               for chunk in (row.get("chunks") or {}).values())
+
+
 class DeliveryUnknown(RuntimeError):
     """An execution or send may have happened; unsafe to repeat automatically."""
 
@@ -193,17 +206,17 @@ class DeliveryJournal:
     def capacity_status(self):
         """Count receipt identities in bounded pages, without reading bodies."""
         limit = intake_record_limit()
-        first, cursor, used = None, "", 0
+        cursor, used = "", 0
         while used <= limit:
             page_size = min(10_000, limit + 1 - used)
             page = list(self.store.iter_record_ids(start_after=cursor, limit=page_size))
             if not page:
                 break
             for position, _ in page:
-                if position == first:
+                # The scan wraps back to the start: a position at or before the
+                # cursor ends the count, even if compaction removed the first one.
+                if cursor and position <= cursor:
                     return self._capacity_result(used, limit, exact=True)
-                if first is None:
-                    first = position
                 cursor = position
                 used += 1
                 if used > limit:
@@ -380,7 +393,7 @@ class DeliveryJournal:
                     ) from exc
                 except RecordConflict:
                     row = self.get(record_id)
-        if not row or row["fingerprint"] != fingerprint:
+        if not row or row["fingerprint"] not in (fingerprint, _earlier_fingerprint(payload, route)):
             raise ValueError("Channel message identity already belongs to different content or routing")
         if row.get("restore_hold"):
             return row
@@ -469,8 +482,7 @@ class DeliveryJournal:
         from maverick.privacy_ops import RecordConflict
 
         if (not row or row.get("restore_hold") or row.get("question_watch")
-                or row["execution"] != "completed"
-                or row["delivery"] != "delivered"):
+                or row["execution"] != "completed" or not _settled(row)):
             return False
         if row.get("compacted") and row.get("cleanup_pending") == []:
             if row["updated_at"] > now - TOMBSTONE_SECONDS:
@@ -506,6 +518,27 @@ async def admit_message(msg, *, external_id, account, authorize, route=None, jou
         raise PermissionError("Channel sender authorization changed")
     journal = journal or DeliveryJournal()
     return await asyncio.to_thread(journal.admit, msg, external_id=external_id, account=account, route=route)
+
+
+# Fields the saved message gained after its first release; at their defaults
+# the message is the one an earlier build saved without them.
+_LATER_FIELDS = {"provider_tenant_id": None, "provider_sender_id": None, "conversation_ref": None,
+                 "question_reply_only": False}
+
+
+def _earlier_fingerprint(payload, route):
+    """The fingerprint an earlier build gave this message, or None."""
+    if any(payload.get(key) != default for key, default in _LATER_FIELDS.items()):
+        return None
+    return _digest([{key: value for key, value in payload.items() if key not in _LATER_FIELDS}, route])
+
+
+def _settled(row):
+    """Delivered, or a phone call's answer. A voice answer goes back in the
+    call's own HTTP response, so its receipt always ends "delivery unknown" and
+    no later send can confirm or repeat it; kept as unresolved, every call's
+    receipt would stay forever and fill the intake all chat apps share."""
+    return row["delivery"] == "delivered" or (row["channel"] == "voice" and row["delivery"] == "delivery_unknown")
 
 
 def _require_reply_source(row):
@@ -677,7 +710,10 @@ async def process_message(channel, msg, *, external_id, account, authorize, send
 
             inbound = await prepare(inbound)
             payload, publications = await asyncio.to_thread(_payload, inbound, row["id"])
-            if any(payload.get(key) != row["message"].get(key)
+            # A receipt saved before question_reply_only existed lacks the key;
+            # it was admitted with that field's default.
+            admitted = {"question_reply_only": False, **row["message"]}
+            if any(payload.get(key) != admitted.get(key)
                     for key in ("user_id", "sender_id", "channel", "message_id",
                                 "conversation_ref", "question_reply_only", "text")):
                 raise PermissionError("Prepared channel input changed its admitted identity or text")
@@ -889,12 +925,12 @@ class _DeliveryAttempt:
                 # Refused before the provider is called: nothing was sent, so the
                 # chunk stays retryable (recorded unknown, a non-idempotent
                 # channel would refuse every replay and the reply never go out).
-                raise DeliveryNotSent(str(exc)) from exc
+                raise DeliveryWithheld(str(exc)) from exc
             if not self.authorize():
                 raise DeliveryNotSent("Channel sender authorization changed before sending")
             result = await call()
-        except DeliveryNotSent:
-            await self._finish(key, attempt_id, "retryable")
+        except DeliveryNotSent as exc:
+            await self._finish(key, attempt_id, "retryable", withheld=isinstance(exc, DeliveryWithheld))
             raise
         except BaseException:
             await self._finish(key, attempt_id, "delivery_unknown")
@@ -902,12 +938,14 @@ class _DeliveryAttempt:
         await self._finish(key, attempt_id, "delivered", str(result or "")[:512])
         return result
 
-    async def _finish(self, key, attempt_id, state, provider_id=""):
+    async def _finish(self, key, attempt_id, state, provider_id="", *, withheld=False):
         row = await asyncio.to_thread(self.journal.get, self.record_id)
         chunks = dict(row["chunks"])
         if chunks[key]["attempt_id"] != attempt_id:
             raise DeliveryUnknown("Channel send ownership changed")
         chunks[key] = {**chunks[key], "state": state, "provider_id": provider_id}
+        if withheld:
+            chunks[key]["withheld"] = True
         updates = {"chunks": chunks}
         if key == "reply":
             updates["delivery"] = state

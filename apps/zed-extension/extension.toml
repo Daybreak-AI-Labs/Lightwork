@@ -5,7 +5,7 @@ id = "maverick"
 name = "Lightwork"
 version = "0.1.6"
 schema_version = 1
-authors = ["cdayAI"]
+authors = ["The Lightwork Authors"]
 description = "Drive the Lightwork agent runtime from Zed: the Lightwork MCP server as an assistant context server, plus terminal tasks for the CLI."
 repository = "https://github.com/Daybreak-AI-Labs/Lightwork"
 

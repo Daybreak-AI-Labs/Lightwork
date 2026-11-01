@@ -1,4 +1,4 @@
-"""Goal templates v2: community registry discover + install (ROADMAP Q4 2026)."""
+"""Goal templates v2: community registry discover + install."""
 from __future__ import annotations
 
 import hashlib

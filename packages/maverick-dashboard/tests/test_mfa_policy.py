@@ -59,6 +59,21 @@ def test_malformed_require_fails_closed(tmp_path):
     assert mfa_policy.step_up_seconds() == 15 * 60
 
 
+def test_require_stays_on_when_the_source_breaks_during_the_load(tmp_path, monkeypatch):
+    # The check before the load sees a clean file; the file breaks just before
+    # the load reads it. Falling back to "off" here would drop the second factor.
+    _write_config(tmp_path, "[auth.mfa]\nrequire = false\n")
+    assert mfa_policy.require_mfa() is False
+    real_get = config.get_auth_mfa
+
+    def get_after_the_file_breaks():
+        (tmp_path / "home" / "config.toml").write_text("[auth.mfa\n", encoding="utf-8")
+        return real_get()
+
+    monkeypatch.setattr(config, "get_auth_mfa", get_after_the_file_breaks)
+    assert mfa_policy.require_mfa() is True
+
+
 # ---- what proves a second factor ------------------------------------------------
 
 
@@ -194,3 +209,16 @@ def test_reauthenticate_url_prefers_the_browser_login(monkeypatch):
     url = step_up.reauthenticate_url(
         SimpleNamespace(url=SimpleNamespace(path="/users", query="a=1"), method="GET"))
     assert url == "/auth/login?fresh=1&return_to=%2Fusers%3Fa%3D1"
+
+
+def test_reauthenticate_url_asks_saml_for_a_fresh_sign_in(monkeypatch):
+    # Without fresh=1 the SAML login reused the IdP session, the assertion kept
+    # its old AuthnInstant and step-up refused again: a loop.
+    import maverick.oidc as oidc
+    from maverick_dashboard import saml
+
+    monkeypatch.setattr(oidc, "login_enabled", lambda: False)
+    monkeypatch.setattr(saml, "saml_enabled", lambda: True)
+    url = step_up.reauthenticate_url(
+        SimpleNamespace(url=SimpleNamespace(path="/users", query=""), method="GET"))
+    assert url == "/saml/login?fresh=1&return_to=%2Fusers"

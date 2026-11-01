@@ -96,7 +96,8 @@ async def export_goal_bundle(request: Request, goal_id: int) -> Response:
     """The task's goal record, events and episode summaries as one file."""
     from maverick.goal_bundle import IncompleteGoalBundle, prepare_goal_archive
 
-    world, goal, _, version = _export_source(request, goal_id, include_events=True)
+    # Authorization, version digests and world reads block: never on the event loop.
+    world, goal, _, version = await run_in_threadpool(_export_source, request, goal_id, include_events=True)
     try:
         prepared = await run_in_threadpool(prepare_goal_archive, world, goal_id)
     except IncompleteGoalBundle as exc:
@@ -106,10 +107,10 @@ async def export_goal_bundle(request: Request, goal_id: int) -> Response:
     try:
         # Ownership/content grants must still cover the exact exported source
         # after the snapshot is prepared and before a single byte is released.
-        _current_export(request, goal_id, version, include_events=True)
+        await run_in_threadpool(_current_export, request, goal_id, version, include_events=True)
         if prepared.goal != goal:
             raise HTTPException(409, "The task changed while preparing this archive. Review the current copy before downloading.")
-        assert_goal_access(request, prepared.goal)
+        await run_in_threadpool(assert_goal_access, request, prepared.goal)
     except Exception:
         prepared.close()
         raise
@@ -125,7 +126,8 @@ async def export_goal_handoff(request: Request, goal_id: int) -> Response:
     import html
     import re
 
-    world, goal, artifacts, version = _export_source(request, goal_id, include_artifacts=True)
+    world, goal, artifacts, version = await run_in_threadpool(
+        _export_source, request, goal_id, include_artifacts=True)
     questions = await run_in_threadpool(world.open_questions, goal_id=goal_id)
     def esc(value):
         return html.escape(str(value or ""))
@@ -158,8 +160,8 @@ async def export_goal_handoff(request: Request, goal_id: int) -> Response:
     else:
         sections.append("<p>All stored items in the stated handoff scope are included. This is a read-only snapshot, not a resumable task or a verification of external effects.</p>")
     sections.append("</section></main></body></html>")
-    _current_export(request, goal_id, version, include_artifacts=True)
-    if questions != world.open_questions(goal_id=goal_id):
+    await run_in_threadpool(_current_export, request, goal_id, version, include_artifacts=True)
+    if questions != await run_in_threadpool(world.open_questions, goal_id=goal_id):
         raise HTTPException(409, "A task question changed while preparing this copy. Review the current task before downloading.")
     return HTMLResponse("".join(sections), headers={"Content-Disposition": f'attachment; filename="task-{goal_id}-handoff.html"',
                                                     "Cache-Control": "private, no-store"})

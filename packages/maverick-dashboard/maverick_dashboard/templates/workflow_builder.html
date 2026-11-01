@@ -465,7 +465,7 @@
 {% endblock %}
 {% block scripts_extra %}
   <script src="/static/lightwork-template-connections.js"></script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
   (function () {
     var mode = 'template';
     var brief = document.getElementById('wf-brief');

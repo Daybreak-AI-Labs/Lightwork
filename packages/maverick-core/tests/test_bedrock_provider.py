@@ -1,4 +1,4 @@
-"""W1-10: Bedrock through the Anthropic SDK's native clients.
+"""Bedrock through the Anthropic SDK's native clients.
 
 The adapter was bearer-only and subclassed OpenAIClient, so Claude on Bedrock
 lost prompt caching, adaptive thinking, thinking signatures and tool_choice,

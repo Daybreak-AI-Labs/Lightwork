@@ -1,5 +1,4 @@
-"""Docs machine-translation pipeline (roadmap: 2028 H1 distribution,
-"localized docs phase 5 (top-15 langs + MT pipeline)").
+"""Docs machine-translation pipeline.
 
 The human-translated languages live in ``docs/i18n/<lang>/`` (es, ja, de,
 fr, pt-BR, ko, ru, it, hi — see ``docs/i18n/README.md``). This module is

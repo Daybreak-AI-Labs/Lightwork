@@ -6,14 +6,16 @@
     for(;;){const next=await reader.read();if(next.done)break;size+=next.value.length;if(size>262144){await reader.cancel();throw new Error('The complete response is too large. No request was repeated.');}chunks.push(next.value);}
     const bytes=new Uint8Array(size);let position=0;chunks.forEach(chunk=>{bytes.set(chunk,position);position+=chunk.length;});return JSON.parse(new TextDecoder().decode(bytes));
   }
+  // Ends the restricted flow's proof on the server. Its outcome is not shown; the reviewed choice is kept.
+  const endFlow = path => { fetch(path, {method:'POST', credentials:'same-origin', cache:'no-store', redirect:'error'}).catch(() => {}); };
   const recovery = document.querySelector('[data-saml-recovery]');
   if (recovery) {
     const find = name => recovery.querySelector('[data-saml-' + name + ']');
-    const email = find('email'), phrase = find('phrase'), choices = find('recovery-original'), host = find('recovery-review'), status = find('recovery-status');
+    const email = find('email'), phrase = find('phrase'), code = find('code'), choices = find('recovery-original'), host = find('recovery-review'), status = find('recovery-status');
     let generation = 0, busy = false, reviewed = null;
     const say = text => { status.textContent = text; };
-    const stamp = () => JSON.stringify([email.value, phrase.value, choices.value]);
-    const credentials = () => ({email: email.value.trim(), password: phrase.value});
+    const stamp = () => JSON.stringify([email.value, phrase.value, code ? code.value : '', choices.value]);
+    const credentials = () => ({email: email.value.trim(), password: phrase.value, code: code ? code.value.trim() : ''});
     const invalidate = () => { reviewed = null; host.replaceChildren(); host.hidden = true; };
     const lock = value => { busy = value; recovery.querySelectorAll('button').forEach(button => { button.disabled = value; }); };
     async function request(path, body) {
@@ -22,7 +24,7 @@
         const response = await fetch('/auth/company-saml-recovery' + path, {method:'POST', credentials:'same-origin', cache:'no-store', redirect:'error',
           headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal:abort.signal});
         // A sign-in or access refusal discards private entries even when a gateway answers it without a JSON body.
-        if (response.status === 401 || response.status === 403) { generation++; phrase.value = ''; choices.replaceChildren(); invalidate(); }
+        if (response.status === 401 || response.status === 403) { generation++; phrase.value = ''; if (code) code.value = ''; choices.replaceChildren(); invalidate(); }
         const data = await readJSON(response);
         if (!response.ok) {
           throw new Error(typeof data.detail === 'string' ? data.detail.slice(0,2000) : 'The request was refused. Read its original outcome before another review.');
@@ -50,7 +52,7 @@
         Object.entries(data.changes).forEach(([name,value]) => { const label=document.createElement('strong'), text=document.createElement('p'); label.textContent=name; text.textContent=value; host.append(label,text); });
         const label=document.createElement('label'), ack=document.createElement('input'); ack.type='checkbox'; ack.dataset.confirm=''; label.append(ack,' I reviewed the complete restoration.');
         const cancel=document.createElement('button'), save=document.createElement('button'); cancel.type=save.type='button'; cancel.className=save.className='btn'; cancel.textContent='Cancel'; save.textContent='Restore previous choice'; save.disabled=true;
-        reviewed={...data,entered}; ack.addEventListener('change',()=>{save.disabled=!ack.checked || busy;}); cancel.addEventListener('click',()=>{invalidate();say('Nothing was submitted. Your entered work is kept.');});
+        reviewed={...data,entered}; ack.addEventListener('change',()=>{save.disabled=!ack.checked || busy;}); cancel.addEventListener('click',()=>{invalidate();endFlow('/auth/company-saml-recovery/cancel');say('Nothing was submitted. Your entered work is kept.');});
         save.addEventListener('click',async()=>{
           if (busy || !reviewed || !ack.checked || reviewed.entered!==stamp()) {invalidate();say('Your choices changed. Review them again.');return;}
           const admitted=reviewed, current=generation; lock(true); invalidate();
@@ -78,7 +80,7 @@
   const discardReview = () => { prepared = null; review.replaceChildren(); review.hidden = true; };
   const lock = active => { busy = active; panel.querySelectorAll('button').forEach(button => { button.disabled = active || !context; }); };
   const clear = () => { generation += 1; context = ''; form.reset(); requests.replaceChildren(); pending = ''; discardReview();
-    panel.querySelector('[data-saml-activation-phrase]').value=''; panel.querySelector('[data-saml-check]').replaceChildren();
+    panel.querySelector('[data-saml-activation-phrase]').value=''; if(activationCode)activationCode.value=''; panel.querySelector('[data-saml-check]').replaceChildren();
     const currentReview=panel.querySelector('[data-saml-activation-changes]');currentReview.replaceChildren();currentReview.hidden=true;
     const provider=panel.querySelector('[data-saml-provider]');provider.removeAttribute('href');provider.hidden=true;
     say('Your account or access changed. Private sign-in files and choices were cleared.'); };
@@ -182,29 +184,32 @@
     } catch (error) { popup?.close(); if (started === generation) say(error.message); } finally { lock(false); }
   });
   const checks = panel.querySelector('[data-saml-check]'), phrase = panel.querySelector('[data-saml-activation-phrase]'), activationHost = panel.querySelector('[data-saml-activation-changes]');
+  const activationCode = panel.querySelector('[data-saml-activation-code]');
+  const codeValue = () => (activationCode ? activationCode.value.trim() : '');
   const invalidateActivation = () => {activationHost.replaceChildren();activationHost.hidden=true;};
-  const activationStamp = () => JSON.stringify([checks.value,phrase.value,context]);
+  const activationStamp = () => JSON.stringify([checks.value,phrase.value,activationCode ? activationCode.value : '',context]);
   const reload = document.createElement('button');reload.type='button';reload.className='btn';reload.textContent='Read current sign-in checks';checks.parentElement.before(reload);
   reload.addEventListener('click',async()=>{if(busy)return;const started=generation;lock(true);discardReview();invalidateActivation();try{if(await refresh())say('Current sign-in checks loaded. Nothing was changed.');}catch(error){if(started===generation)say(error.message);}finally{lock(false);}});
   panel.querySelector('[data-saml-activation-review]').addEventListener('click',async()=>{
     if(busy)return;const started=generation, entered=activationStamp();lock(true);discardReview();invalidateActivation();
     try{
-      const data=await call('/activation-review',json({check:checks.value,password:phrase.value,context}));
+      const data=await call('/activation-review',json({check:checks.value,password:phrase.value,code:codeValue(),context}));
       if(started!==generation || entered!==activationStamp()){if(started===generation)say('Your choices changed during review. Keep them and review again.');return;}
       render(data.changes,activationHost);const label=document.createElement('label'),ack=document.createElement('input');ack.type='checkbox';label.append(ack,' I reviewed the complete activation.');
       const cancel=document.createElement('button'),save=document.createElement('button');cancel.type=save.type='button';cancel.className=save.className='btn';cancel.textContent='Cancel';save.textContent='Enable checked single sign-on';save.disabled=true;
-      ack.addEventListener('change',()=>{save.disabled=!ack.checked || busy;});cancel.addEventListener('click',()=>{invalidateActivation();say('Nothing was submitted. Your entered work is kept.');});
+      ack.addEventListener('change',()=>{save.disabled=!ack.checked || busy;});cancel.addEventListener('click',()=>{invalidateActivation();endFlow('/api/v1/settings/single-sign-on/cancel');say('Nothing was submitted. Your entered work is kept.');});
       save.addEventListener('click',async()=>{
         if(busy || !ack.checked || entered!==activationStamp()){invalidateActivation();say('Your choices changed. Review them again.');return;}
         const current=generation;lock(true);invalidateActivation();
         try{sessionStorage.setItem('lightwork-saml-activation-original',data.operation);}catch(_){/* Native recovery history remains. */}
-        try{const result=await call('/activate',json({token:data.token,confirmed:true}));if(current===generation){say(result.message+' Use the separate original-owner recovery link to read this original or review restoration.');if(result.confirmed)phrase.value='';}}
+        try{const result=await call('/activate',json({token:data.token,confirmed:true}));if(current===generation){say(result.message+' Use the separate original-owner recovery link to read this original or review restoration.');if(result.confirmed){phrase.value='';if(activationCode)activationCode.value='';}}}
         catch(error){if(current===generation)say(error.message+' Read the original through the owner recovery link; do not repeat activation.');}finally{lock(false);}
       });
       activationHost.append(label,cancel,save);activationHost.hidden=false;ack.focus();say('Read the complete activation before confirming it.');
     }catch(error){if(started===generation)say(error.message);}finally{lock(false);const save=activationHost.querySelector('button:last-child');if(save)save.disabled=true;}
   });
   phrase.addEventListener('input',invalidateActivation);checks.addEventListener('change',invalidateActivation);
+  if(activationCode)activationCode.addEventListener('input',invalidateActivation);
   panel.addEventListener('input',event=>{if(form.contains(event.target))invalidateActivation();});
   document.addEventListener('lightwork:copilot-context-changed',invalidateActivation);
   document.addEventListener('lightwork:copilot-context-changed', event => { if (event.detail?.reason === 'selection') discardReview(); else clear(); });

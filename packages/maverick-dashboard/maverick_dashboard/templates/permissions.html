@@ -61,7 +61,7 @@
     <button id="file-work-enable" class="btn btn--primary" type="button" hidden>Allow file work</button>
     <p id="file-work-result" role="status" aria-live="polite"></p>
   </div>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     var rows = document.getElementById('sbx-rows');
@@ -390,7 +390,7 @@
     .perm-msg { min-height: 1em; }
   </style>
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     (function() {
       const msg = document.getElementById('perm-msg');
       function bad() { return new Error('Could not confirm the updated tool permissions. Reload this page before retrying.'); }

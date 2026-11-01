@@ -1,7 +1,7 @@
 # Governance benchmark — results
 
 Checked-in proof for `eval_governance.py` (see [README](./README.md#does-the-governance-contain-unsafe-autonomy-the-control-plane)
-and [`../docs/strategy/benchmark-plan.md`](../docs/strategy/benchmark-plan.md)).
+and [`benchmark-plan.md`](benchmark-plan.md)).
 
 Reproduce (no key, deterministic):
 

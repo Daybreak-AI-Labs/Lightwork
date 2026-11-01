@@ -157,7 +157,7 @@ async def test_history_uses_last_10_when_disabled(monkeypatch, tmp_path: Path, f
 async def test_history_scales_with_model_window_by_default(
         monkeypatch, tmp_path: Path, fake_llm):
     """Model-scaled context (default ON): the default orchestrator model
-    (Opus 4.8, a 1M-context model per W1-5) keeps up to the 200-turn
+    (Opus 4.8, a 1M-context model) keeps up to the 200-turn
     ceiling, so all 30 seeded turns — including turn 0 — make the brief."""
     monkeypatch.delenv("MAVERICK_COMPACT_HISTORY", raising=False)
     monkeypatch.delenv("MAVERICK_CONTEXT_MODEL_SCALED", raising=False)

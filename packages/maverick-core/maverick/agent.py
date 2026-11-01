@@ -3720,12 +3720,17 @@ class Agent:
         from .autonomy import confirm_plan_enabled
         if practice.tool_allowed(name) or not confirm_plan_enabled():
             return None
+        from .paths import current_tenant_id
         goal_id = int(getattr(self.ctx, "goal_id", 0) or 0)
-        key: tuple = (goal_id, int(getattr(self.ctx, "episode_id", 0) or 0))
+        # Goal and episode ids count up per database, and every workspace and
+        # its practice workspace has its own: the key names which one.
+        key: tuple = (current_tenant_id() or "", practice.active(), goal_id,
+                      int(getattr(self.ctx, "episode_id", 0) or 0))
         if not goal_id:
             # No task to key on: scope the decision to this run's own context,
             # never one entry shared by every unrelated run without a goal.
             key = ("run", getattr(self.ctx, "bus_namespace", None) or id(self.ctx))
+        delay = 0.05
         while True:
             with _PLAN_DECISIONS_LOCK:
                 decided = _PLAN_DECISIONS.get(key)
@@ -3735,7 +3740,11 @@ class Agent:
                     break
             if decided is not None:
                 break
-            await asyncio.sleep(0.05)  # another agent of this run is asking; share its answer
+            # Another agent of this run is asking; share its answer. Agents may
+            # run on separate event loops, so this polls, and a person can take
+            # hours to decide, so the check slows to once a second.
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 1.0)
         if decided is None:
             from .safety.consent import require_consent
             try:
@@ -4473,8 +4482,10 @@ class Agent:
         'cancelled' but the swarm kept spending until FINAL, max_steps, or
         the budget cap (#W1-23). `get_goal` is a single indexed
         primary-key read at the same cadence as the untimed killswitch.check()
-        /budget.check() calls beside it, so no throttling here. Fails open
-        (a transient world-read error must not itself stop the run).
+        /budget.check() calls beside it, so no throttling here. The status read
+        fails open (a transient world-read error must not itself stop the run);
+        the human-handoff check fails closed, because an unreadable hold may be
+        a human's.
         """
         goal_id = getattr(self.ctx, "goal_id", None)
         if goal_id is None:
@@ -4485,10 +4496,20 @@ class Agent:
             require_ai_open(self.ctx.world, goal_id)
         except GoalMutationConflict:
             return True
-        except Exception as e:  # a transient read error must not itself stop the run
-            log.debug("human-handoff check skipped: %s", e)
+        except Exception as e:
+            # A hold that cannot be read may be a human's: stop the run through
+            # the normal stop path (never raise out of the poll loop) rather
+            # than let the AI keep acting in a conversation it may not own.
+            log.warning("human-handoff check unreadable; stopping goal %s: %s", goal_id, e)
+            return True
+        world = self.ctx.world
         try:
-            goal = self.ctx.world.get_goal(goal_id)
+            # The status column alone, not the whole row with its sealed fields
+            # (about 0.9 ms against 0.005, several times per model call).
+            if callable(getattr(type(world), "goal_stream_state", None)):
+                goal = world.goal_stream_state(goal_id)
+            else:
+                goal = world.get_goal(goal_id)
         except Exception as e:  # pragma: no cover -- a stop check must not crash the run
             log.debug("goal-cancelled check skipped: %s", e)
             return False

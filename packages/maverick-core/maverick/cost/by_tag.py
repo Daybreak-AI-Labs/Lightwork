@@ -48,6 +48,7 @@ def gather(
     tag_field: str = "tag",
     limit: int = 500,
     goal_ids: Iterable[int] | None = None,
+    episodes: Iterable | None = None,
 ) -> list[dict]:
     """Build tag rows from a world model's priced episodes.
 
@@ -58,10 +59,14 @@ def gather(
     When ``goal_ids`` is provided, only episodes for those goals are read. This
     lets multi-user dashboard callers aggregate spend after applying their
     owner-scoped goal filter instead of reading every recent episode globally.
+
+    ``episodes`` takes runs the caller has already read and scoped (for example
+    ``WorldModel.episodes_for_owner_goals``), skipping the per-goal reads.
     """
     rows: list[dict] = []
     goal_tags: dict[int, str] = {}
-    episodes = _episodes_for_goals(world, limit=limit, goal_ids=goal_ids)
+    if episodes is None:
+        episodes = _episodes_for_goals(world, limit=limit, goal_ids=goal_ids)
     for ep in episodes:
         cost = _num(getattr(ep, "cost_dollars", 0))
         if cost <= 0:
@@ -105,6 +110,12 @@ def _episodes_for_goals(world, *, limit: int, goal_ids: Iterable[int] | None):
 
 
 def _goal_tag(world, gid: int, tag_field: str) -> str:
+    from ..world_model import WorldModel
+
+    if isinstance(world, WorldModel):
+        # The shipped Goal row has no metadata or tags, so the lookup could only
+        # return "" -- and it cost one goal decrypt per priced goal.
+        return ""
     try:
         g = world.get_goal(gid)
     except Exception:  # pragma: no cover -- missing goal

@@ -32,6 +32,13 @@
         var content = document.querySelector('main') || document.body;
         content.insertBefore(notice, content.firstChild);
         window.dispatchEvent(new CustomEvent('lightwork:context-changed'));
+        // Pages clear what they showed for the previous workspace or account
+        // on these. Sent from document and bubbling, so listeners on document
+        // and on window both hear them.
+        ['lightwork:workspace-changed', 'lightwork:account-context-changed', 'lightwork:authority-changed',
+         'lightwork:draft-context-changed', 'lightwork:copilot-context-changed'].forEach(function (name) {
+          document.dispatchEvent(new CustomEvent(name, {bubbles: true}));
+        });
       }
       window.addEventListener('storage', function (event) {
         if (event.key === 'lightwork-workspace-changed') invalidateWorkspace();
@@ -631,19 +638,34 @@
         // An empty body is null; a stand-in response may only answer json().
         try { return typeof response.json === 'function' ? await response.json() : null; } catch (_) { return null; }
       }
+      // A plain object of the caller's headers: a Headers instance or a list
+      // of [name, value] pairs has no own properties, so copying one as an
+      // object would drop every header it carries.
+      function plainHeaders(value) {
+        var out = {};
+        if (typeof Headers !== 'undefined' && value instanceof Headers) value.forEach(function (v, k) { out[k] = v; });
+        else if (Array.isArray(value)) value.forEach(function (pair) { out[pair[0]] = pair[1]; });
+        else Object.assign(out, value || {});
+        return out;
+      }
+      function headerName(headers, name) {
+        return Object.keys(headers).find(function (key) { return key.toLowerCase() === name.toLowerCase(); });
+      }
       window.mvFetchJSON = async function (url, opts, action) {
         var own = opts || {};
         var options = Object.assign({ credentials: 'same-origin' }, own);
         OWN_OPTIONS.forEach(function (name) { delete options[name]; });
-        var headers = Object.assign({ Accept: 'application/json' }, options.headers || {});
+        var headers = plainHeaders(options.headers);
+        if (!headerName(headers, 'Accept')) headers = Object.assign({ Accept: 'application/json' }, headers);
         var body = options.body;
-        var declared = headers['Content-Type'] || headers['content-type'];
+        var typeName = headerName(headers, 'Content-Type');
+        var declared = typeName && headers[typeName];
         var raw = body == null || typeof body === 'string' || (declared && !/json/i.test(declared)) || (typeof FormData !== 'undefined' && body instanceof FormData) ||
           (typeof Blob !== 'undefined' && body instanceof Blob) || (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) ||
           (typeof ArrayBuffer !== 'undefined' && body instanceof ArrayBuffer);
         if (!raw) {
           options.body = JSON.stringify(body);
-          if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+          if (!typeName) headers['Content-Type'] = 'application/json';
         }
         options.headers = headers;
         var timer = null, timedOut = false, expired = null;

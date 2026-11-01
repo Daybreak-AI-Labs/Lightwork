@@ -1,6 +1,6 @@
 # Enterprise Deployment Playbook
 
-A step-by-step runbook for standing up Lightwork for an enterprise customer:
+A step-by-step runbook for standing up Lightwork for an organization:
 what to **collect from them**, what to **provision**, how to **install**, how to
 **harden**, how to **verify**, and how to **operate** day-2. Every command and
 config key below is real; anything not yet implemented is called out explicitly
@@ -15,14 +15,14 @@ in [§10 Gap status](#10-gap-status).
 
 | Question | Options | Drives |
 |---|---|---|
-| Who runs it? | Customer self-hosts **(recommended)** / we host | Data boundary, sub-processor list |
-| Tenancy | One instance **per customer**, with workspaces inside it | Channels, OIDC, isolation model; shared hosting is not qualified by this runbook |
+| Who runs it? | The organization self-hosts **(recommended)** / a service provider hosts it | Data boundary, sub-processor list |
+| Tenancy | One instance **per organization**, with workspaces inside it | Channels, OIDC, isolation model; shared hosting is not qualified by this runbook |
 | World-model backend | SQLite / **Postgres** (managed HA, pooling, RLS) | Backups, DB isolation; control plane remains 1 replica |
 | Trust of agent-run code | Trusted ops only / **untrusted/multi-tenant** | Sandbox backend (§6.1) — **blocker if wrong** |
 | LLM | Cloud (Anthropic/OpenAI/…) / **self-hosted** (vLLM/Ollama/TGI) | Egress lock, data residency |
 | Auth | Dashboard token / OIDC SSO / reverse-proxy | What you collect from their IdP |
 
-**Recommended enterprise default:** one instance per customer, Postgres backend,
+**Recommended enterprise default:** one instance per organization, Postgres backend,
 self- or cloud-LLM per their data policy, OIDC SSO, **container sandbox**,
 enterprise mode ON. Distinct per-tenant bot/IdP identities require
 one-instance-per-tenant (the inbound listener/issuer is what identifies the
@@ -30,9 +30,9 @@ user) — the Helm chart + per-tenant config overlay make that cheap.
 
 ---
 
-## 2. Collect from the customer ("I need this from them")
+## 2. Collect from the organization
 
-Hand the customer this checklist. ☐ = required, ◇ = optional/feature-dependent.
+Hand the organization's administrators this checklist. ☐ = required, ◇ = optional/feature-dependent.
 
 ### 2.1 LLM access (one path required)
 - ☐ **Cloud key** for their chosen provider → env var, stored as a secret:
@@ -58,11 +58,11 @@ From their IdP (Okta/Entra/Auth0/Google):
   multi-AZ, automated backups w/ PITR → a DSN of the form
   `postgres://…@HOST:5432/DBNAME` (credentials from their secret store) for
   `MAVERICK_PG_DSN`. SQLite (no dependency) is fine for a single-replica
-  per-customer instance. Postgres does not make every file-backed control-plane
+  per-organization instance. Postgres does not make every file-backed control-plane
   store replica-safe; keep the dashboard/serve process at one replica.
 
 ### 2.4 Network / TLS
-- ☐ A **DNS hostname** for the dashboard (e.g. `maverick.customer.com`).
+- ☐ A **DNS hostname** for the dashboard (e.g. `maverick.example.com`).
 - ☐ **TLS certificate** (their cert, or cert-manager/Let's Encrypt). TLS is
   terminated at their ingress/reverse proxy — Lightwork assumes HTTPS in front.
 
@@ -169,7 +169,7 @@ warns once). For any deployment running untrusted/multi-tenant work this is a
 **blocker**.
 ```toml
 [sandbox]
-backend = "docker"      # or "podman" / "gvisor" / "kubernetes" / "firecracker" — NOT "local"
+backend = "docker"      # or "podman" / "gvisor" / "kubernetes" — NOT "local" or "firecracker" (experimental scaffold)
 allow_root = false
 allow_network = false   # default-deny egress from agent code
 workdir = "/home/maverick/workspace"
@@ -226,7 +226,7 @@ MAVERICK_BACKUP_SIGNING_KEY=<32-byte hex/base64> # authenticated DR archives
 [audit]
 sign = true
 [retention]
-audit_days = 365      # set to the customer's retention policy
+audit_days = 365      # set to the organization's retention policy
 ```
 For shared multi-tenant DBs, enable Postgres RLS: `MAVERICK_PG_RLS=1`
 (+ `MAVERICK_STRICT_TENANT_ISOLATION=1`).
@@ -348,21 +348,19 @@ Honest, current state — what's now enforced in code vs. what genuinely remains
 | **MCP rate limiting** | Per-caller sliding-window limiter (bearer/IP), `MAVERICK_MCP_RATE_LIMIT` (default 600/min; 0 disables) → 429 over cap. |
 | **gRPC rate limiting** | Per-caller sliding-window limiter at the auth chokepoint (agent id / hashed peer), `MAVERICK_GRPC_RATE_LIMIT` (default 600/min; 0 disables) → RESOURCE_EXHAUSTED. Complements `maximum_concurrent_rpcs`. |
 | **Key rotation** | `maverick audit rotate-key` (signing) and `maverick encryption rotate` (at-rest) — both **additive**: a keyring/per-row key-id means new writes use the new key while prior keys keep decrypting old data. No flag-day re-encrypt. |
-| **Plugins** | Correction: load-time **allowlist** (`[plugins] enabled` / `MAVERICK_PLUGINS_ALLOW`) **and permission-grant enforcement are real and default-deny** (`enforce_permissions=true`) — an ungranted permission *skips* the plugin. (Earlier draft mis-stated this as unenforced.) |
+| **Plugins** | Load-time **allowlist** (`[plugins] enabled` / `MAVERICK_PLUGINS_ALLOW`) **and permission-grant enforcement are default-deny** (`enforce_permissions=true`) — an ungranted permission *skips* the plugin. |
 
-### Remaining (disclose to the customer / roadmap)
+### Remaining gaps
 | Area | Gap | Interim mitigation |
 |---|---|---|
 | Multi-replica control plane | Postgres centralizes the world model, but workflow releases/runs, A2A durable claims, audit/learning ledgers, and tenant-local policy files are not all transactionally shared yet. | Enforced at runtime: the control plane takes an exclusive lock on its data root at startup, and a second process refuses to serve and names the holder. Helm additionally refuses `replicaCount > 1` and control-plane HPA. `/readyz` reports the replica-safety posture. Scale remote workers separately. |
 | MCP | Shared bearer grants full tool access; per-tenant gating only via Agent Trust Plane (opt-in). | `[agent_trust] enforce=true` with per-agent tokens. |
 | Plugins | Granted plugins run **in-process** — no runtime syscall/network sandbox (load-time grants only). | Vet + code-review allowlisted plugins. |
-| Local Firecracker | The local scaffold is unsupported; it does not qualify customer execution and is not a silent Docker fallback. | Select and qualify a supported execution backend. Managed AWS requires the separate Kubernetes executor in [`deploy/aws/EXECUTOR.md`](../../deploy/aws/EXECUTOR.md). |
-| Billing | Metering + idempotent invoicing exist; **no card-checkout by design** (enterprise contract + AR motion). See [`../billing.md`](../billing.md). | Export usage (`billing invoice --json`); bill via AR, or wire a processor keyed on `invoice_id`. |
-| Compliance | **DPA / sub-processor / SLA templates** now ship in `docs/enterprise/legal/`; **SOC 2 Type II + penetration test require external auditors** (not code). | Engage auditor/pen-test firm; complete the templates with counsel. |
+| Local Firecracker | The local scaffold is unsupported; it does not qualify production execution and is not a silent Docker fallback. | Select and qualify a supported execution backend. Managed AWS requires the separate Kubernetes executor in [`deploy/aws/EXECUTOR.md`](../../deploy/aws/EXECUTOR.md). |
+| Compliance | **SOC 2 Type II and penetration-test attestations require external auditors** (not code). | The operating organization engages an auditor or penetration-test firm. |
 
 ---
 
 *Grounded in: `deploy/{helm,vps,docker,postgres,observability,reference-architectures}/`,
 `packages/maverick-core/maverick/{config.py,cli.py,sandbox/,enterprise.py,deployment.py,audit/,backup.py}`,
 and `packages/maverick-dashboard/maverick_dashboard/{app.py,api.py,auth.py,rbac.py}`.*
-</content>

@@ -26,7 +26,7 @@ phone (or any other client) a frontend.
 or everything at once:
 
 ```bash
-python -m pip install -e './packages/maverick-channels[all]'
+python -m pip install -e ./packages/maverick-core -e './packages/maverick-channels[all]'
 ```
 
 ## The interface

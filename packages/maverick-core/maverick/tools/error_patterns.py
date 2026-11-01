@@ -1,4 +1,4 @@
-"""Error pattern recognizer tool (roadmap: 2027 H1 UX — "error pattern recognizer").
+"""Error pattern recognizer tool.
 
 Collapses a pile of error lines into a ranked set of *patterns*: it normalises
 the variable parts (numbers, hex/pointers, UUIDs, IPs, quoted paths,

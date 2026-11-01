@@ -48,11 +48,12 @@ def test_generic_upgrade_cannot_use_protected_handoff(store, monkeypatch):
         handoff.publish("unused", actor_label="Admin")
 
 
-def test_a_non_ascii_review_id_is_a_refusal_not_a_type_error(store):
+@pytest.mark.parametrize("identifier", ["é" * 32, "\ud800" * 32])
+def test_a_non_ascii_review_id_is_a_refusal_not_a_type_error(store, identifier):
     release = dict(version="1.2.3", runtime_sha256="a" * 64, installer_sha256="b" * 64, signature="signed")
     handoff.save_review(release)
     with pytest.raises(handoff.recovery.MaintenanceError, match="expired or changed"):
-        handoff.reviewed_release("é" * 32)
+        handoff.reviewed_release(identifier)
 
 
 @pytest.mark.parametrize("damage", ["unauthenticated", "unreadable", "malformed"])

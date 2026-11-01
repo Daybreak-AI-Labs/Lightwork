@@ -1,17 +1,18 @@
 # Lightwork 2.0 migration playbook
 
-**Roadmap refs:** 2028-H1 "2.0 stable release" + "migration playbook".
-This playbook is the operator-facing half; the changes themselves are
-specified in [RFC 0001](./rfcs/0001-maverick-2.0.md) (config schema v2,
-async-only channel SDK, connector re-homing, tool contract). **Cutting the
-2.0 release — version bump, tag, publish — is a maintainer act** gated on
-the [release checklist](./release-checklist-2.0.md); this document is what
-an operator runs when that release exists.
+This playbook is the operator-facing half of the 2.0 upgrade; the changes
+themselves are specified in [RFC 0001](./rfcs/0001-maverick-2.0.md) (config
+schema v2, async-only channel SDK, connector re-homing, tool contract). The
+2.0 release is gated on the [release checklist](./release-checklist-2.0.md);
+this document is what an operator runs when that release exists.
 
-> Honest status: the current line is 0.1.x. Every tool referenced below
-> ships **today** and is dry-run-first, so the playbook is rehearsable now
-> against a 0.1.x install — that rehearsal is itself one of the release
-> checklist's gates.
+> Status: the current line is 0.1.x. Every tool referenced below
+> ships **today** and is dry-run-first, so the playbook can be rehearsed now
+> against a 0.1.x install; that rehearsal is one of the release checklist's
+> gates. Lightwork packages are not published to PyPI: the `pip install`
+> lines below assume packages built from the release tag, and a
+> [source install](./source-install.md) upgrades by checking out the release
+> tag and re-running the install script.
 
 ## TL;DR for a single-box install
 
@@ -52,10 +53,10 @@ maverick audit verify       # the chain must still verify after upgrade
 Per RFC 0001 C2: sync handler shims are removed in 2.0. Third-party
 adapters must implement the async seams; the deprecation warnings shipped
 in 0.1.x (`deprecations.py`: `channels.str_handler`, remove_in 0.3.0)
-name exactly what to change. The certification contract suite
-([programs/certification.md](./programs/certification.md)) is the
-compatibility test: an adapter that passes it on 0.1.x with no deprecation
-warnings is 2.0-ready.
+name exactly what to change. The channel SDK v2 tests
+(`packages/maverick-channels/tests/test_channel_sdk_v2.py`) show the expected
+`Reply` and dispatch behaviour: an adapter whose tests pass on 0.1.x with no
+deprecation warnings is 2.0-ready.
 
 ## Plugins
 

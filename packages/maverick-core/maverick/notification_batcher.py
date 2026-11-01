@@ -1,4 +1,4 @@
-"""Smart notification batching (roadmap: 2028 H1 UX).
+"""Smart notification batching.
 
 A long run can fire a flurry of low-priority pushes ("step 3 done", "step 4
 done", …) and turn a phone into a slot machine. Batching coalesces the

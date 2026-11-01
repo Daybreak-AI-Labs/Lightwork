@@ -1,4 +1,4 @@
-"""Tenant lifecycle / provisioning registry (ROADMAP platform spine)."""
+"""Tenant lifecycle / provisioning registry."""
 from __future__ import annotations
 
 import pytest
@@ -367,3 +367,29 @@ def test_erasure_removes_children_before_a_one_character_top_level_name(tmp_path
 
     assert result["result"] == "confirmed"
     assert not root.exists()
+
+
+def test_removed_workspace_with_an_active_legal_matter_is_not_erased_until_released(tmp_path, monkeypatch):
+    from maverick import ediscovery
+    from maverick.paths import tenant_scope
+
+    tr.create_tenant("former")
+    root = tmp_path / "tenants" / "former"
+    (root / "kept.txt").write_text("held", encoding="utf-8")
+    with tenant_scope(tenant="former"):
+        store = ediscovery.MatterStore(ediscovery.store_path())
+        matter = store.create("former", actor="auditor", values={
+            "name": "Acme dispute", "custodians": ["user:cli:alice"], "record_kinds": ["goals"]})
+    assert tr.delete_tenant("former") is True
+    review = tr.erasure_review("former")
+    with pytest.raises(tr.TenantRegistryError, match="legal hold is active"):
+        tr.erase_removed_tenant("former", revision=review["revision"], operation="2" * 32,
+                                actor="user:owner", context="test", previous_attempt=review["previous_attempt"])
+    assert (root / "kept.txt").read_text(encoding="utf-8") == "held"
+
+    with tenant_scope(tenant="former"):
+        store.release("former", matter["id"], actor="auditor", expected_revision=1)
+    review = tr.erasure_review("former")
+    result = tr.erase_removed_tenant("former", revision=review["revision"], operation="3" * 32,
+                                     actor="user:owner", context="test", previous_attempt=review["previous_attempt"])
+    assert result["result"] == "confirmed" and not root.exists()

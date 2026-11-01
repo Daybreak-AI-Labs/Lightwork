@@ -3,8 +3,8 @@
 The existing `[budget.provider_caps]` setting enables a provider cap, with
 `[budget] provider_caps_period = "day"` or `"month"` selecting UTC periods.
 This remains separate from a run's Budget and a principal's quota. No configured
-cap leaves provider admission unchanged. This correction reuses the existing
-provider-cap configuration rather than enabling a new cap by default.
+cap leaves provider admission unchanged. No provider cap is enabled by
+default.
 
 Every physical synchronous, asynchronous, or hedged LLM dispatch reserves its
 projected cost under the accounting lock before calling a provider. Outstanding
@@ -79,4 +79,4 @@ review binding, receipt coverage, pagination, and interrupted completion. Dashbo
 API tests use temporary workspaces; DOM tests execute the actual template and
 controller with synthetic HTTP responses. The dedicated PostgreSQL two-connection
 test requires the existing PostgreSQL test DSN and does not claim local live
-database acceptance without that fixture. No validation invokes a paid provider.
+database acceptance without that fixture. No test calls a live provider.

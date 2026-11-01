@@ -17,7 +17,7 @@ The schema was verified against the HF dataset card May 2026:
   - FAIL_TO_PASS, PASS_TO_PASS (JSON-encoded strings — we json.loads them)
   - environment_setup_commit, difficulty, created_at
 
-Wave 12 hotfix companion: this is the script the runbook references for
+This is the script the runbook references for
 the "stage Verified" step that the harness itself does NOT perform.
 """
 from __future__ import annotations

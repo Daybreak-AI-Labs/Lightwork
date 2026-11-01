@@ -1,4 +1,4 @@
-"""Key rotation planner (roadmap: 2028 H2 — "key rotation playbook").
+"""Key rotation planner.
 
 Given a set of signing/encryption keys (each with a creation date and a maximum
 age) and a reference "today", decide which keys are OK, DUE, or OVERDUE for

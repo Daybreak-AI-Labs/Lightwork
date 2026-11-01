@@ -7,7 +7,7 @@ into OpenAI's chat format and converting the response back.
 Used directly for OpenAI; subclassed by OpenRouter and Ollama, which
 are OpenAI-compatible at different base_urls.
 
-v0.1.1 fixes (per council review):
+v0.1.1 fixes:
   - tool_result.content may be a list of blocks; extract `text` from each
   - max_completion_tokens for gpt-4o / o1 / o3 (max_tokens deprecated)
   - finish_reason mapped to Anthropic stop_reason vocabulary
@@ -87,7 +87,7 @@ def _strict_usage_count(v: object, field: str, *, missing_ok: bool = False) -> i
     reports malformed accounting data, do not silently record a zero-cost call:
     fail closed so the agent stops instead of bypassing spend limits. The
     error is a :class:`UsageAccountingError` (a provider fault), never a
-    cap breach -- see platform audit W1-17.
+    cap breach.
     Optional cache fields may pass ``missing_ok=True`` to treat ``None`` as 0.
     """
     if v is None:
@@ -150,7 +150,7 @@ def _translate_user_blocks(content: list) -> tuple[list[dict], dict | None]:
     messages plus a single trailing ``user`` message (or ``None`` if the
     turn carried no text/image content at all).
 
-    W1-7: an Anthropic image/document block used to fall into the
+    An Anthropic image/document block used to fall into the
     ``else`` branch below and get ``str()``-stringified into plain text --
     the model saw a Python dict repr containing the raw base64 payload as
     prompt text, not an actual image. content_parts holds OpenAI
@@ -431,7 +431,7 @@ class OpenAIClient:
                 "parameters": t.get("input_schema", {"type": "object"}),
             }
             if t.get("strict"):
-                # W1-11: Anthropic strict tool use -> OpenAI strict function
+                # Anthropic strict tool use -> OpenAI strict function
                 # calling (schema-validated arguments). Only when the tool
                 # opted in, so the translated catalog is otherwise unchanged.
                 fn["strict"] = True
@@ -653,7 +653,7 @@ class OpenAIClient:
             )
         if oai_tools:
             kwargs["tools"] = oai_tools
-            # W1-11: forced / restricted tool selection and serialised calls.
+            # Forced / restricted tool selection and serialised calls.
             if mapped_choice is not None:
                 kwargs["tool_choice"] = mapped_choice
             if no_parallel:
