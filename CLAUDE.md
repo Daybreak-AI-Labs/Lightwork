@@ -88,8 +88,9 @@ controls; the other packages build on it.
   not only at an explicit `check()`. A test that raises only `max_dollars`
   still fails on any other cap it crosses; raise every cap the test will cross.
 - pytest-asyncio runs in strict mode; async tests need explicit markers.
-- CI also runs selected suites with `MAVERICK_TEST_SECURE_DEFAULT=1` (the
-  production security posture); run affected tests that way too.
+- CI also runs tests with `MAVERICK_TEST_SECURE_DEFAULT=1` (the production
+  security posture): selected suites on pull requests, the whole suite in the
+  merge queue and on `main`. Run affected tests that way too.
 
 ### CI gates beyond Ruff
 

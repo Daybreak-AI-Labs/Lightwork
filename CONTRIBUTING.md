@@ -132,8 +132,10 @@ worker per CPU core and grouping tests by file:
 python -m pytest -q -n auto --dist loadfile
 ```
 
-CI also runs selected suites with `MAVERICK_TEST_SECURE_DEFAULT=1` (the
-production security posture); run affected tests that way before pushing.
+CI also runs tests with `MAVERICK_TEST_SECURE_DEFAULT=1` (the production
+security posture): selected suites on pull requests, and the whole suite in
+the merge queue and on `main` (the `posture` jobs). Run the tests you changed
+that way before pushing.
 
 A collection error in any file stops the whole run, so fix import errors
 first. When a collection error shows a `pyo3_runtime.PanicException`, the real

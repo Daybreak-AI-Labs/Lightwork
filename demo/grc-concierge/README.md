@@ -22,8 +22,8 @@ does not turn this demo into the governed `/security` product.
 The release workflow attaches a versioned
 `lightwork-grc-concierge-<version>.zip` to each tagged release (none has been
 published yet), with an embedded release manifest, file hashes, the Apache-2.0
-`LICENSE`, `NOTICE` and `TRADEMARK.md`, an aggregate standalone-SKU CycloneDX
-SBOM, SHA-256 checksums, and Sigstore signature/certificate files. This is a
+`LICENSE`, `NOTICE` and `TRADEMARK.md`, an aggregate CycloneDX SBOM of the
+standalone demo archives, SHA-256 checksums, and Sigstore signature/certificate files. This is a
 **source archive**, not a wheel or PyPI package. The same archive can be
 reproduced from a tagged checkout by running this at the repository root:
 

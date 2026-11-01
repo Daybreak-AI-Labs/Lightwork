@@ -1,6 +1,6 @@
 {
   "artifact_name": "lightwork-model-risk-ai-assurance-officer",
-  "description": "Reduced unsigned local Model Risk and AI Assurance Officer standalone source SKU",
+  "description": "Reduced unsigned local Model Risk and AI Assurance Officer standalone source archive",
   "display_name": "Lightwork Model Risk & AI Assurance Officer",
   "entrypoint": "serve_standalone.py",
   "files": [

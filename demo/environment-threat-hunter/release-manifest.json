@@ -1,6 +1,6 @@
 {
   "artifact_name": "lightwork-environment-threat-hunter",
-  "description": "Reduced, local-only environment threat hunter standalone source SKU",
+  "description": "Reduced, local-only environment threat hunter standalone source archive",
   "display_name": "Lightwork Environment Threat Hunter",
   "entrypoint": "serve_standalone.py",
   "files": [

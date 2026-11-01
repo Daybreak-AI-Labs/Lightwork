@@ -41,7 +41,7 @@ variable "domain_name" {
 }
 
 variable "health_check_path" {
-  description = "ALB target-group health check path. /livez answers 200 as soon as the process accepts HTTP (liveness only); /readyz runs the deep dependency checks and returns 503 while a dependency is down, which would pull the target out of service rather than restart it."
+  description = "ALB target-group health check path. /livez answers 200 as soon as the process accepts HTTP (liveness only); /readyz runs the deep dependency checks and returns 503 while a dependency is down; because the ECS service uses this health check, ECS would stop and replace the tasks for as long as the dependency stays down."
   type        = string
   default     = "/livez"
 }
