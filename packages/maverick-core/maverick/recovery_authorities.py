@@ -71,6 +71,9 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     # Even metadata-only replay receipts prevent previously consumed changes
     # from executing again. An older restored absence is not fresh admission.
     "fact_operation_receipts": "fact_operation_receipt_authority",
+    # Ekko draft-build receipts are the same kind of replay barrier: a lost
+    # reply must not rebuild drafts the person has since removed.
+    "ekko_build_operations": "ekko_build_operation_receipt_authority",
     "permission_access_requests": "permission_request_authority",
     "personal_data_requests": "personal_erasure_request_authority",
     "owned_task_diagnostics": "private_diagnostic_release_authority",
