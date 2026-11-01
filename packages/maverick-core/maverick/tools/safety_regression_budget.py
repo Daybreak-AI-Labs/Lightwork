@@ -1,4 +1,4 @@
-"""Safety regression budget (roadmap: 2028 H1/H2 — safety gating in CI).
+"""Safety regression budget.
 
 Gate a candidate release against a safety baseline: a candidate may regress a
 safety score by at most ``allowed_regression``. Higher scores are better, so a

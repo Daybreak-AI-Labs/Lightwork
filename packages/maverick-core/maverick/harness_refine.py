@@ -2,7 +2,7 @@
 operating instructions from an observed failure; a human APPLIES it.
 
 The capability itself is unremarkable — read a failure, decide what guidance
-would have avoided it, write that guidance down. What makes it sellable is
+would have avoided it, write that guidance down. What makes it safe is
 that none of the writing happens on the agent's own authority:
 
 * **A proposal is never self-applied.** ``propose`` parks a real world
@@ -448,7 +448,7 @@ def propose(observation: dict, *, goal_id: int | None = None,
                     proposed_by=record["proposed_by"], failure=failure[:200])
     except Exception:
         # An unrecordable proposal must not sit in the queue looking
-        # applicable: the Operating Record is the reason this is sellable.
+        # applicable: its Operating Record entry is what makes it reviewable.
         _discard(proposal_id)
         raise
     return dict(record)

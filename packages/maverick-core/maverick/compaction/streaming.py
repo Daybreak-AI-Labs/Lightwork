@@ -1,4 +1,4 @@
-"""Streaming (incremental) compaction (roadmap: 2028 H1 perf, v7).
+"""Streaming (incremental) compaction.
 
 Digest-style compaction re-summarizes the WHOLE prefix every time it runs —
 O(history) summarizer input per compaction. This strategy instead maintains a

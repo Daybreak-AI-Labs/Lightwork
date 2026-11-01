@@ -177,7 +177,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         # Governance knobs the runtime reads (capability.py / agent.py) that
         # were missing here -- so a client configuring the flagship
         # capability-enforcement feature, or the deferred-tools knob, got a
-        # false "unknown key" warning (client-journey finding).
+        # false "unknown key" warning.
         "enforce",
         "per_call_tokens",
         "deferred_tools",
@@ -191,7 +191,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # Tamper-evident audit log. The runtime reads [audit] sign (audit/writer.py)
     # and migrate.py already lists it; config-lint flagged the whole section as
     # unknown ("did you mean auth?"), telling a regulated client their flagship
-    # signed-audit config looked like a typo (client-journey finding).
+    # signed-audit config looked like a typo.
     "audit": {"sign", "worm", "unified",
               # Off-host key and SIEM forwarding (audit/writer.py, audit_siem.py).
               "require_offhost_key", "siem_dest", "siem_token", "siem_allow_insecure",
@@ -637,7 +637,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
 # section the runtime actually reads as a typo. The two had drifted by ~59
 # sections -- a client configuring documented features like [provider_failover],
 # [enterprise], [egress], [governance], [encryption] got told they were
-# typos (client-journey finding). Sections with an explicit key schema above
+# typos. Sections with an explicit key schema above
 # keep it (setdefault won't overwrite); the rest accept any subkey (None),
 # exactly as migrate treats them.
 from .migrate import KNOWN_SECTIONS as _RUNTIME_SECTIONS  # noqa: E402

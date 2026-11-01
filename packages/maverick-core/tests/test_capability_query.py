@@ -1,4 +1,4 @@
-"""Capability self-report tool (ROADMAP 2028 H2)."""
+"""Capability self-report tool."""
 from __future__ import annotations
 
 import json

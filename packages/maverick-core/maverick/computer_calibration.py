@@ -1,4 +1,4 @@
-"""Computer-use coordinate calibration (roadmap: 2028 H1 capabilities).
+"""Computer-use coordinate calibration.
 
 Vision models emit click coordinates in *their* view of the screen — a
 screenshot that may be DPI-scaled (Retina/HiDPI), resized for the model, or

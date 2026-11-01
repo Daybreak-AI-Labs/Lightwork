@@ -1,4 +1,4 @@
-"""Risk-tier auto-classifier for GOALS (roadmap: 2028 H1 safety).
+"""Risk-tier auto-classifier for GOALS.
 
 :mod:`maverick.safety.tool_risk` classifies a *tool* (the instrument); this
 module classifies a *goal* (the intent) **before it runs**, so autonomy and

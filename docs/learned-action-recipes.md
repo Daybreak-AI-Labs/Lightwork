@@ -895,4 +895,4 @@ events contain identifiers and commitments instead of raw values. Existing nativ
 tool audit events also retain bounded, redacted input/output summaries. Signed local receipts
 do not provide independent witnessing or protection from an administrator who
 controls both storage and signing keys. Local fixture tests establish implemented
-behavior within their scope, not live customer acceptance or acquisition value.
+behavior within their scope, not live customer acceptance.

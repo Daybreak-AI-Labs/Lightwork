@@ -1,6 +1,5 @@
 {
   "schema": "lightwork.persistence-authority-inventory.v1",
-  "reviewed_base_sha": "ea17dc91f14b984d167dd5768ea7543fbda9278f",
   "source_state": "local implementation; line references regenerated from current files",
   "singleton_required": true,
   "high_availability_qualified": false,
@@ -183,13 +182,13 @@
     }
   },
   "counts": {
-    "governed": 138,
+    "governed": 139,
     "artifact": 55,
     "a2a": 4,
     "preferences": 8,
     "learning": 61,
-    "sqlite_domain": 84,
-    "configuration": 76,
+    "sqlite_domain": 81,
+    "configuration": 75,
     "read_projection": 24,
     "coordinator": 1,
     "audit": 26,
@@ -333,7 +332,7 @@
       "path": "packages/maverick-channels/maverick_channels/rich_render.py",
       "contract": "artifact",
       "owner": "packages/maverick-channels/maverick_channels/rich_render.py",
-      "purpose": "KaTeX / Mermaid rich-render layer (roadmap: 2028 H2 ecosystem).",
+      "purpose": "KaTeX / Mermaid rich-render layer.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -412,7 +411,7 @@
       "path": "packages/maverick-core/maverick/achievements.py",
       "contract": "preferences",
       "owner": "packages/maverick-core/maverick/achievements.py",
-      "purpose": "Local achievements (roadmap: 2028 H2 UX).",
+      "purpose": "Local achievements.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -625,7 +624,7 @@
       "path": "packages/maverick-core/maverick/agent_edr.py",
       "contract": "read_projection",
       "owner": "delegated; inspect source callsites below",
-      "purpose": "The Agent Security Plane: detect, respond, prove (moonshot Bet 4).",
+      "purpose": "The Agent Security Plane: detect, respond, prove.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -694,7 +693,7 @@
       "path": "packages/maverick-core/maverick/ai_act_package.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/ai_act_package.py",
-      "purpose": "EU AI Act conformance package generator (roadmap: 2028 H2 safety).",
+      "purpose": "EU AI Act conformance package generator.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -2477,7 +2476,7 @@
       "path": "packages/maverick-core/maverick/async_route_audit.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/async_route_audit.py",
-      "purpose": "Static concurrency audit: FastAPI ``async def`` route handlers that never\n``await`` anything, despite calling synchronous SQLite/world/file/config work\nin their body (platform audit **W1-69**).",
+      "purpose": "Static concurrency audit: FastAPI ``async def`` route handlers that never\n``await`` anything, despite calling synchronous SQLite/world/file/config work\nin their body.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -2523,7 +2522,7 @@
       "path": "packages/maverick-core/maverick/attestation.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/attestation.py",
-      "purpose": "Build a portable attestation bundle: the wedge for moonshot Bet 1.",
+      "purpose": "Build a portable attestation bundle.",
       "referenced_store_owners": [
         ".self_improvement"
       ],
@@ -2753,7 +2752,7 @@
       "path": "packages/maverick-core/maverick/benchmark_retrospective.py",
       "contract": "read_projection",
       "owner": "delegated; inspect source callsites below",
-      "purpose": "Longitudinal benchmark retrospective (roadmap: 2028 H2 performance —\n\"3-year retrospective benchmark\").",
+      "purpose": "Longitudinal benchmark retrospective.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -2843,7 +2842,7 @@
       "path": "packages/maverick-core/maverick/budget_receipts.py",
       "contract": "audit",
       "owner": "packages/maverick-core/maverick/budget_receipts.py",
-      "purpose": "Cryptographic budget receipts: tamper-evident spend records\n(roadmap: 2028 H1 safety).",
+      "purpose": "Cryptographic budget receipts: tamper-evident spend records.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -3199,7 +3198,7 @@
       "path": "packages/maverick-core/maverick/computer_calibration.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/computer_calibration.py",
-      "purpose": "Computer-use coordinate calibration (roadmap: 2028 H1 capabilities).",
+      "purpose": "Computer-use coordinate calibration.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -4170,7 +4169,7 @@
       "path": "packages/maverick-core/maverick/control_data_plane_soak.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/control_data_plane_soak.py",
-      "purpose": "Control/data-plane soak: prove the dispatch substrate holds under concurrent\nload (roadmap follow-through on the e2e harness).",
+      "purpose": "Control/data-plane soak: prove the dispatch substrate holds under concurrent\nload.",
       "referenced_store_owners": [
         ".job_queue",
         ".queue_dispatcher",
@@ -4231,7 +4230,7 @@
       "path": "packages/maverick-core/maverick/crash_only_log.py",
       "contract": "audit",
       "owner": "packages/maverick-core/maverick/crash_only_log.py",
-      "purpose": "Crash-only logging: a sink that is safe to ``kill -9`` at any byte\n(roadmap: 2027 H2 safety).",
+      "purpose": "Crash-only logging: a sink that is safe to ``kill -9`` at any byte.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -5018,7 +5017,7 @@
       "path": "packages/maverick-core/maverick/docs_i18n.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/docs_i18n.py",
-      "purpose": "Docs machine-translation pipeline (roadmap: 2028 H1 distribution,\n\"localized docs phase 5 (top-15 langs + MT pipeline)\").",
+      "purpose": "Docs machine-translation pipeline.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -5295,7 +5294,7 @@
       "path": "packages/maverick-core/maverick/duckdb_analytics.py",
       "contract": "external",
       "owner": "packages/maverick-core/maverick/duckdb_analytics.py",
-      "purpose": "DuckDB analytics over the world model (roadmap: 2027 H2 ecosystem).",
+      "purpose": "DuckDB analytics over the world model.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -5328,7 +5327,7 @@
       "path": "packages/maverick-core/maverick/earned_autonomy.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/earned_autonomy.py",
-      "purpose": "Earned Autonomy -- consequence-proven trust (moonshot Bet 5).",
+      "purpose": "Earned Autonomy -- consequence-proven trust.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -5370,7 +5369,7 @@
       "path": "packages/maverick-core/maverick/edit_format.py",
       "contract": "external",
       "owner": "packages/maverick-core/maverick/edit_format.py",
-      "purpose": "SEARCH/REPLACE edit format — Wave 11.",
+      "purpose": "SEARCH/REPLACE edit format.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -6019,7 +6018,7 @@
       "path": "packages/maverick-core/maverick/failure_telemetry.py",
       "contract": "audit",
       "owner": "packages/maverick-core/maverick/failure_telemetry.py",
-      "purpose": "Default-on local failure-mode telemetry (roadmap: 2027 H2 performance).",
+      "purpose": "Default-on local failure-mode telemetry.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -6054,7 +6053,7 @@
       "path": "packages/maverick-core/maverick/federation.py",
       "contract": "sqlite_domain",
       "owner": "packages/maverick-core/maverick/federation.py",
-      "purpose": "Federated swarm protocol (roadmap: 2028 H2 capabilities + ecosystem).",
+      "purpose": "Federated swarm protocol.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -6226,7 +6225,7 @@
       "path": "packages/maverick-core/maverick/golden_path.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/golden_path.py",
-      "purpose": "Golden path — the five-minute \"show me the receipts\" demo.",
+      "purpose": "Golden path — a five-minute walkthrough of governance with its audit trail.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -7334,7 +7333,7 @@
       "path": "packages/maverick-core/maverick/licensing.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/licensing.py",
-      "purpose": "Signed license keys for the sellable agent SKUs.",
+      "purpose": "Signed license keys for the standalone agent builds.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -7422,7 +7421,7 @@
       "path": "packages/maverick-core/maverick/mcp_analytics.py",
       "contract": "derived",
       "owner": "packages/maverick-core/maverick/mcp_analytics.py",
-      "purpose": "Opt-in MCP-client language analytics — the language-bindings decision gate.",
+      "purpose": "Opt-in MCP-client language analytics — a local tally of the languages MCP clients use.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -7478,7 +7477,7 @@
       "path": "packages/maverick-core/maverick/meeting_listener.py",
       "contract": "business_records",
       "owner": "packages/maverick-core/maverick/meeting_listener.py",
-      "purpose": "ASR meeting listener (roadmap: 2027 H1 capabilities, \"ASR meeting\nlistener\").",
+      "purpose": "ASR meeting listener.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -7535,7 +7534,7 @@
       "path": "packages/maverick-core/maverick/migrate.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/migrate.py",
-      "purpose": "Backwards-compat tooling: ``maverick migrate`` (roadmap: 2027 H2 distribution).",
+      "purpose": "Backwards-compat tooling: ``maverick migrate``.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -7554,7 +7553,7 @@
       "path": "packages/maverick-core/maverick/migration_governance.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/migration_governance.py",
-      "purpose": "Migration governance — the Alembic-grade ratchet over the world-model\nmigration ladders (roadmap: regulated-SaaS data-plane).",
+      "purpose": "Migration governance — the Alembic-grade ratchet over the world-model\nmigration ladders.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -8280,7 +8279,7 @@
       "path": "packages/maverick-core/maverick/plugin_ca.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/plugin_ca.py",
-      "purpose": "Plugin signing CA (roadmap: 2028 H2 ecosystem).",
+      "purpose": "Plugin signing CA.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -8335,7 +8334,7 @@
       "path": "packages/maverick-core/maverick/plugin_lock.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/plugin_lock.py",
-      "purpose": "Plugin version-pinning lockfile (roadmap: 2027 H2 ecosystem).",
+      "purpose": "Plugin version-pinning lockfile.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -8385,7 +8384,7 @@
       "path": "packages/maverick-core/maverick/plugin_telemetry.py",
       "contract": "derived",
       "owner": "packages/maverick-core/maverick/plugin_telemetry.py",
-      "purpose": "Plugin telemetry, opt-in (roadmap: 2027 H2 ecosystem).",
+      "purpose": "Plugin telemetry, opt-in.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -9672,7 +9671,7 @@
       "path": "packages/maverick-core/maverick/profiling_daemon.py",
       "contract": "read_projection",
       "owner": "delegated; inspect source callsites below",
-      "purpose": "Continuous profiling daemon (roadmap: 2028 H1 performance).",
+      "purpose": "Continuous profiling daemon.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -9806,7 +9805,7 @@
       "path": "packages/maverick-core/maverick/provider_cost_cap.py",
       "contract": "execution",
       "owner": "packages/maverick-core/maverick/provider_cost_cap.py",
-      "purpose": "Provider-level cost caps across all runs (roadmap: 2028 H1 safety).",
+      "purpose": "Provider-level cost caps across all runs.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -9936,7 +9935,7 @@
       "path": "packages/maverick-core/maverick/push_v2.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/push_v2.py",
-      "purpose": "Mobile push v2 — device registry + per-device routing (roadmap: 2027 H1 UX).",
+      "purpose": "Mobile push v2 — device registry + per-device routing.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -10021,7 +10020,7 @@
       "path": "packages/maverick-core/maverick/quorum.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/quorum.py",
-      "purpose": "Quorum approval for config changes (roadmap: 2028 H1 safety).",
+      "purpose": "Quorum approval for config changes.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -10156,7 +10155,7 @@
       "path": "packages/maverick-core/maverick/rectification.py",
       "contract": "audit",
       "owner": "packages/maverick-core/maverick/rectification.py",
-      "purpose": "Right-to-rectification (GDPR Art. 16) over the world model\n(roadmap: 2027 H2 safety).",
+      "purpose": "Right-to-rectification (GDPR Art. 16) over the world model.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -10332,7 +10331,7 @@
       "path": "packages/maverick-core/maverick/release_canary.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/release_canary.py",
-      "purpose": "Cost/perf canary per release (roadmap: 2028 H2 performance).",
+      "purpose": "Cost/perf canary per release.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -10425,7 +10424,7 @@
       "path": "packages/maverick-core/maverick/reliability_cert.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/reliability_cert.py",
-      "purpose": "Reliability certification run (roadmap: 2028 H2 performance —\n\"reliability cert\").",
+      "purpose": "Reliability certification run.",
       "referenced_store_owners": [
         ".world_model"
       ],
@@ -10615,7 +10614,7 @@
       "path": "packages/maverick-core/maverick/revocation.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/revocation.py",
-      "purpose": "Capability revocation list (roadmap: 2028 H2 safety).",
+      "purpose": "Capability revocation list.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -10782,7 +10781,7 @@
       "path": "packages/maverick-core/maverick/safety_report.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/safety_report.py",
-      "purpose": "Annual safety report generator (roadmap: 2027 H2 Safety).",
+      "purpose": "Annual safety report generator.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -11386,7 +11385,7 @@
       "path": "packages/maverick-core/maverick/self_tuning_budget.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/self_tuning_budget.py",
-      "purpose": "Self-tuning budgets (roadmap: 2028 H2 performance).",
+      "purpose": "Self-tuning budgets.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -11651,7 +11650,7 @@
       "path": "packages/maverick-core/maverick/share_link.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/share_link.py",
-      "purpose": "Universal share link + cross-device handoff (roadmap: 2028 H2 UX).",
+      "purpose": "Universal share link + cross-device handoff.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -11687,7 +11686,7 @@
       "path": "packages/maverick-core/maverick/shield_updates.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/shield_updates.py",
-      "purpose": "Federated shield rules updates (roadmap: 2027 H2 Safety).",
+      "purpose": "Federated shield rules updates.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -11771,7 +11770,7 @@
       "path": "packages/maverick-core/maverick/sigstore_signing.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/sigstore_signing.py",
-      "purpose": "Sigstore keyless signing for skill/plugin artifacts (roadmap: 2027 H2 Safety).",
+      "purpose": "Sigstore keyless signing for skill/plugin artifacts.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -11887,7 +11886,7 @@
       "path": "packages/maverick-core/maverick/speculative_decode.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/speculative_decode.py",
-      "purpose": "Cross-provider speculative drafting (roadmap: 2028 H2 — \"speculative\ndecoding across providers\").",
+      "purpose": "Cross-provider speculative drafting.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -12034,7 +12033,7 @@
       "path": "packages/maverick-core/maverick/supply_chain.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/supply_chain.py",
-      "purpose": "Supply-chain pinning: a pin-and-verify ledger for the dependency tree\n(roadmap: 2027 H2 safety).",
+      "purpose": "Supply-chain pinning: a pin-and-verify ledger for the dependency tree.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -13028,7 +13027,7 @@
       "path": "packages/maverick-core/maverick/tiered_storage.py",
       "contract": "world",
       "owner": "packages/maverick-core/maverick/tiered_storage.py",
-      "purpose": "Tiered world-model storage: hot SQLite + cold archive files (roadmap: 2027 H1 performance).",
+      "purpose": "Tiered world-model storage: hot SQLite + cold archive files.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -13410,9 +13409,9 @@
       "path": "packages/maverick-core/maverick/ux_store.py",
       "contract": "preferences",
       "owner": "packages/maverick-core/maverick/ux_store.py",
-      "purpose": "Dashboard UX store: pins, saved views, trace annotations (roadmap 2027-H1 UX).",
+      "purpose": "Dashboard UX store: pins, saved views, trace annotations.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Follow-up reviewed against source b6d19b46e831ce373dd97d8ec9e9c5186a366855: default/shared stores read and write tenant-resolved dashboard/ux_store-v2.json. Legacy ux_store.json is deliberately retained unread because the former singleton did not establish reliable workspace lineage; no automatic adoption or migration by principal/goal match.",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Follow-up review: default/shared stores read and write tenant-resolved dashboard/ux_store-v2.json. Legacy ux_store.json is deliberately retained unread because the former singleton did not establish reliable workspace lineage; no automatic adoption or migration by principal/goal match.",
       "governed_namespaces": [],
       "literal_path_hints": [
         "ux_store-v2.json",
@@ -13797,7 +13796,7 @@
       "path": "packages/maverick-core/maverick/voice_unlock.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/voice_unlock.py",
-      "purpose": "Voice biometric unlock — companion factor ONLY (roadmap: 2028 H2 UX).",
+      "purpose": "Voice biometric unlock — companion factor ONLY.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -14882,7 +14881,7 @@
       "path": "packages/maverick-core/maverick/benchmarks/reproducible_v2.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/benchmarks/reproducible_v2.py",
-      "purpose": "Reproducible benchmark harness v2 (ROADMAP 2027 H1 Distribution).",
+      "purpose": "Reproducible benchmark harness v2.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -14901,7 +14900,7 @@
       "path": "packages/maverick-core/maverick/cache/learning.py",
       "contract": "derived",
       "owner": "packages/maverick-core/maverick/cache/learning.py",
-      "purpose": "Cross-run learning cache: memoize verified sub-results across runs\n(roadmap: 2027 H2 performance).",
+      "purpose": "Cross-run learning cache: memoize verified sub-results across runs.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -15329,7 +15328,7 @@
       "path": "packages/maverick-core/maverick/compaction/learned.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/compaction/learned.py",
-      "purpose": "Learned LLM summarizer for context compaction (roadmap: 2027 H1 perf, v3).",
+      "purpose": "Learned LLM summarizer for context compaction.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -15359,7 +15358,7 @@
       "path": "packages/maverick-core/maverick/compaction/streaming.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/compaction/streaming.py",
-      "purpose": "Streaming (incremental) compaction (roadmap: 2028 H1 perf, v7).",
+      "purpose": "Streaming (incremental) compaction.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -15389,7 +15388,7 @@
       "path": "packages/maverick-core/maverick/cost/router_v3.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/cost/router_v3.py",
-      "purpose": "Cost-aware routing v3 — contextual bandit (roadmap: 2028 H1 performance).",
+      "purpose": "Cost-aware routing v3 — contextual bandit.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -15886,7 +15885,7 @@
       "path": "packages/maverick-core/maverick/grpc_api/contract.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/grpc_api/contract.py",
-      "purpose": "gRPC API v1 stability contract (roadmap: 2028 H2 ecosystem).",
+      "purpose": "gRPC API v1 stability contract.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -15943,7 +15942,7 @@
       "path": "packages/maverick-core/maverick/marketplace/ratings.py",
       "contract": "business_records",
       "owner": "packages/maverick-core/maverick/marketplace/ratings.py",
-      "purpose": "Marketplace ratings — local ledger (roadmap 2027-H1 distribution/ecosystem).",
+      "purpose": "Marketplace ratings — local ledger.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -16211,7 +16210,7 @@
       "path": "packages/maverick-core/maverick/safety/honeytokens.py",
       "contract": "transient",
       "owner": "packages/maverick-core/maverick/safety/honeytokens.py",
-      "purpose": "Honeytoken planting and tripwires (roadmap: 2027 H2 safety).",
+      "purpose": "Honeytoken planting and tripwires.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -16498,7 +16497,7 @@
       "path": "packages/maverick-core/maverick/skill/search.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/skill/search.py",
-      "purpose": "Skill search engine + Hugging Face dataset publish/pull (ROADMAP 2027 H2).",
+      "purpose": "Skill search engine + Hugging Face dataset publish/pull.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -17019,7 +17018,7 @@
       "path": "packages/maverick-core/maverick/tools/oauth_helper.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/tools/oauth_helper.py",
-      "purpose": "Generic OAuth helper (roadmap: 2027 H2 ecosystem).",
+      "purpose": "Generic OAuth helper.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -17437,7 +17436,7 @@
       "path": "packages/maverick-core/maverick/vector_store/pgvector_store.py",
       "contract": "knowledge",
       "owner": "packages/maverick-core/maverick/vector_store/pgvector_store.py",
-      "purpose": "pgvector vector store adapter (roadmap: 2028 H1 ecosystem).",
+      "purpose": "pgvector vector store adapter.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -21743,7 +21742,7 @@
       "path": "packages/maverick-shield/maverick_shield/corpus_release.py",
       "contract": "artifact",
       "owner": "packages/maverick-shield/maverick_shield/corpus_release.py",
-      "purpose": "Adversarial-prompt corpus release (roadmap: 2028 H2 safety).",
+      "purpose": "Adversarial-prompt corpus release.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -23090,9 +23089,9 @@
       ]
     },
     {
-      "path": "apps/installer-cli/maverick_installer/wizard.py",
+      "path": "apps/installer-cli/maverick_installer/wizard/__init__.py",
       "contract": "configuration",
-      "owner": "apps/installer-cli/maverick_installer/wizard.py",
+      "owner": "apps/installer-cli/maverick_installer/wizard/__init__.py",
       "purpose": "Lightwork interactive installer, including a private exact-answer first-install recovery receipt.",
       "referenced_store_owners": [],
       "review": "The private first-install receipt is written before keys/configuration and removed after both files commit. Restart requires exact matching of any existing file and refuses changed keys; a legacy orphan key file without a receipt remains an administrator recovery case. Other persistence seams retain contract-family classification (not every operation tested).",
@@ -23162,189 +23161,6 @@
           "function": "main",
           "kind": "write_text",
           "expression": "(output / 'child.json').write_text(json.dumps(record), encoding='utf-8')"
-        }
-      ]
-    },
-    {
-      "path": "apps/vendor-console/vendor_console/app.py",
-      "contract": "sqlite_domain",
-      "owner": "apps/vendor-console/vendor_console/app.py",
-      "purpose": "Daybreak vendor console — FastAPI app (server-rendered Jinja + HTMX).",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {},
-      "source_sites": [
-        {
-          "line": 30,
-          "function": "create_app",
-          "kind": "connect",
-          "expression": "db.connect(db_path)"
-        }
-      ]
-    },
-    {
-      "path": "apps/vendor-console/vendor_console/db.py",
-      "contract": "sqlite_domain",
-      "owner": "apps/vendor-console/vendor_console/db.py",
-      "purpose": "SQLite storage for the vendor console.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [
-        "vendor-console.db"
-      ],
-      "observed_mechanism_markers": {
-        "begin_immediate": 2,
-        "begin_transaction": 3,
-        "schema_version": 7,
-        "create_table": 11
-      },
-      "source_sites": [
-        {
-          "line": 155,
-          "function": "_open",
-          "kind": "connect",
-          "expression": "sqlite3.connect(target, check_same_thread=False, timeout=5.0, uri=uri, factory=_Connection)"
-        },
-        {
-          "line": 222,
-          "function": "init_db",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 202,
-          "function": "transaction",
-          "kind": "commit",
-          "expression": "owned.commit()"
-        }
-      ]
-    },
-    {
-      "path": "apps/vendor-console/vendor_console/licensing.py",
-      "contract": "configuration",
-      "owner": "apps/vendor-console/vendor_console/licensing.py",
-      "purpose": "License lifecycle — issue, upsell, revoke, and resolve the doc to serve.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [
-        "publisher.key"
-      ],
-      "observed_mechanism_markers": {
-        "atomic_replace": 3
-      },
-      "source_sites": [
-        {
-          "line": 46,
-          "function": "signing_key_hex",
-          "kind": "write_text",
-          "expression": "path.write_text(priv, encoding='utf-8')"
-        }
-      ]
-    },
-    {
-      "path": "apps/vendor-console/vendor_console/store.py",
-      "contract": "sqlite_domain",
-      "owner": "apps/vendor-console/vendor_console/store.py",
-      "purpose": "Repository layer — thin, explicit SQL over the SQLite rows. No ORM, no magic;\nevery query is visible so an internal tool holding signing keys is easy to audit.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {},
-      "source_sites": [
-        {
-          "line": 22,
-          "function": "create_staff",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 35,
-          "function": "create_first_owner",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 66,
-          "function": "set_totp",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 72,
-          "function": "set_totp_last_step",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 79,
-          "function": "bump_session_epoch",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 94,
-          "function": "create_customer",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 122,
-          "function": "update_customer",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 146,
-          "function": "add_license",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 169,
-          "function": "revoke_license",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 183,
-          "function": "record_checkin",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 220,
-          "function": "add_release",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 251,
-          "function": "yank_release",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 268,
-          "function": "create_ticket",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 399,
-          "function": "update_ticket",
-          "kind": "commit",
-          "expression": "conn.commit()"
-        },
-        {
-          "line": 410,
-          "function": "add_comment",
-          "kind": "commit",
-          "expression": "conn.commit()"
         }
       ]
     },
@@ -26771,7 +26587,7 @@
         "maverick.governed_records",
         "maverick.world_model"
       ],
-      "review": "Reviewed Facts adapter admission-before-effect, context/actor/operation digest binding, native revision CAS and historical receipt recovery (source fa3cd13019fea8ba44bc434d778e32e6f62bdd1a). Receipt metadata contains no fact name/value. Restored receipt absence or stale completion cannot authorize another effect; hold startup until current authority and consumed-operation state are reconciled. Retained minimal replay evidence is disclosed in My Data.",
+      "review": "Reviewed Facts adapter admission-before-effect, context/actor/operation digest binding, native revision CAS and historical receipt recovery. Receipt metadata contains no fact name/value. Restored receipt absence or stale completion cannot authorize another effect; hold startup until current authority and consumed-operation state are reconciled. Retained minimal replay evidence is disclosed in My Data.",
       "governed_namespaces": [
         {
           "namespace": "fact_operation_receipts",
@@ -26806,7 +26622,7 @@
         "maverick.ndjson_log",
         "maverick.paths"
       ],
-      "review": "Reviewed source b6d19b46e831ce373dd97d8ec9e9c5186a366855: _path delegates to data_dir(\"dashboard\", \"goal-feedback-v2.ndjson\"); append_row and tail_rows retain private NDJSON semantics. This feedback projection is customer data, not an independent execution grant. The former file beside dashboard_overrides_path(), goal-feedback.ndjson, is retained unread: matching an owner string or colliding goal number cannot prove workspace lineage. Other learning stores and signoff authority retain their own controls.",
+      "review": "Reviewed source: _path delegates to data_dir(\"dashboard\", \"goal-feedback-v2.ndjson\"); append_row and tail_rows retain private NDJSON semantics. This feedback projection is customer data, not an independent execution grant. The former file beside dashboard_overrides_path(), goal-feedback.ndjson, is retained unread: matching an owner string or colliding goal number cannot prove workspace lineage. Other learning stores and signoff authority retain their own controls.",
       "governed_namespaces": [],
       "literal_path_hints": [
         "dashboard/goal-feedback-v2.ndjson",
@@ -30526,9 +30342,8 @@
       ]
     }
   ],
-  "customer_audit_additions": {
-    "base_sha": "d822db99ee48aab4fdded47fc799486e8e5ea44f",
+  "additional_review": {
     "module_count": 48,
-    "review": "September 30 customer-audit additions: source purpose, path construction and persistence call sites. Restore holds cover grants, identity links, dispatch receipts and pending work; warning/project-default records are explicitly non-authorizing data. No distributed or live-provider qualification. The Facts adapter follow-up adds metadata-only consumed-operation receipts under the same startup hold; it cannot reauthorize a restored mutation."
+    "review": "Additional module review: source purpose, path construction and persistence call sites. Restore holds cover grants, identity links, dispatch receipts and pending work; warning/project-default records are explicitly non-authorizing data. No distributed or live-provider qualification. The Facts adapter follow-up adds metadata-only consumed-operation receipts under the same startup hold; it cannot reauthorize a restored mutation."
   }
 }

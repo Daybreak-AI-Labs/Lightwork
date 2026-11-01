@@ -128,11 +128,10 @@ def test_streaming_parity_doc_exists():
     p = repo_root / "docs" / "performance" / "streaming-parity.md"
     assert p.is_file()
     body = p.read_text(encoding="utf-8")
-    # Doc must list each known provider so it stays in sync.
-    for provider in (
-        "anthropic", "openai", "openrouter", "ollama", "moonshot",
-        "deepseek", "xai", "gemini",
-        "chatgpt-session", "claude-session", "kimi-session",
-        "grok-session", "gemini-session",
-    ):
-        assert provider in body, f"streaming-parity doc missing: {provider}"
+    # Doc must list every registered provider so it stays in sync with the
+    # adapter registry.
+    from maverick.providers import _PROVIDER_ALIASES
+
+    assert len(_PROVIDER_ALIASES) >= 8
+    for provider in _PROVIDER_ALIASES:
+        assert f"`{provider}`" in body, f"streaming-parity doc missing: {provider}"

@@ -1,11 +1,12 @@
 # Strategy / Corporate Development / Executive agent suite
 
-> **Status (June 2026):** counts and plans in this document are historical. The shipped catalog is 2,020 lint-clean agents across 53 suites with a full learning lifecycle — see [`docs/FEATURES.md`](../FEATURES.md).
+> **Status:** historical design reference. The counts and plans below describe the suite
+> when it was written; run `maverick domains-lint` for the current roster, and see
+> [`docs/FEATURES.md`](../FEATURES.md) for what ships.
 
-
-**Status:** design / roadmap. Companion to the finance, IT-GRC, sales-GTM, HR, and
+Companion to the finance, IT-GRC, sales-GTM, HR, and
 product-engineering suites; indexed in [`agent-suites-overview.md`](agent-suites-overview.md).
-Builds on [`../enterprise/architecture.md`](../enterprise/architecture.md). ~31 agents (26 base + 5 council-added)
+Builds on [`../enterprise/architecture.md`](../enterprise/architecture.md). ~31 agents (26 base + 5 added after review)
 across seven towers.
 
 > **The "top of the house" — heavily cross-cutting, MNPI-heavy.** This is the CEO/CSO/
@@ -31,7 +32,7 @@ The cardinal rule for every agent below:
 ## Contents
 
 1. [What's already shipped — the reuse map](#1-whats-already-shipped--the-reuse-map)
-2. [How a strategy/exec agent maps onto Lightwork](#2-how-a-strategyexec-agent-maps-onto-maverick)
+2. [How a strategy/exec agent maps onto Lightwork](#2-how-a-strategyexec-agent-maps-onto-lightwork)
 3. [The control model (cross-cutting)](#3-the-control-model-cross-cutting)
 4. [Per-client customization — the dials](#4-per-client-customization--the-dials)
 5. [The roster — seven towers](#5-the-roster--seven-towers)
@@ -158,7 +159,7 @@ rule 6) compiling to capability + the wall topology + the disclosure gates.
 
 ## 5. The roster — seven towers
 
-~26 base agents (+ 5 council-added, end of roster). For each: **Job**, **Connects to**, **Capability**, **Controls**, **Status**.
+~26 base agents (+ 5 added after review, end of roster). For each: **Job**, **Connects to**, **Capability**, **Controls**, **Status**.
 Heavy cross-references to finance/GTM/GRC (don't duplicate). Representative packs are TOML.
 
 ---
@@ -408,9 +409,9 @@ authoring = "manual"
 
 ---
 
-### Council-added agents (from the adversarial review)
+### Additional agents
 
-Five seats the council flagged — the two hardest, most deal-defining (M&A modeling, antitrust/
+Five seats added after review — the two hardest, most deal-defining (M&A modeling, antitrust/
 CFIUS) were falling between suites. Full skills in [`agent-skills-catalog.md`](agent-skills-catalog.md).
 
 - **M&A Financial-Modeling Agent** *(Tower 2 — sealed)* — closes the Strat↔Finance gap: three-statement model, LBO mechanics (debt schedule/cash sweep/circularity), DCF/WACC, PPA, accretion/dilution, returns (IRR/MOIC), deal structuring. **Status: Gap** (neither suite owned it).
@@ -474,7 +475,7 @@ Each becomes a `run_assessment` capability + a conversational assessor via
 
 ## 9. Integrations catalog
 
-Per CLAUDE.md rules 5 & 6, every connector ships a config knob + wizard toggle.
+Per kernel rules 5 & 6, every connector ships a config knob + wizard toggle.
 
 | System class | Vendors | Status | Used by |
 |---|---|---|---|

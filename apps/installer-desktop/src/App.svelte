@@ -70,7 +70,7 @@
   function failureAdvice(): string {
     const text = lines.join('\n') + '\n' + errorMsg;
     if (/Authentication failed|Repository not found|could not read Username|Permission denied \(publickey\)/i.test(text)) {
-      return 'Lightwork could not be downloaded because this computer is not signed in to a GitHub account that has access to Lightwork. Sign in with the GitHub account Daybreak AI Labs gave access to, then select Try again.';
+      return 'Lightwork could not be downloaded because GitHub refused the request. Check that this computer can open github.com/Daybreak-AI-Labs/Lightwork in a browser, then select Try again.';
     }
     if (/Could not resolve host|Failed to connect|unable to access|timed out|network is unreachable/i.test(text)) {
       return 'Lightwork could not be downloaded. Check that this computer is connected to the internet, then select Try again.';
@@ -365,8 +365,7 @@
       <p>This app installs Lightwork on this computer, then opens it so you can finish setting it up. It takes a few minutes and you can cancel at any time.</p>
       <h2>Before you start, you need</h2>
       <ul>
-        <li>An internet connection.</li>
-        <li>A GitHub account that Daybreak AI Labs has given access to Lightwork. If a GitHub sign-in window appears during setup, sign in with that account. If you don't have access yet, ask the person who sent you this installer.</li>
+        <li>An internet connection. Lightwork is downloaded from its public GitHub repository; no GitHub account is needed.</li>
         <li>Permission to install apps on this computer. Setup may add helper programs Lightwork needs and may ask for your computer password.</li>
       </ul>
       <details><summary>What will be installed?</summary>

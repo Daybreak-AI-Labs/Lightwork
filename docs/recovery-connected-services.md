@@ -58,8 +58,7 @@ binding govern lookup. No new provider credentials or broader source access are
 introduced. Installed-source qualification remains separate from mocked local
 tests.
 Native file and archive tests, API admission tests and synthetic browser checks
-are separate from authenticated installed-application acceptance. These changes
-do not establish that every post-install operation is complete.
+are separate from authenticated installed-application acceptance.
 
 ## Implementation and qualification
 

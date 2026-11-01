@@ -150,7 +150,7 @@ def test_channel_server_accepts_selected_keyless_local_provider(
 ):
     """`maverick serve` had its own hard-coded ANTHROPIC_API_KEY-only gate
     (server.py build_from_config), refusing config-only self-hosted setups
-    that `start` and the dashboard accept (round-3 platform-test finding)."""
+    that `start` and the dashboard accept."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE", "vllm:stub")
     clean_provider_env.write_text(

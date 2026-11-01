@@ -1,4 +1,4 @@
-"""W2-46 regression: the audit Ed25519 key must not be a general-purpose
+"""Regression: the audit Ed25519 key must not be a general-purpose
 signing oracle.
 
 Before this fix, ``sign_detached_digest`` (dashboard evidence exports) and

@@ -12,7 +12,7 @@ one deterministic, read-only report per department:
   * **Throughput**   -- deliverables completed (done episodes), per suite.
   * **Economics**    -- agent cost vs a human-baseline cost per deliverable
     (operator-set), i.e. cost avoided. Descriptive only -- it never tunes
-    anything away (the council's warning: cost pressure must not defund
+    anything away (cost pressure must not defund
     safety).
   * **Compounding**  -- the improvement curve from the hindsight ledger
     (coverage trend over snapshots): "better than 90 days ago, here's the

@@ -1,37 +1,35 @@
-# Lightwork AWS deploy — handoff
+# Lightwork AWS deploy — runbook
 
-Everything needed to finish standing up Lightwork on AWS tonight. Written
-because the prior session hit a permission wall on `terraform apply` (Auto
-mode's classifier hard-blocks it, and self-editing settings to allow it is
-also blocked — by design). This session needs a permission mode other than
-Auto (Accept Edits / Bypass Permissions / Default-with-prompts all work).
+Everything needed to stand up Lightwork on AWS from the Terraform stack in
+this directory. The steps assume the AWS CLI profile `lightwork`; substitute
+your own profile name throughout.
 
-## What already exists (nothing billed beyond these two)
+## Created out of band (before the first apply)
 
-- **AWS account:** `589997396906` (Daybreak Labs). Profile name: `lightwork`.
+- **AWS account:** the target AWS account, reached through the `lightwork`
+  profile.
 - **Region:** `us-east-2` for everything except the CodeBuild-triggering
   commands, which are also `us-east-2` (the stack does not use `us-east-1`
   anywhere).
-- **Terraform state bucket:** `lightwork-tfstate-589997396906` — versioned,
+- **Terraform state bucket:** `lightwork-tfstate-<account-id>` — versioned,
   SSE-encrypted, public access blocked. Created directly via `aws s3api`
-  (it can't bootstrap itself via Terraform), already wired as the backend in
-  `versions.tf`.
+  (it can't bootstrap itself via Terraform). `versions.tf` names everything
+  about the backend except the bucket; that comes from the git-ignored
+  `backend.hcl` (copy `backend.hcl.example`) passed to `terraform init`.
 - **Budget guardrail:** an AWS Budget named `lightwork-monthly`, $200/mo cost
   alert. Created directly via `aws budgets create-budget` (not Terraform
   state). If a re-run errors "already exists" on either of these two, that's
   fine — skip and move on.
-- **Terraform stack:** fully written, `fmt`/`init`/`validate`/`plan` all
-  passed, at `deploy/aws/terraform/` on this branch (`aws/terraform-deploy`,
-  already pushed to origin). **Nothing else has been created yet** — no VPC,
-  no RDS, no ECR, no ECS, no ALB. The next real step is `terraform apply`.
+- **Terraform stack:** `deploy/aws/terraform/`. Everything else — VPC, RDS,
+  ECR, ECS, ALB — is created by `terraform apply`.
 
 ## What it builds
 
 VPC (2 public subnets for the ALB + Fargate tasks, no NAT gateway — tasks get
 a public IP directly; 2 isolated private subnets for RDS) → ECR repo → a
 CodeBuild project that builds `deploy/docker/Dockerfile` from an S3 source
-zip and pushes to ECR (no local Docker daemon in these containers, so the
-image is built in AWS, not locally) → Secrets Manager (DB password, dashboard
+zip and pushes to ECR (the image is built in AWS, so no local Docker daemon is
+needed) → Secrets Manager (DB password, dashboard
 token, Anthropic API key placeholder, assembled Postgres DSN) → RDS Postgres
 16 (`db.t4g.micro`) → ECS Fargate service running `maverick dashboard --host
 0.0.0.0 --port 8765` behind an ALB (health check `/livez`) → least-privilege
@@ -46,7 +44,7 @@ export PATH="$HOME/.local/bin:$PATH"
 aws sts get-caller-identity --profile lightwork   # if this already works, skip to step 1
 ```
 
-If it fails (fresh container, no cached login) — install the CLI if needed,
+If it fails (no cached login) — install the CLI if needed,
 then log in:
 
 ```bash
@@ -54,8 +52,8 @@ curl -fsSL 'https://awscli.amazonaws.com/v2/install.sh' | bash
 export PATH="$HOME/.local/bin:$PATH"
 aws configure set region us-east-2 --profile lightwork
 aws login --region us-east-2 --profile lightwork --remote
-# Prints a URL. The human opens it, approves, gets a code back, pastes it here.
-aws sts get-caller-identity --profile lightwork   # must show Account 589997396906
+# Prints a URL. Open it in a browser, approve, and paste the returned code.
+aws sts get-caller-identity --profile lightwork   # must show the target account
 ```
 
 ### 1. Install Terraform if needed
@@ -69,6 +67,37 @@ terraform version || {
 }
 ```
 
+### 1b. Create the untracked operator inputs
+
+`oidc.auto.tfvars` is tracked and holds only non-personal configuration. The
+two inputs that identify people are read from `local.auto.tfvars`, which git
+ignores:
+
+```bash
+cp deploy/aws/terraform/local.auto.tfvars.example deploy/aws/terraform/local.auto.tfvars
+# fill in dashboard_admins (the break-glass Auth0 principals) and email_from
+```
+
+An existing deployment must get this file before its next `terraform apply`,
+or the plan removes the break-glass admins and switches platform email to the
+`variables.tf` default from-address. A running deployment's current values
+are the `MAVERICK_DASHBOARD_ADMINS` and `EMAIL_FROM` environment variables of
+its task definition, whose family is `<project>-<environment>`:
+
+```bash
+aws ecs describe-task-definition --task-definition lightwork-prod \
+  --query "taskDefinition.containerDefinitions[0].environment"
+```
+
+Two further protections are part of the stack and need nothing from you:
+every Secrets Manager entry keeps a 7-day recovery window (restore with
+`aws secretsmanager restore-secret`; an intentional teardown that must reuse
+a name at once deletes with `--force-delete-without-recovery` first), and the
+state volume has AWS Backup enabled (daily, 35-day retention, default vault).
+The deployer identity is bound to the deploy region and can never delete the
+database, its snapshots or the state volume; retiring those is a separately
+reviewed operation under a different identity.
+
 ### 2. Apply the stack
 
 **Critical gotcha:** the `aws login` credential store (`~/.aws/login/`) is a
@@ -79,11 +108,12 @@ same shell:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 export AWS_REGION=us-east-2 AWS_DEFAULT_REGION=us-east-2
-unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN   # this sandbox may have proxy-injected placeholder keys that silently override the profile — clear them first
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN   # static keys in the environment silently override the profile; clear them first
 eval "$(aws configure export-credentials --profile lightwork --format env)"
 
-cd /home/user/Lightwork/deploy/aws/terraform   # adjust if the checkout path differs
-terraform init -input=false
+cd <your Lightwork checkout>/deploy/aws/terraform
+cp backend.hcl.example backend.hcl   # then set bucket to the state bucket created above
+terraform init -input=false -backend-config=backend.hcl
 terraform plan -input=false          # sanity check — should show ~30 resources to add, 0 to change/destroy
 terraform apply -input=false -auto-approve
 ```
@@ -119,7 +149,7 @@ this finishes). This step alone takes ~15-20 minutes (the release-cohort
 wheelhouse build is the long pole).
 
 ```bash
-cd /home/user/Lightwork
+cd <your Lightwork checkout>
 rm -f /tmp/lightwork-src.zip
 zip -r -q /tmp/lightwork-src.zip \
   release-cohort.toml \
@@ -153,6 +183,24 @@ aws secretsmanager put-secret-value \
   --secret-string 'sk-ant-...' \
   --profile lightwork --region us-east-2
 ```
+
+### 4b. Pin the image you just built (recommended)
+
+The repository is MUTABLE and `image_tag` defaults to `latest`, so a service
+follows whatever is pushed under that tag on its next task start. To run exactly
+the image CodeBuild produced, read its digest and set `image_digest`:
+
+```bash
+aws ecr describe-images --repository-name lightwork --region us-east-2 \
+  --image-ids imageTag=latest --query 'imageDetails[0].imageDigest' --output text
+# -> sha256:...; then in local.auto.tfvars:
+#    image_digest = "sha256:..."
+terraform apply
+```
+
+The task definition then names `repository@digest`; a later push to `latest`
+changes nothing until you update the digest. Clear the variable to follow the
+tag again.
 
 ### 5. Make sure ECS picks up the pushed image + new key
 
@@ -235,19 +283,15 @@ The native consent SDK also needs the receipt signing root in the task
 environment (`MAVERICK_CONSENT_RECEIPT_ROOT`, from `secrets.tf`); `terraform
 apply` creates the secret and rolls a task revision that carries it. The
 evidence parsers (pypdf, openpyxl, pillow, xlrd, olefile) come from the
-`evidence-analysis` extra, which `deploy/docker/Dockerfile` now includes in the
+`evidence-analysis` extra, which `deploy/docker/Dockerfile` includes in the
 image build, so rebuild and redeploy (step 3 and step 5) after this change.
 Then `GET /api/v1/features/modules` should report the three modules as
 `configured` instead of `incomplete`.
 
-## Fast-follow (not tonight-blocking)
+## Notes
 
-- HTTPS + a real domain: ACM cert + a Cloudflare CNAME for a
-  `daybreakailabs.com` subdomain onto the ALB DNS name, plus an `aws_lb_listener`
-  on 443 (currently only port 80 is wired).
-- Cognito for real user login (token auth is fine for tonight).
-- Once verified working, open a PR for this branch (`aws/terraform-deploy`)
-  against `main` so the IaC isn't stranded on a feature branch.
-- Root credentials were used for `aws login` — fine to get moving tonight,
-  but consider a scoped deploy IAM role/user afterward instead of running
-  Terraform as account root long-term.
+- HTTPS exists only while `domain_name` (`variables.tf`) is set: it creates
+  the ACM certificate, its Cloudflare validation CNAME(s) and the ALB 443
+  listener. With it empty the stack serves plain HTTP on the ALB DNS name.
+- Run Terraform as the scoped deployer identity from `deployer.tf`, never as
+  the account root user.

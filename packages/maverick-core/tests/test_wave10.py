@@ -1,6 +1,6 @@
-"""Wave 10: SWE-bench Pro final pre-flight fixes.
+"""SWE-bench Pro final pre-flight fixes.
 
-Covers the bugs surfaced by the 20-agent extreme council + the code
+Covers the bugs surfaced by the pre-flight review + the code
 reviewer agent's verified defect list. Each test pins one specific
 fix so regressions are obvious.
 """
@@ -32,7 +32,7 @@ class TestExtractUnifiedDiffGitFormat:
             "rename to new.py\n"
         )
         out = extract_unified_diff(text)
-        # Rename-only diffs have no @@ hunks; Wave 10 accepts them
+        # Rename-only diffs have no @@ hunks; they are accepted
         # because we now anchor on `diff --git` as an alternative start.
         assert out is not None
         assert "rename from old.py" in out
@@ -98,7 +98,7 @@ class TestSandboxExecTimeout:
         from maverick.sandbox import LocalBackend
         # self.timeout would be 0.1s, but the call passes 5s, so a
         # 0.5s sleep completes successfully (no TIMEOUT).
-        # Wave 11: use python -c for cross-platform sleep (Unix `sleep`
+        # Use python -c for cross-platform sleep (Unix `sleep`
         # is not available on Windows).
         sb = LocalBackend(workdir=tmp_path, timeout=0.1)
         import sys
@@ -432,7 +432,7 @@ class TestPredictedPatchExtraction:
 class TestCodingModeTemplate:
     def test_template_mentions_three_phases(self):
         from maverick.coding_mode import CODER_CODING_MODE_TEMPLATE
-        # Wave 10 (B3): LOCALIZE → EDIT → VERIFY is the canonical
+        # LOCALIZE → EDIT → VERIFY is the canonical
         # OpenHands / Aider playbook. Pinning the template guarantees
         # the orchestrator instructs the model in this order.
         assert "LOCALIZE" in CODER_CODING_MODE_TEMPLATE

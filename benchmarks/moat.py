@@ -1,24 +1,23 @@
-"""Compounding-moat benchmark: does Lightwork get better at a task the
+"""Warm-vs-cold memory benchmark: does Lightwork get better at a task the
 SECOND time it sees it?
 
-This is the benchmark for Lightwork's core differentiator vs. stateless
-agents (OpenAI/Google assistants): a persistent world model + skill
-auto-distillation + reflexion. The claim is that a warm agent — one that
-has already done a similar task and retained what it learned — solves the
-next one more cheaply and/or more reliably than a cold agent starting
-from scratch.
+This is the benchmark for the main claim of persistent memory: a
+persistent world model + skill auto-distillation + reflexion. The claim is
+that a warm agent — one that has already done a similar task and retained
+what it learned — solves the next one more cheaply and/or more reliably
+than a cold agent starting from scratch.
 
 The benchmark makes that claim *measurable*:
 
   * COLD phase: run each task against a fresh world model with learning
     OFF (no skills, no reflexion). This is the stateless baseline — what a
-    memoryless competitor does on every request.
+    memoryless agent does on every request.
   * WARM phase: run a SIMILAR task against the SAME world model with
     learning ON, so the agent can recall the distilled skill / reflexion
     from the cold phase.
 
 It then reports the deltas: cost, tool calls, wall time, and success
-rate. A real moat shows a negative cost/tool delta (cheaper) and a
+rate. A real benefit shows a negative cost/tool delta (cheaper) and a
 non-negative success delta (no worse, ideally better) on the warm phase.
 
 Design: all measurement logic is pure and takes an injected ``run_fn``,
@@ -141,7 +140,7 @@ def run_moat_benchmark(pairs: list[TaskPair], run_fn: RunFn) -> MoatResult:
 def format_report(result: MoatResult) -> str:
     """Render a MoatResult as a markdown report."""
     lines = [
-        "# Compounding-moat benchmark",
+        "# Warm-vs-cold memory benchmark",
         "",
         "Cold = fresh world model, learning OFF (stateless baseline).",
         "Warm = same world model, learning ON (skills + reflexion recall).",
@@ -166,10 +165,10 @@ def format_report(result: MoatResult) -> str:
         f"warm {result.warm_success_rate:.0%}",
         "",
         (
-            "✅ **Moat demonstrated**: the warm agent is cheaper and no less "
+            "✅ **Warm advantage demonstrated**: the warm agent is cheaper and no less "
             "reliable."
             if result.moat_demonstrated
-            else "⚠️ Moat not demonstrated on this run."
+            else "⚠️ Warm advantage not demonstrated on this run."
         ),
     ]
     return "\n".join(lines)
@@ -285,7 +284,7 @@ def run_with_maverick(task_text: str, learning_enabled: bool) -> RunMetrics:  # 
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="Compounding-moat benchmark")
+    ap = argparse.ArgumentParser(description="Warm-vs-cold memory benchmark")
     ap.add_argument("--out", type=Path, default=Path("benchmarks/MOAT_RESULTS.md"),
                     help="where to write the markdown report")
     ap.add_argument("--json", type=Path, default=None,

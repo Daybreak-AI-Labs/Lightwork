@@ -44,7 +44,7 @@ def test_render_respects_max_entries():
     assert "item-0" not in short
 
 
-# ---- per-agent cursors (W1-44) ----
+# ---- per-agent cursors ----
 
 def test_render_since_returns_only_new_posts_by_other_agents():
     bb = Blackboard()

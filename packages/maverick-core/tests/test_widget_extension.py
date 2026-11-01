@@ -36,7 +36,7 @@ def test_widget_js_parses():
 def test_widget_polls_the_real_goals_endpoint():
     js = _JS.read_text(encoding="utf-8")
     # /api/v1/goals is the real read endpoint (maverick_dashboard/api.py);
-    # /api/v1/glance does not exist in the dashboard.
+    # The widget does not use /api/v1/glance (the watchOS glance payload).
     assert '"/api/v1/goals?limit=100"' in js
     assert "glance" not in js.lower()
 

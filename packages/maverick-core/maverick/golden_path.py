@@ -1,18 +1,18 @@
-"""Golden path — the five-minute "show me the receipts" demo.
+"""Golden path — a five-minute walkthrough of governance with its audit trail.
 
 A seeded, no-LLM scenario that drives the REAL governance / capability / audit /
 budget code through a treasury-ops storyline and emits a narrated transcript
-plus the actual tamper-evident receipts. The thing a prospect or investor sees
-in one command: the platform lets the routine work through, STOPS the dangerous
-move, and leaves a signed, verifiable trail either way.
+plus the actual tamper-evident audit records. In one command it shows the
+platform letting routine work through, STOPPING the dangerous move, and leaving
+a signed, verifiable trail either way.
 
     python -m maverick.golden_path [-o OUTDIR]
 
 Writes ``OUTDIR/GOLDEN_PATH.md`` (the narrated story) and ``OUTDIR/audit.ndjson``
 (the signed hash-chain). Every verdict here comes from real enforcement code —
 nothing is mocked and no model is called. Distinct from
-:mod:`maverick.proof_pack` (which proves the guarantees in aggregate); this is
-the human-readable walkthrough that makes them visceral.
+:mod:`maverick.proof_pack` (which checks the guarantees in aggregate); this is
+the human-readable walkthrough of the same behaviour.
 """
 from __future__ import annotations
 

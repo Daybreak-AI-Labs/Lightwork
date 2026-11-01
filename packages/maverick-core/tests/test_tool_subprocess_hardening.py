@@ -1,7 +1,7 @@
 """Tool subprocesses must run with secrets scrubbed and freeform media args
 filtered.
 
-Council (Security seat, findings #1-#3): ~10 tools shelled out directly with
+~10 tools shelled out directly with
 the full os.environ (leaking provider keys to the child) and several appended
 a model-controlled freeform args[] to argv (pandoc --lua-filter = code exec,
 ffmpeg -i /etc/passwd = arbitrary file read). PR3 adds:

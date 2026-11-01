@@ -1,7 +1,7 @@
 """Long-context compaction for the agent's running message list.
 
-Karpathy SOTA-review item: 100k-token persistent episodes will choke
-and pay full price every turn. The compaction policy:
+100k-token persistent episodes will choke and pay full price every
+turn. The compaction policy:
 
 * **Drop**: raw tool output blocks > MAX_TOOL_OUTPUT_BYTES (default
   2 KiB) older than KEEP_RECENT_TURNS turns; keep a one-line digest.
@@ -19,9 +19,8 @@ and pay full price every turn. The compaction policy:
   installed. ``compact_messages`` behavior is unchanged when no
   embedder/index is supplied.
 
-The "drop vs keep" boundary is hardcoded for now per the Karpathy
-review: "start hardcoded ... then learn the what-to-keep gate from
-outcome reward". That second half lands when we have outcome reward
+The "drop vs keep" boundary is hardcoded for now: start hardcoded, then
+learn the what-to-keep gate from outcome reward. That second half lands when we have outcome reward
 signal end-to-end.
 
 This module is pure-function: input is the current ``messages`` list

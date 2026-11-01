@@ -231,7 +231,7 @@ class TestProcessIssueGitTimeout:
 
 
 class TestProcessIssueDoesNotBlockEventLoop:
-    """W1-71: process_issue is `async def` but is awaited directly on the
+    """Process_issue is `async def` but is awaited directly on the
     dashboard's shared event loop (Starlette awaits an async BackgroundTask
     inline). Its git subprocess calls must therefore run off-thread --
     otherwise a slow clone/checkout/push/PR-create stalls every other

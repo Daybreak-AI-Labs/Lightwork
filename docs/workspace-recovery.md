@@ -137,7 +137,7 @@ snapshot, then reinstalls the old application and restores the captured local
 state. Unfinished operations keep normal startup blocked and can be resumed
 through the desktop maintenance controls. Completed-upgrade rollback is a
 candidate local protocol with synthetic transaction and browser validation;
-native MSI execution, recognized customer certificates and clean-machine
+native MSI execution, publicly trusted signing certificates and clean-machine
 acceptance remain separate Windows release gates. Signing-key or publisher
 certificate rotation and remote stores or independently managed workers require
 a coordinated recovery procedure and are not supported by this local path.
@@ -227,8 +227,8 @@ an administrator can explicitly retrieve an already completed report after reloa
   installation protocol above restores the exact retained application before
   its captured state; it never asks an older reader to consume newer accounting
   or storage records.
-- Native switching and customer MSI installation need Windows native acceptance.
-  Python/API and DOM tests do not verify a clean customer machine.
+- Native switching and MSI installation need Windows native acceptance.
+  Python/API and DOM tests do not verify a clean Windows machine.
 
 ## Tenant identity history
 
@@ -265,8 +265,8 @@ The drill creates an isolated temporary home, encrypted synthetic draft and
 SQLite fixture, performs real restore, checks the draft with its retained
 fixture key, prints measurements, and removes its state. It does not restore
 a real workspace or contact providers. API tests separately exercise the full
-isolated application lifespan. Customer CI starts the frozen recovery entry
-point after stopping its own normal runtime.
+isolated application lifespan. The Windows desktop package workflow starts the
+frozen recovery entry point after stopping its own normal runtime.
 
 ## Application-reader fixture acceptance
 

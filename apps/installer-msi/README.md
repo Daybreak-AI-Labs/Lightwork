@@ -1,10 +1,10 @@
 # maverick-installer-msi (engineering bootstrap)
 
-The separate [Windows customer candidate](CUSTOMER.md) combines the complete
-frozen runtime, desktop app, and offline WebView2 installer. Its build,
+The separate [Windows desktop package candidate](CUSTOMER.md) combines the
+complete frozen runtime, desktop app, and offline WebView2 installer. Its build,
 maintenance, signing, and acceptance workflow does not use this engineering
-bootstrap. Customer release acceptance remains pending; the distinction below
-continues to apply to `Package.wxs` and `build.ps1`.
+bootstrap. Release acceptance for that package remains pending; the distinction
+below continues to apply to `Package.wxs` and `build.ps1`.
 
 WiX Toolset v4 authoring for an **engineering-only** Windows bootstrap. It
 installs a `maverick.cmd` launcher on the per-user PATH plus one
@@ -13,7 +13,7 @@ live PyPI on first launch.
 
 This is not a complete Lightwork platform installer. It omits the other seven
 packages in `release-cohort.toml`, does not bundle Python or a dependency
-wheelhouse, is not offline-capable, and is not a customer release artifact.
+wheelhouse, is not offline-capable, and is not a release artifact.
 
 ## What's in the package
 
@@ -47,8 +47,8 @@ Design notes:
   The MSI does not embed a Python runtime, a locked dependency wheelhouse, or
   the full eight-package release cohort. `maverick.cmd` prints an actionable
   error if Python 3.10+ is missing; pip otherwise resolves runtime dependencies
-  from live PyPI without a shipped constraints file. There is currently no
-  supported offline/customer MSI.
+  from live PyPI without a shipped constraints file. This bootstrap is not an
+  offline MSI; the separate desktop package candidate is.
 
 ## Building
 
@@ -67,7 +67,7 @@ There is also a manual-dispatch engineering workflow
 MSI on `windows-2022`. Its artifact name and metadata identify it as an
 unsigned engineering bootstrap requiring live PyPI.
 
-## Status — honest
+## Status
 
 - **Engineering-only:** this bootstrap is deliberately excluded from release
   completeness claims. A complete Windows delivery must install an offline
@@ -76,10 +76,10 @@ unsigned engineering bootstrap requiring live PyPI.
 - The staged wheel filename and first-install/upgrade bootstrap have an offline
   `--no-deps --no-index` filename smoke test. That test validates only wheel
   staging; it does not make the real first-launch dependency install offline.
-- The `.wxs`, launcher, and build script were authored and statically
-  validated (`test_wxs.py`) in a Linux environment. **No MSI was built or
-  installed here** — that requires WiX v4 on a Windows host. Treat the first
-  `build.ps1` run as a release candidate to smoke-test.
+- The `.wxs`, launcher, and build script are statically validated by
+  `test_wxs.py`, which runs on any platform. Building or installing the MSI
+  requires WiX v4 on a Windows host; treat the first `build.ps1` run as a
+  release candidate to smoke-test.
 - The produced MSI ships **UNSIGNED**. SmartScreen can show an "unknown
   publisher" warning until an Authenticode signing path exists.
 

@@ -532,7 +532,7 @@ def create_tenant(
     tid = _validate_id(tenant_id)
     quota = _quota_value(max_daily_dollars)
     display_name = display_name.strip()
-    # Provisioning a named tenant IS multi-tenant mode — a paid (Platinum)
+    # Provisioning a named tenant IS multi-tenant mode — a tier-gated (Platinum)
     # capability. Fail-open: a no-op unless license enforcement is on and the
     # deployment isn't entitled (a genuine single-tenant box never calls this —
     # it uses the default tenant).
@@ -1336,7 +1336,7 @@ def tenant_over_quota(tenant_id: str | None) -> str | None:
     if spent >= cap:
         return (f"workspace {tid!r} is over its daily spend cap "
                 f"(${spent:.2f} >= ${cap:.2f}); resets at midnight UTC")
-    # Runs in flight hold the allowance they may still spend (W2-83). Without
+    # Runs in flight hold the allowance they may still spend. Without
     # counting them here the gate admitted a run that reserve_tenant_budget
     # then granted $0, so it was created, started, and died on its first
     # model call with "budget exceeded" instead of a clean over-quota refusal.

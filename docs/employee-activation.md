@@ -32,8 +32,7 @@ connector source selection remains in the native picker; opaque fetch references
 are excluded from conversational result details. Copilot action families still
 require the installation's existing opt-in.
 
-Validation at implementation checkpoint: 1,573 local activation/settings-catalog
-tests passed, including encrypted draft isolation, immutable submission recovery,
-current-result acceptance, unselected-source refusal and catalog attenuation.
-Python 3.10 parsing, Jinja parsing and JavaScript syntax passed. No live provider
-or source fetch was run. Final integrated/browser/release qualification is pending.
+Local activation and settings-catalog tests cover encrypted draft isolation,
+immutable submission recovery, current-result acceptance, unselected-source
+refusal and catalog attenuation. They make no live provider call or source
+fetch; browser and release qualification are separate.

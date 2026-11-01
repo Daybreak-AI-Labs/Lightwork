@@ -14,7 +14,7 @@
 | High-round soak (knobs cranked far past defaults) | **187 passed**, ~**2.1M** randomized scenarios, **0 invariant violations** |
 | Concurrency battery ×25 repeats | **25/25 clean** — no lost promotions, no store corruption |
 | Determinism (real loop) | same inputs → **byte-identical** learned store across 6 independent runs |
-| Standalone proof scoreboard (`proof/self_harness_proof.py`) | **11/11 guarantees PROVEN**, reproducible |
+| Standalone proof scoreboard (`proof/self_harness_proof.py`) | **11/11 checks passed**, reproducible |
 
 Only skips in the whole run were two unrelated optional-dependency modules
 (`z3`, `duckdb`) — no self-harness test skipped.
@@ -106,7 +106,7 @@ python3 proof/self_harness_proof.py
   [PASS]  rollback durability         forget/reject beat auto re-entry; indeterminate verdicts stay retryable
   [PASS]  fleet store parity          same content as files; 8/8 concurrent promotions; forget round-trips
   [PASS]  fleet corpus store          stage/reject/accept as world rows; export-import keeps every field
-  11 guarantees PROVEN, 0 failed
+  11 checks passed, 0 failed
 ```
 
 The headline guarantee, **determinism**, runs the loop six times on identical

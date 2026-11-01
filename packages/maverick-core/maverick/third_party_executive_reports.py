@@ -879,7 +879,7 @@ def render_deterministic_pdf(
         )
     )
 
-    # Paginate by the vertical space the lines actually consume (W4-89): a
+    # Paginate by the vertical space the lines actually consume: a
     # fixed line count overflowed the page once a report carried every
     # metric plus several sources, drawing body lines below the y=34 footer
     # and off the paper edge -- silently clipping the source digests that

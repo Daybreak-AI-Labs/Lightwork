@@ -1,4 +1,4 @@
-"""Per-tool latency profile (ROADMAP 2027 H1, Performance)."""
+"""Per-tool latency profile."""
 from __future__ import annotations
 
 import asyncio

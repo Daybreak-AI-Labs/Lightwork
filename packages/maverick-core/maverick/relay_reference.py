@@ -1,8 +1,8 @@
-"""Self-hosted relay reference (ROADMAP 2027 H2 Distribution).
+"""Self-hosted relay reference.
 
 A reference implementation of the self-hostable relay that fronts inbound
-webhooks -- the OpenClaw-bridge pattern from the ROADMAP's Even-Realities-G2
-"bring your own agent" note. OpenClaw's bridge is a Cloudflare Worker (a hosted
+webhooks for a "bring your own agent" device such as the Even Realities G2
+(the OpenClaw-bridge pattern). OpenClaw's bridge is a Cloudflare Worker (a hosted
 dependency); ours ships as framework-agnostic *logic* you run as a Worker OR a
 small local/edge service (see ``docs/self-hosted-relay.md``).
 

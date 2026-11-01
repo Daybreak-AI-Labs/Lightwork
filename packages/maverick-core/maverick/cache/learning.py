@@ -1,5 +1,5 @@
 """Cross-run learning cache: memoize verified sub-results across runs
-(roadmap: 2027 H2 performance).
+.
 
 Agents re-derive the same expensive facts every run — "this repo's build
 command is ``make -j test``", "service Y's API schema is ...". Each

@@ -1397,7 +1397,7 @@ def any_provider_configured() -> bool:
         if str(pcfg.get("api_key", "")).strip() or str(pcfg.get("base_url", "")).strip():
             return True
         # Bedrock signing with AWS IAM credentials carries no key at all: the
-        # explicit auth_mode is the configuration (W1-10).
+        # explicit auth_mode is the configuration.
         if provider == "bedrock" and str(pcfg.get("auth_mode", "")).strip().lower() == "iam":
             return True
         # Vertex AI signs in with Google Application Default Credentials: the
@@ -3023,8 +3023,8 @@ def get_billing_stripe() -> dict:
     from ``MAVERICK_STRIPE_SECRET_KEY`` / ``MAVERICK_STRIPE_WEBHOOK_SECRET`` via
     the secret provider, else from the sealed values saved on the All settings
     page (read only by :mod:`maverick.billing_stripe`) -- so this returns only
-    the enable flag, the metered-usage pricing flag (a pricing decision is
-    pending; default off bills the platform fee only), the currency, and the
+    the enable flag, the metered-usage flag (default off: only the platform
+    fee is billed), the currency, and the
     per-plan ``prices`` map of Stripe recurring price ids for the platform
     subscription fee."""
     billing = load_config().get("billing", {})
@@ -3039,7 +3039,7 @@ def get_billing_stripe() -> dict:
     currency = cfg.get("currency", "usd")
     return {
         "enable": _strict_config_bool(cfg, "enable", False),
-        # The pricing-decision flag: when off (default) only the recurring
+        # The metered-usage flag: when off (default) only the recurring
         # platform fee is billed; the metered model-usage line items are computed
         # but NOT pushed to Stripe. No markup is hardcoded here -- the rate is
         # whatever RateCard the operator supplies when generating the invoice.
@@ -3885,7 +3885,7 @@ def get_consequence() -> dict:
 
 
 def get_earned_autonomy() -> dict:
-    """Return the ``[earned_autonomy]`` section (Bet 5: consequence-proven trust).
+    """Return the ``[earned_autonomy]`` section (consequence-proven trust).
 
     Agents earn policy-auto-approval per action type by proving they predict
     consequences correctly (maverick.earned_autonomy). OFF by default: enabling
@@ -4267,7 +4267,7 @@ def get_value(*, config: dict | None = None) -> dict:
     (``[value.departments.<name>]`` tables with ``hourly_rate`` /
     ``hours_per_task``) so legal work can be priced differently from support.
     ``enable`` only shows/hides the dashboard page; the numbers are always safe
-    (read-only, they never tune anything -- the council's warning that cost
+    (read-only, they never tune anything -- cost
     pressure must not defund safety). Defaults are deliberately conservative so
     an out-of-box ROI claim is defensible, not inflated.
     Env override: ``MAVERICK_VALUE_HOURLY_RATE`` / ``MAVERICK_VALUE_HOURS``.

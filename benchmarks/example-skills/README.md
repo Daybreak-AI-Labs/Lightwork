@@ -28,8 +28,7 @@ maverick skill install gh:Daybreak-AI-Labs/Lightwork:benchmarks/example-skills/w
 1. Write a `SKILL.md` following the schema below.
 2. Test it: `maverick skill install ./your-skill.md` then
    `maverick start "<phrase that should trigger it>"`.
-3. Submit a PR to the future `awesome-maverick-skills` repo (or this
-   directory for v0.1).
+3. Open a pull request that adds it to this directory.
 
 ## Schema
 

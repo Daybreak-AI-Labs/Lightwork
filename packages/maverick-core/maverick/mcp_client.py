@@ -1,6 +1,6 @@
 """MCP client: let Lightwork consume external MCP servers as tools.
 
-v0.1.6 hardening (council review):
+v0.1.6 hardening:
   - Env passed to the child process is now an EXPLICIT allowlist, not
     full ``os.environ``. Compromised npm MCP servers no longer exfil
     ANTHROPIC_API_KEY / MAVERICK_DASHBOARD_TOKEN / GITHUB_TOKEN / AWS_*.

@@ -1,4 +1,4 @@
-"""Council security pass — dashboard auth + CSRF + headers + skill-install gate."""
+"""Dashboard auth + CSRF + headers + skill-install gate."""
 from __future__ import annotations
 
 import pytest

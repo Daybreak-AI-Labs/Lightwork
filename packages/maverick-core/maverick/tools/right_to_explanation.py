@@ -1,4 +1,4 @@
-"""Right-to-explanation + right-to-rectification record builder (roadmap: 2028 H1).
+"""Right-to-explanation + right-to-rectification record builder.
 
 Two pure helpers for the GDPR-style "right to an explanation" (Art. 22) and
 "right to rectification" (Art. 16) of an automated decision:

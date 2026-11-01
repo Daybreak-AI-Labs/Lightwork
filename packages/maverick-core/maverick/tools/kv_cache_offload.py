@@ -1,4 +1,4 @@
-"""KV-cache offload-to-disk planner (roadmap: 2027 H2 perf — "KV-cache offload").
+"""KV-cache offload-to-disk planner.
 
 Decide which KV-cache blocks stay resident in memory and which spill to disk
 under a byte budget, using least-recently-used eviction. The caller supplies

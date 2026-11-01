@@ -272,7 +272,7 @@ Mutations return revision conflicts as HTTP 409, validation failures as 422,
 missing records as 404, and unexpected failures as a redacted 503. Dashboard
 mutations require the same-origin header enforced across Lightwork.
 
-## YC demo path
+## Demonstration walkthrough
 
 1. Enable the module and the desired finance regimes.
 2. Ingest a bounded Federal Register fixture (or let the scheduler poll the
@@ -289,16 +289,16 @@ mutations require the same-origin header enforced across Lightwork.
    request. Record evidence-backed human results, then reconcile them back into
    the finance cycle.
 
-This demo proves the product loop without claiming live legal advice, a
-production sanctions determination, fraud detection efficacy, or an audit
-opinion.
+This walkthrough exercises the product loop. It does not provide legal advice,
+a production sanctions determination, evidence of fraud-detection efficacy, or
+an audit opinion.
 
 ## Known v1 boundaries and next work
 
 - Add counsel-reviewed, jurisdiction-specific licensing pack versions and the
   lending vertical.
 - Certify notice-level state-register endpoints one state at a time; the shipped
-  Texas source is an honest issue-level starting point.
+  Texas source is an issue-level starting point.
 - Add commercial sanctions/PEP providers and structured identifiers (DOB,
   address, nationality, ownership) behind the same governed case contract.
 - Add reconciliation feedback and labeled-case precision/recall measurement for

@@ -1,4 +1,4 @@
-"""MCP Tasks (spec 2025-11-25): async, pollable tool execution (ROADMAP B1).
+"""MCP Tasks (spec 2025-11-25): async, pollable tool execution.
 
 A task-augmented tools/call returns a CreateTaskResult immediately and runs the
 tool on a background worker; the client polls tasks/get and fetches the result

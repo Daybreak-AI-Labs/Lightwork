@@ -67,7 +67,7 @@ Sources used for the contract:
   kernel's SSRF-safe pinned HTTPS client and only ever go to the `serviceUrl`
   named in the verified token.
 
-## 1. Register the bot in Azure (owner steps)
+## 1. Register the bot in Azure (administrator steps)
 
 1. In the Azure portal create an **Azure Bot** resource
    (https://learn.microsoft.com/azure/bot-service/bot-service-quickstart-registration).

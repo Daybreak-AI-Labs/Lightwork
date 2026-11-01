@@ -1,5 +1,5 @@
 """Migration governance — the Alembic-grade ratchet over the world-model
-migration ladders (roadmap: regulated-SaaS data-plane).
+migration ladders.
 
 ``schema_migrations.py`` lints a single ladder for online/offline safety. This
 module governs the *integrity and evolution* of BOTH backend ladders together —
@@ -280,7 +280,7 @@ def repin_blockers(
 ) -> list[str]:
     """Already-locked versions whose checksum would change on the next write.
 
-    W1-55: ``regen_blockers`` only inspects versions ABSENT from the lock, so
+    ``regen_blockers`` only inspects versions ABSENT from the lock, so
     editing a released migration and running ``--regen`` re-pinned it with a
     green CI afterward -- the exact event the immutability rule exists to
     catch (``lock_problems`` flags the edit before regen, but nothing stopped

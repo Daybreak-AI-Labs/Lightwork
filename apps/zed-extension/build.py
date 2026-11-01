@@ -15,6 +15,7 @@ TARGET = "wasm32-wasip2"
 INPUTS = (
     "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "extension.toml",
     "src/lib.rs", "tasks/maverick.json", "README.md", "BUILDING.md", "build.py",
+    "LICENSE", "NOTICE",
 )
 
 

@@ -1,4 +1,4 @@
-"""Text watermark detector (roadmap: 2027 H1 safety — "watermark detector").
+"""Text watermark detector.
 
 Scans text for the invisible/steganographic markers used to fingerprint
 machine-generated or leaked content: zero-width characters, Unicode tag

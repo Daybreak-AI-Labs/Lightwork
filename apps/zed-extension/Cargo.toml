@@ -3,8 +3,8 @@ name = "maverick-zed-extension"
 version = "0.1.6"
 edition = "2021"
 description = "Zed editor extension for the Lightwork agent runtime"
-authors = ["cdayAI"]
-license = "LicenseRef-Proprietary"
+authors = ["The Lightwork Authors"]
+license = "Apache-2.0"
 repository = "https://github.com/Daybreak-AI-Labs/Lightwork"
 
 [lib]
