@@ -30,7 +30,7 @@ RUN apt-get update \
 # apt python is PEP 668 externally-managed; python:slim's is not).
 RUN python3 -m venv /opt/maverick
 ENV PATH="/opt/maverick/bin:${PATH}"
-RUN python -m pip install --upgrade 'pip==26.2.1'
+RUN python -m pip install --upgrade 'pip==26.2.2'
 
 WORKDIR /app
 COPY release-cohort.toml ./release-cohort.toml

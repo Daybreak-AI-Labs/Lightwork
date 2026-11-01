@@ -51,13 +51,13 @@ rm -rf .nuitkavenv dist/nuitka-build
 "$PY" -m venv .nuitkavenv
 # shellcheck disable=SC1091
 source .nuitkavenv/bin/activate
-python -m pip install --upgrade 'pip==26.2.1' >/dev/null
+python -m pip install --upgrade 'pip==26.2.2' >/dev/null
 
 echo ">> [2/6] install packages NON-editable (so Nuitka can follow them)"
 python scripts/install_release_cohort.py \
   --target-python python \
   --core-extra release-runtime
-python -m pip install --constraint requirements/ci.txt 'nuitka==4.2.2'
+python -m pip install --constraint requirements/ci.txt 'nuitka==4.3.1'
 python -m pip check
 python -c "from maverick.providers import verify_release_runtime; verify_release_runtime()"
 

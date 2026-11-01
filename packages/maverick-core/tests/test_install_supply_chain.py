@@ -471,14 +471,14 @@ def test_public_pypi_consumer_is_disabled_until_namespace_is_reserved():
     assert "contents: read" in top_level
     assert "contents: write" not in resolver
     assert "pull-requests: write" not in resolver
-    assert "pip-tools==7.6.1" in resolver
+    assert "pip-tools==7.6.2" in resolver
     assert "runs-on: macos-15" in resolver
     assert '"--no-header"' in resolver
     assert '"--no-emit-index-url"' in resolver
     assert '"--index-url"' in resolver
     assert '"https://pypi.org/simple"' in resolver
     assert "resolved-homebrew-formula" in resolver
-    assert "setuptools==84.0.0" in resolver
+    assert "setuptools==84.2.1" in resolver
     assert "fetch-depth: 0" in resolver
     assert "Verify the signed exact-release Python authority" in resolver
     assert resolver.index("Verify the signed exact-release Python authority") < resolver.index(

@@ -10,6 +10,11 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10
+    import tomli as tomllib
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -100,7 +105,22 @@ def test_repository_constraints_are_exact_and_cover_current_environment():
     )
 
     assert canonicalize_name("maverick-agent") in first_party
-    assert constraints["tzdata"].specifier.contains("2026.4")
+    # The kernel declares a tzdata floor (packages/maverick-core/pyproject.toml);
+    # the lock must pin a tzdata that satisfies it, whichever version that is.
+    core = tomllib.loads(
+        (REPO_ROOT / "packages" / "maverick-core" / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+    )
+    tzdata_floor = next(
+        Requirement(dependency)
+        for dependency in core["project"]["dependencies"]
+        if canonicalize_name(Requirement(dependency).name) == "tzdata"
+    )
+    pinned_tzdata = next(iter(constraints["tzdata"].specifier)).version
+    assert tzdata_floor.specifier.contains(pinned_tzdata), (
+        f"tzdata=={pinned_tzdata} does not satisfy the kernel floor {tzdata_floor}"
+    )
     # Bumped with psycopg 3.3.6 in 4fd34f7c; the Postgres CI job installs the same pin.
     assert constraints["psycopg-pool"].specifier.contains("3.3.3")
 
