@@ -1,8 +1,8 @@
-# DSAR Concierge — a sellable, standalone data-subject-request agent
+# DSAR Concierge — a standalone data-subject-request agent
 
-The whole DSAR lifecycle on one small surface, sold on its own or bundled
-with the Lightwork platform (same product, same records — the capability
-seam decides what's on; see `/about` in the running app):
+The whole DSAR lifecycle on one small surface, run on its own or alongside
+the Lightwork platform (same records — the capability seam decides what's on;
+see `/about` in the running app):
 
 * **Intake** — a subject-facing form (`/request`) and a message webhook
   (`POST /webhook/message`) with a deterministic detector (kind + subject +
@@ -17,10 +17,10 @@ seam decides what's on; see `/about` in the running app):
   here**: the agent prepares a structured per-system operator handoff and
   parks the request awaiting confirmation.
 * **Counted value** — `/value.json` sums per-request value (env-overridable
-  baselines) for the partner fleet console to roll up.
-* **Licensing** — `LIGHTWORK_LICENSE` (+ `LIGHTWORK_LICENSE_PUBKEY`)
-  verified via Ed25519. Unlicensed = evaluation mode: fully functional
-  with an open-request cap. An upsell is a key swap, not a reinstall.
+  baselines) for a fleet console to roll up.
+* **License key (optional)** — `LIGHTWORK_LICENSE` (+ `LIGHTWORK_LICENSE_PUBKEY`)
+  verified via Ed25519. Without a key the app runs in evaluation mode: fully
+  functional, with a cap of 5 open requests.
 
 **With Lightwork** the same agent additionally mirrors every request into
 the governed privacy workspace registers, lands every step on the signed
@@ -37,8 +37,8 @@ DSAR_OPERATOR_TOKEN=$(openssl rand -hex 24) bash run_standalone.sh
 ```
 
 Container + cloud installs: `Dockerfile.standalone` here, and the per-cloud
-guides in `../pia-concierge/DEPLOYMENT.md` apply to this SKU with the env
-names below.
+guides in [`../pia-concierge/DEPLOYMENT.md`](../pia-concierge/DEPLOYMENT.md)
+apply to this app with the env names below.
 
 ## Environment
 
@@ -51,5 +51,5 @@ names below.
 | `DSAR_OPERATOR_USER` / `DSAR_OPERATOR_TOKEN` | `operator` / unset | HTTP Basic credentials required for the operator queue, case pages, package downloads, and workflow actions |
 | `DSAR_SLA_DAYS` | `30` | the statutory clock |
 | `EMAIL_USER` / `EMAIL_SMTP_PORT` | — | outbound mail identity (standalone captures locally) |
-| `LIGHTWORK_LICENSE` / `LIGHTWORK_LICENSE_PUBKEY` | unset | signed license token + vendor public key |
-| `VALUE_HOURLY_RATE`, `VALUE_DSAR_*_HOURS` | `$60`, 2.5/2.5/3.0h | the client's own value inputs |
+| `LIGHTWORK_LICENSE` / `LIGHTWORK_LICENSE_PUBKEY` | unset | signed license token + issuer public key |
+| `VALUE_HOURLY_RATE`, `VALUE_DSAR_*_HOURS` | `$60`, 2.5/2.5/3.0h | the operator's own value inputs |

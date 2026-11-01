@@ -490,7 +490,7 @@ def test_rls_apply_raises_when_policy_cannot_be_installed_or_verified(monkeypatc
         world._apply_rls()
 
 def test_rls_covers_tables_added_after_the_v10_tenant_migration():
-    # Council #7: projects (v15) and fact_history (v18) carry tenant_id but were
+    # projects (v15) and fact_history (v18) carry tenant_id but were
     # absent from the RLS set, so a PG deployment left them app-layer-only. They
     # must be RLS-scoped, while staying OUT of the v10 column-add migration list.
     assert "projects" in postgres._RLS_TABLES
@@ -593,7 +593,7 @@ def test_explicit_env_off_overrides_enterprise(_clean_toggle_env, monkeypatch):
 
 
 def test_list_goals_filters_by_domain_and_project_id(monkeypatch):
-    # W1-49: SQLite's list_goals accepts domain=/project_id= (used by the
+    # SQLite's list_goals accepts domain=/project_id= (used by the
     # dashboard's project-detail page and domain-scoped inbox); the Postgres
     # port didn't, so both callers 500'd with a TypeError on this backend.
     world = PostgresWorldModel.__new__(PostgresWorldModel)
@@ -719,7 +719,7 @@ def test_preflight_skipped_when_explicitly_opted_in(monkeypatch):
 
 @pytest.mark.skipif(not _HAS_PSYCOPG, reason="psycopg not installed")
 class TestReconnectOnBrokenConnection:
-    """W1-54: the single shared (non-pooled) connection must self-heal after
+    """The single shared (non-pooled) connection must self-heal after
     a managed-Postgres failover or idle-connection reset instead of raising
     OperationalError on every call until the process restarts."""
 

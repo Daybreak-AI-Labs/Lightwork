@@ -22,7 +22,7 @@ repos:
       - id: no-bare-import-tomllib
         name: reject bare `import tomllib` (3.11+ stdlib; use the tomli fallback)
         # Column-0 `import tomllib` in apps/packages/benchmarks is the mistake;
-        # the documented pattern indents it inside a try/except (see CLAUDE.md).
+        # the documented pattern indents it inside a try/except (see CONTRIBUTING.md).
         language: pygrep
         entry: '^import[ \t]+tomllib([ \t]|$)'
         files: ^(apps|packages|benchmarks)/.*\.py$

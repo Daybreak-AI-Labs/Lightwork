@@ -142,7 +142,8 @@ class MintApprovalPending(ExternalAgentsError):
 
 
 def entitled() -> bool:
-    """Bring-your-own-agent governance is a paid (Gold) capability.
+    """Bring-your-own-agent governance is gated by the ``external_agents``
+    entitlement (Gold tier) when license enforcement is on.
 
     Fail-open like fleet governance: it only bites when a deployment has
     turned license enforcement on and the license lacks the feature. Roster
@@ -171,9 +172,9 @@ def enabled() -> bool:
 # -- sidecar registry (platform/ownership metadata + reported-spend meter) ----
 
 def _seat_limit() -> int:
-    """Enrollment seat cap: ``[external_agents] max_enrolled`` clamped to the
-    structural ceiling. The commercial seat count lives in config (set by the
-    operator to match their license order); the hard cap protects the
+    """Enrollment cap: ``[external_agents] max_enrolled`` clamped to the
+    structural ceiling. The enrollment limit lives in config, set by the
+    operator (for example to match a licence); the hard cap protects the
     JSON-sidecar storage model."""
     try:
         from .config import load_config

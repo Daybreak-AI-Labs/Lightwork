@@ -1,4 +1,4 @@
-"""Public performance SLA harness (roadmap: 2028 H2 performance).
+"""Public performance SLA harness.
 
 The SLA itself is published at ``docs/perf-sla.md``; this module is its
 **enforcement**: each row of the SLA table that is measurable in-process is a

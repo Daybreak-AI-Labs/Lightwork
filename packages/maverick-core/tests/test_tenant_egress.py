@@ -1,4 +1,4 @@
-"""Per-tenant egress policy plane (ROADMAP platform spine)."""
+"""Per-tenant egress policy plane."""
 from __future__ import annotations
 
 from maverick.tenant import egress as te
@@ -73,7 +73,7 @@ def test_http_fetch_uses_tenant_egress(monkeypatch):
 
 def test_browser_navigate_uses_tenant_egress(monkeypatch):
     # The browser tool previously never consulted the tenant plane at all
-    # (platform audit W2-88) -- it must now refuse a denied host too.
+    # -- it must now refuse a denied host too.
     import maverick.config as cfg
     monkeypatch.setattr(cfg, "load_config", lambda: {
         "egress": {"deny": ["blocked.test"]},

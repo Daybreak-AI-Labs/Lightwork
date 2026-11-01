@@ -33,9 +33,10 @@ entrypoint = "acme_widgets:plugin"     # in-process
 requires = ["tool:http_fetch", "net:egress"]   # declared, enforced
 ```
 
-The kernel reads `requires`, intersects it with the operator's grant (CLAUDE.md
-rule #5 — a config knob gates every capability), and refuses to load a plugin
-that demands more than it's granted, with a clear message.
+The kernel reads `requires`, intersects it with the operator's grant
+([kernel rule 5](../../CONTRIBUTING.md#house-rules): a config knob gates every
+capability), and refuses to load a plugin that demands more than it's granted,
+with a clear message.
 
 > **As shipped:** `requires` is a key of the plugin's own manifest
 > (`maverick-plugin.toml`), not of the operator's config, so there is no

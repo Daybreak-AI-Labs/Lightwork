@@ -1,10 +1,10 @@
-"""Wave 12: security hardening.
+"""Security hardening.
 
-Covers council findings F9b-F9f:
-  - F9b: str_replace_editor.view bypassed opaque-mode test-file block
-  - F9c: subprocess inherited MAVERICK_GOLD_PATCH from env
-  - F9d: .git/ reads not blocked (refs + objects leak the gold)
-  - F9f: MAVERICK_GOLD_PATCH popped on first read (defense in depth)
+Covers:
+  - str_replace_editor.view bypassed opaque-mode test-file block
+  - subprocess inherited MAVERICK_GOLD_PATCH from env
+  - .git/ reads not blocked (refs + objects leak the gold)
+  - MAVERICK_GOLD_PATCH popped on first read (defense in depth)
 """
 from __future__ import annotations
 
@@ -125,7 +125,7 @@ class TestDotGitBlocked:
 
 
 class TestStrReplaceEditorOpacity:
-    """F9b: str_replace_editor.view was the opacity backdoor — same
+    """str_replace_editor.view was the opacity backdoor — same
     file gating as read_file must apply."""
 
     def test_view_blocks_test_file_in_opaque(self, tmp_path, opaque_mode):
@@ -173,7 +173,7 @@ class TestStrReplaceEditorOpacity:
 
 
 class TestSymlinkBypass:
-    """Wave 12 hardening: symlink to .git or tests/ must still be
+    """Symlink to .git or tests/ must still be
     blocked by the resolved-path check."""
 
     @pytest.mark.skipif(
@@ -223,7 +223,7 @@ class TestSymlinkBypass:
 
 
 class TestTestsDirAllFiles:
-    """Wave 12 hardening: ANY file under tests/ is now blocked, not
+    """ANY file under tests/ is now blocked, not
     just files matching the test_*.py heuristic."""
 
     def test_conftest_under_tests_blocked(self, tmp_path, opaque_mode):
@@ -254,7 +254,7 @@ class TestTestsDirAllFiles:
 
 
 class TestShellGitFlagsBypass:
-    """Wave 12 hardening (agent 2 #3): git plumbing wasn't blocked
+    """git plumbing wasn't blocked
     when preceded by `-P`, `--git-dir=...`, `-c k=v`, etc."""
 
     def _shell(self, tmp_path):
@@ -302,7 +302,7 @@ class TestShellGitFlagsBypass:
 
 
 class TestShellAnyUtilityReadsDotGit:
-    """Wave 12 hardening (agent 2 #2): block .git/<sensitive> reads
+    """Block .git/<sensitive> reads
     regardless of consuming utility — python, awk, xxd, grep, sed,
     cp, mv, tar all bypass the prior cat-blocker."""
 
@@ -348,7 +348,7 @@ class TestShellAnyUtilityReadsDotGit:
 
 
 class TestGoldPatchEmptyEnvSentinel:
-    """Wave 12 hardening (agent 2 #5): empty-string MAVERICK_GOLD_PATCH
+    """Empty-string MAVERICK_GOLD_PATCH
     should pop+cache, NOT be treated as 'not yet read'."""
 
     def test_empty_env_is_popped_and_cached(self, monkeypatch):
@@ -371,7 +371,7 @@ class TestGoldPatchEmptyEnvSentinel:
 
 
 class TestShellGitInternalsBlocked:
-    """F9d: shell-level git plumbing + raw .git filesystem access."""
+    """Shell-level git plumbing + raw .git filesystem access."""
 
     def _shell(self, tmp_path):
         from maverick.tools.shell import shell
@@ -414,7 +414,7 @@ class TestShellGitInternalsBlocked:
 
 
 class TestShellPopsGoldPatch:
-    """F9c: subprocess must not inherit MAVERICK_GOLD_PATCH. The shell
+    """Subprocess must not inherit MAVERICK_GOLD_PATCH. The shell
     tool defensively pops the env var before forwarding to sandbox."""
 
     def test_shell_pops_gold_patch_in_opaque(self, tmp_path, monkeypatch):

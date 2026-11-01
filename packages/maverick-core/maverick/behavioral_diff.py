@@ -1,4 +1,4 @@
-"""Behavioral diff across model/prompt upgrades (roadmap: 2027 H2 safety).
+"""Behavioral diff across model/prompt upgrades.
 
 Swapping a model id (or editing a system prompt) changes behavior in ways a
 unit suite never sees: a probe that used to get a helpful answer starts

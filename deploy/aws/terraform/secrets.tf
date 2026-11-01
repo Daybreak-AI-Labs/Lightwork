@@ -11,10 +11,16 @@ resource "random_password" "dashboard_token" {
 }
 
 # ---- Secrets Manager entries (injected into the task, never baked into the image) ----
+#
+# Every entry keeps the 7-day recovery window (the shortest AWS allows above
+# immediate deletion), so a secret destroyed by a wrong apply can be restored
+# with `aws secretsmanager restore-secret`. An intentional teardown that must
+# reuse a name at once deletes with
+# `aws secretsmanager delete-secret --force-delete-without-recovery` first.
 
 resource "aws_secretsmanager_secret" "db_password" {
   name                    = "${local.name}/db-password"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "db_password" {
@@ -24,7 +30,7 @@ resource "aws_secretsmanager_secret_version" "db_password" {
 
 resource "aws_secretsmanager_secret" "dashboard_token" {
   name                    = "${local.name}/dashboard-token"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "dashboard_token" {
@@ -39,7 +45,7 @@ resource "aws_secretsmanager_secret_version" "dashboard_token" {
 #     --secret-string 'sk-ant-...' --profile lightwork --region us-east-2
 resource "aws_secretsmanager_secret" "anthropic_api_key" {
   name                    = "${local.name}/anthropic-api-key"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "anthropic_api_key" {
@@ -62,7 +68,7 @@ resource "random_password" "oidc_session_secret" {
 
 resource "aws_secretsmanager_secret" "oidc_session_secret" {
   name                    = "${local.name}/oidc-session-secret"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "oidc_session_secret" {
@@ -77,7 +83,7 @@ resource "aws_secretsmanager_secret_version" "oidc_session_secret" {
 #     --secret-string '<auth0-client-secret>' --profile lightwork --region us-east-2
 resource "aws_secretsmanager_secret" "oidc_client_secret" {
   name                    = "${local.name}/oidc-client-secret"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "oidc_client_secret" {
@@ -94,14 +100,17 @@ resource "aws_secretsmanager_secret_version" "oidc_client_secret" {
 
 # Full Postgres DSN, assembled from the RDS endpoint. Alphanumeric password
 # means no URL-encoding is required.
+# sslmode=require encrypts the connection to RDS without a CA bundle in the
+# image; deploy/postgres/README.md asks for verify-full, which needs the RDS CA
+# bundle shipped and pinned in the image first, which is not done yet.
 resource "aws_secretsmanager_secret" "pg_dsn" {
   name                    = "${local.name}/pg-dsn"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 7
 }
 
 resource "aws_secretsmanager_secret_version" "pg_dsn" {
   secret_id     = aws_secretsmanager_secret.pg_dsn.id
-  secret_string = "postgresql://${var.db_username}:${random_password.db.result}@${aws_db_instance.main.address}:5432/${var.db_name}" # pragma: allowlist secret -- Terraform interpolation, no literal secret
+  secret_string = "postgresql://${var.db_username}:${random_password.db.result}@${aws_db_instance.main.address}:5432/${var.db_name}?sslmode=require" # pragma: allowlist secret -- Terraform interpolation, no literal secret
 }
 
 # At-rest encryption key. The kernel otherwise generates one on first use under

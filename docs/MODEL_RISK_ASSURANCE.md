@@ -126,7 +126,7 @@ publishing or otherwise externally anchoring the latest public commitment.
 ## Standalone product
 
 `demo/model-risk-ai-assurance-officer/` is a self-contained, loopback-only
-source SKU. Run it with:
+standalone application. Run it with:
 
 ```bash
 cd demo/model-risk-ai-assurance-officer

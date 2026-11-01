@@ -248,7 +248,7 @@ def test_onetrust_import_maps_tiers_and_never_overwrites():
 
 
 def test_onetrust_import_reports_rejected_and_capacity_rows(monkeypatch):
-    """W4-98: a 300-character name, an already-registered vendor and a full
+    """A 300-character name, an already-registered vendor and a full
     register used to vanish identically; each now carries its own reason so
     a truncated import cannot pass for success."""
     _register("Globex")

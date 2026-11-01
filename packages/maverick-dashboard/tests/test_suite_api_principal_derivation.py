@@ -1,4 +1,4 @@
-"""Cross-suite regression test for platform audit **W3-1**.
+"""Cross-suite regression test for suite-API principal derivation.
 
 29 dashboard suite-API modules each copied a `_principal`/`_principal_ref`
 helper that 401'd whenever `request.state.principal` was empty -- but that's
@@ -29,7 +29,7 @@ from maverick_dashboard.app import app
 TENANT = "tenant-w3-1-probe"
 STATIC_TOKEN = "w3-1-probe-static-token"  # noqa: S105 - test fixture value, not a real secret
 
-#: (module, route) for every suite fixed by W3-1. One representative
+#: (module, route) for every suite fixed. One representative
 #: read-only route per module -- its own status/readiness endpoint, since
 #: every one of these was gated by the same broken helper.
 ROUTES = [

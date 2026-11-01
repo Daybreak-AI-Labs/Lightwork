@@ -28,7 +28,7 @@ and cover every refusal the subsystem can raise. They were previously two
 unrelated ``RuntimeError`` subclasses, so a handler written against one silently
 missed the other -- and the one that was missed,
 :class:`~maverick.audit.signing.OffHostSigningRequiredError`, is the one that
-fires under the strictest posture the product sells.
+fires under the strictest posture the product supports.
 
 ``RuntimeError`` remains the base so handlers predating these names keep working.
 """

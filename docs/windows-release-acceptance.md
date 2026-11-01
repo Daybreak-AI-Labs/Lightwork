@@ -84,7 +84,7 @@ do not replace cryptographic verification of the installer itself.
 
 The release owner provisions a **new disposable Windows 11 x64 VM** from a
 reviewed image for each attempt. This is infrastructure preparation, not an
-operation the workflow performs on a customer machine. The image needs current
+operation the workflow performs on a user's machine. The image needs current
 Windows servicing, PowerShell 7 and an ephemeral GitHub Actions runner. It must
 not contain Lightwork or developer tools on PATH (including Python store aliases,
 Git, Cargo, Rust, MSVC or WiX). Image cleanliness is owner-attested; the script
@@ -131,7 +131,7 @@ Tauri updater signatures again before either MSI is launched.
 Dispatch **Windows real release pair acceptance** from `main`, paste the reviewed
 plan, explicitly authorize the disposable VM operations and approve its protected
 environment. The first job only downloads and validates immutable inputs and
-builds the reviewed offline verifier. The customer VM receives that exact
+builds the reviewed offline verifier. The disposable VM receives that exact
 artifact; it does not check out source or install Python, Git or build tools.
 
 The VM driver then:
@@ -185,7 +185,7 @@ profile passed for these two runtime hashes and this owner-attested VM. It does
 not mean the whole release is accepted. The report explicitly records that it
 does not automate the native WebView journey or verify network-isolated install.
 Native first launch/setup, offline WebView2 bootstrap, interrupted operations,
-failed upgrade recovery, customer-grade certificate acceptance, update download
+failed upgrade recovery, production signing-certificate acceptance, update download
 behavior and the broader release checklist in
 [`apps/installer-msi/CUSTOMER.md`](../apps/installer-msi/CUSTOMER.md) remain separate
 evidence. No workflow is dispatched or MSI installed merely by adding this gate.

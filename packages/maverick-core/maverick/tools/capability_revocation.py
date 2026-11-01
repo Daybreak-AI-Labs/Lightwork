@@ -1,4 +1,4 @@
-"""Capability revocation propagation (roadmap: 2028 H2 safety).
+"""Capability revocation propagation.
 
 When a capability is revoked from a principal, every principal that holds that
 capability *only* by transitive delegation from the revoked holder must lose it

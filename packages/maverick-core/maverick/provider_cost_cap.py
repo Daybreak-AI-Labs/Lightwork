@@ -1,4 +1,4 @@
-"""Provider-level cost caps across all runs (roadmap: 2028 H1 safety).
+"""Provider-level cost caps across all runs.
 
 :class:`maverick.budget.Budget` caps **one run**; :mod:`maverick.quotas` caps
 a **principal** per day. Neither bounds what the deployment as a whole may

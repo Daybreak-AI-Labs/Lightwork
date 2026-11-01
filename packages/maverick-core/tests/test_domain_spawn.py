@@ -184,7 +184,7 @@ def test_agent_from_profile_sets_knowledge_sources(tmp_path):
 
 
 def test_agent_from_profile_depth_zero_root_is_goal_root(tmp_path):
-    # W1-24: run_goal's domain-routed root (orchestrator.py) always calls
+    # Run_goal's domain-routed root (orchestrator.py) always calls
     # agent_from_profile with no parent, at depth 0 -- role=profile.name,
     # e.g. "finance_controller", never "orchestrator". Every kernel
     # mechanic gated on "is this the goal's root" must still fire for it.
@@ -199,7 +199,7 @@ def test_agent_from_profile_depth_zero_root_is_goal_root(tmp_path):
 
 
 def test_domain_routed_root_gets_orchestrator_template_with_persona(tmp_path):
-    # W1-24: before the fix, select_base_template picked the WORKER template
+    # Before the fix, select_base_template picked the WORKER template
     # ("You are a specialist agent... depth 0") for ANY role other than
     # literally "orchestrator" -- so a domain pack's root never got the
     # orchestrator framing that tells it to decompose/delegate/verify. The
@@ -219,7 +219,7 @@ def test_domain_routed_root_gets_orchestrator_template_with_persona(tmp_path):
 
 @pytest.mark.asyncio
 async def test_domain_routed_root_invokes_the_final_verifier(tmp_path, monkeypatch):
-    # W1-24 end-to-end regression: before the fix, a domain-routed root's
+    # End-to-end regression: before the fix, a domain-routed root's
     # FINAL was accepted with verifier_confidence=1.0 and no verifier LLM
     # call at all -- indistinguishable from a genuinely-verified answer to
     # every downstream consumer (trajectory donation, the autonomy servo,

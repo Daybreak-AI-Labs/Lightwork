@@ -1,4 +1,4 @@
-"""Continuous benchmarking (ROADMAP 2027 H2)."""
+"""Continuous benchmarking."""
 from __future__ import annotations
 
 import pytest

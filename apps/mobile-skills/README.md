@@ -1,6 +1,6 @@
 # maverick-mobile-skills
 
-An **honest feasibility scaffold** for running Lightwork *skill logic* on
+A **feasibility scaffold** for running Lightwork *skill logic* on
 iOS/Android. Two paths, both executing the same real pure-Python module
 from `maverick-core`:
 
@@ -36,9 +36,9 @@ instruction message instead of silently breaking.
 
 ## kivy-shell
 
-`python kivy-shell/main.py` works three ways, most honest first:
+`python kivy-shell/main.py` works three ways:
 
-- **No Kivy installed** (this repo's test env): prints the skill output to
+- **No Kivy installed** (as in the test suite): prints the skill output to
   the terminal — the scaffold stays exercisable.
 - **Kivy installed on desktop**: opens the app window (skill list + run
   button).
@@ -54,28 +54,27 @@ instruction message instead of silently breaking.
 
 ## Hard limits — why this is skills-only, not the agent
 
-Read this before promising "Lightwork on mobile":
+These limits apply to any use of Lightwork on mobile:
 
 - **No sandbox, no subprocess.** Mobile OSes (and Pyodide's WASM runtime)
-  do not allow spawning processes. Lightwork's house rule is that all shell
-  goes through `sandbox.exec()` — there is **no mobile backend** for it, so
+  do not allow spawning processes. Lightwork routes all shell
+  through `sandbox.exec()`, and there is **no mobile backend** for it, so
   every shell-using tool is off the table. Only pure-computation skill
   logic (like this one) runs.
 - **Network tools need the relay.** A phone can't host the runtime or
   receive webhooks; the supported pattern is the self-hosted relay
-  (`deploy/relay/` — see its README), with the phone as a thin client.
-  (There is no `docs/self-hosted-relay.md` today; `deploy/relay/README.md`
-  is the relay doc.)
+  ([`deploy/relay/`](../../deploy/relay/README.md)), with the phone as a
+  thin client.
 - **No LLM calls from the scaffold.** Provider keys on a public webpage or
   inside an APK would be exfiltratable; the scaffold deliberately ships
   zero networking (`android.permissions =` is empty).
 
-## What was and wasn't verified here
+## Verification scope
 
-- Verified here: the module's isolation property and sample outputs
+- Covered by tests: the module's isolation property and sample outputs
   (subprocess import test), `main.py`'s terminal fallback, the HTML
   referencing only vendored/relative paths — `python -m pytest
   apps/mobile-skills/test_mobile_skills.py -q`.
-- **Not** verified here: Pyodide actually booting (vendoring needs a
-  download), the Kivy UI (no Kivy in this env), and any APK/IPA build
+- **Not** covered: Pyodide actually booting (vendoring needs a
+  download), the Kivy UI (requires Kivy), and any APK/IPA build
   (buildozer/Xcode toolchains required — maintainer acts).

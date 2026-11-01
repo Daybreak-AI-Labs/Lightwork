@@ -36,9 +36,9 @@ The catalog is **curated + hash-pinned**, which is what lets a consumer
 click "Install" without the `MAVERICK_ALLOW_SKILL_INSTALL` opt-in that
 free-text URL installs require:
 
-1. **Curated** — an entry only exists because someone opened a PR
-   against the index (the `awesome-maverick` repo). That's the same
-   review bar as a package registry.
+1. **Curated** — an entry only exists because the maintainers of the
+   index reviewed and accepted it. That's the same review bar as a
+   package registry.
 2. **Hash-pinned** — on install, the client fetches `source`, computes
    the SHA-256, and refuses to write if it doesn't match the index's
    `sha256`. A compromised mirror can't swap the bytes.
@@ -56,7 +56,8 @@ does not.
 ```toml
 [catalogs]
 # Base URLs (no trailing /kind). Multiple indexes merge; earlier wins
-# on name collision. Defaults to the awesome-maverick index.
+# on name collision. The built-in default index is not yet published;
+# configure your own under [catalogs] indexes.
 indexes = ["https://raw.githubusercontent.com/your-org/your-index/main/catalog"]
 ```
 

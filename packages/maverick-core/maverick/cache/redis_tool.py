@@ -1,4 +1,4 @@
-"""Distributed tool-output cache backend on Redis (roadmap: 2027 H2 performance).
+"""Distributed tool-output cache backend on Redis.
 
 :mod:`maverick.tool_cache` memoizes side-effect-free tool results per
 *process*: every worker in a fleet pays its own cold start for the same

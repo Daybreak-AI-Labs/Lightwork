@@ -1,6 +1,6 @@
-# Model Risk & AI Assurance Officer standalone SKU
+# Model Risk & AI Assurance Officer standalone app
 
-This self-contained defensive SKU inventories declared models, agents, tools,
+This self-contained defensive app inventories declared models, agents, tools,
 datasets, and providers. Its vendored deterministic engine reports operational
 risk and gaps across ownership, intended use, legal-applicability review,
 evaluation and red-team freshness, change lineage, drift, incidents, and
@@ -73,9 +73,10 @@ rollback, connector, filing, policy-mutation, or provider-effect routes.
 
 ## Source release
 
-Tagged releases package this directory as the licensed
-`lightwork-model-risk-ai-assurance-officer-<version>.zip` source SKU using the
-explicit release manifest. It is not a wheel or PyPI distribution. From a
+The release workflow packages this directory as the
+`lightwork-model-risk-ai-assurance-officer-<version>.zip` source archive using
+the explicit release manifest (no release has been published yet). It is not a
+wheel or PyPI distribution. From a
 tagged checkout at the repository root:
 
 ```bash

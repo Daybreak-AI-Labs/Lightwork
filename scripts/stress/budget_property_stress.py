@@ -64,7 +64,7 @@ def stress_exact_accounting():
 
 
 def stress_fail_closed():
-    # Per the documented Wave-12 contract: non-finite / negative / unparseable
+    # Per the budget contract: non-finite / negative / unparseable
     # counts must FAIL CLOSED (BudgetExceeded), never silently record a paid
     # call as $0. None is the ONE deliberate exception -- it coerces to 0
     # (Anthropic returns None usage on streaming refusals), so it is NOT a poison.

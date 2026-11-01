@@ -341,13 +341,23 @@ def test_an_archive_is_removed_even_when_its_download_is_cut_off(tmp_path):
     archive.write_bytes(b"personal data" * 100)
     response = api._ArchiveResponse(archive, media_type="application/zip")
     sent: list[str] = []
+    # A server's receive() hands over the request once and then waits for the
+    # client to say more or go away. Starlette 1.8 watches it for the
+    # disconnect while the file streams, so a receive() that answers at once
+    # forever would spin; the fake behaves like the real channel instead.
+    disconnected = asyncio.Event()
+    pending = [{"type": "http.request", "body": b"", "more_body": False}]
 
     async def receive():
-        return {"type": "http.request", "body": b"", "more_body": False}
+        if pending:
+            return pending.pop()
+        await disconnected.wait()
+        return {"type": "http.disconnect"}
 
     async def send(message):
         sent.append(message["type"])
         if message["type"] == "http.response.body":
+            disconnected.set()
             raise ConnectionResetError("the reviewer's connection dropped")
 
     scope = {"type": "http", "method": "GET", "headers": []}

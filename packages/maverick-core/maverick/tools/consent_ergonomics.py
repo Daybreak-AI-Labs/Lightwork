@@ -1,4 +1,4 @@
-"""Consent ergonomics pass (roadmap: 2028 H2 safety — "consent ergonomics").
+"""Consent ergonomics pass.
 
 Turn a raw permission request (action + scopes + data + duration) into a
 minimal, plain-language consent prompt a human can actually read, plus a risk

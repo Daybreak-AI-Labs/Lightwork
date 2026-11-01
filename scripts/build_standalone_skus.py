@@ -31,7 +31,7 @@ SKU_DIRS = (
     Path("demo/model-risk-ai-assurance-officer"),
 )
 TEXT_SUFFIXES = {".html", ".json", ".md", ".py", ".sh", ".txt", ".toml", ".yaml", ".yml"}
-TEXT_FILENAMES = {"LICENSE"}
+TEXT_FILENAMES = {"LICENSE", "NOTICE"}
 ARTIFACT_RE = re.compile(r"^lightwork-[a-z0-9]+(?:-[a-z0-9]+)*$")
 REVISION_RE = re.compile(r"^(?:[0-9a-f]{7,64}|unknown)$")
 DEPENDENCY_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(.*)$")
@@ -164,7 +164,7 @@ def _build_sku(
             }
             for relative, payload in sorted(payloads.items())
         },
-        "license": "LicenseRef-Proprietary",
+        "license": "Apache-2.0",
         "pypi_distribution": False,
         "requirements": [item["requirement"] for item in requirements],
         "schema_version": 1,
@@ -199,7 +199,7 @@ def _cyclonedx_bom(
             {
                 "bom-ref": sku_ref,
                 "description": build["description"],
-                "licenses": [{"license": {"name": "LicenseRef-Proprietary"}}],
+                "licenses": [{"license": {"id": "Apache-2.0"}}],
                 "name": build["artifact_name"],
                 "properties": [
                     {"name": "lightwork:distribution-format", "value": "source-zip"},

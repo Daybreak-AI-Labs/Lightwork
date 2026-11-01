@@ -1,7 +1,7 @@
 # Decision: no browser anti-bot evasion kit
 
-**Status:** Decided — declined · **Roadmap ref:** 2027-H2 Capabilities
-"Browser anti-bot evasion kit (opt-in)" · **Date:** June 2026 ·
+**Status:** Decided — declined (proposed item: "Browser anti-bot evasion kit
+(opt-in)") · **Date:** June 2026 ·
 **Precedent:** the corpus-release indicator policy (capability shipped
 only where the safety posture holds).
 
@@ -22,9 +22,8 @@ boundary, which is detection evasion against a third party. Shipping it —
 even default-OFF, even labelled "use responsibly" — would make Lightwork a
 turnkey tool for ToS violation, scraping past rate limits, and CAPTCHA
 farming, and would put that capability one toggle away for every operator
-regardless of intent. That is not a posture we can stand behind in a
-commercially licensed enterprise product, and it is not a capability we are
-willing to make broadly available.
+regardless of intent. That is not a posture the project can stand behind,
+and it is not a capability we are willing to make broadly available.
 
 This is a *decline on purpose-of-the-capability* grounds, not a
 "too hard" punt. The mechanics (header/UA rotation, headless-flag

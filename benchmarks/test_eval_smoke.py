@@ -1,4 +1,4 @@
-"""The offline eval-harness regression gate (ROADMAP P3).
+"""The offline eval-harness regression gate.
 
 ``eval_smoke.run_smoke()`` drives the real harness (registry + framework +
 tau2 verifier) against scripted solvers -- no LLM, no network -- and asserts

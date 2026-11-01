@@ -199,7 +199,7 @@ def test_status_is_store_free_honest_exact_gate_and_authenticated(
 def test_status_grants_a_synthetic_operator_ref_under_genuine_auth_off(environment) -> None:
     """A missing principal is not ALWAYS a 401: genuine local auth-off mode
     and a valid static dashboard bearer are both already-authenticated
-    shapes require_permission() itself accepts (W3-1)."""
+    shapes require_permission() itself accepts."""
     client, _database, _state = environment
     response = client.get(
         f"{API}/status",

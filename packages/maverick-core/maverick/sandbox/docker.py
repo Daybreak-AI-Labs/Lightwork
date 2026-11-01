@@ -165,7 +165,7 @@ class DockerBackend:
             self.close()
             if self.pending_cleanup:
                 raise RuntimeError("previous sandbox container cleanup is unresolved")
-        # Wave 11: per-call `timeout` matches LocalBackend so the shell
+        # Per-call `timeout` matches LocalBackend so the shell
         # tool can plumb a longer cap for pytest/npm test/etc. Falls
         # back to self.timeout (default 60 s).
         effective = self.timeout if timeout is None else timeout

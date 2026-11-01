@@ -14,7 +14,7 @@ selected, otherwise ``$MAVERICK_HOME/config.toml`` (or
 ``$LIGHTWORK_HOME/config.toml``; default ``~/.maverick/config.toml``), plus a
 sibling ``.env``. The agent reads from the same resolution contract.
 
-v0.1.1 additions (council UX feedback):
+v0.1.1 additions:
   - Preflight: Python version, write perms, optional docker check
   - API key validation: pings Anthropic with the entered key before save
 """
@@ -846,7 +846,7 @@ def _remember_validation(env_name: str, key: str, ok: bool, msg: str) -> None:
 
 
 def show_bad_key_error(env_name: str, msg: str) -> None:
-    """Council UX seat error screen #1: provider rejected the key."""
+    """Error screen: the provider rejected the key."""
     console.print()
     console.print(
         Panel.fit(
@@ -862,7 +862,7 @@ def show_bad_key_error(env_name: str, msg: str) -> None:
 
 
 def show_network_error(provider: str, exception_type: str) -> None:
-    """Council UX seat error screen #2: validator couldn't reach the provider."""
+    """Error screen: the validator couldn't reach the provider."""
     console.print()
     console.print(
         Panel.fit(
@@ -875,7 +875,7 @@ def show_network_error(provider: str, exception_type: str) -> None:
 
 
 def show_install_failure(exc: BaseException) -> None:
-    """Council UX seat error screen #3: catch-all for unexpected setup failures."""
+    """Error screen: catch-all for unexpected setup failures."""
     console.print()
     console.print(
         Panel.fit(
@@ -942,7 +942,7 @@ def pick_providers() -> list[str]:
 
 def pick_bedrock_auth() -> dict[str, Any]:
     """How Lightwork authenticates to AWS Bedrock; written to
-    ``[providers.bedrock]`` (W1-10). IAM is the standard enterprise path
+    ``[providers.bedrock]``. IAM is the standard enterprise path
     (instance/task role, profile, or env keys) and needs no bearer token."""
     console.print(
         "[dim]Bedrock can sign requests with your AWS IAM credentials -- an "
@@ -2636,8 +2636,8 @@ def pick_sandbox() -> dict[str, Any]:
     if backend == "kubernetes":
         # The backend fails closed when allow_network=false and the namespace
         # has no deny-all NetworkPolicy (a transient pod can't block its own
-        # egress), so a config written without asking ran nothing (platform
-        # audit W1-104). Ask, and hand over the exact manifest to apply.
+        # egress), so a config written without asking ran nothing. Ask, and
+        # hand over the exact manifest to apply.
         namespace = _q_text("  Kubernetes namespace for sandbox pods", default="default").strip()
         cfg["namespace"] = namespace or "default"
         net = _q_select(
@@ -2782,7 +2782,7 @@ def kubernetes_deny_all_manifest(namespace: str) -> str:
     return _DENY_ALL_NETWORKPOLICY.format(ns=namespace)
 
 
-# ---------- new wizard steps (council parity pass) ----------
+# ---------- additional wizard steps ----------
 
 
 def pick_web_search() -> tuple[bool, list[str]]:
@@ -3012,17 +3012,17 @@ def pick_analytics() -> dict[str, Any]:
     When granted, the MCP server tallies a coarse language bucket from each
     client's User-Agent (typescript / go / rust / c# / java / python) into a
     local counts file — no request content, no identifiers, nothing leaves
-    the machine. The tally feeds the Q1-2027 language-bindings gate
-    (``maverick.mcp_analytics.non_python_share()``). Returns a dict written
-    under ``[analytics]``.
+    the machine. The operator reads it with
+    ``maverick.mcp_analytics.client_language_counts()`` and
+    ``non_python_share()``. Returns a dict written under ``[analytics]``.
     """
     console.print()
     console.print(
         "[dim]Optional: count which languages drive this agent over MCP "
         "(a coarse bucket from each client's User-Agent). Counts stay in a "
         "local file — no request content, no identifiers, nothing is "
-        "uploaded. The tally feeds the decision on funding native client "
-        "libraries; OFF by default.[/dim]"
+        "uploaded. It shows you which languages your MCP clients use; OFF "
+        "by default.[/dim]"
     )
     if not _q_confirm("Count MCP client languages locally?", default=False):
         return {}
@@ -4051,7 +4051,7 @@ AGENT_SUITES: list[tuple[str, str]] = [
     ("government_contracting", "Government Contracting"),
     ("education_nonprofit", "Education / Nonprofit"),
     ("tax", "Tax Preparation (CPA Firms)"),
-    # Council-expansion verticals (2026).
+    # Additional verticals.
     ("utilities", "Energy / Utilities"),
     ("real_estate", "Real Estate / Property Management"),
     ("pharma_lifesciences", "Pharma / Life Sciences"),
@@ -4109,32 +4109,34 @@ def pick_suites() -> dict[str, bool]:
 
 
 def pick_license() -> dict[str, Any]:
-    """The ``[license]`` section — paid-feature entitlement enforcement.
+    """The ``[license]`` section — optional license-tier enforcement.
 
-    Default **OFF** (a community/dev box runs everything, matching the
-    fail-open kernel). A licensed production deployment turns enforcement on and
-    points at its signed license file; paid features then gate on the license.
+    Default **OFF** (a default install runs everything, matching the
+    fail-open kernel). A deployment that uses signed licenses turns enforcement
+    on and points at its signed license file; tier-gated features then follow
+    the license.
     Returns a config map for ``[license]`` (empty when the operator keeps the
     fail-open default, so nothing is emitted and nothing gates)."""
     console.print()
     console.print(
-        "[bold]Licensing[/bold] — enforce paid-feature entitlements "
-        "(Gold/Platinum features, add-on suites like fleet)."
+        "[bold]Licensing[/bold] (optional) — restrict gated tier features and "
+        "add-on suites such as fleet to what a signed license grants."
     )
     console.print(
-        "[dim]License checks are off by default. Turn them on for a licensed "
-        "deployment. A missing or expired license blocks paid add-ons; "
+        "[dim]License checks are off by default, and every feature works. Turn "
+        "them on only if you use signed licenses. A missing or expired license "
+        "then blocks the gated features; "
         "core functions remain available. Later, review or install a license "
         "in Settings > License and change enforcement in Settings > All settings.[/dim]"
     )
-    if not _q_confirm("  Enforce paid-feature entitlements on this deployment?", default=False):
+    if not _q_confirm("  Turn on license enforcement for this deployment?", default=False):
         return {}
     out: dict[str, Any] = {"enforce": True}
     path = _q_text("    Signed license file path (blank = ~/.maverick/license.json)", default="")
     if path.strip():
         out["license_file"] = path.strip()
     pub = _q_text(
-        "    Trusted publisher pubkey(s), comma-separated hex (blank = keys embedded in the build)",
+        "    Trusted publisher pubkey(s), comma-separated hex (blank = none; licenses cannot be verified)",
         default="",
     )
     keys = _csv_list(pub, lower=True)
@@ -4150,8 +4152,8 @@ def pick_license() -> dict[str, Any]:
         # (config.toml interpolates ${VAR}; the value lives in ~/.maverick/.env).
         out["api_token"] = "${MAVERICK_LICENSE_API_TOKEN}"
         # Near-instant propagation: the dashboard polls the API on this
-        # interval so an upgrade issued in the vendor console lights up
-        # without a redeploy. 0 disables; the kernel floors it at 30s.
+        # interval so a re-issued license takes effect without a redeploy.
+        # 0 disables; the kernel floors it at 30s.
         interval = _q_text(
             "    Auto-refresh interval in seconds (blank = 60, 0 = manual refresh only)", default=""
         )
@@ -5490,7 +5492,7 @@ def prepare_first_outcome(department: str, workdir: str) -> dict[str, Any]:
 def pick_mode() -> str:
     """First-screen picker: consumer vs advanced.
 
-    Council round-2 design: every launch starts here so a non-technical
+    Every launch starts here so a non-technical
     user lands in a four-question flow with safe defaults, and a power
     user can opt straight into the full wizard.
     """
@@ -5581,14 +5583,14 @@ def write_consumer_config(
     first_outcome: str | None = None,
     protect_existing: bool = False,
 ) -> str:
-    """Write a consumer-mode config with the safety-seat safe defaults.
+    """Write a consumer-mode config with the safe defaults.
 
     Single source of truth shared by the CLI consumer flow
     (``run_consumer``) and the desktop installer sidecar
     (``maverick_installer.bridge``) so the two front ends can't drift.
     ``profile`` is the governance level from :data:`GOVERNANCE_PROFILES`
     (unknown values fall back to the default) -- it layers the learning
-    lifecycle + governance posture on top of the safety-seat base, which
+    lifecycle + governance posture on top of the safe-default base, which
     is identical at every level. Creates the workspace dir, and the sample
     workspace for ``first_outcome`` (a department slug from
     :mod:`maverick.sample_outcomes`) when one was picked. Raises on write
@@ -5967,7 +5969,7 @@ def run_express() -> int:
             "[dim]Left off pending administrator review: computer/\n"
             "browser control, code execution, autonomous self-modification, at-rest\n"
             "encryption + multi-tenancy, messaging channels, and license enforcement\n"
-            "(leaving enforcement off is what keeps every paid feature unlocked).[/dim]",
+            "(with enforcement off, every feature works).[/dim]",
             border_style="cyan",
         )
     )
@@ -6497,7 +6499,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     providers = state.get("providers") or pick_providers()
     while not providers:
         # Aborting on empty selection forced the user to restart the
-        # whole wizard (UX seat finding). Re-ask instead.
+        # whole wizard. Re-ask instead.
         console.print("[yellow]Pick at least one provider; Lightwork needs an LLM.[/yellow]")
         providers = pick_providers()
     state["providers"] = providers

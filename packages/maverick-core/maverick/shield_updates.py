@@ -1,4 +1,4 @@
-"""Federated shield rules updates (roadmap: 2027 H2 Safety).
+"""Federated shield rules updates.
 
 Pull-based, signature-verified updates to the shield's RULES bundle. A
 publisher signs ``{"version": N, "rules": [...]}`` with Ed25519 (the same

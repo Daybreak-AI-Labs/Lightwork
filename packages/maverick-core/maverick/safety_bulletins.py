@@ -1,4 +1,4 @@
-"""Public safety bulletin RSS (roadmap: 2027 H2 safety).
+"""Public safety bulletin RSS.
 
 Coordinated disclosure ends with *telling people*. This renders the
 deployment's (or the project's) security bulletins — markdown files with a

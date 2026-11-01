@@ -1,4 +1,4 @@
-"""Skill search engine + HF dataset publish/pull (ROADMAP 2027 H2).
+"""Skill search engine + HF dataset publish/pull.
 
 Offline + deterministic: ranking is checked against hand-built docs; the HF
 pull goes through a FAKE fetcher (no network). Round-trips export -> import

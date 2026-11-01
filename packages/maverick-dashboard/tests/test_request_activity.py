@@ -37,6 +37,30 @@ def _app(seen):
     return app
 
 
+def _gzip_holds_the_response_start() -> bool:
+    """Whether GZipMiddleware delays ``http.response.start`` of an excluded
+    content type until the first body chunk, measured rather than assumed."""
+    import asyncio
+
+    order: list[str] = []
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-type", b"text/event-stream")]})
+        order.append("first event produced")
+        await send({"type": "http.response.body", "body": b"data: one\n\n", "more_body": False})
+
+    async def send(message):
+        order.append(message["type"])
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    scope = {"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""}
+    asyncio.run(GZipMiddleware(app, minimum_size=1)(scope, receive, send))
+    return order.index("http.response.start") > order.index("first event produced")
+
+
 def test_ordinary_requests_count_while_event_streams_and_sockets_do_not(monkeypatch):
     # A page's open event stream or socket kept the dashboard "busy" forever,
     # so the schema build and garbage rounds that wait for quiet never ran.
@@ -51,9 +75,15 @@ def test_ordinary_requests_count_while_event_streams_and_sockets_do_not(monkeypa
     # while GZip holds the response start until the first event.
     events = client.get("/stream", headers={"Accept": "text/event-stream"})
     assert events.text == "data: one\n\ndata: two\n\n"
-    # Without the header the stream counts until its response starts.
+    # Without the header the stream counts until its response starts. When
+    # GZip holds the response start of an excluded content type until the
+    # first event (Starlette before 1.8), the first event is still counted;
+    # from 1.8 the start passes through at once and neither event is.
     assert client.get("/stream").text == "data: one\n\ndata: two\n\n"
     with client.websocket_connect("/socket"):
         pass
-    assert seen == [("work", 2), ("stream", 1), ("stream", 1), ("stream", 2), ("stream", 1), ("socket", 1)]
+    first_event = 2 if _gzip_holds_the_response_start() else 1
+    assert seen == [
+        ("work", 2), ("stream", 1), ("stream", 1), ("stream", first_event), ("stream", 1), ("socket", 1),
+    ]
     assert request_activity.in_flight() == 1

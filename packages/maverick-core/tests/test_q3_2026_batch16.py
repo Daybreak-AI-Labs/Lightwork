@@ -207,7 +207,7 @@ def test_url_less_browser_action_denies_disallowed_current_host(monkeypatch):
     assert closed == [True]
 
 
-# ---------- egress checks (platform audit W2-88) ----------
+# ---------- egress checks ----------
 #
 # Previously the browser tool ran outside both the enterprise egress lock
 # and the per-tenant egress plane entirely -- no check at all, unlike every

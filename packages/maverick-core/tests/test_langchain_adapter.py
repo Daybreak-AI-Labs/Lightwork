@@ -1,4 +1,4 @@
-"""LangChain / LangGraph interop adapter (ROADMAP connector)."""
+"""LangChain / LangGraph interop adapter."""
 from __future__ import annotations
 
 import importlib.util

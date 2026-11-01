@@ -24,7 +24,7 @@ from .anthropic_limits import (
 )
 from .anthropic_limits import _is_opus_adaptive, effective_max_tokens
 
-# Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-3): fast mode is a real
+# Fast mode is a real
 # Anthropic API feature (Claude Opus 5 / Opus 4.8 only, research preview),
 # but it needs a specific wire shape -- the beta messages endpoint, this
 # beta flag, and a top-level `speed="fast"` parameter -- none of which
@@ -38,7 +38,7 @@ _LOW_CACHE_WARNING_EMITTED: dict[str, bool] = {}
 
 
 def _default_cache_ttl() -> str:
-    """Wave 11: benchmark mode defaults to 5m TTL (no cross-instance
+    """Benchmark mode defaults to 5m TTL (no cross-instance
     reuse), interactive mode keeps 1h (multi-turn within a single
     long-running goal benefits from longer cache life).
 
@@ -62,7 +62,7 @@ def _ephemeral(obj: dict) -> dict:
     # across many turns inside a single goal -- 5m is too short and
     # forces ~20% extra spend on re-creates. Explicitly set 1h on every
     # cache control block so we get the discount we expect.
-    # Wave 11: in coding-mode (SWE-bench style), default to 5m since
+    # In coding-mode (SWE-bench style), default to 5m since
     # there is no cross-instance reuse and the 25% cache-write surcharge
     # on a 1h TTL is wasted.
     #
@@ -125,12 +125,12 @@ def _cached_system(text: str) -> list[dict]:
 def _cached_tools(tools: list[dict]) -> list[dict]:
     if not tools:
         return tools
-    # Wave 12 (council F13d): sort tools by name BEFORE sending so the
+    # Sort tools by name BEFORE sending so the
     # tool catalog is byte-identical across calls — Anthropic's prompt
     # cache key includes the tools[] block, and a non-deterministic
     # order silently busts the cache write. Stable order = predictable
     # cache hits = 30-50% input cost reduction over the run.
-    # Wave 12 hardening: coerce key via str() so a malformed tool with
+    # Coerce key via str() so a malformed tool with
     # name=None or non-string doesn't blow sorted() with TypeError.
     out = [dict(t) for t in sorted(
         tools, key=lambda t: str(t.get("name") or ""),
@@ -253,7 +253,7 @@ def _apply_tool_choice(
     tool_choice: dict | None,
     model_id: str,
 ) -> None:
-    """Translate a normalized ``tool_choice`` onto an Anthropic request (W1-11).
+    """Translate a normalized ``tool_choice`` onto an Anthropic request.
 
     A forced choice (``any``/``tool``) is clamped to ``auto`` where the API
     rejects it -- Fable/Mythos 5.1, or manual extended thinking
@@ -291,7 +291,7 @@ def _apply_tool_choice(
 def _add_messages_cache_breakpoint(messages: list[dict]) -> list[dict]:
     """Mark the most recent stable user/tool_result message(s) for caching.
 
-    Wave 10: Anthropic prompt caching caches everything up to AND including the
+    Anthropic prompt caching caches everything up to AND including the
     marked breakpoint. The system prompt + tools are already cached; the
     remaining breakpoint slots are best spent on the most recent stable turn so
     multi-turn agent loops (which re-send the entire history every step) get
@@ -340,7 +340,7 @@ class AnthropicClient:
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None,
                  default_headers: dict | None = None, *, environment=None):
-        # May 26 council fix (long-tail audit #1): strip whitespace.
+        # Strip whitespace.
         # `export ANTHROPIC_API_KEY=$(cat key.txt)` is a common source of
         # trailing newline; without strip, every API call 401s and the
         # operator sees "API outage" instead of the real "key has
@@ -385,7 +385,7 @@ class AnthropicClient:
         effort: str | None = None,
         tool_choice: dict | None = None,
     ) -> dict[str, Any]:
-        # Fast mode (W1-3): MODEL_OPUS_FAST is a catalog-only id, never sent
+        # Fast mode: MODEL_OPUS_FAST is a catalog-only id, never sent
         # to the API. Substitute the real model NOW so every prefix check
         # below (adaptive-thinking gating, cache minimums, etc.) sees the
         # actual "claude-opus-4-8" and behaves identically to a plain Opus
@@ -394,7 +394,7 @@ class AnthropicClient:
         if want_fast:
             model = MODEL_OPUS
 
-        # Wave 10: cache the most recent stable user message so repeated
+        # Cache the most recent stable user message so repeated
         # tool-use turns hit the cache for the history (40-55% input
         # token cost cut on long trajectories). Toggle via env var so
         # the dashboard can A/B it.
@@ -414,7 +414,7 @@ class AnthropicClient:
         if tools:
             kwargs["tools"] = _cached_tools(tools)
 
-        # Wave 12 hotfix: note (at DEBUG, once per model) when system+tools is
+        # Note (at DEBUG, once per model) when system+tools is
         # below the min-cache threshold. The cache_control markers are silently
         # ignored in that case — we still set them so caching kicks in if/when
         # the prompt grows. Kept at debug, not warning: the consumer CLI installs
@@ -440,7 +440,7 @@ class AnthropicClient:
                     min_tokens, model_for_min, min_tokens,
                 )
                 _LOW_CACHE_WARNING_EMITTED[model_for_min] = True
-        # Wave 12 hotfix: thinking + interleaved-thinking handling per
+        # Thinking + interleaved-thinking handling per
         # Anthropic's May 2026 docs (platform.claude.com/docs/.../adaptive-thinking):
         #
         #   - Opus 4.7:  ONLY adaptive mode accepted. Manual
@@ -453,7 +453,7 @@ class AnthropicClient:
         #                `interleaved-thinking-2025-05-14` header is
         #                still required to get interleaved behavior.
         #
-        # An earlier Wave 12 commit set the beta header unconditionally
+        # An earlier commit set the beta header unconditionally
         # for any "claude-opus-/claude-sonnet-4" prefix — that breaks
         # against Opus 4.7 (400) and is wasted noise on 4.6.
         model_id = (model or self.DEFAULT_MODEL) or ""
@@ -502,7 +502,7 @@ class AnthropicClient:
             # decide via adaptive. This matches the docs' "adaptive is
             # the only supported mode" guidance.
             kwargs["thinking"] = {"type": "adaptive"}
-            # May 26 council fix (API audit #18): adaptive thinking
+            # Adaptive thinking
             # can spend the entire `max_tokens` budget on thinking and
             # leave nothing for the tool_use / text output, producing
             # an empty response. Bump headroom for adaptive runs — but
@@ -549,7 +549,7 @@ class AnthropicClient:
                 else:
                     kwargs["output_config"] = {"effort": model_effort}
 
-        # W1-11: forced / restricted tool selection, after thinking is settled
+        # Forced / restricted tool selection, after thinking is settled
         # (a manual-thinking request cannot force a tool).
         _apply_tool_choice(kwargs, tool_choice, model_id)
 
@@ -570,7 +570,7 @@ class AnthropicClient:
         text_parts: list[str] = []
         thinking_parts: list[str] = []
         tool_calls: list[ToolCall] = []
-        # May 26 council fix (API audit #1): preserve PER-BLOCK
+        # Preserve PER-BLOCK
         # signatures. With Opus 4.7 interleaved thinking, a single
         # turn can emit multiple thinking blocks, each with its own
         # signature derived from that block's text. Concatenating
@@ -614,7 +614,7 @@ class AnthropicClient:
                     "name": block.name, "input": dict(block.input),
                 })
 
-        # Wave 12 (council F13c) + hardening: nullsafe usage parsing.
+        # Nullsafe usage parsing.
         # If resp.usage itself is None (streaming refusal), getattr
         # chains through 0 defaults. Coerce all values via int() inside
         # a try block to catch non-int truthy values (string "100" from
@@ -631,7 +631,7 @@ class AnthropicClient:
         cache_read = _safe_int(getattr(usage, "cache_read_input_tokens", 0))
         in_tok = _safe_int(getattr(usage, "input_tokens", 0))
         out_tok = _safe_int(getattr(usage, "output_tokens", 0))
-        # W1-6: the system/tools breakpoint writes at _default_cache_ttl()
+        # The system/tools breakpoint writes at _default_cache_ttl()
         # (1h in interactive mode) while the messages breakpoint writes at
         # _msg_cache_ttl() (5m) -- a single call can write BOTH tiers at
         # once. Anthropic reports the real per-tier split as
@@ -650,7 +650,7 @@ class AnthropicClient:
                 model=model,
                 cache_read_tok=cache_read,
                 cache_write_tok=cache_creation,
-                # Wave 12: pass TTL so write surcharge math matches the
+                # Pass TTL so write surcharge math matches the
                 # actual breakpoint TTL (5m vs 1h) when the per-tier split
                 # below isn't available (older SDK, or a single-tier write).
                 cache_write_ttl=_default_cache_ttl(),
@@ -726,7 +726,7 @@ class AnthropicClient:
         kwargs = self._build_request(
             system, messages, tools, max_tokens, thinking_budget, model, effort,
             tool_choice=tool_choice)
-        # Fast mode (W1-3) is beta-endpoint-only: `speed` is only a validated
+        # Fast mode is beta-endpoint-only: `speed` is only a validated
         # field on client.beta.messages.*. Bill against the CALLER's model id
         # ("claude-opus-4-8-fast", the correctly-priced rate-card SKU), not
         # kwargs["model"] (the real wire id _build_request substituted) --
@@ -739,7 +739,7 @@ class AnthropicClient:
             resp = sync_retry(lambda: endpoint.create(**kwargs))
             return self._parse_response(resp, budget, model=billing_model)
 
-        # Council finding: wrapping the streaming path in sync_retry
+        # Wrapping the streaming path in sync_retry
         # would replay every on_delta callback after a mid-stream
         # failure, so consumers see duplicate prefixes. Streaming is
         # called from interactive paths (CLI --stream, dashboard chat);

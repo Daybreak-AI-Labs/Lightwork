@@ -1,6 +1,6 @@
 """`str_replace_editor` tool — surgical exact-match string replacement.
 
-Wave 10: OpenHands' single biggest contribution to SWE-bench scores
+OpenHands' single biggest contribution to SWE-bench scores
 is this tool. Hand-authored unified diffs from an LLM fail to apply
 ~30% of the time on real instances because of whitespace/line-ending
 drift between what the model thinks the file looks like and what's
@@ -71,7 +71,7 @@ def _view_dir(target: Path) -> str:
 
 
 def _cmd_view(sandbox, target: Path, path_arg: str) -> str:
-    # Wave 12 (council F9b) + hardening pass: str_replace_editor.view
+    # str_replace_editor.view
     # was an opacity bypass — the agent could read test files /
     # .git via this tool because the gate lived only in
     # read_file. Mirror read_file's symlink-resolved block here.

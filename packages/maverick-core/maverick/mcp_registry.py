@@ -3,7 +3,7 @@
 The remote-HTTP client transport (`mcp_client.StreamableHttpMCPClient`) and the
 stdio client let Lightwork *consume* MCP servers once they're in
 ``[mcp_servers.<name>]``; this module is the missing **discovery + install**
-layer (ROADMAP B2 "Registry"). It reuses the generic federated catalog
+layer. It reuses the generic federated catalog
 (`catalog.load_catalog("mcp")`) so a registry is just a self-hostable
 ``<base>/mcp/index.json`` — point ``[mcp_registries] indexes`` at your own.
 

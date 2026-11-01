@@ -1,8 +1,8 @@
 """The seam between the PIA Concierge agent and the Lightwork platform.
 
 Every capability the app needs is resolved here to either the real
-``maverick`` implementation (platform build) or a self-contained standalone
-implementation (sold-on-its-own build). The app imports from this module and
+``maverick`` implementation (platform mode) or a self-contained standalone
+implementation (standalone mode). The app imports from this module and
 never branches on the mode itself.
 
 Standalone loses, by design: the governed engine and control catalog, the

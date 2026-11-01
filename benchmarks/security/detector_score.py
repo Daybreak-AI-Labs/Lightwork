@@ -5,7 +5,7 @@ works without the agent-shield SDK or an API key, and reports TPR / FPR / F1
 with Wilson 95% confidence intervals, a per-obfuscation evasion sweep, and a
 leakage guard.
 
-Honesty rules baked in (per the council review):
+Honesty rules baked in:
   * TPR is reported separately for the ``train`` split (rules tuned on it ->
     a regression check, not skill) and the ``heldout`` split (novel -> the
     real capability signal). F1 uses heldout positives only.
@@ -62,7 +62,7 @@ BACKENDS: dict[str, Callable[[str], bool]] = {
 # Backends we cannot measure here, reported for honesty (not silently dropped).
 UNAVAILABLE = {
     "agent_shield_sdk": (
-        "private/unpublished full SDK; unavailable from public PyPI"
+        "unpublished full SDK; unavailable from public PyPI"
     ),
     "cascade_deep_llm": "needs an LLM judge + API key (MAVERICK_CASCADE_SHIELD=1)",
 }

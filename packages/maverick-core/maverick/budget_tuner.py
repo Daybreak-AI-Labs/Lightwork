@@ -1,4 +1,4 @@
-"""Self-tuning budgets (roadmap: 2028 H2 performance).
+"""Self-tuning budgets.
 
 ``Budget.max_dollars`` defaults to a hand-picked constant. That is either too
 loose (a runaway burns the whole cap before anyone notices) or too tight (a

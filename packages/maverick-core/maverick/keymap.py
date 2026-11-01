@@ -1,4 +1,4 @@
-"""Power-user keymap (roadmap: 2028 H2 UX — "power-user keymap editor").
+"""Power-user keymap.
 
 A validated keybinding layer for the TUI surfaces: actions (quit, refresh,
 expand, collapse, focus next/prev, toggle follow) bound to keys via

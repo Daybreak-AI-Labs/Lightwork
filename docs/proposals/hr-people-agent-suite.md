@@ -1,11 +1,12 @@
 # HR / People agent suite
 
-**Status:** design / roadmap. Companion to
+**Status:** design reference; the per-agent status tags record what existed when it was
+written. Companion to
 [`finance-agent-suite.md`](finance-agent-suite.md),
 [`it-grc-agent-suite.md`](it-grc-agent-suite.md),
 [`sales-gtm-agent-suite.md`](sales-gtm-agent-suite.md), and
 [`../enterprise/architecture.md`](../enterprise/architecture.md). Indexed in
-[`agent-suites-overview.md`](agent-suites-overview.md). ~46 agents (41 base + 5 council-added) across eight towers.
+[`agent-suites-overview.md`](agent-suites-overview.md). ~46 agents (41 base + 5 added after review) across eight towers.
 
 > **What makes HR the most sensitive domain of all.** These agents make decisions
 > *about people*, using the company's **most protected data** (comp, health, performance,
@@ -32,7 +33,7 @@ money"):
 ## Contents
 
 1. [What's already shipped — the reuse map](#1-whats-already-shipped--the-reuse-map)
-2. [How an HR agent maps onto Lightwork](#2-how-an-hr-agent-maps-onto-maverick)
+2. [How an HR agent maps onto Lightwork](#2-how-an-hr-agent-maps-onto-lightwork)
 3. [The control model (cross-cutting)](#3-the-control-model-cross-cutting)
 4. [Per-client customization — the dials](#4-per-client-customization--the-dials)
 5. [The roster — eight towers](#5-the-roster--eight-towers)
@@ -657,9 +658,9 @@ authoring = "manual"
 
 ---
 
-### Council-added agents (from the adversarial review)
+### Additional agents
 
-Five seats the council flagged (Checkr/HireRight had no home; HRIS-admin vs records was
+Five seats added after review (Checkr/HireRight had no home; HRIS-admin vs records was
 conflated). Full skills in [`agent-skills-catalog.md`](agent-skills-catalog.md).
 
 - **Background-Check / FCRA Adverse-Action Agent** *(Tower 1/2)* — Checkr / HireRight `‹build›`; FCRA pre-adverse/adverse-action, ban-the-box/fair-chance timing, EEOC arrest-vs-conviction, disputes. **Status: Gap.**
@@ -731,7 +732,7 @@ Each becomes a `run_assessment` capability + a conversational assessor via the e
 
 ## 9. Integrations catalog
 
-Per CLAUDE.md rules 5 & 6, every connector ships a config knob + wizard toggle.
+Per kernel rules 5 & 6, every connector ships a config knob + wizard toggle.
 
 | System class | Vendors | Status | Used by |
 |---|---|---|---|

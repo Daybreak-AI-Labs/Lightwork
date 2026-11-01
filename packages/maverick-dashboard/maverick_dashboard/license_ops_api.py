@@ -57,7 +57,7 @@ _UNUSABLE_KEY = ("The signing key set up on this server cannot be used. Ask whoe
 _REPLACE_REFUSAL = "A license is already installed. Confirm that you want to replace it."
 _NOT_A_LICENSE = "That file is not a Lightwork license, so nothing was installed."
 _UNTRUSTED_WARNING = (
-    "This server does not trust the key that signed this license yet, so its paid features stay "
+    "This server does not trust the key that signed this license yet, so the features it grants stay "
     "off here until whoever runs your server adds the key's public key to the trusted license keys.")
 _VERIFY_REFUSALS = {
     "malformed": _NOT_A_LICENSE,
@@ -70,7 +70,7 @@ _VERIFY_REFUSALS = {
 _CHECK_SENTENCES = {
     "licensed": "This license checks out and is in date.",
     "grace": "This license checks out but has ended. It keeps working for a short time.",
-    "expired": "This license checks out but has ended, so its paid features would stay off.",
+    "expired": "This license checks out but has ended, so the features it grants would stay off.",
 }
 
 
@@ -165,7 +165,7 @@ def _current(doc: dict | None) -> dict[str, Any]:
 
 
 def _suite_choices(extra: list[str] | tuple[str, ...] = ()) -> list[dict[str, Any]]:
-    """Paid add-on suites first, then every business suite, from the kernel's
+    """Gated add-on suites first, then every business suite, from the kernel's
     own registries (so the list is always the real one)."""
     from maverick.departments import department_title
     from maverick.domain import SUITE_PREFIXES
@@ -307,7 +307,7 @@ def _terms(body: LicenseTerms) -> dict[str, Any]:
         raise HTTPException(422, "Choose an edition from the list.")
     for name in (*body.suites, *body.features):
         if not _NAME.match(name):
-            raise HTTPException(422, "Choose suites and paid features from the lists.")
+            raise HTTPException(422, "Choose suites and features from the lists.")
     return {
         "customer": customer, "tier": body.tier, "edition": body.edition,
         "suites": list(dict.fromkeys(body.suites)), "features": list(dict.fromkeys(body.features)),

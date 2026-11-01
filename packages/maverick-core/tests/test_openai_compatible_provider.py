@@ -98,7 +98,7 @@ def test_missing_base_url_raises(fake_openai):
 
 
 def test_keyless_local_endpoint_gets_a_placeholder_key(fake_openai, monkeypatch):
-    """W1-8: the module's own docstring names LM Studio / llama.cpp -- both
+    """The module's own docstring names LM Studio / llama.cpp -- both
     genuinely key-less local servers -- as headline use cases, but a
     loopback base_url with no configured key used to hit the base client's
     hard "no key" refusal. A loopback/private-network endpoint must

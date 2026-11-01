@@ -1,14 +1,7 @@
 """The reachability ledger, and the docs claim it protects.
 
-Two defect classes shared one root cause: nobody could answer "does production
-reach this?", so everyone guessed, and the guesses went both ways. A strategy
-review cited ``sigstore_signing.py`` as shipped capability (roadmap-tagged, no
-production importer) and in the same pass skipped ``erasure_verify.py`` as
-unbuilt (also roadmap-tagged, but it backs a shipping CLI command).
-
-The ``roadmap: 20XX HN`` header was the only available signal and it is
-useless: 232 modules carry one and most ARE reachable. A tag that is wrong in
-both directions is worse than no tag, because it reads as evidence.
+The reachability ledger answers "does production reach this module?" from the
+import graph, so docs and reviews do not have to infer it from comments.
 """
 
 from __future__ import annotations
@@ -76,8 +69,8 @@ def test_lazy_runtime_imports_are_declared_reachable(table) -> None:
 def test_the_two_modules_that_misled_a_review_classify_correctly(table) -> None:
     """The concrete case this ledger exists to prevent.
 
-    Both carry a roadmap tag. One is genuinely unreachable from production and
-    one backs a shipping command -- and the tag does not distinguish them.
+    One is genuinely unreachable from production and one backs a shipping
+    command; the ledger must classify both.
     """
     # erasure_verify backs `maverick erase-verify`.
     assert table.get("maverick.erasure_verify") in {"PRODUCTION", "CLI_ONLY"}, (

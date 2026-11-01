@@ -1,4 +1,4 @@
-"""TUI mouse mode (roadmap: 2027 H2 UX).
+"""TUI mouse mode.
 
 The `maverick monitor` plan-tree is keyboard/auto-refresh only. Mouse mode
 makes the plan tree **clickable**: enable SGR mouse tracking, map a click at

@@ -1,27 +1,31 @@
-# World-model index audit (Q1 2026)
+# World-model indexes
 
-Records the `EXPLAIN QUERY PLAN` results for the world model's hot
-queries and the indices added to cover them. Bumped the schema
-version to v8 in this audit; existing databases auto-migrate on next
-open.
+The SQLite world model indexes the queries that run on every agent turn,
+monitor refresh or recall lookup, where a full table scan is felt immediately
+on a database that has accumulated goals. Schema version 8 (`MIGRATIONS[8]` in
+`packages/maverick-core/maverick/world_model.py`) added the four compound
+indexes below; existing databases pick them up on next open.
 
-## Hot queries
+## Indexes for the hot queries
 
-The queries below run on every agent turn (or every monitor refresh,
-or every recall lookup) so any full-scan is felt immediately on
-databases that accumulate goals.
+| Index | Columns | Read paths it serves |
+|-------|---------|----------------------|
+| `idx_episodes_goal_started` | `episodes(goal_id, started_at DESC)` | `WorldModel.list_episodes(goal_id=...)` |
+| `idx_episodes_started` | `episodes(started_at DESC)` | `WorldModel.list_episodes()` |
+| `idx_goals_status_updated` | `goals(status, updated_at DESC)` | Active-goal lookup (`WorldModel.inflight_goal`, used by `monitor._resolve_active_goal`) and recall candidates (`WorldModel.candidate_goals`, used by `tools/recall.py`) |
+| `idx_goals_parent` | `goals(parent_id, created_at)` | `WorldModel.subgoals` (used by `monitor._fetch_subgoals`) |
 
-| # | Query | Source | Before audit | After (with v8 indices) |
-|---|-------|--------|--------------|--------------------------|
-| 1 | `SELECT … FROM episodes WHERE goal_id=? ORDER BY started_at DESC LIMIT ?` | `WorldModel.list_episodes(goal_id=...)` | SCAN episodes + sort | SEARCH episodes USING INDEX `idx_episodes_goal_started` |
-| 2 | `SELECT … FROM episodes ORDER BY started_at DESC LIMIT ?` | `WorldModel.list_episodes()` | SCAN episodes + sort | SEARCH episodes USING INDEX `idx_episodes_started` (DESC) |
-| 3 | `SELECT … FROM goals WHERE status IN (...) ORDER BY updated_at DESC LIMIT 1` | `monitor._resolve_active_goal` | SCAN goals + filter + sort | SEARCH goals USING INDEX `idx_goals_status_updated` |
-| 4 | `SELECT … FROM goals WHERE status IN ('succeeded','done','failed') … ORDER BY updated_at DESC LIMIT 500` | `cross_goal_memory.recall._list_candidate_goals` | SCAN goals + sort | SEARCH goals USING INDEX `idx_goals_status_updated` |
-| 5 | `SELECT … FROM goals WHERE parent_id=? ORDER BY created_at ASC LIMIT 50` | `monitor._fetch_subgoals` | SCAN goals + sort | SEARCH goals USING INDEX `idx_goals_parent` |
+When these indexes were added, `EXPLAIN QUERY PLAN` against a synthetic
+database with 50k goals, 100k episodes and 1M goal_events showed each of these
+queries moving from a full scan plus sort to an index search. The
+episodes-by-goal and recall-candidate queries went from 200–400 ms cold
+(30–80 ms warm) to sub-millisecond. SQLite chooses a plan from the schema, the
+data and its statistics, so check the plan on your own database (below) rather
+than assuming it.
 
-## Pre-existing indices (kept)
+## Other indexes
 
-These were added in earlier waves and remain useful:
+Earlier schema versions added these, and they remain in use:
 
 - `idx_goals_status         ON goals(status)`
 - `idx_goals_updated_at     ON goals(updated_at)`
@@ -32,52 +36,44 @@ These were added in earlier waves and remain useful:
 - `idx_turns_conv_id        ON turns(conversation_id, id)`
 - `idx_attachments_goal_id  ON attachments(goal_id)`
 
-Note that `idx_goals_status` and `idx_goals_updated_at` separately
-covered partial queries; the new compound `idx_goals_status_updated`
-covers the common pattern (filter by status, sort by updated_at) in
-a single seek + range scan. SQLite's planner picks it when both
-columns are referenced; the single-column indices are kept for the
-rare query that uses just one.
+`idx_goals_status` and `idx_goals_updated_at` each cover part of the common
+pattern of filtering by status and sorting by `updated_at`; the compound
+`idx_goals_status_updated` covers both in a single seek and range scan when the
+planner chooses it. The single-column indexes remain for queries that use just
+one of the columns. `WHERE goal_id = ? AND id > ?` lookups on `goal_events` are
+already served by `idx_goal_events_goal_id_id`.
 
-## How we verified
+## Checking a query plan
 
-Hand-ran `EXPLAIN QUERY PLAN` on each query against a synthetic
-database with 50k goals + 100k episodes + 1M goal_events. Before the
-audit, queries 1 and 4 took 200-400ms cold and 30-80ms warm; after,
-each is sub-millisecond.
+Run `EXPLAIN QUERY PLAN` against a copy of your world database. Opening it with
+`WorldModel` applies any pending migrations to the copy first.
 
-Reproducing:
-
-```bash
-python -c "
+```python
+import sys
 from maverick.world_model import WorldModel
-import sqlite3, tempfile, os
-with tempfile.NamedTemporaryFile(suffix='.db') as f:
-    w = WorldModel(f.name)
-    # populate ...
-    for q in [
-        'SELECT * FROM episodes WHERE goal_id=? ORDER BY started_at DESC LIMIT 10',
-        # ... other hot queries
-    ]:
-        print(q)
-        for row in w.conn.execute('EXPLAIN QUERY PLAN ' + q, (1,)):
-            print('  ', dict(row))
-"
+
+w = WorldModel(sys.argv[1])  # path to a copy of your world database
+queries = [
+    ("SELECT id FROM episodes WHERE goal_id = ? ORDER BY started_at DESC LIMIT 10", (1,)),
+    ("SELECT id FROM goals WHERE parent_id = ? ORDER BY created_at ASC LIMIT 50", (1,)),
+]
+for sql, params in queries:
+    print(sql)
+    for row in w.conn.execute("EXPLAIN QUERY PLAN " + sql, params):
+        print("  ", row["detail"])
 ```
 
 ## Migration safety
 
-The migration is additive (only new indices). SQLite's
-`CREATE INDEX IF NOT EXISTS` is idempotent — a partially-applied
-migration retries cleanly on next open. Indices are built lazily on
-first query, so the migration itself completes in milliseconds even
-on a multi-GB database.
+The version 8 migration only adds indexes, and `CREATE INDEX IF NOT EXISTS` is
+idempotent, so a partially applied migration completes cleanly on the next
+open. SQLite builds each index when the statement runs, so the first open after
+upgrading a large database takes longer while the indexes are built.
 
-## Next steps (out of scope for this audit)
+## Related
 
-- Partitioning the `goal_events` table by `goal_id` range (Q3 2026
-  performance roadmap item).
-- Adding a covering composite for `WHERE goal_id=? AND id > ?` lookups
-  on `goal_events` — current `idx_goal_events_goal_id_id` is already
-  optimal; verified.
-- Tiered storage (hot SQLite + cold parquet) — Q1 2027 perf item.
+- Old `episodes` and `goal_events` rows can be moved out of SQLite into cold
+  parquet or gzip JSONL files with `maverick/tiered_storage.py`. Archiving is
+  off by default and never runs on its own; it needs `[world_model] cold_dir`
+  and `archive_after_days`.
+- Partitioning the `goal_events` table by `goal_id` range is not implemented.

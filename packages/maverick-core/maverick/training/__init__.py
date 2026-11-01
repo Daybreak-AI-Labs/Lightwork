@@ -1,8 +1,7 @@
 """Governed training and specialist-model improvement for Lightwork.
 
-Karpathy: "the only piece that earns ML complexity" is the
-trajectory donation flywheel + a learned what-to-keep gate +
-process-reward training. This package is where that work lands.
+The only piece that earns ML complexity is the trajectory donation
+flywheel + a learned what-to-keep gate + process-reward training. This package is where that work lands.
 
 Layout:
 

@@ -1,4 +1,4 @@
-"""Voice safety pass (roadmap: 2027 H1 safety).
+"""Voice safety pass.
 
 Two checks specific to the voice pipeline, layered on the floors that already
 exist for text:

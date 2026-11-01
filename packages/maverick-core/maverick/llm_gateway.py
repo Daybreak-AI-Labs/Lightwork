@@ -1,8 +1,7 @@
 """A governed pass-through LLM gateway for agents that never enroll.
 
-The estate-coverage fork every guardian-agent buyer asks about: agents built
-anywhere point their OpenAI-compatible base URL at Lightwork instead of the
-provider, and every call crosses a governed checkpoint — its own bearer, a
+This covers agents that are not enrolled: agents built anywhere point their
+OpenAI-compatible base URL at Lightwork instead of the provider, and every call crosses a governed checkpoint — its own bearer, a
 model allowlist, bounded bodies, the platform's SSRF-pinned and
 enterprise-egress-guarded upstream path — while a caller ledger turns
 unknown traffic into shadow-AI discovery. Bodies are never stored: the

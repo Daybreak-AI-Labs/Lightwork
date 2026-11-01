@@ -1,4 +1,4 @@
-"""Multi-tenant isolation tests (roadmap: 2028 H1 safety).
+"""Multi-tenant isolation tests.
 
 The tenancy story is only as good as its walls. These tests prove, across the
 primitives that actually carry tenant data, that one tenant cannot read,

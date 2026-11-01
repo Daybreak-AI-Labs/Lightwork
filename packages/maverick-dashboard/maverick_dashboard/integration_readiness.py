@@ -1188,7 +1188,8 @@ async def test_mcp(name: str, server_config: dict[str, Any]) -> dict[str, Any]:
 
 
 def plugin_readiness(row: dict[str, Any]) -> dict[str, Any]:
-    """Map QA-024 import truth into the common integration contract."""
+    """Map the plugin import check (policy admission plus a real import) into the
+    common integration contract."""
     configured = bool(row.get("configured"))
     allowed = bool(row.get("allowed")) if configured else None
     state = str(row.get("state") or "")

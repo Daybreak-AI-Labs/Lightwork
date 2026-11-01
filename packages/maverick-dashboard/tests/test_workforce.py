@@ -264,7 +264,7 @@ def test_workforce_explains_missing_department_charter_without_overclaiming(monk
     assert "connectors wired" not in r.text
 
 
-# --- deploy a department as a fleet (paid add-on) ---
+# --- deploy a department as a fleet (plan-gated add-on) ---
 
 def test_departments_list_reports_entitlement():
     rows = client.get("/api/v1/departments").json()

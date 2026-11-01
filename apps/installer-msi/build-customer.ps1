@@ -1,5 +1,5 @@
-# Full Windows customer package. Run on a Windows build host, never on the
-# customer's computer. The engineering build.ps1 remains a separate artifact.
+# Full Windows desktop package. Run on a Windows build host, never on the
+# user's computer. The engineering build.ps1 remains a separate artifact.
 param(
     [Parameter(Mandatory = $true)][string]$Runtime,
     [Parameter(Mandatory = $true)][string]$PublicKeyFile,
@@ -32,4 +32,4 @@ try {
     & node $cli build --verbose --target x86_64-pc-windows-msvc --config $config --bundles msi --features customer-runtime -- --locked
     if ($LASTEXITCODE -ne 0) { throw 'Customer desktop packaging failed.' }
 } finally { Pop-Location }
-Write-Host 'Built the complete customer candidate. Publisher signing and Windows acceptance must pass before distribution.'
+Write-Host 'Built the complete release candidate. Publisher signing and Windows acceptance must pass before distribution.'

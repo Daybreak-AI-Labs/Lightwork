@@ -1,4 +1,4 @@
-"""Cold-start guard for the CLI (roadmap: 2027 H2 — <300ms `--help`).
+"""Cold-start guard for the CLI.
 
 `maverick --help` must stay fast: the win is that importing the CLI defers
 every heavy/optional dependency (httpx, the provider SDKs, vector stores,

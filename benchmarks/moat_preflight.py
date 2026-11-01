@@ -133,10 +133,10 @@ def preflight(codebase: str | Path = DEFAULT_CODEBASE) -> list[tuple[str, bool, 
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Moat run pre-flight (no API, no spend)")
+    ap = argparse.ArgumentParser(description="Warm-vs-cold run pre-flight (no API, no spend)")
     ap.add_argument("--codebase", default=DEFAULT_CODEBASE)
     args = ap.parse_args(argv)
-    print("Moat pre-flight (free / no API):")
+    print("Warm-vs-cold run pre-flight (free / no API):")
     all_ok = True
     for name, ok, detail in preflight(args.codebase):
         print(f"  [{'PASS' if ok else 'FAIL'}] {name}: {detail}")

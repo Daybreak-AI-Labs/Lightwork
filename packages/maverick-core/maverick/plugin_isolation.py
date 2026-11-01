@@ -1,4 +1,4 @@
-"""Plugin sandboxing via subinterpreters (roadmap: 2027 H1 ecosystem).
+"""Plugin sandboxing via subinterpreters.
 
 Third-party plugin code currently runs in the host interpreter: a leaky or
 crashing plugin tool corrupts module state, and a hostile one reads whatever

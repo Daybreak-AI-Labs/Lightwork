@@ -1,4 +1,4 @@
-"""Wave 3 council fixes: AI-safety + privacy + UX."""
+"""AI-safety, privacy and UX fixes."""
 from __future__ import annotations
 
 import pytest
@@ -127,7 +127,7 @@ class TestSwarmFanoutCap:
         # Blackboard should have an error post noting the cap fired.
         errs = ctx.blackboard.by_kind("error")
         assert any("fan-out capped" in e.content for e in errs)
-        # W1-29: the blackboard post alone isn't enough -- it's only ever
+        # The blackboard post alone isn't enough -- it's only ever
         # rendered into the orchestrator's FIRST user turn (agent.py's
         # `bb.render(40)`), so it never reaches the model again. The TOOL
         # RESULT itself (re-sent on every later turn) must say the same 7

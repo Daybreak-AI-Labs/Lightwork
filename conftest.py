@@ -50,6 +50,22 @@ os.environ.setdefault("MAVERICK_SECURE_DEFAULT", "0")
 # set this env themselves (against a mocked model download transport).
 os.environ.setdefault("MAVERICK_VOICE_AUTO_FETCH", "0")
 
+# Provider credentials and endpoints inherited from the host make the kernel
+# report "a provider is configured": ``config.any_provider_configured`` reads
+# every name in PROVIDER_CREDENTIAL_ENV_VARS and PROVIDER_BASE_URL_ENV_VARS. A
+# host whose agent proxy set ANTHROPIC_BASE_URL (and no key) failed the six
+# doctor / healthz / settings tests that assume a fresh install, because those
+# tests unset only the API-key names. Drop the host's values once, here, before
+# any collection import; a test that needs a provider sets its own with
+# monkeypatch afterward. test_provider_env_isolation.py pins the list against
+# the config tuples so a new provider variable cannot slip past it.
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+from test_support.provider_env import scrub_host_provider_env  # noqa: E402
+
+scrub_host_provider_env(os.environ)
+
 
 def pytest_addoption(parser):
     parser.addoption(

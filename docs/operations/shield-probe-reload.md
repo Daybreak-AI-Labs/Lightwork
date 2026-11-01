@@ -39,4 +39,4 @@ concurrent readers, tenant isolation and the shipped fixed red-team corpus's
 monotonic score/flag floor across reloads. That corpus is a known regression
 corpus, not an independent held-out measurement of a newly trained classifier.
 Operators still need their own held-out quality evaluation before deploying
-new weights; this refactor does not authorize or perform model training.
+new weights; reloading does not authorize or perform model training.

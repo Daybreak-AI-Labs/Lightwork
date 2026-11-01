@@ -1,5 +1,4 @@
-"""Audio understanding — zero-shot NON-SPEECH classification (roadmap: 2027 H1
-capabilities, "Audio understanding (non-speech CLAP)").
+"""Audio understanding — zero-shot NON-SPEECH classification.
 
 Whisper hears words; this hears *sounds*. A CLAP model (contrastive
 language-audio pretraining) embeds audio and free-text labels into the same

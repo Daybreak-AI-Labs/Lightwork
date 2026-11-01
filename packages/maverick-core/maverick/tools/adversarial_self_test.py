@@ -1,4 +1,4 @@
-"""Adversarial self-test tool (roadmap: 2028 H2 — "adversarial self-test").
+"""Adversarial self-test tool.
 
 Lets an agent red-team itself, deterministically and offline:
 

@@ -114,7 +114,7 @@ def test_regulated_profile_passes_seals_data_and_is_compliant(monkeypatch, tmp_p
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
     monkeypatch.setenv("MAVERICK_ANON", "1")
-    # Enterprise mode requires the audit signing key to live OFF-HOST (council H5:
+    # Enterprise mode requires the audit signing key to live OFF-HOST (because
     # a same-host on-disk key lets a local root rewrite + re-sign history). A
     # regulated deployment injects a KMS / secrets-manager-sourced key, held in
     # memory only -- model that here so the audit-chain guarantee can sign.

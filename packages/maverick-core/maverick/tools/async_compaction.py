@@ -1,4 +1,4 @@
-"""Async compaction scheduler (roadmap: 2027 H1 — async history compaction).
+"""Async compaction scheduler.
 
 Decide which history segments to compact *now* to fit a token budget without
 blocking the agent loop. The caller supplies the segments and a budget; this

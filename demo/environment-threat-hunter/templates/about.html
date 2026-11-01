@@ -7,7 +7,7 @@
 <section class="hero">
   <h1>{{ caps.mode }}</h1>
   <p><strong>Analysis backend:</strong> <code>{{ caps.analysis_backend }}</code>. {% if caps.forced_standalone %}<code>ENV_HUNTER_STANDALONE=1</code> forced the vendored engine and prevented all <code>maverick</code> imports.{% elif caps.core_analysis %}Auto mode found and reuses Lightwork core analysis adapters only.{% else %}Auto mode did not find the core library, so the vendored ingestion and detection engine is active.{% endif %}</p>
-  <p><strong>Governance authority:</strong> unsigned local only. This web SKU is proposal-only: it has no delivery endpoint or local approval assertion, even when it reuses the Lightwork core library. Finding core analysis does not enable integrated governance. Use <code>/security/soc</code> for governed approval and execution.</p>
+  <p><strong>Governance authority:</strong> unsigned local only. This standalone web app is proposal-only: it has no delivery endpoint or local approval assertion, even when it reuses the Lightwork core library. Finding core analysis does not enable integrated governance. Use <code>/security/soc</code> for governed approval and execution.</p>
 </section>
 <section class="card" aria-labelledby="capability-matrix-heading">
   <h2 id="capability-matrix-heading">Capability and authority matrix</h2>

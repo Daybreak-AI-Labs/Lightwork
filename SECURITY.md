@@ -2,20 +2,22 @@
 
 Lightwork is an AI agent that executes shell commands, reads files, and
 calls external APIs. Vulnerabilities here can affect any host running it.
-We take that seriously.
+This policy explains how to report a vulnerability and how reports are
+handled.
 
 ## Reporting
 
-**Do not file public GitHub issues for vulnerabilities.** Use one of:
+**Do not file public GitHub issues for vulnerabilities.** Report privately:
 
-1. **GitHub Security Advisories** (preferred):
-   https://github.com/Daybreak-AI-Labs/Lightwork/security/advisories/new
-2. **Email**: `security@` the project's domain (or the maintainer's
-   public email on their GitHub profile if no domain is set up).
+1. **GitHub private vulnerability reporting** (preferred): open the
+   repository's **Security** tab and choose **Report a vulnerability**, or go
+   directly to
+   https://github.com/Daybreak-AI-Labs/Lightwork/security/advisories/new.
+2. **Email**, if you cannot use GitHub: chris@daybreakailabs.com.
 
 Include:
 
-- Affected version (`maverick version` output)
+- Affected version (`lightwork version` output, or the commit you tested)
 - Reproduction steps
 - Impact assessment (what an attacker can achieve)
 - Proposed fix, if you have one
@@ -25,15 +27,16 @@ Include:
 We follow a **90-day coordinated disclosure window** from initial report.
 For unpatched critical issues we may extend by mutual agreement.
 
-Public disclosure (advisory + CVE) happens after a patched release is
-available. We credit reporters in the advisory unless they prefer to
-stay anonymous.
+Public disclosure (advisory, and a CVE where one is assigned) happens after a
+fix is available. We credit reporters in the advisory unless they prefer to
+stay anonymous. Disclosed issues are also recorded in the
+[disclosure log](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/DISCLOSURES.md).
 
 ## Supported versions
 
-No release has been published yet. The latest git tag is `v0.1.6`. The
-packages on `main` are at `0.1.7` (see `release-cohort.toml`), which is
-unreleased, and security fixes are made on `main`.
+No release is currently published. The packages on `main` are at version
+`0.1.7` (see `release-cohort.toml`), which is unreleased, and security fixes
+are made on `main`.
 
 Once releases are published, only the latest minor release receives
 security fixes. Older releases are not patched. This table will list
@@ -41,8 +44,7 @@ each supported release when the first one is published.
 
 | Version | Supported |
 |---------|-----------|
-| `main` (0.1.7, unreleased) | Development line; no published release yet |
-| `v0.1.6` (latest tag) | Tag only; not a published release |
+| `main` (0.1.7, unreleased) | Yes: development line; fixes land here |
 
 ## Threat model
 
@@ -66,33 +68,31 @@ In scope:
 - Path traversal in attachments, skills, or world.db paths.
 - DoS on the local FastAPI dashboard.
 
-## Vulnerability reward program
+## Severity and response targets
 
-Reports in scope (above) qualify for recognition and rewards.
+Maintainers rate each in-scope report against this rubric. The response and
+fix times are targets the maintainers aim for, not contractual guarantees.
 
-**Severity rubric** (drives triage SLA + reward tier):
-
-| Tier | Examples (from the threat model) | First response | Fix target |
+| Severity | Examples (from the threat model) | First response | Fix target |
 |---|---|---|---|
 | Critical | sandbox escape to host; secret exfiltration without user action; auth bypass on the dashboard/API | 24 h | 7 days |
 | High | shield bypass chains achieving unauthorized tool effects; webhook signature bypass; cross-tenant data access | 48 h | 14 days |
 | Medium | path traversal contained by a second control; DoS on local services; capability-check gaps | 5 days | 30 days |
 | Low | hardening gaps, missing defense-in-depth, doc-level issues | 10 days | next minor |
 
-**Rewards.** Monetary reward amounts per tier are published on the
-[security advisories page](https://github.com/Daybreak-AI-Labs/Lightwork/security/advisories)
-and may change between program cycles; every valid report receives credit in
-the advisory (unless anonymity is requested) and a hall-of-fame entry below.
-Duplicates go to the first reporter; severity is judged by maintainers
-against the rubric, with reasoning shared in the advisory thread.
+**Recognition.** Every valid report receives credit in the advisory (unless
+anonymity is requested) and an entry in the list below. The project does not
+run a paid bug bounty. Duplicates are credited to the first reporter; the
+maintainers judge severity against the rubric and explain their reasoning in
+the advisory thread.
 
 **Safe harbor.** Good-faith research within this scope — using your own
 instance, no access to others' data, no service degradation of systems you
 don't own, no social engineering — will not be met with legal action. Testing
 against someone else's deployment is out of scope and out of safe harbor.
 
-**Hall of fame.** Researchers credited in published advisories are listed
-here (none yet — be the first).
+**Credited researchers.** Researchers credited in published advisories are
+listed here. None yet.
 
 ## Hardening tips
 
@@ -107,9 +107,9 @@ here (none yet — be the first).
 - Rotate `ANTHROPIC_API_KEY` etc. on a schedule. Lightwork reads from
   `~/.maverick/.env` (chmod 600).
 
-## Execution posture (read this first)
+## Execution posture
 
-The single most important thing to understand about Lightwork's security:
+The most important thing to understand about Lightwork's security:
 
 > **By default, the agent executes model-generated shell commands. With the
 > default `local` sandbox backend, those commands run directly on the host,
@@ -133,7 +133,7 @@ chooses the blast radius**. Defense in depth, from outermost to innermost:
 2. **Agent Shield** (`maverick-shield`) — screens prompts, tool calls, and
    output. Optional and fail-open by design, so it is a *floor*, not a
    guarantee. Treat it as one layer, never the only one.
-3. **Tool ACL + budget + killswitch** — `[tool_acl] denied_tools`, the
+3. **Tool ACL + budget + killswitch** — `[security] denied_tools`, the
    `Budget` cap, and `~/.maverick/HALT` bound what a run can do and spend.
 
 The consumer wizard (`maverick init`, "consumer" mode) fails closed: when no

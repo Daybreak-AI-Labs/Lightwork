@@ -1,4 +1,4 @@
-"""Quorum approval for config changes (roadmap: 2028 H1 safety).
+"""Quorum approval for config changes.
 
 The two-person rule already exists for *actions*
 (:mod:`maverick.tools.two_person_rule` validates collected sign-offs on an

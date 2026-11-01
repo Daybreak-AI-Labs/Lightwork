@@ -1,4 +1,4 @@
-"""Synthetic data generator tool (roadmap: 2028 H2 capabilities).
+"""Synthetic data generator tool.
 
 Generate deterministic synthetic rows from a compact field spec — for seeding
 tests, demos, and fixtures without touching real (or sensitive) data. Seeded so

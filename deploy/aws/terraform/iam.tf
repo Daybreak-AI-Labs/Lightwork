@@ -58,7 +58,7 @@ resource "aws_iam_role" "task" {
 
 # The app sends platform email (invite links) through the Amazon SES API using
 # this task role — no stored SMTP credential. Send-only; the verified identity
-# (daybreakailabs.com) is enforced by SES itself.
+# (the SES identity you verified for your domain) is enforced by SES itself.
 data "aws_iam_policy_document" "task_ses" {
   statement {
     sid       = "SESSend"

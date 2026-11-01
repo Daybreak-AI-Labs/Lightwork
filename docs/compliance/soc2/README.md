@@ -1,12 +1,13 @@
 # SOC 2 Readiness & Control Turn-On Guide
 
-This is the SOC 2 workstream entry point. The detailed control mapping lives in
+This guide is for organizations that run Lightwork inside a SOC 2-scoped
+system. The detailed control mapping lives in
 [`../soc2-controls.md`](../soc2-controls.md); this document covers **readiness
 posture**, the **Type I → Type II path**, and the **control turn-on guide** that
 a compliant deployment must follow.
 
-> SOC 1 is out of scope — Lightwork is not a financial-reporting system for
-> customers (no ICFR relevance). See the program [README](../README.md).
+> SOC 1 is out of scope — Lightwork is not a system of record for financial
+> reporting (no ICFR relevance). See the [compliance documentation index](../README.md).
 
 ## 1. Type I vs Type II
 
@@ -15,9 +16,10 @@ a compliant deployment must follow.
 | **SOC 2 Type I** | Controls are suitably *designed* at a point in time | ~4–8 weeks once policies + process docs exist |
 | **SOC 2 Type II** | Controls *operated effectively* over a window (typically 3–6+ months of evidence) | Type I + the observation window |
 
-Enterprise buyers generally require **Type II**. The practical sequence is:
-approve policies → close Process gaps → enable opt-in controls → **Type I** →
-run the observation window collecting evidence → **Type II**.
+Most organizations that ask for a SOC 2 report require **Type II**. The
+practical sequence is: approve policies → put the Process controls in place →
+enable opt-in controls → **Type I** → run the observation window collecting
+evidence → **Type II**.
 
 ## 2. Trust Services Categories in scope
 
@@ -27,27 +29,33 @@ run the observation window collecting evidence → **Type II**.
 - **Confidentiality (C)** — tenant isolation, encryption at rest, redaction.
 - **Privacy (P)** — DSAR, erasure, retention, Art.50 disclosure.
 
-The Organization decides which optional categories (A/PI/C/P) to include in the
+The deploying organization decides which optional categories (A/PI/C/P) to include in the
 report scope; all five are substantially supported.
 
 ## 3. Control turn-on guide (REQUIRED for a compliant deployment)
 
-Several strong controls ship **off-by-default** so single-tenant local use is
-unchanged. For a SOC 2 (and ISO 27001) deployment they must be **enabled and
-shown enabled** in the evidence snapshot. This is configuration, not new code.
+Capability enforcement, tenant isolation, usage quotas and OIDC ship
+**off-by-default** so single-tenant local use is unchanged; encryption at rest
+and audit signing are on by default unless disabled. For a SOC 2 (and ISO 27001)
+deployment all of them must be **enabled and shown enabled** in the evidence
+snapshot. This is configuration, not new code.
 
 | Control | Enable via | Evidence key (`collect_soc2_evidence()`) | Target |
 | --- | --- | --- | --- |
-| Capability enforcement | `[capability]` / deployment profile | `controls.capability_enforcement` | `enabled` |
-| Tenant isolation | enterprise/multi-tenant config | `controls.tenant_isolation` | `enabled` |
-| Usage quotas | `[quotas]` enforcement | `controls.usage_quotas` | `enabled` |
-| OIDC authentication | `[auth]` OIDC config | `controls.oidc_auth` | `enabled` |
-| Encryption at rest | `[crypto]` / `MAVERICK_ENCRYPTION_KEY` | `controls.encryption_at_rest` | `enabled` |
-| Audit signing | `[audit] sign = true` / `MAVERICK_AUDIT_SIGN=1` | `audit_log` | `ok` (not `unsigned`) |
+| Capability enforcement | `[capabilities] enforce = true` / `MAVERICK_ENFORCE_CAPABILITIES=1` | `controls.capability_enforcement` | `enabled` |
+| Tenant isolation | `[tenancy] by_user = true` / `MAVERICK_TENANT_BY_USER=1` | `controls.tenant_isolation` | `enabled` |
+| Usage quotas | `[quotas] enforce = true` / `MAVERICK_QUOTA_ENFORCE=1` | `controls.usage_quotas` | `enabled` |
+| OIDC authentication | `[auth.oidc] enabled = true` / `MAVERICK_OIDC_ENABLED=1` | `controls.oidc_auth` | `enabled` |
+| Encryption at rest (on by default) | `[encryption] at_rest = true` / `MAVERICK_ENCRYPT_AT_REST=1` | `controls.encryption_at_rest` | `enabled` |
+| Audit signing (on by default) | `[audit] sign = true` / `MAVERICK_AUDIT_SIGN=1` | `audit_log` | `ok` (not `unsigned`) |
+
+[`../deployment/compliant-config.toml`](../deployment/compliant-config.toml) sets
+all of these in one reference configuration.
 
 The hardened-but-functional defaults live in `maverick/security_defaults.py`;
 the enterprise deployment profile turns these on as a group. See
-`docs/security-hardening.md` and `docs/enterprise/security-overview.md`.
+[`../../security-hardening.md`](../../security-hardening.md) and
+[`../../enterprise/security-overview.md`](../../enterprise/security-overview.md).
 
 ## 4. Verifying posture (evidence collection)
 
@@ -78,13 +86,13 @@ operating evidence.
 
 ### Standing posture gate (CI)
 
-The [`Compliance Posture`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/.github/workflows/compliance-posture.yml)
+The [`Compliance Posture`](../../../.github/workflows/compliance-posture.yml)
 GitHub Actions workflow runs the gate automatically: it applies
 [`compliant-config.toml`](../deployment/compliant-config.toml) and fails unless
 `maverick soc2` is compliant-ready. It runs weekly, on demand
 (`workflow_dispatch`), and on any change to the controls/config that affect
 posture — a **regression gate** so a code change can't silently break the
-ability to pass (it would have caught the off-host-key false-negative). It also
+ability to pass. It also
 uploads each run's `soc2-evidence.json` as an artifact. This workflow is
 `pull_request`-triggered and executes code from the checked-out tree, so keep it
 on GitHub-hosted runners only; do **not** retarget it to a production or other
@@ -94,25 +102,25 @@ from a trusted, protected ref or another trusted deployment automation path.
 
 ## 5. Process controls to operate (NOT code)
 
-A Type II report cannot pass on engineering controls alone. These are owned by
-the Organization. Each now has a **drafted operational procedure** (see the
-[operations index](../procedures/README.md)) — what remains is *operating* it to
-produce evidence over the observation window:
+A Type II report cannot pass on engineering controls alone. The organization
+that deploys Lightwork owns and operates these processes and produces their
+evidence over the observation window:
 
-- Change-management process (CC8) → [PROC-03](../procedures/change-management-procedure.md)
-- Vendor / sub-processor management (CC9.2) → [PROC-07](../procedures/vendor-management-procedure.md) + [REG-01](../registers/subprocessor-register.md)/[REG-04](../registers/vendor-register.md)
-- Incident-response program (CC7.4) → [PROC-01](../procedures/incident-response-runbook.md) + [TPL-01](../templates/incident-report-template.md)
-- HR controls (CC1.4) → [PROC-06](../procedures/hr-security-procedures.md) + [TPL-03](../templates/acceptable-use-policy.md)
-- Risk-assessment program (CC3) → [PROC-04](../procedures/risk-assessment-and-review-procedure.md) + [methodology](../risk-management-methodology.md)/[register](../risk-register.md)
-- Vulnerability management / pen-test cadence (CC7.1) → [PROC-02](../procedures/vulnerability-management-procedure.md) + [REG-02](../registers/remediation-tracker.md)
+- Change-management process (CC8)
+- Vendor / sub-processor management (CC9.2)
+- Incident-response program (CC7.4); the [incident-response guide](../procedures/incident-response-runbook.md)
+  covers Lightwork's containment and forensics controls
+- HR controls (CC1.4)
+- Risk-assessment program (CC3)
+- Vulnerability management / pen-test cadence (CC7.1)
 - Physical/environmental security (CC6/A1) → cloud provider's own SOC 2/ISO report
 
 ## 6. Readiness checklist
 
-- [ ] Policies POL-01…POL-12 approved by Management with effective dates
+- [ ] Security and AI policies approved by management with effective dates
 - [ ] Risk register reviewed and accepted
 - [ ] Opt-in controls enabled; evidence snapshot shows all targets met
-- [ ] Process gaps (§5) operationalized with owners
+- [ ] Process controls (§5) operating, each with an owner
 - [ ] Cloud provider attestations collected (inherited physical/env controls)
 - [ ] Auditor (CPA firm) engaged for Type I
 - [ ] Observation window started for Type II evidence collection

@@ -1,4 +1,4 @@
-"""Per-request tenant pinning (council #6).
+"""Per-request tenant pinning.
 
 The world model's tenant scoping (app-layer predicate + Postgres RLS GUC) only
 engages when a tenant is pinned; no dashboard request pinned one. The
