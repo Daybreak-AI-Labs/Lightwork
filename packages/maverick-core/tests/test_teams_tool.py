@@ -1,4 +1,4 @@
-"""Microsoft Teams tool (ROADMAP 2027 H2)."""
+"""Microsoft Teams tool."""
 from __future__ import annotations
 
 from maverick.tools.teams_tool import _build_card, teams_tool

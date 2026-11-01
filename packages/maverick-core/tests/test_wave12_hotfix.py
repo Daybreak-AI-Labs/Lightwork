@@ -92,7 +92,7 @@ class TestLowCacheWarning:
     defaults Sonnet 4.6 and Opus 4.8), so a small enough system+tools block
     won't actually cache. Operators need to see this in logs.
 
-    W1-4: the table used to put Sonnet 4.6/4.5 and Opus 4.7/4.8 at the 4096
+    The table used to put Sonnet 4.6/4.5 and Opus 4.7/4.8 at the 4096
     minimum too (verified wrong against
     https://platform.claude.com/docs/en/build-with-claude/prompt-caching:
     Opus 4.7 is 2048, the rest are 1024)."""

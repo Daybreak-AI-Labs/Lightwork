@@ -1,4 +1,4 @@
-"""Run health score (ROADMAP 2028 H2)."""
+"""Run health score."""
 from __future__ import annotations
 
 from maverick.health_score import compute_health, render

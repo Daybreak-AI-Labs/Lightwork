@@ -83,30 +83,3 @@ for(const stage of ["fetch","body"])test(`status widget bounds hung ${stage}, re
     assert.equal(f.root.querySelector("#last").textContent,"No finished runs yet.");
   }finally{f.close();}
 });
-async function pitch(fetch) {
-  const dom=new JSDOM('<html><head><meta name="web3forms-access-key" content="synthetic-key"></head><body><a data-demo href="#">Demo</a></body></html>',{url:"https://fixture.invalid/",runScripts:"outside-only"});
-  const w=dom.window;await new Promise(resolve=>w.document.addEventListener("DOMContentLoaded",resolve,{once:true}));
-  w.fetch=fetch;w.eval(read("website/app.js"));const form=w.document.querySelector("#demo-form");
-  for(const name of ["name","email","company","message","botcheck"])Object.defineProperty(form,name,{value:form.elements.namedItem(name),configurable:true});
-  form.elements.namedItem("name").value="Synthetic Name";form.elements.namedItem("email").value="person@example.invalid";
-  return {dom,w,form,button:form.querySelector(".df-submit"),open(){w.document.querySelector("[data-demo]").click();},
-    close(){w.document.querySelector(".modal-close").click();},submit(){form.dispatchEvent(new w.Event("submit",{bubbles:true,cancelable:true}));}};
-}
-test("successful optional demo request can be reopened and submitted again",async()=>{
-  let calls=0;const f=await pitch(async()=>{calls++;return {ok:true,json:async()=>({success:true})};});
-  try {
-    f.open();f.submit();await flush();assert.equal(f.form.hidden,true);f.close();f.open();
-    assert.equal(f.form.hidden,false);assert.equal(f.button.disabled,false);assert.equal(f.button.textContent,"Request a demo");
-    f.submit();await flush();assert.equal(calls,2);
-  }finally{f.dom.window.close();}
-});
-test("late demo completion cannot hide or unlock a newer pending form",async()=>{
-  const first=deferred(),second=deferred();let calls=0;
-  const f=await pitch(async()=>++calls===1?first.promise:second.promise);
-  try {
-    f.open();f.submit();f.submit();assert.equal(calls,1);f.close();f.open();f.submit();assert.equal(calls,2);
-    first.resolve({ok:true,json:async()=>({success:true})});await flush();
-    assert.equal(f.form.hidden,false);assert.equal(f.button.disabled,true);
-    second.resolve({ok:true,json:async()=>({success:true})});await flush();assert.equal(f.form.hidden,true);assert.equal(f.button.disabled,false);
-  }finally{f.dom.window.close();}
-});

@@ -1,4 +1,4 @@
-"""Host-git RCE hardening (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-2/W2-3/W2-4).
+"""Host-git RCE hardening (see maverick/git_safety.py).
 
 A workdir the agent can write to (write_file / SEARCH-REPLACE) or that came
 from cloning an untrusted repo can carry a `.git/config` `core.fsmonitor`

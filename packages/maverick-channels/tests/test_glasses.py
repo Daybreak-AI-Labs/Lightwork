@@ -1,4 +1,4 @@
-"""Glasses/wearable channel — ack-then-run bridge (ROADMAP connector)."""
+"""Glasses/wearable channel — ack-then-run bridge."""
 from __future__ import annotations
 
 import asyncio

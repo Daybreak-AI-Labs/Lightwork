@@ -1,4 +1,4 @@
-"""WebRTC data-channel tool (ROADMAP 2028 H2) — offline, fake-aiortc tests."""
+"""WebRTC data-channel tool — offline, fake-aiortc tests."""
 from __future__ import annotations
 
 import asyncio

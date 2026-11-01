@@ -668,7 +668,7 @@ def test_create_goal_persists_owner_with_tenant(monkeypatch):
         execution_principal="agent:worker",
     ) == 99
     sql, params = cursor.calls[0]
-    # docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-47: domain/project_id joined the
+    # domain/project_id joined the
     # column list (signature parity with the SQLite backend), between
     # execution_principal and tenant_id.
     assert "owner, execution_principal, domain, project_id, tenant_id, connection_selection" in sql

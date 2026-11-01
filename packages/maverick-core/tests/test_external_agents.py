@@ -454,7 +454,7 @@ def test_screen_fails_closed_on_scanner_error_and_shield_block():
                         risk="low", shield=_Boom())
     assert verdict["allowed"] is False and verdict["rule"] == "screen_error"
 
-    # Sept 2026 fix (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-32): use the REAL
+    # Use the REAL
     # ShieldVerdict shape (allowed=False), not a fake `blocked` attribute --
     # the fake previously matched a bug in the caller (it checked
     # `getattr(verdict, "blocked", False)`, which is never a real
@@ -1148,7 +1148,7 @@ def test_caller_supplied_runtime_digest_without_server_recheck_is_denied(
 
 
 def test_execute_denies_when_shield_blocks_the_request(monkeypatch):
-    """docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-32: _screen_execute_request checked
+    """_screen_execute_request checked
     `getattr(verdict, "blocked", False)`, which is never a real ShieldVerdict
     field (only `.allowed` is), so this admission gate could never actually
     deny anything the shield flagged."""
@@ -1165,7 +1165,7 @@ def test_execute_denies_when_shield_blocks_the_request(monkeypatch):
 
 
 def test_record_run_denies_when_shield_blocks_the_payload():
-    """docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-32: _clean_text (used by record_run
+    """_clean_text (used by record_run
     for title/summary/step ingest) had the same never-blocks bug."""
     from maverick_shield.guard import ShieldVerdict
 

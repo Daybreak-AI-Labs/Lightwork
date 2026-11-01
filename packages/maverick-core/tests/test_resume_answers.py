@@ -79,7 +79,7 @@ def test_resume_builds_and_passes_a_sandbox(tmp_path: Path, monkeypatch):
 async def test_durable_resume_threads_answered_question_into_first_call(
     tmp_path: Path, monkeypatch, fake_llm, make_llm_response,
 ):
-    """W1-28: with MAVERICK_DURABLE=1 (as `runner.py`'s background resume
+    """With MAVERICK_DURABLE=1 (as `runner.py`'s background resume
     always uses), `_resume_from_checkpoint` used to replace `messages`
     wholesale with the checkpoint taken right before the goal asked its
     question -- discarding the fresh brief `run_goal` had just rebuilt

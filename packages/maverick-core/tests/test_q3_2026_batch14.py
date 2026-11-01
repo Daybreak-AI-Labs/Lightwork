@@ -257,7 +257,7 @@ def test_bedrock_requires_region(monkeypatch):
 
 
 def test_bedrock_builds_url(monkeypatch):
-    # W1-10: the native Messages endpoint (Claude in Amazon Bedrock), not the
+    # The native Messages endpoint (Claude in Amazon Bedrock), not the
     # OpenAI-compatible one; a bearer token selects api_key auth.
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     monkeypatch.setenv("BEDROCK_API_KEY", "k")

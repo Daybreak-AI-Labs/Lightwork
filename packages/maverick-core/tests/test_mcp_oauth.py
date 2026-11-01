@@ -1,4 +1,4 @@
-"""OAuth 2.1 client-credentials for remote MCP servers (ROADMAP B2)."""
+"""OAuth 2.1 client-credentials for remote MCP servers."""
 from __future__ import annotations
 
 import pytest

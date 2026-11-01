@@ -83,7 +83,7 @@ def test_goal_page_shows_version_history_disclosure(tmp_path, monkeypatch):
 
 
 def test_version_history_loader_checks_status_and_retries(tmp_path, monkeypatch):
-    """W3-75: the history fetch had no r.ok check and no error path that
+    """The history fetch had no r.ok check and no error path that
     cleared the loaded flag, so any non-2xx or network error left
     'Loading…' forever and re-opening never retried."""
     w = _world(tmp_path, monkeypatch)

@@ -200,7 +200,7 @@ class TestAnthropicProviderRobust:
         assert budget.input_tokens == 100
 
     def test_split_cache_creation_ttl_bills_each_tier(self):
-        """W1-6: usage.cache_creation.{ephemeral_5m,ephemeral_1h}_input_tokens
+        """Usage.cache_creation.{ephemeral_5m,ephemeral_1h}_input_tokens
         must be read and passed through so a call that writes both a 1h
         (system/tools) and a 5m (messages) breakpoint bills each tier at its
         own rate, instead of the whole cache_creation_input_tokens total at

@@ -272,12 +272,15 @@ def test_standalone_sku_archives_are_deterministic_and_self_describing(tmp_path)
             assert metadata["pypi_distribution"] is False
             assert metadata["source_revision"] == "0123456789abcdef"
             assert metadata["version"] == "0.1.7"
+            assert metadata["license"] == "Apache-2.0"
             assert next(name for name in names if name.endswith("/LICENSE"))
 
     bom = json.loads((first_dir / "lightwork-standalone-skus-0.1.7.cdx.json").read_text())
     assert bom["bomFormat"] == "CycloneDX"
     assert bom["specVersion"] == "1.6"
-    assert len([item for item in bom["components"] if item["type"] == "application"]) == 4
+    skus = [item for item in bom["components"] if item["type"] == "application"]
+    assert len(skus) == 4
+    assert all(item["licenses"] == [{"license": {"id": "Apache-2.0"}}] for item in skus)
 
     checksum_lines = (first_dir / "lightwork-standalone-skus-0.1.7.sha256").read_text().splitlines()
     assert len(checksum_lines) == 5
@@ -461,7 +464,13 @@ def test_public_python_release_cohort_is_complete_and_lockstep():
         project = metadata["project"]
         assert project["name"] == item["distribution"]
         assert project["version"] == release_version
-        assert project["license"] == "LicenseRef-Proprietary"
+        assert project["license"] == "Apache-2.0"
+        assert project["license-files"] == ["LICENSE", "NOTICE"]
+        # Each distribution ships the repository's own licence and notice.
+        for name in ("LICENSE", "NOTICE"):
+            assert (package_root / name).read_bytes() == (REPO_ROOT / name).read_bytes(), (
+                package_root / name
+            )
         assert project["urls"]["Homepage"] == canonical_homepage
         assert metadata["build-system"]["requires"] == ["setuptools==84.0.0"]
 
@@ -936,9 +945,6 @@ def test_native_source_bootstrap_is_not_advertised_as_a_product_installer():
     deployment = (
         REPO_ROOT / "docs" / "deployment.md"
     ).read_text(encoding="utf-8")
-    press = (
-        REPO_ROOT / "docs" / "press-kit.md"
-    ).read_text(encoding="utf-8")
     features = (
         REPO_ROOT / "docs" / "FEATURES.md"
     ).read_text(encoding="utf-8")
@@ -947,7 +953,8 @@ def test_native_source_bootstrap_is_not_advertised_as_a_product_installer():
     assert "attach-release:" not in desktop
     assert "if-no-files-found: error" in desktop
     assert "without a GitHub login" not in desktop
-    assert "authenticated source-bootstrap" in desktop
+    assert "source-bootstrap shell" in desktop
+    assert "authenticated source-bootstrap" not in desktop
     # Guard the installation boundary, independently of the button's label.
     app_text = " ".join(app.split())
     # The same disclosures, in plain words: it installs from Lightwork's
@@ -964,8 +971,6 @@ def test_native_source_bootstrap_is_not_advertised_as_a_product_installer():
     assert "native installers, GHCR" not in readme
     assert "Tauri-based GUI installer for users" not in deployment
     assert "not attached to product releases" in deployment
-    assert "native double-click installers for Windows" not in press
-    assert "self-contained, platform-signed native installer is not" in press
     assert "linux/amd64 and linux/arm64" in features
     assert "arm64 + riscv64" not in features
 
@@ -1060,9 +1065,8 @@ def test_public_site_contains_the_commit_bound_governance_benchmark():
         hashlib.sha256(raw_key).hexdigest(),
     ):
         assert f"`{digest}`" in report
-    assert "Source-binding verification requires a licensed Lightwork source" in (
-        report
-    )
+    assert "Source-binding verification requires a Lightwork source" in report
+    assert "licensed Lightwork source" not in report
     assert "reviewed_non_markdown" in docs_workflow
 
 

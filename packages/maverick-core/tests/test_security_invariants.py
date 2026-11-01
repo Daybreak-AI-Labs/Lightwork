@@ -67,7 +67,7 @@ def test_scrub_env_strips_secret_shaped_vars():
     assert "DATABASE_URL" not in out  # connection string w/ embedded creds
     assert "MAVERICK_OTEL_HEADERS" not in out  # auth-bearing OTLP headers
     assert "OTEL_EXPORTER_OTLP_HEADERS" not in out
-    # docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-45: the tenant KMS key-encryption-key
+    # The tenant KMS key-encryption-key
     # matched none of KEY/TOKEN/SECRET/CREDENTIAL/... ("KEK" != "KEY") and
     # reached model-driven shell commands unstripped.
     assert "MAVERICK_KMS_KEK" not in out

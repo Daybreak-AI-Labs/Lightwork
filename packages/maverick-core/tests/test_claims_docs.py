@@ -13,8 +13,6 @@ import re
 import subprocess
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -24,13 +22,13 @@ def _read(relpath: str) -> str:
 
 def test_security_policy_does_not_claim_an_unreleased_supported_line():
     """SECURITY.md named v0.2.x as the supported line. No release is published
-    (the releases API is empty; the latest git tag is v0.1.6; main is 0.1.7 in
-    release-cohort.toml), so the supported-versions section must say so."""
+    (main is 0.1.7 in release-cohort.toml), so the supported-versions section
+    must say so and name `main` as the line that receives fixes."""
     text = _read("SECURITY.md")
     assert "v0.2.x" not in text
     section = text.split("## Supported versions", 1)[1].split("\n## ", 1)[0]
     assert "No release has been published" in section
-    assert "v0.1.6" in section
+    assert "`main`" in section
     cohort = re.search(r'^version = "([^"]+)"', _read("release-cohort.toml"), re.MULTILINE)
     assert cohort is not None
     assert cohort.group(1) in section
@@ -56,9 +54,7 @@ def test_public_material_names_only_a_registered_proof_pack_command():
     paths = ["README.md"]
     for root in ("pitch", "docs"):
         for path in sorted((REPO_ROOT / root).rglob("*")):
-            # The archived audits are point-in-time records, not public
-            # material; they record that the command was never registered.
-            if path.suffix in {".md", ".html"} and "docs/audits/" not in path.as_posix():
+            if path.suffix in {".md", ".html"}:
                 paths.append(path.relative_to(REPO_ROOT).as_posix())
     stale = [p for p in paths if "maverick proof-pack" in _read(p)]
     assert stale == [], f"unregistered 'maverick proof-pack' command in: {stale}"
@@ -76,7 +72,6 @@ def test_firecracker_is_described_as_a_scaffold_not_a_deploy_target():
         "docs/handbook.md": None,
         "docs/configuration.md": None,
         "docs/env-vars.md": None,
-        "docs/programs/press-and-case-studies.md": None,
     }
     enterprise = sorted(
         path.relative_to(REPO_ROOT).as_posix()
@@ -113,8 +108,6 @@ def test_queue_delivery_is_not_described_as_exactly_once():
             "**exactly-once** — the contention",
         "docs/evidence/README.md":
             "**exactly-once** execution",
-        "docs/audits/STRESS_TEST.md":
-            "**JobQueue exactly-once**",
     }
     for relpath, phrase in stale.items():
         assert phrase not in _read(relpath), f"{relpath} still says {phrase!r}"
@@ -134,73 +127,28 @@ def test_benchmark_results_say_when_no_live_run_is_recorded():
     assert '"--max-dollars"' in harness and '"--tag"' in harness
 
 
-AUDIT_DOCS = (
-    "docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md",
-    "docs/audits/USER_EXPERIENCE_AUDIT.md",
-    "docs/audits/CODE_QUALITY_AUDIT.md",
-)
-
-#: The documents a reader needs today. Everything point-in-time (audits, ledgers,
-#: reviews, status boards) is archived under docs/audits/ and indexed there.
+#: The documents a reader needs today. Point-in-time material (audits, ledgers,
+#: reviews, status boards, launch checklists) does not belong at the root.
 ROOT_DOCUMENTS = {
     "README.md", "ARCHITECTURE.md", "CHANGELOG.md", "CLAUDE.md", "AGENTS.md",
     "CONTRIBUTING.md", "SECURITY.md", "CLA.md", "CODE_OF_CONDUCT.md", "MAINTAINERS.md",
-    "TRADEMARK.md", "THIRD-PARTY-NOTICES.md", "LAUNCH_CHECKLIST.md",
+    "GOVERNANCE.md", "SUPPORT.md", "RELEASING.md", "TRADEMARK.md", "THIRD-PARTY-NOTICES.md",
 }
-ARCHIVED_AUDITS = (
-    "USER_EXPERIENCE_AUDIT.md", "PLATFORM_IMPROVEMENT_AUDIT.md", "CODE_QUALITY_AUDIT.md",
-    "QA_FINDINGS.md", "ADVERSARY_COUNCIL_REVIEW.md", "STRESS_TEST.md",
-    "PUNCHLIST_RESOLUTION.md", "FIXES.md", "LAUNCH_AUDIT.md", "INFRA_AND_POLICY_DECISIONS.md",
-)
 
 
-def test_point_in_time_audits_are_archived_and_the_root_stays_live():
-    """The repository root holds only the documents a reader needs today; every
-    point-in-time audit, ledger or review lives under docs/audits/, is listed
-    in that directory's README, and docs/OPEN_ITEMS.md is the one live list of
-    findings. A new audit at the root fails here until it is archived."""
-    root = Path(__file__).resolve().parents[3]
-    root_docs = {p.name for p in root.glob("*.md")}
+def test_the_root_holds_only_the_live_documents():
+    """The repository root holds only the documents a reader needs today: the
+    overview, architecture, changelog, agent instructions and the community and
+    policy files. A new audit, ledger or launch checklist at the root fails here."""
+    root_docs = {p.name for p in REPO_ROOT.glob("*.md")}
     assert root_docs <= ROOT_DOCUMENTS, sorted(root_docs - ROOT_DOCUMENTS)
-    index = _read("docs/audits/README.md")
-    for name in ARCHIVED_AUDITS:
-        assert (root / "docs" / "audits" / name).is_file(), name
-        assert f"[{name}]({name})" in index, name
-    assert "docs/OPEN_ITEMS.md" in index
-
-
-@pytest.mark.parametrize("name", AUDIT_DOCS)
-def test_audit_documents_carry_a_point_in_time_status_note(name):
-    """The three audits list findings with no per-item status. Each must say it is
-    a point-in-time record and point readers at docs/OPEN_ITEMS.md."""
-    head = "\n".join(_read(name).splitlines()[:25])
-    assert "point-in-time" in head.lower()
-    assert "docs/OPEN_ITEMS.md" in head
-
-
-def test_open_items_lists_the_items_still_open():
-    """docs/OPEN_ITEMS.md must carry the candidate items that were verified as
-    open, and list the three fixed by the follow-up change (the RLS login
-    check, CSP script nonces, SAML signatures) as fixed, not open."""
-    text = _read("docs/OPEN_ITEMS.md")
-    for phrase in (
-        "unsafe-inline", "oidc.auto.tfvars",
-        "deployer.tf", "image_tag", "recovery_window_in_days", "sslmode",
-        "automountServiceAccountToken", "ingress", "use_lockfile",
-        "app.py", "prompt_dsl", "REWRITES", "DigestIndex", "at-least-once",
-    ):
-        assert phrase in text, phrase
-    assert "In progress in a separate change" not in text
-    fixed = text.split("## Checked and already fixed (not open)", 1)[1]
-    for phrase in ("row-level security", "rolbypassrls", "nonce", "want_response_signed"):
-        assert phrase in fixed, phrase
 
 
 def test_business_material_stays_out_of_the_product_repository():
-    """Fundraising, strategy, competitor teardowns and patent material live in the
-    private business repository, not beside the product. A clone of this tree
-    must not hand a contractor or design partner the investor deck, the data
-    room, the pricing research or an invention disclosure."""
+    """Fundraising, strategy, competitor teardowns, patent material and company
+    administration are kept outside this repository, not beside the product. A
+    clone of this tree must not carry an investor deck, a data room, pricing
+    research, an invention disclosure or the company's own records."""
     removed_directories = (
         "pitch",
         "docs/patents",
@@ -210,10 +158,28 @@ def test_business_material_stays_out_of_the_product_repository():
     )
     present = [d for d in removed_directories if (REPO_ROOT / d).exists()]
     assert present == [], f"business material directories back in the product tree: {present}"
+    # Company administration removed for the open-source release: the vendor
+    # licensing console, the company website, point-in-time audits, community
+    # programme plans, contract templates and the company's ISMS records.
+    administration = (
+        "apps/vendor-console",
+        "website",
+        "docs/audits",
+        "docs/programs",
+        "docs/enterprise/legal",
+        "docs/compliance/evidence",
+        "docs/compliance/policies",
+        "docs/compliance/registers",
+    )
+    returned = subprocess.run(
+        ["git", "ls-files", "--", *administration],
+        capture_output=True, text=True, cwd=REPO_ROOT, check=True,
+    ).stdout.split()
+    assert returned == [], f"company administration back in the product tree: {returned}"
     # Documentation and root files only: product skill packs legitimately carry
     # names such as investor-update-author.md and due-diligence-data-room.md.
     tracked = subprocess.run(
-        ["git", "ls-files", "--", "docs", "*.md", "*.pdf", "*.pptx", ":!docs/audits/*"],
+        ["git", "ls-files", "--", "docs", "*.md", "*.pdf", "*.pptx"],
         capture_output=True, text=True, cwd=REPO_ROOT, check=True,
     ).stdout.split("\n")
     tracked = [path for path in tracked if path and (path.startswith("docs/") or "/" not in path)]

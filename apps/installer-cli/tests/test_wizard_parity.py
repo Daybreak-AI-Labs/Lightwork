@@ -640,7 +640,7 @@ def test_pick_retention_skipped(monkeypatch):
 
 
 def test_pick_retention_accepted_includes_messages_days(monkeypatch):
-    """W1-57: messages is the fourth retention knob, prompted alongside
+    """Messages is the fourth retention knob, prompted alongside
     audit/episodes/events when the operator opts in to auto-pruning."""
     from maverick_installer import wizard
     monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: True)

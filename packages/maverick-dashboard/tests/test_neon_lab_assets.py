@@ -39,7 +39,9 @@ def test_fonts_are_public_immutable_woff2(noauth, name):
 # encoded traversal is what actually reaches the font route.
 @pytest.mark.parametrize("name", ["..%2Flightwork.css", "inter-400.woff2", "manrope-200.ttf", "..%2F..%2Fapp.py",
                                   # The six byte-identical per-weight copies are gone with the single file.
-                                  "manrope-200.woff2", "manrope-700.woff2"])
+                                  "manrope-200.woff2", "manrope-700.woff2",
+                                  # The fonts' licence ships beside them but is not a face.
+                                  "OFL.txt"])
 def test_font_route_is_an_allowlist(noauth, name):
     assert noauth.get(f"/static/fonts/{name}").status_code in (401, 404)   # not on the allowlist: gated or missing, never served
 
@@ -81,7 +83,10 @@ def test_public_font_paths_are_exactly_the_declared_files():
     assert declared == {"/static/fonts/manrope-var.woff2", "/static/fonts/jbm-400.woff2", "/static/fonts/jbm-500.woff2"}
     assert {path for path in auth.PUBLIC_STATIC_PATHS if path.startswith("/static/fonts/")} == declared
     assert {"/static/fonts/" + name for name in dash_app._FONT_FILES} == declared
-    assert {"/static/fonts/" + path.name for path in (_STATIC / "fonts").iterdir()} == declared
+    shipped = {"/static/fonts/" + path.name for path in (_STATIC / "fonts").iterdir() if path.suffix == ".woff2"}
+    assert shipped == declared
+    # The SIL Open Font License the faces require ships with them; no other file does.
+    assert {path.name for path in (_STATIC / "fonts").iterdir() if path.suffix != ".woff2"} == {"OFL.txt"}
 
 
 @pytest.mark.parametrize("shell", ["base.html", "chat_base.html", "public_base.html"])

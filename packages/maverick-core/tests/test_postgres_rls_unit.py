@@ -593,7 +593,7 @@ def test_explicit_env_off_overrides_enterprise(_clean_toggle_env, monkeypatch):
 
 
 def test_list_goals_filters_by_domain_and_project_id(monkeypatch):
-    # W1-49: SQLite's list_goals accepts domain=/project_id= (used by the
+    # SQLite's list_goals accepts domain=/project_id= (used by the
     # dashboard's project-detail page and domain-scoped inbox); the Postgres
     # port didn't, so both callers 500'd with a TypeError on this backend.
     world = PostgresWorldModel.__new__(PostgresWorldModel)
@@ -719,7 +719,7 @@ def test_preflight_skipped_when_explicitly_opted_in(monkeypatch):
 
 @pytest.mark.skipif(not _HAS_PSYCOPG, reason="psycopg not installed")
 class TestReconnectOnBrokenConnection:
-    """W1-54: the single shared (non-pooled) connection must self-heal after
+    """The single shared (non-pooled) connection must self-heal after
     a managed-Postgres failover or idle-connection reset instead of raising
     OperationalError on every call until the process restarts."""
 

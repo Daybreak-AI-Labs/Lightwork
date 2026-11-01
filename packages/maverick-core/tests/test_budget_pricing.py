@@ -122,7 +122,7 @@ def test_cache_write_1h_is_two_x_input():
 
 
 def test_cache_write_split_bills_each_tier_at_its_own_multiplier():
-    """W1-6: one call can write BOTH a 1h breakpoint (system/tools) and a
+    """One call can write BOTH a 1h breakpoint (system/tools) and a
     5m breakpoint (messages) at once. Before this, the combined total was
     billed at a single multiplier (whichever cache_write_ttl the caller
     passed) -- forcing the whole write to 2.0x when only part of it was

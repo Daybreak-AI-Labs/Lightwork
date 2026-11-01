@@ -26,7 +26,7 @@ class TestBuiltinRules:
         assert sev == "critical"
 
     def test_rm_rf_root_split_flags_blocked(self):
-        """docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-33: splitting the flags across
+        """Splitting the flags across
         tokens (functionally identical to `rm -rf /`) used to bypass the
         rule entirely because neither single token contained both r and f."""
         for cmd in (
@@ -51,7 +51,7 @@ class TestBuiltinRules:
         assert "rm_rf_root" not in names2
 
     def test_recursive_chmod_chown_root_split_flags_blocked(self):
-        """docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-33: same split-flag bypass for
+        """Same split-flag bypass for
         the recursive chmod/chown rule."""
         for cmd in (
             "chmod -c -R 777 /",

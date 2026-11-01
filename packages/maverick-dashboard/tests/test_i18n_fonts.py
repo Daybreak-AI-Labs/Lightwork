@@ -48,7 +48,7 @@ def test_lang_param_translates_chrome_and_sets_cookie():
     # than repeated on the final ``/start`` response.
     r = client.get("/overview", params={"lang": "fr"})
     assert r.status_code == 200
-    # W3-73: the page body is English, so <html lang> says so; the chrome
+    # The page body is English, so <html lang> says so; the chrome
     # strings that ARE translated carry their own lang attribute.
     assert '<html lang="en" dir="ltr">' in r.text
     assert '<html lang="fr"' not in r.text
