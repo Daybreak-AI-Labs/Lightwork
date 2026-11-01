@@ -1,11 +1,13 @@
-# Proposal (needs sign-off): route coding-mode git through `sandbox.exec()`
+# Proposal: route coding-mode git through `sandbox.exec()`
 
-**Status:** NOT IMPLEMENTED — written up for your decision. Architecturally
-significant (changes behavior across every sandbox backend), so per CLAUDE.md
-("If a fix is ambiguous or architecturally significant, write it up and ASK")
-it is deliberately left unapplied.
+**Status:** Partly implemented. `Agent._reset_workdir` and `Agent._git_apply`
+now run git through `sandbox.exec()` (option 1 below: the patch is written to a
+temporary file inside the workdir) and fall back to host `subprocess` only when
+no sandbox is configured. The git calls in `coding_mode.py` still run on the
+host. Routing those is architecturally significant (it changes behavior across
+every sandbox backend), so it awaits a maintainer decision.
 
-**Interim guard (UX-013).** Until this is decided, every host-side git call in
+**Interim guard.** Until this is decided, every host-side git call in
 that path refuses a workspace whose git settings define a filter (so a planted
 `smudge`/`clean` command cannot run on the host; Git LFS repositories are
 refused too) and runs with repository hooks off, using
@@ -13,22 +15,25 @@ refused too) and runs with repository hooks off, using
 That is a static scan of what git reads, not isolation: routing the calls
 through `sandbox.exec()` as proposed below is still the real fix.
 
-## The problem (launch-audit HIGH)
+## The problem
 
-Coding mode's apply/validate/verify path runs `git` on the **host** via raw
-`subprocess.run`, while the rest of the agent's shell goes through
-`sandbox.exec()`. This violates CLAUDE.md rule 4 ("Sandbox-mediate all shell …
-never call `subprocess.run` from a tool directly") and, more importantly,
-**breaks coding mode for non-local sandboxes**:
+Parts of coding mode's apply/validate/verify path run `git` on the **host** via
+raw `subprocess.run`, while the rest of the agent's shell goes through
+`sandbox.exec()`. This works against
+[kernel rule 4](../../CONTRIBUTING.md#house-rules) ("all shell goes through
+`sandbox.exec()`") and, more importantly, **breaks coding mode for non-local
+sandboxes**:
 
 - `run_failing_tests` correctly routes through the sandbox: `coding_mode.py`
   `r = sandbox.exec(c)`.
-- But the FINAL handler's git ops are raw host subprocess:
-  - `agent.py:220-225` — `subprocess.run(["git","-C",str(workdir),"reset","--hard","HEAD"])`
-  - `agent.py:522-528`, `agent.py:702-710`, `agent.py:739-743`, `agent.py:772-780`
-    — `git apply -` / diff render
-  - `coding_mode.py:1702-1781` — same pattern.
-- `workdir = Path(getattr(self.ctx.sandbox, "workdir", "."))`.
+- `agent.py` `Agent._reset_workdir` (`git reset --hard HEAD` / `git clean -fd`)
+  and `Agent._git_apply` (`git apply <tmpfile>`) route through `sandbox.exec()`
+  when a sandbox is configured.
+- These still run on the host:
+  - `coding_mode.py` `validate_patch` — `git apply --check -`.
+  - `coding_mode.py` `evaluate_candidate` — `git worktree add`, `git apply -`
+    and `git worktree remove` for each candidate.
+- Both take the workdir from the sandbox (`getattr(sandbox, "workdir", ".")`).
 
 For `SSHBackend` the workdir is a **remote** path (`~/maverick-workspace`,
 `sandbox/ssh.py`), so `git -C <that-path> apply` on the host operates on a path
@@ -36,7 +41,7 @@ that **doesn't exist locally**, a different tree than where the agent's edits
 and tests actually ran. Docker/podman work only by the bind-mount accident
 (`docker.py` mounts the host workdir to `/workspace`).
 
-(Platform audit **W1-86** fixed the same class of bug for `KubernetesBackend`:
+(An earlier fix addressed the same class of bug for `KubernetesBackend`:
 its `workdir` used to be an in-pod path with nothing ever copied into it —
 `exec()` ran commands against an empty directory, so this proposal's host-side
 `git -C <workdir>` calls were doubly wrong there. `workdir` is now the HOST
@@ -45,7 +50,8 @@ contract as every other backend, so it no longer needs special-casing here —
 though routing git through `sandbox.exec()` remains the more correct fix in
 general, per this proposal.)
 
-Net: coding mode silently produces wrong/empty patches under SSH/firecracker
+Net: while these calls stay on the host, coding mode can silently validate or
+evaluate the wrong tree under SSH/firecracker
 (the Firecracker scaffold has its own, still-open "exec path does not yet
 mount the workspace" gap — see `docs/FEATURES.md`).
 
@@ -67,15 +73,14 @@ same filesystem context as the edits and tests.
      pipe over the ssh channel; docker: `docker exec -i`).
   Option 1 is lower-risk (no contract change); Option 2 is cleaner long-term.
 
-## Why this needs your sign-off (risks)
+## Risks
 
 - **Touches every sandbox backend's contract/behavior.** A regression here breaks
   coding mode (the SWE-bench path) for *all* users, not just remote ones.
 - The `git apply -` stdin handling is the crux; getting it wrong silently drops
   patches (exactly the failure class we're fixing).
-- It is **not** a launch blocker for the default (`local`) sandbox — local
-  coding mode works today. The bug bites SSH/firecracker users, who are a
-  later-quarter audience.
+- The default (`local`) sandbox is unaffected — local coding mode works
+  today. The bug affects SSH/firecracker users.
 
 ## Verification plan (before merge)
 
@@ -83,13 +88,12 @@ same filesystem context as the edits and tests.
    issues git via `sandbox.exec`, never `subprocess`.
 2. Integration (local backend): the existing
    `test_integration_swe_smoke::test_full_pipeline_produces_valid_patch` must
-   still pass (note: it is **currently failing on main**, unrelated — investigate
-   that first so it's a real gate).
-3. SSH: exercise against a configured remote host (not available in the audit
-   environment) — confirm the patch is rendered from the remote tree.
+   still pass.
+3. SSH: exercise against a configured remote host — confirm the patch is
+   rendered from the remote tree.
 
 ## Recommendation
 
-Schedule as a fast-follow right after launch (it's a real correctness bug for
-remote sandboxes and a clean CLAUDE.md-rule-4 fix), but do **not** rush it into
-the v0.1.3 tag — the default local sandbox is unaffected and the change is wide.
+Implement it as a dedicated change: it is a real correctness bug for remote
+sandboxes and brings the remaining calls under kernel rule 4, but the default
+local sandbox is unaffected and the change is wide.

@@ -45,7 +45,7 @@ describe('installer terminal state', () => {
     render(App);
     const disclosure = screen.getByText(/installs Lightwork on this computer, then opens it/);
     expect(disclosure.closest('details')).toBeNull();
-    const access = screen.getByText(/GitHub account that Daybreak AI Labs has given access to Lightwork/);
+    const access = screen.getByText(/public GitHub repository; no GitHub account is needed/);
     expect(access.closest('details')).toBeNull();
     expect(screen.getByText(/An internet connection/)).toBeTruthy();
     expect(screen.getByText(/Permission to install apps/)).toBeTruthy();
@@ -90,7 +90,7 @@ describe('installer terminal state', () => {
     logHandler?.({ payload: "fatal: could not read Username for 'https://github.com': terminal prompts disabled" });
     failInstall({ code: 'failed', message: 'Installer exited with status 1' });
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('not signed in to a GitHub account that has access to Lightwork');
+    expect(alert.textContent).toContain('GitHub refused the request');
     expect(alert.textContent).not.toContain('fatal');
     expect(screen.getByRole('button', { name: 'Resume reviewed bootstrap' })).toBeTruthy();
   });

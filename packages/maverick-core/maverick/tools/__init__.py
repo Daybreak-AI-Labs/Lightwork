@@ -305,7 +305,7 @@ class Tool:
     # ``to_anthropic()``: it must never alter the tool catalog the model
     # sees (that would bust the prompt cache).
     parallel_safe: bool = False
-    # W1-11: ask the provider to validate tool inputs against input_schema
+    # Ask the provider to validate tool inputs against input_schema
     # (Anthropic ``strict: true``; OpenAI function ``strict: true``) so a
     # malformed-arguments retry is never needed. Off by default: strict mode
     # constrains the schema (e.g. additionalProperties: false, every property
@@ -712,7 +712,7 @@ class ToolRegistry:
                 # Tool errors (incl. an injected tool_dispatch chaos failure)
                 # are surfaced as a tool-result string so the agent can react
                 # — this mirrors how real tool exceptions behave. The chaos
-                # gap the council flagged is on the LLM path, fixed by wiring
+                # gap worth covering is on the LLM path, fixed by wiring
                 # maybe_fail("llm_call") into complete_async (not here).
                 return _tool_error_result(e, name)
             finally:
@@ -964,7 +964,7 @@ def base_registry(
     reg.register(read_tool_result(goal_id=goal_id, principal=principal or None))
     reg.register(read_attachment_tool(world, goal_id))
     reg.register(repo_map(sandbox))
-    # Wave 10 (B1): surgical exact-match editor. OpenHands' biggest
+    # Surgical exact-match editor. OpenHands' biggest
     # single contribution to SWE-bench scores — eliminates ~30% of
     # apply-fail failures by side-stepping hand-authored diffs.
     reg.register(str_replace_editor(sandbox))
@@ -1548,7 +1548,7 @@ def base_registry(
     reg.register(speak(sandbox))
 
     # Capability tools that live in the parent package (maverick/), not the
-    # tools subpackage. ROADMAP 2027 H2 / 2028 H1.
+    # tools subpackage.
     from ..browser_auth_vault import browser_auth_vault
     from ..browser_device import browser_device
     from ..continuous_benchmark import bench_track
@@ -1566,7 +1566,7 @@ def base_registry(
     reg.register(html_to_app(sandbox))
     reg.register(browser_auth_vault())
 
-    # Subpackage capability tools (ROADMAP 2027 H2). The sandbox-backed ones
+    # Subpackage capability tools. The sandbox-backed ones
     # take the sandbox; the rest are stateless.
     from .diagram_tool import diagram_tool
     from .latex_tool import latex_tool
@@ -1590,7 +1590,7 @@ def base_registry(
     # boolean as a real human approval gate. Keep it importable for explicit
     # offline diff proposal workflows, but do not expose it to agents by default.
 
-    # Runtime / introspection tools (ROADMAP 2028 H1/H2).
+    # Runtime / introspection tools.
     from ..cost.curve_fitter import cost_curve_tool
     from .capability_query import capability_query
     from .oidc_tool import oidc_tool

@@ -26,6 +26,6 @@ Success criteria:
   - Total length 1500-3000 words.
   - At least 12 URLs to specific resources.
 
-This stresses long-horizon planning AND multi-agent coordination AND revision loops -- the exact wedge Lightwork claims.
+This stresses long-horizon planning AND multi-agent coordination AND revision loops -- the long-horizon work Lightwork targets.
 
 Budget: $4, 40 minutes wall-clock.

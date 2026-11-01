@@ -1,4 +1,4 @@
-"""WebSocket tool (ROADMAP 2027 H2)."""
+"""WebSocket tool."""
 from __future__ import annotations
 
 import asyncio

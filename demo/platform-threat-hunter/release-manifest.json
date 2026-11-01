@@ -1,6 +1,6 @@
 {
   "artifact_name": "lightwork-platform-threat-hunter",
-  "description": "Reduced, local-only platform threat hunter standalone source SKU",
+  "description": "Reduced, local-only platform threat hunter standalone source archive",
   "display_name": "Lightwork Platform Threat Hunter",
   "entrypoint": "serve_standalone.py",
   "files": [
@@ -21,6 +21,7 @@
   "schema_version": 1,
   "shared_files": [
     "LICENSE",
+    "NOTICE",
     "TRADEMARK.md"
   ]
 }

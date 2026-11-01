@@ -1084,7 +1084,7 @@
           var disable = unavailable ? ' disabled title="Set up at least one specialist before deploying this team"' : '';
           var deploy = d.entitled
             ? '<button type="button" class="btn dep-deploy" data-key="' + esc(d.key) + '" aria-label="Deploy ' + esc(d.title) + ' team" style="font-size:var(--text-sm);"' + disable + '>Deploy team</button>'
-            : '<button type="button" class="btn dep-deploy" data-key="' + esc(d.key) + '" aria-label="Deploy ' + esc(d.title) + ' team" style="font-size:var(--text-sm);"' + disable + '>Deploy team</button><span class="dept__addon">paid add-on</span>';
+            : '<button type="button" class="btn dep-deploy" data-key="' + esc(d.key) + '" aria-label="Deploy ' + esc(d.title) + ' team" style="font-size:var(--text-sm);"' + disable + '>Deploy team</button><span class="dept__addon">add-on required</span>';
           return '<div class="dept" data-key="' + esc(d.key) + '">'
             + '<div class="dept__head"><span class="dept__avatar">' + esc(initials(d.title)) + '</span>'
             + '<span><div class="dept__name">' + esc(d.title) + '</div>'
@@ -1122,7 +1122,7 @@
         document.getElementById('dept-dlg-sub').textContent =
           n + ' specialist' + (n === 1 ? '' : 's') +
           (readinessText(d, n) ? ' · ' + readinessText(d, n) : '') +
-          (d.entitled ? '' : ' · paid add-on');
+          (d.entitled ? '' : ' · add-on required');
         document.getElementById('dept-dlg-charter').textContent = d.charter || '';
         var ul = document.getElementById('dept-dlg-members');
         ul.innerHTML = '';

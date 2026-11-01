@@ -1,14 +1,14 @@
-# Lightwork authenticated source bootstrap
+# Lightwork source bootstrap
 
-Tauri GUI bootstrap for authorized repository users who prefer not to drive
+Tauri GUI bootstrap for users who prefer not to drive
 the source install from a terminal. A double-click app with one button: it runs
 the same bootstrap the CLI
 one-liners use (`deploy/desktop/install.{ps1,sh}`) behind a live
 progress screen.
 
 This is not a self-contained native installer. It clones a pinned commit from
-the private Lightwork repository, so network access and valid GitHub
-authorization are required, and the installed Python source remains readable.
+the Lightwork GitHub repository, so network access is required, and the
+installed Python source remains readable.
 
 ## How it works
 
@@ -94,9 +94,8 @@ pnpm install
 pnpm tauri dev
 ```
 
-Hot-reloads the Svelte frontend. Clicking **Install from authorized source**
-runs the bundled
-bootstrap, so test in a throwaway VM/container unless you actually want
+Hot-reloads the Svelte frontend. Clicking **Install Lightwork** runs the
+bundled bootstrap, so test in a throwaway VM/container unless you actually want
 Lightwork installed on your dev box. The desktop app embeds the installer
 script blob directly from the git commit captured at build time and reports
 that blob's SHA-256 in the install log. It pins the installed source to the
@@ -175,11 +174,12 @@ Lightwork dashboard identity handshake, including legitimate onboarding.
 
 ## macOS/Linux engineering artifact verification
 
-The supported customer candidate remains Windows. macOS/Linux are explicitly
-engineering source setup: private repository authorization, network, dependency
-installation and readable Python sources remain part of that journey. The GUI
+The only packaged installer candidate is the
+[Windows desktop package](../installer-msi/CUSTOMER.md). macOS/Linux use the
+engineering source setup: network access, dependency installation and readable
+Python sources remain part of that journey. The GUI
 above provides inventory, interruption recovery and in-app dashboard setup.
-Unsigned workflow artifacts remain unsigned; do not relabel them as customer
+Unsigned workflow artifacts remain unsigned; do not relabel them as supported
 installers or remove platform trust protections to suppress warnings.
 
 Release operators can verify separately approved signed engineering packages with
@@ -208,5 +208,5 @@ For Linux use the exact approved Linux target. The JSON receipt always labels
 selected signed bytes and release identity, not notarization or native install
 acceptance. [Tauri's macOS signing guidance](https://v2.tauri.app/distribute/sign/macos/)
 describes the separate platform-signing/notarization prerequisites. Production
-certificates, notarization, supported customer target expansion, dependency
+certificates, notarization, supported target expansion, dependency
 advisory resolution and exact native acceptance remain release prerequisites.

@@ -1,4 +1,4 @@
-"""Plan-execute-reflect loop topology (roadmap: 2027 H1 capabilities).
+"""Plan-execute-reflect loop topology.
 
 A classic long-horizon control loop as a standalone topology helper, in the
 same shape as :mod:`maverick.debate`: a **planner** breaks the goal into steps,

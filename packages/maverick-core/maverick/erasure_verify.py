@@ -1,4 +1,4 @@
-"""Differential erasure verification (roadmap: 2028 H2 safety).
+"""Differential erasure verification.
 
 A right-to-erasure (GDPR Art. 17) run that *says* it deleted a subject's data
 is not the same as proving it. This verifies the claim: after an erase, the

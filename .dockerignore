@@ -5,7 +5,7 @@
 !requirements/
 !requirements/ci.txt
 
-# The complete eight-distribution runtime cohort. Keep private apps, VCS data,
+# The complete eight-distribution runtime cohort. Keep the other apps, VCS data,
 # local state, caches, test output, credentials, and generated artifacts out of
 # the root-context image build by allowing only these source trees.
 !packages/

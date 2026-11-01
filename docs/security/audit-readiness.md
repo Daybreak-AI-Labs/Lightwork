@@ -36,7 +36,7 @@ contain it (§3) and the tests that exercise it (§4).
 | 4 | **Secret exfiltration** | tool stdout, logs, audit, replay export | `maverick.secrets.scrub` + `maverick.safety.secret_detector`; env scrubbing in `LocalBackend` |
 | 5 | **MCP supply chain** | MCP server command / tool descriptions | `pin_sha256` command hash-pinning; tool-description scan at registration |
 | 6 | **Channel webhook spoofing / double-spend** | SMS/WhatsApp/Telegram/Bluesky inbound | HMAC verification (fail-closed 401); atomic dedup; per-channel sender allowlist |
-| 7 | **Audit-log tampering / repudiation** | `~/.maverick/audit/*.ndjson` | Ed25519 hash-chain (opt-in `[audit] sign`), cross-file anchors, fsync durability |
+| 7 | **Audit-log tampering / repudiation** | `~/.maverick/audit/*.ndjson` | Ed25519 hash-chain (`[audit] sign`, on by default), cross-file anchors, fsync durability |
 | 8 | **AuthN/AuthZ bypass** | dashboard, MCP HTTP, A2A | Fail-closed bearer tokens (`MAVERICK_DASHBOARD_TOKEN`, `MAVERICK_MCP_TOKEN`, `MAVERICK_A2A_TOKEN`) |
 | 9 | **Plugin / skill code execution** | pip entry-points, installed skills | Default-deny plugin allowlist (`MAVERICK_PLUGINS_ALLOW`); skill-body scan + hash-pin at install |
 | 10 | **Resource exhaustion / DoS** | long inputs, runaway loops, fork bombs | `Budget` caps; ReDoS-hardened regexes; sandbox `pids_limit`/timeouts; killswitch `~/.maverick/HALT` |
@@ -158,8 +158,10 @@ hardened config; an auditor should still try to escalate each.
 - **`jailbreak_heuristics` precision.** The weighted scorer over-flags some
   benign instruction-shaped text (e.g. "ignore the instructions in the old
   README"); a false-positive-tuning pass is outstanding.
-- **Audit tamper-evidence is opt-in.** Plain NDJSON unless `[audit] sign =
-  true`; third-party attribution requires an externally-held pubkey.
+- **Audit tamper-evidence depends on key custody.** Signing is on by default
+  (off with `[audit] sign = false` or `MAVERICK_SECURE_DEFAULT=0`), but the
+  default key is held on the same host; third-party attribution requires an
+  externally-held pubkey.
 - **Plugin permissions are enforced by default.** A plugin requesting an
   ungranted permission is skipped (not loaded) unless `enforce_permissions =
   false` downgrades it to advisory; the default-deny load allowlist is a second,

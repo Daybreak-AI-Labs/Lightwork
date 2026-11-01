@@ -1,4 +1,4 @@
-"""QA-024: plugin status must reflect policy admission and a real import."""
+"""Plugin status must reflect policy admission and a real import."""
 from __future__ import annotations
 
 from dataclasses import dataclass

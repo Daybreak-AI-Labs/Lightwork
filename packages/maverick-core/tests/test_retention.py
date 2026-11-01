@@ -143,7 +143,7 @@ def test_purge_world_episodes_dry_run(tmp_path: Path):
 
 
 def test_purge_episodes_before_nulls_dangling_fact_references(tmp_path: Path):
-    # W1-50 (canonical path): facts.source_episode_id / fact_history.source_
+    # Canonical path: facts.source_episode_id / fact_history.source_
     # episode_id REFERENCE episodes(id) with no ON DELETE clause, and the
     # world opens with foreign_keys ON. Deleting an aged-out episode that a
     # still-live fact cites used to raise sqlite3.IntegrityError and abort
@@ -170,7 +170,7 @@ def test_purge_episodes_before_nulls_dangling_fact_references(tmp_path: Path):
 
 
 def test_purge_world_episodes_db_path_nulls_dangling_fact_references(tmp_path: Path):
-    # W1-50 (--db-path route): this path opened a raw sqlite3 connection
+    # --db-path route: this path opened a raw sqlite3 connection
     # WITHOUT foreign_keys, so it silently deleted the parent episode and
     # left a dangling facts.source_episode_id instead of raising -- the two
     # retention routes disagreed on the same policy.
@@ -245,7 +245,7 @@ def test_purge_world_messages_dry_run(tmp_path: Path):
 
 
 def test_purge_messages_before_canonical(tmp_path: Path):
-    """W1-57: the canonical (--db-path-less) route dispatches through the
+    """The canonical (--db-path-less) route dispatches through the
     configured world backend, mirroring purge_episodes_before/purge_goal_events_before.
     Unlike episodes, messages have no dependent FK rows to null out first."""
     from maverick.world_model import WorldModel

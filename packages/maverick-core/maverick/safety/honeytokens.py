@@ -1,4 +1,4 @@
-"""Honeytoken planting and tripwires (roadmap: 2027 H2 safety).
+"""Honeytoken planting and tripwires.
 
 A compromised agent (or a prompt-injected payload riding inside one) that
 goes hunting for credentials will read whatever secrets file it can find.

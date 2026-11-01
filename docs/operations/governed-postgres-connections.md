@@ -28,8 +28,9 @@ Pool acquisition accepts a finite 0.1–60 second timeout. At most 64 callers wa
 in one pool. Four distinct pool identities are permitted per process; reaching
 that limit refuses acquisition instead of silently evicting active authority.
 The normal deployment authority pin allows only one configured identity. No
-credentials appear in cache keys or pool names. Install `maverick-core[postgres]`
-to use the backend and its optional pool.
+credentials appear in cache keys or pool names. Install the `postgres` extra
+(`python -m pip install -e './packages/maverick-core[postgres]'` from the
+repository root) to use the backend and its optional pool.
 
 Every transaction still verifies current schema, forced RLS, execution-role
 privileges and the external encryption-key identity. It binds the tenant with

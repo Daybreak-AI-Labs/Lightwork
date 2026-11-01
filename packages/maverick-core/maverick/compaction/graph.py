@@ -1,4 +1,4 @@
-"""Graph-structured compaction (roadmap: 2028 H2 perf, v8).
+"""Graph-structured compaction.
 
 Instead of prose, compact the old middle of a trajectory into a small
 entity-relation graph: subject-relation-object triples plus a rendered text

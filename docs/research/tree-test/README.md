@@ -91,7 +91,7 @@ smaller than the intervals are not differences.
 
 ## Recommended bar for switching areas on
 
-This is a recommendation for the owner to accept or change, not a rule the
+This is a recommendation for the maintainers to accept or change, not a rule the
 product enforces:
 
 1. On the **areas** tree, overall task success is **at least 70%** for every

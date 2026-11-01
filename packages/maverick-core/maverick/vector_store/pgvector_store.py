@@ -1,4 +1,4 @@
-"""pgvector vector store adapter (roadmap: 2028 H1 ecosystem).
+"""pgvector vector store adapter.
 
 Mirrors the Chroma/Qdrant/Weaviate adapter API (``add`` / ``query`` /
 ``delete`` / ``count`` / ``reset``) over Postgres + the pgvector extension —

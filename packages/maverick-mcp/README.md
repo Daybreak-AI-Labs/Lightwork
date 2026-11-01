@@ -17,8 +17,12 @@ Lightwork in via MCP, you get:
 
 ## Install
 
+Installed by
+[Install from source](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md).
+For development on this package alone:
+
 ```bash
-pip install -e ./packages/maverick-mcp
+python -m pip install -e ./packages/maverick-core -e ./packages/maverick-mcp
 ```
 
 ## Wire into Claude Code

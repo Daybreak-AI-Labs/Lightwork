@@ -1,4 +1,4 @@
-"""Unified inbox (roadmap: 2028 H2 UX).
+"""Unified inbox.
 
 Merge messages arriving from multiple channels (slack, email, discord, ...) into
 a single chronological view, grouped per thread, with an unread count per

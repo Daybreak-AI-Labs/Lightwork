@@ -1,4 +1,4 @@
-"""Cost-of-quality study helper (roadmap: 2028 H1 — "cost of quality").
+"""Cost-of-quality study helper.
 
 Quantify how much of a run budget went to *successful* work versus retries and
 failed attempts — the "cost of poor quality" view. Deterministic and offline:

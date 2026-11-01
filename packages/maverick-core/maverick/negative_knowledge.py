@@ -1,6 +1,6 @@
 """Negative knowledge -- executable guardrails mined from causally-triaged failures.
 
-The Cognitive Data Engine's fix-mining stage, and the council's runner-up moat:
+The Cognitive Data Engine's fix-mining stage:
 governance that gets *smarter from every incident* instead of ossifying into
 static, hand-written ACLs. A triaged :class:`~maverick.data_engine.FailureClass`
 (an action that *provably* lowers outcomes) becomes a :class:`Guardrail`: a

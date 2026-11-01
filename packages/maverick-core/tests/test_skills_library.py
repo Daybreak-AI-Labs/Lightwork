@@ -1,7 +1,7 @@
 """The shipped cross-cutting + suite SKILL.md library: validates and is wired.
 
 The agent roster shipped 1,000+ domain packs while the SKILL.md library was a
-single example -- the gap the expansion council flagged as highest-leverage.
+single example -- the highest-leverage gap in the library.
 This pins the library (``maverick/skills_builtin/*.md``) to the same
 publish-readiness bar the install/distill paths enforce
 (``maverick.skills.validate_skill_file``) AND proves it is actually loaded at
@@ -24,7 +24,7 @@ _FILES = sorted(builtin_skills_dir().glob("*.md"))
 
 
 def test_skills_library_present():
-    # The council shipped 20 cross-cutting + 41 suite-specific skills.
+    # 20 cross-cutting + 41 suite-specific skills ship with the library.
     assert len(_FILES) >= 60, f"expected >=60 skills, found {len(_FILES)} in {builtin_skills_dir()}"
 
 

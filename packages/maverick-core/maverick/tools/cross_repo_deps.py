@@ -1,4 +1,4 @@
-"""Cross-repo dependency graph tool (roadmap: 2028 H1 capabilities).
+"""Cross-repo dependency graph tool.
 
 Parses the Python import graph across one or more repo roots and surfaces the
 edges *between* top-level packages — the view that matters when you're trying

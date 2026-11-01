@@ -1,4 +1,4 @@
-"""Federated audit-log verification (roadmap: 2028 H2 safety).
+"""Federated audit-log verification.
 
 Each node/tenant keeps its own signed, hash-chained audit log
 (``audit/signing.py``: per-file ``verify_chain`` + cross-file

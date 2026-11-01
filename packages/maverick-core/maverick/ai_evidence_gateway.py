@@ -1505,7 +1505,7 @@ def _abandon_conversation_reservation(
     actor: str,
 ) -> None:
     """Release a reservation whose delivery failed before it could be
-    committed (W4-29).
+    committed.
 
     ``_conversation_reservation`` reserves the conversation, and only
     ``_complete_conversation`` ever clears ``pending`` -- if rendering or
@@ -2454,7 +2454,7 @@ def _deliver_text_locked(  # noqa: C901 - linear release transaction is auditabl
                 actor=operator,
             )
         )
-        # W4-29: render/sign/receipt-commit can fail after the reservation
+        # Render/sign/receipt-commit can fail after the reservation
         # above (signer refusal, segment/capacity error, disk full) --
         # _complete_conversation below is the only thing that ever clears
         # it, so an exception here used to poison every later delivery in

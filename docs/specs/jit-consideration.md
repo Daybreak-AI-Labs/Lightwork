@@ -1,7 +1,6 @@
 # Decision: JIT / AOT compilation of the hot path (mypyc / Cython)
 
-**Status:** Decided — do not adopt; revisit on a measured trigger · **Roadmap
-ref:** 2027-H2 Performance "JIT consideration (mypyc/cython on hot path)" ·
+**Status:** Decided — do not adopt; revisit on a measured trigger ·
 **Date:** June 2026
 
 ## Question

@@ -1,4 +1,4 @@
-"""Long-context retrieval router (ROADMAP near-term: >200k auto-shard)."""
+"""Long-context retrieval router."""
 from __future__ import annotations
 
 from maverick.long_context_router import (

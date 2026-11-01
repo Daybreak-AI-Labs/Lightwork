@@ -1,4 +1,4 @@
-"""Generic SaaS-trigger framework (roadmap: 2028 H1).
+"""Generic SaaS-trigger framework.
 
 Turn an inbound SaaS webhook into a Lightwork goal, safely. ``verify`` checks the
 delivery's HMAC signature (constant-time) so a forged payload can't drive the

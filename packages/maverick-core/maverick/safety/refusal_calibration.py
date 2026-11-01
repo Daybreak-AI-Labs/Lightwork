@@ -1,4 +1,4 @@
-"""Refusal calibration scoring (roadmap: 2027 H2 safety).
+"""Refusal calibration scoring.
 
 The shield + model stack can fail in two opposite directions: it refuses
 benign asks ("over-refusal" — support tickets, users routing around the

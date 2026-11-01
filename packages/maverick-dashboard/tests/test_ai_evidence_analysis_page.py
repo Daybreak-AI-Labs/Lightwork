@@ -104,7 +104,7 @@ def test_workbench_has_only_closed_evidence_controls(client: TestClient) -> None
                 if isinstance((value := attrs.get(name)), str)
             )
 
-    # Shell assets carry a content-hash query (W3-77); compare the paths.
+    # Shell assets carry a content-hash query; compare the paths.
     script_sources = {(item.get("src") or "").split("?")[0] for item in scripts}
     # The Copilot's script is named on its button and loaded after the page.
     script_sources |= {(attrs.get("data-copilot-src") or "").split("?")[0] for tag, attrs in parser.tags if tag == "button"}

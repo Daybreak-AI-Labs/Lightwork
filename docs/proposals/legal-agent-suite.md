@@ -1,10 +1,11 @@
 # Legal agent suite — the General Counsel's office
 
-**Status:** design / roadmap. Companion to the finance, IT-GRC, sales-GTM, HR,
+**Status:** design reference; the per-agent status tags record what existed when it was
+written. Companion to the finance, IT-GRC, sales-GTM, HR,
 product-engineering, and strategy/exec suites; indexed in
 [`agent-suites-overview.md`](agent-suites-overview.md). Extends the shipped
 [`legal.toml`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/domains/legal.toml) starter pack into
-a full suite. ~36 agents (31 base + 5 council-added) across eight towers.
+a full suite. ~36 agents (31 base + 5 added after review) across eight towers.
 
 > **Legal is horizontal — it touches every other suite — and uniquely risky for AI.** A
 > Legal agent that invents a case citation is not a bug, it's the failure mode that has
@@ -29,7 +30,7 @@ The cardinal rule, generalized verbatim from `legal.toml` and applied to every a
 ## Contents
 
 1. [What's already shipped — the reuse map](#1-whats-already-shipped--the-reuse-map)
-2. [How a legal agent maps onto Lightwork](#2-how-a-legal-agent-maps-onto-maverick)
+2. [How a legal agent maps onto Lightwork](#2-how-a-legal-agent-maps-onto-lightwork)
 3. [The control model (cross-cutting)](#3-the-control-model-cross-cutting)
 4. [Per-client customization — the dials](#4-per-client-customization--the-dials)
 5. [The roster — eight towers](#5-the-roster--eight-towers)
@@ -478,9 +479,9 @@ The privilege/work-product tower — **sealed matter compartments**.
 
 ---
 
-### Council-added agents (from the adversarial review)
+### Additional agents
 
-Five seats the council flagged. Full skills in [`agent-skills-catalog.md`](agent-skills-catalog.md).
+Five seats added after review. Full skills in [`agent-skills-catalog.md`](agent-skills-catalog.md).
 
 - **AI & Emerging-Tech Counsel Agent** *(Tower 6/7)* — EU AI Act, Colorado AI Act, the US state-privacy wave, AI/IP & training-data law, AI contracting. The legal owner of AI governance (complementing GRC). **Status: Gap.**
 - **Litigation Discovery-Response / Subpoena Agent** *(Tower 4 — sealed)* — responding to subpoenas/CIDs/government investigations, litigation-hold coordination (with 4.3), 30(b)(6) prep. Inbound-demand workflow, distinct from e-discovery review. **Status: Gap.**
@@ -544,7 +545,7 @@ Each becomes a `run_assessment` capability + a conversational assessor via
 
 ## 9. Integrations catalog
 
-Per CLAUDE.md rules 5 & 6, every connector ships a config knob + wizard toggle.
+Per kernel rules 5 & 6, every connector ships a config knob + wizard toggle.
 
 | System class | Vendors | Status | Used by |
 |---|---|---|---|

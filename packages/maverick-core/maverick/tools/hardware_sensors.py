@@ -1,4 +1,4 @@
-"""Hardware sensor tool (roadmap: 2028 H1 capabilities — "hardware sensor tool").
+"""Hardware sensor tool.
 
 Read the HOST's hardware sensors — temperatures, fans, battery — so an agent
 can reason about thermal throttling, a dead fan, or whether a long run will

@@ -1,4 +1,4 @@
-# demo-cluster — public read-only demo (demo.maverick.dev)
+# demo-cluster — public read-only demo
 
 Blueprint for a public, **read-only** Lightwork demo: seeded finished runs,
 the real dashboard process, and an nginx path-allowlist proxy as the only
@@ -29,9 +29,7 @@ apply).
 
 ## Why the deny-proxy is load-bearing
 
-**The dashboard has no global read-only flag.** Verified at authoring time:
-`grep -ri read_only packages/maverick-dashboard/maverick_dashboard/` matches
-only two docstrings describing endpoints that happen to be GETs. Setting
+**The dashboard has no global read-only flag.** Setting
 `MAVERICK_DASHBOARD_TOKEN` alone does NOT make a deployment read-only — the
 token authorizes *everything*. The mutating surface that must never be
 publicly reachable (all POST/DELETE; from `maverick_dashboard/api.py` and
@@ -95,8 +93,10 @@ key is needed or configured.
 
 ## Operations — maintainer acts
 
-- **DNS + TLS for demo.maverick.dev are not in this blueprint.** Point the
-  record at your host/LoadBalancer and terminate TLS at your edge (compose:
+- **DNS + TLS are not in this blueprint.** The templates use the example
+  hostname `demo.maverick.dev` (nginx `server_name` in `nginx.conf.template`
+  and `k8s.yaml`); replace it with your own hostname, point its DNS record at
+  your host/LoadBalancer and terminate TLS at your edge (compose:
   a TLS proxy in front of :8080; k8s: Ingress/Gateway + cert-manager). Do
   not serve the demo over plain HTTP to the public internet.
 - Resource limits are set on every service/container; restart policy is
@@ -109,11 +109,11 @@ key is needed or configured.
   not suppress seeding and are not shown by `/demo`; wipe the `demo-state`
   volume to start completely fresh.
 
-## What was and wasn't verified here
+## Verification scope
 
 Contract-tested statically in
 `packages/maverick-core/tests/test_demo_cluster.py` (compose/k8s/nginx
 invariants, seed script compiles and uses the real API, no baked secrets) —
-same pattern as the other reference architectures. **Not** stood up
-end-to-end in this environment (no Docker daemon available); the first
-`docker compose up` against a built image is the smoke test.
+same pattern as the other reference architectures. The test suite does
+**not** stand the blueprint up end to end; the first `docker compose up`
+against a built image is the smoke test.

@@ -132,7 +132,7 @@ def test_set_dispatcher_swaps_and_is_restorable():
     assert runner.get_dispatcher() is original
 
 
-# ---------- W1-72: goal execution must not share the loop's default pool ----------
+# ---------- goal execution must not share the loop's default pool ----------
 
 def test_default_asyncio_executor_is_undersized_for_the_advertised_ceiling():
     """Documents the defect precondition this fix closes: CPython's default
@@ -180,7 +180,7 @@ async def test_async_dispatch_uses_the_dedicated_goal_executor(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_context_propagates_across_the_dedicated_executor(monkeypatch):
-    """W1-72 regression: switching from asyncio.to_thread (which copies the
+    """Regression: switching from asyncio.to_thread (which copies the
     caller's contextvars.Context into the worker thread) to a custom
     loop.run_in_executor call must not silently drop that propagation --
     e.g. the active-tenant contextvar must still be visible inside the

@@ -1,27 +1,31 @@
 """Signed-license entitlements — control which features/tiers a deployment runs.
 
-A **license** is an Ed25519-signed JSON document issued by Daybreak Labs that
-declares a customer's edition, pricing **tier** (basic / gold / platinum), and
-enabled add-on **suites** (e.g. ``fleet``). It is verified **offline** at load
-time against the publisher's trusted public key — so an **air-gapped** bank can
-be upgraded (platform → Gold, or + Fleet packs) by dropping in a new signed
-license file, **no network required**. A connected deployment can additionally
-poll an entitlement API, but the signed file is the floor that works everywhere.
+A **license** is an Ed25519-signed JSON document, issued by whoever holds the
+publisher signing key, that declares a licensee's edition, **tier** (basic /
+gold / platinum), and enabled add-on **suites** (e.g. ``fleet``). It is verified
+**offline** at load time against the publisher's trusted public key — so an
+**air-gapped** deployment can change tier (platform → Gold, or + Fleet packs) by
+dropping in a new signed license file, **no network required**. A connected
+deployment can additionally poll an entitlement API, but the signed file is the
+floor that works everywhere.
+
+Enforcement is **off by default** (:func:`enforcing`): unless an operator sets
+``[license] enforce = true`` or ``MAVERICK_LICENSE_ENFORCE=1``, every feature
+runs whether or not a license is installed.
 
 Design (kernel rule 1 ethos — *fail open on the core*):
 
 - The **core kernel never hard-stops** on a missing, expired, or invalid
-  license. It falls back to the base tier with a warning and keeps running —
-  bricking a bank mid-workflow is a worse failure than an unpaid add-on.
-- Only **paid add-ons** (Gold/Platinum features, add-on suites like ``fleet``)
-  gate **off** when unlicensed. Revenue is protected without ever stopping the
-  work a customer already depends on.
+  license. It falls back to the base tier with a warning and keeps running.
+- Only **tier-gated features** (Gold/Platinum features, add-on suites like
+  ``fleet``) gate **off** when unlicensed, and only while enforcement is on.
+  Work that needs no gated feature never stops.
 - A **grace window** keeps a just-expired license fully live, so a renewal is
   never a fire drill.
 
-Trust anchor: paid features activate **only** when the license is signed by a
+Trust anchor: gated features activate **only** when the license is signed by a
 key in the deployment's trusted set (``MAVERICK_LICENSE_PUBKEYS`` /
-``[license] publisher_pubkeys``, or a key embedded in the shipped build). Absent
+``[license] publisher_pubkeys``, or a key embedded in the build). Absent
 a trust anchor a self-signed license grants **nothing** beyond the base tier.
 """
 from __future__ import annotations
@@ -36,14 +40,14 @@ from pathlib import Path
 # ---- tier + capability registry (the single place features gate) -----------
 #
 # AXIS NOTE: this module is the **platform-tier** axis (Basic/Gold/Platinum),
-# gated by a signed *deployment* license — one of the three axes in
-# docs/product-portfolio.md ("Canonical naming, editions & SKU map"). It is
-# distinct from :mod:`maverick.billing`, whose ``Entitlements``/``feature_allowed``
-# gate the **per-tenant billing plan** (free/pro/enterprise) for a multi-tenant
+# gated by a signed *deployment* license. It is distinct from
+# :mod:`maverick.billing`, whose ``Entitlements``/``feature_allowed`` gate the
+# **per-tenant billing plan** (free/pro/enterprise) for a multi-tenant
 # operator. Same word ("entitlements"), different axis — don't cross the imports.
 # The two compose (a capability can be both tier-gated here and plan-gated there;
-# e.g. SIEM export is a Gold+ tier capability per that doc AND an ``audit_export``
-# billing-plan feature). Keep tier gates here; keep per-tenant plan gates there.
+# e.g. SIEM export is a Gold+ tier capability in GATED_FEATURES AND an
+# ``audit_export`` billing-plan feature). Keep tier gates here; keep per-tenant
+# plan gates there.
 
 _TIER_RANK = {"basic": 0, "gold": 1, "platinum": 2}
 BASE_TIER = "basic"
@@ -69,10 +73,10 @@ GATED_SUITES: frozenset[str] = frozenset({"fleet"})
 # Status values for a loaded license.
 LICENSED = "licensed"   # valid + in date
 GRACE = "grace"         # expired but within the grace window (still live)
-EXPIRED = "expired"     # expired beyond grace (paid off, core on)
-INVALID = "invalid"     # bad signature / untrusted key (paid off, core on)
-UNVERIFIED = "unverified"  # unsigned or no trust anchor (paid off, core on)
-UNLICENSED = "unlicensed"  # no license file (paid off, core on)
+EXPIRED = "expired"     # expired beyond grace (gated off, core on)
+INVALID = "invalid"     # bad signature / untrusted key (gated off, core on)
+UNVERIFIED = "unverified"  # unsigned or no trust anchor (gated off, core on)
+UNLICENSED = "unlicensed"  # no license file (gated off, core on)
 
 _PAID_ACTIVE = frozenset({LICENSED, GRACE})
 
@@ -133,12 +137,13 @@ def _trusted_pubkeys(explicit: list[str] | None = None) -> list[str]:
     return keys
 
 
-#: Publisher keys baked into the shipped build. Populated at release time with
-#: Daybreak Labs' license public key(s) so paid features work with no config.
+#: Publisher keys compiled into a build. Empty in this source tree, so a
+#: deployment trusts only the keys it configures (``MAVERICK_LICENSE_PUBKEYS`` /
+#: ``[license] publisher_pubkeys``).
 _EMBEDDED_PUBKEYS: tuple[str, ...] = ()
 
 
-# ---- issuing (Daybreak side) + verification (deployment side) --------------
+# ---- issuing (publisher side) + verification (deployment side) -------------
 
 def new_keypair() -> tuple[str, str]:
     """Mint a fresh Ed25519 license keypair → (private_hex, public_hex)."""
@@ -193,7 +198,7 @@ def verify_license(doc: dict, trusted_pubkeys: list[str]) -> tuple[bool, str]:
 @dataclass(frozen=True)
 class Entitlements:
     """The resolved entitlement state of a deployment. Consult ``allows`` /
-    ``suite_enabled`` / ``tier_at_least`` at every paid-feature chokepoint."""
+    ``suite_enabled`` / ``tier_at_least`` at every gated-feature chokepoint."""
     tier: str = BASE_TIER
     suites: tuple[str, ...] = ()
     features: tuple[str, ...] = ()
@@ -212,7 +217,7 @@ class Entitlements:
 
     def allows(self, feature: str) -> bool:
         """True iff ``feature`` may run. Core features (not in the registry and
-        not an explicit paid grant or denial) always run — fail-open on the
+        not an explicit grant or denial) always run — fail-open on the
         kernel. Within a live license the checkbox semantics are:
 
         - ``features`` grants a gated feature à la carte, even below its
@@ -220,7 +225,7 @@ class Entitlements:
         - ``features_denied`` switches a feature off even when the tier would
           include it (e.g. Gold minus ``siem_export``). Denial wins over grant.
 
-        Both lists only bind while the license is paid-active (``resolve``
+        Both lists only bind while the license is active (``resolve``
         drops them otherwise), so an expired/invalid license still fails open
         to the base tier — a denial can never outlive the license that made it.
         """
@@ -312,11 +317,11 @@ def reset_cache() -> None:
     _CACHE = None
 
 
-# ---- chokepoint API (what paid features call) ------------------------------
+# ---- chokepoint API (what gated features call) -----------------------------
 
 def enforcing() -> bool:
-    """True iff paid-feature enforcement is ON for this deployment. **Default
-    OFF** — a dev/community box runs everything; enforcement is a deliberate
+    """True iff license enforcement is ON for this deployment. **Default
+    OFF** — a default install runs everything; enforcement is a deliberate
     production posture (``[license] enforce = true`` or
     ``MAVERICK_LICENSE_ENFORCE=1``). This is what keeps the fail-open promise:
     the gate never activates unless an operator turns it on."""
@@ -328,7 +333,7 @@ def enforcing() -> bool:
 
 
 def require(feature: str) -> bool:
-    """Chokepoint gate for a paid *feature*: allowed unless enforcement is on
+    """Chokepoint gate for a tier-gated *feature*: allowed unless enforcement is on
     **and** the license doesn't grant it. Fail-open when not enforcing."""
     if not enforcing():
         return True
@@ -336,7 +341,7 @@ def require(feature: str) -> bool:
 
 
 def require_suite(suite: str) -> bool:
-    """Chokepoint gate for a paid add-on *suite* (e.g. ``fleet``)."""
+    """Chokepoint gate for an add-on *suite* (e.g. ``fleet``)."""
     if not enforcing():
         return True
     return current().suite_enabled(suite)
@@ -419,7 +424,7 @@ def refresh_from_server(url: str | None = None, *, token: str | None = None,
     Fail-open by contract (kernel rule 1): a missing URL, a network error, or an
     unverifiable response NEVER raises and NEVER changes the running entitlement
     — the last-known license file keeps the deployment live. Only a **verified,
-    paid-active, and not-a-rollback** license is written, so a spoofed,
+    active, and not-a-rollback** license is written, so a spoofed,
     downgraded, or replayed API reply cannot forge, strip, or roll back
     entitlements. ``fetch`` is injectable for tests."""
     cfg = _license_cfg()
@@ -460,14 +465,10 @@ def refresh_from_server(url: str | None = None, *, token: str | None = None,
 
 # ---- background auto-refresh (near-instant entitlement propagation) --------
 #
-# The connected path above is pull-based; nothing in the kernel called it on a
-# schedule, so a license issued in the vendor console only landed when someone
-# ran a manual refresh. This loop closes that gap: a long-lived process (the
-# dashboard, `maverick mcp`, …) calls start_refresher() once and the deployment
-# then picks up upgrades/downgrades within one interval of the console issuing
-# them — checkbox flipped at HQ, feature live at the client ~a minute later.
-# Every poll also records a fleet check-in server-side, so the fleet board
-# stays near-live for free.
+# The connected path above is pull-based. A long-lived process calls
+# start_refresher() once (the dashboard does so at startup), and the deployment
+# then picks up a re-issued license within one refresh interval, with no
+# redeploy and no manual refresh.
 
 DEFAULT_REFRESH_INTERVAL = 60.0   # seconds; a signed license is ~1 KB of JSON
 _MIN_REFRESH_INTERVAL = 30.0      # floor so a config typo can't hammer the API
@@ -656,7 +657,7 @@ def install_license(doc: dict, path: str | Path | None = None) -> Path:
 
 # ---- CLI: python -m maverick.entitlements {keygen,issue,verify,show} -------
 # Self-contained so it needs no wiring into the main cli.py. `keygen`/`issue`
-# are Daybreak-side (keep the private key secret); `verify`/`show` run on a
+# are publisher-side (keep the private key secret); `verify`/`show` run on a
 # deployment.
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
@@ -668,7 +669,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
 
     sub.add_parser("keygen", help="mint a publisher keypair (keep the private key secret)")
 
-    iss = sub.add_parser("issue", help="sign a license (Daybreak side)")
+    iss = sub.add_parser("issue", help="sign a license (publisher side)")
     iss.add_argument("--customer", required=True)
     iss.add_argument("--tier", default="gold", choices=list(_TIER_RANK))
     iss.add_argument("--edition", default="enterprise")
@@ -726,7 +727,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     ent = load_entitlements(args.file, trusted_pubkeys=trust)
     print(ent.summary())
     if args.cmd == "show":
-        print(f"  paid features active: {ent.paid_active}")
+        print(f"  licensed features active: {ent.paid_active}")
         print(f"  suites: {list(ent.suites) or '—'}")
         for feat in sorted(GATED_FEATURES):
             print(f"    {'✓' if ent.allows(feat) else '·'} {feat}")

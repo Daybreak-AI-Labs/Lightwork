@@ -7,7 +7,7 @@ audit chain, and no privacy workspace: those come with Lightwork.
 
     PIA_STANDALONE=1  python serve_standalone.py
 
-This is what a client who buys the agent on its own runs. It imports NOTHING
+This is what standalone mode runs. It imports NOTHING
 from ``maverick`` — the scoring engine is the self-contained ``pia_engine``.
 """
 from __future__ import annotations

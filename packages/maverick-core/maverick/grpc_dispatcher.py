@@ -1,4 +1,4 @@
-"""gRPC dispatch (roadmap: 2027 H1 performance).
+"""gRPC dispatch.
 
 Move goal execution to a remote Lightwork worker over gRPC: a
 :class:`GrpcDispatcher` implements the :class:`maverick.runner.Dispatcher`

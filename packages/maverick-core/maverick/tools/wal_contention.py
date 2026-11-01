@@ -1,4 +1,4 @@
-"""WAL contention audit (roadmap: 2027 H1 — "WAL contention audit N=16").
+"""WAL contention audit.
 
 A write-ahead log serialises commits, so p99 write latency should rise roughly
 linearly with the number of concurrent writers. Where it rises *superlinearly*,

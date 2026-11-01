@@ -1,4 +1,4 @@
-"""Council round-2 perf-seat regression: WorldModel write serialisation.
+"""Regression: WorldModel write serialisation.
 
 PR #98 introduced a per-DB-path WorldModel singleton in the dashboard
 so requests stopped reopening SQLite + reapplying migrations. That's

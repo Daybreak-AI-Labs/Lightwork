@@ -50,7 +50,7 @@ MAVERICK_BENCH_DRY_RUN=1 python benchmarks/harness.py \
 
 ## Comparator notes
 
-Lightwork's wedge is **long-horizon work** — multi-day plans, recursive
+Lightwork targets **long-horizon work** — multi-day plans, recursive
 decomposition, persistent learning. The fair comparison is against
 agents that ALSO target multi-step work:
 

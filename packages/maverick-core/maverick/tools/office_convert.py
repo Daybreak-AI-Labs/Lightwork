@@ -1,4 +1,4 @@
-"""Office-document converter (roadmap: 2028 H1 capabilities).
+"""Office-document converter.
 
 LibreOffice headless conversion for the *binary* office formats pandoc can't
 take — Word/Excel/PowerPoint/OpenDocument — into PDF / text / HTML / CSV.

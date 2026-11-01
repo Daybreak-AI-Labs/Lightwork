@@ -1,4 +1,4 @@
-"""eBPF syscall monitor for agent process trees (roadmap: 2027 H2 Safety).
+"""eBPF syscall monitor for agent process trees.
 
 An OPERATOR-run supervisor around ``bpftrace``: it generates a bpftrace
 program that follows a PID tree (seed PID plus every descendant forked while

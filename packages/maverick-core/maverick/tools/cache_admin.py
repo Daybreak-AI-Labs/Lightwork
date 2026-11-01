@@ -1,4 +1,4 @@
-"""Tool-output cache admin tool (roadmap: 2027 H1 performance — "cache purge API").
+"""Tool-output cache admin tool.
 
 An operator-facing surface over the tool-output cache (``tool_cache``): inspect
 hit/miss/size, or purge entries — all of them, or just one tool's — when its

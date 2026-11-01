@@ -1,4 +1,4 @@
-"""UX-216: Settings lists every provider that takes a key and a server address,
+"""Settings lists every provider that takes a key and a server address,
 so an OpenAI-compatible (or TGI) server configured on the computer running
 Lightwork is shown as set up instead of "0 providers connected / No key"."""
 from __future__ import annotations

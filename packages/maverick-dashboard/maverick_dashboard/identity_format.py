@@ -1,7 +1,7 @@
 """Human-friendly rendering of identities and roles for the dashboard UI.
 
 Enterprise operators should never have to read a raw OIDC subject like
-``user:auth0|6a9ad1a287e571a6c9d4d080`` or a lowercase role slug like
+``user:auth0|000000000000000000000001`` or a lowercase role slug like
 ``operator`` in the interface. The identity provider only hands us an opaque
 ``sub`` for federated accounts (there is no email for a break-glass admin
 pinned by ``sub``), so we cannot always show a real name -- but we can always

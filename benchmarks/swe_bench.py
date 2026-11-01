@@ -1,7 +1,7 @@
 """SWE-bench Verified harness for Lightwork + baselines.
 
-Karpathy SOTA-review item: real SWE-bench numbers with three baselines.
-Without these the "swarm" column is undefendable.
+Produces real SWE-bench numbers with three baselines. Without these the
+"swarm" column is undefendable.
 
 This script DOES NOT execute the test suites by itself -- SWE-bench's
 evaluation harness needs Docker + the dataset. It DOES:
@@ -85,7 +85,7 @@ def _dry_run_row(instance_id: str, pipeline: str) -> Row:
     )
 
 
-# Wave 12: sanitize patches before they reach the CSV. Three failures
+# Sanitize patches before they reach the CSV. Three failures
 # in one place: (a) NUL bytes break csv.DictReader on resume → silent
 # re-runs that double-charge; (b) Excel auto-executes cells starting
 # with `=+-@\t\r` and patch lines literally start with `+`/`-` → CSV
@@ -96,7 +96,7 @@ def _dry_run_row(instance_id: str, pipeline: str) -> Row:
 def _sanitize_patch_for_csv(diff: str) -> str:
     if not diff:
         return ""
-    # Wave 12 hardening: normalize CRLF to LF before C0 strip so Windows-
+    # Normalize CRLF to LF before C0 strip so Windows-
     # origin patches don't leave bare \r that csv.DictReader misinterprets
     # as embedded newlines. Also strip BOM (U+FEFF) and C1 controls
     # (U+0080-U+009F + zero-width / bidi U+200B-U+200F, U+202A-U+202E),
@@ -205,13 +205,13 @@ def _scrub_env_value(key: str, value: str) -> str:
     return _redact_url_userinfo(value)
 
 
-# Wave 11: hoist LLM() across instances. anthropic.Client holds an
+# Hoist LLM() across instances. anthropic.Client holds an
 # httpx connection pool; constructing a fresh LLM per instance leaked
 # ~5-10 MB of RSS per instance and OOM-killed the run around #800-1200
 # on a 1865-instance Pro sweep. One LLM per process, threadsafe per
 # the Anthropic SDK's documented invariants.
 _SHARED_LLM = None
-# Wave 12 (council F12a): lock around lazy init so two pipeline calls
+# Lock around lazy init so two pipeline calls
 # starting near-simultaneously don't double-construct the LLM (which
 # would leak a second httpx pool and stomp on the first's connections).
 _SHARED_LLM_LOCK = threading.Lock()
@@ -231,7 +231,7 @@ def _get_shared_llm():
 class _ResetWorkdirError(RuntimeError):
     """Raised when the workdir can't be reset to the requested commit.
 
-    May 26 council fix (harness audit #1): the prior best-effort silent-
+    The prior best-effort silent-
     swallow allowed instances to run against whatever tip the previous
     instance left, producing patches against the wrong tree and silently
     scoring 0 with outcome="failure". We now raise so the harness can
@@ -274,7 +274,7 @@ def _reset_workdir(workdir, base_commit: str = "") -> None:
             ["git", "-C", str(workdir_path), "clean", "-fdx"],
             capture_output=True, timeout=30,
         )
-        # May 26 council fix (long-tail audit #3): always run reflog
+        # Always run reflog
         # expire + gc, not just in opaque mode. In non-opaque dev runs,
         # the reflog accumulates a new entry per `reset --hard` (one per
         # instance). Across 1865 Verified instances on a shared workdir
@@ -299,7 +299,7 @@ def _reset_workdir(workdir, base_commit: str = "") -> None:
 def _maverick_snapshot_and_set_env(kwargs: dict) -> dict:
     """Snapshot all MAVERICK_* env vars (for later restore) and set the
     per-instance test-env vars from the manifest. Returns the snapshot."""
-    # Wave 10 council fix: capture ALL MAVERICK_* env vars so any var the
+    # Capture ALL MAVERICK_* env vars so any var the
     # agent loop mutated is restored, not just a five-key whitelist.
     _prior_env = {
         k: v for k, v in os.environ.items()
@@ -748,7 +748,7 @@ def _maverick_build_row(
 
     total_cost, total_in, total_out, last_outcome = _maverick_episode_accounting(all_eps)
 
-    # May 26 council fix (harness audit #3): Budget.check() is post-hoc
+    # Budget.check() is post-hoc
     # — a single fat API call (cache write surcharge or 100k-token tool
     # result) can blow the cap by 30-50% AFTER the record completes.
     # Surface that as a distinct outcome so the operator sees overruns
@@ -760,19 +760,19 @@ def _maverick_build_row(
             f" {last_outcome}"
         )
 
-    # Wave 10 (C1): predicted_patch must be the EXTRACTED diff, not the
+    # predicted_patch must be the EXTRACTED diff, not the
     # orchestrator's prose. The orchestrator's return value starts with
     # `DONE.\n\n<patch>` in coding mode; extract_unified_diff pulls the
     # actual unified diff. Fallback chain: orchestrator return -> goal.result.
-    goal = goal_obj  # pre-read before close (Wave 12 hotfix)
+    goal = goal_obj  # pre-read before close
     diff = extract_unified_diff(result or "") or extract_unified_diff(
         (goal.result or "") if goal else ""
     ) or ""
 
-    # Wave 11: surface tool-use signals + verifier confidence + trace
+    # Surface tool-use signals + verifier confidence + trace
     # data for adoption tripwire + forensics. The agent posts these
     # to the blackboard which mirrors into goal_events.
-    events = world_events  # pre-read before close (Wave 12 hotfix)
+    events = world_events  # pre-read before close
     str_replace_used, verify_event_count, tool_names, num_turns = (
         _maverick_tool_signals(events)
     )
@@ -788,7 +788,7 @@ def _maverick_build_row(
     # Optional per-instance JSON sidecar for forensics.
     _maverick_write_trace(instance_id, events)
 
-    # Wave 12 hotfix: report the orchestrator role's actual model
+    # Report the orchestrator role's actual model
     # (resolved via the same role-dispatch the agent loop uses), not
     # the shared LLM's default. The default is hardcoded to Sonnet,
     # which makes Opus-brain runs misleadingly show "claude-sonnet-4-6"
@@ -815,7 +815,7 @@ def _maverick_build_row(
         cost_dollars=total_cost,
         tokens_in=total_in,
         tokens_out=total_out,
-        # Wave 12 fix: SWE-bench Pro grader has no patch-size cap; the
+        # SWE-bench Pro grader has no patch-size cap; the
         # previous [:50_000] silently truncated mid-hunk on multi-file
         # refactors (Django/pandas instances ~60-100KB). Sanitize NUL
         # bytes (csv.DictReader fails on them, breaking resume) and
@@ -823,7 +823,7 @@ def _maverick_build_row(
         # cells starting with =+-@\t\r — patch lines naturally start
         # with `+`/`-`).
         predicted_patch=_sanitize_patch_for_csv(diff),
-        # Wave 12 hotfix: don't override "no-diff" with the episode's
+        # Don't override "no-diff" with the episode's
         # `last_outcome` when the actual extracted diff is empty.
         # Otherwise we report "success" on instances where the agent's
         # SR block was never applied/extracted — the score reads "X
@@ -842,7 +842,7 @@ def _maverick_build_row(
 def run_maverick(instance_id: str, brief: str, **kwargs) -> Row:
     """Spin up a Lightwork swarm against the instance brief.
 
-    Wave 8: coding-mode + best-of-N support. The harness sets
+    Coding-mode + best-of-N support. The harness sets
     MAVERICK_CODING_MODE=1 + MAVERICK_BEST_OF_N + MAVERICK_FAIL_TO_PASS /
     MAVERICK_PASS_TO_PASS so coding_mode.from_env() picks up the
     benchmark context. The agent then uses the strict diff-only
@@ -850,13 +850,13 @@ def run_maverick(instance_id: str, brief: str, **kwargs) -> Row:
     the test-driven verifier when ground-truth tests are present,
     and (when n > 1) returns the best-of-N candidate.
 
-    Wave 10: predicted_patch is now the EXTRACTED unified diff (not
+    predicted_patch is now the EXTRACTED unified diff (not
     the orchestrator's prose). Failing-test files are pre-read and
     prepended to the brief. Cost is summed across all episodes
     in this goal, not just the last one. Test envs are cleared after
     the run so they don't leak into adjacent processes.
 
-    Wave 11: LLM is hoisted to a process-wide singleton (no RSS leak),
+    LLM is hoisted to a process-wide singleton (no RSS leak),
     workdir is reset before the run (no state bleed), per-instance
     cost is hard-capped, Pro `requirements`/`interface` fields are
     surfaced into the brief, and the 30-turn productivity ceiling is
@@ -878,21 +878,21 @@ def run_maverick(instance_id: str, brief: str, **kwargs) -> Row:
     # cost profile materially, so don't default it on.
     best_of_n = int(os.environ.get("MAVERICK_BEST_OF_N", "1"))
 
-    # Wave 10: snapshot prior env so we can restore on exit and not leak
+    # Snapshot prior env so we can restore on exit and not leak
     # one instance's test sets into the next instance (or into a
     # follow-on non-bench process sharing the same shell).
     _prior_env = _maverick_snapshot_and_set_env(kwargs)
 
-    # Wave 11 (D8): reset workdir to a clean state before the run so
+    # Reset workdir to a clean state before the run so
     # state from instance N-1 doesn't pollute. Also strips reflog/tags
     # that could leak gold (Princeton issue #465).
     _maverick_reset_workdir()
 
-    # Wave 10 (B2): pre-read failing-test source as initial context so the
+    # Pre-read failing-test source as initial context so the
     # agent localises against the actual assertions rather than guessing.
     failing_test_context = _maverick_failing_test_context(kwargs.get("fail_to_pass") or [])
 
-    # Wave 11: surface Pro `requirements` + `interface` fields. SWE-bench
+    # Surface Pro `requirements` + `interface` fields. SWE-bench
     # Pro adds these as part of issue augmentation; harnesses that drop
     # them lose easy points because the agent has to infer the spec.
     pro_block = _maverick_pro_block(kwargs)
@@ -914,7 +914,7 @@ def run_maverick(instance_id: str, brief: str, **kwargs) -> Row:
     world = WorldModel()
     llm = _get_shared_llm()
     gid = world.create_goal(f"swe-bench:{instance_id}", enriched_brief)
-    # Wave 11: per-instance hard cost cap honors operator's
+    # Per-instance hard cost cap honors operator's
     # --instance-hard-cap; defaults to $3 to align with Scale's published
     # Pro budget. Wall is capped at 25 turns x 60s = 25 min effective.
     instance_cap = float(os.environ.get("MAVERICK_INSTANCE_HARD_CAP", "3.0"))
@@ -936,10 +936,10 @@ def run_maverick(instance_id: str, brief: str, **kwargs) -> Row:
     result = ""
 
     try:
-        # Wave 10 (C6): sum cost across ALL episodes for this goal, not
+        # Sum cost across ALL episodes for this goal, not
         # just the most recent one. Best-of-N runs N episodes; prior
         # code reported only eps[0] (one attempt) and lost the other
-        # N-1. Wave 12 hotfix: all THREE world.* reads (list_episodes,
+        # N-1. All THREE world.* reads (list_episodes,
         # get_goal, goal_events) MUST happen BEFORE the finally block
         # closes the WorldModel SQLite connection — otherwise the
         # harness raises ProgrammingError("Cannot operate on a closed
@@ -948,20 +948,20 @@ def run_maverick(instance_id: str, brief: str, **kwargs) -> Row:
             llm, world, budget, gid, sandbox, best_of_n,
         )
     finally:
-        # Wave 10 (D11) + May 26 council fix (harness audit #2): restore
+        # Restore
         # env to the EXACT pre-instance state. Drop any MAVERICK_* var
         # the agent loop added that wasn't in the prior snapshot — that
         # was the leak channel for BoN temperature / model overrides
         # bleeding across instances.
         _maverick_restore_env(_prior_env)
-        # Wave 11 (D18): release the per-instance WorldModel SQLite
+        # Release the per-instance WorldModel SQLite
         # connection. Without this, 1865 instances leak 1865 open file
         # descriptors and SQLite WAL handles.
         try:
             world.close()
         except Exception:
             pass
-    # May 26 council fix (harness audit #4): on best-of-N runs,
+    # On best-of-N runs,
     # `all_eps[0]` is the LAST-started episode (list_episodes orders
     # started_at DESC). Prefer a successful episode's outcome; fall back
     # to most recent if none succeeded.
@@ -1272,10 +1272,10 @@ def load_instances(manifest: Path) -> list[dict]:
         optional `fail_to_pass`, `pass_to_pass`, `gold_patch`, `language`
       - one bare ID per line (brief loaded from same-name .txt file)
 
-    Wave 9 fix: previously returned `(id, brief)` tuples and dropped the
+    Previously returned `(id, brief)` tuples and dropped the
     test sets entirely — the test-driven verifier never fired.
 
-    Wave 10 (D7): single malformed JSON line no longer aborts the whole
+    Single malformed JSON line no longer aborts the whole
     harness; the bad line is logged + skipped so the run continues.
     """
     out: list[dict] = []
@@ -1366,13 +1366,13 @@ def _ensure_csv_header(f, cols: list[str]) -> bool:
 def write_csv(rows: list[Row], out_path: Path) -> None:
     """Append (or create) a CSV at out_path. One row per (instance, pipeline).
 
-    Wave 9 fix: dropped the manual `\\n` escape — csv.DictWriter quotes
+    Dropped the manual `\\n` escape — csv.DictWriter quotes
     newlines correctly; the runbook's `replace('\\\\n', chr(10))` was a
     no-op on the unescaped data anyway, and would corrupt patches that
     contained the literal two-character sequence `\\n` (Python source,
     docstrings).
 
-    Wave 10 (D8): hold an advisory `flock(LOCK_EX)` for the duration of
+    Hold an advisory `flock(LOCK_EX)` for the duration of
     the header-check + append so concurrent harness shards don't double-
     write rows or interleave a header in the middle of the file. Falls
     back to no-lock on platforms without fcntl (e.g. Windows runners).
@@ -1408,7 +1408,7 @@ def write_csv(rows: list[Row], out_path: Path) -> None:
 
 
 def _write_run_meta(out_dir: Path, args, manifest_path: Path) -> Path:
-    """Wave 12 (council F16): emit run_meta.json next to the results CSV.
+    """Emit run_meta.json next to the results CSV.
 
     Captures everything needed to reproduce or audit a run:
       - Lightwork git rev (HEAD sha)
@@ -1447,7 +1447,7 @@ def _write_run_meta(out_dir: Path, args, manifest_path: Path) -> Path:
         pass
 
     # pip freeze — pinned dep snapshot.
-    # Wave 12 hardening: 120s timeout (was 30s) because pip freeze on a
+    # 120s timeout (was 30s) because pip freeze on a
     # fresh venv with many packages on a slow CI worker can take 60+s.
     # 30s silently returned empty pip_freeze, defeating the audit purpose.
     try:
@@ -1513,11 +1513,11 @@ def already_done(out_path: Path) -> set[tuple[str, str]]:
     """Read out_path and return the set of (instance_id, pipeline) pairs
     already written AND that succeeded. Used by main() to skip on resume.
 
-    Wave 10 (D12): csv.Error during read no longer silently empties the
+    csv.Error during read no longer silently empties the
     set; instead we log a visible warning so a partial-write race or
     corrupt CSV doesn't trigger a SILENT re-run that double-charges.
 
-    Wave 12 (council F11b): rows whose `outcome` starts with "error:"
+    Rows whose `outcome` starts with "error:"
     are NOT marked done. The agent errored (sandbox crash, API
     outage, etc) without producing a real patch — resuming should
     retry these, not skip them.
@@ -1548,14 +1548,14 @@ def already_done(out_path: Path) -> set[tuple[str, str]]:
     if error_rows:
         print(
             f"info: {error_rows} error row(s) found in {out_path} — "
-            "they will be retried (Wave 12: errors no longer mark a "
+            "they will be retried (errors no longer mark a "
             "row as done)",
             file=sys.stderr,
         )
     return done
 
 
-# Wave 12 (council F11a): clean-exit flag shared with signal handler.
+# Clean-exit flag shared with signal handler.
 # Set on SIGTERM; the main loop checks it after each row write and
 # exits gracefully (last row flushed, partial accounting reported).
 _TERMINATE_REQUESTED: bool = False
@@ -1591,14 +1591,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--instance-hard-cap", type=float, default=None,
                     help="Hard per-instance $ cap (sets MAVERICK_INSTANCE_HARD_CAP).")
     ap.add_argument("--worker-index", type=int, default=0,
-                    help="Shard index (0..num-workers-1). Wave 11 (D8 shard).")
+                    help="Shard index (0..num-workers-1).")
     ap.add_argument("--num-workers", type=int, default=1,
                     help="Total number of parallel shards.")
     ap.add_argument("--adoption-tripwire", type=float, default=None,
                     help="Abort if SEARCH/REPLACE adoption rate < N (0.0-1.0) "
                     "after the first 25 instances. Sentinel for prompt drift.")
     ap.add_argument("--max-consecutive-failures", type=int, default=10,
-                    help="Wave 12 (F11e): abort if N consecutive instances "
+                    help="Abort if N consecutive instances "
                     "error out (likely API outage / quota exhaustion / "
                     "sandbox crash). 0 to disable.")
     return ap
@@ -1608,13 +1608,13 @@ def _shard_instances(instances: list, args) -> list | int:
     """Apply hash-sharding for parallel workers. Returns the filtered
     instance list, or an int exit code when resume must be refused.
 
-    Wave 11 (D8): shard by hash(instance_id) % num_workers so two
+    Shard by hash(instance_id) % num_workers so two
     parallel harness processes don't redo each other's work even
     though both started with the same manifest.
     """
     if args.num_workers <= 1:
         return instances
-    # May 26 council fix (harness audit #5): refuse to resume if
+    # Refuse to resume if
     # num_workers changed since the last run. The sharding hash
     # would re-bucket every instance, silently orphaning the ones
     # that prior workers already processed.
@@ -1653,7 +1653,7 @@ def _instance_extra(inst: dict) -> dict:
         "pass_to_pass": inst.get("pass_to_pass", []) or [],
         "gold_patch": inst.get("gold_patch", "") or "",
         "language": inst.get("language", "") or "",
-        # Wave 11: Pro-specific manifest fields.
+        # Pro-specific manifest fields.
         "base_commit": inst.get("base_commit", "") or "",
         "requirements": inst.get("requirements", "") or "",
         "interface": inst.get("interface", "") or "",
@@ -1678,8 +1678,7 @@ def _process_row_outcome(row: Row, pipeline: str, args, state: _RunState) -> int
     """Update circuit-breaker + adoption-tripwire accounting for a freshly
     written row. Returns an int exit code when a tripwire fires, else None.
     """
-    # Wave 12 (F11e) + hardening + smoke-day-2 fix:
-    # consecutive-failure circuit breaker. ANY outcome that
+    # Consecutive-failure circuit breaker. ANY outcome that
     # isn't an explicit success/dry-run resets the breaker
     # AND counts toward the failure budget. The May 26
     # smoke showed 3/6 instances coming back as "no-diff"
@@ -1709,7 +1708,7 @@ def _process_row_outcome(row: Row, pipeline: str, args, state: _RunState) -> int
             file=sys.stderr,
         )
         return 5
-    # Wave 11: track SEARCH/REPLACE adoption via extra signal.
+    # Track SEARCH/REPLACE adoption via extra signal.
     if pipeline == "maverick":
         if row.extra.get("str_replace_editor_used"):
             state.str_replace_uses += 1
@@ -1718,7 +1717,7 @@ def _process_row_outcome(row: Row, pipeline: str, args, state: _RunState) -> int
     print(f"{row.instance_id}\t{pipeline}\t{row.outcome}\t"
           f"${row.cost_dollars:.3f}\t{row.wall_seconds:.1f}s"
           f"\ttotal=${state.total_spend:.2f}")
-    # Wave 11: adoption tripwire. After 25 instances, if
+    # Adoption tripwire. After 25 instances, if
     # SEARCH/REPLACE adoption is below the threshold, abort
     # so we don't burn $4k on a degenerate run.
     if (args.adoption_tripwire is not None
@@ -1740,11 +1739,11 @@ def _process_row_outcome(row: Row, pipeline: str, args, state: _RunState) -> int
 def _install_sigterm_handler() -> None:
     """Install the SIGTERM handler for clean shutdown.
 
-    Wave 12 (F11a): cloud schedulers (kubelet, systemd, AWS Batch) get a
+    Cloud schedulers (kubelet, systemd, AWS Batch) get a
     clean shutdown instead of an unflushed CSV. SIGINT (Ctrl-C) is already
     caught by the KeyboardInterrupt block.
 
-    Wave 12 hardening: reset the global flag so reentry (tests calling
+    Reset the global flag so reentry (tests calling
     main() twice in one process, harness wrappers, etc.) doesn't
     immediately short-circuit because a prior call set the flag.
     """
@@ -1784,7 +1783,7 @@ def main() -> int:
     if args.instance_hard_cap is not None:
         os.environ["MAVERICK_INSTANCE_HARD_CAP"] = str(args.instance_hard_cap)
 
-    # Wave 12 (F16): provenance snapshot next to the results CSV.
+    # Provenance snapshot next to the results CSV.
     _write_run_meta_best_effort(args)
 
     pipelines = [p.strip() for p in args.pipelines.split(",") if p.strip()]

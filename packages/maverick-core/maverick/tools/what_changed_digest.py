@@ -1,4 +1,4 @@
-"""\"What changed\" digest (roadmap: 2027 H1 UX — "what changed digest").
+"""\"What changed\" digest.
 
 Given two snapshots of the same structured state — two runs' metrics, two
 config dumps, a before/after of any flat key→value map — produce a compact,

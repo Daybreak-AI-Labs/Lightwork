@@ -1,4 +1,4 @@
-"""Tier 0 (Wave 11): adversarial edge cases for SEARCH/REPLACE parser/applier.
+"""Tier 0: adversarial edge cases for SEARCH/REPLACE parser/applier.
 
 These tests probe failure modes I didn't cover in test_edit_format.py
 that could fire on real SWE-bench Pro instances. Each test is a

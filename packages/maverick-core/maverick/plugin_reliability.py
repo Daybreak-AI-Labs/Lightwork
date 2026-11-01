@@ -1,4 +1,4 @@
-"""Long-running plugin reliability suite (roadmap: 2028 H2 ecosystem).
+"""Long-running plugin reliability suite.
 
 The TS / gRPC / in-process plugin hosts each claim reliability properties —
 a crashed child is restarted and the call retried once, a timeout becomes an

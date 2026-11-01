@@ -1,201 +1,395 @@
 # Contributing to Lightwork
 
-Thanks for being here. Lightwork is built by accretion -- every commit
-should make the foundation stronger without forcing a rewrite. Read
-these guidelines before opening your first PR.
+Thank you for your interest in Lightwork. This guide covers how to set up a
+development environment, the rules the code follows, and how changes are
+reviewed and merged.
 
-> **Note:** Lightwork is now proprietary, commercially licensed software (see
-> [`LICENSE`](./LICENSE)). External contributions require a signed CLA — see
-> "License & contributions" below.
+Lightwork is licensed under the
+[Apache License, Version 2.0](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE).
+Everyone taking part is expected to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md), and contributions are accepted under the
+[Contributor License Agreement](CLA.md).
 
-## Quick start (dev setup)
+## Ways to contribute
+
+- **Report a bug.** Open an issue with the bug report template.
+- **Suggest a feature.** Open an issue with the feature request template and
+  describe the problem you want solved.
+- **Improve the documentation.** User guides live in `docs/`; corrections and
+  clarifications are always welcome.
+- **Fix a bug or build a feature.** See [Where to start](#where-to-start).
+- **Review pull requests** and help answer questions in
+  [GitHub Discussions](https://github.com/Daybreak-AI-Labs/Lightwork/discussions).
+- **Extend Lightwork** with a model provider, a channel adapter or a skill (see
+  [Extending Lightwork](#extending-lightwork)).
+
+Security vulnerabilities are the exception: do not report them in a public
+issue. Follow the
+[security policy](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md)
+instead.
+
+## Where to start
+
+- Maintainers label issues that suit a first contribution
+  `good first issue`; that list is the best place to start.
+- Before you start on an issue, leave a comment saying you are working on it,
+  so that two people do not solve the same problem.
+- For a larger change, open an issue first and agree on the approach with a
+  maintainer before you write the code.
+- Significant changes, such as a new public API, a breaking change or a change
+  to how the project works, go through an RFC. The process is described in
+  [docs/rfcs/README.md](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/rfcs/README.md).
+
+## Development setup
+
+This section sets up a development environment. To install Lightwork to use
+it, follow the
+[source installation guide](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md)
+instead.
+
+You need git, bash and Python 3.10, 3.11 or 3.12 (the versions CI tests).
+Docker or Podman is optional; the container sandbox backends use it. Node.js is
+needed only for the TypeScript SDK in `sdks/plugin-ts`.
 
 ```bash
 git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd maverick
-# Core + the full dev/test toolchain (pytest, ruff, pre-commit, and the
-# cross-package runtime deps the suite imports) in one shot:
-pip install -e './packages/maverick-core[dev]'
-# Sibling packages are import-time deps of the suite (installed --no-deps;
-# their runtime deps come from [dev] above at the floors CI enforces):
-pip install --no-deps -e ./packages/maverick-shield
-pip install --no-deps -e ./packages/maverick-channels
-pip install --no-deps -e ./packages/maverick-dashboard
-pip install --no-deps -e ./packages/maverick-mcp
-pip install --no-deps -e ./apps/installer-cli
-pre-commit install
-
-pytest -q
+cd Lightwork
+bash .devcontainer/post-create.sh
+. .venv/bin/activate
+lightwork version
+lightwork doctor
 ```
 
-Make sure `maverick --help` works and `maverick doctor` prints a
-status table. `pre-commit install` wires the lint gate (below) to run on
-every commit, so you catch a ruff failure locally instead of in CI.
+`.devcontainer/post-create.sh` creates a virtual environment in `.venv` with
+the `python3` on your `PATH`, so make sure that is a supported version. It
+installs the eight workspace packages in editable mode (`maverick-core` with
+its dependencies, the others with `--no-deps`), then the runtime dependencies
+those packages need and the development tools: pytest, pytest-asyncio,
+pytest-xdist, ruff, vulture and build. The repository's dev container (`.devcontainer/`) and GitHub
+Codespaces run the same script automatically. On Windows, run it in WSL or use
+the dev container.
 
-## Project shape
+The `lightwork` and `maverick` commands are the same CLI. `lightwork version`
+lists the installed packages; `lightwork doctor` reports what is configured and
+what is missing. On a development machine, warnings about a missing provider
+key or an unsandboxed host are expected. The tests do not need a provider key.
+
+To run the secret scan that is part of the lint gates, also install
+detect-secrets:
+
+```bash
+python -m pip install 'detect-secrets>=1.5'
+```
+
+Do not run `pip install -e .` at the repository root. The root
+`pyproject.toml` holds workspace and tool configuration only; install the
+packages individually as the setup script does.
+
+### Repository layout
 
 ```
 packages/
-  maverick-core/       Python agent kernel (recursive swarm, world model,
-                       multi-provider LLM dispatch, skills, sandboxes)
-  maverick-shield/     Agent Shield integration with builtin fallback rules
-  maverick-channels/   12 channel adapters (Telegram, Discord, Slack, ...)
-  maverick-dashboard/  FastAPI local web UI (goals/skills/facts/spend)
-  maverick-mcp/        Model Context Protocol server (stdio JSON-RPC)
+  maverick-core/       Agent kernel: agents and swarm, world model, budget,
+                       multi-provider LLM dispatch, skills, sandboxes, CLI
+  maverick-shield/     Safety screening (agent-shield integration with a
+                       built-in rule set)
+  maverick-channels/   Channel adapters (Telegram, Discord, Slack, ...)
+  maverick-dashboard/  FastAPI web dashboard and REST API
+  maverick-mcp/        Model Context Protocol server
+  maverick-evolve/     Evaluation harness and configuration-only evolutionary
+                       search
+  maverick-knowledge/  Per-domain document knowledge (vector retrieval)
 apps/
-  installer-cli/       Interactive Python TUI wizard
-  installer-desktop/   Tauri-based native GUI installer
-deploy/
-  docker/  vps/  desktop/
-docs/                  User-facing guides
-benchmarks/            Long-horizon eval suite + example skills
+  installer-cli/       Setup wizard (`lightwork init`)
+  installer-desktop/   Tauri source-bootstrap app (not a self-contained installer)
+  ...                  Editor extensions, desktop and mobile companions
+deploy/                Docker, VPS, Helm and other deployment recipes
+docs/                  User and operator documentation
+benchmarks/            Evaluation suites and example skills
+sdks/                  Client and plugin SDKs
 ```
 
-New capability → new package under `packages/`. New entry point → new
-app under `apps/`. The wizard MUST learn to enable any new capability,
-or non-technical users can't reach it.
+[ARCHITECTURE.md](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/ARCHITECTURE.md)
+describes how the pieces fit together.
+
+## Running the tests
+
+Run tests with `python3 -m pytest` (or `python -m pytest` inside the virtual
+environment), never with a bare `pytest`. A `pytest` found on `PATH` can belong
+to an isolated tool environment (pipx or uv) that cannot see the installed
+packages, and the run then fails with import errors.
+
+```bash
+python -m pytest -q packages/maverick-shield/tests      # one package
+python -m pytest -q packages/maverick-core/tests/test_budget.py   # one file
+python -m pytest -q                                     # the whole suite
+```
+
+The whole suite is large. Run it the way CI does, with pytest-xdist using one
+worker per CPU core and grouping tests by file:
+
+```bash
+python -m pytest -q -n auto --dist loadfile
+```
+
+CI also runs tests with `MAVERICK_TEST_SECURE_DEFAULT=1` (the production
+security posture): selected suites on pull requests, and the whole suite in
+the merge queue and on `main` (the `posture` jobs). Run the tests you changed
+that way before pushing.
+
+On a pull request the `test (3.10, n)` legs run only the test files your
+changed files can affect (the `select-tests` job in `ci.yml`; the rules are in
+`scripts/select_pr_tests.py` and in the table below). The merge queue and
+`main` run everything, so run the whole suite locally before pushing a change
+to shared code, and check the selection yourself with
+`python scripts/select_pr_tests.py --git origin/main HEAD`.
+
+A collection error in any file stops the whole run, so fix import errors
+first. When a collection error shows a `pyo3_runtime.PanicException`, the real
+cause (often a missing module) is on the captured stderr line above it.
+
+CI runs the suite on Python 3.10, 3.11 and 3.12 as four file-level slices
+(`--shard N/4`, an option defined in the root `conftest.py`). Each slice runs
+under pytest-xdist and then runs the tests marked `heavy_concurrency` serially,
+so their own threads do not compete with a second worker
+(`.github/actions/test-shard/action.yml` has the exact commands).
+
+### Writing tests
+
+- Tests live in each package's `tests/` directory, one `test_<module>.py` per
+  module. Inside a package use relative imports; tests use absolute imports
+  (`from maverick.budget import Budget`).
+- Tests that touch the agent loop use the `fake_llm` fixture (`FakeLLM`) from
+  `packages/maverick-core/tests/conftest.py`. Tests never call a real model
+  provider.
+- Tests must not depend on each other: no fixed TCP ports, no shared paths
+  outside `tmp_path`, and nothing that assumes another file ran first. xdist
+  schedules files in its own order. The root `conftest.py` fails any test that
+  leaves a `maverick.*` package attribute bound to a re-imported module copy.
+- pytest-asyncio runs in strict mode, so async tests need an explicit
+  `@pytest.mark.asyncio` marker.
+- Dashboard tests create the client with
+  `TestClient(app, headers={"Origin": "http://testserver"})`, because mutating
+  `/api/v1` requests must pass the same-origin check, and use a fixture that
+  points `world_model.DEFAULT_DB` at `tmp_path` so that tests never touch a real
+  database. Copy an existing dashboard test.
+- `Budget` enforces every cap (tokens, dollars, wall-clock time, tool calls)
+  when usage is recorded, not only in `check()`. A test that raises one cap
+  must also raise any other cap it will cross.
+- A test that contends on SQLite from its own threads carries
+  `@pytest.mark.heavy_concurrency`.
+
+## Lint and CI gates
+
+Before you push, run:
+
+```bash
+bash scripts/pre-push-lint.sh
+```
+
+It runs these checks and reports every failure at once:
+
+- `ruff check .` over the whole repository. Ruff is the only static checker;
+  there is no type checker. Bugbear (`B`) rules are enabled and the complexity
+  limit is 20, so new code must stay under it.
+- `vulture` for dead code.
+- A check for a bare `import tomllib` and for `shell=True` outside the sandbox
+  backends (see the house rules below).
+- `detect-secrets` against `.secrets.baseline`. It scans tracked files only, so
+  run `git add` on new files first. Mark a false positive with
+  `# pragma: allowlist secret`. The check is skipped if `detect-secrets` is not
+  installed.
+- `scripts/check_attribution.py` over your unpushed commits (see
+  [Commits and pull requests](#commits-and-pull-requests)).
+- The project's contract gates: `python -m maverick.plugin_matrix --ci`,
+  `maverick.domain_prose_lint --ci`, `maverick.deprecations --ci`,
+  `maverick.grpc_api.contract --check`, `maverick.a11y_audit --ci` and
+  `maverick.schema_migrations --ci`.
+- The release packaging tests
+  (`packages/maverick-core/tests/test_release_packaging.py`).
+
+To run ruff and the `tomllib` check on every commit, install the pre-commit
+hooks once with `python -m pip install pre-commit` and `pre-commit install`.
+
+The CI `lint` job runs further contract gates (`python -m maverick.<gate> --ci`).
+Two need extra steps when you change what they guard:
+
+- **World-model migrations** are immutable once released. Adding a migration
+  requires regenerating the checksum lock with
+  `python -m maverick.migration_governance --regen` and committing
+  `migrations.lock.json`.
+- **Evaluator ground-truth anchors** are immutable once released. A new anchor
+  must be locked with `python -m maverick.evaluator_evolution --regen`.
+
+### How changes reach `main`
+
+`main` is protected by the ruleset in `.github/rulesets/protect-main.json`.
+Every change lands through a pull request and the merge queue as a squash
+merge, and only after every required check has passed on the queue's merge of
+the pull request onto the current `main`. Force-pushes and branch deletion are
+refused, history stays linear, and nobody can bypass the rules.
+
+| Check | What it runs |
+| --- | --- |
+| `lint` | `ruff check .`, vulture, the `tomllib` and `shell=True` checks, detect-secrets and the `python -m maverick.<gate> --ci` contract gates |
+| `lint-pr-title` | Conventional Commits pull request title (see below) |
+| `no-ai-attribution` | `scripts/check_attribution.py` over the pull request's commits, title and description, the merge-queue commit and pushes to `main` |
+| `select-tests` | On a pull request, the test files the changed files can affect (`scripts/select_pr_tests.py`): a change to the kernel, a `conftest.py`, `pyproject.toml`, the requirements, `.github/` or `scripts/` selects the full suite; a package change selects its tests and every test naming its import package; other files select the tests naming them by path. The heavier jobs (`docker`, `postgres`, `audit`, `release-cohort`, `redteam`, `eval-smoke`, the benchmark gates, Windows containment) run on a pull request only when a changed file is under their inputs (`JOB_PREFIXES`) |
+| `test (3.10, 1/2/3/4)` | The test suite on Python 3.10, in four slices: the `select-tests` selection on a pull request, the full suite in the merge queue and on `main` |
+| `test (3.11, 1/2/3/4)`, `test (3.12, 1/2/3/4)` | The same slices on 3.11 and 3.12. On a pull request these report success without running; they run on the merge queue's commit and on `main` |
+| `posture (1/2/3/4)` | The full suite again on 3.12 under the production security defaults, gated like the 3.11 and 3.12 legs |
+| `harness-overhead`, `governance-frontier-offline` | The tracked benchmark manifests verify against the current sources (regenerate them when a source they cover changes) |
+| `audit` | OSV Scanner, pip-audit, bandit, the license policy and the SBOM |
+| `release-cohort`, `redteam`, `eval-smoke`, `postgres`, `docker` | Release packaging, the shield red-team corpus, the evaluation harness, the Postgres backend and the container image |
+| `Windows process containment (Python 3.10/3.11/3.12)` | Process-tree containment on Windows: 3.10 on every pull request, 3.11 and 3.12 on the merge queue and `main` |
+
+Each required check must also run on `merge_group` events, or the queue cannot
+merge; `test_every_required_workflow_runs_in_the_merge_queue` enforces this.
+Maintainers apply the ruleset by importing the JSON file under **Settings →
+Rules → Rulesets → New ruleset → Import a ruleset**, and change it by editing
+the file in a pull request and importing it again. The squash merge default
+commit message (**Settings → General → Pull Requests**) must be the pull
+request title.
 
 ## House rules
 
-1. **Surgical changes.** Don't "improve" adjacent code. Match existing
-   style even if you'd do it differently.
-2. **Shield wired or it doesn't count.** If you add a new tool / sink,
-   it goes through `ctx.shield.scan_tool_call()` before execution.
-3. **Budget caps are non-negotiable.** Every long-running path must
-   respect `Budget`. No bypassing `budget.check()`.
-4. **Sandbox-mediate all shell.** Never call `subprocess.run` from a
-   tool directly -- go through `sandbox.exec()`.
-5. **Per-role model choice is user-controlled.** Never hardcode a model
-   in the agent loop. Read from `maverick.config.get_role_model(role)`.
-6. **Fail-open with a warning, never silently.** A broken scanner or
-   missing optional dep must log loudly.
-7. **Defaults belong in code; overrides in `~/.maverick/config.toml`.**
+The kernel rules below are numbered; code comments and documents cite them as
+"kernel rule N", so keep the numbers stable.
 
-## Tests
+1. **The kernel runs without the shield.** Never require `agent-shield`. When
+   an optional component is missing or a scanner fails, fail open and log a
+   clear warning; never fail silently.
+2. **Never hard-code a model.** Resolve models with
+   `maverick.config.get_role_model(role)`. The defaults in
+   `maverick.llm.ROLE_MODELS` are a last resort, and the user's per-role choice
+   always wins.
+3. **Budget caps are not optional.** Every long-running path respects `Budget`;
+   never bypass `budget.check()`.
+4. **All shell goes through `sandbox.exec()`.** Never call `subprocess.run`
+   from a tool, and never use `shell=True` outside `maverick/sandbox/`; CI
+   checks for it.
+5. **No new top-level dependency without a configuration knob.** Put new
+   dependencies behind an optional extra and a setting that turns the feature
+   on.
+6. **The setup wizard is the source of truth for the user experience.** A new
+   capability needs a configuration knob and a step in the wizard
+   (`apps/installer-cli/maverick_installer/`), or users cannot reach it.
+7. **Keep diffs surgical.** Change only what the task needs, match the
+   existing style, avoid speculative abstractions, state your assumptions in
+   the pull request, and for a bug fix or new validation write the failing test
+   first.
 
-- Every package has a `tests/` directory with `test_*.py` files.
-- Use the `FakeLLM` fixture in `packages/maverick-core/tests/conftest.py`
-  for any test that touches the agent loop -- never burn API credits in CI.
-- Tests run in CI on Python 3.10/3.11/3.12 as three disjoint file-level
-  slices per interpreter (`--shard N/3`, defined in the root `conftest.py`),
-  each under pytest-xdist with one worker per core and tests grouped by file
-  (`-n auto --dist loadfile`). Run the whole suite the same way locally --
-  `python -m pytest -q -n auto --dist loadfile` -- and it takes minutes
-  instead of the half hour it takes serially. Tests must therefore be
-  file-independent: no fixed TCP ports, no shared paths outside `tmp_path`,
-  nothing that assumes another file ran first or after. xdist orders files
-  by size, not alphabetically, so "it only leaks into files that run later"
-  is not a defence; the root conftest fails any test that leaves a
-  `maverick.*` package attribute bound to a re-imported module copy, the
-  leak that took nine unrelated tests down the first time. A test whose
-  *own* concurrency contends on SQLite (the queue soak, the discovery
-  estate runner) carries `@pytest.mark.heavy_concurrency`; CI runs those in
-  a short serial phase after each slice's parallel pass so they never share
-  a two-core box with a second xdist worker.
+Further rules:
 
-## Continuous integration (read before merging)
+- **Python 3.10 compatibility.** `tomllib` is in the standard library only from
+  Python 3.11, so a bare `import tomllib` breaks the 3.10 build. Use:
 
-**A PR is not mergeable until every required check is green.** `main` is
-protected by the ruleset in `.github/rulesets/protect-main.json`: every
-change lands through a pull request, through the **merge queue**, as a
-**squash**, and only once every required check below has passed on the
-queue's merge of the PR onto the current `main` (so "it was green on my
-branch" and "main moved after I pushed" can no longer put a red commit on
-`main`). Force-pushes and branch deletion are refused, history stays linear,
-and nobody is on the bypass list. The ruleset requires **zero approving
-reviews** only because the repository has a single maintainer, who cannot
-approve their own PRs; the change-management policy wants an independent
-approver, so the day a second maintainer exists, set
-`required_approving_review_count` to 1 and `require_code_owner_review` to
-true in the JSON and re-import.
+  ```python
+  try:
+      import tomllib
+  except ModuleNotFoundError:  # Python 3.10
+      import tomli as tomllib
+  ```
 
-The ruleset is applied in **Settings -> Rules -> Rulesets -> New ruleset ->
-Import a ruleset** with that JSON file; edit the file and re-import to change
-it, so the protection is reviewed like code. Two repository settings go with
-it: **Settings -> General -> Pull Requests -> "Allow squash merging" -> default
-commit message = "Pull request title"** (the "Default message" option
-prefills the squash from every branch commit, which is how AI co-author
-trailers reached `main`), and the **merge queue** appears on each PR as
-"Merge when ready" once the ruleset is active.
+- **New tools are screened.** A new tool or output sink goes through
+  `ctx.shield.scan_tool_call()` before it executes.
+- **Defaults belong in code; overrides in `~/.maverick/config.toml`.**
+- **Health endpoints already exist.** `/healthz`, `/livez` and `/readyz` are
+  served by the dashboard app and are deliberately exempt from authentication;
+  do not add another health route under `/api/v1`.
+- **Renames update the docs.** When you rename a module, also update
+  `docs/FEATURES.md` and any tool wrapper in `maverick/tools/` that refers to
+  it.
+- **User-facing features need a path in the dashboard.** An API or CLI alone
+  does not complete a feature. Give it a journey in the dashboard in plain
+  language, use the shared Liquid Glass components (the dashboard design
+  system in `static/lightwork.css`), and make it reachable through the
+  dashboard Copilot (the in-product assistant panel) with the same permission
+  checks as the direct UI. See the
+  [customer experience contract](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/customer-experience-contract.md).
 
-The required checks (each must also trigger on `merge_group`, or the queue
-can never merge -- `test_every_required_workflow_runs_in_the_merge_queue`
-pins that):
+## Extending Lightwork
 
-| Check                              | What it runs                                                          |
-| ---------------------------------- | --------------------------------------------------------------------- |
-| `lint`                             | `ruff check .`, vulture, the tomllib/shell=True greps, detect-secrets, and every `python -m maverick.<gate> --ci` contract gate |
-| `lint-pr-title`                    | Conventional-Commit PR title (see below)                              |
-| `no-ai-attribution`                | `scripts/check_attribution.py` over the PR's commits + title/body, the merge-queue commit, and pushes to `main`: no AI co-author trailers, generator footers, assistant session links or assistant author/committer identities (a squash merge turns every distinct commit author into a `Co-authored-by:` trailer) (CLAUDE.md) |
-| `test (3.10, 1/2/3/4)`             | the full `pytest` suite on the floor interpreter, four file-level slices, on every pull request |
-| `test (3.11, 1/2/3/4)`, `test (3.12, 1/2/3/4)` | the same slices on the rest of the supported window (`test-window` in ci.yml): on a pull request the legs start, skip every step and report success within seconds; on the merge queue's commit and on `main` they run for real |
-| `posture (1/2/3/4)`                | the full suite again under the production security posture on 3.12, four slices. Gated the same way as `test-window`: it starts, skips and reports success on a pull request, and runs for real on the merge queue's commit and on `main` -- so the whole 3.12 + secure-defaults suite is proven at merge, not on every PR push |
-| `harness-overhead`, `governance-frontier-offline` | the tracked benchmark manifests verify against the current sources (regenerate them when a control-tree source changes) |
-| `audit`                            | OSV/pip-audit/bandit/SBOM across every dependency surface             |
-| `release-cohort`, `redteam`, `eval-smoke`, `postgres`, `docker` | packaging cohort, shield red-team corpus, eval harness, Postgres backend, deploy image |
-| `Windows process containment (Python 3.10/.11/.12)` | Job Object process-tree containment on Windows: 3.10 on every pull request, 3.11 and 3.12 on the queue and `main` |
+### Adding a model provider
 
-Two recurring foot-guns, both enforced by CI:
-
-1. **`ruff check .` runs on the whole repo, not just your diff.** An unused
-   import you orphaned in another file fails lint for *everyone*. Run
-   `pre-commit run --all-files` (or just `ruff check .`) before you push --
-   `pre-commit install` makes this automatic on commit.
-2. **`import tomllib` needs the 3.10 fallback.** `tomllib` is 3.11+ stdlib;
-   importing it bare breaks the 3.10 leg of the matrix. Use the
-   `try/except ModuleNotFoundError: import tomli as tomllib` pattern from
-   `CLAUDE.md`.
-
-**PR titles** must be Conventional Commits (`feat:`, `fix:`, `docs:`,
-`refactor:`, `test:`, `chore:`, `perf:`, `ci:`) **and the subject after the
-prefix must start with a letter** -- not a digit, quote, or backtick
-(`feat: 2027 roadmap` fails; `feat: add the 2027 roadmap` passes).
-
-## Adding a provider
-
-1. Create `packages/maverick-core/maverick/providers/<name>_provider.py`
-   with a class implementing `complete()` and `complete_async()` that
-   accept Anthropic-format messages/tools and return `LLMResponse`.
-2. Register in `packages/maverick-core/maverick/providers/__init__.py`
-   under `get_provider_client` and `KNOWN_PROVIDERS`.
-3. Add to the wizard catalog at
+1. Create `packages/maverick-core/maverick/providers/<name>_provider.py` with a
+   class that implements `complete()` and `complete_async()`, accepts
+   Anthropic-format messages and tools, and returns an `LLMResponse`.
+2. Register it in `packages/maverick-core/maverick/providers/__init__.py`, in
+   `get_provider_client` and `KNOWN_PROVIDERS`.
+3. Add it to the wizard catalogue in
    `apps/installer-cli/maverick_installer/models.py`.
-4. Add tests for any format-translation logic.
+4. Add tests for any message-format translation.
 
-## Adding a channel
+### Adding a channel
 
-1. Subclass `Channel` in `packages/maverick-channels/maverick_channels/<name>.py`.
-2. Wire it in `server.py` (`_wire_<name>` + `_WIRES` dict).
-3. Add to the wizard `CHANNELS` list.
-4. Document setup steps in `docs/deployment.md`.
-5. If it needs a Python SDK, add to `pyproject.toml` optional extras.
+1. Subclass `Channel` (`packages/maverick-channels/maverick_channels/base.py`)
+   in `packages/maverick-channels/maverick_channels/<name>.py`.
+2. Wire it in `packages/maverick-core/maverick/server.py`: add a
+   `_wire_<name>` function and an entry in `_WIRES`.
+3. Add it to the wizard's `CHANNELS` list in
+   `apps/installer-cli/maverick_installer/wizard.py`.
+4. If it needs a third-party SDK, add an optional extra in
+   `packages/maverick-channels/pyproject.toml`.
+5. Document the setup steps in `docs/deployment.md`.
 
-## Adding a skill
+### Adding a skill
 
-Write a `SKILL.md` (see `benchmarks/example-skills/README.md` for the
-schema) and put it in `benchmarks/example-skills/`. Users install with
-`maverick skill install gh:...`.
+Write a `SKILL.md` (the format is described in
+`benchmarks/example-skills/README.md`) and add it to `benchmarks/example-skills/`.
+Users install skills with `lightwork skill install`, which accepts a URL, a
+`gh:org/repo[:path]` reference or a local path.
 
-## Commit style
+## Commits and pull requests
 
-- Conventional commit subject (`feat:`, `fix:`, `docs:`, `refactor:`,
-  `test:`, `chore:`).
-- Body explains the *why*, not the *what*. The diff shows what.
-- Reference the council finding or issue if applicable.
+- **Keep pull requests small and focused.** One logical change per pull
+  request is easier to review and to revert.
+- **Fill in the pull request template**, link the issue the change addresses,
+  and describe how you tested it.
+- **Pull request titles follow [Conventional Commits](https://www.conventionalcommits.org).**
+  The title starts with a type: `feat`, `fix`, `docs`, `test`, `refactor`,
+  `perf`, `chore`, `ci`, `build`, `style` or `revert`, followed by a colon. The
+  subject after the prefix must start with a letter, not a digit, quote or
+  backtick: `feat: add the 2027 schedule` passes, `feat: 2027 schedule` fails.
+  The `lint-pr-title` check enforces this. Pull requests are squash-merged, so
+  the title becomes the commit subject on `main`.
+- **Write commit messages that explain why.** The diff shows what changed; the
+  message should say why.
+- **Sign the CLA** by adding this line to the description of your first pull
+  request:
+
+      I have read the CLA and I agree to its terms.
+
+- **No AI attribution in the history.** Commit messages, pull request titles
+  and pull request descriptions must not contain AI co-author trailers (such
+  as a `Co-authored-by:` line that names an AI assistant), "generated by"
+  footers or assistant session links, and commits must not be authored or
+  committed under an AI assistant's identity. You are responsible for every
+  line you submit, however you wrote it. The `no-ai-attribution` check enforces
+  this; run `python scripts/check_attribution.py --commits origin/main..HEAD`
+  to check your branch locally.
 
 ## Reporting bugs
 
-Use the issue templates. Include `maverick doctor` output and the
-relevant section of your `~/.maverick/config.toml` (with secrets
-redacted).
+Use the issue templates. The bug report asks for the output of
+`lightwork doctor`, the steps to reproduce the problem, your version and your
+platform. If you include part of `~/.maverick/config.toml`, remove secrets
+first.
 
-## License & contributions
+## Security issues
 
-Lightwork is **proprietary** software (see [`LICENSE`](./LICENSE)). External
-contributions are accepted only under the signed Contributor License Agreement in
-[`CLA.md`](./CLA.md), which assigns the Licensor the rights needed to relicense the
-contribution; contact the maintainers before opening a PR. By contributing, you agree your
-contribution becomes part of the proprietary work owned by the Licensor. (The
-former inbound=outbound-MIT terms do not apply to contributions made after the
-relicense; versions previously published under MIT remain MIT for those
-versions.)
+Do not open a public issue for a security vulnerability. Report it privately
+as described in the
+[security policy](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md).
+
+## Code of Conduct
+
+This project follows the [Code of Conduct](CODE_OF_CONDUCT.md). Report
+unacceptable behavior to chris@daybreakailabs.com.
+
+## License
+
+By contributing, you agree that your contributions are licensed under the
+[Apache License, Version 2.0](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)
+and under the terms of the [Contributor License Agreement](CLA.md). You keep
+the copyright in your contributions.

@@ -1,5 +1,4 @@
-"""Reliability certification run (roadmap: 2028 H2 performance —
-"reliability cert").
+"""Reliability certification run.
 
 For a self-hosted enterprise deployment there is no hosted status page to
 point at; the honest equivalent is a **reproducible, evidence-backed

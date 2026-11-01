@@ -1,4 +1,4 @@
-"""Wave 4 council fixes — security + integrity hardening."""
+"""Security and integrity hardening."""
 from __future__ import annotations
 
 import pytest

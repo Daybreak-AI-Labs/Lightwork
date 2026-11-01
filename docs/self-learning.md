@@ -46,8 +46,8 @@ max_acquisitions = 5     # cap on auto-acquisitions per run
 ```
 
 > `allow_mcp_acquisition` is a **separate, higher-trust** opt-in that ships off
-> even when the rest of self-learning is on. It re-enables (safely) the
-> capability removed in #392: see "MCP-server acquisition" below. Set it via
+> even when the rest of self-learning is on. It enables a constrained form of
+> MCP-server acquisition: see "MCP-server acquisition" below. Set it via
 > config or `MAVERICK_ALLOW_MCP_ACQUISITION=1`. An older config that still sets
 > the retired `add_mcp_servers` key is tolerated and ignored.
 
@@ -290,11 +290,11 @@ paused: it runs only under `[self_improvement] enable` **and** the
 
 ## MCP-server acquisition
 
-PR #378 once let the agent add and hot-start an MCP server from a
-model-supplied `command`/`args`. PR #392 disabled that: a model that can pick
-the command line is a remote-code-execution / supply-chain hole. #422 restores
-the *capability* without re-opening the hole, by closing two gaps at once —
-**no free-text command, and an operator in the loop**:
+Letting the agent add and hot-start an MCP server from a model-supplied
+`command`/`args` would be a remote-code-execution / supply-chain hole: the model
+could pick the command line. Lightwork supports the *capability* without that
+hole by closing two gaps at once — **no free-text command, and an operator in
+the loop**:
 
 1. **Catalog-pinned only.** `op=add_mcp_server` takes a catalog **name**, not a
    command. The command, args, and `pin_sha256` come from the curated `mcp`
@@ -311,16 +311,16 @@ the *capability* without re-opening the hole, by closing two gaps at once —
 3. **Existing spec defenses.** The pinned command still goes through
    `MCPServerSpec` validation (shell-metacharacter / NUL / newline rejection)
    and `pin_sha256` is verified against the on-disk binary at launch
-   (CVE-2026-30615). None of those defenses are weakened.
+   (CVE-2026-30615).
 
-The launch path is unchanged: catalog-pinned entry → operator-approved →
-the same validated `MCPServerSpec` → the same `MCPClient.start()` the static
-config loader uses. There is no new subprocess spawn.
+The launch path is: catalog-pinned entry → operator-approved → validated
+`MCPServerSpec` → the same `MCPClient.start()` the static config loader uses.
+Acquisition adds no separate subprocess spawn.
 
 The whole path is **off by default** and gated behind `allow_mcp_acquisition`
 (or `MAVERICK_ALLOW_MCP_ACQUISITION=1`) — independent of the self-learning
-master switch. With it off, `op=add_mcp_server` returns the same informative
-"disabled" error as before.
+master switch. With it off, `op=add_mcp_server` returns an informative
+"disabled" error.
 
 > Note: catalog `mcp` entries encode their launch command in the entry's
 > `source` field (e.g. `source = "npx -y @scope/server"`); Lightwork splits it

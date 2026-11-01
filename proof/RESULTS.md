@@ -1,26 +1,19 @@
 # Lightwork — Proof & Results
 
-> Reproducible evidence that Lightwork's core claims hold. Every scoreboard
-> below is produced by **real enforcement / learning code on this machine** — no
-> mocks, no LLM, byte-for-byte reproducible. Run them yourself in under a minute.
->
-> **What this proves (and what it doesn't).** These artifacts prove the
-> platform's *guarantees* and the self-learning loop's *properties* —
-> governance holds, the loop is deterministic, bounded, reversible, and
-> poison-resistant ("it can't quietly get worse" is **provable**). They are
-> **not** a customer ROI figure or a competitive capability benchmark: the
-> compounding learning curve needs real run history and competitive scores need
-> a model provider key — both are reported honestly as *not yet populated*
-> rather than fabricated (see §3). For Lightwork, that refusal-to-fabricate is
-> the point.
+> These scripts check Lightwork's governance and learning properties against
+> the shipped pack roster through the same enforcement code the runtime uses.
+> They need no model provider; `dgm_code_rung_proof.py` (§5) also needs a
+> sandbox backend that meets
+> [`docs/security/dgm-evaluator-evidence.md`](../docs/security/dgm-evaluator-evidence.md).
+> They are not an ROI figure or a capability benchmark (see
+> [What these results do not show](#what-these-results-do-not-show)).
 
 ---
 
 ## 1. Platform guarantees — `python proof/run_proof.py`
 
-The control plane is the product. Seven guarantees, run against the **real
-shipped roster** through the **same enforcement primitives** the production tool
-chokepoint calls:
+Seven checks run against the **real shipped roster** through the **same
+enforcement primitives** the production tool chokepoint calls:
 
 ```
   [PASS]  Least privilege by construction   finance_ap runs at max_risk='medium' (parent=high): reads AP, no shell, no payments
@@ -31,7 +24,7 @@ chokepoint calls:
   [PASS]  Verified peer handoffs            authentic handoff verifies (rule=ok); tampered copy rejected (rule=tampered)
   [PASS]  Audit ledger integrity (co-located key)   2-row signed chain verifies clean; altering an amount is caught (bad_hash) -- co-located key: detects non-privileged edits only, NOT tamper-evidence vs a same-uid actor (set MAVERICK_AUDIT_SIGNING_KEY for off-host key custody)
   ----------------------------------------------------------------------------
-  7 guarantees PROVEN, 0 failed
+  7 checks passed, 0 failed
 ```
 
 > **Audit-ledger custody caveat.** The signed (Ed25519) hash-chain always
@@ -68,7 +61,7 @@ made checkable.
   [PASS]  fleet store parity          same content as files; 8/8 concurrent promotions; forget round-trips
   [PASS]  fleet corpus store          stage/reject/accept as world rows; export-import keeps every field
   ----------------------------------------------------------------------------
-  11 guarantees PROVEN, 0 failed
+  11 checks passed, 0 failed
 ```
 
 What each guarantee underwrites, in plain terms:
@@ -92,7 +85,7 @@ One command emits an **Ed25519-signed, reproducible** bundle (`PROOF.md` +
 
 | section            | status              | evidence |
 |--------------------|---------------------|----------|
-| governance (hard)  | PASS                | 7 guarantees proven |
+| governance (hard)  | PASS                | 7 checks passed     |
 | reliability (hard) | PASS                | chaos game-day exit 0; plugin 1500 calls 88.8% success; 16 writers x 25 rows: 400 written, 0 errors |
 | perf_sla (hard)    | PASS                | dispatch p95 0.475ms (<=5); compaction 0.687ms (<=250); world write p95 0.534ms (<=25); world read p95 19.1ms (<=25) |
 | shield_asr         | SKIPPED             | offline shield-ASR harness is repo-only |
@@ -104,10 +97,9 @@ One command emits an **Ed25519-signed, reproducible** bundle (`PROOF.md` +
 exactly what it can and cannot prove on a given machine, and **refuses to invent
 a number**. The hard guarantees (governance, reliability, performance) gate the
 verdict and pass on real code; the competitive and learning-curve sections are
-honestly empty until a real deployment populates them. This is the
-"we don't say it — we show it, and we don't show what we can't" posture.
+honestly empty until a real deployment populates them.
 
-## 4. The golden path (the receipts) — `python -m maverick.golden_path`
+## 4. Golden path — `python -m maverick.golden_path`
 
 A seeded finance-ops storyline through the real governance/capability/audit/
 budget code (no model), emitting a narrated story + a signed audit chain:
@@ -139,17 +131,24 @@ and the append-only promotion ledger. No LLM, no network.
   [PASS]  unforgeable human approval        Ed25519 operator signature; swapped payload NOT authorised
   [PASS]  governed promotion + ledger       all 5 gates PASS; signed promotion recorded to append-only ledger
   ----------------------------------------------------------------------------
-  6 guarantees PROVEN, 0 failed   (LLM proposer + container isolation stubbed, by design)
+  6 checks passed, 0 failed   (LLM proposer + container isolation stubbed, by design)
 ```
 
 The load-bearing property is line 3: a candidate that **memorises the seen tests
 without fixing the capability** gains on the held-in split but not the held-out
 split, is flagged `OVERFIT`, and is refused. That is the anti-reward-laundering
 guard — the reason a self-improving loop measured against a held-out yardstick
-cannot quietly launder drift into a "promotion". Two seams are stubbed and
-disclosed: the LLM *proposer* that authors the patch (the harness supplies the
-exact diff a proposer would emit), and container isolation (the eval runs on the
-host and says so; a require-container deployment fails closed instead).
+cannot quietly launder drift into a "promotion". The LLM *proposer* that
+authors the patch is stubbed (the harness supplies the exact diff a proposer
+would emit).
+
+The scoreboard above was recorded when the evaluator still ran on the host.
+The current script no longer stubs isolation or test evidence: it needs a
+sandbox backend that meets the contract in
+[`docs/security/dgm-evaluator-evidence.md`](../docs/security/dgm-evaluator-evidence.md),
+and its footer reads `(LLM proposer stubbed; evaluator evidence is never
+stubbed)`. No bundled backend meets that contract, so on a default install the
+proof exits non-zero and prints the readiness gap instead of a score.
 
 ---
 
@@ -168,13 +167,12 @@ cheats and regressions do not.
   [PASS]  regression caught                  breaks a PASS_TO_PASS -> not resolved, never promoted
   [PASS]  ledger holds only the genuine fix  the signed promotion ledger records only the real resolution
   ----------------------------------------------------------------------------
-  4 guarantees PROVEN, 0 failed
+  4 checks passed, 0 failed
 ```
 
 The load-bearing property is line 2: the #1 way to inflate a SWE-bench score is
 to **edit the grader's own tests**, and the anti-cheat boundary refuses that
-structurally, before a test is ever run. No other entry on the SWE-bench
-leaderboard reports its result under a signed reference monitor.
+structurally, before a test is ever run.
 
 The **real number** — what % of SWE-bench Verified the agent resolves under this
 chain — comes from `benchmarks/swebench_governed.py --proposer llm` over real
@@ -204,7 +202,7 @@ its held-out resolved-rate.
   [PASS]  ledger holds only genuine uplift    exactly one promotion recorded
   [PASS]  one-step rollback                   archived v0 restored byte-identical; ledger marks rolled_back
   ----------------------------------------------------------------------------
-  6 guarantees PROVEN, 0 failed
+  6 checks passed, 0 failed
 ```
 
 Three properties carry the weight. **Memorisation is not improvement** — a
@@ -235,7 +233,7 @@ policy (≥20 held-out samples, capability evidence, human signature).
   [PASS]  unforgeable payload-bound approval  swapped weights digest NOT authorised
   [PASS]  one-step rollback                   previous pointer restored byte-identical; ledger marks rolled_back
   ----------------------------------------------------------------------------
-  6 guarantees PROVEN, 0 failed   (trainer + eval scorer stubbed, by design)
+  6 checks passed, 0 failed   (trainer + eval scorer stubbed, by design)
 ```
 
 Three properties carry the weight here. **Weights cannot smuggle authority** —
@@ -259,13 +257,13 @@ rendered Ollama `ADAPTER` Modelfile; provider key / GPU required).
 
 ```bash
 # from a source checkout
-python proof/run_proof.py            # 7 platform guarantees
-python proof/self_harness_proof.py   # 7 self-learning-loop guarantees
-python proof/dgm_code_rung_proof.py  # 6 governed DGM code-rung guarantees
-python proof/swebench_governed_proof.py       # 4 SWE-bench-under-governance guarantees
-python proof/dgm_uplift_proof.py     # 6 governed self-improvement (DGM uplift) guarantees
-python proof/adapter_rung_proof.py   # 6 governed adapter-rung (in-tenant weights) guarantees
-python -m maverick.golden_path -o ./gp        # the receipts (story + signed audit.ndjson)
+python proof/run_proof.py            # 7 platform checks
+python proof/self_harness_proof.py   # 11 self-learning-loop checks
+python proof/dgm_code_rung_proof.py  # 6 governed DGM code-rung checks (needs a conforming evaluator backend)
+python proof/swebench_governed_proof.py       # 4 SWE-bench-under-governance checks
+python proof/dgm_uplift_proof.py     # 6 governed self-improvement (DGM uplift) checks
+python proof/adapter_rung_proof.py   # 6 governed adapter-rung (in-tenant weights) checks
+python -m maverick.golden_path -o ./gp        # narrated story + signed audit.ndjson
 python -m maverick.proof_pack -o ./proof      # signed evidence bundle
 
 # verify the signed audit chain offline (third-party tamper-evidence)
@@ -274,17 +272,18 @@ maverick audit verify --file ./gp/audit.ndjson --pubkey <publisher-ed25519-hex>
 python -m maverick.proof_pack --verify ./proof/proof_manifest.json --pubkey <publisher-ed25519-hex>
 ```
 
-## What we deliberately do **not** claim
+## What these results do not show
 
-- **No competitive capability benchmark.** Lightwork competes on governance and
-  provable learning, not raw agent task-success; a leaderboard would be
-  off-thesis and is intentionally not presented.
-- **No customer ROI figure** until a real deployment produces one — the
+- **No competitive capability benchmark.** These proofs measure governance and
+  learning properties, not agent task success, so no leaderboard result is
+  presented here.
+- **No ROI figure** until a real deployment produces one — the
   `learning_curve` section stays `INSUFFICIENT DATA` rather than estimate.
 - **No fabricated security score.** `shield_asr` measures the *built-in*
   fallback detector; the load-bearing defense is **containment** (least
-  privilege), proven under §1.
+  privilege), checked under §1.
 
 > Environment for the runs above: Python 3.11 on Linux; `cryptography` present
-> (Ed25519 guarantees ran live, not CI-deferred). Results are reproducible on
-> any source checkout.
+> (Ed25519 guarantees ran live, not CI-deferred). Except for §5, which needs a
+> conforming evaluator backend, results are reproducible on any source
+> checkout.

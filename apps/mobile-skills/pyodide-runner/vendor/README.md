@@ -15,6 +15,6 @@ tar xjf pyodide-0.26.4.tar.bz2     # extracts to vendor/pyodide/
 test -f pyodide/pyodide.js && echo OK
 ```
 
-The placeholder above is deliberate: this environment has no network
-access, so committing a checksum we could not compute ourselves would be
-fabrication. Fill it in on first download and commit the pin.
+The checksum is deliberately left as a TODO rather than copied from an
+unverified source. Fill it in on first download, after cross-checking it
+against the official release assets, and commit the pin.

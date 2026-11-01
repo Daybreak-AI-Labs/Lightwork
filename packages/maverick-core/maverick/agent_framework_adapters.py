@@ -1,4 +1,4 @@
-"""AutoGen + CrewAI + OpenAI interop (roadmap: 2027 H2 ecosystem).
+"""AutoGen + CrewAI + OpenAI interop.
 
 The LangChain adapter's two directions, extended to the other frameworks
 people actually run multi-agent stacks on. The delegation core is shared —

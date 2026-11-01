@@ -1,5 +1,5 @@
 """Contract tests for the deployment reference architectures + devcontainer
-(roadmap 2027-H1 distribution). Static validation: the artifacts parse, agree
+. Static validation: the artifacts parse, agree
 on the canonical port/command/state path, and bake in no secrets."""
 from __future__ import annotations
 

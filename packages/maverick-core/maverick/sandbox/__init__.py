@@ -469,8 +469,8 @@ def _build_sandbox(
         timeout = 60.0
 
     if chosen == "modal":
-        # Ephemeral Modal cloud sandboxes ([modal] extra). The CF-Workers half
-        # of the roadmap item is declined for shell semantics (see
+        # Ephemeral Modal cloud sandboxes ([modal] extra). A Cloudflare
+        # Workers backend is declined for shell semantics (see
         # sandbox/modal_backend.py docstring).
         from .modal_backend import ModalBackend
         return ModalBackend(

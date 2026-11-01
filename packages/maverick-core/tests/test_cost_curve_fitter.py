@@ -1,4 +1,4 @@
-"""Provider cost-curve fitter (ROADMAP 2028 H2)."""
+"""Provider cost-curve fitter."""
 from __future__ import annotations
 
 from maverick.cost.curve_fitter import fit_all, fit_curve, gather

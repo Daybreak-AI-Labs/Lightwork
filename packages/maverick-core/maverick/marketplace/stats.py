@@ -1,4 +1,4 @@
-"""Marketplace stats (roadmap: 2028 H2 ecosystem — "marketplace stats dashboard").
+"""Marketplace stats.
 
 Aggregates the local ratings ledger (:mod:`maverick.marketplace_ratings`) into
 the numbers a stats view wants: how many things you've rated, the average, the

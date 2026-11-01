@@ -1,4 +1,4 @@
-"""Capability-leak fuzzer (roadmap: 2028 H1 safety).
+"""Capability-leak fuzzer.
 
 Given the set of capabilities currently *granted* and a tool→required-capability
 map, enumerate every tool and report capability LEAKS — tools that would run

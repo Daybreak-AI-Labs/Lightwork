@@ -5,8 +5,8 @@ each package's license into an SPDX-ish category — permissive / weak-copyleft 
 strong-copyleft / public-domain / unknown — via a keyword map over the license
 ``License-Expression``, Trove classifiers, or the legacy ``License`` field, in
 that order. ``policy_check`` flags packages whose category is in a denylist
-(default: ``strong-copyleft`` — GPL/AGPL — the categories that create
-distribution obligations for a proprietary product).
+(default: ``strong-copyleft`` — GPL/AGPL/SSPL — the licenses whose copyleft
+terms can extend to a larger work that includes the package).
 
 The classifier and policy check are pure and unit-tested; ``scan_distributions``
 accepts an injectable iterable so tests don't depend on the real environment.

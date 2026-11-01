@@ -1,4 +1,4 @@
-"""Wave 12 (council F16): run_meta.json reproducibility provenance."""
+"""run_meta.json reproducibility provenance."""
 from __future__ import annotations
 
 import importlib.util

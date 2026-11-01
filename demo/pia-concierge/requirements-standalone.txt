@@ -1,5 +1,5 @@
 # PIA Concierge — STANDALONE agent dependencies.
-# This is the complete third-party surface of the standalone SKU: it imports
+# This is the complete third-party surface of standalone mode: it imports
 # nothing from the Lightwork platform (`maverick`). Pin-tested floors; upgrade
 # deliberately, not automatically.
 fastapi>=0.115
