@@ -89,8 +89,8 @@ jobs:
             fi
           fi
           # release-cohort.toml is the reviewed public allowlist. Never
-          # auto-discover apps/*: that once pulled the private vendor console
-          # into an OIDC-enabled publish run.
+          # auto-discover apps/*: most app directories are not release
+          # packages and must never enter an OIDC-enabled publish run.
           mapfile -t dirs < <(python - <<'PY'
           import os
           import tomllib

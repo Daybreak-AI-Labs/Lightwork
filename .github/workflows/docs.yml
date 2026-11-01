@@ -200,11 +200,11 @@ jobs:
               )
           print(f"staged {len(staged)} explicitly public documents/assets")
           PY
-      - name: Build the customer-facing site
-        # mkdocs.yml remains the full private-repository documentation set.
-        # The public overlay removes strategy, research, patents, internal
-        # compliance evidence, and diligence/data-room material from the Pages
-        # artifact rather than merely hiding those pages from navigation.
+      - name: Build the published documentation site
+        # mkdocs.yml describes the full documentation set. The public overlay
+        # builds only the pages staged from docs/public-docs.txt, so a page
+        # that is not allowlisted is absent from the Pages artifact rather
+        # than merely hidden from navigation.
         run: mkdocs build --strict --config-file mkdocs.public.yml --site-dir _site
       - name: Verify the Pages artifact contains only allowlisted documents
         shell: bash

@@ -1,51 +1,56 @@
 # Pull request
 
 <!--
-Thanks for contributing to Lightwork! Keep this PR small and focused.
-See CONTRIBUTING.md for the dev setup and house rules.
+Thanks for contributing to Lightwork. Keep this pull request small and focused.
+See CONTRIBUTING.md for the development setup and the project rules.
 -->
 
 ## What
 
-<!-- One-line summary of the change. The diff shows what; this is the elevator pitch. -->
+<!-- A one-line summary of the change. The diff shows the details. -->
 
 ## Why
 
-<!-- The motivation. Link the review finding, issue, or gap that this closes. -->
+<!-- The motivation. Link the issue this addresses, for example `Closes #123`. -->
 
 ## How
 
 <!--
-List of files touched and what changed in each. Keep it short -- reviewers can read the diff.
-Only use this section to flag non-obvious design decisions or trade-offs.
+Only what the diff does not make obvious: design decisions, trade-offs, or
+anything that needs a reviewer's close attention.
 -->
 
 ## Test plan
 
 <!--
-- [ ] `pytest -vvs` passes
-- [ ] `maverick doctor` still healthy after changes
-- [ ] If you touched the agent loop, added a FakeLLM-driven test
-- [ ] If you added a tool / sink, it goes through `ctx.shield.scan_tool_call()`
-- [ ] If you added a provider, the wizard catalog (`models.py`) is updated
-- [ ] If you added a channel, the wizard `CHANNELS` list and `server.py` `_WIRES` are updated
-- [ ] If you added a CLI command, `docs/getting-started.md` mentions it
+How you tested the change. For example:
+- [ ] `python3 -m pytest -q <the test files you changed>` passes
+- [ ] `lightwork doctor` still reports a healthy install
+- [ ] If you touched the agent loop, a test drives it with a scripted (fake) LLM
+- [ ] If you added a tool or output sink, it goes through `ctx.shield.scan_tool_call()`
+- [ ] If you added a provider, the wizard catalogue (`apps/installer-cli/maverick_installer/models.py`) is updated
+- [ ] If you added a channel, the wizard `CHANNELS` list and `_WIRES` in `server.py` are updated
+- [ ] If you added a CLI command, the relevant guide under `docs/` describes it
 -->
 
 ## Checklist
 
-- [ ] **PR title is Conventional Commits** — `type:` prefix (`feat:`/`fix:`/`docs:`/`chore:`/`refactor:`/`test:`/`perf:`/`ci:`) and the subject **starts with a letter** (not a digit, quote, or backtick). The `lint-pr-title` check enforces this.
-- [ ] **Tests added or updated** and `pytest -q` passes locally.
-- [ ] **`ruff check .` is clean** (or run `pre-commit install` once and let it gate your commits).
-- [ ] **No bare `import tomllib`** — it's 3.11+ stdlib and breaks CI on 3.10. Use the `try: import tomllib / except ModuleNotFoundError: import tomli as tomllib` fallback (see CLAUDE.md).
-- [ ] **New capability → the wizard learns it.** If you added a channel/provider/sandbox/feature, `apps/installer-cli/` can enable it, or non-technical users can't reach it.
-- [ ] **Safety invariants hold** (if you touched the agent loop or added a tool/sink): new tools go through `ctx.shield.scan_tool_call()`, long-running paths respect `Budget`, and all shell goes through `sandbox.exec()` (never `subprocess.run` directly).
-- [ ] **Surgical change** — didn't reformat or "improve" adjacent code; matched the existing style.
+- [ ] **The pull request title follows Conventional Commits**: a type prefix (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `perf:`, `chore:`, `ci:`, `build:`, `style:` or `revert:`) and a subject that **starts with a letter** (not a digit, quote or backtick). The `lint-pr-title` check enforces this.
+- [ ] **Tests are added or updated**, and `python3 -m pytest -q` passes for the code I changed (never a bare `pytest`; see CONTRIBUTING.md).
+- [ ] **`bash scripts/pre-push-lint.sh` passes** (ruff, vulture, the `tomllib` and `shell=True` checks, detect-secrets and the contract gates).
+- [ ] **No bare `import tomllib`**: it is in the standard library only from Python 3.11 and breaks the 3.10 build. Use the `try: import tomllib` / `except ModuleNotFoundError: import tomli as tomllib` fallback (see CONTRIBUTING.md).
+- [ ] **A new capability is reachable from the setup wizard.** If you added a channel, provider, sandbox or feature, `apps/installer-cli/` can enable it.
+- [ ] **Safety invariants hold** (if you touched the agent loop or added a tool or sink): new tools go through `ctx.shield.scan_tool_call()`, long-running paths respect `Budget`, and all shell goes through `sandbox.exec()` (never `subprocess.run` directly).
+- [ ] **The change is surgical**: no reformatting or unrelated changes to adjacent code, and it matches the existing style.
+- [ ] **No AI attribution**: commit messages, the title and this description contain no AI co-author trailers, generator footers or assistant session links, and no commit is authored as an AI assistant. The `no-ai-attribution` check enforces this.
 
-## Related finding
+## Contributor License Agreement
 
-<!-- If this addresses a review finding (architecture / security / UX / code quality
-     / docs / tests / deployment), reference it: -->
+<!--
+First pull request to Lightwork? Sign the Contributor License Agreement
+(CLA.md) by adding the following line after the end of this comment:
 
-- Finding: ...
-- Severity: ...
+    I have read the CLA and I agree to its terms.
+
+You only need to do this once; it also covers your later contributions.
+-->

@@ -1,11 +1,11 @@
 name: Commit hygiene
 
 # Refuse AI-attribution trailers, generator footers and assistant session
-# links in commit messages and PR text (CLAUDE.md, "No AI attribution in repo
-# artifacts"). They kept landing on main through squash merges, which are
-# prefilled from the branch's commit messages -- so the refusal has to happen
-# BEFORE the merge, on the commits and the PR text, and again on the
-# merge-queue commit (the exact message that becomes main's history).
+# links in commit messages and PR text (project policy; see "Commits and pull
+# requests" in CONTRIBUTING.md). Squash merges are prefilled from the branch's
+# commit messages, so the refusal has to happen BEFORE the merge, on the
+# commits and the PR text, and again on the merge-queue commit (the exact
+# message that becomes main's history).
 #
 # The push trigger is detective: if a trailer still gets through (a merge made
 # outside the queue), main goes red instead of quietly accumulating them.
@@ -48,7 +48,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          args=(--commits "${BASE_SHA}..${HEAD_SHA}")
+          # The first push to a branch (for example a new repository's first
+          # main commit) has no previous tip: GitHub sends an all-zero
+          # "before" SHA, which is not a valid range start. Inspect the pushed
+          # history itself in that case.
+          if [ -z "${BASE_SHA}" ] || [ "${BASE_SHA}" = "0000000000000000000000000000000000000000" ]; then
+            args=(--commits "${HEAD_SHA}")
+          else
+            args=(--commits "${BASE_SHA}..${HEAD_SHA}")
+          fi
           if [ "$EVENT_NAME" = "pull_request" ]; then
             printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/pr-text.md"
             args+=(--text "$RUNNER_TEMP/pr-text.md")
