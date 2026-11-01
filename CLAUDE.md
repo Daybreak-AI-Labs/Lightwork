@@ -32,7 +32,11 @@ controls; the other packages build on it.
   dependency from PyPI. It then installs the runtime dependencies the
   `--no-deps` installs skip, plus the dev tools, including `pytest-xdist`,
   `pyjwt[crypto]` (CI parity; `test_oidc` skips itself without it), `cffi` and
-  `build`.
+  `build`. Everything resolves under `PIP_CONSTRAINT=requirements/ci.txt`, as
+  the CI jobs do, and the script also installs `pytest-timeout`, `sqlalchemy`
+  (the database tool imports it; three tests fail without it) and
+  `detect-secrets` (the pre-push lint's baseline gate skips silently without
+  it).
 - **Test:** `python3 -m pytest -q -n auto --dist loadfile` from the repo root
   (pytest-xdist, one worker per core, grouped by file), not bare `pytest`. CI
   runs this with `-m "not heavy_concurrency"` and then runs the
@@ -71,6 +75,13 @@ controls; the other packages build on it.
   design (its deep check treats a missing provider key as degraded).
   `post-create.sh` does not install mkdocs; the docs toolchain is pinned in
   `requirements/docs.txt`.
+- A provider variable set by the host makes the kernel believe a provider is
+  configured: `config.any_provider_configured()` reads every `*_API_KEY` and
+  `*_BASE_URL` name (a cloud container's agent proxy sets `ANTHROPIC_BASE_URL`
+  with no key), which flipped six doctor, healthz and settings tests. The root
+  `conftest.py` scrubs `test_support/provider_env.HOST_PROVIDER_ENV_VARS` at
+  session start; a new provider variable goes in that tuple (a test pins it
+  against `config.py`).
 
 ### Testing
 
@@ -91,6 +102,16 @@ controls; the other packages build on it.
 - CI also runs tests with `MAVERICK_TEST_SECURE_DEFAULT=1` (the production
   security posture): selected suites on pull requests, the whole suite in the
   merge queue and on `main`. Run affected tests that way too.
+- On a pull request the `test (3.10, n)` legs run only the test files
+  `scripts/select_pr_tests.py` selects from the changed files (a kernel,
+  `conftest.py`, requirements, `.github/` or `scripts/` change means the full
+  suite; a package change means its tests plus every test naming its import
+  package; other files mean the tests naming them by path), and the heavier
+  jobs (docker, postgres, audit, release-cohort, redteam, eval-smoke, the
+  benchmark gates, Windows containment) run only when a changed file is under
+  their inputs (`JOB_PREFIXES`). The merge queue and `main` run everything.
+  Preview the selection with `python scripts/select_pr_tests.py --git
+  origin/main HEAD`.
 
 ### CI gates beyond Ruff
 
@@ -139,8 +160,9 @@ Each of these fails the build (the `lint` job in `.github/workflows/ci.yml`):
   loop-variable capture B023, and the rest). FastAPI `Depends`/`Form`/`Query`
   and similar calls in argument defaults are allowed through
   `extend-immutable-calls`; they are not violations. Cyclomatic complexity is
-  capped at 20. Functions already over the cap carry `# noqa: C901` as
-  refactor debt; new code stays under the cap.
+  capped at 20, with 167 grandfathered `# noqa: C901` waivers in non-test code
+  (`test_complexity_waivers_do_not_grow` pins that ceiling, so the backlog can
+  only shrink); new code stays under the cap.
 - There is no mypy or pyright. Ruff is the only static gate, so do not add
   type-only "fixes" expecting a checker to validate them.
 

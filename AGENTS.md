@@ -11,7 +11,10 @@ TypeScript plugin SDK (`sdks/plugin-ts`).
 ## Setup
 
     bash .devcontainer/post-create.sh   # creates .venv, editable-installs all 8
-                                        # packages + dev tools (pytest-xdist,
+                                        # packages under PIP_CONSTRAINT=
+                                        # requirements/ci.txt (CI parity) + dev
+                                        # tools (pytest-xdist, pytest-timeout,
+                                        # sqlalchemy, detect-secrets,
                                         # pyjwt[crypto], cffi, build)
 
 `pip install -e .` at the root fails: the workspace `pyproject.toml` has no
@@ -77,3 +80,7 @@ configured; Ruff, Vulture and the contract and governance gates in
 serially after the ordinary suite, as `.github/actions/test-shard/action.yml`
 does. Also validate with `MAVERICK_TEST_SECURE_DEFAULT=1`, the production
 security posture that CI tests.
+On a pull request the `test (3.10, n)` legs run only the test files
+`scripts/select_pr_tests.py` selects from the changed files; the merge queue
+and `main` run everything, so run the whole suite locally for a change to
+shared code.

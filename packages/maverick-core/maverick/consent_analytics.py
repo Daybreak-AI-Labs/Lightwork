@@ -23,6 +23,7 @@ from typing import Any
 
 from . import consent_storage
 from .paths import canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 
 ANALYTICS_SCHEMA = "lightwork.consent-analytics.v1"
 _DIMENSIONS = frozenset(
@@ -251,6 +252,7 @@ class ConsentAnalytics:
                 f"{self.path.resolve().as_uri()}?mode=ro",
                 uri=True,
                 timeout=5,
+                factory=ClosingConnection,
             )
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA query_only = ON")

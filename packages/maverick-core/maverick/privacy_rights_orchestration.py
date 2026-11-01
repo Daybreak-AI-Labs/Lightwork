@@ -20,6 +20,7 @@ credentials, URLs, origins, or provider payloads.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -35,6 +36,7 @@ from typing import Any
 
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 
 SCHEMA_VERSION = 2
 _CLAIM_HISTORY_CLEANUP_BATCH = 128
@@ -571,7 +573,9 @@ class PrivacyRightsOrchestrationStore:
         return _id(actor, "authenticated principal")
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path, timeout=30.0, isolation_level=None, factory=ClosingConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
@@ -2023,7 +2027,7 @@ class PrivacyRightsOrchestrationStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -2192,7 +2196,7 @@ class PrivacyRightsOrchestrationStore:
             "source_ids": list(owned_sources) if owned_sources is not None else None,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             self._prune_claim_history(connection, tenant, now, idempotency_key)
             request_sha, operation = self._operation(
@@ -2640,7 +2644,7 @@ class PrivacyRightsOrchestrationStore:
             "expected_revision": expected,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
@@ -4362,7 +4366,7 @@ class PrivacyRightsOrchestrationStore:
             "cutoff": requested_cutoff,
             "actor_ref": actor,
         }
-        with self._connect() as connection:
+        with contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request

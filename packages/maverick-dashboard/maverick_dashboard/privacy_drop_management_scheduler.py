@@ -24,6 +24,7 @@ from typing import Any
 
 from maverick.file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from maverick.paths import canonical_tenant_id
+from maverick.sqlite_closing import ClosingConnection
 
 NETWORK_IO = False
 
@@ -236,7 +237,7 @@ class DROPManagedMaintenanceScheduler:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0)
+        connection = sqlite3.connect(self.path, timeout=30.0, factory=ClosingConnection)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=30000")
         return connection

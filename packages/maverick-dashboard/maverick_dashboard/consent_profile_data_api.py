@@ -24,6 +24,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from maverick import consent_storage
 from maverick.file_lock import ensure_private_directory, ensure_private_file
 from maverick.paths import canonical_tenant_id
+from maverick.sqlite_closing import ClosingConnection
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -658,7 +659,9 @@ class PublicPromptAssignmentStore:
         if consent_storage.shared():
             connection = consent_storage.connect(self.path, timeout=30.0)
         else:
-            connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+            connection = sqlite3.connect(
+                self.path, timeout=30.0, isolation_level=None, factory=ClosingConnection
+            )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=30000")
         connection.execute("PRAGMA secure_delete=ON")

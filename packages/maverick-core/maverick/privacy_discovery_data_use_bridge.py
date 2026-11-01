@@ -35,6 +35,7 @@ from typing import Any
 
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 
 SCHEMA_VERSION = 1
 PROPOSAL_SCHEMA = "lightwork.privacy-discovery-data-use-proposal.v1"
@@ -443,7 +444,9 @@ class PrivacyDiscoveryDataUseBridgeStore:
             else:
                 os.close(fd)
         ensure_private_file(self.path, 0o600)
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path, timeout=30, isolation_level=None, factory=ClosingConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=30000")
         connection.execute("PRAGMA journal_mode=DELETE")

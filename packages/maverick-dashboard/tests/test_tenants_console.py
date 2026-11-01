@@ -62,5 +62,5 @@ def test_roster_lets_an_admin_change_each_daily_limit_in_place(monkeypatch, tmp_
     assert 'class="tenant-quota" data-tenant="free"' in text and "No limit" in text
     # The editor posts to the existing quota API (script served as a static file).
     from pathlib import Path
-    script = (Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static" / "lightwork-tenants.js").read_text()
+    script = (Path(__file__).resolve().parents[1] / "maverick_dashboard" / "static" / "lightwork-tenants.js").read_text(encoding="utf-8")
     assert "'/quota', 'POST'" in script and "No limit" in script

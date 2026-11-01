@@ -303,6 +303,19 @@ class WorkDiscoveryStore:
                     ON ekko_collector_leases(
                         tenant_key, owner_key, device_key, session_id
                     );
+                CREATE TABLE IF NOT EXISTS ekko_plans (
+                    tenant_key TEXT NOT NULL, owner_key TEXT NOT NULL, device_key TEXT NOT NULL,
+                    opportunity_id TEXT NOT NULL, revision TEXT NOT NULL, payload BLOB NOT NULL,
+                    expires_at REAL NOT NULL,
+                    PRIMARY KEY (tenant_key, owner_key, device_key, opportunity_id)
+                );
+                CREATE TABLE IF NOT EXISTS ekko_plan_sources (
+                    tenant_key TEXT NOT NULL, owner_key TEXT NOT NULL, device_key TEXT NOT NULL,
+                    opportunity_id TEXT NOT NULL, session_id TEXT NOT NULL,
+                    PRIMARY KEY (tenant_key, owner_key, device_key, opportunity_id, session_id),
+                    FOREIGN KEY (tenant_key, owner_key, device_key, opportunity_id)
+                        REFERENCES ekko_plans(tenant_key, owner_key, device_key, opportunity_id) ON DELETE CASCADE
+                );
             """)
             yield conn
         finally:
@@ -332,7 +345,7 @@ class WorkDiscoveryStore:
 
         if purpose not in {
             "authority", "enrollment", "session", "session_authority",
-            "event", "audit", "lease",
+            "event", "audit", "lease", "plan",
         }:
             raise ValueError("invalid Ekko sealed-payload purpose")
         envelope = {
@@ -345,14 +358,15 @@ class WorkDiscoveryStore:
             envelope, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
         blob = seal_for_tenant(self.tenant, plaintext)
-        if len(blob) > _MAX_EVENT_BLOB_BYTES:
+        if len(blob) > (65_536 if purpose == "plan" else _MAX_EVENT_BLOB_BYTES):
             raise ValueError("sealed Ekko payload exceeds its byte limit")
         return blob
 
     def _unseal(self, blob: bytes, *, purpose: str) -> dict[str, Any]:
         from .tenant.kms import unseal_for_tenant
 
-        if not isinstance(blob, bytes) or len(blob) > _MAX_EVENT_BLOB_BYTES:
+        limit = 65_536 if purpose == "plan" else _MAX_EVENT_BLOB_BYTES
+        if not isinstance(blob, bytes) or len(blob) > limit:
             raise WorkDiscoveryStoreError("invalid sealed Ekko payload")
         try:
             plaintext = unseal_for_tenant(self.tenant, blob)
@@ -363,7 +377,7 @@ class WorkDiscoveryStore:
             raise WorkDiscoveryStoreError(
                 "sealed Ekko payload could not be authenticated"
             ) from exc
-        if len(plaintext) > _MAX_EVENT_BLOB_BYTES:
+        if len(plaintext) > limit:
             raise WorkDiscoveryStoreError("unsealed Ekko payload exceeds its byte limit")
         try:
             envelope = json.loads(plaintext)
@@ -1927,6 +1941,8 @@ class WorkDiscoveryStore:
         """
         trusted_now = self._now() if now is None else _timestamp(now)
         with self._transaction() as conn:
+            conn.execute("DELETE FROM ekko_plans WHERE tenant_key=? AND owner_key=? AND device_key=? AND expires_at<=?",
+                         (*self._scope, trusted_now))
             count = int(conn.execute(
                 "SELECT COUNT(*) FROM ekko_events WHERE tenant_key=? AND owner_key=? "
                 "AND device_key=? AND expires_at<=?",
@@ -2357,6 +2373,8 @@ class WorkDiscoveryStore:
 
     def _prune_locked(self, *, trusted_now: float, cutoff: float) -> dict[str, int]:
         with self._transaction() as conn:
+            conn.execute("DELETE FROM ekko_plans WHERE tenant_key=? AND owner_key=? AND device_key=? AND expires_at<=?",
+                         (*self._scope, trusted_now))
             old_events = int(conn.execute(
                 "SELECT COUNT(*) FROM ekko_events WHERE tenant_key=? AND owner_key=? "
                 "AND device_key=? AND (expires_at<=? OR ingested_at<?)",
@@ -2412,6 +2430,13 @@ class WorkDiscoveryStore:
         with self._transaction() as conn:
             extra = " AND session_id=?" if session_id is not None else ""
             params: tuple[Any, ...] = (*self._scope, *((session_id,) if session_id is not None else ()))
+            plan_filter = (
+                " AND opportunity_id IN (SELECT opportunity_id FROM ekko_plan_sources WHERE "
+                "tenant_key=? AND owner_key=? AND device_key=? AND session_id=?)"
+                if session_id is not None else ""
+            )
+            conn.execute("DELETE FROM ekko_plans WHERE tenant_key=? AND owner_key=? AND device_key=?" + plan_filter,
+                         (*self._scope, *params) if session_id is not None else self._scope)
             events = int(conn.execute(
                 "SELECT COUNT(*) FROM ekko_events WHERE tenant_key=? AND owner_key=? "
                 "AND device_key=?" + extra,

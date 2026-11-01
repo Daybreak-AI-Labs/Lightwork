@@ -181,6 +181,7 @@ function harness(file, functionName, args) {
     Option: class { constructor(text, value) { this.text = text; this.value = value; this.disabled = false; } },
     window: {
       confirm() { return true; },
+      addEventListener() {},
       // The shell's fetch helper, sending through the context's fetch.
       mvFetchJSON: (...args) => helpers.mvFetchJSON(...args),
       // Pages show a server message only when it is already a plain sentence.

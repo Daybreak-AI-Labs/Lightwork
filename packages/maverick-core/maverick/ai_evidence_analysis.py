@@ -35,6 +35,7 @@ from typing import Any
 from .constant_time import text_equals
 from .file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 
 ARTIFACT_AUTHORITY_SCHEMA = "lightwork.ai-evidence.artifact-authority.v1"
 CRITERION_SCHEMA = "lightwork.ai-evidence.criterion.v1"
@@ -2008,18 +2009,27 @@ class EvidenceAnalysisStore:
 
     def _connect(self) -> sqlite3.Connection:
         ensure_private_directory(self.path.parent)
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
-        ensure_private_file(self.path, 0o600)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=30000")
-        connection.execute("PRAGMA journal_mode=DELETE")
-        connection.execute("PRAGMA synchronous=FULL")
-        connection.create_function(
-            "ai_evidence_retention_authorized",
-            0,
-            lambda: 1 if bool(getattr(self._retention, "authorized", False)) else 0,
+        connection = sqlite3.connect(
+            self.path,
+            timeout=30.0,
+            isolation_level=None,
+            factory=ClosingConnection,
         )
+        try:
+            ensure_private_file(self.path, 0o600)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA busy_timeout=30000")
+            connection.execute("PRAGMA journal_mode=DELETE")
+            connection.execute("PRAGMA synchronous=FULL")
+            connection.create_function(
+                "ai_evidence_retention_authorized",
+                0,
+                lambda: 1 if bool(getattr(self._retention, "authorized", False)) else 0,
+            )
+        except BaseException:
+            connection.close()
+            raise
         return connection
 
     @staticmethod

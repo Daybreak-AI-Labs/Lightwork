@@ -616,6 +616,27 @@ def test_named_rotation_recovers_original_key_without_another_change():
     assert not car._rotation_intent("b" * 64).exists()
 
 
+@requires_crypto
+def test_a_key_rewritten_in_place_with_its_time_restored_changes_the_reviewed_version():
+    # The review token is taken from stat facts only, and an in-place rewrite
+    # that keeps the size and restores the modification time changes none of
+    # them (on Windows st_ctime is the creation time, so it cannot show it either).
+    import os
+
+    car.seal(b"existing private work")  # the legacy key
+    car.rotate_at_rest_key()
+    key = next(car._keyring_dir().glob("*.key"))
+    reviewed = car.key_rotation_version()
+    before = os.stat(key)
+    key.write_text("ab" * 32, encoding="utf-8")  # another key, the same size
+    os.utime(key, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert car.key_rotation_version() != reviewed
+    keys = sorted(car._keyring_dir().glob("*.key"))
+    with pytest.raises(car.EncryptionUnavailable, match="changed after review"):
+        car.rotate_at_rest_key(expected_version=reviewed)
+    assert sorted(car._keyring_dir().glob("*.key")) == keys
+
+
 def test_explicit_postgres_refuses_node_local_key_rotation(monkeypatch):
     monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "postgres")
     monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "1")

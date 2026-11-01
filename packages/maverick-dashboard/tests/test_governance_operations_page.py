@@ -712,7 +712,7 @@ def test_governance_record_fields_are_labelled_in_plain_words():
 
     from maverick_dashboard import app as app_module
 
-    source = (Path(app_module.__file__).parent / "templates" / "_governance_operations.html").read_text()
+    source = (Path(app_module.__file__).parent / "templates" / "_governance_operations.html").read_text(encoding="utf-8")
     block = source[source.index("const FIELD_LABELS = {"):source.index("const fieldLabel = key =>")]
     labels = dict(re.findall(r'(\w+): "([^"]+)"', block))
     # Every record list shows the plain label, not the raw key.

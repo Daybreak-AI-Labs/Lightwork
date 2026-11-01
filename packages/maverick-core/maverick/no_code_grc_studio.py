@@ -42,6 +42,7 @@ from .file_lock import (
     ensure_private_file,
 )
 from .paths import canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 
 SCHEMA_VERSION = 2
 BLUEPRINT_SCHEMA = "lightwork.no-code-grc-blueprint.v1"
@@ -915,7 +916,9 @@ class GRCStudioStore:
         return hmac.new(self._integrity_key, _canonical(value), hashlib.sha256).hexdigest()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path, timeout=30.0, isolation_level=None, factory=ClosingConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
@@ -2992,7 +2995,10 @@ class GRCStudioStore:
             # the manifest's source report describes the exact SQLite snapshot.
             integrity = self._verify_integrity_unlocked()
             atomic_create_bytes(backup_path, b"", mode=0o600)
-            with self._connect() as source, sqlite3.connect(backup_path) as destination:
+            with (
+                self._connect() as source,
+                sqlite3.connect(backup_path, factory=ClosingConnection) as destination,
+            ):
                 source.backup(destination)
                 result = destination.execute("PRAGMA integrity_check").fetchone()
                 if result is None or result[0] != "ok":
@@ -3126,7 +3132,9 @@ class GRCStudioStore:
             _digest(manifest["database_sha256"], "database_sha256"), self._file_sha256(backup_path)
         ):
             raise GRCStudioIntegrityError("recovery database digest changed")
-        with sqlite3.connect(f"file:{backup_path}?mode=ro", uri=True) as connection:
+        with sqlite3.connect(
+            f"file:{backup_path}?mode=ro", uri=True, factory=ClosingConnection
+        ) as connection:
             result = connection.execute("PRAGMA integrity_check").fetchone()
             if result is None or result[0] != "ok":
                 raise GRCStudioIntegrityError("recovery database integrity check failed")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import gc
 import sqlite3
 from dataclasses import replace
 
@@ -390,3 +392,156 @@ def test_tampered_immutable_version_is_detected(fixture) -> None:
         )
     with pytest.raises(web.WebPublishSettingsIntegrityError):
         store.verify_integrity()
+
+
+def _assert_closed(connections):
+    for connection in connections:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
+
+def test_every_settings_connection_is_closed_when_its_call_returns(tmp_path, monkeypatch) -> None:
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: any connection left open by a call stays open.
+    opened = []
+    real_connect = sqlite3.connect
+    fail_pragma = {"on": True}
+
+    class _PragmaFails(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql == "PRAGMA foreign_keys=ON" and fail_pragma["on"]:
+                raise sqlite3.OperationalError("pragma failed")
+            return super().execute(sql, *args)
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, factory=_PragmaFails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    def build():
+        return web.WebPublishSettingsStore(
+            tmp_path / "settings.sqlite3",
+            tenant_id="tenant-a",
+            publishing_authority_resolver=_Resolver(),
+            principal_resolver=lambda: "administrator-1",
+            retention_seconds=60,
+            clock=lambda: 1_700_000_000.0,
+        )
+
+    monkeypatch.setattr(web.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        with pytest.raises(web.WebPublishSettingsError):
+            build()
+        fail_pragma["on"] = False
+        before = len(opened)
+        store = build()
+        assert len(opened) > before, "__init__"
+        _assert_closed(opened[before:])
+        calls = [
+            ("get_head", lambda: store.get_head(property_id="website-main")),
+            # The lookup of a version that does not exist ends in an expected error.
+            (
+                "get_version",
+                lambda: store.get_version(property_id="website-main", version_id="version-missing"),
+            ),
+            ("list_versions", lambda: store.list_versions(property_id="website-main")),
+            ("public_projection", lambda: store.public_projection(property_id="website-main")),
+            ("audit_history", store.audit_history),
+            ("verify_integrity", store.verify_integrity),
+            ("recovery_status", store.recovery_status),
+        ]
+        for name, call in calls:
+            before = len(opened)
+            with contextlib.suppress(web.WebPublishSettingsError):
+                call()
+            assert len(opened) > before, name
+            _assert_closed(opened[before:])
+    finally:
+        gc.enable()
+    _assert_closed(opened)
+
+
+class _SharedSession:
+    """Stands in for a shared Postgres session: it forwards to sqlite3 but is not one."""
+
+    def __init__(self, inner):
+        object.__setattr__(self, "_inner", inner)
+        object.__setattr__(self, "closes", [])
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._inner, name, value)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return self._inner.__exit__(*exc)
+
+    def close(self):
+        self.closes.append(True)
+
+
+class _SetupFailsSession(_SharedSession):
+    def execute(self, sql, *args):
+        if sql.startswith("PRAGMA"):
+            raise sqlite3.OperationalError("pragma failed")
+        return self._inner.execute(sql, *args)
+
+
+def _shared_web_store(tmp_path):
+    return web.WebPublishSettingsStore(
+        tmp_path / "settings.sqlite3",
+        tenant_id="tenant-a",
+        publishing_authority_resolver=_Resolver(),
+        principal_resolver=lambda: "administrator-1",
+        retention_seconds=60,
+        clock=lambda: 1_700_000_000.0,
+    )
+
+
+def test_shared_sessions_are_left_to_their_own_release(tmp_path, monkeypatch) -> None:
+    # The store commits or rolls back a shared session; closing it stays with that session.
+    store = _shared_web_store(tmp_path)
+    sessions = []
+
+    def shared_connect(path, *, timeout=10.0, **_):
+        session = _SharedSession(sqlite3.connect(str(path), timeout=timeout, isolation_level=None))
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(web.consent_storage, "shared", lambda: True)
+    monkeypatch.setattr(web.consent_storage, "connect", shared_connect)
+    gc.disable()
+    try:
+        store.verify_integrity()
+        assert sessions and all(session.closes == [] for session in sessions)
+    finally:
+        gc.enable()
+        for session in sessions:
+            session._inner.close()
+
+
+def test_shared_setup_failure_is_left_to_the_session_owner(tmp_path, monkeypatch) -> None:
+    store = _shared_web_store(tmp_path)
+    sessions = []
+
+    def shared_connect(path, *, timeout=10.0, **_):
+        session = _SetupFailsSession(sqlite3.connect(str(path), timeout=timeout, isolation_level=None))
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(web.consent_storage, "shared", lambda: True)
+    monkeypatch.setattr(web.consent_storage, "connect", shared_connect)
+    gc.disable()
+    try:
+        with pytest.raises(web.WebPublishSettingsIntegrityError):
+            store.verify_integrity()
+        assert sessions and all(session.closes == [] for session in sessions)
+    finally:
+        gc.enable()
+        for session in sessions:
+            session._inner.close()

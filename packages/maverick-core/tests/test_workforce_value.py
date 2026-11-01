@@ -178,3 +178,50 @@ def test_runs_read_with_their_goal_domain_skip_a_second_goal_read(tmp_path, monk
     assert {d.department: d.deliverables for d in value.by_department} == {
         "finance_ap": 2, "(unattributed)": 1}
     assert value.by_department == reread.by_department
+
+
+def test_runs_at_the_reports_own_clock_reading_both_count(tmp_path, monkeypatch):
+    # A coarse wall clock (Windows) can read the same value when a run starts
+    # and when the report is built. The window's end is inclusive: both runs count.
+    import time as clock
+
+    from maverick.world_model import WorldModel
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setattr(clock, "time", lambda: 1_800_000_000.0)
+    wm = WorldModel(tmp_path / "w.db")
+    try:
+        for _ in range(2):
+            goal = wm.create_goal("task", "", domain="finance_ap")
+            episode = wm.start_episode(goal)
+            wm.end_episode(episode, "summary", "success", cost_dollars=1.0)
+        value = workforce_value.compute(wm)
+        assert {d.department: d.deliverables for d in value.by_department} == {"finance_ap": 2}
+    finally:
+        wm.close()
+
+
+def test_a_run_started_after_the_reports_reading_is_not_counted(tmp_path, monkeypatch):
+    # The report covers up to its own reading: a run started later belongs to a
+    # later report. The history reader and a list-only adapter both enforce it.
+    import time as clock
+
+    from maverick.world_model import WorldModel
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    wm = WorldModel(tmp_path / "w.db")
+    try:
+        monkeypatch.setattr(clock, "time", lambda: 1_800_000_000.0)
+        goal = wm.create_goal("task", "", domain="finance_ap")
+        episode = wm.start_episode(goal)
+        wm.end_episode(episode, "summary", "success", cost_dollars=1.0)
+        monkeypatch.setattr(clock, "time", lambda: 1_800_000_060.0)
+        later = wm.start_episode(goal)
+        wm.end_episode(later, "summary", "success", cost_dollars=5.0)
+        value = workforce_value.compute(wm, now=1_800_000_000.0)
+        assert value.agent_cost == 1.0
+        assert {d.department: d.deliverables for d in value.by_department} == {"finance_ap": 1}
+    finally:
+        wm.close()
+    legacy = _World([_ep(1, cost=5.0, outcome="success", started_at=1_800_000_060.0)], {1: "finance_ap"})
+    assert workforce_value.compute(legacy, now=1_800_000_000.0).deliverables == 0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import gc
 import hashlib
 import inspect
 import itertools
@@ -1096,3 +1097,83 @@ def test_inventory_source_review_drift_or_revocation_after_proposal_blocks_appro
             expected_revision=1,
             idempotency_key="revoked",
         )
+
+
+def test_store_connections_close_when_row_setup_fails(tmp_path, monkeypatch) -> None:
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: any connection left open by a call stays open.
+    context = Context()
+    store = ConsentScanNoticeProposalStore(
+        tmp_path / "notice-proposals.sqlite3",
+        snapshot_resolver=lambda: context.snapshot,
+        actor_resolver=lambda: context.actor,
+        signing_key_resolver=lambda _tenant: b"k" * 32,
+        clock=lambda: context.now,
+        gate=lambda: None,
+    )
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+    fail_row_setup = {"on": True}
+
+    class _RowSetupFails(sqlite3.Connection):
+        def __setattr__(self, name, value):
+            if name == "row_factory" and fail_row_setup["on"]:
+                raise sqlite3.OperationalError("row setup failed")
+            super().__setattr__(name, value)
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, factory=_RowSetupFails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(proposal_module.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            with store._connect():
+                pass
+        fail_row_setup["on"] = False
+        with store._connect() as connection:
+            assert connection.execute("SELECT 1").fetchone()[0] == 1
+    finally:
+        gc.enable()
+    assert len(opened) == 2  # the failed setup, the working call
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
+
+def test_shared_setup_failure_is_left_to_the_session_owner(tmp_path, monkeypatch) -> None:
+    context = Context()
+    store = ConsentScanNoticeProposalStore(
+        tmp_path / "notice-proposals.sqlite3",
+        snapshot_resolver=lambda: context.snapshot,
+        actor_resolver=lambda: context.actor,
+        signing_key_resolver=lambda _tenant: b"k" * 32,
+        clock=lambda: context.now,
+        gate=lambda: None,
+    )
+    sessions = []
+
+    class _SetupFails:
+        def __init__(self):
+            self.closes = []
+            self.row_factory = None
+            sessions.append(self)
+
+        def execute(self, sql, *args):
+            raise sqlite3.OperationalError("pragma failed")
+
+        def close(self):
+            self.closes.append(True)
+
+    monkeypatch.setattr(proposal_module.consent_storage, "shared", lambda: True)
+    monkeypatch.setattr(proposal_module.consent_storage, "connect", lambda path, **kwargs: _SetupFails())
+    gc.disable()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            with store._connect():
+                pass
+        assert len(sessions) == 1 and sessions[0].closes == []
+    finally:
+        gc.enable()

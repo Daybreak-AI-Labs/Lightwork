@@ -1155,3 +1155,39 @@ def test_a_pause_delivers_the_retention_record_with_the_number_removed(context, 
     assert response.status_code == 200, response.text
     purges = [payload["lifecycle"] for kind, payload in delivered if kind == "ekko_retention_purge"]
     assert purges == [{"state": "expired_removed", "removed": 1}]
+
+
+def test_ekko_factory_finds_owned_work_and_respects_customer_decisions(context):
+    import os
+    from pathlib import Path
+
+    client, world = context
+    path = Path(os.environ["MAVERICK_CONFIG"])
+    path.write_text(path.read_text() + '\n[ekko]\nenable=true\nbuild_enabled=true\n')
+    config.reset_config_cache()
+    seed(world, owner="user:alice", count=3)
+    seed(world, owner="user:bob", count=4)
+    options = client.get("/api/v1/ekko/build/options", headers=headers())
+    assert options.status_code == 200, options.text
+    body = {"context": options.json()["context"], "device_id": "local-device", "brief": ""}
+
+    def scan():
+        response = client.post("/api/v1/ekko/build/scan", headers=headers(), json=body)
+        assert response.status_code == 200, response.text
+        assert "CONFIDENTIAL" not in response.text and "PRIVATE-RESULT" not in response.text
+        return response.json()
+
+    found = scan()
+    assert found["ready"] == 1
+    assert found["proposals"][0]["source"] == "3 distinct requests in Lightwork"
+    recommendation = get(client, "/opportunities")["opportunities"][0]
+    decision_path = BASE + "/opportunities/" + recommendation["id"] + "/decision"
+    refused = client.post(decision_path, headers=headers(), json={"revision": recommendation["revision"],
+        "decision": "decline", "manual_steps": ["inputs", "review"]})
+    assert refused.status_code == 200, refused.text
+    assert scan()["ready"] == 0
+    current = opportunities.RECOMMENDATIONS.get(recommendation["id"])
+    reopened = client.post(decision_path, headers=headers(), json={"revision": current["revision"],
+        "decision": "reopen", "manual_steps": ["inputs", "prepare", "review"]})
+    assert reopened.status_code == 200, reopened.text
+    assert scan()["ready"] == 0

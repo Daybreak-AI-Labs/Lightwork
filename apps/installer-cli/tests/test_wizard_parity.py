@@ -388,6 +388,8 @@ def test_write_config_emits_explicit_ekko_policy(tmp_path: Path, monkeypatch):
         tmp_path, monkeypatch,
         ekko={
             "enable": True,
+            "planning_enabled": True,
+            "build_enabled": True,
             "retention_days": 14,
             "capture_level": "application_metadata",
             "allowed_apps": ["excel", "powerpoint"],
@@ -396,6 +398,8 @@ def test_write_config_emits_explicit_ekko_policy(tmp_path: Path, monkeypatch):
     )
     assert parsed["ekko"] == {
         "enable": True,
+        "planning_enabled": True,
+        "build_enabled": True,
         "retention_days": 14,
         "capture_level": "application_metadata",
         "allowed_apps": ["excel", "powerpoint"],
@@ -887,7 +891,7 @@ def test_pick_ekko_defaults_off_without_follow_up_prompts(monkeypatch):
 def test_pick_ekko_enabled_branch_is_bounded_and_local_first(monkeypatch):
     from maverick_installer import wizard
 
-    confirms = iter([True])  # enable
+    confirms = iter([True, True, True])  # enable, private plans, automatic drafts
     answers = iter(["Excel, PowerPoint, mystery.exe", "999", "1", "999"])
     monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **k: next(confirms))
     monkeypatch.setattr(wizard, "_q_text", lambda *a, **k: next(answers))
@@ -899,6 +903,8 @@ def test_pick_ekko_enabled_branch_is_bounded_and_local_first(monkeypatch):
     result = wizard.pick_ekko()
 
     assert result["enable"] is True
+    assert result["planning_enabled"] is True
+    assert result["build_enabled"] is True
     assert result["allowed_apps"] == ["excel", "powerpoint"]
     assert result["retention_days"] == 30
     assert result["enrollment_days"] == 30

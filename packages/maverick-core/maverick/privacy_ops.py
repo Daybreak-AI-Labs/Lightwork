@@ -3316,6 +3316,7 @@ def _dsar_platform_holdings(record: dict) -> dict:
         str(record.get("subject_id") or ""),
         channel=record.get("channel") or None,
         tenant=current_tenant_id() or None,
+        strict=True,
     )
     # Use the export's canonical row counts. Counting top-level containers
     # misses nested turns/episodes and counts history subjects instead of the
@@ -3376,11 +3377,17 @@ def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
             if recovered is None:
                 from .dsar import export_subject_data
 
-                bundle = export_subject_data(
-                    record["subject_id"],
-                    channel=record.get("channel") or None,
-                    tenant=intent["tenant"] or None,
-                )
+                try:
+                    bundle = export_subject_data(
+                        record["subject_id"],
+                        channel=record.get("channel") or None,
+                        tenant=intent["tenant"] or None,
+                        strict=True,
+                    )
+                except RuntimeError as exc:
+                    raise ValueError(
+                        "Subject data could not be verified. Keep this request open and try again after storage is restored."
+                    ) from exc
                 artifact_sha256 = _write_dsar_export_artifact(
                     out_path,
                     intent,

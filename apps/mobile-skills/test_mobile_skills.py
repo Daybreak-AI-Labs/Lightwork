@@ -47,7 +47,7 @@ def test_module_really_has_no_intra_package_imports():
 
 
 def test_html_references_only_vendored_paths():
-    html = _HTML.read_text()
+    html = _HTML.read_text(encoding="utf-8")
     # Every load target (script src, fetch path, Pyodide indexURL) must be
     # relative — no CDN / remote loads in the committed artifact.
     targets = re.findall(r'src="([^"]+)"', html)
@@ -63,7 +63,7 @@ def test_html_references_only_vendored_paths():
 
 
 def test_vendor_readme_has_pinned_release_and_todo_checksum():
-    text = (_HERE / "pyodide-runner" / "vendor" / "README.md").read_text()
+    text = (_HERE / "pyodide-runner" / "vendor" / "README.md").read_text(encoding="utf-8")
     assert "pyodide-0.26.4.tar.bz2" in text
     assert "TODO" in text and "sha256" in text  # explicit fill-on-download, no fake pin
 
@@ -100,7 +100,7 @@ def test_phone_results_are_worded_for_people():
 
 
 def test_browser_results_are_worded_for_people():
-    html = _HTML.read_text()
+    html = _HTML.read_text(encoding="utf-8")
     assert "difference=" not in html and "entropy=" not in html.split("<script>", 1)[1]
     assert "% different: " in html
     assert "0% means all answers agree. 100% means every answer is different." in html

@@ -43,6 +43,7 @@ from .file_lock import (
     ensure_private_file,
 )
 from .paths import InvalidTenantError, canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 from .suite_audit_capture import (
     SuiteAuditCapture,
     SuiteAuditCaptureError,
@@ -1112,7 +1113,9 @@ class SharedGovernanceInventoryStore:
             )
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path, timeout=30.0, isolation_level=None, factory=ClosingConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")

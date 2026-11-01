@@ -40,6 +40,7 @@ from maverick.privacy_drop_management import (
     DROPRecordAuthority,
     DROPStatusEvidence,
 )
+from maverick.sqlite_closing import ClosingConnection
 
 SCHEMA_VERSION = 1
 NETWORK_IO = False
@@ -205,7 +206,7 @@ class DROPAuthorityRegistry:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0)
+        connection = sqlite3.connect(self.path, timeout=30.0, factory=ClosingConnection)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")

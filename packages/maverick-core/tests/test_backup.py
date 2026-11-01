@@ -373,6 +373,78 @@ def test_withheld_key_files_lists_what_the_operator_must_escrow(tmp_path):
     ])
 
 
+def _is_closed(connection):
+    try:
+        connection.execute("SELECT 1")
+    except sqlite3.ProgrammingError:
+        return True
+    return False
+
+
+def test_restore_closes_cached_federation_state_connections_before_replacing_the_file(monkeypatch):
+    from maverick import federation
+    from maverick.paths import data_dir
+
+    root = data_dir()
+    _seed(root)
+    state = federation._FederationState(root / "federation" / "inbound_state.sqlite3")
+    assert state.claim_replay("scope", "sig", expires_at=time.time() + 60, now=time.time()) is False
+    with federation._STATE_FILE_GATE.shared():
+        cached = state._connect()
+    archive = backup.create_backup()
+    closed_when_replaced = []
+    real_publish = backup._publish_staged_file
+
+    def checked_publish(source, destination):
+        if destination.name == "inbound_state.sqlite3":
+            closed_when_replaced.append(_is_closed(cached))
+        return real_publish(source, destination)
+
+    monkeypatch.setattr(backup, "_publish_staged_file", checked_publish)
+    backup.restore_backup(archive, replace_existing=True)
+    # The federation file is in the archive, so the replacement reached it, and the cached
+    # connection was already closed at that point.
+    assert closed_when_replaced == [True]
+    assert state.claim_replay("scope", "sig2", expires_at=time.time() + 60, now=time.time()) is False
+
+
+def test_a_state_call_during_a_restore_waits_for_the_replacement(monkeypatch):
+    import threading
+
+    from maverick import federation
+    from maverick.paths import data_dir
+
+    root = data_dir()
+    _seed(root)
+    state = federation._FederationState(root / "federation" / "inbound_state.sqlite3")
+    assert state.claim_replay("scope", "sig", expires_at=time.time() + 60, now=time.time()) is False
+    archive = backup.create_backup()
+    real_publish = backup._publish_staged_file
+    results: dict[str, object] = {}
+    callers: list[threading.Thread] = []
+
+    def publish_while_a_call_arrives(source, destination):
+        if destination.name == "inbound_state.sqlite3" and not callers:
+            caller = threading.Thread(
+                target=lambda: results.update(
+                    claimed=state.claim_replay("scope", "sig2", expires_at=time.time() + 60, now=time.time())
+                )
+            )
+            callers.append(caller)
+            caller.start()
+            caller.join(timeout=0.3)
+            # The call waits until the replacement has finished; it does not open the file during it.
+            assert caller.is_alive(), "a state call must wait while the state file is replaced"
+        return real_publish(source, destination)
+
+    monkeypatch.setattr(backup, "_publish_staged_file", publish_while_a_call_arrives)
+    backup.restore_backup(archive, replace_existing=True)
+    assert callers, "the federation state file was not replaced"
+    callers[0].join(timeout=10)
+    assert not callers[0].is_alive()
+    assert results["claimed"] is False
+
+
 def test_replace_existing_restore_preserves_live_workspace_keys(tmp_path):
     """A keys-excluded archive must not turn a live workspace key into a
     replacement target: deleting it would leave that workspace's restored data

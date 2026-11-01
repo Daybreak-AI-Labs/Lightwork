@@ -50,10 +50,10 @@ def test_a_second_rejected_answer_offers_a_person_with_the_task_attached(world):
 def test_the_answer_panel_carries_the_hand_off_and_a_stopped_task_shows_it(world):
     from pathlib import Path
 
-    panel = (Path(__file__).resolve().parents[1] / "maverick_dashboard/templates/_chat_answer_panel.html").read_text()
+    panel = (Path(__file__).resolve().parents[1] / "maverick_dashboard/templates/_chat_answer_panel.html").read_text(encoding="utf-8")
     assert 'id="feedback-hand-off" hidden' in panel and "data-get-help>{{ ui('Get help from a person') }}" in panel
     stopped = panel[panel.index("{% if goal.status in ('blocked', 'failed') %}"):]
     stopped = stopped[:stopped.index("{% endif %}")]
     assert '#get-help" data-get-help>' in stopped
-    script = (Path(__file__).resolve().parents[1] / "maverick_dashboard/static/lightwork-answer-panel.js").read_text()
+    script = (Path(__file__).resolve().parents[1] / "maverick_dashboard/static/lightwork-answer-panel.js").read_text(encoding="utf-8")
     assert "value.hand_off" in script

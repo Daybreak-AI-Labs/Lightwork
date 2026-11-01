@@ -47,6 +47,7 @@ from .budget import Budget, BudgetExceeded
 from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 
 SCHEMA_VERSION = 1
 POLICY_SCHEMA = "lightwork.governance-agent.policy.v1"
@@ -1245,7 +1246,9 @@ class GovernanceAgentStore:
         return token
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path, timeout=30.0, isolation_level=None, factory=ClosingConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.create_function(
             "lightwork_governance_updated_at", 2, self._indexed_run_updated_at,

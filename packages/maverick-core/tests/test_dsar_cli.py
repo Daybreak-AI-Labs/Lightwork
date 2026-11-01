@@ -123,6 +123,23 @@ def test_dsar_export_unknown_user_is_empty_and_exits_zero():
     assert bundle["counts"]["conversations"] == 0
 
 
+def test_dsar_export_refuses_unreadable_store_without_creating_artifact(
+    monkeypatch, tmp_path,
+):
+    def unavailable(*_args, **_kwargs):
+        raise OSError("private world path should not be shown")
+
+    monkeypatch.setattr("maverick.world_model.world_for_tenant", unavailable)
+    output = tmp_path / "incomplete-export.json"
+    result = CliRunner().invoke(
+        main, ["dsar", "export", "--user", "alice", "--output", str(output)]
+    )
+
+    assert result.exit_code != 0
+    assert not output.exists()
+    assert "private world path" not in result.output
+
+
 def test_dsar_export_output_writes_file(tmp_path):
     _seed_world()
     out = tmp_path / "alice_dsar.json"

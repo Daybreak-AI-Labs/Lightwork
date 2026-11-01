@@ -47,8 +47,47 @@ class StartSessionIn(DeviceIn):
     acknowledge_capture_scope: bool = False
 
 
+class TaskReviewIn(_StrictInput):
+    goal: str = Field(min_length=3, max_length=1000)
+    inputs: str = Field(min_length=3, max_length=1000)
+    output: str = Field(min_length=3, max_length=1000)
+    approval: str = Field(min_length=3, max_length=1000)
+    task_type: Literal["general", "reporting", "reconciliation", "document_review"] = "general"
+
+
+class BenefitIn(_StrictInput):
+    runs_per_week: float = Field(0, ge=0, le=10000, allow_inf_nan=False, strict=True)
+    manual_minutes: float = Field(0, ge=0, le=10080, allow_inf_nan=False, strict=True)
+    remaining_minutes: float | None = Field(None, ge=0, le=10080, allow_inf_nan=False, strict=True)
+    setup_hours: float | None = Field(None, ge=0, le=10000, allow_inf_nan=False, strict=True)
+
+
+class PlanIn(DeviceIn):
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    acknowledge_private_storage: bool = Field(False, strict=True)
+    review: TaskReviewIn
+    assumptions: BenefitIn = Field(default_factory=BenefitIn)
+    stage: Literal["shortlisted", "pilot", "parked"] = "shortlisted"
+    evidence_revision: str = Field(min_length=64, max_length=64)
+    expected_revision: str = Field("", max_length=32)
+
+
+class PlanRevisionIn(DeviceIn):
+    context: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_revision: str = Field(min_length=32, max_length=32)
+
+
+class PilotRunIn(PlanRevisionIn):
+    sample_id: str = Field(pattern=r"^[A-Za-z0-9-]{8,64}$")
+    manual_minutes: float = Field(gt=0, le=10080, allow_inf_nan=False, strict=True)
+    remaining_minutes: float = Field(ge=0, le=10080, allow_inf_nan=False, strict=True)
+    accepted: bool = Field(strict=True)
+
+
 class HandoffIn(DeviceIn):
     kind: Literal["flow", "agent"] = "flow"
+    review: TaskReviewIn | None = None
+    evidence_revision: str = Field("", max_length=64)
 
 
 class EnrollIn(DeviceIn):
@@ -233,6 +272,7 @@ def _status_data(request: Request, device_id: str) -> dict:
     blocked = set(policy.get("blocked_apps") or [])
     return {
         "enabled": bool(policy.get("enable", False)),
+        "planning_enabled": bool(policy.get("enable") and policy.get("planning_enabled")),
         "workflows_enabled": flows_enabled(),
         "workflows_control_managed": "MAVERICK_FLOWS" in os.environ,
         "control_managed": "MAVERICK_EKKO" in os.environ,
@@ -368,7 +408,7 @@ def _candidate(store, policy: dict, opportunity_id: str):
     raise HTTPException(status_code=404, detail="no such Ekko opportunity")
 
 
-def _handoff_brief(candidate, kind: str) -> str:
+def _handoff_brief(candidate, kind: str, review) -> str:
     steps = [
         f"{index}. {step.action} {step.object_type} in {step.app}"
         for index, step in enumerate(candidate.pattern, 1)
@@ -376,17 +416,22 @@ def _handoff_brief(candidate, kind: str) -> str:
     artifact = "workflow" if kind == "flow" else "agent playbook"
     return "\n".join(
         [
-            f"Draft an unsaved {artifact} for: {candidate.title}",
+            f"Draft an unsaved {artifact} for: {review.goal}",
+            f"Kind of work: {review.task_type.replace('_', ' ')}",
+            f"Owner-selected inputs: {review.inputs}",
+            f"Expected output: {review.output}",
+            f"Human review: {review.approval}",
             "",
-            "Evidence from approved, content-free application metadata:",
+            ("Evidence from approved, content-free application metadata:"
+             if candidate.observation_basis == "application_metadata"
+             else "Evidence from approved guided activity labels:"),
             *steps,
             "",
             (
                 f"Observed {candidate.occurrences} times across "
-                f"{candidate.distinct_days} distinct days; confidence "
-                f"{candidate.confidence:.0%}; estimated "
-                f"{candidate.estimated_minutes_per_run:.1f} minutes per run; "
-                f"risk signal {candidate.risk}."
+                f"{candidate.distinct_days} distinct days. "
+                "These observations do not establish the task's purpose, completeness, "
+                "time savings or automation feasibility. The task description above comes from the owner."
             ),
             "",
             "Preserve human review before saving, scheduling, running, or delivering. ",
@@ -625,11 +670,30 @@ async def ekko_stop_session(
 
 
 def _candidate_response(store, policy: dict) -> dict:
-    candidates = _discover(store, policy) if store.path.exists() else []
+    from maverick.work_discovery import MAX_DISCOVERY_EVENTS, discover_candidates
+
+    events = store.list_events(limit=MAX_DISCOVERY_EVENTS) if store.path.exists() else []
+    min_occurrences = max(2, int(policy.get("min_occurrences", 3)))
+    min_days = max(2, int(policy.get("min_distinct_days", 2)))
+    candidates = discover_candidates(events, min_occurrences=min_occurrences, min_distinct_days=min_days)
+    days = len({event.day for event in events})
+    if candidates:
+        next_step = "Review a pattern and describe the job before preparing a draft."
+    elif not events:
+        next_step = "Enroll this device and start recording allowed apps to gather evidence."
+    elif days < min_days:
+        next_step = f"Activity covers {days} of the {min_days} days needed. Continue normal work on another day."
+    else:
+        next_step = f"No pattern has met both evidence requirements yet: {min_occurrences} separate repeats across {min_days} days."
     return {
         "candidates": [candidate.to_dict() for candidate in candidates],
         "count": len(candidates),
         "preview_only": True,
+        "progress": {
+            "activities": len(events), "observed_days": days,
+            "required_occurrences": min_occurrences, "required_days": min_days,
+            "next_step": next_step, "at_event_limit": len(events) == MAX_DISCOVERY_EVENTS,
+        },
     }
 
 
@@ -665,7 +729,7 @@ def ekko_candidate_handoff(
     from maverick.audit import EventKind
     from maverick.config import get_ekko
     from maverick.flow import enabled as flows_enabled
-    from maverick.work_discovery import build_draft_bundle
+    from maverick.work_discovery import DraftReview, build_draft_bundle
 
     from .in_app_routes import _draft_context
 
@@ -680,10 +744,18 @@ def ekko_candidate_handoff(
         )
     store = _store(request, payload.device_id)
     candidate = _candidate(store, get_ekko(), opportunity_id)
+    if payload.review is None:
+        raise HTTPException(422, "Describe the job, inputs, expected output and human review before preparing a draft.")
+    if payload.evidence_revision != candidate.to_dict()["evidence_revision"]:
+        raise HTTPException(409, "The evidence changed. Refresh the suggestions and review this pattern again before drafting.")
+    try:
+        review = DraftReview(**payload.review.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     # Give the workflow editor the exact provider-free, validated graph. Agent
     # handoffs still use a bounded brief. Neither path saves or activates work.
-    bundle = build_draft_bundle(candidate, owner=_owner(request))
-    brief = _handoff_brief(candidate, payload.kind)
+    bundle = build_draft_bundle(candidate, owner=_owner(request), review=review)
+    brief = _handoff_brief(candidate, payload.kind, review)
     prepared_flow = bundle.flow.to_dict() if payload.kind == "flow" else None
     if prepared_flow is not None:
         prepared_flow.pop("owner", None)
@@ -706,6 +778,92 @@ def ekko_candidate_handoff(
         "requires_human_approval": bool(bundle.requires_human_approval),
         **({"flow": prepared_flow} if prepared_flow is not None else {}),
     }
+
+
+def _plans(request, device_id):
+    from maverick.work_discovery_planning import OpportunityPlans
+
+    return OpportunityPlans(_store(request, device_id))
+
+
+def _planning_access(request, *, write=False, context=None):
+    from maverick import config
+
+    from .ekko_ops_api import _access
+
+    with auth.fresh_configuration():
+        current_context = _access(request)
+        policy = config.get_ekko()
+    if context is not None and not secrets.compare_digest(context, current_context):
+        raise HTTPException(409, {"code": "ekko_context_changed", "message":
+            "Your workspace, access or Ekko settings changed. Refresh the page before changing private plans."})
+    if write:
+        _app()._require_same_origin(request)
+        if not policy["enable"] or not policy["planning_enabled"]:
+            raise HTTPException(409, "Saving opportunity plans is off. An administrator can enable it in All settings under Ekko.")
+    return policy, current_context
+
+
+def _plan_result(operation):
+    from maverick.work_discovery_planning import PlanConflict
+    from maverick.work_discovery_store import WorkDiscoveryStoreError
+
+    try:
+        return operation()
+    except PlanConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except WorkDiscoveryStoreError as exc:
+        raise HTTPException(503, "Saved opportunities could not be verified. Your current notes are kept; try again later.") from exc
+
+
+@router.get("/api/v1/ekko/plans")
+def ekko_plans(request: Request, device_id: str = Query(_DEFAULT_DEVICE, min_length=1, max_length=64)):
+    policy, context = _planning_access(request)
+    plans = _plan_result(lambda: _plans(request, device_id).list())
+    return {"plans": plans, "context": context, "enabled": bool(policy["enable"] and policy["planning_enabled"]),
+            "retention_days": policy["retention_days"]}
+
+
+@router.put("/api/v1/ekko/candidates/{opportunity_id}/plan")
+def ekko_save_plan(request: Request, opportunity_id: str, payload: PlanIn):
+    policy, _ = _planning_access(request, write=True, context=payload.context)
+    if not payload.acknowledge_private_storage:
+        raise HTTPException(422, "Confirm that your task notes, assumptions and pilot results may be saved privately.")
+    store = _store(request, payload.device_id)
+    candidate = _candidate(store, policy, opportunity_id)
+    if candidate.to_dict()["evidence_revision"] != payload.evidence_revision:
+        raise HTTPException(409, "The evidence changed. Refresh and review this opportunity before saving.")
+    enrolled = store.get_policy()
+    retention = min(policy["retention_days"], enrolled.retention_days) if enrolled else policy["retention_days"]
+    result = _plan_result(lambda: _plans(request, payload.device_id).save(
+        candidate, review=payload.review.model_dump(), assumptions=payload.assumptions.model_dump(),
+        stage=payload.stage, expected_revision=payload.expected_revision, retention_days=retention,
+    ))
+    return {"plan": result, "saved": True, "started_work": False}
+
+
+@router.post("/api/v1/ekko/plans/{opportunity_id}/runs")
+def ekko_record_pilot(request: Request, opportunity_id: str, payload: PilotRunIn):
+    _planning_access(request, write=True, context=payload.context)
+    if not _OPPORTUNITY_RE.fullmatch(opportunity_id):
+        raise HTTPException(404, "Choose a saved opportunity.")
+    sample = payload.model_dump(exclude={"device_id", "expected_revision", "context"})
+    result = _plan_result(lambda: _plans(request, payload.device_id).record_run(
+        opportunity_id, sample=sample, expected_revision=payload.expected_revision,
+    ))
+    return {"plan": result, "recorded": True, "basis": "owner_reported_pilot"}
+
+
+@router.delete("/api/v1/ekko/plans/{opportunity_id}")
+def ekko_delete_plan(request: Request, opportunity_id: str, payload: PlanRevisionIn):
+    _planning_access(request, context=payload.context)
+    _app()._require_same_origin(request)
+    removed = _plan_result(lambda: _plans(request, payload.device_id).delete(
+        opportunity_id, expected_revision=payload.expected_revision,
+    ))
+    return {"removed": removed}
 
 
 @router.delete("/api/v1/ekko/sessions/{session_id}")

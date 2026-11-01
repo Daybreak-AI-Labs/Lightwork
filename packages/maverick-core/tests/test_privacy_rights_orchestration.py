@@ -1291,3 +1291,58 @@ def test_product_boundaries_make_no_provider_or_completeness_claim() -> None:
         "estate_completeness_claimed": False,
         "live_provider_acceptance_verified": False,
     }
+
+
+def _record_connections(monkeypatch) -> list[sqlite3.Connection]:
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", recording_connect)
+    return opened
+
+
+def test_hold_refusal_closes_every_ledger_connection(authority, monkeypatch) -> None:
+    """The destructive-approval gate reads the legal hold through a ledger connection
+    that must be closed on refusal, not only committed (Windows keeps it locked)."""
+    store, actor, clock = authority
+    enroll_all(store, "tenant-a", "crm", key="source")
+    case = open_verified(store, clock, "tenant-a", "case-delete", ["erasure"])
+    tasks = store.plan_source_tasks(
+        "tenant-a",
+        case.case_id,
+        "crm",
+        expected_case_revision=case.revision,
+        idempotency_key="plan",
+    )
+    delete_task = task_by_phase(tasks, "delete")
+    store.set_legal_hold(
+        "tenant-a",
+        case.case_id,
+        active=True,
+        evidence_sha256=digest("hold"),
+        evidence_ref="hold:1",
+        expected_revision=case.revision + 1,
+        idempotency_key="hold-on",
+    )
+    actor["value"] = "approver"
+    opened = _record_connections(monkeypatch)
+    try:
+        with pytest.raises(rights.PrivacyRightsConflict, match="legal hold"):
+            store.approve_destructive_work(
+                "tenant-a",
+                delete_task.task_id,
+                expected_revision=delete_task.revision,
+                idempotency_key="approve-on-hold",
+            )
+        assert opened, "the approval gate should read the ledger"
+        for connection in opened:
+            with pytest.raises(sqlite3.ProgrammingError):  # a closed connection refuses work
+                connection.execute("SELECT 1")
+    finally:
+        for connection in opened:
+            connection.close()

@@ -42,7 +42,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12.13"
       - id: release-ref
@@ -169,7 +169,7 @@ jobs:
           ref: ${{ needs.validate-release-tag.outputs.sha }}
           persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -234,7 +234,7 @@ jobs:
         with:
           ref: ${{ needs.validate-release-tag.outputs.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           # 3.12.10 is the last official Windows/macOS binary in this branch.
           # Later 3.12 security releases in actions/python-versions are Linux-only.
@@ -303,7 +303,7 @@ jobs:
           else
             mv dist/maverick "dist/${{ matrix.artifact }}"
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}
@@ -320,7 +320,7 @@ jobs:
         with:
           ref: ${{ needs.validate-release-tag.outputs.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12.13"
       - name: Build reproducible standalone SKU source archives
@@ -336,7 +336,7 @@ jobs:
             --source-revision "$revision" \
             --output-dir dist
           (cd dist && sha256sum --check "lightwork-standalone-skus-${version}.sha256")
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: standalone-sku-source
           path: |
@@ -361,7 +361,7 @@ jobs:
         with:
           ref: ${{ needs.validate-release-tag.outputs.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12.13"
       - name: Generate the isolated release-runtime SBOM
@@ -390,7 +390,7 @@ jobs:
             --pyproject packages/maverick-core/pyproject.toml \
             -o "maverick-sbom-${RELEASE_TAG}.cdx.json"
           test -s "maverick-sbom-${RELEASE_TAG}.cdx.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-runtime-sbom
           path: maverick-sbom-*.cdx.json
@@ -494,7 +494,7 @@ jobs:
         with:
           ref: ${{ needs.validate-release-tag.outputs.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12.13"
       - name: Prepare isolated producer directories
@@ -504,27 +504,27 @@ jobs:
           rm -rf "$RUNNER_TEMP/release-inputs" dist
           mkdir -p "$RUNNER_TEMP/release-inputs" dist
       - name: Download the Linux binary producer
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: maverick-linux-x86_64
           path: ${{ runner.temp }}/release-inputs/binary-linux
       - name: Download the macOS binary producer
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: maverick-macos-arm64
           path: ${{ runner.temp }}/release-inputs/binary-macos
       - name: Download the Windows binary producer
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: maverick-windows-x86_64.exe
           path: ${{ runner.temp }}/release-inputs/binary-windows
       - name: Download the standalone source producer
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: standalone-sku-source
           path: ${{ runner.temp }}/release-inputs/standalone
       - name: Download the release-runtime SBOM producer
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: release-runtime-sbom
           path: ${{ runner.temp }}/release-inputs/sbom
@@ -641,7 +641,7 @@ jobs:
       - name: List trusted release inputs
         run: ls -la dist/
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

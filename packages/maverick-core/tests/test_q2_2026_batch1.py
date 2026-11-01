@@ -725,7 +725,7 @@ COOKBOOK_RECIPES = [
 def test_cookbook_recipe_exists(name):
     p = REPO_ROOT / "docs" / "cookbook" / name
     assert p.is_file(), f"missing cookbook recipe: {name}"
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # Each recipe must have a "Goal text" or be the index.
     if name == "index.md":
         return
@@ -735,7 +735,7 @@ def test_cookbook_recipe_exists(name):
 def test_cookbook_has_at_least_12_recipes():
     assert len(COOKBOOK_RECIPES) >= 12
     # And each is linked from the index so users can find it.
-    index = (REPO_ROOT / "docs" / "cookbook" / "index.md").read_text()
+    index = (REPO_ROOT / "docs" / "cookbook" / "index.md").read_text(encoding="utf-8")
     for name in COOKBOOK_RECIPES:
         assert f"({name})" in index or f"(./{name})" in index, (
             f"recipe not linked from index: {name}"
@@ -745,7 +745,7 @@ def test_cookbook_has_at_least_12_recipes():
 def test_failure_modes_doc_exists():
     p = REPO_ROOT / "docs" / "performance" / "failure-modes.md"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # Must enumerate every ErrorClass.
     for cls in (
         "rate_limit", "transient_network", "server_5xx",

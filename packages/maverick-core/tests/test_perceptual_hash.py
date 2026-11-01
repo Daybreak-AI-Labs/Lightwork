@@ -92,7 +92,7 @@ def test_file_hash_matches_pixels_when_pillow_present(tmp_path):
 def test_js_constant_stays_in_sync():
     """ahash.js must embed the exact same constant (cheap drift tripwire)."""
     assert AHASH_JS.is_file(), AHASH_JS
-    assert f'"{GRADIENT_HASH}"' in AHASH_JS.read_text()
+    assert f'"{GRADIENT_HASH}"' in AHASH_JS.read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not on PATH")

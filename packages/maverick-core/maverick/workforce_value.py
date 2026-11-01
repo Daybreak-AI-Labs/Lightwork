@@ -140,7 +140,10 @@ def compute(
     try:
         if callable(getattr(world, "query", None)):
             from .episode_reporting import iter_episodes
-            episodes = iter_episodes(world, owner=owner, since=cutoff, until=ts_now, finished_only=True)
+            # The window's end is checked in record(), inclusively: iter_episodes'
+            # ``until`` is exclusive, and a run started at this report's own
+            # clock reading must still count.
+            episodes = iter_episodes(world, owner=owner, since=cutoff, finished_only=True)
         else:
             if owner is not None:
                 raise ValueError("This history adapter cannot enforce an owner scope.")
@@ -152,7 +155,8 @@ def compute(
         out.unavailable_reason = "Task history could not be read. Savings are unavailable; no zero-activity claim was made."
         return out
     def record(ep):
-        if float(getattr(ep, "started_at", 0) or 0) < cutoff:
+        started = float(getattr(ep, "started_at", 0) or 0)
+        if started < cutoff or started > ts_now:
             return
         raw_cost = getattr(ep, "cost_dollars", None)
         if raw_cost is None:

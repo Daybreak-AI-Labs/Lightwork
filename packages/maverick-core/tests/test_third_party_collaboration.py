@@ -1050,3 +1050,45 @@ def test_capability_boundaries_are_explicitly_false() -> None:
     assert MODEL_INFERENCE_IMPLEMENTED is False
     assert UPLOAD_BYTES_IMPLEMENTED is False
     assert VENDOR_ATTESTATIONS_INDEPENDENTLY_VERIFIED is False
+
+
+def _record_connections(monkeypatch) -> list[sqlite3.Connection]:
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", recording_connect)
+    return opened
+
+
+def test_hold_gated_purge_closes_every_ledger_connection(authority, monkeypatch) -> None:
+    """``with connection:`` commits but never closes, so a held purge kept the ledger
+    open (Windows then refuses to replace or delete it). Every connection must close."""
+    store, _, clock, _ = authority
+    _, invitation = issue(store)
+    store.set_legal_hold(
+        "tenant-a",
+        "invite-1",
+        active=True,
+        evidence_ref="legal.case-1",
+        expected_revision=int(invitation["revision"]),
+        idempotency_key="hold-on",
+    )
+    clock.advance(DAY * 3)
+    opened = _record_connections(monkeypatch)
+    try:
+        assert store.purge_expired("tenant-a", before=clock(), idempotency_key="purge-held") == {
+            "invitations": 0,
+            "drafts": 0,
+        }
+        assert opened, "the purge should read the ledger"
+        for connection in opened:
+            with pytest.raises(sqlite3.ProgrammingError):  # a closed connection refuses work
+                connection.execute("SELECT 1")
+    finally:
+        for connection in opened:
+            connection.close()

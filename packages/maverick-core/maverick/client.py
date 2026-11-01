@@ -240,6 +240,7 @@ def _erase_client_bound(cid: str, *, keep_audit: bool, actor: str | None) -> dic
     from . import audit
     from .client_erasure import ErasureReceipt
     from .ediscovery import active_matter_count
+    from .federation import hold_state_file_closed
     from .file_lock import cross_process_lock, ensure_private_directory
     from .paths import data_dir, maverick_home
 
@@ -276,8 +277,11 @@ def _erase_client_bound(cid: str, *, keep_audit: bool, actor: str | None) -> dic
         ensure_private_directory(receipts)
         with cross_process_lock(receipts / f".erase-{cid}", strict=True):
             entered = True
-            return _erase_client_locked(root, home, cid, keep_audit, actor or f"local:{getpass.getuser()}",
-                                        ErasureReceipt, audit, canonical_root, root_identity)
+            # The client's federation state file is inside the root being erased. Keep it closed
+            # for the whole erase, so that no state call reopens it between the removals.
+            with hold_state_file_closed():
+                return _erase_client_locked(root, home, cid, keep_audit, actor or f"local:{getpass.getuser()}",
+                                            ErasureReceipt, audit, canonical_root, root_identity)
     except ClientErasureError:
         raise
     except (OSError, RuntimeError, ValueError) as exc:

@@ -1,6 +1,8 @@
 """Tenant lifecycle / provisioning registry."""
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 from maverick.tenant import registry as tr
 
@@ -223,6 +225,68 @@ def test_delete_with_purge_removes_data(tmp_path):
     (data / "world.db").write_text("x", encoding="utf-8")
     assert tr.delete_tenant("acme", purge=True) is True
     assert not data.exists()
+
+
+def _is_closed(connection):
+    try:
+        connection.execute("SELECT 1")
+    except sqlite3.ProgrammingError:
+        return True
+    return False
+
+
+def test_purge_closes_the_tenant_federation_state_before_removing_it(tmp_path, monkeypatch):
+    import shutil
+
+    from maverick import federation
+
+    tr.create_tenant("acme")
+    state = federation._FederationState(
+        tmp_path / "tenants" / "acme" / "federation" / "inbound_state.sqlite3"
+    )
+    with federation._STATE_FILE_GATE.shared():
+        cached = state._connect()
+    closed_when_removed = []
+    real_rmtree = shutil.rmtree
+
+    def checked_rmtree(path, *args, **kwargs):
+        if path.name == "acme":
+            closed_when_removed.append(_is_closed(cached))
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", checked_rmtree)
+    assert tr.delete_tenant("acme", purge=True) is True
+    assert closed_when_removed == [True]
+    assert not (tmp_path / "tenants" / "acme").exists()
+
+
+def test_erasure_closes_the_tenant_federation_state_before_unlinking_it(tmp_path, monkeypatch):
+    import time
+
+    from maverick import federation
+
+    tr.create_tenant("former")
+    root = tmp_path / "tenants" / "former"
+    state = federation._FederationState(root / "federation" / "inbound_state.sqlite3")
+    assert state.claim_replay("scope", "sig", expires_at=time.time() + 60, now=time.time()) is False
+    with federation._STATE_FILE_GATE.shared():
+        cached = state._connect()
+    assert tr.delete_tenant("former") is True
+    review = tr.erasure_review("former")
+    closed_when_unlinked = []
+    real_unlink = tr._erasure_unlink
+
+    def checked_unlink(root_, entries, check):
+        assert any(entry["path"] == "federation/inbound_state.sqlite3" for entry in entries)
+        closed_when_unlinked.append(_is_closed(cached))
+        return real_unlink(root_, entries, check)
+
+    monkeypatch.setattr(tr, "_erasure_unlink", checked_unlink)
+    result = tr.erase_removed_tenant("former", revision=review["revision"], operation="4" * 32,
+                                     actor="user:owner", context="test",
+                                     previous_attempt=review["previous_attempt"])
+    assert result["result"] == "confirmed" and not root.exists()
+    assert closed_when_unlinked == [True]
 
 
 def test_registry_round_trips_on_disk():

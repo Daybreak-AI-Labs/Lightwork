@@ -32,6 +32,7 @@ import re
 import sqlite3
 import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import closing
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -776,14 +777,18 @@ class EvidenceAuthorityRegistry:
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=30)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=FULL")
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA synchronous=FULL")
+        except BaseException:
+            connection.close()
+            raise
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS ai_evidence_authority_meta(
@@ -1056,7 +1061,11 @@ class EvidenceAuthorityRegistry:
         )
         payload_json = _canonical(dict(payload)).decode("ascii")
         created_at = self._now()
-        with cross_process_lock(self.path, strict=True), self._connect() as connection:
+        with (
+            cross_process_lock(self.path, strict=True),
+            closing(self._connect()) as connection,
+            connection,
+        ):
             connection.execute("BEGIN IMMEDIATE")
             current = self._current_row(
                 selected_kind,
@@ -1129,7 +1138,7 @@ class EvidenceAuthorityRegistry:
     def _current_payload(self, kind: str, object_key: str) -> tuple[Mapping[str, Any], int]:
         row = self._current_row(kind, object_key)
         if row is None:
-            with self._connect() as connection:
+            with closing(self._connect()) as connection, connection:
                 retired = self._tombstone_row(kind, object_key, connection=connection)
             if retired is not None:
                 raise AIEvidenceAnalysisCompositionError(
@@ -1299,7 +1308,7 @@ class EvidenceAuthorityRegistry:
         )
 
     def _current_object_keys(self, kind: str, limit: int) -> list[str]:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 "SELECT object_key FROM ai_evidence_authority_records "
                 "WHERE tenant_id=? AND kind=? GROUP BY object_key "
@@ -1863,7 +1872,7 @@ class EvidenceAuthorityRegistry:
             return int(row["registry_revision"])
         selected_kind = _ref(kind, "authority kind")
         selected_key = _ref(object_key, "authority key")
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             retired = self._tombstone_row(
                 selected_kind,
                 selected_key,
@@ -1892,7 +1901,11 @@ class EvidenceAuthorityRegistry:
         purged_tombstones = 0
         tombstones_after = 0
         anchor = _ZERO_DIGEST
-        with cross_process_lock(self.path, strict=True), self._connect() as connection:
+        with (
+            cross_process_lock(self.path, strict=True),
+            closing(self._connect()) as connection,
+            connection,
+        ):
             connection.execute("BEGIN IMMEDIATE")
             guard = connection.execute(
                 "SELECT value FROM ai_evidence_authority_meta WHERE key='delete_guard'"
@@ -2107,7 +2120,7 @@ class EvidenceAuthorityRegistry:
         )
 
     def verify_integrity(self) -> AuthorityRegistryIntegrity:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             binding = connection.execute(
                 "SELECT value FROM ai_evidence_authority_meta WHERE key='tenant_sha256'"
             ).fetchone()
@@ -2398,6 +2411,28 @@ def _adapter_identity(
     return adapter.authority(valid_until=now + 3_600)
 
 
+def _require_adapter_enrolled(
+    registry: EvidenceAuthorityRegistry,
+    identity: evidence.EvidenceAdapterAuthority,
+) -> None:
+    # The registry key includes the adapter revision, so an upgrade to a new
+    # revision has no enrollment yet. Read-only paths must refuse until the
+    # adapter is enrolled again rather than reporting a generic unavailability.
+    key = registry._adapter_key(  # noqa: SLF001 - registry-owned enrollment check
+        identity.stage,
+        identity.adapter_id,
+        identity.revision,
+    )
+    if registry.current_registry_revision("adapter", key) == 0:
+        raise AIEvidenceAnalysisCompositionError(
+            "local evidence adapter authority is not enrolled for this revision; "
+            "after an upgrade the local evidence adapter must be enrolled again; "
+            "an analysis or authority request enrolls it on first use, and a global "
+            "administrator can enroll it now with "
+            "POST /api/v1/ai-evidence-analysis/authorities/bootstrap"
+        )
+
+
 def bootstrap_local_adapter_authorities(
     registry: EvidenceAuthorityRegistry,
     *,
@@ -2559,6 +2594,8 @@ def build_ai_evidence_analysis_composition(
         now = _timestamp(clock(), "clock")
         extraction_identity = _adapter_identity(extraction_adapter, now=now)
         analysis_identity = _adapter_identity(analysis_adapter, now=now)
+        _require_adapter_enrolled(registry, extraction_identity)
+        _require_adapter_enrolled(registry, analysis_identity)
         extraction_authority = registry.resolve_adapter(
             tenant,
             extraction_identity.stage,

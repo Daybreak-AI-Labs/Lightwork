@@ -55,6 +55,44 @@ def test_undo_outcomes_and_round_bumped_vote_identity(wm):
     assert wm.get_approval_audit_event(first.event_id).final_status is None
 
 
+def test_the_window_is_open_only_before_its_end_even_on_an_equal_clock_reading(wm, monkeypatch):
+    # Windows' wall clock (time.time() there reads GetSystemTimeAsFileTime
+    # before Python 3.13) can give the decision and the undo the same value.
+    # The window is [decided_at, decided_at + within_seconds): an undo with a
+    # zero window is refused, and so is one at exactly the end of the window.
+    import maverick.world_model as world_model
+
+    aid = wm.create_approval("wire-funds", risk="high", undoable=True)
+    _decide(wm, aid, "approved")
+    decided_at = wm.get_approval(aid).decided_at
+    clock = {"now": decided_at}
+    monkeypatch.setattr(world_model.time, "time", lambda: clock["now"])
+    assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=0) == "too_late"
+    clock["now"] = decided_at + 30
+    assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=30) == "too_late"
+    clock["now"] = decided_at + 29.5
+    assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=30) == "undone"
+    assert wm.get_approval(aid).status == "pending"
+
+
+def test_a_clock_read_before_the_decision_keeps_the_undo_open_while_the_task_waits(wm, monkeypatch):
+    # The waiting task settles a decision only once the clock reaches
+    # decided_at + window (settle_approval_decision with decided_before =
+    # now - window). A clock read before decided_at has not settled it, so the
+    # task keeps waiting and the undo must stay open: refusing it would let the
+    # task act on a decision the person was still able to reverse.
+    import maverick.world_model as world_model
+
+    aid = wm.create_approval("wire-funds", risk="high", undoable=True)
+    _decide(wm, aid, "approved")
+    decided_at = wm.get_approval(aid).decided_at
+    clock = {"now": decided_at - 5}
+    monkeypatch.setattr(world_model.time, "time", lambda: clock["now"])
+    assert wm.settle_approval_decision(aid, decided_before=clock["now"] - 30).undo_hold == "open"
+    assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=30) == "undone"
+    assert wm.get_approval(aid).status == "pending"
+
+
 def test_undo_round_ids_are_stable_and_distinct():
     from maverick.world_model import _approval_audit_event_id
 

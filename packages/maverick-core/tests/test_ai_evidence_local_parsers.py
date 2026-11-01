@@ -254,7 +254,7 @@ def test_ocr_attests_exact_runtime_uses_transient_input_and_returns_bounded_text
     authority = local.GovernedLocalExtractionAdapter(maximum_bytes=4_096).authority(
         valid_until=1_900_000_000
     )
-    assert authority.revision == 3
+    assert authority.revision == 4
     assert authority.network_access is False
     assert authority.implementation_sha256 == local._implementation_sha256()  # noqa: SLF001
 

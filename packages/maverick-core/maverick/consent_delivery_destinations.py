@@ -1004,9 +1004,14 @@ class ConsentDestinationOperationStore:
             connection = consent_storage.connect(self.path, timeout=30)
         else:
             connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=30000")
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA busy_timeout=30000")
+        except BaseException:
+            if isinstance(connection, sqlite3.Connection):
+                connection.close()
+            raise
         try:
             yield connection
         finally:

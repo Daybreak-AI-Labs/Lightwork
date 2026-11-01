@@ -8,20 +8,35 @@ catalogue of built features and tools; planned work is listed in
 > `packages/maverick-core/maverick/` unless noted. CLI verbs are shown as
 > `maverick <verb>`.
 
-- **First named local owner** — `maverick_dashboard.local_owner` and
-  `local_owner_routes` let a fresh loopback-only installation create its first
-  administrator inside Start. A salted local passphrase reopens the existing
-  signed invite session; the claim closes anonymous access before role setup.
-  Managed sign-in, existing identities, deployment invite policy, current roles,
-  and SCIM revocation remain authoritative. The installer exposes
-  `[dashboard] local_owner_setup`; see [first run](getting-started.md#first-run).
-- **Personal device pairing preview** — default-off `[device_pairing] enabled`
-  lets named members approve an expiring device code. Scoped credentials read
-  only their own work in one workspace, with protected renewal and explicit
-  removal in Your paired devices. Mobile/watch/vision settings store the
-  connection securely. See [scope, retention and qualification](device-pairing.md).
+<!-- toc:start -->
+## Contents
 
-## Agent kernel & orchestration
+| Section | Entries |
+| --- | ---: |
+| [Agent kernel and orchestration](#agent-kernel-and-orchestration) | 218 |
+| [Tools](#tools) | 10 |
+| [Channels](#channels) | prose |
+| [Sandboxes](#sandboxes) | prose |
+| [LLM providers and routing](#llm-providers-and-routing) | prose |
+| [MCP and agent interop](#mcp-and-agent-interop) | 20 |
+| [Safety and security](#safety-and-security) | 59 |
+| [Governed agent runtime and onboarding](#governed-agent-runtime-and-onboarding) | 37 |
+| [Hosted control plane and multi-tenancy](#hosted-control-plane-and-multi-tenancy) | 11 |
+| [Evaluation and benchmarks](#evaluation-and-benchmarks) | prose |
+| [Observability and reliability](#observability-and-reliability) | prose |
+| [UX surfaces](#ux-surfaces) | 67 |
+| [Packaged governance, evidence and external privacy control planes](#packaged-governance-evidence-and-external-privacy-control-planes) | 5 |
+| [Software development: the code vault](#software-development-the-code-vault) | 2 |
+| [Information-flow control](#information-flow-control) | 1 |
+| [Adaptive immunity](#adaptive-immunity) | 5 |
+| [Unified cross-suite audit projection](#unified-cross-suite-audit-projection) | 6 |
+| [Distribution and install](#distribution-and-install) | 22 |
+| [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 18 in 24 subsections |
+
+481 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+<!-- toc:end -->
+
+## Agent kernel and orchestration
 
 - **Conversation alternatives** — Try again, Edit and resend, and Branch from
   here open a complete review before starting a separate conversation. The
@@ -2276,10 +2291,30 @@ Settings and the installation wizard.
   reading the codes to *realize* the savings is a separate, gated step.
 
 - **Ekko — client-controlled work discovery** (`work_discovery.py`,
-  `work_discovery_store.py`, `ekko_daemon.py`, `maverick ekko`, independently
+  `work_discovery_store.py`, `work_discovery_planning.py`, `work_discovery_factory.py`,
+  `ekko_daemon.py`, `maverick ekko`, independently
   gated by default-off `[ekko]` / `MAVERICK_EKKO`) — turns repeated application
-  transitions into evidence-backed automation candidates and review-only Agent
-  Factory + Flow drafts. Enrollment is owner/device scoped, observation uses a
+  transitions into automation candidates with separate-occurrence evidence,
+  actionable discovery progress and an owner review of the task, inputs, output
+  and approval. App switches do not imply task timing or tool access. Reviewed
+  Agent Factory + Flow drafts are unsaved, with initial and final human approval
+  in the workflow proposal; stale evidence requires another review. Copilot
+  opens the same protected review without receiving recorded activity.
+  Opt-in private opportunity plans retain reviewed task descriptions, benefit
+  assumptions and shortlist/pilot/parked stages with scoped encryption and
+  expiry. Estimates include setup and remaining human work; pilot scorecards
+  count rejected outputs and rework as losses. Assumptions and owner-reported
+  results remain distinct from verified savings. Reporting, reconciliation and
+  document review tailor the unsaved draft's instructions. Revision checks and
+  pilot retry references protect against stale edits and duplicate counts.
+  **Find and build for me** separately opts in to discovering repeated owned
+  business requests, current reviewed plans or guided task steps and customer-specified
+  tasks, then saving native agent workflows in bounded batches. Existing drafts
+  and customer exclusions are preserved. The UI and reviewed Copilot operation
+  share the build service, source/context checks and recovery behavior. Building
+  makes no provider calls and never publishes, schedules or runs workflows.
+  External connections receive readiness checks, not content crawling.
+  Enrollment is owner/device scoped, observation uses a
   positive application allowlist with a winning sensitive-app blocklist, and
   raw local events expire after at most 30 days. The bundled foreground daemon
   accepts an explicitly supplied observer; it never chooses an ambient OS
@@ -3210,7 +3245,7 @@ of a fresh `docker run --rm` per command (a cold start each time), keep one
 container alive and `docker exec` into it, so the 2nd..Nth command in a run
 skip container startup; torn down on `close()`.
 
-## LLM providers & routing
+## LLM providers and routing
 
 15 providers, routable per role (`llm.py`): Anthropic, OpenAI, OpenRouter,
 Ollama, Gemini, DeepSeek, Bedrock, Vertex AI, Azure, xAI, Moonshot, TGI, vLLM, and
@@ -3350,7 +3385,7 @@ when the response reports it, rather than pricing the whole write at one TTL.
 Opt-in **cache pre-warming** (`max_tokens=0` prefill at orchestrator start)
 and a `maverick_llm_cache_tokens_total` hit-rate metric.
 
-## MCP & agent interop
+## MCP and agent interop
 
 - **MCP server** (`packages/maverick-mcp/`) — stdio JSON-RPC **and** Streamable
   HTTP transport; tool `outputSchema`, resource subscriptions.
@@ -3547,7 +3582,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `client_language_counts()` and `non_python_share()`; off by default, consent step in the
   installer wizard (`maverick init` → Analytics).
 
-## Safety & security
+## Safety and security
 
 - **Consumer Consent & Preferences authority**
   (`consent_preferences.py`, `[consent_preferences] enable = true`) — an
@@ -4369,7 +4404,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   corpus via `MAVERICK_REDTEAM_CORPUS`).
 - **Sandbox-escape canaries**, per-tool rate limiter, killswitch.
 
-## Governed agent runtime & onboarding
+## Governed agent runtime and onboarding
 
 - **Conversational intake** — interviews a user, collects docs, and proposes a
   domain configuration (intake agent + LLM proposer + `run_intake`).
@@ -4776,7 +4811,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
 - **Scheduling** — recurring autonomous goals from a prompt; `worker --once`
   cron-friendly drain (`scheduler.py`, `job_queue.py`, `worker.py`).
 
-## Hosted control plane & multi-tenancy
+## Hosted control plane and multi-tenancy
 
 The backend for running Lightwork as a governed, multi-tenant platform (each piece
 opt-in; single-tenant/self-hosted deployments are unaffected):
@@ -4860,7 +4895,7 @@ opt-in; single-tenant/self-hosted deployments are unaffected):
   does not unwrap under B's AEAD context), and clean `set_tenant`/`reset_tenant`
   scope discipline.
 
-## Evaluation & benchmarks
+## Evaluation and benchmarks
 
 **Long-running plugin reliability drill** (`plugin_reliability.py`, `python -m
 maverick.plugin_reliability`): the plugin counterpart to the chaos game-day —
@@ -4912,7 +4947,7 @@ token bombs, runaway iterations — each asserted CLAMPED by the cache /
 output-cap / Budget ceilings; `main()` exits 1 on any unclamped scenario. All
 CI-runnable on shipped fixtures.
 
-## Observability & reliability
+## Observability and reliability
 
 OpenTelemetry traces (spans carry the **full OTel GenAI semantic-convention
 attribute set** — `gen_ai.operation.name` / `system` / `request.model` /
@@ -5567,6 +5602,18 @@ tested without spawning py-spy.
   turn a phone into a slot machine; **high/urgent** notifications cut the line
   and deliver immediately (flushing any pending batch first, so order holds). A
   daemon flusher drives the window; unconfigured, `notify()` is unchanged.
+- **First named local owner** — `maverick_dashboard.local_owner` and
+  `local_owner_routes` let a fresh loopback-only installation create its first
+  administrator inside Start. A salted local passphrase reopens the existing
+  signed invite session; the claim closes anonymous access before role setup.
+  Managed sign-in, existing identities, deployment invite policy, current roles,
+  and SCIM revocation remain authoritative. The installer exposes
+  `[dashboard] local_owner_setup`; see [first run](getting-started.md#first-run).
+- **Personal device pairing preview** — default-off `[device_pairing] enabled`
+  lets named members approve an expiring device code. Scoped credentials read
+  only their own work in one workspace, with protected renewal and explicit
+  removal in Your paired devices. Mobile/watch/vision settings store the
+  connection securely. See [scope, retention and qualification](device-pairing.md).
 
 ## Packaged governance, evidence and external privacy control planes
 
@@ -5606,6 +5653,21 @@ tested without spawning py-spy.
   The schema-bound API result covers the public `aiEvidenceAnalysisResult`
   outcome locally without claiming OneTrust wire compatibility, calibrated
   detection quality, preview entitlement or customer acceptance.
+  **Upgrade note:** the local evidence adapter is now revision 4, because its
+  implementation identity changed when the store began closing its SQLite
+  connections. An existing registry must enroll it again after this upgrade.
+  Enrollment is `POST /api/v1/ai-evidence-analysis/authorities/bootstrap`
+  (global admin permission). The installed store and registry factories also
+  enroll it on the first analysis or authority request, including the purge
+  request `POST /api/v1/ai-evidence-analysis/retention/purge`, so those requests
+  need no separate step. No dashboard control or CLI command calls the bootstrap
+  yet. Until enrollment, the cross-suite context reports `integrity_unverified`
+  and readiness reports not ready. Analyses recorded before the upgrade carry the
+  revision 3 adapter authority: review and `get_released` refuse them, but `get`,
+  `history`, the analysis list and the cross-suite context still show their
+  stored status (for example `review_approved`). Do not treat a pre-upgrade
+  approved record as released; run a new analysis for each one that still needs
+  review.
 - **Cloud-agent governance research preview (not available in the shipped dashboard)**
   (`ai_cloud_agent_governance.py`, informational dashboard page
   `/assurance/cloud-agents`) — experimental
@@ -5764,7 +5826,7 @@ tested without spawning py-spy.
   crash/recovery, concurrency, scale and full provider/source completeness
   remain unverified.
 
-## Distribution & install
+## Distribution and install
 
 - **Private workbench recovery**: vendor onboarding, account connections,
   workspace members and knowledge access share response classification and

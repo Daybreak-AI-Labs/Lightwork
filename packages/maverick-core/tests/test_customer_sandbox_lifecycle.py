@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import gc
 import hashlib
 import json
 import os
@@ -3054,3 +3055,69 @@ def test_successful_resync_destroy_and_elapsed_retention_purge(tmp_path: Path) -
         idempotency_key="purge-resync-retention",
     )
     assert tombstone.sandbox_id == active.sandbox_id
+
+
+def test_every_lifecycle_connection_is_closed_when_its_call_returns(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: any connection left open by a call stays open.
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+
+    class _PragmaFails(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql == "PRAGMA foreign_keys=ON" and fail_pragma["on"]:
+                raise sqlite3.OperationalError("pragma failed")
+            return super().execute(sql, *args)
+
+    fail_pragma = {"on": True}
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, factory=_PragmaFails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(lifecycle_module.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            _store(tmp_path, Authorities())
+        fail_pragma["on"] = False
+        store = _store(tmp_path, Authorities())
+        store.status()
+    finally:
+        gc.enable()
+    assert len(opened) >= 2  # the connection whose PRAGMA failed, and the working store
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
+
+def test_lifecycle_connection_closes_when_row_setup_fails(tmp_path: Path, monkeypatch) -> None:
+    # Same GC-disabled rule as above: an unclosed connection stays open until a GC pass.
+    store = _store(tmp_path, Authorities())
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+
+    class _RowSetupFails(sqlite3.Connection):
+        def __setattr__(self, name, value):
+            if name == "row_factory":
+                raise sqlite3.OperationalError("row setup failed")
+            super().__setattr__(name, value)
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, factory=_RowSetupFails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(lifecycle_module.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            store._connect()
+    finally:
+        gc.enable()
+    assert len(opened) == 1
+    with pytest.raises(sqlite3.ProgrammingError):
+        opened[0].execute("SELECT 1")

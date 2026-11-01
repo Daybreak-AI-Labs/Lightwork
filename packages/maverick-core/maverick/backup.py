@@ -1372,6 +1372,18 @@ def _rollback(root: Path, tx: Path, document: dict[str, Any]) -> None:
             )
 
 
+@contextmanager
+def _federation_state_held_closed():
+    # The federation state file is one of the files a restore replaces. Its cached connections
+    # must be closed, and kept from reopening, until the replacement is done: an open file
+    # cannot be replaced on Windows, and a replaced file would leave a cached connection writing
+    # to the old one.
+    from .federation import hold_state_file_closed
+
+    with hold_state_file_closed():
+        yield
+
+
 def _recover_transactions(root: Path, *, allow_unsigned: bool) -> None:
     tx_root = _transaction_root(root)
     if not os.path.lexists(tx_root):
@@ -1392,7 +1404,8 @@ def _recover_transactions(root: Path, *, allow_unsigned: bool) -> None:
         document, _ = _load_journal(tx, allow_unsigned=allow_unsigned)
         state = document.get("state")
         if state in {"prepared", "applying"}:
-            _rollback(root, tx, document)
+            with _federation_state_held_closed():
+                _rollback(root, tx, document)
         elif state not in {"preparing", "committed"}:
             raise BackupError(f"unknown restore journal state: {state!r}")
         _remove_private_tree(tx)
@@ -1467,6 +1480,24 @@ def _flow_index_restore_markers(targets: set[str]) -> set[str]:
 
 
 def _apply_transaction(
+    root: Path,
+    stage: Path,
+    expected: dict[str, tuple[str, int | None]],
+    *,
+    key: bytes | None,
+    replace_existing: bool = False,
+) -> None:
+    with _federation_state_held_closed():
+        _apply_journaled_transaction(
+            root,
+            stage,
+            expected,
+            key=key,
+            replace_existing=replace_existing,
+        )
+
+
+def _apply_journaled_transaction(
     root: Path,
     stage: Path,
     expected: dict[str, tuple[str, int | None]],

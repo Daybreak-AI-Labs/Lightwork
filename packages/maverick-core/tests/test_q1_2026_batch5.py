@@ -180,7 +180,7 @@ def test_vscode_extension_source_exists():
     repo_root = Path(__file__).resolve().parents[3]
     p = repo_root / "apps" / "vscode-extension" / "src" / "extension.ts"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # Sanity: source mentions the CLI it shells out to.
     assert "maverick" in body
     assert "activate" in body

@@ -1184,6 +1184,24 @@ def _windows_replace_open_fd(
         raise ctypes.WinError(ctypes.get_last_error())
 
 
+def _retry_permission_error(operation, *, retry_seconds: float):
+    """Run ``operation``, retrying PermissionError until ``retry_seconds`` pass.
+
+    A zero window is a plain call, so callers can make the retry Windows-only
+    by choosing the window.
+    """
+    deadline = time.monotonic() + retry_seconds
+    delay = 0.002
+    while True:
+        try:
+            return operation()
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 1.5, 0.05)
+
+
 def _read_with_windows_retry(read, *, retry_seconds: float):
     try:
         retry_seconds = float(retry_seconds)
@@ -1193,16 +1211,7 @@ def _read_with_windows_retry(read, *, retry_seconds: float):
         raise ValueError("retry_seconds must be a finite number from 0 to 5")
     if os.name != "nt":
         return read()
-    deadline = time.monotonic() + retry_seconds
-    delay = 0.002
-    while True:
-        try:
-            return read()
-        except PermissionError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(delay)
-            delay = min(delay * 1.5, 0.05)
+    return _retry_permission_error(read, retry_seconds=retry_seconds)
 
 
 def atomic_read_text(

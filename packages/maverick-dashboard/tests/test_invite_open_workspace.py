@@ -48,7 +48,7 @@ def test_the_open_workspace_form_carries_the_workspace_it_was_rendered_under():
     every Open <workspace> with 'the active workspace changed'."""
     from pathlib import Path
 
-    page = (Path(__file__).resolve().parents[1] / "maverick_dashboard/templates/invite_accept.html").read_text()
+    page = (Path(__file__).resolve().parents[1] / "maverick_dashboard/templates/invite_accept.html").read_text(encoding="utf-8")
     form = page[page.index('action="/auth/invite/{{ invite.token }}/workspace"'):]
     form = form[:form.index("</form>")]
     assert 'name="_expected_tenant"' in form and "workspace_expected_tenant" in form

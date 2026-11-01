@@ -73,7 +73,8 @@ def _pair(connection, tenant, batch):
 
 
 _CHILD = r'''
-import json, sys, time
+import json, sqlite3, sys, time
+from contextlib import closing
 from pathlib import Path
 from maverick import privacy_rights_orchestration as rights
 
@@ -120,7 +121,9 @@ class ObservedConnection:
                 pause(self.connection)
             result = self.connection.__exit__(*exception)
             if exception[0] is None and stage == "after_commit":
-                pause(self.connection)
+                # The store's connection is closed on exit, so read the committed state on a fresh one.
+                with closing(sqlite3.connect(path)) as fresh:
+                    pause(fresh)
             return result
         finally:
             self.connection.close()

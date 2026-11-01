@@ -396,8 +396,9 @@ class GovernedDocumentVault:
         self._read_only = False
         try:
             ensure_private_directory(self.path.parent)
-            with self._schema_lock, self._connect(initializing=True) as connection:
-                self._create_schema(connection)
+            with self._schema_lock:
+                with closing(self._connect(initializing=True)) as connection, connection:
+                    self._create_schema(connection)
             ensure_private_file(self.path)
         except GovernedDocumentVaultError:
             raise
@@ -479,12 +480,16 @@ class GovernedDocumentVault:
                 isolation_level=None,
                 uri=uri,
             )
-            connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA foreign_keys=ON")
-            connection.execute("PRAGMA busy_timeout=30000")
-            if initializing:
-                connection.execute("PRAGMA journal_mode=WAL")
-                connection.execute("PRAGMA synchronous=FULL")
+            try:
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA foreign_keys=ON")
+                connection.execute("PRAGMA busy_timeout=30000")
+                if initializing:
+                    connection.execute("PRAGMA journal_mode=WAL")
+                    connection.execute("PRAGMA synchronous=FULL")
+            except BaseException:
+                connection.close()
+                raise
             return connection
         except sqlite3.DatabaseError as exc:
             raise VaultIntegrityError("document_vault_store_invalid") from exc
@@ -1153,7 +1158,7 @@ class GovernedDocumentVault:
 
     def get(self, document_ref: str) -> GovernedDocumentRecord:
         identifier = _identifier(document_ref, "document_ref")
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             self._verify_meta(connection)
             return self._record(self._head_on(connection, identifier))
 
@@ -1203,7 +1208,7 @@ class GovernedDocumentVault:
     def context_record_count(self) -> int:
         """Return the exact current-head count without scanning document bodies."""
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             self._verify_meta(connection)
             row = connection.execute(
                 "SELECT COUNT(*) FROM governed_documents"
@@ -1745,7 +1750,7 @@ class GovernedDocumentVault:
 
     def list_audit(self, *, limit: int = 100) -> list[dict[str, object]]:
         selected = _integer(limit, "limit", 1, 1_000)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             self._verify_meta(connection)
             return [dict(row) for row in connection.execute(
                 "SELECT * FROM governed_document_audit ORDER BY sequence DESC LIMIT ?",
@@ -1761,7 +1766,7 @@ class GovernedDocumentVault:
             raise VaultValidationError("document_vault_verify_content_invalid")
         documents = revisions = authorities = grants = tombstones = events = 0
         anchor_count = 0
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             self._verify_meta(connection)
             integrity_state = self._verify_integrity_state(connection)
             document_rows: dict[str, sqlite3.Row] = {}

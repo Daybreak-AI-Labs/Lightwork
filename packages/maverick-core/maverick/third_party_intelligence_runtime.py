@@ -27,6 +27,7 @@ from typing import Any
 
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 from .third_party_intelligence_providers import (
     CredentialBinding,
     ProviderFeedResult,
@@ -298,7 +299,9 @@ class ThirdPartyFeedRuntimeStore:
             else:
                 os.close(descriptor)
         ensure_private_file(self.path, 0o600)
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path, timeout=30.0, isolation_level=None, factory=ClosingConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")

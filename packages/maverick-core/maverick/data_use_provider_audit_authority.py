@@ -55,6 +55,7 @@ from .data_use_provider_audit import (
 )
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 
 PROJECTION_SCHEMA = "lightwork.data-use.provider-audit-projection.v1"
 AUTHORITY_RECORD_SCHEMA = "lightwork.data-use.provider-audit-authority-record.v1"
@@ -509,7 +510,9 @@ class DataUseProviderAuditAuthorityStore:
 
     def _connect(self) -> sqlite3.Connection:
         ensure_private_directory(self.path.parent)
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path, timeout=30, isolation_level=None, factory=ClosingConnection
+        )
         ensure_private_file(self.path, 0o600)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")

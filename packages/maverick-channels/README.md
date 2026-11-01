@@ -10,20 +10,39 @@ phone (or any other client) a frontend.
 
 ## Channels
 
-| Channel  | Status   | Install                                  | Notes |
-|----------|----------|------------------------------------------|-------|
-| CLI      | ready    | bundled                                  | stdin/stdout, used by `maverick start` |
-| Telegram | ready    | `pip install '.[telegram]'`              | Long-poll, no public endpoint needed |
-| Discord  | ready    | `pip install '.[discord]'`               | Gateway WebSocket |
-| Slack    | ready    | `pip install '.[slack]'`                 | Socket Mode |
-| Signal   | ready    | bundled (needs `signal-cli` on PATH)     | JSON-RPC over subprocess |
-| Email    | ready    | bundled                                  | IMAP poll + SMTP send (stdlib) |
-| Matrix   | ready    | `pip install '.[matrix]'`                | Federated, end-to-end encryptable |
-| WhatsApp | scaffold | `pip install '.[whatsapp]'`              | Twilio webhook — needs public HTTPS |
-| SMS      | scaffold | `pip install '.[sms]'`                   | Twilio webhook — needs public HTTPS |
-| iMessage | scaffold | bundled                                  | macOS only, needs Full Disk Access |
+Every adapter below is registered in `maverick.server._WIRES`, so
+`maverick serve` hosts it once its `[channels.<table>]` section is enabled
+(the installer offers each one). Each needs its provider's credentials and a
+per-sender allowlist; unknown senders are denied. Readiness depends on the
+provider account, so send a test message from the Channels page after setup.
 
-or everything at once:
+| Channel | Config table | Install extra | Notes |
+|---|---|---|---|
+| Telegram | `telegram` | `[telegram]` | Bot API long-poll; no public endpoint needed |
+| Discord | `discord` | `[discord]` | Gateway WebSocket bot |
+| Slack | `slack` | `[slack]` | Socket Mode; no public webhook needed |
+| Signal | `signal` | bundled; needs `signal-cli` on PATH | JSON-RPC daemon |
+| Email | `email` | bundled | IMAP poll + SMTP send (stdlib); `email_v2` adds IMAP IDLE and threading |
+| Matrix | `matrix` | `[matrix]` | matrix-nio; federated, end-to-end encryptable |
+| Mattermost | `mattermost` | `[mattermost]` | Bot account answering direct messages and @mentions |
+| Microsoft Teams | `teams` | `[teams]` | Azure Bot Framework webhook; approvals as Adaptive Cards |
+| Bluesky | `bluesky` | `[bluesky]` | AT Protocol |
+| Mastodon | `mastodon` | `[mastodon]` | Mastodon API |
+| Threads | `threads` | `[threads]` | Meta Threads API |
+| RCS | `rcs` | `[rcs]` | Google RCS Business Messaging |
+| WhatsApp (Twilio) | `whatsapp` | `[whatsapp]` | Twilio webhook; needs public HTTPS |
+| WhatsApp (Cloud API) | `whatsapp_cloud` | `[whatsapp-cloud]` | Meta Cloud API webhook; needs public HTTPS |
+| SMS | `sms` | `[sms]` | Twilio webhook; needs public HTTPS |
+| iMessage | `imessage` | bundled | macOS only; needs Full Disk Access |
+| IRC | `irc` | bundled | RFC 1459/2812 over asyncio |
+| Voice | `voice` | `[voice]` | Voice provider functions (HTTP results never prove spoken delivery); `streaming_voice` adds barge-in |
+
+`cli` is the interactive terminal channel behind `maverick start`, not hosted
+by `maverick serve`; `glasses` is fronted by the external webhook relay.
+`discord_stages` and `rich_render` are opt-in helpers layered on the base
+adapters, not separate channels.
+
+Install one extra per channel, or everything at once:
 
 ```bash
 python -m pip install -e ./packages/maverick-core -e './packages/maverick-channels[all]'
