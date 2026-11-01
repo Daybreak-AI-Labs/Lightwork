@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 # leave room for the response (max_tokens param) and tools schema.
 # Keys are exact model ids; lookups fall back to family prefix.
 #
-# W1-5: every Opus/Sonnet 4.6+ model is actually a 1M-context model per
+# Every Opus/Sonnet 4.6+ model is actually a 1M-context model per
 # https://platform.claude.com/docs/en/build-with-claude/context-windows
 # (and each model's own overview page) -- this table had them all capped
 # at 200k, silently refusing prompts up to 800k tokens that the real API

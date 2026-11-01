@@ -26,7 +26,7 @@ def _is_opus_adaptive(model_id: str) -> bool:
     "Adaptive"-only per each model's own capabilities table at
     https://platform.claude.com/docs/en/about-claude/models/overview.
 
-    W1-9: this used to match only Opus 4.7/4.8, so an unrecognized
+    This used to match only Opus 4.7/4.8, so an unrecognized
     current-generation id fell through to the manual
     ``{"type": "enabled", "budget_tokens": ...}`` path below -- which those
     models reject with a 400, the same way Opus 4.7/4.8 do. The single

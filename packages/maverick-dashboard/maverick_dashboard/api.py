@@ -15022,7 +15022,7 @@ async def external_agent_enroll(request: Request, payload: ExternalAgentIn) -> d
     if not xa.entitled():
         raise HTTPException(
             status_code=403,
-            detail="external-agent governance is a paid (Gold) add-on not included in this license",
+            detail="license enforcement is on and this license does not grant the external_agents entitlement",
         )
     try:
         out = xa.enroll(
@@ -16008,14 +16008,14 @@ def run_fleet_agent(
     # cannot mask their 404/403 responses or disclose configuration state to a
     # caller who is not allowed to dispatch this agent.
     require_provider_or_400()
-    # Running an agent under the oversight control plane is the paid (Gold)
+    # Running an agent under the oversight control plane is the tier-gated (Gold)
     # "fleet governance" capability. Fail-open: a no-op unless license enforcement
     # is on and the license lacks it. Checked after existence (404) so a missing
     # fleet never reveals licensing state.
     if not governance_enabled():
         raise HTTPException(
             status_code=403,
-            detail="fleet governance is a paid (Gold) add-on not included in this license",
+            detail="license enforcement is on and this license does not grant the fleet_governance entitlement",
         )
     prompt = (payload.prompt or "").strip()
     if not prompt:
@@ -17316,7 +17316,7 @@ def _department_entitled_for_request(key: str) -> bool:
 
     No active tenant remains fail-open for legacy self-host installs. Once a
     tenant roster exists, however, a dashboard request with no pinned tenant is
-    an ambiguous managed request; report the paid add-on as unavailable rather
+    an ambiguous managed request; report the gated add-on as unavailable rather
     than letting the core billing gate treat it as self-hosted.
     """
     from maverick.departments import department_entitled
@@ -17343,7 +17343,7 @@ async def list_departments_api(request: Request) -> list[dict]:
     """Departments (suites) as deployable teams: title, charter, headcount.
 
     Each entry carries ``entitled`` — whether the active tenant's plan includes
-    the paid ``departments`` add-on, so the UI shows Deploy vs. Add-on-required.
+    the ``departments`` add-on, so the UI shows Deploy vs. Add-on-required.
     Suite-scoped (job function): a caller with a department grant sees only
     their departments; unscoped callers (auth off / admin / no grant) see all.
     """

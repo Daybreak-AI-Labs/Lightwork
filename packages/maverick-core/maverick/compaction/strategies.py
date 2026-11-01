@@ -1,4 +1,4 @@
-"""Opt-in compaction strategy selection (roadmap: compaction v3/v5/v7/v8).
+"""Opt-in compaction strategy selection.
 
 The always-on path is :func:`maverick.compaction.compact_messages`. This
 module layers the roadmap strategies on top of it, selected the same way

@@ -1,4 +1,4 @@
-"""Multi-agent collusion detector (roadmap: 2027 H1 safety).
+"""Multi-agent collusion detector.
 
 The swarm's safety story leans on *independent* checks — and independence
 fails two different ways, so this tool detects both:

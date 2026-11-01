@@ -166,7 +166,7 @@ MODEL_PRICING_PROVIDER = VersionedPricingProvider(
             (1.0, 5.0),
             evidence_id="anthropic-direct-2026-07-29",
         ),
-        # Current generation (W1-9): unlisted here previously, so a real
+        # Current generation: unlisted here previously, so a real
         # bill on any of these fell back to the Sonnet estimate rate under
         # [budget] strict_pricing=false, or refused outright under the
         # (default) strict policy.
@@ -796,7 +796,7 @@ def _record_provider_call(provider: str) -> None:
         pass
 
 
-# Sept 2026 fix (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-2): mirrors
+# Transport-failure classification for the circuit breaker: mirrors
 # failover_policy._DEFAULT_FAILOVER_ON -- the classes a provider-transport
 # problem can actually fall into. Kept as an independent literal (not a
 # cross-module import of a private name) since the two call sites answer
@@ -815,7 +815,7 @@ def _add_tool_choice(
     method: str,
     tools: list[dict] | None,
 ) -> None:
-    """W1-11: thread a caller's ``tool_choice`` to the provider client when it
+    """Thread a caller's ``tool_choice`` to the provider client when it
     accepts one. Validated up front (a bad value is the caller's bug, raised
     before any spend); dropped with a debug line for a client whose
     ``complete``/``complete_async`` has no such parameter (e.g. codex_cli), so
@@ -1526,7 +1526,7 @@ _AZURE_CLIENT_ENV_NAMES = (
     "AZURE_OPENAI_DEPLOYMENT",
     "AZURE_OPENAI_TOKEN_SCOPE",
 )
-# Everything the native Bedrock client reads (W1-10); part of the client
+# Everything the native Bedrock client reads; part of the client
 # fingerprint so a region/auth/endpoint change rotates the cached client.
 _BEDROCK_CLIENT_ENV_NAMES = (
     "AWS_BEARER_TOKEN_BEDROCK",
@@ -1653,7 +1653,7 @@ def _configured_timeouts(present: dict) -> dict[str, str]:
 
 
 def _run_preflight(model_id, system, messages, tools, max_tokens) -> None:
-    """Token preflight before an LLM dispatch (roadmap 'token preflight v1').
+    """Token preflight before an LLM dispatch.
 
     Mode via the ``MAVERICK_PREFLIGHT`` env var:
       - ``warn`` (default): log a warning if the estimated request won't fit
@@ -1763,7 +1763,7 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None,
     0.25x, OpenAI 0.5x); ``None`` falls back to OpenAI's 0.5x. Anthropic cache
     reads always bill 0.1x (they arrive via ``cache_read_tokens`` instead).
 
-    W1-1: this feeds the provider-cap ledger / provider-health / circuit
+    This feeds the provider-cap ledger / provider-health / circuit
     breaker accounting from ``complete()``'s own ``finally`` block, called
     unconditionally there (not inside a try/except) -- it is NOT the
     authoritative per-goal bill (that is the provider client's own
@@ -1833,7 +1833,7 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None,
     # ``cache_write`` (cache_creation_tokens) is only ever surfaced by the
     # Anthropic provider. A single call can write BOTH the system/tools
     # breakpoint (``_default_cache_ttl()`` -- 1h in interactive mode, 2.0x)
-    # and the messages breakpoint (5m, 1.25x) at once -- W1-6: billing the
+    # and the messages breakpoint (5m, 1.25x) at once -- billing the
     # combined total at one multiplier over/undercounts whichever tier
     # doesn't match. Anthropic reports the real split as
     # usage.cache_creation.{ephemeral_5m,ephemeral_1h}_input_tokens; use it

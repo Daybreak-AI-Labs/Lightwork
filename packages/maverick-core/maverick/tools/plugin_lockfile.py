@@ -1,4 +1,4 @@
-"""Plugin version-pinning lockfile (roadmap: 2027 H2).
+"""Plugin version-pinning lockfile.
 
 Pin the exact set of installed plugins so a swarm runs the same code everywhere:
 ``generate`` emits a deterministic, sorted lockfile (one ``name==version==hash``

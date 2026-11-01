@@ -1,4 +1,4 @@
-"""DuckDB analytics over the world model (roadmap: 2027 H2 ecosystem).
+"""DuckDB analytics over the world model.
 
 The roadmap lists a "DuckDB world-model". As the *live transactional* store
 that's the wrong tool — DuckDB is an OLAP engine, and the agent's world model

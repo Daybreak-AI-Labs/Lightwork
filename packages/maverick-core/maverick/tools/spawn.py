@@ -482,7 +482,7 @@ def _format_swarm_results(parent: Agent, children: list, results: list,
     trailing children once spent — every child keeps an identity line, and
     full answers remain in the run record.
 
-    W1-29: ``dropped_specs`` are the tail of a requested fan-out that got cut
+    ``dropped_specs`` are the tail of a requested fan-out that got cut
     by the per-call cap. The cap is also posted to the blackboard, but a
     blackboard post is only ever rendered into the FIRST user turn
     (agent.py's ``bb.render(40)``) -- it never reaches the model again once

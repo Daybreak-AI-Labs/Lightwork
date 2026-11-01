@@ -507,7 +507,7 @@ MIGRATIONS: dict[int, list[str]] = {
         "CREATE INDEX IF NOT EXISTS idx_goal_events_ts "
         "ON goal_events(ts)",
     ],
-    # Q1 2026 index audit: hot queries identified via EXPLAIN QUERY PLAN.
+    # Schema v8: hot-query indexes identified via EXPLAIN QUERY PLAN.
     #
     # - list_episodes(goal_id=...) filters by goal_id then orders by
     #   started_at: needs idx_episodes_goal_started.
@@ -1873,7 +1873,7 @@ class WorldModel:
         try:
             while current < SCHEMA_VERSION:
                 next_version = current + 1
-                # W1-56: Python's sqlite3 legacy driver auto-commits DDL/
+                # Python's sqlite3 legacy driver auto-commits DDL/
                 # backfill statements one at a time outside any transaction,
                 # so a failing multi-statement migration left EARLIER
                 # statements of the SAME version permanently applied while
@@ -3030,7 +3030,7 @@ class WorldModel:
         operation on the world model (instead of opening its SQLite file behind
         its back) preserves backend selection and transaction ownership.
 
-        W1-50: ``facts.source_episode_id``/``fact_history.source_episode_id``
+        ``facts.source_episode_id``/``fact_history.source_episode_id``
         are ``REFERENCES episodes(id)`` with no ``ON DELETE`` clause, and the
         world opens with ``PRAGMA foreign_keys = ON`` -- deleting an episode
         any fact still cites (retention prunes by AGE, not by whether a fact
@@ -3179,7 +3179,7 @@ class WorldModel:
     ) -> int:
         """Count or delete conversation messages older than an absolute cutoff.
 
-        W1-57: unlike episodes, nothing references ``messages.id`` via a
+        Unlike episodes, nothing references ``messages.id`` via a
         foreign key, so this is a plain age-based delete with no dangling
         provenance to null out first.
         """
@@ -5409,7 +5409,7 @@ class PostgresAtRestUnsupported(RuntimeError):
     The Postgres backend does not seal content at rest yet (the SQLite backend
     does, via ``crypto_at_rest``). Rather than silently storing regulated /
     encrypted-at-rest data as plaintext, :func:`open_world` fails closed. See
-    ``docs/encryption.md`` and ``docs/audits/FIXES.md`` (P1)."""
+    ``docs/encryption.md``."""
 
 
 def reclaim_window_seconds(default: float = 60.0) -> float:

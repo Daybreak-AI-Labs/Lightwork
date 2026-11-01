@@ -1345,7 +1345,7 @@ class PostgresWorldModel:
         self.close()
 
     def _reconnect_if_broken(self) -> None:
-        """W1-54: reopen the single shared connection (non-pooled mode) after
+        """Reopen the single shared connection (non-pooled mode) after
         it's been killed out from under us.
 
         Managed Postgres (RDS/CloudSQL multi-AZ) fails over and resets idle
@@ -1376,7 +1376,7 @@ class PostgresWorldModel:
         InFailedSqlTransaction until the process restarts. Rolling back
         keeps the connection usable.
 
-        W1-54: a rollback can't save a connection the SERVER killed (a
+        A rollback can't save a connection the SERVER killed (a
         managed-Postgres failover, or an idle-connection reset) -- the
         rollback itself fails too. In that case, close and drop the
         connection instead of leaving a dead one in ``self.conn``, so
@@ -1640,13 +1640,12 @@ class PostgresWorldModel:
         project_id: int | None = None,
         connection_references: list | None = None,
     ) -> int:
-        # Sept 2026 fix (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-47): `domain` and
-        # `project_id` mirror the SQLite backend's create_goal signature. Both
-        # columns already exist on Postgres (migrations above) and were
-        # settable after creation via set_goal_domain/set_goal_project, but a
-        # caller that passes them AT creation (checkpoint sub-goal spawning,
-        # the finance CLI) got a TypeError on this backend instead of a
-        # created goal.
+        # `domain` and `project_id` mirror the SQLite backend's create_goal
+        # signature. Both columns already exist on Postgres (migrations above)
+        # and were settable after creation via set_goal_domain/set_goal_project,
+        # but a caller that passes them AT creation (checkpoint sub-goal
+        # spawning, the finance CLI) got a TypeError on this backend instead of
+        # a created goal.
         if execution_principal is None:
             execution_principal = ""
         if not isinstance(execution_principal, str):
@@ -2770,7 +2769,7 @@ class PostgresWorldModel:
     ) -> list[PGGoal]:
         """List goals, optionally filtered by status + paginated (mirrors SQLite).
 
-        W1-49: ``domain``/``project_id`` were missing here (unlike SQLite's
+        ``domain``/``project_id`` were missing here (unlike SQLite's
         ``list_goals``), so the dashboard's project-detail page and
         domain-scoped inbox both 500 on this backend --
         ``list_goals(project_id=...)`` / ``list_goals(domain=...)`` raised
@@ -3316,10 +3315,10 @@ class PostgresWorldModel:
         """Aggregate spend. ``owner`` scopes to one principal's runs (join to
         the owning goal), matching the SQLite backend's signature; ``None``
         is the deployment-wide admin / auth-off view; ``since`` keeps only runs
-        that started at or after that time, as on SQLite. (Sept 2026 fix,
-        docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-48: this backend previously took no
-        ``owner`` argument at all, so any owner-scoped caller -- ``/api/v1/spend``,
-        external-agent spend records -- raised TypeError on Postgres.)
+        that started at or after that time, as on SQLite. (This backend
+        previously took no ``owner`` argument at all, so any owner-scoped
+        caller -- ``/api/v1/spend``, external-agent spend records -- raised
+        TypeError on Postgres.)
         """
         frag, params = _tenant_scope("g.tenant_id")
         table = "episodes e"
@@ -5991,7 +5990,7 @@ class PostgresWorldModel:
     ) -> int:
         """Count or delete old conversation messages in the active tenant.
 
-        W1-57: nothing references ``messages.id`` via foreign key, so this
+        Nothing references ``messages.id`` via foreign key, so this
         is a plain age-based delete scoped through the owning goal's tenant.
         """
         tenant = _required_retention_tenant("message retention")

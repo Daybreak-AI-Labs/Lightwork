@@ -2,15 +2,14 @@
 
 The six compliance suites already ship as dashboard pages scattered across
 several nav groups (Govern, Privacy, Consent, AI oversight, Third parties).
-The public site (``daybreakailabs.com/autonomous-compliance``) presents them as
-ONE product -- the compliance platform run by governed agents -- with an honest
-three-word status vocabulary: **shipped / preview / external**. This module is
+The Autonomous Compliance dashboard page presents them as ONE product -- the
+compliance platform run by governed agents -- with an honest three-word status
+vocabulary: **shipped / preview / external**. This module is
 that vocabulary's authority; the product landing page and the module-off gate
 banner both read status from here so it can never drift between them.
 
-Status is assigned conservatively from the OneTrust capability review (the
-parity breakdown and the full-platform capability matrix, held with the
-business material outside this repository):
+Status is assigned conservatively from a per-capability review of what the
+code in this repository implements:
 
   * ``shipped``  <- an *Implemented* capability row: a coherent local product
                     path is mounted, configuration-ready and focused-test-

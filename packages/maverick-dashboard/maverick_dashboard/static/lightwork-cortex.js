@@ -1,6 +1,5 @@
 /* Cortex — the company brain's page (Observe → Cortex).
-   1. The lattice (#cortex-lattice): a fibonacci lattice, ported from the
-      Daybreak Labs site (website/lab.js, "2. Cortex"), slowly turning,
+   1. The lattice (#cortex-lattice): a fibonacci lattice, slowly turning,
       its nodes lighting as the workforce writes to it and as reads touch it.
       Pure canvas, no dependencies. Honors prefers-reduced-motion (one static
       frame, nothing lights) and pauses when scrolled out of view or the tab

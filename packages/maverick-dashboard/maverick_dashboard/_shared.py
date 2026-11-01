@@ -184,7 +184,7 @@ def authenticated_subject(request, *, error_detail: str) -> str:
     """Resolve the caller's identity subject for a suite API's per-caller
     principal-ref digest.
 
-    Platform audit **W3-1**: 29 suite-API modules each copied a `_principal`/
+    29 suite-API modules each copied a `_principal`/
     `_principal_ref` helper that reads `request.state.principal` and 401s
     when it's empty. But `require_principal` (auth.py) deliberately leaves
     `request.state.principal` UNSET for two legitimate authenticated shapes,

@@ -44,7 +44,7 @@ class UsageAccountingError(RuntimeError):
     or negative token count -- for a call that was already paid for.
 
     Fail closed: the spend cannot be billed against the cap, so the run stops.
-    Deliberately NOT a :class:`BudgetExceeded` subclass (platform audit W1-17):
+    Deliberately NOT a :class:`BudgetExceeded` subclass:
     reporting a broken gateway as "budget exceeded" sent operators to raise
     ``max_dollars`` instead of fixing the gateway, hid the real cause from the
     dashboard and CLI, and made provider failover treat it as a budget control
@@ -388,7 +388,7 @@ def _bedrock_estimate_quote(
     estimate_only: bool,
 ) -> ModelPrice | None:
     """Estimate-only quote for a Bedrock model id from the Claude API list rate
-    of the model behind it (W1-10).
+    of the model behind it.
 
     AWS invoices Bedrock at its own rates (regional endpoints carry a 10%
     premium over global), which are not in the verified rate card, so this is
@@ -671,7 +671,7 @@ def _lookup_price_quote(  # noqa: C901 - ordered evidence and policy precedence
     if approved is not None:
         return approved
 
-    # Bedrock model ids (W1-10): a provisional estimate from the Claude API
+    # Bedrock model ids: a provisional estimate from the Claude API
     # list rate of the model behind the id; never a bill under strict pricing.
     bedrock_canonical = bedrock_rate_card_model_id(bare)
     if bedrock_canonical is not None:
@@ -856,7 +856,7 @@ class Budget:
         OpenAI/o-series/gpt-5 auto-cache). ``cache_write_tok`` at 1.25x (5m TTL)
         or 2.0x (1h TTL) — pass ``cache_write_ttl="1h"`` for a 1h breakpoint.
 
-        W1-6: a single request's cache writes can straddle BOTH TTL tiers at
+        A single request's cache writes can straddle BOTH TTL tiers at
         once (e.g. a 1h system/tools breakpoint plus a 5m messages
         breakpoint) -- Anthropic's response then reports
         ``usage.cache_creation.ephemeral_5m_input_tokens`` /

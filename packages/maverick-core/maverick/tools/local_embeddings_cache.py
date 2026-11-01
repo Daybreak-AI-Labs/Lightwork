@@ -1,4 +1,4 @@
-"""Local-first embeddings cache (roadmap: 2028 H1 — "LMDB" local cache).
+"""Local-first embeddings cache.
 
 A content-addressed cache for text embeddings. The roadmap names LMDB as the
 backing store; this helper is the *pure* logic around it (key derivation + cache

@@ -1,4 +1,4 @@
-"""world_model compression helper (roadmap: 2028 H2 perf — "zstd compression").
+"""world_model compression helper.
 
 Estimate how much a world-model payload shrinks under compression, and verify
 that compression is lossless before relying on it. The roadmap calls for zstd;

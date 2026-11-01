@@ -1,4 +1,4 @@
-"""Localized money formatting (roadmap: 2028 H2 UX — "localized currency display").
+"""Localized money formatting.
 
 Lightwork reports spend in US dollars. For a non-US operator that reads wrong:
 ``$1,234.56`` should be ``1.234,56 €`` in Germany or ``¥1,235`` in Japan. This

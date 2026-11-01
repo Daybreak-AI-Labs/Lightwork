@@ -308,7 +308,7 @@ def _format_tree_of_thought_plan(winning_plan: str, *, shield: Any | None = None
 
 
 def _unpriced_model_message(exc: BaseException, goal_id: Any) -> str:
-    """W1-30: a genuinely unpriced model is not a cap trip -- raising the cap
+    """A genuinely unpriced model is not a cap trip -- raising the cap
     and resuming (``_budget_exceeded_message``'s advice) fails identically,
     because the real problem is that Lightwork refuses to bill a model with
     no verified price, not that spend or time ran out.
@@ -352,7 +352,7 @@ def _budget_exceeded_message(budget: Any, goal_id: Any) -> str:
 
 
 def _usage_accounting_message(detail: str, goal_id: Any) -> str:
-    """A provider mis-reported token usage (W1-17): a gateway fault, not a cap."""
+    """A provider mis-reported token usage: a gateway fault, not a cap."""
     return (
         "Stopped: the model provider returned invalid usage accounting, so "
         "Lightwork could not bill the call against your spending cap and "
@@ -388,7 +388,7 @@ def _budget_stop_message(budget: Any, goal_id: Any, error: BudgetExceeded) -> st
 
 
 def _review_checkpoint_message(detail: str, goal_id: Any) -> str:
-    """The opt-in review checkpoint stopped the run (W1-33): a reviewer
+    """The opt-in review checkpoint stopped the run: a reviewer
     decision, not a HALT file -- so no `maverick unhalt` advice."""
     return (
         f"Paused: the review checkpoint stopped this run at {detail} because "
@@ -1598,7 +1598,7 @@ def _goal_already_ran(world: Any, goal_id: int) -> bool:
 
     ``resume=True`` only says the caller will pick up saved work if there is
     any -- the shared runner passes it for every dashboard, API, schedule, flow
-    and queue start, first starts included (UX-014) -- so it cannot stand for
+    and queue start, first starts included -- so it cannot stand for
     "a person already approved this". A recorded run can: the start check comes
     before the first run is recorded, so a task it held has none. When that
     cannot be read, the check applies."""
@@ -1788,7 +1788,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             f"{_safe_exception_text(exc, fallback='tenant lookup failed')}"
         )
     if not _tenant_reason:
-        # W2-83: budget_from_config clamps a run to $0 when the tenant's
+        # budget_from_config clamps a run to $0 when the tenant's
         # allowance is exhausted by in-flight holds (or unreadable) and says
         # why. Refuse here, before the run starts, rather than admit a
         # $0-cap run that dies on its first model call.
@@ -2074,7 +2074,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         try:
             result = await root.run()
         except UnpricedModelError as e:
-            # W1-30: a genuinely unpriced model, not a cap trip -- must be
+            # A genuinely unpriced model, not a cap trip -- must be
             # caught BEFORE the BudgetExceeded clause below (it's a
             # subclass) or it's reported as "raise your cap and resume",
             # advice that fails identically since spend was never the issue.
@@ -2103,7 +2103,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         except UsageAccountingError as e:
             # A provider mis-reported usage on a call made outside the agent
             # loop (verifier, summariser...). Same reporting as the in-loop
-            # path below: a provider fault, not a cap breach (W1-17).
+            # path below: a provider fault, not a cap breach.
             _lifecycle.end_episode(f"provider accounting: {e}", "failure")
             try:  # default-on local failure telemetry; no-op when disabled
                 from . import failure_telemetry as _ft
@@ -2266,7 +2266,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                     "result": message,
                 })
                 return message
-            # W1-30: an unpriced model inside a spawned child is swallowed by
+            # An unpriced model inside a spawned child is swallowed by
             # the agent into `result.error` (same reason a budget cap trip
             # is), not raised -- `budget.check()` above never sees it (it's
             # not a cap trip). Detect it via agent.py's "unpriced model:"
@@ -2288,7 +2288,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 # handler above, instead of doubling the label.
                 _detail = result.error.split(": ", 1)[-1]
                 return _unpriced_model_message(_detail, goal_id)
-            # W1-33: branch on the structured stop kind, not on substrings of
+            # Branch on the structured stop kind, not on substrings of
             # the error text. A review-checkpoint stop is a reviewer decision:
             # there is no HALT file and `maverick unhalt` would do nothing.
             if result.stop_kind == "review_checkpoint":
@@ -2978,11 +2978,10 @@ def _donate_bestofn_candidates(llm, world, budget, goal_id, candidates, best) ->
 
 
 # Host-git RCE hardening (fsmonitor/filter-hook guard + scrubbed env) now
-# lives in git_safety.py so every host-side git caller shares it -- see
-# docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-2. Imported at module top as
-# _git_env_without_user_config / _git_metadata_may_execute_filters; kept
-# under those private names since test_orchestrator_git_safety.py imports
-# them from here.
+# lives in git_safety.py so every host-side git caller shares it. Imported at
+# module top as _git_env_without_user_config /
+# _git_metadata_may_execute_filters; kept under those private names since
+# test_orchestrator_git_safety.py imports them from here.
 
 
 def _reset_workdir_to_head(workdir) -> None:

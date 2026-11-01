@@ -1,4 +1,4 @@
-"""Backwards-compat tooling: ``maverick migrate`` (roadmap: 2027 H2 distribution).
+"""Backwards-compat tooling: ``maverick migrate``.
 
 Upgrades change what config means; this is the tool that walks an existing
 ``~/.maverick/config.toml`` forward. Three honest pieces:

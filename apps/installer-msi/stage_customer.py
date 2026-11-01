@@ -159,7 +159,7 @@ def stage(runtime: Path, output: Path, endpoint: str, public_key: str,
         "bundle": {
             "targets": ["msi"], "category": "Productivity",
             "shortDescription": "Lightwork workspace and complete local runtime",
-            "longDescription": "Lightwork with its complete runtime. No Python, Git, or source repository access is required on the customer computer.",
+            "longDescription": "Lightwork with its complete runtime. No Python or Git is required on the target computer.",
             "externalBin": [str(output.resolve() / "maverick")],
             "icon": [str(ROOT / "apps/installer-desktop/src-tauri/icons/icon.ico")],
             "createUpdaterArtifacts": False,

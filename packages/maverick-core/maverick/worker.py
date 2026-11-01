@@ -37,7 +37,7 @@ from .job_queue import Job, JobQueue, LeaseLost
 
 log = logging.getLogger(__name__)
 
-# W1-73: the automation worker pool shares a handful of threads (default 3)
+# The automation worker pool shares a handful of threads (default 3)
 # across run_goal/start_goal AND control jobs (cron ticks, flow sweeps). The
 # default per-semaphore acquire timeout (5 minutes, see runner._ACQUIRE_TIMEOUT)
 # is sized for a caller that has nothing better to do but wait; a queue worker
@@ -234,7 +234,7 @@ class Worker:
             if not goal_id:
                 raise ValueError("run_goal payload requires goal_id")
             # Sync run so the queue waits before claiming the next job. A
-            # short acquire_timeout (W1-73) keeps a busy principal/global
+            # short acquire_timeout keeps a busy principal/global
             # concurrency lane from blocking this worker thread -- shared
             # with cron ticks and flow sweeps -- for minutes.
             from .runner import run_goal_in_thread
@@ -266,7 +266,7 @@ class Worker:
             if not goal_id:
                 goal_id = self._create_scheduled_goal(job, text)
             # Same retry contract as run_goal: only a genuine crash requeues;
-            # a missing concurrency slot defers instead (W1-73).
+            # a missing concurrency slot defers instead.
             from .runner import run_goal_in_thread
             status = run_goal_in_thread(
                 int(goal_id), acquire_timeout=_queue_goal_acquire_timeout(),
@@ -464,7 +464,7 @@ class Worker:
             log.warning("worker: job %d failed, requeued: %s",
                         job.id, err.splitlines()[0])
         else:
-            # W1-70: the terminal write is a separate failure domain from the
+            # The terminal write is a separate failure domain from the
             # handler. It used to share the try above, so a transient error
             # here (e.g. sqlite "database is locked" past busy_timeout) was
             # routed through the except Exception clause above -- requeuing a

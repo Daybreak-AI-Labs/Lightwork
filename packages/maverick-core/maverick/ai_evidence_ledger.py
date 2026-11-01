@@ -727,7 +727,7 @@ class SegmentedReceiptLedger:
         expected_previous: str,
     ) -> dict[str, Any]:
         """Verify ONLY the row just written at ``offset_before``, not the
-        whole segment (W4-28).
+        whole segment.
 
         ``append()`` holds ``cross_process_lock`` for its entire duration and
         has already reconciled ``state`` against the physical file moments
@@ -1907,7 +1907,7 @@ class SegmentedReceiptLedger:
             signer = AuditSigner(segment_path)
             if not signer.write(dict(event)):
                 raise SegmentedLedgerError("audit signer refused evidence")
-            # W4-28: verify only the row just written, chained to the tip we
+            # Verify only the row just written, chained to the tip we
             # already know (this new segment's own header, or the active
             # segment's authenticated tip) -- not the whole segment from
             # genesis. append() holds cross_process_lock start-to-finish and

@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# Build a COMPILED, single-file `maverick` binary with Nuitka — the IP-hard
-# packaging path. Where PyInstaller bundles your .pyc bytecode (trivially
-# decompilable back to readable source), Nuitka compiles the Python to C and
-# then to a native binary, so shipping it does not hand a customer your
-# proprietary source. Use this for external/enterprise drops where "we never
-# ship source" has to be literally true; the PyInstaller path
-# (build-macos-app.sh) stays the fast dev/demo build.
+# Build a compiled, single-file `maverick` binary with Nuitka. Where
+# PyInstaller bundles .pyc bytecode, Nuitka compiles the Python to C and then
+# to a native binary. The PyInstaller path (build-macos-app.sh) stays the fast
+# dev/demo build.
 #
 # NOT a cross-compiler: run this ON each target OS/arch you ship (an arm64 Mac
 # for macOS arm64, an x86_64 Linux box for Linux x86_64, Windows for .exe). The

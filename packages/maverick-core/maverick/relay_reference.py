@@ -1,4 +1,4 @@
-"""Self-hosted relay reference (ROADMAP 2027 H2 Distribution).
+"""Self-hosted relay reference.
 
 A reference implementation of the self-hostable relay that fronts inbound
 webhooks -- the OpenClaw-bridge pattern from the ROADMAP's Even-Realities-G2

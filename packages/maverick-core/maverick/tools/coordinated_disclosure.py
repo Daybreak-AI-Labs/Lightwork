@@ -1,4 +1,4 @@
-"""Coordinated-disclosure log (roadmap: 2027 H1 safety).
+"""Coordinated-disclosure log.
 
 Run a coordinated vulnerability disclosure (CVD) process offline: track a
 whole report set's embargo timelines, check one report's window, and render

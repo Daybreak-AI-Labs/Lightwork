@@ -1,4 +1,4 @@
-"""Plugin signing CA (roadmap: 2028 H2 ecosystem).
+"""Plugin signing CA.
 
 A **self-hostable** certificate authority for plugin/skill artifacts — the
 in-house counterpart to sigstore's keyless flow (which depends on an external

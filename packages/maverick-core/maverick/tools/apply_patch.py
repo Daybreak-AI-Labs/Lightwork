@@ -78,7 +78,7 @@ def _is_safe_path(rel: str, workdir: Path) -> bool:
         rel_to_workdir = target.relative_to(workdir)
     except ValueError:
         return False
-    # Sept 2026 fix (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-3): a patch
+    # Host-git hardening (see git_safety.py): a patch
     # targeting `.git/config` (or any path under `.git/`) can plant a
     # core.fsmonitor hook or filter smudge/clean command that a later
     # host-side git call would execute. `write_file` and friends already

@@ -1,5 +1,4 @@
-"""Modal sandbox backend (roadmap: 2027 H2 ecosystem — "Cloudflare Workers +
-Modal sandboxes").
+"""Modal sandbox backend.
 
 Runs agent shell commands in `Modal Sandboxes <https://modal.com/docs/guide/sandbox>`_
 — ephemeral cloud containers with hard resource limits — so a Lightwork on a

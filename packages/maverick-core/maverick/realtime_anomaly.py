@@ -1,4 +1,4 @@
-"""Real-time anomaly detection (roadmap: 2027 H2 performance).
+"""Real-time anomaly detection.
 
 :mod:`maverick.cross_run_anomaly` is *batch* — it profiles a finished run
 against a baseline of past runs. This is the *online* companion: feed it a

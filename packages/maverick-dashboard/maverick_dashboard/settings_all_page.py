@@ -1339,7 +1339,7 @@ def _plan(body: CatalogUpdate) -> tuple[dict, list[dict], list[dict], dict]:  # 
         if setting.section in _UNAVAILABLE_SETTING_SECTIONS:
             raise _Refused(
                 409,
-                "Cloud agent oversight is still in development and cannot be turned on in this installation. Open its page to ask Daybreak about availability.",
+                "Cloud agent oversight is still in development and cannot be turned on in this installation.",
             )
         if item.id in seen:
             raise _Refused(400, "Each setting can be changed once per save.")

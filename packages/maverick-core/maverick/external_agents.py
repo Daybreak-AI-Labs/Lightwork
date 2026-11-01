@@ -142,7 +142,8 @@ class MintApprovalPending(ExternalAgentsError):
 
 
 def entitled() -> bool:
-    """Bring-your-own-agent governance is a paid (Gold) capability.
+    """Bring-your-own-agent governance is gated by the ``external_agents``
+    entitlement (Gold tier) when license enforcement is on.
 
     Fail-open like fleet governance: it only bites when a deployment has
     turned license enforcement on and the license lacks the feature. Roster

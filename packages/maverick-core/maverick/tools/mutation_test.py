@@ -1,4 +1,4 @@
-"""Mutation-testing planner tool (roadmap: 2028 H1 capabilities).
+"""Mutation-testing planner tool.
 
 Generates the *mutants* of a piece of Python source — small semantic changes a
 good test suite should catch (a surviving mutant = a coverage gap). It produces

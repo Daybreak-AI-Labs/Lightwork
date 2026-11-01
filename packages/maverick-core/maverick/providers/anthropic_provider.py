@@ -24,7 +24,7 @@ from .anthropic_limits import (
 )
 from .anthropic_limits import _is_opus_adaptive, effective_max_tokens
 
-# Sept 2026 fix (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-3): fast mode is a real
+# Fast mode is a real
 # Anthropic API feature (Claude Opus 5 / Opus 4.8 only, research preview),
 # but it needs a specific wire shape -- the beta messages endpoint, this
 # beta flag, and a top-level `speed="fast"` parameter -- none of which
@@ -253,7 +253,7 @@ def _apply_tool_choice(
     tool_choice: dict | None,
     model_id: str,
 ) -> None:
-    """Translate a normalized ``tool_choice`` onto an Anthropic request (W1-11).
+    """Translate a normalized ``tool_choice`` onto an Anthropic request.
 
     A forced choice (``any``/``tool``) is clamped to ``auto`` where the API
     rejects it -- Fable/Mythos 5.1, or manual extended thinking
@@ -385,7 +385,7 @@ class AnthropicClient:
         effort: str | None = None,
         tool_choice: dict | None = None,
     ) -> dict[str, Any]:
-        # Fast mode (W1-3): MODEL_OPUS_FAST is a catalog-only id, never sent
+        # Fast mode: MODEL_OPUS_FAST is a catalog-only id, never sent
         # to the API. Substitute the real model NOW so every prefix check
         # below (adaptive-thinking gating, cache minimums, etc.) sees the
         # actual "claude-opus-4-8" and behaves identically to a plain Opus
@@ -549,7 +549,7 @@ class AnthropicClient:
                 else:
                     kwargs["output_config"] = {"effort": model_effort}
 
-        # W1-11: forced / restricted tool selection, after thinking is settled
+        # Forced / restricted tool selection, after thinking is settled
         # (a manual-thinking request cannot force a tool).
         _apply_tool_choice(kwargs, tool_choice, model_id)
 
@@ -631,7 +631,7 @@ class AnthropicClient:
         cache_read = _safe_int(getattr(usage, "cache_read_input_tokens", 0))
         in_tok = _safe_int(getattr(usage, "input_tokens", 0))
         out_tok = _safe_int(getattr(usage, "output_tokens", 0))
-        # W1-6: the system/tools breakpoint writes at _default_cache_ttl()
+        # The system/tools breakpoint writes at _default_cache_ttl()
         # (1h in interactive mode) while the messages breakpoint writes at
         # _msg_cache_ttl() (5m) -- a single call can write BOTH tiers at
         # once. Anthropic reports the real per-tier split as
@@ -726,7 +726,7 @@ class AnthropicClient:
         kwargs = self._build_request(
             system, messages, tools, max_tokens, thinking_budget, model, effort,
             tool_choice=tool_choice)
-        # Fast mode (W1-3) is beta-endpoint-only: `speed` is only a validated
+        # Fast mode is beta-endpoint-only: `speed` is only a validated
         # field on client.beta.messages.*. Bill against the CALLER's model id
         # ("claude-opus-4-8-fast", the correctly-priced rate-card SKU), not
         # kwargs["model"] (the real wire id _build_request substituted) --

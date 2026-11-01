@@ -1091,7 +1091,7 @@ def install_plugin(name: str, *, timeout: float = 300.0) -> dict[str, list[str]]
     return installed_plugins()
 
 
-# ---- hot plugin reload (roadmap 2027-H1 ecosystem) --------------------------
+# ---- hot plugin reload --------------------------
 
 _PLUGIN_GROUPS = ("maverick.tools", "maverick.channels", "maverick.skills",
                   "maverick.personas")

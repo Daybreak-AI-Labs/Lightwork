@@ -1,4 +1,4 @@
-"""Adversarial eval harness — scorer (roadmap: 2027 H1 safety).
+"""Adversarial eval harness — scorer.
 
 The red-team corpus produces, for each adversarial prompt, an *expected*
 verdict (the shield should block it) and the shield's *actual* verdict. This

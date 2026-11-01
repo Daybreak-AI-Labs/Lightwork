@@ -164,7 +164,7 @@ def _humanize_run_error(e: Exception) -> str:
     from ..budget import UsageAccountingError
 
     if isinstance(e, UsageAccountingError):
-        # A gateway fault, not a cap breach (W1-17): say so, and don't send
+        # A gateway fault, not a cap breach: say so, and don't send
         # the user off to raise max_dollars.
         return (
             "The model provider returned invalid usage accounting, so Lightwork "
@@ -717,12 +717,12 @@ def launch_check() -> None:
 def license_group() -> None:
     """Issue and inspect the deployment's signed feature license.
 
-    The signed license is the offline floor that unlocks paid tiers/suites (see
-    ``maverick.entitlements``). ``issue``/``set`` sign a new license, ``show``
-    resolves the installed one, and ``keygen`` mints a publisher keypair. The
-    publisher PRIVATE key is a SECRET: supply it via MAVERICK_LICENSE_PRIVATE_KEY
-    (env or your secret manager); it is never read from config and never
-    printed by ``issue``."""
+    The signed license is the offline floor that unlocks gated tiers/suites when
+    license enforcement is on (off by default; see ``maverick.entitlements``).
+    ``issue``/``set`` sign a new license, ``show`` resolves the installed one,
+    and ``keygen`` mints a publisher keypair. The publisher PRIVATE key is a
+    SECRET: supply it via MAVERICK_LICENSE_PRIVATE_KEY (env or your secret
+    manager); it is never read from config and never printed by ``issue``."""
 
 
 @license_group.command("issue")
@@ -748,7 +748,7 @@ def license_group() -> None:
 def license_issue(customer: str, tier: str, edition: str, suites: tuple,
                   features: tuple, expires: str | None, grace_days: int | None,
                   seats: int | None, out: str | None, to_stdout: bool) -> None:
-    """Sign a license for a customer, declaring its tier + enabled add-on suites.
+    """Sign a license for a licensee, declaring its tier + enabled add-on suites.
 
     Re-issuing with different --suite/--feature/--tier is how you change what a
     deployment is entitled to (``set`` is an alias). The signing key comes from
@@ -794,11 +794,11 @@ def license_issue(customer: str, tier: str, edition: str, suites: tuple,
     click.echo(f"  {customer} · tier={tier} · suites={list(suites) or '—'} · "
                f"key_id={doc['key_id'][:16]}…")
     # A license signed by a key the deployment doesn't trust grants nothing, so
-    # warn instead of letting the operator think paid features are now on.
+    # warn instead of letting the operator think gated features are now on.
     if not key_trusted(doc["key_id"]):
         click.echo(
             "  NOTE: this signing key is not in the deployment trust anchor "
-            "(MAVERICK_LICENSE_PUBKEYS / [license] publisher_pubkeys); paid "
+            "(MAVERICK_LICENSE_PUBKEYS / [license] publisher_pubkeys); gated "
             "features stay OFF until you publish its PUBLIC key there.", err=True)
 
 
@@ -823,7 +823,7 @@ def license_show(file: str | None, pubkey: str | None) -> None:
     trust = [k.strip() for k in pubkey.split(",")] if pubkey else None
     ent = load_entitlements(file, trusted_pubkeys=trust)
     click.echo(ent.summary())
-    click.echo(f"  paid features active: {ent.paid_active}")
+    click.echo(f"  licensed features active: {ent.paid_active}")
     click.echo(f"  suites: {list(ent.suites) or '—'}")
     for feat in sorted(GATED_FEATURES):
         click.echo(f"    {'✓' if ent.allows(feat) else '·'} {feat}")
@@ -2473,7 +2473,8 @@ def fleet_run(ctx, fleet_name: str, agent_name: str, prompt: str,
         click.echo(f"no such fleet: {fleet_name}", err=True)
         sys.exit(1)
     if not governance_enabled():
-        click.echo("fleet governance is a paid (Gold) add-on; this deployment's "
+        click.echo("fleet governance needs the Gold tier (or a fleet_governance "
+                   "grant) while license enforcement is on; this deployment's "
                    "license does not include it", err=True)
         sys.exit(2)
     agent = next((a for a in f.agents if a.name == agent_name), None)
@@ -3526,7 +3527,7 @@ def billing_stripe_status(as_json: bool) -> None:
                f"webhook secret present: {st.has_webhook_secret}")
     click.echo(f"  stripe SDK installed: {st.sdk_available}")
     click.echo(f"  bill metered usage: {st.bill_metered_usage}"
-               f"   (pricing-decision flag; off = platform fee only)")
+               f"   (off = platform fee only)")
     click.echo(f"  plans priced: {', '.join(st.plans_priced) or '(none)'}   "
                f"currency: {st.currency}")
 
@@ -3569,7 +3570,7 @@ def billing_stripe_preview(tenant_id: str, since: str | None, until: str | None,
     else:
         click.echo(f"  metered model usage: computed (${prev['metered_total']:.2f} "
                    f"{prev['currency'].upper()}) but NOT billed "
-                   "(pricing decision pending; platform fee only)")
+                   "(bill_metered_usage is off; platform fee only)")
 
 
 @billing.command("stripe-sync")
@@ -3617,7 +3618,7 @@ def billing_stripe_sync(tenant_id: str, since: str | None, until: str | None,
     if items is not None:
         click.echo(f"  metered usage items pushed: {len(items)}")
     else:
-        click.echo("  metered usage: not billed (pricing decision pending; "
+        click.echo("  metered usage: not billed (bill_metered_usage is off; "
                    "platform fee only)")
 
 
@@ -7071,7 +7072,7 @@ def audit_export(
                 click.echo(f"ERROR: {_label} must be YYYY-MM-DD", err=True)
                 sys.exit(2)
 
-    # Plan feature gating: SIEM audit export is a paid-tier entitlement. Deny
+    # Plan feature gating: SIEM audit export is a plan-gated feature. Deny
     # either an explicit --tenant or the active deployment tenant when it names
     # a provisioned tenant whose plan omits "audit_export"; unscoped/self-host
     # export is unaffected because feature_allowed fails open at the edges.
@@ -7221,7 +7222,7 @@ def audit_forward(
         )
         sys.exit(2)
 
-    # Same paid-tier entitlement gate as export, including active deployment
+    # Same plan gate as export, including active deployment
     # tenants resolved by feature_allowed when --tenant is omitted.
     from ..billing import feature_allowed
     if not feature_allowed("audit_export", tenant=tenant):

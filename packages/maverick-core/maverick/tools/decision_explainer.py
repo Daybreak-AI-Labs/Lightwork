@@ -1,4 +1,4 @@
-"""Additive-decision explainer (roadmap: 2028 safety — "right-to-explanation").
+"""Additive-decision explainer.
 
 For an automated decision driven by a linear scorecard (score = sum of
 weight x value, plus an intercept), this produces the per-factor contribution

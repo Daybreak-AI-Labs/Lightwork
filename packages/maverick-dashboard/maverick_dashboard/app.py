@@ -578,7 +578,7 @@ def _theme_context(request: Request) -> dict:
         "custom_theme_names": sorted(custom),
         # ``lang`` is the selected UI language (drives ``t()``); ``page_lang``
         # is what the page body is actually written in and is what
-        # ``<html lang>`` and ``dir`` declare (W3-73, UX-198). They differ
+        # ``<html lang>`` and ``dir`` declare. They differ
         # until the templates are translated, so an English body is never
         # mirrored because a few chrome strings are Arabic.
         "lang": lang,
@@ -1463,7 +1463,7 @@ async def _lifespan(app: FastAPI):
         await _start_privacy_discovery_remediation_scheduler()
         await _start_privacy_notice_publication_scheduler()
         # Connected-entitlement auto-refresh: a deployment with [license] api_url
-        # configured polls the vendor console so an upgrade/downgrade issued there
+        # configured polls that license service so a license re-issued there
         # lands within ~a minute — no redeploy, no manual refresh. No-op (returns
         # None) without an API URL or with refresh_interval_seconds = 0, so tests
         # and offline/air-gapped boxes are untouched. Fail-open by construction:
@@ -1956,7 +1956,7 @@ app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 def _compress_enabled() -> bool:
     """``[dashboard] compress`` (default on), overridden by
     ``MAVERICK_DASHBOARD_COMPRESS``. Response compression for a self-hosted
-    dashboard behind a bare uvicorn or a default ingress (W3-77); turn it off
+    dashboard behind a bare uvicorn or a default ingress; turn it off
     when a proxy in front already compresses."""
     env = os.environ.get("MAVERICK_DASHBOARD_COMPRESS", "").strip().lower()
     if env:
@@ -8004,7 +8004,7 @@ async def compartments_page(
     Reads the discoverable domain packs (built-in + onboarded) so an operator
     can see which sealed agents exist and the capability envelope each runs
     under -- the compartments a Rung-2 seal acts on. Searched and paginated
-    like /tools (W3-30): unscoped, the full roster is 2,000+ packs and rendered
+    like /tools: unscoped, the full roster is 2,000+ packs and rendered
     every capability envelope into one multi-megabyte page."""
     query = q.strip()
     domain_page = {
@@ -15349,8 +15349,7 @@ async def benchmarks_page(request: Request) -> HTMLResponse:
 
     Per-suite trend sparklines + a comparison table over the real
     ``~/.maverick/benchmarks/history.json`` store. No competitor numbers are
-    shown or invented here — see docs/comparison.md for the qualitative
-    comparison."""
+    shown or invented here."""
     from .api import _benchmark_snapshot
 
     snap = _benchmark_snapshot()

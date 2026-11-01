@@ -305,7 +305,7 @@ class Tool:
     # ``to_anthropic()``: it must never alter the tool catalog the model
     # sees (that would bust the prompt cache).
     parallel_safe: bool = False
-    # W1-11: ask the provider to validate tool inputs against input_schema
+    # Ask the provider to validate tool inputs against input_schema
     # (Anthropic ``strict: true``; OpenAI function ``strict: true``) so a
     # malformed-arguments retry is never needed. Off by default: strict mode
     # constrains the schema (e.g. additionalProperties: false, every property
@@ -1566,7 +1566,7 @@ def base_registry(
     reg.register(html_to_app(sandbox))
     reg.register(browser_auth_vault())
 
-    # Subpackage capability tools (ROADMAP 2027 H2). The sandbox-backed ones
+    # Subpackage capability tools. The sandbox-backed ones
     # take the sandbox; the rest are stateless.
     from .diagram_tool import diagram_tool
     from .latex_tool import latex_tool
@@ -1590,7 +1590,7 @@ def base_registry(
     # boolean as a real human approval gate. Keep it importable for explicit
     # offline diff proposal workflows, but do not expose it to agents by default.
 
-    # Runtime / introspection tools (ROADMAP 2028 H1/H2).
+    # Runtime / introspection tools.
     from ..cost.curve_fitter import cost_curve_tool
     from .capability_query import capability_query
     from .oidc_tool import oidc_tool

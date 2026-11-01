@@ -1,4 +1,4 @@
-"""Memory-leak quarantine (roadmap: 2027 H1 — long-horizon RSS leak detection).
+"""Memory-leak quarantine.
 
 Over a long run, a leaking component's RSS climbs without bound while a healthy
 one oscillates around a flat mean. Given an RSS time series per component, this

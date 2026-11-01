@@ -134,7 +134,7 @@ python verify_manifest.py measured-manifest.json trusted-publisher.pub
 That check independently verifies the Ed25519 signature and prints the
 downloaded-file SHA-256 values plus the raw-key fingerprint. It does
 **not** recompute the manifest's signed control-source digests.
-Source-binding verification requires a licensed Lightwork source
+Source-binding verification requires a Lightwork source
 snapshot at the measured commit and the full tracked-artifact command
 below.
 

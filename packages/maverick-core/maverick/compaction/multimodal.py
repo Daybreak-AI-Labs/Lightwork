@@ -1,4 +1,4 @@
-"""Multi-modal compaction (roadmap: 2027 H2 perf, v5).
+"""Multi-modal compaction.
 
 History items carrying heavy media content blocks — the vision blocks
 ``attachments.content_blocks_for_goal`` produces, screenshots inside
