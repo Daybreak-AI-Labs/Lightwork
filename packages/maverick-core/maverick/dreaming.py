@@ -151,7 +151,7 @@ class DreamInsight:
 
     def to_dict(self) -> dict:
         d = asdict(self)
-        # June 17 council fix (#1241 follow-up): `load_insights` substitutes
+        # `load_insights` substitutes
         # `_LEGACY_SCOPE_UNKNOWN` for a channel/user_id that was MISSING on
         # disk (pre-scope lines whose scope is genuinely ambiguous). On any
         # rewrite (append/expire/resolve) `asdict` would serialize that
@@ -306,7 +306,7 @@ def cluster_failures(
     ``min_cluster`` members survive — a one-off failure is noise, not a
     pattern worth dreaming about.
 
-    June 17 council fix (config-bounds audit): ``min_cluster < 1`` means
+    ``min_cluster < 1`` means
     "disabled" — return no clusters. The prior ``max(1, min_cluster)``
     silently floored a config/default of 0 to 1, which promotes EVERY
     one-off failure into a persisted (and globally recallable, via

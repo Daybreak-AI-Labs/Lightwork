@@ -1,6 +1,6 @@
 {
   "artifact_name": "lightwork-grc-concierge",
-  "description": "Reduced, local-only GRC Concierge standalone source SKU",
+  "description": "Reduced, local-only GRC Concierge standalone source archive",
   "display_name": "Lightwork GRC Concierge",
   "entrypoint": "serve_standalone.py",
   "files": [
@@ -21,6 +21,7 @@
   "schema_version": 1,
   "shared_files": [
     "LICENSE",
+    "NOTICE",
     "TRADEMARK.md"
   ]
 }

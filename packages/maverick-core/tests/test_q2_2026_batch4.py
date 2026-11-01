@@ -258,7 +258,7 @@ def test_dashboard_theme_cookie_persists(dashboard_client):
 
 
 def test_dashboard_theme_switcher_options_in_header(dashboard_client):
-    """Council UX pass replaced the 4-coloured-dots switcher with a single
+    """The 4-coloured-dots switcher was replaced with a single
     ``<select>`` element (accessibility + cleaner UI). All four themes
     must still be present as options."""
     resp = dashboard_client.get("/")

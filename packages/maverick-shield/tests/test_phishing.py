@@ -1,4 +1,4 @@
-"""Phishing-content detector (ROADMAP 2028 H1).
+"""Phishing-content detector.
 
 Unit tests for the heuristic detector + the Shield.scan_output wiring.
 """

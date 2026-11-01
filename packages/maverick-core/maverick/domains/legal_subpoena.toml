@@ -1,4 +1,4 @@
-# Legal — council-added — Litigation Discovery-Response / Subpoena.
+# Legal — Litigation Discovery-Response / Subpoena.
 # Sealed matter compartment. Inbound-demand workflow (distinct from e-discovery review).
 name = "legal_subpoena"
 compartment = "legal_litigation"

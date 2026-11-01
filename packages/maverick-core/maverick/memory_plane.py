@@ -1,32 +1,30 @@
 """The Institutional Memory plane: attest what the fleet actually learned.
 
-Moonshot Bet 2 says the deepest enterprise moat is not the model but the firm's
-accumulated operational judgment, held in a governed, vendor-neutral plane that
-compounds and ports. :mod:`maverick.fleet_memory` already implements the
-ingest/recall half of that: external agents from any vendor deposit and retrieve
-department-scoped lessons through a fail-closed governed surface, every read
-audited with the reader's identity.
+The fleet's accumulated operational judgment is held in a governed,
+vendor-neutral plane. :mod:`maverick.fleet_memory` implements the ingest/recall
+half: external agents from any vendor deposit and retrieve department-scoped
+lessons through a fail-closed governed surface, every read audited with the
+reader's identity.
 
-The half that was missing is **attest**. A memory plane whose value is "it
+This module is the **attest** half. A memory plane whose value is "it
 compounds, and it is yours, and it never leaked across tenants" is making three
-claims a customer would reasonably want checked before they treat it as an asset
-on the balance sheet -- and until now the only answer was our word.
+claims that should be checkable rather than taken on trust.
 
-This module builds that attestation, and it deliberately rides the **same signed
-bundle spine as Bet 1** (:mod:`maverick.attestation_verify` supplies the crypto,
-the trust-anchor rule, and the HOLDS/FAILS/INDETERMINATE/NOT_APPLICABLE
-vocabulary). That is the doc's own thesis -- one capsule format, every bet
-attaches to it -- and it means there is one implementation of "verify a
-signature against a key the verifier already trusted", not two.
+The attestation deliberately uses the **same signed bundle spine as the
+attestation bundle** (:mod:`maverick.attestation`;
+:mod:`maverick.attestation_verify` supplies the crypto, the trust-anchor rule,
+and the HOLDS/FAILS/INDETERMINATE/NOT_APPLICABLE vocabulary). There is one
+implementation of "verify a signature against a key the verifier already
+trusted", not two.
 
 The gradings carry the same discipline, which matters most in two places:
 
-*One vendor is not cross-vendor.* The cross-vendor claim is the moat: a Copilot
-agent benefiting from a lesson a Claude agent learned last week. A plane with a
-single vendor connected has nothing to demonstrate, so the claim is
-``NOT_APPLICABLE`` rather than a pass. Grading it HOLDS because nothing went
-wrong would sell the one property the model vendors structurally cannot copy on
-the strength of an empty room.
+*One vendor is not cross-vendor.* The cross-vendor claim is that a lesson
+crosses a vendor boundary: a Copilot agent benefiting from a lesson a Claude
+agent learned last week. A plane with a single vendor connected has nothing to
+demonstrate, so the claim is ``NOT_APPLICABLE`` rather than a pass. Grading it
+HOLDS because nothing went wrong would claim the property on the strength of
+an empty room.
 
 *Isolation cannot be proven from inside.* "One customer's memory never reaches
 another's" is not checkable within a single tenant's bundle -- every record is
@@ -94,11 +92,12 @@ class DepartmentCurve:
 def compounding_by_department(world: Any, *, window: int = 5,
                               min_runs: int = _MIN_RUNS_FOR_CLAIM,
                               ) -> list[DepartmentCurve]:
-    """The cold->warm curve per department -- the un-fakeable moat proof.
+    """The cold->warm curve per department.
 
     Reuses :mod:`maverick.compounding_metric` and only changes how a run is
-    classified: by department rather than by task verb, because "your finance
-    swarm got 40% cheaper" is the sentence a buyer acts on. Read-only.
+    classified: by department rather than by task verb, because a
+    per-department result ("the finance swarm got 40% cheaper") is the one an
+    operator can act on. Read-only.
     """
     from . import compounding_metric as cm
 
@@ -128,9 +127,9 @@ def _is_real_cost_pair(cold: float, warm: float) -> bool:
 
     ``CompoundingReport.improving`` is a bare ``warm < cold`` comparison, which
     a negative or non-finite cost satisfies trivially: episodes logged at
-    -$1e9 and -$1e12 "improve" beautifully. The whole value of this claim is
-    that it is the un-fakeable half of the moat, so a cost that is not a finite
-    positive number disqualifies the curve rather than powering it.
+    -$1e9 and -$1e12 "improve" beautifully. The claim is only worth making if
+    it cannot be faked, so a cost that is not a finite positive number
+    disqualifies the curve rather than powering it.
     """
     return all(
         isinstance(v, (int, float)) and not isinstance(v, bool)
@@ -416,9 +415,9 @@ def _check_cross_vendor(bundle: dict) -> ClaimResult:
         notes.append("the fleet-memory plane is switched off; these totals are "
                      "historical, not live")
     if len(vendors) < 2:
-        # The moat is a lesson crossing a vendor boundary. One vendor cannot
-        # demonstrate that, and a pass here would sell the property the model
-        # vendors structurally cannot copy on the strength of an empty room.
+        # The claim is a lesson crossing a vendor boundary. One vendor cannot
+        # demonstrate that, and a pass here would claim the property on the
+        # strength of an empty room.
         return ClaimResult(
             "cross_vendor", NOT_APPLICABLE,
             f"{len(vendors)} contributing vendor(s): nothing crossed a vendor "
@@ -521,9 +520,9 @@ def _check_isolation(bundle: dict) -> ClaimResult:
 def verify(bundle: dict, *, trusted_key_hex: str) -> VerifyResult:
     """Check a memory-plane attestation against an out-of-band key.
 
-    Same trust model as Bet 1: without an anchor obtained outside the artifact,
-    verification fails closed, because a key carried inside a signed file
-    identifies nobody.
+    Same trust model as the attestation bundle: without an anchor obtained
+    outside the artifact, verification fails closed, because a key carried
+    inside a signed file identifies nobody.
     """
     if not isinstance(bundle, dict):
         return VerifyResult(False, "unverified", "bundle is not a JSON object")
@@ -539,7 +538,7 @@ def verify(bundle: dict, *, trusted_key_hex: str) -> VerifyResult:
     if not _have_crypto():
         # Without this the signature check below fails and the customer is told
         # the publisher's signature is BAD -- a tamper accusation for a missing
-        # optional extra. Bet 1's verifier already distinguishes the two.
+        # optional extra. The attestation verifier already distinguishes the two.
         return VerifyResult(False, "unverified",
                             "the 'cryptography' package is required to verify")
     sig = bundle.get("signature")

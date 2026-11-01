@@ -1,5 +1,5 @@
 """Computer-use coordinate calibration: pure-math affine fit, drift report,
-target grid, atomic 0600 persistence (ROADMAP 2028 H1). No screen needed."""
+target grid, atomic 0600 persistence. No screen needed."""
 from __future__ import annotations
 
 import os

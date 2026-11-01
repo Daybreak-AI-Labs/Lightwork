@@ -1,4 +1,4 @@
-"""Provider failover (ROADMAP 2027 H1, Performance) — opt-in, default off."""
+"""Provider failover — opt-in, default off."""
 from __future__ import annotations
 
 import asyncio

@@ -1,8 +1,8 @@
 # SOC 2 Controls Mapping
 
 This document maps the SOC 2 **Trust Services Criteria (TSC)** to the concrete
-Lightwork controls that satisfy each. It is the foundation of the SOC 2
-workstream: a controls inventory an auditor can read alongside the
+Lightwork controls that satisfy each: a controls inventory an auditor can read
+alongside the
 machine-readable evidence collector in
 [`packages/maverick-core/maverick/soc2.py`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/soc2.py)
 (`collect_soc2_evidence()`).
@@ -13,14 +13,16 @@ machine-readable evidence collector in
 > Privacy** categories — but a real SOC 2 Type II report also requires
 > *process* controls (change management, vendor management, background checks,
 > incident response, HR onboarding/offboarding) that are **not code**. Those are
-> marked **Process-only** or **Gap** below and must be owned by the company, not
-> the repo.
+> marked **Process-only** or **Gap** below and must be operated by the
+> organization that deploys Lightwork.
 
 ## Status legend
 
 | Status | Meaning |
 | --- | --- |
 | **Implemented** | A concrete, enforced technical control exists in the codebase. |
+| **Implemented (on by default)** | Implemented and enabled in a default install; an operator can turn it off explicitly. |
+| **Implemented (opt-in)** | Implemented but off by default; it must be enabled for a compliant deployment. |
 | **Partial** | A control exists but is opt-in/off-by-default, scoped, or incomplete. |
 | **Gap** | No control today; needs to be built or established. |
 | **Process-only** | Satisfied (if at all) by an organizational process outside this repo, not by code. |
@@ -39,7 +41,7 @@ The CC series is mandatory for every SOC 2 report.
 | TSC | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- |
 | CC1.1 Integrity & ethical values | Anti-test-cheating verifier; test-driven `verify_final` keeps agents honest | Partial | `maverick/verifier.py`; `maverick/agent.py` (verify gate) |
-| CC1.2–CC1.5 Board oversight, org structure, accountability | Company governance, org chart, role definitions | Process-only | Not code — company policy |
+| CC1.2–CC1.5 Board oversight, org structure, accountability | Operator governance, org chart, role definitions | Process-only | Not code — operator policy |
 
 ### CC2 — Communication & Information
 
@@ -47,7 +49,7 @@ The CC series is mandatory for every SOC 2 report.
 | --- | --- | --- | --- |
 | CC2.1 Quality information for internal control | Append-only Ed25519 Merkle-chained audit log; OpenTelemetry traces/metrics | Implemented | `maverick/audit/`; `audit_log`, `audit_signing_key`; `maverick/observability.py` |
 | CC2.2 Internal communication of responsibilities | EU AI Act Art. 50 user disclosure; user-facing docs | Partial | `maverick/compliance.py`; `docs/` |
-| CC2.3 External communication | Public docs, support/incident channels | Process-only | `docs/`; company policy |
+| CC2.3 External communication | Public docs, support/incident channels | Process-only | `docs/`; operator policy |
 
 ### CC3 — Risk Assessment
 
@@ -96,7 +98,7 @@ This is Lightwork's strongest area.
 | CC7.2 Monitors anomalies | OpenTelemetry metrics; circuit breakers; `capability_denied` audit event | Implemented | `maverick/observability.py`; `maverick/audit/events.py` (`CAPABILITY_DENIED`) |
 | CC7.3 Evaluates security events | Audit log + chain verification; shield_block / consent events | Implemented | `maverick/audit/`; `audit_log` evidence key |
 | CC7.4 Responds to incidents | Killswitch (file + in-process halt); circuit breakers | Partial | `maverick/killswitch.py`; `maverick/circuit_breaker.py` |
-| CC7.4 Incident response *program* | Documented IR runbook, on-call, escalation | Process-only | Not code — company policy |
+| CC7.4 Incident response *program* | Documented IR runbook, on-call, escalation | Process-only | Not code — operator policy |
 | CC7.5 Recovers from incidents | Durable checkpoint/resume; job queue | Implemented | `maverick/checkpoint.py`; `maverick/job_queue.py` |
 
 ### CC8 — Change Management
@@ -104,14 +106,14 @@ This is Lightwork's strongest area.
 | TSC | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- |
 | CC8.1 Authorizes/designs/tests/approves changes | Eval-gated CI; PR review; semantic-PR-title + lint gates; test-driven verifier | Partial | `.github/workflows/` (ci, lint-pr-title); test matrix (CLAUDE.md) |
-| CC8.1 Change-management *policy* (approvals, segregation of duties) | Documented change-control policy, reviewer requirements, prod-deploy approvals | Process-only | Not code — company policy |
+| CC8.1 Change-management *policy* (approvals, segregation of duties) | Documented change-control policy, reviewer requirements, prod-deploy approvals | Process-only | Not code — operator policy |
 
 ### CC9 — Risk Mitigation
 
 | TSC | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- |
 | CC9.1 Mitigates business-disruption risk | Hard **Budget** caps; usage **quotas** + enforcement; killswitch | Implemented | `maverick/budget.py`; `maverick/quotas.py` (`controls.usage_quotas`); `maverick/killswitch.py` |
-| CC9.2 Vendor & business-partner risk management | Sub-processor inventory, vendor security reviews, DPAs | Process-only / Gap | Not code — company policy (LLM providers, infra vendors) |
+| CC9.2 Vendor & business-partner risk management | Sub-processor inventory, vendor security reviews, DPAs | Process-only / Gap | Not code — operator policy (LLM providers, infra vendors) |
 
 ## A — Availability
 
@@ -153,15 +155,15 @@ is policy + notice, with a few technical anchors.
 | P3 Collection | Anonymous mode (strip identifying fields from logs/audit) | Partial | `maverick/privacy.py` (`anon_enabled`) |
 | P4 Use, retention & disposal | Audit retention policy; GDPR erase | Implemented | `maverick/audit/retention.py`, `erase.py` |
 | P5 Access (subject access) | GDPR erase (right to erasure) **and** DSAR export — Art. 15/20 access/portability bundle of all data held for a subject (world + audit) | Implemented | `maverick/dsar.py` (`export_subject_data`; `controls.data_subject_export`); `maverick/audit/erase.py` (erasure) |
-| P6 Disclosure to third parties | Secret redaction; sub-processor disclosure | Partial / Process-only | `maverick/safety/secret_detector.py`; company sub-processor list |
+| P6 Disclosure to third parties | Secret redaction; sub-processor disclosure | Partial / Process-only | `maverick/safety/secret_detector.py`; operator's sub-processor list |
 | P7 Quality | Tenant isolation prevents cross-subject contamination | Partial | `maverick/paths.py` |
-| P8 Monitoring & enforcement | Audit log; privacy complaint handling | Partial / Process-only | `maverick/audit/`; company policy |
+| P8 Monitoring & enforcement | Audit log; privacy complaint handling | Partial / Process-only | `maverick/audit/`; operator policy |
 
 ## Process-only / Gap summary (NOT code)
 
 A SOC 2 Type II report cannot pass on engineering controls alone. The following
-are explicitly **out of scope for this repo** and must be owned as company
-processes (or built where marked Gap):
+are **out of scope for this repository** and must be operated as processes by
+the deploying organization (or built where marked Gap):
 
 - **Change management policy** (CC8): documented approvals, segregation of
   duties, prod-deploy sign-off. (Code controls: CI gates + PR review.)
@@ -178,14 +180,14 @@ processes (or built where marked Gap):
 - **Vulnerability management / pen testing cadence** (CC7.1): scheduled scans
   and third-party penetration tests with remediation tracking.
 
-### Engineering Gaps to close
+### Opt-in controls to enable
 
 - **Several controls are opt-in / off-by-default** (capabilities, tenant
-  isolation, quotas, OIDC, encryption at rest, and audit signing). For a SOC 2
-  deployment these must be turned **on** and shown enabled (`audit_log` = `ok`,
-  not `unsigned`) in the evidence snapshot — see "Verifying posture" below. The
-  opt-in default is intentional (single-tenant local use is unchanged), but a
-  compliant deployment must flip them on.
+  isolation, quotas, OIDC); encryption at rest and audit signing are on by
+  default unless disabled. For a SOC 2 deployment all of them must be **on** and
+  shown enabled (`audit_log` = `ok`, not `unsigned`) in the evidence snapshot —
+  see "Verifying posture" below. The opt-in default is intentional (single-tenant
+  local use is unchanged), but a compliant deployment must turn them on.
 
 ## The evidence collector
 
@@ -245,7 +247,6 @@ opt-in and must be turned on for a full SOC 2 posture: `capability_enforcement`,
 `tenant_isolation`, `usage_quotas`, and `oidc_auth` (OIDC would otherwise lock out
 the local single-user dashboard).
 
-> **Follow-on (not in this change):** a `maverick soc2` CLI command that prints
-> this snapshot (and exits non-zero if required controls are not `enabled`) is a
-> deliberate next step. It belongs in `cli.py` and the installer wizard, which
-> this workstream intentionally does not touch.
+> The `maverick soc2` command prints this snapshot as JSON (`--json` for
+> single-line output) and exits non-zero unless the required controls are
+> ready. See [`soc2/README.md`](soc2/README.md).

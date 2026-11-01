@@ -1,4 +1,4 @@
-"""Property-test generator tool (roadmap: 2028 H1 capabilities).
+"""Property-test generator tool.
 
 Given a Python function's source, emit a `Hypothesis` property-test skeleton:
 strategies are inferred from the parameter type hints, and the body asserts the

@@ -1,12 +1,12 @@
 # Design Spec: MCP Server Registry
 
-**Status:** Shipped (discovery + install + config write + CLI; OAuth deferred) · **Roadmap ref:** [`ROADMAP.md`](../ROADMAP.md) → "Current state & gap analysis" (B2) · **Related:** [`catalog.md`](./catalog.md), [`skill-index.md`](./skill-index.md) · **Date:** June 2026
+**Status:** Shipped (discovery + install + config write + CLI; OAuth deferred) · **Related:** [`catalog.md`](./catalog.md), [`skill-index.md`](./skill-index.md) · **Date:** June 2026
 
 ## 1. Problem
 
 Lightwork can *consume* external MCP servers once they're in
 `[mcp_servers.<name>]` (stdio via `MCPClient`, remote HTTP via
-`StreamableHttpMCPClient`). What was missing (roadmap B2) is **discovery +
+`StreamableHttpMCPClient`). What was missing is **discovery +
 install**: a user shouldn't have to hand-write a server's command/args/url. A
 registry gives `maverick mcp-registry browse` / `add <name>` so servers install
 by name, the same way `maverick skill add` works for skills.
@@ -19,11 +19,12 @@ to validate. Static-bearer remote servers already work via `auth_token`.
 A registry is a self-hostable JSON index served at `<base>/mcp/index.json`,
 reusing the generic [`catalog.py`](./catalog.md) infra (fetch + 6h cache +
 SSRF-guarded `guarded_urlopen` + https-only + stale-serve + multi-index merge,
-earlier index wins). Point `[mcp_registries] indexes` at your own base(s);
-default is the built-in awesome-maverick index (`DEFAULT_MCP_REGISTRIES`).
+earlier index wins). Point `[mcp_registries] indexes` at your own base(s).
+The built-in default index (`DEFAULT_MCP_REGISTRIES`) is not yet published;
+configure your own under `[mcp_registries] indexes`.
 
 ```toml
-# ~/.maverick/config.toml — only needed to override the default
+# ~/.maverick/config.toml
 [mcp_registries]
 indexes = ["https://registry.example.com/catalog", "https://internal.acme/catalog"]
 ```
@@ -112,7 +113,7 @@ Lightwork's *own* server):
 - `remove <name>` — drop the table from config.
 - `list` — show the MCP servers currently configured (via the kernel's loader).
 
-## 7. Config knob + wizard (CLAUDE.md #5/#6)
+## 7. Config knob + wizard (kernel rules 5 and 6)
 
 - Knob: `[mcp_registries] indexes` (list of base URLs). Discovery works with **no
   config** (built-in default), so the knob is only for custom/self-hosted

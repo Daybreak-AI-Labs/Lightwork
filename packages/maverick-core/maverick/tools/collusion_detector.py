@@ -1,4 +1,4 @@
-"""Multi-agent collusion detector (roadmap: 2027 H1 safety).
+"""Multi-agent collusion detector.
 
 The swarm's safety story leans on *independent* checks — and independence
 fails two different ways, so this tool detects both:
@@ -13,8 +13,8 @@ fails two different ways, so this tool detects both:
   whose agreement is at/above a threshold and report the connected blocs,
   flagging any large enough to swing a quorum.
 
-Two converged implementations of the same roadmap item, merged: both are
-pure counting/lexical overlap — deterministic and offline, no model.
+Both checks are pure counting/lexical overlap — deterministic and offline, no
+model.
 
 ops:
   - scan(messages[, threshold])  — messages: [{agent, text, verdict?}].

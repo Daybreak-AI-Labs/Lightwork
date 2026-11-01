@@ -1,11 +1,9 @@
-"""Coordinated-disclosure log (roadmap: 2027 H1 safety).
+"""Coordinated-disclosure log.
 
 Run a coordinated vulnerability disclosure (CVD) process offline: track a
 whole report set's embargo timelines, check one report's window, and render
 a public advisory. Pure date arithmetic — deterministic, no network, no DB;
 the caller persists records however it likes and passes them back in.
-
-Two converged implementations of the same roadmap item, merged:
 
 ops:
   - status(records[, today, policy, embargo_days])  — per-report status

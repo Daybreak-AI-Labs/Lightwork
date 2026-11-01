@@ -7,7 +7,7 @@ Catches the most common failure modes BEFORE you burn money:
   - ~/.maverick/config.toml doesn't silently override your env vars
   - Enough disk space for Docker images (~200GB for Pro)
   - Required hosts (Anthropic / HuggingFace / Docker Hub) are reachable
-  - Wave 11 env vars are set sensibly
+  - Benchmark env vars are set sensibly
 
 Usage::
 
@@ -197,7 +197,7 @@ def check_config_no_stale_overrides() -> bool:
     if has_override and coding_mode:
         _warn(
             f"~/.maverick/config.toml has [models] section with overrides "
-            f"{list(models.keys())}. These WILL override Wave 11 env vars "
+            f"{list(models.keys())}. These WILL override the benchmark env vars "
             f"(MAVERICK_MODEL_OVERRIDE_<ROLE>) unless cleared. Either "
             f"delete the [models] section for the bench run, OR set the "
             f"per-role env vars explicitly."
@@ -254,7 +254,7 @@ def check_network_egress() -> bool:
 
 
 def check_wave11_env() -> bool:
-    """Soft sanity-check on the Wave 11 env-var matrix. Warnings only —
+    """Soft sanity-check on the benchmark env-var matrix. Warnings only —
     we don't refuse to run if any are missing, just surface anomalies."""
     expected = {
         "MAVERICK_CODING_MODE": "1",
@@ -265,9 +265,9 @@ def check_wave11_env() -> bool:
     for k, v in expected.items():
         actual = os.environ.get(k)
         if actual is None:
-            _warn(f"{k} not set (Wave 11 runbook recommends {k}={v!r})")
+            _warn(f"{k} not set (the SWE-bench runbooks recommend {k}={v!r})")
         elif actual != v:
-            _warn(f"{k}={actual!r} (Wave 11 runbook recommends {k}={v!r})")
+            _warn(f"{k}={actual!r} (the SWE-bench runbooks recommend {k}={v!r})")
     bon = os.environ.get("MAVERICK_BEST_OF_N")
     if bon:
         try:
@@ -289,7 +289,7 @@ def check_wave11_env() -> bool:
             "MAVERICK_INSTANCE_HARD_CAP not set (recommended: 3.0). Without "
             "this, a runaway instance could eat the entire run budget."
         )
-    _ok("Wave 11 env var check complete (see warnings above, if any)")
+    _ok("Benchmark env var check complete (see warnings above, if any)")
     return True
 
 

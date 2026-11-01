@@ -1,0 +1,13 @@
+# Operator inputs that identify people. Copy this file to local.auto.tfvars
+# (ignored by git) and fill it in before `terraform apply`; Terraform loads
+# every *.auto.tfvars in this directory. Without it the stack has no
+# break-glass admin and sends platform email from the variables.tf default.
+
+# Break-glass master admin principals, comma-separated. List every Auth0
+# identity the owner signs in with (for example the Google identity and the
+# email/password identity) so admin holds regardless of the sign-in method;
+# a principal's sub is shown after its first login. Never list demo users.
+dashboard_admins = "user:google-oauth2|<sub>,user:auth0|<sub>"
+
+# From address for platform email: an address on your verified SES domain.
+email_from = "<name>@<your-ses-domain>"

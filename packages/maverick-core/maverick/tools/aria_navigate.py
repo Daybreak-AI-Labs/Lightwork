@@ -1,4 +1,4 @@
-"""ARIA-first browser navigation (roadmap: 2028 H2 — capabilities).
+"""ARIA-first browser navigation.
 
 Drives the shared Playwright browser session through the ACCESSIBILITY TREE
 instead of pixels or raw CSS selectors:

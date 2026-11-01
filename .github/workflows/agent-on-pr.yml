@@ -19,9 +19,6 @@ name: Lightwork agent on PR (reusable)
 #           overrides_path: ".maverick"
 #         secrets:
 #           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-#           # Needed when the caller's GITHUB_TOKEN cannot read the private
-#           # Lightwork repository. Use a read-only GitHub App/PAT token.
-#           LIGHTWORK_SOURCE_TOKEN: ${{ secrets.LIGHTWORK_SOURCE_TOKEN }}
 
 on:
   workflow_call:
@@ -56,8 +53,8 @@ on:
           Optional path (relative to the calling repo's trusted base revision)
           to a Lightwork override bundle: a directory with domains/*.toml
           and/or roles.toml, applied before the run so the review uses the
-          client's already-reviewed customized agents. PR-head policy is never
-          loaded.
+          calling repository's already-reviewed customized agents. PR-head
+          policy is never loaded.
         required: false
         default: ''
         type: string
@@ -68,8 +65,8 @@ on:
         required: false
       LIGHTWORK_SOURCE_TOKEN:
         description: >-
-          Optional read-only token for checking out the private Lightwork
-          repository. The caller GITHUB_TOKEN is used when this is omitted.
+          Optional read-only token for checking out the Lightwork source
+          repository. The caller's GITHUB_TOKEN is used when this is omitted.
         required: false
 
 permissions:
@@ -311,7 +308,7 @@ jobs:
           path.write_text(config, encoding="utf-8")
           PY
 
-          # Apply this client's customization bundle only from the trusted PR
+          # Apply the caller's customization bundle only from the trusted PR
           # base revision. Reviewer policy is authority: PR-head code must not
           # be able to rewrite its own roles or system addenda.
           if [ -n "${AGENT_OVERRIDES_PATH:-}" ]; then

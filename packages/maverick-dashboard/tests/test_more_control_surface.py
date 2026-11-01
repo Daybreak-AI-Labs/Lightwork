@@ -1,5 +1,5 @@
-"""Council round-2 Tier-2: the 5 missing UI endpoints that close
-capabilities-seat gaps.
+"""The 5 missing UI endpoints that close
+capability gaps.
 
 - /api/v1/halt now returns reason + armed_at when the file is present.
 - /api/v1/cache/stats + /api/v1/cache/purge (with /cache HTML page).

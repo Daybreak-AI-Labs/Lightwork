@@ -1,4 +1,4 @@
-"""Tiered storage planner (roadmap: 2027 H1 — "hot SQLite + cold parquet").
+"""Tiered storage planner.
 
 Partition a record set into a HOT tier (recently accessed, kept in fast row
 storage like SQLite) and a COLD tier (idle, archived to columnar parquet). The

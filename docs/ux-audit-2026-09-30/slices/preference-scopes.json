@@ -1,9 +1,0 @@
-[
-  {
-    "id": "LW-030",
-    "status": "implemented-test-needed",
-    "implementation_evidence": "Existing encrypted experience_preferences resolves product, organization, selected workspace, named personal and conversation scopes with allowlisted keys and administrator locks; native Preferences exposes effective source and explicit inherit. Root Today/template preferences enforce canonical template read access, and native notifications own quiet-window preferences. preference_memory.describe now joins the verified personal_identity/personal_memory controls in Preferences using content-free effective recall, administrator policy, saved source and channel-only/shared-source posture; edits/reset/narrowing link directly to current My Data controls. No generic memory toggle or guessed channel mapping. Personal recall gates both destination and explicitly chosen verified source under administrator ceiling.",
-    "validation": "14 local tests passed: six content-free memory projection/policy/identity/failure cases plus eight experience-preference scope and idempotency regressions. Targeted Ruff passed. No live provider calls. Root runs integrated suites.",
-    "remaining": "Integrated browser/accessibility and PostgreSQL multi-workspace qualification remain required; native preference and My Data implementations are complete, but this checkpoint does not claim deployed qualification."
-  }
-]

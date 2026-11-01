@@ -47,6 +47,6 @@ request for explicit retry instead of silently repeating it with a new identity.
 
 Implementation evidence is in `deliverable_bundles.py`,
 `deliverable_bundle_export.py`, `deliverable_bundles_api.py`, and
-`product_operations_bundles.py`. Native regression cases are authored in
-`test_deliverable_bundles.py`; local/browser/PostgreSQL qualification is recorded
-separately in the audit ledger and must not be inferred from this design document.
+`product_operations_bundles.py`. Native regression cases are in
+`test_deliverable_bundles.py`; local, browser and PostgreSQL qualification must
+not be inferred from this design document.

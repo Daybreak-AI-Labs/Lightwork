@@ -1,4 +1,4 @@
-"""Structured stop reasons (W1-33) and the provider usage-accounting stop (W1-17).
+"""Structured stop reasons and the provider usage-accounting stop.
 
 The orchestrator used to classify any agent error containing "halt" as
 "a HALT file is present -- run maverick unhalt", which is what a

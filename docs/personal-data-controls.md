@@ -41,10 +41,8 @@ learning exclusion policy; it is not model unlearning. Consolidated per-store
 erasure uses the reviewed request process below; authorized knowledge-lineage
 requests remain in Knowledge Access.
 
-Static Python 3.10 parsing, JavaScript syntax and whitespace checks passed.
-After local testing was authorized, focused personal-data, recall and deletion
-tests passed in the shared Python 3.12 environment. Installed-browser and live
-provider qualification are separate and remain unclaimed.
+Local tests cover personal-data, recall and deletion behavior. Installed-browser
+and live provider qualification have not been performed.
 
 ## Recalled content isolation
 
@@ -60,7 +58,7 @@ Shared packets, knowledge derivatives, already trained models, external copies, 
 
 Activation preparation records and personal project defaults are separately selectable stores. Erasure keeps content-free revision tombstones, so an old save or deterministic activation operation cannot recreate removed private inputs. Activation records with an admitting, active, missing or ambiguously owned task are blocked; source tasks, admission receipts and created workflows stay separate. Project defaults erasure never changes shared project structure. Both adapters require exact ownership, reviewed revisions and acknowledged audit receipts; an unacknowledged receipt is reported as unconfirmed.
 
-Shared harness lessons and automatically harvested evaluation cases now require durable current unowned-source lineage. Legacy unknown-source rows stay in raw storage for retention and governed cleanup but cannot appear in shared prompts, search, lesson pages, trial outcomes or provider evaluation. A review of visible pending cases preserves hidden historical rows. Fresh checks apply before proposing, evaluating, judging and using memoized evaluation results; machine-source metadata survives staging, review, and immutable evaluation manifests. Hand-authored operator corpus entries remain explicitly supplied business exercises. The shared learning activity log projects operation metadata and never old free-text lessons.
+Shared harness lessons and automatically harvested evaluation cases require durable current unowned-source lineage. Legacy unknown-source rows stay in raw storage for retention and governed cleanup but cannot appear in shared prompts, search, lesson pages, trial outcomes or provider evaluation. A review of visible pending cases preserves hidden historical rows. Fresh checks apply before proposing, evaluating, judging and using memoized evaluation results; machine-source metadata survives staging, review, and immutable evaluation manifests. Hand-authored operator corpus entries remain explicitly supplied business exercises. The shared learning activity log projects operation metadata and never old free-text lessons.
 
 
 Owned model-test receipts and queued conversation messages/files are separate inventory, export and reviewed-erasure choices. Active or unknown tests and consuming/dispatching queue items require reconciliation first. Erasure retains content-free operation IDs and generation barriers, so stale execute or editor requests cannot recreate the erased content. A separate reviewer is attributed explicitly; pending audit delivery is unconfirmed, never a successful purge claim.
@@ -69,4 +67,4 @@ Generated-tool reviews carry opaque name/digest keys, not private generated name
 
 My Data account-download links contain no copied bundle, expire after ten minutes, and require the same currently authorized named account/workspace at download. Conversation scope links also recheck verified ownership; actual publication requires acknowledged audit. Fourteen shared Copilot adapters use the native identity, memory, provenance, exclusion, export and deletion services with the same current context/revisions and separate review rules. All personal controls remain reachable directly at `/my-data`.
 
-Completion checks: 51 focused local Python tests, 6 local Node tests, Ruff and JavaScript syntax/whitespace checks passed. Installed cross-user browser scenarios and the parent's final integrated suites remain separate qualification work.
+Local Python and Node tests cover these controls. Installed cross-user browser scenarios have not been qualified.

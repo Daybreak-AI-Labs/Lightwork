@@ -1,4 +1,4 @@
-"""Two-person rule tool (roadmap: 2027 H1 safety — "two-person rule for irreversible ops").
+"""Two-person rule tool.
 
 Validates dual-control (four-eyes) sign-off on an irreversible/high-impact
 action: are there at least N *distinct* approvers who are not the requester

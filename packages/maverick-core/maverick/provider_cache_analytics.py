@@ -1,4 +1,4 @@
-"""Provider-side caching analytics (roadmap: 2028 H2 Performance).
+"""Provider-side caching analytics.
 
 The anthropic provider records prompt-cache telemetry — ``cache_read``,
 ``cache_creation`` (write), and ``uncached`` input tokens, as

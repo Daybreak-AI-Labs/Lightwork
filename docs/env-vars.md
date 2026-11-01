@@ -140,7 +140,7 @@ explicit limits, retry behavior and unknown provider charges.
 | `MAVERICK_PG_RLS` | config `[world_model] rls`; **auto-on under enterprise mode** | DB-native Postgres Row-Level Security on the tenant tables (defense-in-depth over the app predicate). When auto-enabled by enterprise mode, a boot preflight refuses to start on legacy `tenant_id IS NULL` rows (run `maverick tenant backfill`); explicit `=1` keeps the fail-closed opt-in path. |
 | `MAVERICK_KMS_KEK` | derived from the at-rest key | The per-tenant-DEK Key Encryption Key (32 bytes, hex/base64) for `tenant/kms.py`. |
 | `MAVERICK_KMS_DEK_CACHE_TTL` | config `[kms] dek_cache_ttl` (`0` = process lifetime) | Seconds a tenant DEK stays cached before it must be re-unwrapped by the KMS. A positive TTL bounds how long a *revoked* cloud-KMS key keeps opening data (the next access re-hits the KMS and fails closed). Per-tenant **BYOK** is configured in each tenant's own `tenants/<id>/config.toml` `[kms]` section (provider/key_id/region), resolved deterministically by `get_kms(tenant_id)`. A workspace's own `key_id` always outranks the server-wide `MAVERICK_KMS_KEY_ID`, which applies only to workspaces that pinned no key of their own, so a customer's key is never silently replaced by the operator's. Data keys that were locked under the server-wide key while a workspace's own key was configured (the earlier behaviour) must be re-wrapped to the workspace's key, or they will not open: run `tenant.kms.rotate_kek_fleet` with `old_kms_for=lambda t: build_cloud_kms(provider, key_id=<server-wide key>)` and `new_kms_for=get_kms`. **Rolling the local KEK** across the fleet: `maverick tenant kms-rotate --old-kek-file /run/secrets/old-kek --new-kek-file /run/secrets/new-kek` (re-wrap only, idempotent/resumable, `--dry-run` to preview; omit file options to use hidden prompts). Avoid passing KEKs in command-line arguments; set `MAVERICK_KMS_KEK` to the new value live only after rotation reports 0 failed. Cloud/BYOK rotation uses `tenant.kms.rotate_kek_fleet` with per-tenant resolvers. |
-| `MAVERICK_MCP_ANALYTICS` | config `[analytics] mcp_client_language` (off) | Opt-in, consent-gated tally of MCP-client language (feeds the language-bindings gate). |
+| `MAVERICK_MCP_ANALYTICS` | config `[analytics] mcp_client_language` (off) | Opt-in, consent-gated local tally of the languages your MCP clients use. |
 | `MAVERICK_LICENSE_PRIVATE_KEY` | — (secret) | Publisher Ed25519 signing key hex used by `maverick license issue`/`set` to sign a deployment license. Resolved through the secret provider (env or a mounted vault/secret file); **never** read from `config.toml` and never printed. Mint one with `maverick license keygen`; publish the matching **public** key as the trust anchor (`[license] publisher_pubkeys` / `MAVERICK_LICENSE_PUBKEYS`). |
 | `MAVERICK_PUBLIC_URL` | config `[dashboard] public_url` / `[flows] public_url` | Externally-reachable dashboard base URL. `maverick tenant onboard` uses it to build the printed first-admin invite link (also used for flow-approval links). Unset → the command prints the relative `/auth/invite/<token>` path and tells you to prepend your host. |
 | `IRC_ALLOWED_ACCOUNTS` | — | Comma-separated allowlist of authenticated IRC account names that may drive the agent over the IRC channel. Requires an IRC server that provides the IRCv3 `account-tag` capability. |
@@ -151,7 +151,9 @@ explicit limits, retry behavior and unknown provider charges.
 
 Turn the metered-usage invoices (`maverick.billing`) into real charges
 (`maverick.billing_stripe`). Off by default; the `stripe` SDK is an optional
-extra (`pip install 'maverick-core[stripe]'`). Distinct from the agent-facing
+extra (`python -m pip install -e './packages/maverick-core[stripe]'` from the
+repository root, or add `stripe` to `--core-extra` in
+`scripts/install_release_cohort.py`). Distinct from the agent-facing
 `stripe` **tool** (which uses `STRIPE_SECRET_KEY` to read a customer's account) —
 these drive the *platform's own* Stripe account to bill tenants.
 
@@ -162,7 +164,7 @@ these drive the *platform's own* Stripe account to bill tenants.
 | `MAVERICK_STRIPE_WEBHOOK_SECRET` | — | Webhook signing secret (`whsec_...`) used to verify inbound Stripe events (stdlib HMAC; no SDK needed). A verified `invoice.payment_failed` / past-due subscription downgrades the tenant to the base entitlement tier; a recovered payment restores it. |
 | `MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN` | — | Zendesk API token for contact-centre handoffs (see `docs/contact-centre-handoff.md` in the repository). Resolved through the secret provider; overrides the sealed value saved in Settings. Never logged. |
 | `MAVERICK_CONTACT_CENTRE_WEBHOOK_SECRET` | — | Signing secret for contact-centre webhook handoffs. Resolved through the secret provider; overrides the sealed value saved in Settings. Without it nothing is sent to the webhook. |
-| `MAVERICK_STRIPE_BILL_METERED` | config `[billing.stripe] bill_metered_usage` (off) | **Pricing decision pending.** Off bills only the recurring platform-fee subscription; on also pushes the metered model-usage line items. No markup is set here — amounts come from whatever `RateCard` rated the invoice. |
+| `MAVERICK_STRIPE_BILL_METERED` | config `[billing.stripe] bill_metered_usage` (off) | Off bills only the recurring platform-fee subscription; on also pushes the metered model-usage line items. No markup is set here — amounts come from whatever `RateCard` rated the invoice. |
 
 ### Fleet queue
 
@@ -206,11 +208,11 @@ Other config-only knobs: `[billing.plans]` (override plan entitlements), `[egres
 
 **Operator lifecycle:** `maverick tenant onboard <id> --admin-email <email>`
 provisions a tenant and mints its first-admin invite in one step;
-`maverick license issue|set|show|keygen` controls the deployment's signed
-feature license (tier + add-on suites); `maverick launch-check` prints PASS/FAIL
-for each go-live switch (cost-cap enforcement, per-user tenancy, a license trust
-anchor, at-rest encryption, and a resolvable provider key) and exits non-zero if
-any is off, so a deploy pipeline can gate on it.
+`maverick license issue|set|show|keygen` manages the deployment's optional
+signed feature license (enforcement is off by default); `maverick launch-check`
+prints PASS/FAIL for each go-live switch (cost-cap enforcement, per-user
+tenancy, a license trust anchor, at-rest encryption, and a resolvable provider
+key) and exits non-zero if any is off, so a deploy pipeline can gate on it.
 
 ## LLM cost & latency
 
@@ -384,7 +386,7 @@ system-specific shapes (e.g. `SERVICENOW_INSTANCE_URL`, `SNOWFLAKE_ACCOUNT`,
 | `<SYSTEM>_BASE_URL` / `<SYSTEM>_TOKEN` | unset | Per-connector endpoint + credential; see [connectors.md](connectors.md). Writes stay confirm-gated regardless. |
 | `DATABASE_URL` | unset | SQLAlchemy URL for the `database` tool (Postgres / MySQL / SQL Server / Oracle / Redshift / ...). |
 | `MAVERICK_ENABLE_CRED_TOOLS` | unset (off) | `1`/`true` registers connectors that can use ambient host credentials (AWS Lambda/DynamoDB, Google Drive, Airtable, Asana, ClickUp, Vercel). Off by default. |
-| `MAVERICK_WORKFORCE_DATA_GROUNDING` | config `[workforce] data_grounding` (on) | Kill-switch for primary-source data grounding. When on, each analyst pack is auto-granted its suite's 37 read-only public-data connectors (SEC EDGAR, FRED, openFDA, USAspending, NWS/NOAA weather, ...) — GET-only, low-risk, deferred. Set `off`/`0` to withhold them. See [connectors.md](connectors.md). |
+| `MAVERICK_WORKFORCE_DATA_GROUNDING` | config `[workforce] data_grounding` (on) | Kill-switch for primary-source data grounding. When on, each analyst pack is granted its suite's read-only public-data connectors (37 in total across suites: SEC EDGAR, FRED, openFDA, USAspending, NWS/NOAA weather, ...) — GET-only, low-risk, deferred. Set `off`/`0` to withhold them. See [connectors.md](connectors.md). |
 | `MAVERICK_WORKFORCE_LEVELS` | config `[workforce] levels` (off) | Enable per-agent autonomy levels (observe/suggest/request/auto). Off = every agent stages actions for human execution. |
 
 ## Agent-to-agent (A2A)

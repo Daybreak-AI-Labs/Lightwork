@@ -38,11 +38,11 @@ Self-Improvement workshop (110 papers).
 | Memory | Hindsight (arXiv:2512.12818) — four networks separating evidence from inference, confidence-scored opinions | `hindsight.py`, `procedural_memory.py`, `memory.py` (cites 2602.19320), `experience.py` (HERA 2604.00901) |
 | Anti-gaming / provable learning | survey names it; no published system offers signed, auditable proof of *what was learned* | calibration freeze + reward-laundering resistance (**new**); signed audit chain + snapshot/rollback + `operating_record.py` |
 
-**Where we're ahead of the literature:** no verified academic system ships a
-signed, cryptographically-lineaged, auditable proof of *what was learned* with
-rollback. Papers imply lineage (evolutionary archives, memory networks); we
-productized it. On the survey's own axis — governance of co-evolution — that is
-the defensible position.
+**A gap in the literature:** no verified academic system ships a signed,
+cryptographically-lineaged, auditable proof of *what was learned* with rollback.
+Papers imply lineage (evolutionary archives, memory networks); Lightwork
+implements it with the signed audit chain plus learned-state snapshots and
+rollback (`maverick dream --rollback`).
 
 ## Shipped this cycle
 
@@ -97,18 +97,15 @@ Ranked by leverage:
 2. **`reward_audit` → signed audit chain.** The structured reward's rubric is
    attached to the verdict and logged; writing it into the tamper-evident chain
    is what makes "provable learning" literally provable per verdict.
-3. **Quantify reward-laundering resistance as a published governance metric.** We
-   now measure it; the whitespace the survey leaves open is *defining the
-   category* — a reference governance architecture with a bounded, audited
-   gaming-gap number.
+3. **Quantify reward-laundering resistance as a published governance metric.** It
+   is now measured; publishing it would give a reference governance architecture
+   a bounded, audited gaming-gap number.
 4. **The governed DGM `code`-rewrite rung.** The approval gate is the trust
    anchor and it's done; the rung itself is still an opaque payload. Making it
-   real (sandbox code-eval + capability-diff over the candidate) is the flagship
-   "nobody else can safely ship this" capability — DGM-style self-rewrite under a
+   real (sandbox code-eval + capability-diff over the candidate) would deliver
+   DGM-style self-rewrite under a
    reference monitor with signed, reversible, capability-bounded promotion.
 
-The true frontier for a platform like this is exactly the survey's named
-challenge — **governed co-evolution** — and the load-bearing primitives are the
-ones we already hold: verifiable ground truth (RAG-verified queries ≈ immutable
-anchors) and archive/snapshot lineage. Staying ahead means deepening those, not
-chasing raw capability.
+The survey's named open challenge is **governed co-evolution**; the relevant
+primitives here are verifiable ground truth (RAG-verified queries ≈ immutable
+anchors) and archive/snapshot lineage.

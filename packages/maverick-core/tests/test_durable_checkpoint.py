@@ -303,7 +303,7 @@ def test_resume_from_checkpoint_restores_state(tmp_path, monkeypatch):
         [{"role": "user", "content": "fresh"}], ctx.blackboard, ctx.episode_id)
     assert ckpt is not None
     assert start_step == 7
-    # W1-28: index 0 is the freshly-built brief passed in by the caller, not
+    # Index 0 is the freshly-built brief passed in by the caller, not
     # the checkpoint's stale one -- see
     # test_resume_from_checkpoint_refreshes_brief_but_keeps_history below for
     # why (a new `ask_user` answer only ever reaches the model through it).
@@ -312,7 +312,7 @@ def test_resume_from_checkpoint_restores_state(tmp_path, monkeypatch):
 
 
 def test_resume_from_checkpoint_refreshes_brief_but_keeps_history(tmp_path, monkeypatch):
-    # W1-28: run_goal bakes a newly-answered `ask_user` question into the
+    # Run_goal bakes a newly-answered `ask_user` question into the
     # brief it builds for the resumed root Agent (orchestrator.py's
     # `qa_block`), which lands in `messages[0]` before `_resume_from_checkpoint`
     # is called. Wholesale-replacing `messages` with the checkpoint discarded

@@ -132,7 +132,7 @@ def test_pdf_is_deterministic_bounded_and_contains_no_active_content() -> None:
 
 
 def test_pdf_paginates_by_vertical_budget_so_no_line_lands_in_the_footer() -> None:
-    """W4-89: a report with every metric plus several sources used to overflow
+    """A report with every metric plus several sources used to overflow
     the page (lines drawn at y=2, below the y=34 footer) because pagination
     counted lines instead of the vertical space they consume."""
     import re

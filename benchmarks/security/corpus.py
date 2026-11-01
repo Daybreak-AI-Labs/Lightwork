@@ -1,8 +1,8 @@
 """Labelled dataset for the shield detector benchmark.
 
-Honesty matters more than a big number here (see the council review that
-motivated this suite). Cases carry an explicit ``split`` so a memorised
-result can never masquerade as a capability claim:
+Honesty matters more than a big number here. Cases carry an explicit
+``split`` so a memorised result can never masquerade as a capability
+claim:
 
 * ``train``   -- the existing regression corpus the built-in rules were
                  *tuned against* (``shield_jailbreak_corpus.txt``). High TPR

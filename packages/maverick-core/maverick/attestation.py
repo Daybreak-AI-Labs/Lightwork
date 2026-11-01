@@ -1,4 +1,4 @@
-"""Build a portable attestation bundle: the wedge for moonshot Bet 1.
+"""Build a portable, independently verifiable attestation bundle.
 
 The Operating Record capsule (:mod:`maverick.operating_record`) already exports
 the firm's decisions signed. What it cannot do is convince somebody who trusts
@@ -16,9 +16,9 @@ to evidence somebody else can re-derive:
    a pre-dispatch ``tool_call`` row and the envelope names what was forbidden.
    Completion is evidenced separately by a correlated ``tool_result`` row.
 2. **bounded_self_improvement** -- the learning loop never granted itself
-   authority it did not already have. Bet 1's distinctive claim, and the reason
-   :class:`maverick.self_improvement.PromotionRecord` now records *how* the
-   capability gate judged each promotion: the gate always refused a widening
+   authority it did not already have. The bundle's distinctive claim, and the
+   reason :class:`maverick.self_improvement.PromotionRecord` now records *how*
+   the capability gate judged each promotion: the gate always refused a widening
    change, but a receipt that omits the grading leaves "proven bounded" and
    "never checked" indistinguishable to anybody reading the ledger afterwards.
 3. **authentic_history** -- the decision history is intact and complete, via

@@ -1,4 +1,4 @@
-"""Diff-to-expected comparator (roadmap: 2028 H1 UX).
+"""Diff-to-expected comparator.
 
 Compare an actual value against an expected value and report MATCH or DIFF with
 a precise description of the first/all mismatches. Deterministic and offline:

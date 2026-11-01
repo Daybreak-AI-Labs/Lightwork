@@ -117,4 +117,4 @@ does not — you can also implement the JSON-RPC handshake by hand in
 - [Rust client quickstart](./rust-quickstart.md)
 - [C# / .NET client quickstart](./csharp-quickstart.md)
 - [Java / JVM client quickstart](./java-quickstart.md)
-- [docs/ROADMAP.md → Language Bindings — Council Decision](../ROADMAP.md)
+- [Roadmap: language bindings](../ROADMAP.md#language-bindings)

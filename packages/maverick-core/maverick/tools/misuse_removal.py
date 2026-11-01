@@ -1,4 +1,4 @@
-"""Misuse leaderboard removal (roadmap: 2028 H1 safety — "misuse leaderboard removal").
+"""Misuse leaderboard removal.
 
 Given a public leaderboard of entries (id, score, flagged?), remove the entries
 flagged for misuse, emit a tombstone for each removal (id + reason), and return

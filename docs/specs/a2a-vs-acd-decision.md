@@ -1,14 +1,14 @@
 # Decision: adopt A2A's Agent Card; cut the homegrown ACD
 
-**Status:** Decided — adopt A2A, retire ACD · **Roadmap ref:** [`ROADMAP.md`](../ROADMAP.md) → "Current state & gap analysis" (B3) · **Date:** June 2026
+**Status:** Decided — adopt A2A, retire ACD · **Date:** June 2026
 
 ## The question
 
-Roadmap **B3** was an open decision: should Lightwork describe its agent
+The roadmap left an open decision: should Lightwork describe its agent
 capabilities with the open **A2A (Agent2Agent) Agent Card**, or with a
 **homegrown ACD** (Agent Capability Descriptor) — a Lightwork-specific spec that
-the roadmap had penciled in as `docs/specs/acd.md` (Q4 2026), then `ACD spec
-v1.0` (2027 H2) and `v1.1` (2028 H2)?
+the roadmap had penciled in as `docs/specs/acd.md`, then `ACD spec v1.0` and
+`v1.1`?
 
 ## Decision
 
@@ -55,22 +55,19 @@ ships.
    wrong card. No "Agent Card emitter" is needed; `build_agent_card()` is already
    the single source.
 
-## What this changes on the roadmap
+## Effect on earlier plans
 
-- **B3 row:** `⬜ decision` → `✅ decision: adopt A2A's Agent Card; ACD cut`.
-- **Q4 2026 Ecosystem — "ACD spec v0.1 (`docs/specs/acd.md`)":** cut; superseded
-  by the shipped A2A Agent Card. Annotated in place pointing here.
-- **2027 H2 / 2028 H2 Ecosystem — "ACD spec v1.0 / v1.1 / ACD interop tests":**
-  superseded by this decision. Any future "capability descriptor" work tracks
-  A2A's own versioning, not a parallel ACD line. (Left in the far-future lists as
-  historical context; this doc is the record of record.)
+- **The open decision** is closed: adopt A2A's Agent Card; ACD is cut.
+- **ACD spec v0.1 (`docs/specs/acd.md`)** is not written; the shipped A2A Agent
+  Card supersedes it.
+- **ACD spec v1.0 / v1.1 and ACD interop tests** are superseded by this
+  decision. Any future "capability descriptor" work tracks A2A's own
+  versioning, not a parallel ACD line. This document is the record.
 
 ## What remains open (small, non-blocking)
 
-- **Wizard knob for A2A.** A2A is enable-able via `MAVERICK_A2A_ENABLED` / `[a2a]`
-  today, but there's no installer-wizard step (CLAUDE.md #6). A small follow-up:
-  a `pick_a2a()`-style toggle already exists in the wizard — wire its output into
-  the emitted config so non-technical users can opt in. (Outward-facing surface,
-  so it stays off by default.)
-- **Cross-agent card federation** (discovering *other* agents' cards) tracks the
-  2027 H1 ecosystem cluster, not ACD.
+- **Wizard knob for A2A** (kernel rule 6). Done: the installer wizard's
+  `pick_a2a()` step writes the `[a2a]` section, so non-technical users can opt
+  in. It is an outward-facing surface, so it stays off by default.
+- **Cross-agent card federation** (discovering *other* agents' cards) is
+  separate ecosystem work, not ACD.

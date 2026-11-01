@@ -1,5 +1,4 @@
-"""Fast JSON with a stdlib fallback (roadmap: 2028 H1 performance —
-"sub-ms dispatch overhead (msgspec/orjson)").
+"""Fast JSON with a stdlib fallback.
 
 The dispatch path serializes/deserializes JSON constantly (tool args/results,
 event payloads, world-model blobs). ``orjson`` is ~5-10x faster than the

@@ -1,4 +1,4 @@
-"""Independent audit-log mirror verification (roadmap: 2028 H1 safety).
+"""Independent audit-log mirror verification.
 
 Cross-check a primary audit log against an independent mirror: do the two
 agree entry-for-entry (same hash at each sequence number), and is the sequence

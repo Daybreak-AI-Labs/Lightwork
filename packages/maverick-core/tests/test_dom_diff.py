@@ -1,4 +1,4 @@
-"""Live-DOM diff (ROADMAP 2028 H1)."""
+"""Live-DOM diff."""
 from __future__ import annotations
 
 from maverick.dom_diff import diff_html, render_diff

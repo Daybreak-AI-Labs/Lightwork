@@ -1,8 +1,6 @@
 # Skills library
 
-> The first-party **`SKILL.md` library** the 2026 expansion council recommended
-> (see [`proposals/council-expansion-2026.md`](proposals/council-expansion-2026.md)).
-> Source files ship inside the package at
+> The first-party **`SKILL.md` library**. Source files ship inside the package at
 > `packages/maverick-core/maverick/skills_builtin/*.md`; each is reusable
 > procedural know-how any agent can follow mechanically, validated by
 > `maverick.skills.validate_skill_file` (test: `test_skills_library.py`).
@@ -11,8 +9,11 @@
 > the agent's prompt (`agent.py`); opt out with `MAVERICK_BUILTIN_SKILLS=0` or
 > `[skills] builtin = false`.
 
-**61 skills** — 20 cross-cutting (inherited by hundreds of packs via the
-`relevant_skills` trigger mechanism) + 41 suite-specific.
+This page lists the core set of **61 skills**: 20 cross-cutting and 41
+suite-specific. For each task, `skills.relevant_skills()` recalls the few skills
+whose triggers match the goal, above a relevance threshold. The
+`skills_builtin/` directory holds the full library, which is considerably
+larger than this list.
 
 ## Cross-cutting (20)
 

@@ -94,8 +94,8 @@ binding. Background reads retain unsaved form edits; conflicts require an
 explicit reload before editing the latest values. Muting one task does not
 mute other tasks. Unsubscribed/off periods do not queue a later replay.
 
-Local policy, delivery, semantic-generation, source paging, migration and
-Copilot-recovery regression group: 80 passed. These include rollback, repeat
-blocked transitions, more than 1,000 eligible sources, owner isolation, result
-rewrites and separate seen status. Native PostgreSQL, installed delivery and
-release qualification remain unclaimed. No live messages were sent.
+Local regression tests cover policy, delivery, semantic generations, source
+paging, migration and Copilot recovery, including rollback, repeated blocked
+transitions, more than 1,000 eligible sources, owner isolation, result rewrites
+and separate seen status. Native PostgreSQL and installed delivery have not been
+qualified, and the tests send no live messages.

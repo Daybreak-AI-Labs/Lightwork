@@ -1,4 +1,4 @@
-"""Comparative replay — trace diff (roadmap: 2027 H1 UX — "comparative replay").
+"""Comparative replay — trace diff.
 
 Two runs of the same goal should follow the same shape; when they don't, the
 interesting thing is *where they first diverged*. This tool aligns two replay
