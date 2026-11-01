@@ -160,14 +160,14 @@ launchers should apply an equivalent reviewed allowlist.
   not part of the wire protocol.
 - **The MCP server is for cross-language clients, not for tunneling
   Lightwork over the public internet.** Pair with your own auth +
-  TLS layer if you go remote (see `packages/maverick-mcp/maverick_mcp/http_transport.py`).
+  TLS layer if you go remote (see `http_transport.py` in `packages/maverick-mcp/`).
 
 ## Why no `npm install @maverick/core`?
 
 Thin API clients port well; opinionated frameworks don't. The multi-agent
 kernel stays in Python, and every MCP-speaking language can drive it without
-giving up features. The decision, and the adoption gate for a thin TypeScript
-client package, are recorded under
+giving up features. The decision, and when a thin TypeScript client package
+would be considered, are recorded under
 [Language bindings](../ROADMAP.md#language-bindings) in the roadmap.
 
 ## See also

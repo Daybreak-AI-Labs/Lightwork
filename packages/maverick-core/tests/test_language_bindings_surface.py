@@ -68,8 +68,8 @@ def test_roadmap_records_the_language_bindings_decision():
     # Each top-5 language is named in the decision.
     for lang in ("TypeScript", "Go", "Rust", "C#", "Java"):
         assert lang in section, f"top-5 language {lang!r} not in the decision"
-    # The 15% gate is the decision criterion.
-    assert "15%" in section
+    # A thin TypeScript client is the only port considered, and only on demand.
+    assert "thin TypeScript client package" in section
     assert "MCP" in section
 
 
