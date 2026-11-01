@@ -46,8 +46,8 @@ def test_no_hardcoded_vision_model_in_resolution_path():
     # Guard: the tools resolve via model_for_role, and the old hard-coded
     # `or "anthropic:..."` fallback (which bypassed config) is gone.
     for rel in ("tools/view_image.py", "tools/view_video.py", "skills.py"):
-        src = (_CORE / rel).read_text()
+        src = (_CORE / rel).read_text(encoding="utf-8")
         assert "model_for_role(" in src, f"{rel} should resolve via model_for_role"
     for rel in ("tools/view_image.py", "tools/view_video.py"):
-        src = (_CORE / rel).read_text()
+        src = (_CORE / rel).read_text(encoding="utf-8")
         assert 'or "anthropic:claude-sonnet-4-6"' not in src

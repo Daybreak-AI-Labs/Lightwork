@@ -405,7 +405,7 @@ def test_audit_erase_logs_only_redacted_subject(tmp_path, caplog):
 def test_skill_index_spec_doc_exists():
     p = REPO_ROOT / "docs" / "specs" / "skill-index.md"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     for section in ("Top-level shape", "Required fields", "Client behavior",
                     "Federation", "Trust model"):
         assert section in body
@@ -414,7 +414,7 @@ def test_skill_index_spec_doc_exists():
 def test_skill_index_example_parses_as_json():
     """The example JSON in the spec should be valid JSON the client can read."""
     p = REPO_ROOT / "docs" / "specs" / "skill-index.md"
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # Extract the first ```json block.
     import re
     m = re.search(r"```json\s*\n(.*?)```", body, flags=re.DOTALL)

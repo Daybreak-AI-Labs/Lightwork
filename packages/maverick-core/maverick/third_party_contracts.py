@@ -35,6 +35,7 @@ from pathlib import Path
 from .constant_time import text_equals
 from .file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 
 SCHEMA_VERSION = 1
 AUTHORITY_SCHEMA = "lightwork.third-party-vendor-authority.v1"
@@ -1003,7 +1004,7 @@ class ThirdPartyContractStore:
         return _id(actor, "authenticated principal")
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0)
+        connection = sqlite3.connect(self.path, timeout=30.0, factory=ClosingConnection)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
@@ -2082,7 +2083,7 @@ class ThirdPartyContractStore:
         ensure_private_directory(target.parent)
         try:
             with cross_process_lock(self.path, strict=True), self._connect() as source_connection:
-                with sqlite3.connect(target) as destination_connection:
+                with sqlite3.connect(target, factory=ClosingConnection) as destination_connection:
                     source_connection.backup(destination_connection)
                     check = destination_connection.execute("PRAGMA quick_check").fetchone()
                     if check is None or check[0] != "ok":

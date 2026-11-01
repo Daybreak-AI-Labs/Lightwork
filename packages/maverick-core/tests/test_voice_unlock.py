@@ -1,6 +1,8 @@
 """Voice biometric unlock: companion-factor-only, local, deletable."""
 from __future__ import annotations
 
+import json
+
 import pytest
 from maverick import file_lock
 from maverick.file_lock import private_path_is_restricted
@@ -70,7 +72,12 @@ def test_store_holds_embeddings_not_audio(gate, tmp_path):
     gate.enroll("alice", [b"RAW-AUDIO-1", b"RAW-AUDIO-2", b"RAW-AUDIO-3"])
     raw = (tmp_path / "profiles.json").read_bytes()
     assert b"RAW-AUDIO" not in raw          # never raw audio
-    assert b"sealed" in raw and b"0.6" not in raw  # the embedding itself is sealed
+    # The embedding [0.6, 0.8, 0.0] is stored only inside the sealed value. Check every field
+    # but the enrolment time, whose digits can contain "0.6" by chance.
+    profile = json.loads(raw)["alice"]
+    assert set(profile) == {"sealed", "enrolled_at", "samples"}
+    clear = json.dumps({key: value for key, value in profile.items() if key != "enrolled_at"})
+    assert "0.6" not in clear and "0.8" not in clear
     assert private_path_is_restricted(tmp_path / "profiles.json", 0o600)
 
 

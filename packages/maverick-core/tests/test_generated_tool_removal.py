@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 
 from maverick.budget import Budget
+from maverick.file_lock import private_path_is_restricted
 
 
 def test_older_broad_file_keeps_one_identity_after_it_is_tightened(monkeypatch, tmp_path):
@@ -27,5 +28,10 @@ def test_older_broad_file_keeps_one_identity_after_it_is_tightened(monkeypatch, 
 
     first = engine.inventory("", allowance())
     assert [row["name"] for row in first] == ["older"]
-    assert target.stat().st_mode & 0o077 == 0
+    if os.name == "nt":
+        # Windows has no group/other mode bits; the tightened file gets the
+        # protected owner-only DACL that ensure_private_file installs.
+        assert private_path_is_restricted(target)
+    else:
+        assert target.stat().st_mode & 0o077 == 0
     assert engine.inspect("older", "", allowance())["binding"] == first[0]["binding"]

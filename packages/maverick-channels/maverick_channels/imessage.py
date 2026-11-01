@@ -28,6 +28,7 @@ import logging
 import platform
 import sqlite3
 import subprocess
+from contextlib import closing
 from pathlib import Path
 
 from .base import Channel, IncomingMessage, is_allowed, normalize_allowlist
@@ -150,13 +151,13 @@ class iMessageChannel(Channel):  # noqa: N801 - product spelling
             await asyncio.sleep(self.poll_interval)
 
     def _latest_rowid(self) -> int:
-        with sqlite3.connect(f"file:{CHAT_DB}?mode=ro", uri=True) as conn:
+        with closing(sqlite3.connect(f"file:{CHAT_DB}?mode=ro", uri=True)) as conn, conn:
             row = conn.execute("SELECT COALESCE(MAX(ROWID), 0) FROM message").fetchone()
             return row[0] if row else 0
 
     def _fetch_new(self) -> list[tuple[str, str, int, str]]:
         out: list[tuple[str, str, int, str]] = []
-        with sqlite3.connect(f"file:{CHAT_DB}?mode=ro", uri=True) as conn:
+        with closing(sqlite3.connect(f"file:{CHAT_DB}?mode=ro", uri=True)) as conn, conn:
             cur = conn.execute(
                 """
                 SELECT m.ROWID, h.id, m.text, m.guid

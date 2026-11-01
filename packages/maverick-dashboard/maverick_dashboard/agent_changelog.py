@@ -56,6 +56,11 @@ def entries(agent: str | None = None, *, limit: int = 10, include_workspace: boo
     rows = [row for row in tail_rows(_path(), _MAX_ROWS)
             if isinstance(row.get("changes"), list) and isinstance(row.get("ts"), (int, float))
             and (wanted is None or str(row.get("agent", "")) in wanted)]
+    # The file is oldest first. Reversing it before the stable sort keeps the
+    # later record first when two share a clock reading (a coarse clock can
+    # give equal stamps). A clock stepped back still orders by its stamp, so
+    # this covers equal readings only.
+    rows.reverse()
     rows.sort(key=lambda row: row["ts"], reverse=True)
     return rows[:max(0, int(limit))]
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import gc
 import hashlib
 import inspect
 import json
@@ -10,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 from maverick import config as maverick_config
+from maverick import consumer_trust_center as trust_center_module
 from maverick.consent_profile_data import ProfileExport, PublicProfileAuthority
 from maverick.consumer_trust_center import (
     TRUST_CENTER_EXPORT_SCHEMA,
@@ -959,3 +961,39 @@ def test_public_entrypoints_do_not_accept_tenant_profile_or_property_authority()
         "self",
         "idempotency_key",
     ]
+
+
+def test_store_connections_close_when_row_setup_fails(tmp_path, monkeypatch):
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: any connection left open by a call stays open.
+    store, *_ = _store(tmp_path)
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+    fail_row_setup = {"on": True}
+
+    class _RowSetupFails(sqlite3.Connection):
+        def __setattr__(self, name, value):
+            if name == "row_factory" and fail_row_setup["on"]:
+                raise sqlite3.OperationalError("row setup failed")
+            super().__setattr__(name, value)
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, factory=_RowSetupFails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(trust_center_module.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            with store._connect():
+                pass
+        fail_row_setup["on"] = False
+        with store._connect() as connection:
+            assert connection.execute("SELECT 1").fetchone()[0] == 1
+    finally:
+        gc.enable()
+    assert len(opened) == 2  # the failed setup, the working call
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")

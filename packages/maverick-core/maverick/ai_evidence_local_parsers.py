@@ -54,7 +54,7 @@ _TESSERACT_VERSION_RE = re.compile(r"tesseract[ \t]+([^\s]+)", re.IGNORECASE)
 _WORKER_ERROR_RE = re.compile(r"xls_[a-z_]{1,63}\Z")
 _IMAGE_WORKER_ERROR_RE = re.compile(r"image_[a-z_]{1,63}\Z")
 _ADAPTER_ID = "local-bounded-extraction"
-_ADAPTER_REVISION = 3
+_ADAPTER_REVISION = 4
 _XLS_WORKER_MODULE = "maverick.ai_evidence_local_parsers"
 _BWRAP_VERSION_RE = re.compile(r"(?:bubblewrap|bwrap)[ \t]+([^\s]+)", re.IGNORECASE)
 

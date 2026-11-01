@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import contextlib
+import gc
 import hashlib
+import sqlite3
+import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -11,6 +16,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from maverick import ai_evidence_analysis as evidence
+from maverick import ai_evidence_local_parsers as local_parsers
 from maverick_dashboard import ai_evidence_analysis_authority_api as authority_api
 from maverick_dashboard import ai_evidence_analysis_composition as composition
 
@@ -639,6 +645,198 @@ def test_local_adapter_rotation_is_explicit_and_cannot_undo_revocation(
         )
 
 
+def _adapter_as_enrolled_by(
+    current: evidence.EvidenceAdapterAuthority,
+    *,
+    revision: int,
+    implementation_sha256: str,
+) -> evidence.EvidenceAdapterAuthority:
+    raw = replace(
+        current,
+        revision=revision,
+        implementation_sha256=implementation_sha256,
+        authority_sha256="0" * 64,
+    )
+    return replace(raw, authority_sha256=evidence.adapter_authority_sha256(raw))
+
+
+def _registry_at(tmp_path: Path, clock) -> composition.EvidenceAuthorityRegistry:
+    return composition.EvidenceAuthorityRegistry(
+        tmp_path / "authorities.sqlite3",
+        tenant_id=TENANT,
+        settings=composition.ai_evidence_analysis_settings(_config()),
+        clock=clock,
+    )
+
+
+def test_registry_enrolled_before_the_upgrade_refuses_reads_until_enrolled_again(
+    tmp_path: Path,
+) -> None:
+    # The adapter revision is part of the registry key, so a registry enrolled at
+    # revision 3 has no revision-4 enrollment: reads refuse, and bootstrap enrolls.
+    clock = Clock()
+    current = _build(tmp_path / "source", clock=clock).extraction_authority
+    enrolled_at_three = _adapter_as_enrolled_by(
+        current,
+        revision=3,
+        implementation_sha256=_digest("implementation-before-upgrade"),
+    )
+    registry = _registry_at(tmp_path, clock)
+    registry.enroll_adapter(enrolled_at_three)
+
+    with pytest.raises(
+        composition.AIEvidenceAnalysisCompositionError,
+        match=(
+            "not enrolled for this revision; after an upgrade the local evidence adapter "
+            "must be enrolled again; .*first use.*POST /api/v1/ai-evidence-analysis/"
+            "authorities/bootstrap"
+        ),
+    ):
+        _build(tmp_path, clock=clock, bootstrap=False)
+    assert registry.resolve_adapter(TENANT, "extraction", "local-bounded-extraction", 3) == (
+        enrolled_at_three
+    )
+
+    enrolled = _build(tmp_path, clock=clock, bootstrap=True)
+    assert enrolled.extraction_authority.revision == 4
+    # The criteria-match analysis adapter has its own revision and is unchanged.
+    assert enrolled.analysis_authority.revision == 1
+    reopened = _build(tmp_path, clock=clock, bootstrap=False)
+    assert reopened.extraction_authority == enrolled.extraction_authority
+    assert reopened.analysis_authority == enrolled.analysis_authority
+
+
+def test_admin_bootstrap_enrolls_the_local_adapter_again_at_revision_four(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = time.time
+    current = _build(tmp_path / "source", clock=clock).extraction_authority
+    registry = _registry_at(tmp_path, clock)
+    registry.enroll_adapter(
+        _adapter_as_enrolled_by(
+            current,
+            revision=3,
+            implementation_sha256=_digest("implementation-before-upgrade"),
+        )
+    )
+    permission_calls: list[str] = []
+    monkeypatch.setattr(authority_api, "_tenant_id", lambda: TENANT)
+    monkeypatch.setattr(
+        authority_api,
+        "require_global_permission",
+        lambda _request, permission: permission_calls.append(permission),
+    )
+    app = FastAPI()
+    app.state.ai_evidence_analysis_authority_registry_factory = lambda _tenant: registry
+    app.include_router(
+        authority_api.create_ai_evidence_analysis_authority_router(),
+        prefix="/api/v1",
+    )
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+
+    response = client.post("/api/v1/ai-evidence-analysis/authorities/bootstrap")
+
+    assert response.status_code == 200, response.text
+    assert permission_calls == ["admin"]
+    assert [item["revision"] for item in response.json()["adapters"]] == [4, 1]
+    reopened = _build(tmp_path, clock=clock, bootstrap=False)
+    assert reopened.extraction_authority.revision == 4
+
+
+def test_analysis_recorded_before_the_upgrade_is_refused_for_review_and_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = Clock()
+    raw = b"LIGHTWORK_EVIDENCE_FACT:FACT.access"
+    monkeypatch.setattr(local_parsers, "_ADAPTER_REVISION", 3)
+    before = _build(tmp_path, clock=clock)
+    assert before.extraction_authority.revision == 3
+    artifact_authority, criteria = _enroll_round_trip_authorities(before, raw)
+    artifact = evidence.EvidenceArtifact(
+        artifact_id="artifact-one",
+        media_type=evidence.MEDIA_TEXT,
+        content=raw,
+        source_ref="source-vault",
+        source_revision=1,
+        acquired_at=NOW - 10,
+    )
+
+    def analyze(key: str):
+        return before.store.analyze(
+            TENANT,
+            artifact=artifact,
+            expected_artifact_authority_sha256=artifact_authority.authority_sha256,
+            criteria_set_id="criteria-one",
+            expected_criteria_revision=criteria.revision,
+            expected_criteria_authority_sha256=criteria.authority_sha256,
+            submitter_ref="submitter-one",
+            valid_until=NOW + 1_000,
+            retained_until=NOW + 2_000,
+            idempotency_key=key,
+        )
+
+    pending = analyze("analyze-pending")
+    released = analyze("analyze-released")
+    before.store.review(
+        TENANT,
+        released.analysis_id,
+        reviewer_ref="reviewer-two",
+        decision="approve",
+        expected_revision=1,
+        idempotency_key="approve-before-upgrade",
+    )
+    monkeypatch.undo()
+
+    upgraded = _build(tmp_path, clock=clock)
+    assert upgraded.extraction_authority.revision == 4
+    with pytest.raises(evidence.EvidenceAnalysisConflict, match="adapter authority changed"):
+        upgraded.store.review(
+            TENANT,
+            pending.analysis_id,
+            reviewer_ref="reviewer-two",
+            decision="approve",
+            expected_revision=1,
+            idempotency_key="review-after-upgrade",
+        )
+    with pytest.raises(evidence.EvidenceAnalysisConflict, match="adapter authority changed"):
+        upgraded.store.get_released(TENANT, released.analysis_id)
+    assert upgraded.store.verify_integrity(TENANT).analyses == 2
+
+
+def test_changed_local_adapter_implementation_is_refused_and_not_overwritten(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    source = _build(tmp_path / "source", clock=clock)
+    changed = _adapter_as_enrolled_by(
+        source.extraction_authority,
+        revision=source.extraction_authority.revision,
+        implementation_sha256=_digest("another-implementation"),
+    )
+    registry = _registry_at(tmp_path, clock)
+    registry.enroll_adapter(changed)
+    registry.enroll_adapter(source.analysis_authority)
+    key = registry._adapter_key(  # noqa: SLF001 - exact registry key assertion
+        changed.stage,
+        changed.adapter_id,
+        changed.revision,
+    )
+
+    for bootstrap in (True, False):
+        with pytest.raises(
+            composition.AIEvidenceAnalysisCompositionError,
+            match="changed, expired, or was revoked",
+        ):
+            _build(tmp_path, clock=clock, bootstrap=bootstrap)
+    assert registry.current_registry_revision("adapter", key) == 1
+    assert (
+        registry.resolve_adapter(TENANT, changed.stage, changed.adapter_id, changed.revision)
+        == changed
+    )
+
+
 def test_authority_lifetimes_are_bounded(tmp_path: Path) -> None:
     registry = _build(tmp_path).registry
 
@@ -989,3 +1187,68 @@ def test_upload_registration_computes_the_fingerprint_on_the_server(
         headers={"Content-Type": "text/html"},
     )
     assert unsupported.status_code == 415
+
+
+def _assert_closed(connections):
+    for connection in connections:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
+
+def test_composition_owned_connections_are_closed_when_their_calls_return(tmp_path, monkeypatch):
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: any connection left open by a call stays open.
+    opened = []
+    real_connect = sqlite3.connect
+    fail_pragma = {"on": True}
+
+    class _PragmaFailsMixin:
+        def execute(self, sql, *args):
+            if sql == "PRAGMA foreign_keys=ON" and fail_pragma["on"]:
+                raise sqlite3.OperationalError("pragma failed")
+            return super().execute(sql, *args)
+
+    def recording_connect(*args, **kwargs):
+        # Only connections opened by this module's helpers are under test; the
+        # analysis store in maverick.ai_evidence_analysis opens its own, and every
+        # other call keeps its arguments unchanged, including a caller's factory.
+        own = sys._getframe(1).f_code.co_filename == composition.__file__
+        if not own:
+            return real_connect(*args, **kwargs)
+        base = kwargs.pop("factory", sqlite3.Connection)
+        pragma_fails = type("_PragmaFails", (_PragmaFailsMixin, base), {})
+        connection = real_connect(*args, factory=pragma_fails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(composition.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            _build(tmp_path)
+        fail_pragma["on"] = False
+        before = len(opened)
+        comp = _build(tmp_path)
+        assert len(opened) > before, "__init__"
+        _assert_closed(opened[before:])
+        calls = [
+            ("list_usable_artifacts", comp.registry.list_usable_artifacts),
+            ("list_usable_criteria", comp.registry.list_usable_criteria),
+            ("verify_integrity", comp.registry.verify_integrity),
+            ("current_registry_revision", lambda: comp.registry.current_registry_revision("artifact", "missing")),
+            # A missing authority reads its retirement tombstone, then raises.
+            (
+                "_current_payload",
+                lambda: comp.registry._current_payload("artifact", "missing-artifact"),
+            ),
+            ("compact_expired", lambda: comp.registry.compact_expired(limit=10)),
+        ]
+        for name, call in calls:
+            before = len(opened)
+            with contextlib.suppress(composition.AIEvidenceAnalysisCompositionError):
+                call()
+            assert len(opened) > before, name
+            _assert_closed(opened[before:])
+    finally:
+        gc.enable()
+    _assert_closed(opened)

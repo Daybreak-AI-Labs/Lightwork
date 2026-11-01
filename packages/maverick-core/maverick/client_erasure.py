@@ -85,8 +85,13 @@ def windows_erase_target_identity(path: Path) -> tuple[int, int, bool, bool]:
         raise ValueError("an erase target has no stable file identity")
     if stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
         raise ValueError("an erase target has another hard link outside this path")
-    return (info.st_dev, info.st_ino, stat.S_ISDIR(info.st_mode),
-            bool(getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)))
+    # Take the directory flag from the attributes the deletion handle reports.
+    # On the failing Windows run, S_ISDIR on this lstat result disagreed with the
+    # handle's DIRECTORY attribute for a directory alias, so every alias looked
+    # changed after the inventory. (The S_IFLNK cause is not verified against the docs.)
+    attributes = getattr(info, "st_file_attributes", 0)
+    return (info.st_dev, info.st_ino, bool(attributes & stat.FILE_ATTRIBUTE_DIRECTORY),
+            bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)))
 
 
 def delete_windows_erase_target(path: Path, expected: tuple[int, int, bool, bool]) -> None:

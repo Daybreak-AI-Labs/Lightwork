@@ -10,7 +10,7 @@ def test_mkdocs_yml_exists_and_parses():
     """Top-level mkdocs.yml configures the MkDocs Material site."""
     p = REPO_ROOT / "mkdocs.yml"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # Sanity: required fields appear.
     for k in ("site_name:", "theme:", "nav:", "name: material"):
         assert k in body, f"mkdocs.yml missing {k!r}"
@@ -19,7 +19,7 @@ def test_mkdocs_yml_exists_and_parses():
 def test_mkdocs_yml_navigation_references_existing_files():
     """nav: entries must point to files that actually exist."""
     p = REPO_ROOT / "mkdocs.yml"
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # Naive: extract any docs/ relative path the nav: block points to.
     # MkDocs paths are relative to docs/.
     import re
@@ -40,7 +40,7 @@ def test_mkdocs_yml_navigation_references_existing_files():
 def test_docs_index_landing_exists():
     p = REPO_ROOT / "docs" / "index.md"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # The landing page must carry its core sections.
     for keyword in ("Lightwork", "Quick start", "Pricing", "Roadmap"):
         assert keyword in body, f"index.md missing section: {keyword}"
@@ -49,7 +49,7 @@ def test_docs_index_landing_exists():
 def test_docs_workflow_exists():
     p = REPO_ROOT / ".github" / "workflows" / "docs.yml"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # Must build with mkdocs and deploy to Pages.
     assert "mkdocs" in body
     assert "deploy-pages" in body or "github-pages" in body.lower()
@@ -58,7 +58,7 @@ def test_docs_workflow_exists():
 def test_reusable_agent_on_pr_workflow_exists():
     p = REPO_ROOT / ".github" / "workflows" / "agent-on-pr.yml"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # Must declare reusable workflow_call and required inputs.
     assert "workflow_call" in body
     assert "goal:" in body
@@ -71,7 +71,7 @@ def test_publish_workflow_still_present():
     """Earlier PyPI publish workflow shouldn't have been clobbered."""
     p = REPO_ROOT / ".github" / "workflows" / "publish.yml"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     assert "pypa/gh-action-pypi-publish" in body
 
 

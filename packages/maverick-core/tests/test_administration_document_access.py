@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -468,3 +469,61 @@ def test_resolver_cannot_return_cross_tenant_or_unsafe_display_name(tmp_path):
     authority = _authority("tenant-a", "principal.alice", "doc-name")
     with pytest.raises(access.DocumentAccessValidationError, match="display_name_invalid"):
         replace(authority, safe_display_name="../secret.pdf")
+
+
+def _assert_closed(connections):
+    for connection in connections:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
+
+def test_every_store_connection_is_closed_when_its_call_returns(tmp_path, monkeypatch):
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: any connection left open by a call stays open.
+    opened = []
+    real_connect = sqlite3.connect
+    fail_pragma = {"on": True}
+
+    class _PragmaFails(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql == "PRAGMA foreign_keys=ON" and fail_pragma["on"]:
+                raise sqlite3.OperationalError("pragma failed")
+            return super().execute(sql, *args)
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, factory=_PragmaFails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(access.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        with pytest.raises(access.DocumentAccessError):
+            _service(tmp_path)
+        fail_pragma["on"] = False
+        before = len(opened)
+        service, *_ = _service(tmp_path)
+        assert len(opened) > before, "__init__"
+        _assert_closed(opened[before:])
+        before = len(opened)
+        minted = service.mint_token("doc-123", idempotency_key="mint-close-1")
+        assert len(opened) > before, "mint_token"
+        _assert_closed(opened[before:])
+        calls = [
+            # A repeated mint reads the operation log through find_mint_replay.
+            ("mint_token", lambda: service.mint_token("doc-123", idempotency_key="mint-close-1")),
+            ("get_token", lambda: service.get_token(minted.record.token_id)),
+            ("list_tokens", service.list_tokens),
+            ("claim", lambda: service.claim(minted.download_token, idempotency_key="claim-close-1")),
+            ("list_audit", service.store.list_audit),
+            ("status", service.status),
+            ("verify_integrity", service.store.verify_integrity),
+        ]
+        for name, call in calls:
+            before = len(opened)
+            call()
+            assert len(opened) > before, name
+            _assert_closed(opened[before:])
+    finally:
+        gc.enable()
+    _assert_closed(opened)

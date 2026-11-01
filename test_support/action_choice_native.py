@@ -201,7 +201,8 @@ class Harness:
             tool_data_schemas={tool: TOOL_SCHEMAS[tool] for tool in (OPEN, terminal)},
             retain_until=time.time() + 3600)
         assert resume(run.run_id).status == "paused_approval"
-        assert resume(run.run_id).status == "completed"
+        resumed = resume(run.run_id)
+        assert resumed.status == "completed", (resumed.status, getattr(resumed, "error", ""))
         row = service.get(context(), source.id, run.run_id)
         assert row["status"] == "awaiting_review"
         row = service.review(context(), source.id, run.run_id, expected_revision=row["revision"],

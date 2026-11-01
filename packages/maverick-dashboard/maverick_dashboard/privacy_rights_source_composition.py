@@ -28,6 +28,7 @@ from maverick import privacy_rights_source_adapters as adapters
 from maverick import privacy_rights_source_worker as worker
 from maverick.file_lock import ensure_private_directory, ensure_private_file
 from maverick.paths import canonical_tenant_id, data_dir, tenant_scope
+from maverick.sqlite_closing import ClosingConnection
 
 _PROVIDERS = frozenset(
     {
@@ -491,7 +492,9 @@ class EncryptedMutationTargetCustody:
         ensure_private_file(self.path)
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path, timeout=30.0, isolation_level=None, factory=ClosingConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=30000")
         connection.execute("PRAGMA secure_delete=ON")
@@ -761,7 +764,7 @@ class GovernedVaultRetrievalSink:
                 "privacy-rights retrieval index is unavailable"
             )
         connection = sqlite3.connect(
-            self.index_path, timeout=30.0, isolation_level=None
+            self.index_path, timeout=30.0, isolation_level=None, factory=ClosingConnection
         )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=30000")

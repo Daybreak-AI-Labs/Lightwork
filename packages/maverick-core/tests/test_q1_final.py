@@ -348,7 +348,7 @@ def test_world_model_v8_indices_present(tmp_path):
 def test_world_model_indexes_doc_exists():
     p = REPO_ROOT / "docs" / "performance" / "world-model-indexes.md"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     for expected in (
         "idx_episodes_goal_started",
         "idx_episodes_started",

@@ -31,6 +31,7 @@ from typing import Any
 from .constant_time import text_equals
 from .file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 
 SCHEMA_VERSION = 1
 REQUEST_TYPES = frozenset({"DataDeletion", "OptOut"})
@@ -449,7 +450,7 @@ class DROPManagementStore:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0)
+        connection = sqlite3.connect(self.path, timeout=30.0, factory=ClosingConnection)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")

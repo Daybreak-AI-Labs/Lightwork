@@ -1116,3 +1116,74 @@ def test_honest_provider_boundary_and_lifecycle_export(
     assert report.body["lifecycle_integrity_sha256"] == lifecycle.integrity_sha256
     assert "callbacks_are_delivery_intent_not_external_writes" in report.body["limitations"]
     assert store.verify_integrity("tenant-a").verified_records > 0
+
+
+def _record_connections(monkeypatch) -> list[sqlite3.Connection]:
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", recording_connect)
+    return opened
+
+
+def test_offboarding_hold_refusal_closes_every_ledger_connection(
+    authority: tuple[ThirdPartyLifecycleStore, Clock, Principal],
+    monkeypatch,
+) -> None:
+    """The completion gate derives the legal-hold blocker through ledger connections
+    that must be closed, not only committed (Windows keeps the ledger locked)."""
+    store, clock, principal = authority
+    evaluated_owner_review_assessment(store, principal, "vendor-1")
+    principal.value = "owner"
+    lifecycle = store.create_lifecycle(
+        "tenant-a",
+        "lifecycle-1",
+        vendor_ref="vendor-1",
+        owner_ref="owner",
+        dependencies=dependencies(),
+        retention_seconds=DAY,
+        idempotency_key="lifecycle-create",
+    )
+    lifecycle = store.transition_lifecycle(
+        "tenant-a",
+        lifecycle.lifecycle_id,
+        "active",
+        reason_code="onboarding_accepted",
+        expected_revision=lifecycle.revision,
+        idempotency_key="lifecycle-active",
+    )
+    plan = store.begin_offboarding(
+        "tenant-a",
+        lifecycle.lifecycle_id,
+        "plan-1",
+        tasks=offboarding_tasks(),
+        legal_hold=True,
+        legal_hold_evidence_ref="legal.hold.case",
+        maximum_callback_attempts=2,
+        expected_lifecycle_revision=lifecycle.revision,
+        idempotency_key="offboarding-begin",
+    )
+    principal.value = "approver"
+    opened = _record_connections(monkeypatch)
+    try:
+        with pytest.raises(ThirdPartyLifecycleConflict, match="legal_hold_active"):
+            store.approve_offboarding_completion(
+                "tenant-a",
+                plan.plan_id,
+                completion_attestation_ref="attestation.held",
+                expected_plan_revision=plan.revision,
+                expected_lifecycle_revision=3,
+                idempotency_key="offboarding-held",
+            )
+        assert opened, "the completion gate should read the ledger"
+        for connection in opened:
+            with pytest.raises(sqlite3.ProgrammingError):  # a closed connection refuses work
+                connection.execute("SELECT 1")
+    finally:
+        for connection in opened:
+            connection.close()

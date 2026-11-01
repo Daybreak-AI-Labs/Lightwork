@@ -92,7 +92,7 @@ def test_jailbreak_corpus_minimum_detection_rate():
     corpus_path = repo_root / "tests" / "data" / "shield_jailbreak_corpus.txt"
     assert corpus_path.exists(), f"missing corpus: {corpus_path}"
     lines: list[str] = []
-    for raw in corpus_path.read_text().splitlines():
+    for raw in corpus_path.read_text(encoding="utf-8").splitlines():
         s = raw.strip()
         if not s or s.startswith("#"):
             continue
@@ -115,7 +115,7 @@ def test_threat_model_doc_exists():
     repo_root = Path(__file__).resolve().parents[3]
     p = repo_root / "docs" / "security" / "threat-model.md"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # Must cover all six STRIDE categories.
     for cat in ("Spoofing", "Tampering", "Repudiation",
                 "Information disclosure", "Denial of service",
@@ -127,7 +127,7 @@ def test_streaming_parity_doc_exists():
     repo_root = Path(__file__).resolve().parents[3]
     p = repo_root / "docs" / "performance" / "streaming-parity.md"
     assert p.is_file()
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     # Doc must list every registered provider so it stays in sync with the
     # adapter registry.
     from maverick.providers import _PROVIDER_ALIASES

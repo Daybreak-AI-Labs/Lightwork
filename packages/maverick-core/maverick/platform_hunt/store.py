@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ..file_lock import ensure_private_directory, ensure_private_file
+from ..sqlite_closing import ClosingConnection
 from .models import ContainmentProposal, Finding, Investigation, canonical_digest
 
 AuditRecorder = Callable[[str, dict[str, Any]], bool]
@@ -95,7 +96,7 @@ class HuntStore:
         ensure_private_file(self.path, 0o600)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, timeout=30.0)
+        conn = sqlite3.connect(self.path, timeout=30.0, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout = 30000")
         conn.execute("PRAGMA foreign_keys = ON")
@@ -823,7 +824,7 @@ class HuntStore:
                        WHERE event_id = ? AND delivered_at IS NULL""",
                     (time.time(), str(row["event_id"])),
                 )
-            delivered += int(updated.rowcount == 1)
+                delivered += int(updated.rowcount == 1)
         return delivered
 
     def pending_audit_count(self) -> int:

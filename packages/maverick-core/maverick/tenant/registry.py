@@ -872,11 +872,15 @@ def delete_tenant(tenant_id: str, *, purge: bool = False) -> bool:
     if purge:
         import shutil
 
+        from ..federation import hold_state_file_closed
         from ..workspace import Workspace
         root = Workspace(tid).root
         # Only purge under the tenants/ tree, never the shared root.
         if "tenants" in root.parts:
-            shutil.rmtree(root, ignore_errors=True)
+            # The tenant's federation state file may be open here; an open file cannot be
+            # removed on Windows, and rmtree(ignore_errors=True) would skip it silently.
+            with hold_state_file_closed():
+                shutil.rmtree(root, ignore_errors=True)
     return True
 
 
@@ -1124,7 +1128,10 @@ def erase_removed_tenant(tenant_id: str, *, revision: str, operation: str, actor
         current_entries, _total = _erasure_tree(root, check)
         if current_entries != entries:
             raise ValueError("The local records changed after admission. This original remains unconfirmed; review the remaining records separately.")
-        _erasure_unlink(root, entries, check)
+        # The tenant's federation state file is among the entries; keep it closed for the unlinks.
+        from ..federation import hold_state_file_closed
+        with hold_state_file_closed():
+            _erasure_unlink(root, entries, check)
         check()
         if _erasure_root(tid).exists():
             raise TenantRegistryError("Local erasure could not be confirmed. Check the original result.")

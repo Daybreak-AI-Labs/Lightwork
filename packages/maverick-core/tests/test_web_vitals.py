@@ -7,6 +7,7 @@ import os
 
 import pytest
 from maverick import web_vitals as vitals
+from maverick.file_lock import private_path_is_restricted
 
 DAY = 86_400
 NOW = calendar.timegm((2026, 10, 6, 12, 0, 0))
@@ -85,7 +86,11 @@ def test_stores_no_person_no_raw_address_and_no_raw_values(home):
     vitals.record("/chat/goal/{goal_id}", "phone", {"lcp": 1234, "inp": 88, "cls": 0.05}, now=NOW)
     text = vitals.store_path().read_text()
     assert "1234" not in text and "88," not in text
-    assert oct(vitals.store_path().stat().st_mode & 0o777) == "0o600"
+    if os.name == "nt":
+        # Windows has no mode bits; the store is created with a protected owner-only DACL.
+        assert private_path_is_restricted(vitals.store_path(), 0o600)
+    else:
+        assert oct(vitals.store_path().stat().st_mode & 0o777) == "0o600"
     stored = json.loads(text)
     assert set(stored) == {"version", "days"}
 

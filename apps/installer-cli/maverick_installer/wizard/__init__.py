@@ -5915,11 +5915,20 @@ def _prior_governance_profile() -> str | None:
     belong to Settings > All settings. Reads the wizard's configured path.
     """
     try:
-        cfg = tomllib.loads(CONFIG_FILE.read_text())
-        prior = (cfg.get("governance") or {}).get("profile", "")
-        return prior if prior in GOVERNANCE_PROFILES else None
-    except Exception:  # pragma: no cover -- absent/invalid config: no prior
+        # The wizard writes config.toml as UTF-8; Windows' default is cp1252.
+        cfg = tomllib.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:  # nothing saved yet: no prior
         return None
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        # Say so rather than quietly offering the default in place of a saved level.
+        console.print(
+            "[yellow]Your saved settings file could not be read, so the governance "
+            "level chosen before is not shown. Pick it again below.[/yellow]"
+        )
+        return None
+    section = cfg.get("governance")
+    prior = section.get("profile", "") if isinstance(section, dict) else ""
+    return prior if isinstance(prior, str) and prior in GOVERNANCE_PROFILES else None
 
 
 def pick_governance_profile() -> str:

@@ -53,6 +53,9 @@ Off by default. Opt in::
 """
 from __future__ import annotations
 
+import atexit
+import contextlib
+import functools
 import hashlib
 import hmac
 import json
@@ -63,7 +66,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict, deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from concurrent import futures
 from dataclasses import dataclass
 from pathlib import Path
@@ -109,6 +112,91 @@ _fed_rate_hits: dict[str, deque[float]] = {}
 _fed_rate_lock = threading.Lock()
 _FED_RATE_MAX_KEYS = 8192
 _FED_STATE_CONNECTION = threading.local()
+# Every connection _FederationState._connect caches, in any thread, so that a release can close
+# them all. Each entry is (owning thread, connection), keyed by id(connection). A cached
+# connection is used only by the thread that cached it, but a release closes it from another
+# thread, so each one is opened with check_same_thread=False. That is safe only because a
+# release waits for every running state call (see _STATE_FILE_GATE) before it closes anything.
+_FED_STATE_REGISTRY_LOCK = threading.Lock()
+_FED_STATE_REGISTRY: dict[int, tuple[threading.Thread, sqlite3.Connection]] = {}
+# Connections the parent process cached, kept referenced in a forked child so that finalizing
+# them there cannot close the parent's file descriptor (see _reset_after_fork).
+_INHERITED_FED_STATE_CONNECTIONS: list[sqlite3.Connection] = []
+# Bumped by every release; a thread's cache is valid only for the generation it was opened in,
+# so every thread reopens after a release.
+_FED_STATE_GENERATION = 0
+
+
+class _StateFileGate:
+    """Lets state calls run together, and makes a close or a file replacement wait for them.
+
+    A state call holds the gate shared from before it opens its connection until it has
+    finished using it. close_cached_connections() and hold_state_file_closed() hold it
+    exclusively: they wait for running calls to finish, so no connection is closed while a
+    call uses it, and calls that start meanwhile wait for them, so no connection opens while
+    the state file is being replaced. A thread that asks for the gate exclusively from inside
+    one of its own state calls, or asks for it shared while it holds it exclusively, would wait
+    on itself, so that raises RuntimeError instead.
+    """
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition(threading.Lock())
+        self._readers = 0
+        self._waiting_writers = 0
+        self._writer: int | None = None
+        self._local = threading.local()
+
+    @contextlib.contextmanager
+    def shared(self) -> Iterator[None]:
+        local = self._local
+        if getattr(local, "writing", 0):
+            raise RuntimeError("the federation state file is held closed by this thread")
+        nested = getattr(local, "reading", 0)
+        with self._condition:
+            # A nested call already counts as a reader, and a writer can only be running once
+            # every reader has left, so waiting here could only wait on this thread.
+            if not nested:
+                while self._writer is not None or self._waiting_writers:
+                    self._condition.wait()
+            self._readers += 1
+        local.reading = nested + 1
+        try:
+            yield
+        finally:
+            local.reading = nested
+            with self._condition:
+                self._readers -= 1
+                if not self._readers:
+                    self._condition.notify_all()
+
+    @contextlib.contextmanager
+    def exclusive(self) -> Iterator[None]:
+        local = self._local
+        if getattr(local, "reading", 0):
+            raise RuntimeError("the federation state file cannot be closed inside a state call")
+        outer = getattr(local, "writing", 0)
+        if not outer:
+            with self._condition:
+                self._waiting_writers += 1
+                try:
+                    while self._writer is not None or self._readers:
+                        self._condition.wait()
+                    self._writer = threading.get_ident()
+                finally:
+                    self._waiting_writers -= 1
+                    self._condition.notify_all()
+        local.writing = outer + 1
+        try:
+            yield
+        finally:
+            local.writing = outer
+            if not outer:
+                with self._condition:
+                    self._writer = None
+                    self._condition.notify_all()
+
+
+_STATE_FILE_GATE = _StateFileGate()
 
 _DEFAULT_ADDR = "127.0.0.1:50061"  # one port up from the goal API (50051)
 _DEFAULT_RPC_TIMEOUT_S = 10.0
@@ -140,6 +228,17 @@ class _CorrelationEntry:
     result: dict[str, Any] | None = None
 
 
+def _state_call(method):
+    """Run a state method inside the gate, so its connection is not closed while it uses it."""
+
+    @functools.wraps(method)
+    def call(self, *args, **kwargs):
+        with _STATE_FILE_GATE.shared():
+            return method(self, *args, **kwargs)
+
+    return call
+
+
 class _FederationState:
     """Tenant-scoped durable replay, rate, and correlation authority."""
 
@@ -151,6 +250,11 @@ class _FederationState:
         self.path = Path(path)
 
     def _connect(self) -> sqlite3.Connection:
+        """Return this thread's cached connection, opening the state file on first use.
+
+        The caller must be inside a state call (_STATE_FILE_GATE.shared()) for as long as it
+        uses the connection. The public state methods below are wrapped with _state_call.
+        """
         from .file_lock import (
             ensure_private_directory,
             ensure_private_file,
@@ -162,14 +266,16 @@ class _FederationState:
         cached_path = getattr(_FED_STATE_CONNECTION, "path", None)
         cached_conn = getattr(_FED_STATE_CONNECTION, "conn", None)
         cached_pid = getattr(_FED_STATE_CONNECTION, "pid", None)
+        cached_generation = getattr(_FED_STATE_CONNECTION, "generation", None)
         if (
             cached_path == canonical
             and cached_conn is not None
             and cached_pid == current_pid
+            and cached_generation == _FED_STATE_GENERATION
         ):
             return cached_conn
         if cached_conn is not None:
-            cached_conn.close()
+            _release_registered(cached_conn)
             _FED_STATE_CONNECTION.conn = None
             _FED_STATE_CONNECTION.path = None
             _FED_STATE_CONNECTION.pid = None
@@ -180,6 +286,7 @@ class _FederationState:
             ensure_private_file(self.path)
         conn = sqlite3.connect(
             str(self.path), timeout=10.0, isolation_level=None,
+            check_same_thread=False,
         )
         try:
             if not existed:
@@ -212,14 +319,17 @@ class _FederationState:
                     PRIMARY KEY (peer, correlation_id)
                 );
             """)
+            generation = _register_cached_connection(conn)
             _FED_STATE_CONNECTION.path = canonical
             _FED_STATE_CONNECTION.conn = conn
             _FED_STATE_CONNECTION.pid = current_pid
+            _FED_STATE_CONNECTION.generation = generation
             return conn
         except BaseException:
             conn.close()
             raise
 
+    @_state_call
     def claim_replay(
         self, scope: str, sig: str, *, expires_at: float, now: float,
     ) -> bool:
@@ -250,6 +360,7 @@ class _FederationState:
             )
             return False
 
+    @_state_call
     def rate_ok(self, key: str, *, now: float, limit: int) -> bool:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -268,6 +379,7 @@ class _FederationState:
             )
             return True
 
+    @_state_call
     def claim_correlation(
         self, peer: str, corr: str, digest: str, *, now: float,
     ) -> tuple[str, dict[str, Any] | None, str]:
@@ -314,6 +426,7 @@ class _FederationState:
             )
             return "owner", None, owner_token
 
+    @_state_call
     def correlation_result(
         self, peer: str, corr: str, digest: str,
     ) -> tuple[str, dict[str, Any] | None]:
@@ -335,6 +448,7 @@ class _FederationState:
             raise ValueError("invalid federation correlation result")
         return "cached", result
 
+    @_state_call
     def finish_correlation(
         self,
         peer: str,
@@ -359,6 +473,7 @@ class _FederationState:
             if cursor.rowcount != 1:
                 raise ValueError("federation correlation ownership changed")
 
+    @_state_call
     def release_correlation(
         self, peer: str, corr: str, digest: str, owner_token: str,
     ) -> None:
@@ -369,6 +484,132 @@ class _FederationState:
                 "AND digest = ? AND owner_token = ? AND status = 'in_progress'",
                 (peer, corr, digest, owner_token),
             )
+
+
+def _register_cached_connection(connection: sqlite3.Connection) -> int:
+    """Track a newly cached connection; return the generation it is valid for.
+
+    A thread that has ended never uses its cached connection again, so the connections of
+    ended threads are closed here rather than kept until process exit. Called inside a state
+    call, so no release can run at the same time.
+    """
+    owner = threading.current_thread()
+    with _FED_STATE_REGISTRY_LOCK:
+        ended = []
+        for key, (thread, stale) in list(_FED_STATE_REGISTRY.items()):
+            if not thread.is_alive():
+                del _FED_STATE_REGISTRY[key]
+                ended.append(stale)
+        _FED_STATE_REGISTRY[id(connection)] = (owner, connection)
+        generation = _FED_STATE_GENERATION
+    for stale in ended:
+        _close_registered(stale)
+    return generation
+
+
+def _close_registered(connection: sqlite3.Connection) -> None:
+    with contextlib.suppress(sqlite3.Error):
+        connection.close()
+
+
+def _release_registered(connection: sqlite3.Connection) -> None:
+    """Close one cached connection, unless a release has already closed it."""
+    with _FED_STATE_REGISTRY_LOCK:
+        entry = _FED_STATE_REGISTRY.get(id(connection))
+        if entry is None or entry[1] is not connection:
+            return
+        del _FED_STATE_REGISTRY[id(connection)]
+    _close_registered(connection)
+
+
+def _close_all_cached() -> None:
+    """Close every registered connection and invalidate every thread's cache.
+
+    The caller holds _STATE_FILE_GATE exclusively, so no connection is in use.
+    """
+    global _FED_STATE_GENERATION
+    with _FED_STATE_REGISTRY_LOCK:
+        _FED_STATE_GENERATION += 1
+        entries = list(_FED_STATE_REGISTRY.values())
+        _FED_STATE_REGISTRY.clear()
+    for _thread, connection in entries:
+        _close_registered(connection)
+    _FED_STATE_CONNECTION.conn = None
+    _FED_STATE_CONNECTION.path = None
+    _FED_STATE_CONNECTION.pid = None
+    _FED_STATE_CONNECTION.generation = None
+
+
+def close_cached_connections() -> None:
+    """Close every federation state connection cached by any thread, and invalidate the caches.
+
+    A state call that is running in another thread is waited for, not interrupted: the close
+    starts once those calls have finished, and calls that start meanwhile wait for it. Each
+    thread's cache is invalidated, so its next state call opens a fresh connection. Raises
+    RuntimeError when called from inside a state call, because that call would wait on itself.
+
+    The release reaches only this process. A dashboard or MCP server in another process keeps
+    its own connection, so a restore or purge run there can still fail on Windows, and on POSIX
+    that process keeps writing to a replaced file. Not verified on Windows.
+
+    To keep the file closed for a whole replacement, use hold_state_file_closed() instead.
+    """
+    with _STATE_FILE_GATE.exclusive():
+        _close_all_cached()
+
+
+@contextlib.contextmanager
+def hold_state_file_closed() -> Iterator[None]:
+    """Close the cached state connections, and keep new ones from opening until the block exits.
+
+    Wrap every deletion, replacement or restore of the federation state file in it, so that no
+    connection can open the file between the close and the replacement. The same limits as
+    close_cached_connections() apply, and the block must not make federation state calls.
+    """
+    with _STATE_FILE_GATE.exclusive():
+        _close_all_cached()
+        yield
+
+
+def _close_calling_thread_at_exit() -> None:
+    """At interpreter exit, close only the calling thread's connection.
+
+    Other threads may still be running then, so their connections are left to end with the
+    process.
+    """
+    connection = getattr(_FED_STATE_CONNECTION, "conn", None)
+    _FED_STATE_CONNECTION.conn = None
+    if connection is not None:
+        _release_registered(connection)
+
+
+atexit.register(_close_calling_thread_at_exit)
+
+
+def _reset_after_fork() -> None:
+    """In a forked child, forget the parent's registry and gate without closing its connections.
+
+    The child's copies of those connection objects stay referenced, so that finalizing them in
+    the child cannot close file descriptors that the parent still uses.
+    """
+    global _FED_STATE_REGISTRY_LOCK, _STATE_FILE_GATE
+    _INHERITED_FED_STATE_CONNECTIONS.extend(
+        connection for _thread, connection in _FED_STATE_REGISTRY.values()
+    )
+    _FED_STATE_REGISTRY.clear()
+    cached = getattr(_FED_STATE_CONNECTION, "conn", None)
+    if cached is not None:
+        _INHERITED_FED_STATE_CONNECTIONS.append(cached)
+    _FED_STATE_CONNECTION.conn = None
+    _FED_STATE_CONNECTION.path = None
+    _FED_STATE_CONNECTION.pid = None
+    _FED_STATE_CONNECTION.generation = None
+    _FED_STATE_REGISTRY_LOCK = threading.Lock()
+    _STATE_FILE_GATE = _StateFileGate()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_after_fork)
 
 
 def _federation_state(path: Path | None = None) -> _FederationState:

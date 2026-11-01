@@ -37,6 +37,7 @@ from typing import Protocol, runtime_checkable
 from .constant_time import text_equals
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import InvalidTenantError, canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 from .unified_audit import SOURCE_ACTION_CODES, SourceRecord, build_source_record
 
 SCHEMA_VERSION = 1
@@ -600,7 +601,9 @@ class AIGovernanceLoopStore:
             raise AIGovernanceLoopValidationError("store clock is unavailable") from exc
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path, timeout=30.0, isolation_level=None, factory=ClosingConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA foreign_keys=ON")

@@ -322,3 +322,92 @@ def test_concurrent_folds_on_different_conversations_all_persist(tmp_path):
     survived = sum(1 for i in range(n) if final.state(f"conv{i:03d}")[0] > 0)
     assert survived == n
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_concurrent_folds_survive_transient_replace_denials(tmp_path, monkeypatch, caplog):
+    """Windows refuses to replace sidecar.json while another handle on it is open
+    (a concurrent fold reading it), so the first rename of a save can fail with
+    PermissionError. That save used to be dropped with only a warning. Deny the
+    first rename of every save here: all N conversations must still persist."""
+    import errno
+    import threading
+
+    from maverick.compaction import streaming
+
+    # The Windows retry window; Linux never retries a PermissionError.
+    monkeypatch.setattr(streaming, "_REPLACE_RETRY_SECONDS", 5.0)
+    real_replace = os.replace
+    guard = threading.Lock()
+    denied_sources = []
+
+    def deny_first_rename(source, target, *args, **kwargs):
+        with guard:
+            first_attempt = source not in denied_sources
+            if first_attempt:
+                denied_sources.append(source)
+        if first_attempt:
+            raise PermissionError(errno.EACCES, "sidecar is open by another reader", str(target))
+        return real_replace(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", deny_first_rename)
+    p = tmp_path / "sidecar.json"
+    n = 12
+    turns = [{"role": "user", "content": "hello there"},
+             {"role": "assistant", "content": "hi back"}]
+
+    def worker(i: int):
+        comp = StreamingCompactor(llm=ConcatLLM(), path=p)
+        comp.fold(f"conv{i:03d}", turns)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(denied_sources) == n
+    assert not [r for r in caplog.records if "cannot write" in r.getMessage()]
+    final = StreamingCompactor(llm=ConcatLLM(), path=p)
+    survived = sum(1 for i in range(n) if final.state(f"conv{i:03d}")[0] > 0)
+    assert survived == n
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_locked_reload_failure_never_overwrites_other_conversations(tmp_path, monkeypatch):
+    """A sidecar that cannot be re-read under the lock must not be saved over: the
+    reload used to fall back to an empty dict, so one fold rewrote the file with
+    only its own conversation and dropped every other one. On Windows a reader
+    can hold sidecar.json open for longer than the reload waits."""
+    from pathlib import Path
+
+    p = tmp_path / "sidecar.json"
+    turns = [{"role": "user", "content": "hello there"},
+             {"role": "assistant", "content": "hi back"}]
+    StreamingCompactor(llm=ConcatLLM(), path=p).fold("convA", turns)
+
+    real_read_text = Path.read_text
+    sidecar_reads = []
+
+    def deny_second_sidecar_read(self, *args, **kwargs):
+        # The fold's first read is unlocked; the second is the locked reload.
+        if self == p:
+            sidecar_reads.append(self)
+            if len(sidecar_reads) == 2:
+                raise PermissionError(13, "sidecar is open by another reader", str(self))
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny_second_sidecar_read)
+    StreamingCompactor(llm=ConcatLLM(), path=p).fold("convB", turns)
+    monkeypatch.undo()
+
+    assert len(sidecar_reads) == 2
+    final = StreamingCompactor(llm=ConcatLLM(), path=p)
+    assert final.state("convA")[0] == len(turns)
+
+
+def test_sidecar_replace_retries_only_on_windows():
+    """Linux keeps a single rename attempt, so a persistent denial fails at once."""
+    from maverick.compaction import streaming
+
+    expected = 5.0 if os.name == "nt" else 0.0
+    assert expected == streaming._REPLACE_RETRY_SECONDS

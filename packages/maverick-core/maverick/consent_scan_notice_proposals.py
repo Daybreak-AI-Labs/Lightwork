@@ -812,9 +812,14 @@ class ConsentScanNoticeProposalStore:
                 connection = consent_storage.connect(self._path, timeout=30.0, implicit_transactions=True)
             else:
                 connection = sqlite3.connect(self._path, timeout=30.0)
-            connection.row_factory = sqlite3.Row
             try:
+                connection.row_factory = sqlite3.Row
                 connection.execute("PRAGMA foreign_keys = ON")
+            except BaseException:
+                if isinstance(connection, sqlite3.Connection):
+                    connection.close()
+                raise
+            try:
                 yield connection
             finally:
                 connection.close()

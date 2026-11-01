@@ -308,10 +308,10 @@ class MatterStore:
     @contextlib.contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout=30000")
-        connection.execute("PRAGMA synchronous=FULL")
         try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA busy_timeout=30000")
+            connection.execute("PRAGMA synchronous=FULL")
             yield connection
         finally:
             connection.close()

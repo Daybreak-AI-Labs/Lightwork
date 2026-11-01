@@ -48,6 +48,7 @@ from .consumer_trust_center import (
 )
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 
 AUTHORITY_SCHEMA = "lightwork.consumer-trust-center-authority.v1"
 AUTHORITY_EXPORT_SCHEMA = "lightwork.consumer-trust-center-authority-export.v1"
@@ -446,7 +447,7 @@ class ConsumerTrustCenterAuthorityStore:
         if consent_storage.shared():
             connection = consent_storage.connect(self.path, timeout=30.0, implicit_transactions=True)
         else:
-            connection = sqlite3.connect(self.path, timeout=30.0)
+            connection = sqlite3.connect(self.path, timeout=30.0, factory=ClosingConnection)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")

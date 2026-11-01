@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import gc
+import sqlite3
 from dataclasses import asdict
 
 import pytest
+from maverick import trust_center_branding as branding
 from maverick.trust_center_branding import (
     BrandingConflict,
     BrandingValidationError,
@@ -381,3 +385,170 @@ def test_lists_show_current_assets_domains_and_projections(tmp_path):
     )
     store.purge_assets(before=rejected.retained_until, limit=10)
     assert [item.asset_version for item in store.list_assets()] == [active.asset_version]
+
+
+def _assert_closed(connections):
+    for connection in connections:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
+
+def test_every_branding_connection_is_closed_when_its_call_returns(tmp_path, monkeypatch):
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: any connection left open by a call stays open.
+    opened = []
+    real_connect = sqlite3.connect
+    fail_pragma = {"on": True}
+
+    class _PragmaFails(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql == "PRAGMA foreign_keys=ON" and fail_pragma["on"]:
+                raise sqlite3.OperationalError("pragma failed")
+            return super().execute(sql, *args)
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, factory=_PragmaFails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(branding.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            make_store(tmp_path)
+        fail_pragma["on"] = False
+        clock = Clock()
+        before = len(opened)
+        store = make_store(tmp_path, clock=clock, deployment=DeploymentAuthority(clock))
+        assert len(opened) > before, "__init__"
+        _assert_closed(opened[before:])
+        activate_logo(store)
+        before = len(opened)
+        projection = store.bind_projection(
+            "property-a",
+            "client-a",
+            asset_id="primary-logo",
+            asset_version=1,
+            domain_claim_id=None,
+            domain_claim_version=None,
+            expected_projection_revision=0,
+            actor_ref="publisher",
+        )
+        assert len(opened) > before, "bind_projection"
+        _assert_closed(opened[before:])
+        calls = [
+            ("get_asset", lambda: store.get_asset("primary-logo", 1)),
+            ("list_assets", store.list_assets),
+            ("list_domains", store.list_domains),
+            ("list_projections", store.list_projections),
+            ("status", store.status),
+            ("resolve_projection", lambda: store.resolve_projection(publication())),
+            (
+                "read_public_asset",
+                lambda: store.read_public_asset(
+                    publication(), projection.projection_id, projection.asset_content_sha256
+                ),
+            ),
+            # The domain calls below end in an expected branding error, after their read.
+            ("get_domain", lambda: store.get_domain("brand-domain", 1)),
+            (
+                "verify_domain",
+                lambda: store.verify_domain(
+                    "brand-domain", 1, expected_authority_revision=1, actor_ref="domain-admin"
+                ),
+            ),
+            (
+                "activate_domain",
+                lambda: store.activate_domain(
+                    "brand-domain", 1, expected_authority_revision=1, actor_ref="domain-admin"
+                ),
+            ),
+            (
+                "reverify_domain",
+                lambda: store.reverify_domain(
+                    "brand-domain", 1, expected_authority_revision=1, actor_ref="domain-admin"
+                ),
+            ),
+        ]
+        for name, call in calls:
+            before = len(opened)
+            with contextlib.suppress(branding.TrustCenterBrandingError):
+                call()
+            assert len(opened) > before, name
+            _assert_closed(opened[before:])
+    finally:
+        gc.enable()
+    _assert_closed(opened)
+
+
+class _SharedSession:
+    """Stands in for a shared Postgres session: it forwards to sqlite3 but is not one."""
+
+    def __init__(self, inner):
+        object.__setattr__(self, "_inner", inner)
+        object.__setattr__(self, "closes", [])
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._inner, name, value)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return self._inner.__exit__(*exc)
+
+    def close(self):
+        self.closes.append(True)
+
+
+class _SetupFailsSession(_SharedSession):
+    def execute(self, sql, *args):
+        if sql.startswith("PRAGMA"):
+            raise sqlite3.OperationalError("pragma failed")
+        return self._inner.execute(sql, *args)
+
+
+def test_shared_sessions_are_left_to_their_own_release(tmp_path, monkeypatch):
+    store = make_store(tmp_path)
+    sessions = []
+
+    def shared_connect(path, *, timeout=10.0, **_):
+        session = _SharedSession(sqlite3.connect(str(path), timeout=timeout, isolation_level=None))
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(branding.consent_storage, "shared", lambda: True)
+    monkeypatch.setattr(branding.consent_storage, "connect", shared_connect)
+    gc.disable()
+    try:
+        store.status()
+        assert sessions and all(session.closes == [] for session in sessions)
+    finally:
+        gc.enable()
+        for session in sessions:
+            session._inner.close()
+
+
+def test_shared_setup_failure_is_left_to_the_session_owner(tmp_path, monkeypatch):
+    store = make_store(tmp_path)
+    sessions = []
+
+    def shared_connect(path, *, timeout=10.0, **_):
+        session = _SetupFailsSession(sqlite3.connect(str(path), timeout=timeout, isolation_level=None))
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(branding.consent_storage, "shared", lambda: True)
+    monkeypatch.setattr(branding.consent_storage, "connect", shared_connect)
+    gc.disable()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            store.status()
+        assert sessions and all(session.closes == [] for session in sessions)
+    finally:
+        gc.enable()
+        for session in sessions:
+            session._inner.close()

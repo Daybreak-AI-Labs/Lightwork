@@ -50,6 +50,19 @@ def test_entries_are_newest_first_and_include_workspace_wide_changes():
     assert changelog.record("proc_po_chaser", [], by="user:alice") is None
 
 
+def test_entries_sharing_a_clock_reading_are_still_newest_first(monkeypatch):
+    # Windows clocks can give two saves the same timestamp; the later save
+    # must still come first, and a genuinely later timestamp still wins.
+    clock = {"now": 1_800_000_000.0}
+    monkeypatch.setattr(changelog.time, "time", lambda: clock["now"])
+    changelog.record("proc_po_chaser", ["Changed its instructions"], by="user:alice")
+    changelog.record(changelog.EVERY_AGENT, ["Changed the default AI model for every agent and specialist"],
+                     by="user:bob")
+    clock["now"] += 1
+    changelog.record("proc_po_chaser", ["Changed what it is allowed to do"], by="user:carol")
+    assert [row["by"] for row in changelog.entries("proc_po_chaser")] == ["user:carol", "user:bob", "user:alice"]
+
+
 def test_changelog_rows_stay_in_their_workspace():
     with paths.tenant_scope(tenant="alpha"):
         changelog.record("proc_po_chaser", ["Changed its instructions"], by="user:alice")

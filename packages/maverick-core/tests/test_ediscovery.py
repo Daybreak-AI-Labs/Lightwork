@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import sqlite3
@@ -719,3 +720,39 @@ def test_export_of_an_account_custodian_holds_exactly_its_records(world, ledger,
     from maverick.audit.signing import trusted_audit_public_keys
 
     assert ediscovery_export.verify_export(result["path"], trusted_keys=trusted_audit_public_keys())["valid"] is True
+
+
+def test_every_matter_ledger_connection_closes_when_its_call_returns(tmp_path, monkeypatch):
+    # CPython 3.12 keeps an unclosed sqlite3 connection alive until a cyclic GC pass,
+    # so GC is disabled here: any connection left open by a call stays open.
+    opened = []
+    real_connect = sqlite3.connect
+    fail_pragma = {"on": False}
+
+    class _PragmaFails(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql == "PRAGMA synchronous=FULL" and fail_pragma["on"]:
+                raise sqlite3.OperationalError("pragma failed")
+            return super().execute(sql, *args)
+
+    def recording_connect(*args, **kwargs):
+        connection = real_connect(*args, factory=_PragmaFails, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(ediscovery.sqlite3, "connect", recording_connect)
+    gc.disable()
+    try:
+        store = ediscovery.MatterStore(tmp_path / "ledger.sqlite3")
+        assert store.list("ws-a") == []
+        fail_pragma["on"] = True
+        with pytest.raises(sqlite3.OperationalError):
+            store.list("ws-a")
+        fail_pragma["on"] = False
+        assert store.list("ws-a") == []
+    finally:
+        gc.enable()
+    assert len(opened) >= 4
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")

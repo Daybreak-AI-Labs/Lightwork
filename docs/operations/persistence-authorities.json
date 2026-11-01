@@ -1141,55 +1141,55 @@
       },
       "source_sites": [
         {
-          "line": 2011,
+          "line": 2012,
           "function": "_connect",
           "kind": "connect",
-          "expression": "sqlite3.connect(self.path, timeout=30.0, isolation_level=None)"
+          "expression": "sqlite3.connect(self.path, timeout=30.0, isolation_level=None, factory=ClosingConnection)"
         },
         {
-          "line": 1986,
+          "line": 1987,
           "function": "__init__",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(self.path, strict=True)"
         },
         {
-          "line": 2523,
+          "line": 2533,
           "function": "analyze",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(self.path, strict=True)"
         },
         {
-          "line": 2665,
+          "line": 2675,
           "function": "analyze",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(self.path, strict=True)"
         },
         {
-          "line": 2800,
+          "line": 2810,
           "function": "review",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(self.path, strict=True)"
         },
         {
-          "line": 2835,
+          "line": 2845,
           "function": "review",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(self.path, strict=True)"
         },
         {
-          "line": 2897,
+          "line": 2907,
           "function": "revoke",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(self.path, strict=True)"
         },
         {
-          "line": 2929,
+          "line": 2939,
           "function": "revoke",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(self.path, strict=True)"
         },
         {
-          "line": 3014,
+          "line": 3024,
           "function": "purge_expired",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(self.path, strict=True)"
@@ -5600,7 +5600,7 @@
           "expression": "sqlite3.connect(target)"
         },
         {
-          "line": 990,
+          "line": 994,
           "function": "inventory_provenance_manifest",
           "kind": "data_dir",
           "expression": "data_dir('entity_graph', 'graph.db', tenant=tenant)"
@@ -5612,25 +5612,25 @@
           "expression": "data_dir('entity_graph')"
         },
         {
-          "line": 501,
+          "line": 505,
           "function": "_derive_skills",
           "kind": "data_dir",
           "expression": "data_dir('learned-skills')"
         },
         {
-          "line": 1038,
+          "line": 1042,
           "function": "inventory_provenance_manifest",
           "kind": "commit",
           "expression": "commit('entity', (row['id'], row['kind'], row['canonical'], row['display']))"
         },
         {
-          "line": 1046,
+          "line": 1050,
           "function": "inventory_provenance_manifest",
           "kind": "commit",
           "expression": "commit('alias', (row['entity_id'], row['alias']))"
         },
         {
-          "line": 1061,
+          "line": 1065,
           "function": "inventory_provenance_manifest",
           "kind": "commit",
           "expression": "commit('relationship', (row['id'], row['src'], row['rel'], row['dst'], row['record_type'], row['record_id'], row['valid_from'], row['valid_to'], row['detail']))"
@@ -6067,13 +6067,13 @@
       },
       "source_sites": [
         {
-          "line": 180,
+          "line": 290,
           "function": "_connect",
           "kind": "connect",
-          "expression": "sqlite3.connect(str(self.path), timeout=10.0, isolation_level=None)"
+          "expression": "sqlite3.connect(str(self.path), timeout=10.0, isolation_level=None, check_same_thread=False)"
         },
         {
-          "line": 149,
+          "line": 252,
           "function": "__init__",
           "kind": "data_dir",
           "expression": "data_dir('federation', 'inbound_state.sqlite3')"

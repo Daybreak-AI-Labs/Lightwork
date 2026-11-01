@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import base64
 import codecs
+import contextlib
 import hashlib
 import hmac
 import json
@@ -38,6 +39,7 @@ from typing import Any
 from . import third_party_lifecycle as lifecycle
 from .file_lock import cross_process_lock, ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
+from .sqlite_closing import ClosingConnection
 
 SCHEMA_VERSION = 1
 INVITATION_SCHEMA = "lightwork.third-party-collaboration-invitation.v1"
@@ -673,7 +675,9 @@ class ThirdPartyCollaborationStore:
         )
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path, timeout=30.0, isolation_level=None, factory=ClosingConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
@@ -2768,7 +2772,7 @@ class ThirdPartyCollaborationStore:
         actor = self._actor()
         now = _timestamp(self._clock(), "current time")
         request = {"action": "purge_expired", "before": cutoff, "actor_ref": actor}
-        with cross_process_lock(self.path, strict=True), self._connect() as connection:
+        with cross_process_lock(self.path, strict=True), contextlib.closing(self._connect()) as connection, connection:
             self._begin(connection)
             operation_sha, request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
