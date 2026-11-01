@@ -1,4 +1,4 @@
-"""Per-goal rate limit on shield scans (roadmap: 2027 H2 safety).
+"""Per-goal rate limit on shield scans.
 
 A prompt-injected loop can make an agent call the shield on every iteration —
 thousands of scans for one goal. When the Agent Shield SDK is remote that is

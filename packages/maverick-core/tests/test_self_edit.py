@@ -1,4 +1,4 @@
-"""Self-edit tool: propose-only, path-confined diffs (ROADMAP 2027 H2)."""
+"""Self-edit tool: propose-only, path-confined diffs."""
 from __future__ import annotations
 
 import maverick.tools.self_edit as se

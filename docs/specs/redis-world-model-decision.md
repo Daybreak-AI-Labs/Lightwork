@@ -1,8 +1,7 @@
 # Decision: no Redis primary world-model backend
 
 **Status:** Decided — decline the primary-store backend; the Redis layers
-that fit shipped instead · **Roadmap ref:** 2027-H2 Ecosystem "Redis
-world-model" · **Date:** June 2026 · **Precedent:** the DuckDB
+that fit shipped instead · **Date:** June 2026 · **Precedent:** the DuckDB
 transactional-backend decision (declined; analytics layer shipped).
 
 ## Question

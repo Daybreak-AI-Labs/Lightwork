@@ -45,8 +45,7 @@ def test_all_governed_store_declarations_have_semantic_owner_and_recovery_dispos
         ("maverick-channels", "maverick_channels"), ("maverick-evolve", "maverick_evolve"),
         ("maverick-knowledge", "maverick_knowledge"), ("maverick-mcp", "maverick_mcp"),
         ("maverick-shield", "maverick_shield"),
-    )] + [ROOT / "apps/installer-cli/maverick_installer", ROOT / "apps/vendor-console/vendor_console",
-          ROOT / "apps/installer-msi"]
+    )] + [ROOT / "apps/installer-cli/maverick_installer", ROOT / "apps/installer-msi"]
     for source_root in roots:
         for source in source_root.rglob("*.py"):
             if source.name.startswith("test_") or "fixtures" in source.parts or "tests" in source.parts:

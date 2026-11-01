@@ -31,7 +31,7 @@ remains 3.3.1. This is a release-artifact dependency gate, not a check on every
 database operation in an independently configured source installation.
 
 These checks do not connect to a remote database, start a metrics listener,
-request a model response or change customer records. Staging and installed
+request a model response or change stored records. Staging and installed
 Windows acceptance invoke this command inside the actual frozen executable.
 The release/container and SBOM workflows also verify the profile. Hosted-run
 results belong to their recorded revision and artifact; a source test alone
@@ -42,14 +42,11 @@ on Linux x86-64 and macOS arm64. It runs the CLI checks with disposable homes an
 an empty developer PATH, and retains command logs and a binary hash tied to the
 checkout. The release matrix uses Python 3.12.13 on Linux and 3.12.10 on Windows
 and macOS, matching available official `actions/python-versions` binaries.
-These are engineering checks, not signed/notarized customer release acceptance.
+These are engineering checks, not signed or notarized release acceptance.
 
-The reviewed dependency constraints include the new libraries. PyInstaller
+The reviewed dependency constraints include these libraries. PyInstaller
 retains their dynamically selected modules, binary-driver hooks, distribution
 metadata and MathML symbol data. Source installations can install the reviewed
 package extra; a frozen application's missing dependency must be corrected in
 the distributable build, rather than asking its operator to modify a system
 Python environment.
-
-The [customer readiness matrix](audits/customer-readiness-2026-09-14.md) records
-the remaining release, integration, recovery and independent operator acceptance.

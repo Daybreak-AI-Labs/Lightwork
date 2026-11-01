@@ -1,4 +1,4 @@
-"""Container build tool (roadmap: 2028 H1 capabilities — "container build tool").
+"""Container build tool.
 
 Builds a container image from a Dockerfile + context directory by issuing
 ``docker build`` through the sandbox chokepoint (CLAUDE.md rule #4 — never a

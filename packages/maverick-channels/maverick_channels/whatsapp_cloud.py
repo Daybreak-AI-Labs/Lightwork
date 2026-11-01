@@ -1,4 +1,4 @@
-"""WhatsApp channel via Meta's Cloud API (roadmap: "WhatsApp Cloud API rewrite").
+"""WhatsApp channel via Meta's Cloud API.
 
 The original adapter (``whatsapp.py``) rides Twilio's Business API — an extra
 vendor, extra cost-per-message, and Twilio-shaped webhooks. This adapter

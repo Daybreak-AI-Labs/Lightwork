@@ -1,4 +1,4 @@
-"""Per-agent identity + signing (roadmap: 2027 H1 safety).
+"""Per-agent identity + signing.
 
 Gives each agent in the swarm a stable, derivable identity and lets it sign
 the artifacts it produces so a downstream consumer (or the audit log) can

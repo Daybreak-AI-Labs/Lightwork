@@ -1,4 +1,4 @@
-"""Cache eviction simulator (roadmap: 2028 H1 — adaptive cache, "ARC/LeCaR").
+"""Cache eviction simulator.
 
 Replay an access trace against a fixed-capacity cache under a chosen eviction
 policy and report the hit-rate — the offline yardstick for "would a bigger /

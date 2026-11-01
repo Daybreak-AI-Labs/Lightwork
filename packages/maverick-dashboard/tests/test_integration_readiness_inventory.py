@@ -1,4 +1,4 @@
-"""QA-023: top-level integration inventories expose closed readiness states."""
+"""Top-level integration inventories expose closed readiness states."""
 from __future__ import annotations
 
 import hashlib

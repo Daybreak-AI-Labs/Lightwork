@@ -1,6 +1,6 @@
 """config-lint must recognize the flagship governance config keys.
 
-Client-journey finding (round 5): a regulated client configured the two
+A regulated client configured the two
 headline governance features straight from the docs --
 
     [audit]

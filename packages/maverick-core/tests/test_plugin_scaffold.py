@@ -1,4 +1,4 @@
-"""Council round-2 ecosystem-seat: `maverick plugin new` cookiecutter."""
+"""`maverick plugin new` cookiecutter."""
 from __future__ import annotations
 
 import subprocess

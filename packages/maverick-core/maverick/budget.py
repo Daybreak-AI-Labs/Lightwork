@@ -44,7 +44,7 @@ class UsageAccountingError(RuntimeError):
     or negative token count -- for a call that was already paid for.
 
     Fail closed: the spend cannot be billed against the cap, so the run stops.
-    Deliberately NOT a :class:`BudgetExceeded` subclass (platform audit W1-17):
+    Deliberately NOT a :class:`BudgetExceeded` subclass:
     reporting a broken gateway as "budget exceeded" sent operators to raise
     ``max_dollars`` instead of fixing the gateway, hid the real cause from the
     dashboard and CLI, and made provider failover treat it as a budget control
@@ -254,7 +254,7 @@ def _validate_token_operations(value: object) -> dict[str, dict[str, object]]:
 
 # Anthropic cache multipliers (over the list input price).
 # Two TTLs: 5m default (1.25x write surcharge) and 1h (2.0x write surcharge).
-# Wave 12: prior code collapsed all writes to 1.25x; long-TTL writes were
+# Prior code collapsed all writes to 1.25x; long-TTL writes were
 # under-billed by ~40%.
 _CACHE_READ_MULT = 0.1     # Anthropic: 90% discount on cache reads (both TTLs)
 _CACHE_WRITE_MULT_5M = 1.25
@@ -270,7 +270,7 @@ CACHE_READ_MULT_OPENAI = 0.5
 def _cache_write_mult_from_ttl(ttl: str | None) -> float:
     """Map Anthropic cache TTL string to the write surcharge multiplier.
 
-    Wave 12 hardening: strip + lowercase before matching so trailing
+    Strip + lowercase before matching so trailing
     whitespace ("1h ") or case variants ("1H") don't silently downgrade
     to the 5m rate. Also: anything >= 5m duration is billed at 2.0x to
     match Anthropic's published surcharge tiers (the SDK accepts more
@@ -388,7 +388,7 @@ def _bedrock_estimate_quote(
     estimate_only: bool,
 ) -> ModelPrice | None:
     """Estimate-only quote for a Bedrock model id from the Claude API list rate
-    of the model behind it (W1-10).
+    of the model behind it.
 
     AWS invoices Bedrock at its own rates (regional endpoints carry a 10%
     premium over global), which are not in the verified rate card, so this is
@@ -671,7 +671,7 @@ def _lookup_price_quote(  # noqa: C901 - ordered evidence and policy precedence
     if approved is not None:
         return approved
 
-    # Bedrock model ids (W1-10): a provisional estimate from the Claude API
+    # Bedrock model ids: a provisional estimate from the Claude API
     # list rate of the model behind the id; never a bill under strict pricing.
     bedrock_canonical = bedrock_rate_card_model_id(bare)
     if bedrock_canonical is not None:
@@ -856,7 +856,7 @@ class Budget:
         OpenAI/o-series/gpt-5 auto-cache). ``cache_write_tok`` at 1.25x (5m TTL)
         or 2.0x (1h TTL) — pass ``cache_write_ttl="1h"`` for a 1h breakpoint.
 
-        W1-6: a single request's cache writes can straddle BOTH TTL tiers at
+        A single request's cache writes can straddle BOTH TTL tiers at
         once (e.g. a 1h system/tools breakpoint plus a 5m messages
         breakpoint) -- Anthropic's response then reports
         ``usage.cache_creation.ephemeral_5m_input_tokens`` /
@@ -872,13 +872,13 @@ class Budget:
         behavior for callers that only have one combined count (other
         providers, or an SDK response without the split field).
 
-        Wave 12 nullsafety: ``None`` usage counts coerce to zero — Anthropic
+        ``None`` usage counts coerce to zero — Anthropic
         occasionally returns ``None`` in ``usage`` on streaming refusals; the
         prior code raised ``TypeError`` and the instance counted as $0 spent.
         Non-finite, unparseable, or negative counts now fail closed with
         ``BudgetExceeded`` instead of silently recording a paid call as zero.
 
-        Council finding: cache reads/writes accumulate in separate
+        Cache reads/writes accumulate in separate
         counters so ``max_input_tokens`` reflects the BILLABLE input
         budget (non-cached only). Caching is a discount, so heavy
         caching should let you DO more work within the same input cap.
@@ -903,11 +903,11 @@ class Budget:
         split_cache_write = bool(cache_write_5m_tok or cache_write_1h_tok)
         if split_cache_write:
             cache_write_tok = cache_write_5m_tok + cache_write_1h_tok
-        # Wave 12 (council F12b): make the accumulator atomic so a
+        # Make the accumulator atomic so a
         # future parallel best-of-N (or multi-agent swarm where two
         # agents share a Budget) can't lose updates. `+=` on float is
         # NOT atomic in CPython under threads — we'd silently undercount.
-        # Wave 12 hardening: check() runs INSIDE the lock too — TOCTOU
+        # check() runs INSIDE the lock too — TOCTOU
         # otherwise lets two threads both pass check() with state that
         # the OTHER thread has already invalidated. check() does no I/O
         # and elapsed() is reentrant-safe, so holding the lock through
@@ -1040,7 +1040,7 @@ class Budget:
             self.check()
 
     def elapsed(self) -> float:
-        # Wave 12: use monotonic so NTP clock-skew doesn't bypass the wall
+        # Use monotonic so NTP clock-skew doesn't bypass the wall
         # cap. `started_at` is captured in __post_init__ for monotonic.
         try:
             return time.monotonic() - self._started_monotonic
@@ -1060,7 +1060,7 @@ class Budget:
 
     def __post_init__(self) -> None:
         self._started_monotonic = time.monotonic()
-        # Wave 12 (F12b): per-instance lock for atomic counter updates.
+        # Per-instance lock for atomic counter updates.
         self._lock = threading.Lock()
         # Dollar cost of in-flight calls, held by reserve() until release().
         # Lets concurrent sub-agents sharing one budget account for each
@@ -1092,7 +1092,7 @@ class Budget:
                 setattr(self, _field, _default)
 
     def __getstate__(self):
-        """Wave 12 hardening: threading.Lock is unpicklable. Drop the
+        """threading.Lock is unpicklable. Drop the
         non-picklable transient fields so a Budget can survive being
         sent to a multiprocessing worker (and the monotonic clock is
         per-process — reset on unpickle to avoid bogus elapsed math)."""

@@ -1,6 +1,6 @@
 """`maverick start` preflight UX: refuse early, leave no residue, exit honestly.
 
-Platform-test findings, round 2 fixes:
+Fixed behaviour:
   - A halted `maverick start` printed the refusal but exited 0, so scripts
     could not tell "ran" from "refused"; it also created a goal row first.
     Now: killswitch is checked before goal creation -> exit 3, no row.
@@ -209,7 +209,7 @@ def test_known_model_via_local_prefix_uses_local_zero_metering():
 
 
 def test_debate_and_plan_reflect_refuse_cleanly_when_unconfigured(tmp_path, monkeypatch):
-    """Round-3 finding: both commands skipped the provider preflight and an
+    """Both commands used to skip the provider preflight, and an
     unconfigured install got a raw anthropic-SDK TypeError traceback. They
     must refuse like `start` does: friendly message, exit 2, no traceback."""
     _isolate(monkeypatch, tmp_path)

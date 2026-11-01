@@ -154,7 +154,7 @@ class TestBudgetTripDoesNotOrphanToolUse:
     async def test_apply_check_reject_loop_stops_at_revision_cap(
         self, tmp_path, monkeypatch,
     ):
-        # W1-27: the #612 fix above resets `_patch_validated` on every new
+        # The #612 fix above resets `_patch_validated` on every new
         # FINAL, which also silently defeated the "one retry max" every
         # reject site in the apply-check block was relying on that flag
         # for -- each revised FINAL looked like a first attempt again, so
@@ -306,7 +306,7 @@ class TestReleaseSpawns:
 class TestToolDispatchWallClockGuard:
     @pytest.mark.asyncio
     async def test_hung_tool_is_aborted_at_the_wall_cap(self, tmp_path, monkeypatch):
-        # W1-31: a tool with no timeout of its own (a plugin, an MCP server,
+        # A tool with no timeout of its own (a plugin, an MCP server,
         # a browser/file-watcher wait) previously had no equivalent to
         # _complete_guarded's wall-clock/killswitch polling -- it could hold
         # the goal 'active' and ignore `maverick halt` indefinitely. A never-

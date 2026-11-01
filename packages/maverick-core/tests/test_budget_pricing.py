@@ -15,8 +15,8 @@ from maverick.llm import MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET
 
 def test_opus_priced_at_opus_rate():
     b = Budget(max_dollars=100.0, max_input_tokens=10_000_000, max_output_tokens=10_000_000)
-    # Wave 12 hotfix: Opus 4.7 May 2026 list = $5 in + $25 out per Mtok.
-    # An earlier Wave 12 commit incorrectly raised this to $15/$75 (legacy
+    # Opus 4.7 May 2026 list = $5 in + $25 out per Mtok.
+    # An earlier commit incorrectly raised this to $15/$75 (legacy
     # Opus 4.0/4.1 rates). Verified against
     # https://platform.claude.com/docs/en/about-claude/pricing and against
     # vals.ai's measured $2.42/test for Opus 4.7 on SWE-bench Verified.
@@ -34,7 +34,7 @@ def test_sonnet_priced_at_sonnet_rate():
 
 def test_haiku_priced_at_haiku_rate():
     b = Budget(max_dollars=100.0, max_input_tokens=10_000_000, max_output_tokens=10_000_000)
-    # Wave 12 fix: Haiku 4.5 May 2026 list = $1.00 in + $5.00 out per Mtok.
+    # Haiku 4.5 May 2026 list = $1.00 in + $5.00 out per Mtok.
     # 1M input + 1M output = $1 + $5 = $6 (was under-reported at $4.80
     # while the file claimed (0.80, 4.0)).
     b.record_tokens(1_000_000, 1_000_000, model=MODEL_HAIKU)
@@ -111,7 +111,7 @@ def test_cache_write_5m_is_one_and_a_quarter_input():
 
 
 def test_cache_write_1h_is_two_x_input():
-    """Wave 12: Anthropic bills 1h-TTL cache writes at 2.0x (not 1.25x)."""
+    """Anthropic bills 1h-TTL cache writes at 2.0x (not 1.25x)."""
     b = Budget(max_dollars=100.0, max_input_tokens=10_000_000, max_output_tokens=10_000_000)
     # 1M cache writes on Sonnet at 1h = $3 * 2.0 = $6.00
     b.record_tokens(
@@ -122,7 +122,7 @@ def test_cache_write_1h_is_two_x_input():
 
 
 def test_cache_write_split_bills_each_tier_at_its_own_multiplier():
-    """W1-6: one call can write BOTH a 1h breakpoint (system/tools) and a
+    """One call can write BOTH a 1h breakpoint (system/tools) and a
     5m breakpoint (messages) at once. Before this, the combined total was
     billed at a single multiplier (whichever cache_write_ttl the caller
     passed) -- forcing the whole write to 2.0x when only part of it was
@@ -182,7 +182,7 @@ def test_opus_run_actually_hits_the_dollar_cap():
 
 
 def test_nullsafe_record_tokens_handles_none():
-    """Wave 12: Anthropic occasionally returns None in usage on streaming
+    """Anthropic occasionally returns None in usage on streaming
     refusals. The prior code raised TypeError and the instance counted
     as $0 spent (silent under-bill)."""
     b = Budget(max_dollars=100.0, max_input_tokens=10_000_000, max_output_tokens=10_000_000)
@@ -194,7 +194,7 @@ def test_nullsafe_record_tokens_handles_none():
 
 
 def test_wall_clock_uses_monotonic_clock():
-    """Wave 12: budget.elapsed() must use a monotonic clock so NTP jumps
+    """budget.elapsed() must use a monotonic clock so NTP jumps
     don't bypass max_wall_seconds."""
     import time
     b = Budget(max_dollars=5.0, max_wall_seconds=3600.0)
@@ -209,7 +209,7 @@ def test_wall_clock_uses_monotonic_clock():
 
 
 def test_record_tokens_thread_safe():
-    """Wave 12 (council F12b): concurrent record_tokens calls must not
+    """Concurrent record_tokens calls must not
     lose updates. Without the lock, `self.dollars += ...` races and
     silently undercounts (it's a load-then-store, not atomic)."""
     import threading

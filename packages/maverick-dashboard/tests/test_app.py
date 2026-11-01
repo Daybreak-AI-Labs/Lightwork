@@ -147,7 +147,7 @@ def test_compartments_page_renders(tmp_path, monkeypatch):
 
 
 def test_compartments_page_is_searched_and_paginated(tmp_path, monkeypatch):
-    """W3-30: unscoped, the roster is 2,000+ packs and rendered every
+    """Unscoped, the roster is 2,000+ packs and rendered every
     capability envelope into one multi-megabyte page. It now renders one
     bounded slice, like /tools."""
     from maverick import world_model
@@ -178,7 +178,7 @@ def test_facts_page_renders(tmp_path, monkeypatch):
 
 
 def test_shell_assets_are_fingerprinted_and_long_cached(tmp_path, monkeypatch):
-    """W3-77: the shell CSS/JS links carry a content hash and the versioned
+    """The shell CSS/JS links carry a content hash and the versioned
     URL is cached for a year; unversioned or stale requests revalidate
     (``no-cache`` plus a content ETag) so an upgrade can never pin an old
     bundle."""

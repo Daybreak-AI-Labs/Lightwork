@@ -1217,7 +1217,7 @@ def test_signing_identity_admission_is_an_explicit_installer_opt_in(tmp_path, mo
 
 
 def test_dashboard_compress_decline_is_written_and_accept_is_the_default(tmp_path, monkeypatch):
-    # W3-77: response compression is default-on in the app, so only a
+    # Response compression is default-on in the app, so only a
     # deliberate "no" (a proxy already compresses) reaches config.toml.
     off = _write(tmp_path, monkeypatch, {"dashboard_compress": False})
     assert tomllib.loads(off)["dashboard"]["compress"] is False
@@ -1302,7 +1302,7 @@ def test_model_discovery_decline_is_written_and_accept_is_the_default(tmp_path, 
 
 
 def test_bedrock_auth_mode_is_written_and_iam_needs_no_key(tmp_path, monkeypatch):
-    # W1-10: the wizard asks how to authenticate to Bedrock and writes it; IAM
+    # The wizard asks how to authenticate to Bedrock and writes it; IAM
     # signing carries no api_key line, a bearer token does.
     from maverick_installer import wizard
 

@@ -1,4 +1,4 @@
-"""UX-013: the agent's own patch plumbing must not run a repo-local git filter
+"""The agent's own patch plumbing must not run a repo-local git filter
 on the host.
 
 ``Agent._extract_and_apply_patch`` (SEARCH/REPLACE in coding mode) creates a
@@ -75,7 +75,7 @@ def _git(repo: Path, *args: str, stdin: bytes | None = None) -> None:
 
 # Where the compromised sandbox plants the filter. "config" is the plain
 # `.git/config` + committed `.gitattributes`; the other two are placements the
-# first version of the guard never looked at (UX-013 repair).
+# first version of the guard never looked at.
 LAYOUTS = ["config", "pointer", "worktree_config"]
 
 

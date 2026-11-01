@@ -1,7 +1,7 @@
 # Observability and provider integrations
 
 How to wire Lightwork into OpenRouter, LangSmith, and Helicone using the
-surfaces that already ship: the OpenRouter provider in the 12-provider router
+surfaces that already ship: the OpenRouter provider in the 15-provider router
 (`llm.py`), the opt-in OpenTelemetry / Prometheus / Sentry observability layer
 (`observability.py`), and the `base_url` mechanism on OpenAI-compatible
 providers. Everything here is self-serve configuration — see the
@@ -11,7 +11,7 @@ Substrate, per the [platform overview](../index.md):
 
 - **OpenTelemetry traces, Prometheus `/metrics`, Sentry** — all opt-in,
   off by default (`observability.py`).
-- **OpenRouter** is one of 12 routable providers, with cost-aware routing
+- **OpenRouter** is one of 15 routable providers, with cost-aware routing
   (`cost_router.py`) and provider failover (`provider_failover.py`,
   `failover_policy.py`) layered on top, all opt-in.
 - **Generic OpenAI-compatible endpoints via `base_url`** — the mechanism
@@ -172,7 +172,5 @@ increments.
 
 These are **self-serve integration paths** built on generic protocols — an
 OpenRouter provider client, OTLP trace export, and OpenAI-compatible
-`base_url` overrides. No formal partnership, co-marketing arrangement, or
-endorsement with LangSmith, Helicone, OpenRouter, or any other vendor is
-implied; establishing those is maintainer/business work tracked in product
-planning, not an engineering artifact in this repo.
+`base_url` overrides. No formal partnership or endorsement with LangSmith,
+Helicone, OpenRouter, or any other vendor is implied.

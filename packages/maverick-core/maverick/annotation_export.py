@@ -1,4 +1,4 @@
-"""Replay annotation export (roadmap 2028-H1 UX — "replay annotation export").
+"""Replay annotation export.
 
 Trace annotations (``maverick.ux_store`` — human notes pinned to replay-trace
 steps by ``seq``) stay locked inside the dashboard JSON store. This module

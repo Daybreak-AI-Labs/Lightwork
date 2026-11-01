@@ -1,5 +1,5 @@
 "use strict";
-// UX-164: with no workspace selected the Activity log's protection panel said
+// With no workspace selected the Activity log's protection panel said
 // "This was changed since you opened it. Refresh the page", and refreshing never
 // helped. The panel now says what is missing and links to the workspace picker.
 const { test } = require("node:test");

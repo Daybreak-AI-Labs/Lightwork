@@ -6,9 +6,9 @@
 
 ## Instalação
 
-Para instalar o Lightwork para um cliente, baixe o arquivo assinado para seu sistema em uma [versão do GitHub com anexos](https://github.com/Daybreak-AI-Labs/Lightwork/releases). Verifique a soma e a assinatura da versão exata e execute o arquivo com o comando `dashboard`. O [guia de distribuição](../../DISTRIBUTION.md) informa os arquivos e as verificações. Se não houver arquivo para sua plataforma, solicite um pacote para clientes.
+O Lightwork é instalado a partir do código-fonte; você precisa de Python 3.10–3.12 e Git. Siga o [guia de instalação a partir do código-fonte](../../source-install.md), que traz os comandos para macOS, Linux e Windows. Ainda não há binários pré-compilados, pacotes no PyPI nem imagens de contêiner publicados. No momento não há nenhuma versão publicada; instale a partir de `main`.
 
-Não clone o repositório inteiro para uma instalação de cliente: ele também contém documentos internos de pesquisa, auditoria e patentes. Os oito pacotes ainda não foram publicados juntos no PyPI. Mantenedores com acesso já aprovado ao repositório podem usar o [procedimento de instalação para engenharia](../../internal/source-install.md).
+Depois execute `lightwork dashboard` e abra <http://127.0.0.1:8765> para concluir a configuração do proprietário e do provedor de modelos.
 
 ## Primeira execução
 
@@ -191,7 +191,7 @@ saída antes de usá-los.
 Depois de algumas execuções acumuladas, a superfície de aprendizado se resume a
 quatro comandos: `maverick dream` (consolidar a experiência), `maverick hindsight`
 (o aprendizado ajudou ou regrediu?), `maverick proof` (entregas, custo evitado,
-ROI) e `maverick domains-lint` (auditar o catálogo de especialistas de 2,020
-agentes), além de `maverick domains-audit` (postura de governança: o que cada
+ROI) e `maverick domains-lint` (auditar o catálogo de especialistas),
+além de `maverick domains-audit` (postura de governança: o que cada
 agente pode acessar, nega e recusa) e `maverick domains-eval --check` (casos de
 referência comportamentais).

@@ -24,7 +24,9 @@ pip install 'questionary>=2.0' 'rich>=13.7' \
 # _cffi_backend for this interpreter and crash pytest collection with a
 # pyo3 PanicException; pip can't replace the distro package, but installing
 # cffi fixes the import. build: so `python3 -m build --wheel` works per-package.
-pip install pytest pytest-asyncio 'ruff>=0.5' 'vulture>=2.11' \
+# pytest-xdist: the documented `python3 -m pytest -n auto --dist loadfile`
+# invocation (the one CI uses) needs it.
+pip install pytest pytest-asyncio pytest-xdist 'ruff>=0.5' 'vulture>=2.11' \
             'pyjwt[crypto]' cffi build 'pyyaml>=6.0.3'
 # AI-evidence local parsers: Pillow mirrors the CI environment
 # (requirements/ci.txt pins it); xlrd + olefile power the legacy-XLS worker.

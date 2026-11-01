@@ -64,11 +64,10 @@ Confidence interval: mean ± t × (sample standard deviation ÷ √n), with the
 two-sided 95% Student t value for n − 1 degrees of freedom, clipped to the ends
 of the scale.
 
-Targets (from the experience rubric, MSR-1 and MSR-2): SUS at least 80.3 for
-every role, with at least 30 answers per role each quarter; SEQ mean at least
-6.0 per task; task completion at least 90% (from moderated sessions, below).
-For reference, the average SUS across 500 published studies is 68, and the
-average SEQ is about 5.5.
+Targets: SUS at least 80.3 for every role, with at least 30 answers per role
+each quarter; SEQ mean at least 6.0 per task; task completion at least 90% (from
+moderated sessions, below). For reference, the average SUS across 500 published
+studies is 68, and the average SEQ is about 5.5.
 
 ## 2. Moderated task sessions
 
@@ -78,8 +77,9 @@ narrow intervals.
 
 ### Set-up
 
-- A practice workspace with realistic but synthetic data (never a customer's
-  live data), and an account per participant with the role they use at work.
+- A practice workspace with realistic but synthetic data (never live
+  production data), and an account per participant with the role they use at
+  work.
 - Screen and audio recording with the participant's written consent. Say what
   is recorded, who sees it and when it is deleted.
 - One facilitator and, if possible, one note-taker. The facilitator does not
@@ -153,8 +153,8 @@ finder without the rest of the visual design.
 4. For each task record: **success** (ended on a correct page), **directness**
    (got there without going back up the tree) and **time**. A first-click
    success rate is also useful.
-5. Targets (rubric NAV-1): at least 80% correct first click per role, at least
-   eight participants per role.
+5. Targets: at least 80% correct first click per role, at least eight
+   participants per role.
 
 ## Sources
 

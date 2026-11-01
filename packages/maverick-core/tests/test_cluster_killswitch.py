@@ -1,4 +1,4 @@
-"""Cluster-wide killswitch (council C4): a halt armed in the shared world store
+"""Cluster-wide killswitch: a halt armed in the shared world store
 propagates to every replica's killswitch, not just the one that served the
 arm request. On the default SQLite (single-host) backend the shared consult is
 skipped -- the local HALT file already covers it and a per-call DB read would be
@@ -200,7 +200,7 @@ def test_shared_consult_fails_closed_for_privileged_callers(world):
         assert exc.value.source == "shared-error"
 
 
-# ----- cluster-wide provider spend ledger (council C5) -----
+# ----- cluster-wide provider spend ledger -----
 
 def test_provider_spend_atomic_increment(world):
     assert world.get_provider_spend("2026-06-22", "anthropic") == 0.0

@@ -1,6 +1,6 @@
 """`maverick config-lint` must FAIL on a corrupt config, not say "config OK".
 
-Platform-test finding (round 4): config-lint called load_config(), which is
+Previously, config-lint called load_config(), which is
 deliberately fail-soft -- a TOMLDecodeError is swallowed and {} returned with
 only a warning log. So linting a syntactically broken config.toml linted an
 empty dict, found nothing, and printed "config OK" with exit 0. The one tool

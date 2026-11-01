@@ -1,6 +1,6 @@
 """The base64 de-obfuscation pre-pass must bound how much it decodes+rescans.
 
-Latency finding (round 8): the worst hot-path scan (168ms on 200KB) was a
+The worst hot-path scan (168ms on 200KB) was a
 single huge base64 blob -- _decode_b64_blobs decoded the WHOLE blob and the
 scanner then re-ran every rule over the full ~200KB decode. A hidden
 prompt-injection INSTRUCTION is short; a 200KB blob is a data payload, not a

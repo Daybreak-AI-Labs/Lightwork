@@ -1,15 +1,8 @@
 # Lightwork - Shipped Features
 
-- **Personal device pairing preview** — default-off `[device_pairing] enabled`
-  lets named members approve an expiring device code. Scoped credentials read
-  only their own work in one workspace, with protected renewal and explicit
-  removal in Your paired devices. Mobile/watch/vision settings store the
-  connection securely. See [scope, retention and qualification](device-pairing.md).
-
 What Lightwork **does today**, grounded in the current repository code. This is the
-catalogue of built features and tools; the forward backlog (what's *not* done
-yet) lives in [`ROADMAP.md`](./ROADMAP.md). When a roadmap item ships, it moves
-here.
+catalogue of built features and tools; planned work is listed in
+[`ROADMAP.md`](./ROADMAP.md).
 
 > Conventions: capabilities are grouped by concern. Module paths are relative to
 > `packages/maverick-core/maverick/` unless noted. CLI verbs are shown as
@@ -22,6 +15,11 @@ here.
   Managed sign-in, existing identities, deployment invite policy, current roles,
   and SCIM revocation remain authoritative. The installer exposes
   `[dashboard] local_owner_setup`; see [first run](getting-started.md#first-run).
+- **Personal device pairing preview** — default-off `[device_pairing] enabled`
+  lets named members approve an expiring device code. Scoped credentials read
+  only their own work in one workspace, with protected renewal and explicit
+  removal in Your paired devices. Mobile/watch/vision settings store the
+  connection securely. See [scope, retention and qualification](device-pairing.md).
 
 ## Agent kernel & orchestration
 
@@ -79,9 +77,7 @@ here.
   Native authority, source/version, permission and deadline checks remain at
   the effect. Settings and the installer expose the catalog and its permitted
   operation families. Ordinary controls retain their own feature requirements
-  independently of Copilot. Exact operating scope and dated journey evidence,
-  including remaining coverage gaps, are in the
-  [operation coverage register](post-install-operation-coverage.md).
+  independently of Copilot.
 
 - **Checked answer regions** — optional `[features] applicability_regions`
   adds ordinary Learning controls for two exact versions of an owned taught
@@ -186,8 +182,7 @@ here.
   delivery guarantee or advantage over the matched exhaustive comparison.
 
 These five capabilities are separate, default-off feature choices in ordinary
-Settings and the installation wizard. Their local native qualification and
-limits are recorded in the [operation coverage register](post-install-operation-coverage.md).
+Settings and the installation wizard.
 
 - **Run a learned workflow from Copilot** — on a saved workflow's designer page,
   the closed catalog checks the published release and opens the same labelled
@@ -626,8 +621,8 @@ limits are recorded in the [operation coverage register](post-install-operation-
   commits through the same SSRF-safe / egress-guarded path the tool form uses,
   and records lineage — so a real system-of-record write is governed, not just
   a confirm-gated tool call. Opt-in via `[governed_connectors] enable` +
-  `connectors` (`MAVERICK_GOVERNED_CONNECTORS`; wizard step). Palantir-style
-  action governance, for self-improving agents (see `docs/palantir-playbook.md`).
+  `connectors` (`MAVERICK_GOVERNED_CONNECTORS`; wizard step). Traceable
+  action governance for self-improving agents.
 - **Governed learning at scale** (`access_policy.py`, `learning_rollout.py`;
   opt-in, additive) — **PBAC**: a skill declares `purposes:` and
   `relevant_skills` recalls it only under a matching run purpose
@@ -696,9 +691,9 @@ limits are recorded in the [operation coverage register](post-install-operation-
   operations. Deployment validates required workflow tools against the assembled
   registry, including custom adapters, and refuses missing requirements with
   adapter, enablement or approved-export guidance. Optional missing allowlist
-  tools are reported separately. The September 23 catalog review identified
-  255 packs with remaining adapter-name prerequisites; linted content is not
-  proof that all 2,031 packs are operational in a fresh installation.
+  tools are reported separately. Some packs still name adapters that a fresh
+  installation does not provide, so linted content is not proof that all
+  2,031 packs are operational in a fresh installation.
 - **Governance-posture audit** — `maverick domains-audit [--json <path>
   --suite <name>]` (`domain_audit.py`): the auditable inventory of "what can
   these agents do, and what stops them?" — per pack the compartment seal, risk
@@ -868,13 +863,14 @@ limits are recorded in the [operation coverage register](post-install-operation-
   assessment: fire rate, rating impact (re-rolled on the scorer's own
   rollup), and a verdict (load-bearing / informative / inert / unproven).
   The evidence-based questionnaire prune list.
-- **Signed license keys** (`maverick.licensing` + each SKU's
-  `license_kit.py`) — Ed25519 tokens (`LW1.payload.sig`) minted by the
-  vendor CLI, verified agent-side from `LIGHTWORK_LICENSE` +
-  `LIGHTWORK_LICENSE_PUBKEY`. Unlicensed standalone agents run in
-  evaluation mode (fully functional, open-case cap, honest banner); an
-  upsell or renewal is a key swap, not a reinstall.
-- **DSAR Concierge** (`demo/dsar-concierge/`) — the second sellable
+- **Signed license keys** (`maverick.licensing` + `license_kit.py` in the
+  DSAR Concierge and PIA Concierge demos) — Ed25519 tokens
+  (`LW1.payload.sig`) minted with `python -m maverick.licensing make`,
+  verified agent-side from `LIGHTWORK_LICENSE` + `LIGHTWORK_LICENSE_PUBKEY`.
+  Without a token, those two demos run in evaluation mode (fully functional,
+  open-case cap, visible banner); changing capabilities or renewing is a key
+  swap, not a reinstall.
+- **DSAR Concierge** (`demo/dsar-concierge/`) — a second
   standalone agent on the capability seam: subject-facing intake + a
   deterministic message detector, the emailed identity-verification loop,
   the statutory clock with SLA aging, access/portability packages built
@@ -912,7 +908,7 @@ limits are recorded in the [operation coverage register](post-install-operation-
   safeguards, incident 72h clock, DPA clause coverage — never a synthetic
   score); and a drill-through of the records behind the numbers. One
   aggregate round trip; hand-rolled SVG (no chart deps); auto-refreshes
-  every 60s; Present mode for a full-screen pitch. Estate rows drill
+  every 60s; Present mode for a full-screen presentation. Estate rows drill
   through to the record behind them (`/privacy/vendors/{id}`,
   `/privacy/dsar/{id}`, operate-gated): a vendor's contracts with renewal
   state, questionnaires, linked specialist records and monitoring notes;
@@ -1757,7 +1753,7 @@ limits are recorded in the [operation coverage register](post-install-operation-
   tenant, and forces a visible readiness gap. See
   [`AI_EVIDENCE_GATEWAY.md`](./AI_EVIDENCE_GATEWAY.md) and the
   [governance benchmark report](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md).
-- **Four reduced standalone security SKUs** (`demo/grc-concierge/`,
+- **Four reduced standalone security agents** (`demo/grc-concierge/`,
   `demo/platform-threat-hunter/`, `demo/environment-threat-hunter/`,
   `demo/model-risk-ai-assurance-officer/`) — each has
   an explicit standalone capability layer, backend seam, vendored
@@ -1767,7 +1763,7 @@ limits are recorded in the [operation coverage register](post-install-operation-
   records only; Model Risk keeps declared metadata, local human decisions, and
   non-executing DGM readiness reports. They do not claim the platform's signed
   audit, governed
-  approvals, managed connectors, or cross-run learning. Both hunter SKUs are
+  approvals, managed connectors, or cross-run learning. Both hunters are
   proposal-only; response execution is exclusive to the integrated platform's
   exact approval-bound, explicitly enabled executor seam.
 - **Workspace history seeder** (`demo/pia-concierge/seed_workspace.py`) —
@@ -1884,8 +1880,9 @@ limits are recorded in the [operation coverage register](post-install-operation-
   writes, no unsourced product claims).
 - **Institutional Memory attestation — is it really compounding, and really
   yours?** (`memory_plane.py`, `maverick memory-plane compounding|export|verify`)
-  — the `attest` half of Bet 2's ingest/recall/attest API, riding the **same
-  signed bundle spine as the Bet 1 attestation** (one implementation of the
+  — the `attest` half of the fleet-memory ingest/recall/attest API, using the
+  **same signed bundle format as the attestation bundle** (`attestation.py`;
+  one implementation of the
   crypto, the out-of-band trust anchor, and the
   HOLDS/FAILS/INDETERMINATE/NOT_APPLICABLE vocabulary). Three claims:
   **cross_vendor** — how many vendors actually deposited through the governed
@@ -2451,7 +2448,7 @@ limits are recorded in the [operation coverage register](post-install-operation-
   activate it. The Learning page exposes the separate evolution controls,
   including automatic regression revert when enabled.
   `evolution_log.improvement_count()` reports the
-  self-rewrites that stuck (reverted ones netted out) as the moat number. A failed run records WHICH node failed (`FlowRun.cursor`) and can
+  self-rewrites that stuck (reverted ones netted out) as the improvement count. A failed run records WHICH node failed (`FlowRun.cursor`) and can
   **resume from the failed step** with the data as of the failure
   (`execution.execute(from_failure=True)`, `POST /flows/runs/{id}/retry?from_failure=1`)
   — pre-failure side effects are never re-driven. The server-rendered **visual
@@ -2525,8 +2522,7 @@ limits are recorded in the [operation coverage register](post-install-operation-
   configuration when a write cannot be confirmed. The ordinary form reports
   uncertain outcomes and clears a prior account's credential entry. External
   secret ownership transfer, independent outgoing-only rotation and durable
-  settings audit history remain open; see the
-  [post-install coverage register](./post-install-operation-coverage.md).
+  settings audit history are not implemented.
 
   Polled batches are retained in the tenant world database before dispatch,
   using the configured at-rest encryption. A failed queue reservation or cursor
@@ -2699,7 +2695,7 @@ limits are recorded in the [operation coverage register](post-install-operation-
 
 ## Tools
 
-286 built-in tool modules. Highlights by group (all under `tools/`):
+Built-in tool modules. Highlights by group (all under `tools/`):
 
 - **Code & files** — `fs`, `str_edit`, `ast_edit` (tree-sitter), `apply_patch`
   (atomic multi-file), `repo_map`, `dep_graph`, `test_impact` (coverage-guided),
@@ -3179,10 +3175,9 @@ Selected via `[sandbox] backend`.
 "modal"`, `[modal]` extra): run agent shell in ephemeral Modal cloud sandboxes
 (per-exec container, image/cpu/memory/timeout plumbed, torn down after the
 command) — burstable remote compute without running a cluster; infra errors
-surface as a failed command, never a kernel crash. The Cloudflare-Workers half
-of the roadmap pair was declined for shell semantics (Workers run JS/WASM
-request handlers, not processes; the honest Workers story is the self-hosted
-relay reference + `wasm_run`).
+surface as a failed command, never a kernel crash. There is no Cloudflare
+Workers backend: Workers run JS/WASM request handlers, not processes, so the
+self-hosted relay reference and `wasm_run` cover that use instead.
 **Sandbox SDK v2** (`sandbox/sdk.py`, `SDK_VERSION = 2`): the formal backend
 contract — a `runtime_checkable` `SandboxV2` protocol (`workdir` +
 `exec(cmd, timeout=None)`), declared optional capabilities
@@ -3477,10 +3472,10 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   shared-bearer caller) — so every external ingress (federation, A2A, fleet,
   channel, marketplace, gRPC, MCP) is default-denied at the boundary.
 - **Bring-your-own-agent gateway** (`external_agents.py`, opt-in
-  `[external_agents] enable` / `MAVERICK_EXTERNAL_AGENTS=1`, gold-tier
-  `external_agents` entitlement) — agents built on *other* runtimes
-  (Agentforce, Bedrock Agents, Copilot Studio, OpenAI, LangChain/LangGraph,
-  custom) enroll into the governed workforce: they run on their runtime,
+  `[external_agents] enable` / `MAVERICK_EXTERNAL_AGENTS=1`; also gated by the
+  `external_agents` entitlement when license enforcement is on) — agents built
+  on *other* runtimes (Agentforce, Bedrock Agents, Copilot Studio, OpenAI,
+  LangChain/LangGraph, custom) enroll into the governed workforce: they run on their runtime,
   governed on ours. Four verbs: **enroll** (one call writes the inbound Agent
   Trust entry — tool/risk/budget ceilings, expiry — plus the fleet-memory
   roster and platform/ownership provenance), **credential** (per-surface
@@ -3548,8 +3543,8 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `wrap_crewai_tool` adapt their tools into Lightwork `Tool`s (duck-typed,
   lazy imports, actionable install hints).
 - **MCP-client language analytics** (`mcp_analytics.py`) — opt-in, consent-gated
-  tally of client language (from the User-Agent) that feeds the language-bindings
-  decision gate (`non_python_share()`); off by default, consent step in the
+  local tally of client language (from the User-Agent), read with
+  `client_language_counts()` and `non_python_share()`; off by default, consent step in the
   installer wizard (`maverick init` → Analytics).
 
 ## Safety & security
@@ -4821,18 +4816,20 @@ opt-in; single-tenant/self-hosted deployments are unaffected):
   integration over the platform's own Stripe account. One customer + platform-fee
   subscription per tenant (create-or-lookup, idempotent; the `cus_...` id is stored
   on the tenant record), the metered invoice pushed as Stripe invoice items behind
-  the `bill_metered_usage` pricing-decision flag (off = platform fee only; no
+  the `bill_metered_usage` flag (off = platform fee only; no
   markup hardcoded), and a signature-verified webhook (`MAVERICK_STRIPE_WEBHOOK_SECRET`,
   stdlib HMAC) that downgrades a past-due tenant to the base entitlement tier and
   restores it on payment. The `stripe` SDK is an optional extra
   (`maverick-core[stripe]`), lazily imported; the module and its gate report
   "disabled" cleanly without it. (Distinct from the agent-facing `stripe` tool.)
-- **Signed-license feature control** — `entitlements.py` + `maverick license
-  issue|set|show|keygen`: sign a deployment license declaring its tier
-  (basic/gold/platinum) and enabled add-on suites, resolve the installed one,
-  or mint a publisher keypair. The signing key is a secret sourced only from
-  `MAVERICK_LICENSE_PRIVATE_KEY` (never config, never the repo, never printed);
-  paid features activate only against the configured trust anchor
+- **Signed-license feature control** (optional; enforcement is off by
+  default) — `entitlements.py` + `maverick license issue|set|show|keygen`:
+  sign a deployment license declaring its tier and enabled add-on suites,
+  resolve the installed one, or mint a publisher keypair. The signing key is a
+  secret sourced only from `MAVERICK_LICENSE_PRIVATE_KEY` (never config, never
+  the repo, never printed). Every feature runs unless an operator sets
+  `[license] enforce = true` or `MAVERICK_LICENSE_ENFORCE=1`; with enforcement
+  on, gated features activate only against the configured trust anchor
   (`[license] publisher_pubkeys`).
 - **Go-live readiness gate** — `maverick launch-check` (`health.py:
   run_launch_check`): PASS/FAIL for each production switch — cost-cap
@@ -4909,7 +4906,7 @@ deadline enforcement, secondary-channel delivery) as a framework-agnostic,
 fully-injected core that runs as a Worker or a local service.
 
 `benchmarks/`: GAIA, τ²-bench-style stateful harness, terminal-bench-style
-harness, SWE-bench harness, moat suite, and an **adversarial-cost suite**
+harness, SWE-bench harness, warm-vs-cold memory suite, and an **adversarial-cost suite**
 (`eval_adversarial_cost.py`): scripted money-wasting scenarios — tool loops,
 token bombs, runaway iterations — each asserted CLAMPED by the cache /
 output-cap / Budget ceilings; `main()` exits 1 on any unclamped scenario. All
@@ -5783,21 +5780,23 @@ tested without spawning py-spy.
   background lifespans. Shared/external stores, independent workers, shared
   administration and cross-build restoration remain excluded. See
   [Workspace recovery](workspace-recovery.md).
-- **Windows customer package candidate** (`apps/installer-msi/CUSTOMER.md`):
-  complete frozen runtime, desktop and offline WebView2 without customer
-  Git/Python/private checkout; Windows install/repair/upgrade acceptance,
+- **Windows MSI installer candidate** (`apps/installer-msi/CUSTOMER.md`):
+  complete frozen runtime, desktop and offline WebView2 without a Git, Python
+  or source checkout on the target machine; Windows install/repair/upgrade acceptance,
   protected Authenticode/minisign signing and reviewed in-app maintenance.
   Protected completed-upgrade rollback retains exact signed installers and
   restores their matching, quiesced whole-local-home snapshot after verifying
   the old runtime; interrupted operations keep a startup block, resumable
   review and in-app logs. Native MSI, signed distribution and clean-machine
-  acceptance remain release gates; fixture checks are not customer acceptance.
+  acceptance remain release gates; fixture checks are not installation acceptance.
 
-- **Packaging** — 8-package lockstep cohort (public PyPI consumption remains
-  disabled until every name is reserved), a GHCR image, PyInstaller binaries,
-  reduced licensed source archives, checksums, SBOMs, and Sigstore material.
-  Existing source-bootstrap Tauri/MSI outputs retain their engineering boundary;
-  the separate customer candidate and acceptance gates are described above.
+- **Packaging** — release tooling for an 8-package lockstep cohort (public PyPI
+  publishing remains disabled until every name is reserved), a GHCR image,
+  PyInstaller binaries, reduced standalone source archives, checksums, SBOMs,
+  and Sigstore material. None of these artifacts is published yet; see
+  [DISTRIBUTION.md](./DISTRIBUTION.md). Existing source-bootstrap Tauri/MSI
+  outputs retain their engineering boundary; the separate MSI candidate and its
+  acceptance gates are described above.
 - **Container import-path hardening** — the deploy image sets
   `PYTHONNOUSERSITE=1` for the harness interpreter: system site-packages are
   root-owned, so the only writable import path a model-driven `pip install
@@ -5838,7 +5837,7 @@ tested without spawning py-spy.
   Maintenance still requires observed process/socket quiescence. See
   [Dashboard lifecycle](dashboard-lifecycle.md). macOS/Windows/Linux targets ship unsigned
   (installer-desktop posture), building needs Rust + Tauri CLI. It is not
-  attached to product releases or claimed as a signed customer installer.
+  attached to product releases or claimed as a signed installer.
 - **Windows MSI engineering build** (`apps/installer-msi/`): WiX v4 authoring set — per-user
   scope, stable UpgradeCode + MajorUpgrade, user-PATH component, a launcher
   that bootstraps the bundled wheel into the console-script target —
@@ -5855,8 +5854,8 @@ tested without spawning py-spy.
   for a public read-only demo — the dashboard has no global read-only flag,
   so an nginx deny-proxy (`limit_except GET HEAD`) fronts it with the
   bearer injected upstream; a seeder creates finished demo goals through
-  the real world model; DNS/TLS/operating demo.maverick.dev is a
-  maintainer act. Contract-tested like the other reference architectures.
+  the real world model; DNS, TLS and hosting a public instance are outside
+  the blueprint. Contract-tested like the other reference architectures.
 - **Mobile skill execution scaffolds** (`apps/mobile-skills/`): a Pyodide
   runner page (vendored-only Pyodide, no CDN; pinned release + fill-on-
   download checksum) executing a verified pure-stdlib repo module in a
@@ -5884,9 +5883,7 @@ tested without spawning py-spy.
 - **Docs** — MkDocs site, [getting started](./getting-started.md), 30-recipe
   [cookbook](./cookbook/), [architecture](./architecture.md),
   [embedding guide](./embedding.md), [security hardening](./security-hardening.md),
-  [comparison page](./comparison.md) (Lightwork vs the field, claims grounded in
-  this catalogue), [press kit](./press-kit.md), [showcase wall](./showcase.md)
-  (built-with-Lightwork submissions by PR), and a self-serve
+  and a self-serve
   [observability integrations guide](./integrations/observability-partners.md)
   (OpenRouter provider, OTLP-generic tracing incl. LangSmith, Helicone via
   base_url override).
@@ -5904,41 +5901,20 @@ tested without spawning py-spy.
   gates (fenced code preserved, glossary + structure verified before
   anything is written, human translations never overwritten); `--check` is
   offline, and the model resolves by the `translator` role.
-- **Distribution program kits** ([`docs/programs/`](./programs/)): 24
-  runnable playbooks — Summit v1 (virtual) + Summit v2 (hybrid delta) +
-  Conference v3 (flagship delta), university outreach, integration
-  partnerships (business half), GitHub Stars campaign, office hours,
-  sponsorship tiers (incl. the tier-2 gate + renewal terms), conference
-  booth, swag, ambassadors, Skill of the Year, community survey,
-  foundation exploration, badge program, curriculum kit, community grants,
-  regional meetups, hackathon series, localized communities, public
-  roadmap voting, skill + channel certification (mechanical bars over the
-  real gates), tutorial video seasons 2-4 (per-episode scripts, every
-  command verified), and press kit v2 + an evidence-gated case-study
-  template. Each kit reuses the shipped machinery (skill validator,
-  moderation gauntlet, ratings, plugin matrix CI, sigstore/CA signing,
-  retrospective generators) instead of inventing parallel process; founder
-  decisions (amounts, dates, license grants) are explicitly marked, never
-  invented; executing the programs is a maintainer act.
 - **2.0 release machinery** ([`docs/migration-2.0.md`](./migration-2.0.md)
   + [`docs/release-checklist-2.0.md`](./release-checklist-2.0.md)): the
   operator migration playbook (rehearsable today — snapshot, `maverick
   migrate`/`schema-plan`/`config-lint` dry runs, apply, verify, rollback)
   and the release gate the maintainer cut runs through (CI matrix,
   contract checks, deprecation sunsets, migration rehearsal, LTS branch
-  cut, signing). **Governance**: the Safety Steering Group charter
-  ([`docs/governance/safety-steering-group.md`](./governance/safety-steering-group.md))
-  and the elected-TSC charter draft with explicit launch gates
-  ([`docs/governance/governance-v2-tsc.md`](./governance/governance-v2-tsc.md)).
-  **Strategy**: the five-year vision essay
-  ([`docs/strategy/vision-2031.md`](./strategy/vision-2031.md)), every
-  backward-looking claim grounded in this catalogue.
+  cut, signing).
 - **AR plan tree (visionOS scaffold)** (`apps/visionos-plan-tree/`):
   SwiftUI + RealityKit volumetric window rendering the goal forest from
   `GET /api/v1/goal-tree` — status-colored spheres, parent link bars,
   pinch-to-inspect card; read-only, bearer-token honored. Building/tuning
-  needs Xcode + the visionOS SDK (and honest on-device verification is
-  flagged in the source), per the watch-glance scaffold posture.
+  needs Xcode + the visionOS SDK; the source flags that scale and sphere
+  radius have not been verified on Vision Pro hardware, per the watch-glance
+  scaffold posture.
 
 ## Customer workflow completion and readiness
 

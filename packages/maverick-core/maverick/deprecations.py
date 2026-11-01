@@ -1,5 +1,4 @@
-"""Deprecation registry + sunset gate (roadmap: 2028 H2 performance —
-"sunset deprecated paths").
+"""Deprecation registry + sunset gate.
 
 Deprecations rot when they live in scattered comments: the warning ships, the
 removal never happens, and the old path is maintained forever. This is the

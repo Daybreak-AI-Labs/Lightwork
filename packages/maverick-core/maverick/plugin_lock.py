@@ -1,4 +1,4 @@
-"""Plugin version-pinning lockfile (roadmap: 2027 H2 ecosystem).
+"""Plugin version-pinning lockfile.
 
 The plugin allowlist says *which* plugins may load; it says nothing about
 *which version* — a routine ``pip install -U`` silently swaps the code the

@@ -1,4 +1,4 @@
-"""Sandbox SDK v2 — the formal backend contract (roadmap: 2028 H2 ecosystem).
+"""Sandbox SDK v2 — the formal backend contract.
 
 v1 was duck typing: "anything with ``.exec(cmd) -> ExecResult``" — fine
 in-tree, but a third party cannot ship a backend without forking, and a

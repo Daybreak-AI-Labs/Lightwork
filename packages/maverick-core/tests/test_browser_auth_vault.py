@@ -1,4 +1,4 @@
-"""Browser auth vault (ROADMAP 2027 H2)."""
+"""Browser auth vault."""
 from __future__ import annotations
 
 import pytest

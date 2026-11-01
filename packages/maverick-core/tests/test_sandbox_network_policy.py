@@ -1,4 +1,4 @@
-"""Per-tool network egress policy (ROADMAP 2028 H2)."""
+"""Per-tool network egress policy."""
 from __future__ import annotations
 
 from maverick.sandbox.network_policy import describe, host_allowed

@@ -1,4 +1,4 @@
-"""Multi-agent fairness scheduler tool (roadmap: 2028 H2 — "fairness scheduler").
+"""Multi-agent fairness scheduler tool.
 
 Allocates a fixed number of execution slots across competing agents by weighted
 fair share, using the largest-remainder (Hamilton) method, and never hands an

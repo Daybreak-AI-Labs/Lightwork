@@ -1,4 +1,4 @@
-"""Energy / CO2 accounting for inference (roadmap: 2027 H2 — "energy accounting").
+"""Energy / CO2 accounting for inference.
 
 Turn a workload (tokens processed, or raw GPU-seconds) into an estimated energy
 draw in watt-hours and the resulting operational CO2e in grams, using openly

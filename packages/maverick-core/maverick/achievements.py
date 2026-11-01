@@ -1,4 +1,4 @@
-"""Local achievements (roadmap: 2028 H2 UX).
+"""Local achievements.
 
 A small, local-only milestone ledger: achievements are *derived from the
 world model's recorded history* (never self-reported, nothing leaves the

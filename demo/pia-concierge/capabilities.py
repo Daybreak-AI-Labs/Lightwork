@@ -1,17 +1,16 @@
 """Capability detection for PIA Concierge.
 
-The concierge ships in two shapes from the same code:
+The concierge runs in two modes from the same code:
 
-* **Platform** (bundled with Lightwork) — the real ``maverick`` engine,
-  world-model governance, the Ed25519 signed audit chain, the control
-  catalog, connected-source doc discovery, and the dashboard.
-* **Standalone** (sold on its own) — just the agent: a self-contained
-  scorer, in-process OneTrust review/approve, and vendor memory. No audit
-  trail, no governance, no learning, no dashboard. Buying Lightwork is what
-  unlocks those.
+* **Platform mode** (with Lightwork installed) — the real ``maverick``
+  engine, world-model governance, the Ed25519 signed audit chain, the
+  control catalog, connected-source doc discovery, and the dashboard.
+* **Standalone mode** — just the agent: a self-contained scorer, in-process
+  OneTrust review/approve, and vendor memory. No audit trail, no
+  governance, no learning, no dashboard.
 
 Set ``PIA_STANDALONE=1`` to force standalone even where ``maverick`` is
-importable (that's how the demo shows the standalone SKU on one machine).
+importable (that's how the demo shows standalone mode on one machine).
 When ``maverick`` cannot be imported at all, standalone is the only option.
 """
 from __future__ import annotations

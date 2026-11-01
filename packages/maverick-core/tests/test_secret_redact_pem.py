@@ -1,6 +1,6 @@
 """A PEM private key must be redacted IN FULL, not just its header line.
 
-Security finding (round 7, adversarial): the private_key_pem pattern matched
+Previously, the private_key_pem pattern matched
 only `-----BEGIN ... PRIVATE KEY-----`, so redact() replaced just that marker
 and left the base64 key body + END line in cleartext. A private key pasted
 into a goal / tool output / the blackboard would persist its actual secret

@@ -1,5 +1,5 @@
 """Supply-chain pinning: a pin-and-verify ledger for the dependency tree
-(roadmap: 2027 H2 safety).
+.
 
 An agent runtime is only as trustworthy as the packages loaded into its
 process: a quietly upgraded transitive dependency (or a typosquat pulled in by

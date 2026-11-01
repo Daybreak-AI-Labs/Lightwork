@@ -1,4 +1,4 @@
-"""Capability delegation graph (roadmap: 2027 H1 safety).
+"""Capability delegation graph.
 
 Build a directed graph of capability grants (principal -> grantee : capability)
 and analyze it for governance risks: delegation cycles (A grants to B grants

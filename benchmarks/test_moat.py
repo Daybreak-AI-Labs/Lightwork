@@ -182,9 +182,9 @@ class TestReport:
         )
         result = run_moat_benchmark([TaskPair("demo", "c", "w")], run_fn)
         report = format_report(result)
-        assert "Compounding-moat benchmark" in report
+        assert "Warm-vs-cold memory benchmark" in report
         assert "| demo |" in report
-        assert "Moat demonstrated" in report
+        assert "Warm advantage demonstrated" in report
 
     def test_empty_result_is_safe(self):
         result = MoatResult(pairs=[])
@@ -192,7 +192,7 @@ class TestReport:
         assert result.cold_success_rate == 0.0
         assert result.moat_demonstrated is False
         # Report still renders.
-        assert "Compounding-moat benchmark" in format_report(result)
+        assert "Warm-vs-cold memory benchmark" in format_report(result)
 
 
 class TestLiveRunnerSandbox:

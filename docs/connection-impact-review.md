@@ -6,7 +6,7 @@ are evaluated separately. Exact references and possible dynamic connector use
 are labelled separately; unavailable or administrator-only coverage stays visible.
 Private employee flow definitions remain private even from administrators.
 
-Every named credential update or local removal now requires its revision, the
+Every named credential update or local removal requires its revision, the
 current account/workspace context, and a fresh impact digest. API clients should
 GET `/api/v1/connections/{name}/impact` and submit the reviewed values. An unknown
 network result is not permission to retry. Review current state first.
@@ -41,9 +41,8 @@ identity, grant, and dependent-work evidence is disclosed instead of inferred.
 The OAuth qualification matrix labels every unobserved installed Windows/provider
 combination as unqualified and distinguishes synthetic, native and live evidence.
 
-Python AST/JavaScript syntax and whitespace were reviewed. Regression tests were
-authored but not run; no installed/native tests, sandbox jobs, or live providers were
-called. OAuth acceptance still requires the authorized testing phase, signed build,
-registered provider application and approved test account. These UI and read-probe
+Regression tests use no installed/native host, sandbox job or live provider.
+OAuth acceptance requires a signed build, a registered provider application and
+a test account. These UI and read-probe
 extensions use the existing Connections feature gate. Mutation/rebind operations
 are not currently offered through Copilot; use their governed in-product review.

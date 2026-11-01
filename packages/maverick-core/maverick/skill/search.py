@@ -1,4 +1,4 @@
-"""Skill search engine + Hugging Face dataset publish/pull (ROADMAP 2027 H2).
+"""Skill search engine + Hugging Face dataset publish/pull.
 
 Lightwork already ranks skills *for the agent loop* by goal relevance
 (``skills._relevant_skills_lexical``, ``skill_embeddings``). This is the

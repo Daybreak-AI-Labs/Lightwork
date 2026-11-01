@@ -1,5 +1,4 @@
-"""Run-events firehose serializer (roadmap: 2027 H2 — "run-events firehose
-(WebSocket)").
+"""Run-events firehose serializer.
 
 Encode and filter the stream of run events that a WebSocket firehose would push
 to dashboards. Pure and offline: this is the *serializer*, not the socket — it

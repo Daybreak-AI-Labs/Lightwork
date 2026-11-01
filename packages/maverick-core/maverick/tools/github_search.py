@@ -1,5 +1,5 @@
 """GitHub search tool — repositories / code / issues via the REST search API
-(roadmap: 2027 H2 ecosystem).
+.
 
 Auth is explicit, never ambient: a token is read from ``GITHUB_TOKEN`` (or
 ``GH_TOKEN``), falling back to ``[github] token`` in ``~/.maverick/config.toml``

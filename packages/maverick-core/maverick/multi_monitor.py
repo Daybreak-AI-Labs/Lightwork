@@ -1,4 +1,4 @@
-"""Multi-monitor computer-use (roadmap: 2028 H1 capabilities).
+"""Multi-monitor computer-use.
 
 The computer tool assumes one display: screenshots grab ``sct.monitors[1]``
 and clicks clamp to the primary's size. With several displays the OS exposes
