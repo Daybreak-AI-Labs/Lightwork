@@ -102,6 +102,16 @@ controls; the other packages build on it.
 - CI also runs tests with `MAVERICK_TEST_SECURE_DEFAULT=1` (the production
   security posture): selected suites on pull requests, the whole suite in the
   merge queue and on `main`. Run affected tests that way too.
+- On a pull request the `test (3.10, n)` legs run only the test files
+  `scripts/select_pr_tests.py` selects from the changed files (a kernel,
+  `conftest.py`, requirements, `.github/` or `scripts/` change means the full
+  suite; a package change means its tests plus every test naming its import
+  package; other files mean the tests naming them by path), and the heavier
+  jobs (docker, postgres, audit, release-cohort, redteam, eval-smoke, the
+  benchmark gates, Windows containment) run only when a changed file is under
+  their inputs (`JOB_PREFIXES`). The merge queue and `main` run everything.
+  Preview the selection with `python scripts/select_pr_tests.py --git
+  origin/main HEAD`.
 
 ### CI gates beyond Ruff
 

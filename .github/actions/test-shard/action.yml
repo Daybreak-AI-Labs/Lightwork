@@ -5,7 +5,9 @@ description: >-
   `test-window` jobs in ci.yml: `test` runs it on the floor interpreter for
   every event, `test-window` on the rest of the supported window only where
   the commit actually lands (the merge queue and pushes to main). Callers
-  check the repository out first.
+  check the repository out first. On a pull request `test` narrows the slice
+  to the test files scripts/select_pr_tests.py chose from the changed files
+  (`mode`/`paths`); everywhere else the slice is the whole suite.
 inputs:
   python-version:
     description: Interpreter to install and test on (an actions/setup-python spec).
@@ -13,13 +15,35 @@ inputs:
   shard:
     description: Which of the four file-level slices (1-4) to run.
     required: true
+  mode:
+    description: >-
+      What the slice runs. `full` (the default, and what an empty value
+      means) is the whole deterministic suite; `paths` is only the pytest
+      targets in `paths`; `none` installs nothing, runs nothing and reports
+      success.
+    required: false
+    default: full
+  paths:
+    description: >-
+      JSON array of repository-relative pytest targets, read in `paths` mode
+      only.
+    required: false
+    default: "[]"
 runs:
   using: composite
   steps:
+    - name: Nothing to run
+      if: inputs.mode == 'none'
+      shell: bash
+      run: >-
+        echo "No test file names a file this pull request changes
+        (scripts/select_pr_tests.py); the merge queue runs the whole suite."
     - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      if: inputs.mode != 'none'
       with:
         python-version: ${{ inputs.python-version }}
     - name: Install packages
+      if: inputs.mode != 'none'
       shell: bash
       run: |
         set -x
@@ -48,14 +72,46 @@ runs:
         python -m pip check
         python scripts/verify_constraint_closure.py
     - name: Show installed packages
+      if: inputs.mode != 'none'
       shell: bash
       run: python -m pip list
     - name: Test (bounded, with diagnostics)
+      if: inputs.mode != 'none'
       shell: bash
       env:
         PYTHONFAULTHANDLER: "1"
+        # The selection reaches bash through the environment, not through
+        # template interpolation into the script: the paths are file names
+        # the pull request chose.
+        SELECT_MODE: ${{ inputs.mode }}
+        SELECT_PATHS: ${{ inputs.paths }}
       run: |
         set -o pipefail
+        # On a pull request the `test` job narrows each slice to the test
+        # files scripts/select_pr_tests.py chose from the changed files
+        # (mode=paths); everywhere else, and whenever a shared file changed
+        # or the selection job failed (an empty mode), the slice is the whole
+        # suite. A slice whose share of the selected files is empty exits 5
+        # ("no tests ran") from both phases below; that is a pass in paths
+        # mode only -- a full slice that collects nothing is a broken
+        # checkout.
+        targets=()
+        case "${SELECT_MODE:-full}" in
+          full) ;;
+          paths)
+            readarray -t targets < <(python -c 'import json, os; [print(p) for p in json.loads(os.environ["SELECT_PATHS"])]')
+            if [ "${#targets[@]}" -eq 0 ]; then
+              echo "::error::test-shard mode=paths without any paths"
+              exit 1
+            fi
+            echo "Running the ${#targets[@]} test files selected for this pull request:"
+            printf '  %s\n' "${targets[@]}"
+            ;;
+          *)
+            echo "::error::unknown test-shard mode '$SELECT_MODE'"
+            exit 1
+            ;;
+        esac
         # Two exact-main jobs previously survived until GitHub's six-hour
         # ceiling. pytest-timeout catches a stuck test; GNU timeout also
         # bounds interpreter shutdown/non-daemon-thread leaks after the last
@@ -79,12 +135,15 @@ runs:
             -m "not heavy_concurrency" --tb=short --durations=50 \
             --timeout=180 --timeout-method=signal \
             --junitxml="test-results-${{ inputs.python-version }}-${{ inputs.shard }}.xml" \
+            "${targets[@]}" \
           2>&1 | tee "pytest-${{ inputs.python-version }}-${{ inputs.shard }}.log" || status=$?
+        if [ "$SELECT_MODE" = paths ] && [ "$status" -eq 5 ]; then status=0; fi
         timeout --verbose --signal=ABRT --kill-after=30s 10m \
           python -m pytest -q --shard "${{ inputs.shard }}/4" \
             -m heavy_concurrency --tb=short \
             --timeout=600 --timeout-method=signal \
             --junitxml="test-results-${{ inputs.python-version }}-${{ inputs.shard }}-serial.xml" \
+            "${targets[@]}" \
           2>&1 | tee -a "pytest-${{ inputs.python-version }}-${{ inputs.shard }}.log" || serial=$?
         if [ "${serial:-0}" -ne 0 ] && [ "${serial:-0}" -ne 5 ]; then status=$serial; fi
         exit "$status"

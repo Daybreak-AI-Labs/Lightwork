@@ -137,6 +137,13 @@ security posture): selected suites on pull requests, and the whole suite in
 the merge queue and on `main` (the `posture` jobs). Run the tests you changed
 that way before pushing.
 
+On a pull request the `test (3.10, n)` legs run only the test files your
+changed files can affect (the `select-tests` job in `ci.yml`; the rules are in
+`scripts/select_pr_tests.py` and in the table below). The merge queue and
+`main` run everything, so run the whole suite locally before pushing a change
+to shared code, and check the selection yourself with
+`python scripts/select_pr_tests.py --git origin/main HEAD`.
+
 A collection error in any file stops the whole run, so fix import errors
 first. When a collection error shows a `pyo3_runtime.PanicException`, the real
 cause (often a missing module) is on the captured stderr line above it.
@@ -227,7 +234,8 @@ refused, history stays linear, and nobody can bypass the rules.
 | `lint` | `ruff check .`, vulture, the `tomllib` and `shell=True` checks, detect-secrets and the `python -m maverick.<gate> --ci` contract gates |
 | `lint-pr-title` | Conventional Commits pull request title (see below) |
 | `no-ai-attribution` | `scripts/check_attribution.py` over the pull request's commits, title and description, the merge-queue commit and pushes to `main` |
-| `test (3.10, 1/2/3/4)` | The full test suite on Python 3.10, in four slices, on every pull request |
+| `select-tests` | On a pull request, the test files the changed files can affect (`scripts/select_pr_tests.py`): a change to the kernel, a `conftest.py`, `pyproject.toml`, the requirements, `.github/` or `scripts/` selects the full suite; a package change selects its tests and every test naming its import package; other files select the tests naming them by path. The heavier jobs (`docker`, `postgres`, `audit`, `release-cohort`, `redteam`, `eval-smoke`, the benchmark gates, Windows containment) run on a pull request only when a changed file is under their inputs (`JOB_PREFIXES`) |
+| `test (3.10, 1/2/3/4)` | The test suite on Python 3.10, in four slices: the `select-tests` selection on a pull request, the full suite in the merge queue and on `main` |
 | `test (3.11, 1/2/3/4)`, `test (3.12, 1/2/3/4)` | The same slices on 3.11 and 3.12. On a pull request these report success without running; they run on the merge queue's commit and on `main` |
 | `posture (1/2/3/4)` | The full suite again on 3.12 under the production security defaults, gated like the 3.11 and 3.12 legs |
 | `harness-overhead`, `governance-frontier-offline` | The tracked benchmark manifests verify against the current sources (regenerate them when a source they cover changes) |
