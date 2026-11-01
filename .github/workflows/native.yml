@@ -245,7 +245,7 @@ jobs:
           fi
           "$parity_python" -I -m pip install --upgrade \
             'pip==26.2.2' 'setuptools==84.2.1' 'wheel==0.48.0' \
-            'packaging==26.3' 'pytest==9.2.0' 'certifi==2026.10.23'
+            'packaging==26.3' 'pytest==9.1.1' 'certifi==2026.10.23'
           # --no-index forces the install to use the wheel we just built; if no
           # wheel matches this OS/Python the install fails hard (not a silent skip).
           "$parity_python" -I -m pip install \

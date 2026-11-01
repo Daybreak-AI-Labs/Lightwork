@@ -775,7 +775,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install the focused test dependency
         if: fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment'] != false
-        run: python -m pip install "pytest==9.2.0"
+        run: python -m pip install "pytest==9.1.1"
       - name: Test Windows Job Object process-tree containment
         if: fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment'] != false
         env:
@@ -815,7 +815,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install the focused test dependency
         if: github.event_name != 'pull_request'
-        run: python -m pip install "pytest==9.2.0"
+        run: python -m pip install "pytest==9.1.1"
       - name: Test Windows Job Object process-tree containment
         if: github.event_name != 'pull_request'
         env:
