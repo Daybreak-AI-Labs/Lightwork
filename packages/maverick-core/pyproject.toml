@@ -3,19 +3,18 @@ requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-# PyPI distribution name, reserved for when this ships publicly -- nothing is
-# published under it today (pypi.org/project/maverick-agent 404s as of July
-# 2026), so read this as the intended name, not a live one. The bare 'maverick'
-# name was squatted on PyPI, hence the suffix. The Python *import* name stays as
-# `maverick` (see [tool.setuptools.packages.find]) and the CLI is
+# PyPI distribution name. Nothing is published to PyPI under it yet. The bare
+# 'maverick' name is taken on PyPI, hence the suffix. The Python *import* name
+# stays `maverick` (see [tool.setuptools.packages.find]) and the CLI is
 # installed under both names -- `maverick` and its Lightwork-brand
 # alias `lightwork` (see [project.scripts]).
 name = "maverick-agent"
 version = "0.1.7"
 description = "Recursive multi-agent swarm for long-horizon work"
 requires-python = ">=3.10"
-license = "LicenseRef-Proprietary"
-authors = [{ name = "cdayAI" }]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "The Lightwork Authors" }]
 readme = "README.md"
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -55,7 +54,7 @@ openai     = ["openai>=1.30,<4"]
 release-runtime = [
     "openai>=1.30,<4",
     "openpyxl>=3.1", "lxml>=5.0", "pypdf>=6.14.2", "pdfplumber>=0.10",
-    # Frozen customers cannot add Python packages to the executable. Include
+    # A frozen executable cannot add Python packages after it is built. Include
     # the supported SQL driver, local MathML conversion and metrics collector.
     "sqlalchemy>=2.0,<3", "psycopg[binary,pool]>=3.3.5,<4",
     "latex2mathml>=3.77", "prometheus-client>=0.20",
@@ -164,7 +163,7 @@ sentry          = ["sentry-sdk>=2.0"]
 # used only when [billing.stripe] enable is on. Lazily imported inside the
 # functions that touch Stripe, so the module imports and reports "disabled"
 # cleanly without it; webhook signature verification is stdlib HMAC and needs
-# no SDK. Kept OPTIONAL (kernel rule 5) so a fresh install pulls nothing extra.
+# no SDK. Kept OPTIONAL so a fresh install pulls nothing extra.
 stripe          = ["stripe>=9.0"]
 shield          = ["maverick-shield>=0.1.7"]
 installer  = ["maverick-installer>=0.1.7"]
