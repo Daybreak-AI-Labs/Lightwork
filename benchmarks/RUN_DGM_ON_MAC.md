@@ -1,8 +1,8 @@
-# Running the full SWE-bench DGM uplift on a Mac mini
+# Running the full SWE-bench DGM uplift on a Mac
 
-Your Mac mini is a perfect host for this: it stays up (unlike this session's
-container, which recycles mid-solve and is the *only* reason the run can't
-finish here). The Mac is only the **conductor** — the LLM solve is an API call
+Any Mac that stays up is a good host for this; an ephemeral sandbox container
+recycles mid-solve, which is the *only* reason the run cannot finish there.
+The Mac is only the **conductor** — the LLM solve is an API call
 and every patch is graded on **Modal** (x86 Linux, in the cloud). So Apple
 Silicon vs Intel does not matter, and you do **not** install or run Docker
 locally. No GPU, nothing heavy runs on the Mac itself.

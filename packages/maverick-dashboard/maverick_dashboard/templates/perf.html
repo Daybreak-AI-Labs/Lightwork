@@ -53,7 +53,7 @@
 
 {% endblock %}
 {% block scripts_extra %}
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // Build cells with textContent (mvEl) rather than innerHTML string
     // concatenation: benchmark/SLA names come from local tool output and must
     // never be interpreted as markup.

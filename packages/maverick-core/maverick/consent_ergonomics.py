@@ -1,4 +1,4 @@
-"""Consent ergonomics pass (roadmap: 2028 H2 Safety).
+"""Consent ergonomics pass.
 
 Better consent UX **without weakening the gate**. Three ergonomic wins layered on
 top of :mod:`maverick.safety.consent` — never around it:

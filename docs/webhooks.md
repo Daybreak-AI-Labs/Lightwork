@@ -100,6 +100,7 @@ Every POST body is this JSON object:
 | `vendor.review_due` | vendor | A vendor review is due. |
 | `approval.created` | approval | An action was parked for human approval. |
 | `approval.decided` | approval | Approved or denied (single approver, or the quorum's final decision). |
+| `approval.undone` | approval | A decision on a request a waiting task holds was undone within its undo window (`[approval] undo_grace_seconds`); the approval is waiting again. Payload: `previous_status`, `undone_by`. Other decisions are final and never undone. |
 | `approval.expired` | approval | An approval card expired before anyone decided. |
 | `policy.published` | policy | A policy version was published. |
 | `webhook.test` | webhook_subscription | Sent from the Webhooks page. |

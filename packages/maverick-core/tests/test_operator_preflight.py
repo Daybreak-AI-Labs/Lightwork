@@ -486,6 +486,99 @@ def test_gateway_preflight_validates_wrapped_envelope_without_unwrapping(
     assert not (isolated_config.parent / "state").exists()
 
 
+def test_gateway_preflight_validates_azure_envelope_without_unwrapping(
+    monkeypatch,
+    isolated_config,
+):
+    from maverick import client, kms_backends
+    from maverick import operator_preflight as preflight
+
+    wrapped = base64.b64encode(
+        kms_backends._AZURE_MAGIC + b"opaque-azure-envelope"
+    ).decode("ascii")
+    monkeypatch.setenv("MAVERICK_TENANT", "valid-azure-wrapped-company")
+    monkeypatch.setenv("MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY", "1")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY_WRAPPED", wrapped)
+    real_module_available = preflight._module_available
+    monkeypatch.setattr(
+        preflight,
+        "_module_available",
+        lambda name: (
+            True if name in {"azure.keyvault.keys.crypto", "azure.identity"}
+            else real_module_available(name)
+        ),
+    )
+
+    def unexpected_unwrap(self, value, *, context=None):
+        raise AssertionError("offline preflight must not call KMS unwrap")
+
+    monkeypatch.setattr(
+        kms_backends.AzureKeyVaultKEK,
+        "unwrap",
+        unexpected_unwrap,
+    )
+    client.reset_client_cache()
+
+    checks = preflight._gateway_evidence_checks(
+        {
+            "audit": {"require_offhost_key": True},
+            "evidence_gateway": {"enable": True},
+            "kms": {
+                "provider": "azure",
+                "key_id": "https://acme-kv.vault.azure.net/keys/audit-kek",
+            },
+        }
+    )
+
+    by_id = {check.id: check for check in checks}
+    assert by_id["gateway_key_custody"].status == "ready"
+    assert by_id["gateway_signing"].status == "ready"
+    assert (
+        preflight.os.environ["MAVERICK_AUDIT_SIGNING_KEY_WRAPPED"] == wrapped
+    )
+    assert not (isolated_config.parent / "state").exists()
+
+
+def test_gateway_preflight_blocks_azure_envelope_without_azure_identity(
+    monkeypatch,
+    isolated_config,
+):
+    from maverick import client, kms_backends
+    from maverick import operator_preflight as preflight
+
+    wrapped = base64.b64encode(
+        kms_backends._AZURE_MAGIC + b"opaque-azure-envelope"
+    ).decode("ascii")
+    monkeypatch.setenv("MAVERICK_TENANT", "azure-identity-missing-company")
+    monkeypatch.setenv("MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY", "1")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY_WRAPPED", wrapped)
+    real_module_available = preflight._module_available
+    monkeypatch.setattr(
+        preflight,
+        "_module_available",
+        lambda name: (
+            False if name == "azure.identity" else real_module_available(name)
+        ),
+    )
+    client.reset_client_cache()
+
+    checks = preflight._gateway_evidence_checks(
+        {
+            "audit": {"require_offhost_key": True},
+            "evidence_gateway": {"enable": True},
+            "kms": {
+                "provider": "azure",
+                "key_id": "https://acme-kv.vault.azure.net/keys/audit-kek",
+            },
+        }
+    )
+
+    by_id = {check.id: check for check in checks}
+    assert by_id["gateway_key_custody"].status == "blocked"
+    assert "not installed" in by_id["gateway_key_custody"].detail
+    assert wrapped not in " ".join(check.detail for check in checks)
+
+
 def test_historical_injected_marker_is_not_current_offhost_custody(
     monkeypatch,
     isolated_config,
@@ -841,3 +934,16 @@ def test_preflight_json_never_echoes_provider_secret(isolated_config):
     result = CliRunner().invoke(main, ["preflight", "--json"])
 
     assert secret not in result.output
+
+
+def test_an_invalid_saved_config_points_every_blocked_check_at_the_config_fix(isolated_config):
+    # The file exists, so `maverick init` refuses to run; every check blocked by
+    # the invalid file must send the operator to the fix that works.
+    from maverick import operator_preflight
+
+    isolated_config.write_text("this is not = valid = toml", encoding="utf-8")
+    checks = _by_id(operator_preflight.collect())
+    assert checks["config"].status == "blocked"
+    for check_id in ("provider", "model_routes", "storage"):
+        assert checks[check_id].status == "blocked"
+        assert checks[check_id].remediation == "maverick config-lint"

@@ -32,7 +32,7 @@ def test_coerce_count_fails_closed_on_invalid_counts(bad) -> None:
 
 
 def test_usage_accounting_error_is_not_a_budget_cap_breach() -> None:
-    # W1-17: malformed provider usage is a gateway fault. It must stop the run
+    # Malformed provider usage is a gateway fault. It must stop the run
     # but never masquerade as "budget exceeded" (raising the cap can't fix it)
     # and provider failover must not mask it by trying another model.
     from maverick.provider_failover import should_retry_llm_error

@@ -1503,9 +1503,11 @@ def _park_approval(
             action, risk, scope, detail, provenance, requester,
         )
     stored = encode_approval_detail(approval_card)
+    # This wait holds each decision for the undo window before acting on it,
+    # so its requests are the ones a person can undo.
     approval_id = wm.create_approval(
         action, risk=risk, scope=scope, detail=stored, provenance=provenance,
-        approvals_required=required, requested_by=requester,
+        approvals_required=required, requested_by=requester, undoable=True,
     )
     # Chat channels get the same card with decision buttons: the world model
     # announces it (maverick.approval_notify) right after the row commits.
@@ -1545,6 +1547,12 @@ def _settled_decision(row, approval_card: Mapping[str, object], risk: str) -> Co
     )
 
 
+# How long the wait keeps trying to settle a decision the database will not
+# take (a write lock held elsewhere) before it falls back as for any other
+# unreadable approval store.
+_SETTLE_RETRY_SECONDS = 60.0
+
+
 def _await_dashboard_decision(
     wm,
     approval_id: int,
@@ -1559,7 +1567,10 @@ def _await_dashboard_decision(
     # the human-approval window (timing out a risky-action prompt early) or
     # extend it (stalling the agent). The decision record below keeps wall time.
     deadline = time.monotonic() + _dashboard_timeout()
+    from ..world_model import approval_held_open
+
     grace = approval_undo_grace_seconds()
+    settle_failing_since = None
     while True:
         try:
             row = wm.get_approval(approval_id)
@@ -1576,9 +1587,29 @@ def _await_dashboard_decision(
             # an undo flips the row back to pending and the wait resumes).
             remaining = approval_decision_settles_at(row, grace=grace) - time.time()
             if remaining > 0:
+                settle_failing_since = None   # a new decision gets its own retry time
                 time.sleep(min(1.0, remaining))
                 continue
+            # Make the decision final before acting on it: an undo that reads
+            # a longer window (another process, a changed setting) is refused
+            # from here on, and one that got in first leaves it pending. Only a
+            # decision whose own window has passed is settled: one made again
+            # after an undo just now waits out its full window.
+            try:
+                row = wm.settle_approval_decision(approval_id, decided_before=time.time() - grace)
+            except Exception:
+                # A busy database: the decision stands and stays undoable until
+                # it is settled, so try again rather than refuse what was approved.
+                settle_failing_since = settle_failing_since or time.monotonic()
+                if time.monotonic() - settle_failing_since >= _SETTLE_RETRY_SECONDS:
+                    return None
+                time.sleep(1.0)
+                continue
+            settle_failing_since = None
+            if row is None or row.status == "pending" or approval_held_open(row):
+                continue
             return _settled_decision(row, approval_card, risk)
+        settle_failing_since = None   # undone: the next decision gets its own retry time
         if time.monotonic() >= deadline:
             break
         time.sleep(1.0)

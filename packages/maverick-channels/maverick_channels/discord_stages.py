@@ -1,5 +1,4 @@
-"""Discord Stages voice channel v2 (roadmap: 2027 H1 UX — "voice in
-channels v2 (Discord stages)").
+"""Discord Stages voice channel v2.
 
 Drive Lightwork from a Discord **Stage channel**: the bot joins the stage,
 listens to speakers, transcribes utterances, routes them through the normal

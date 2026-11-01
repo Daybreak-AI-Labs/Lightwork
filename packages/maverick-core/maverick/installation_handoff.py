@@ -12,6 +12,7 @@ import secrets
 import time
 
 from . import installation_recovery as recovery
+from .constant_time import text_equals
 
 
 def _review_digest(release: dict) -> str:
@@ -62,7 +63,7 @@ def current_review() -> dict | None:
 
 def reviewed_release(identifier: str) -> dict:
     record = current_review()
-    if record is None or not secrets.compare_digest(str(record["id"]).encode(), str(identifier).encode()):
+    if record is None or not text_equals(str(record["id"]), str(identifier)):
         raise recovery.MaintenanceError("The exact native release review expired or changed. Check for updates again and review the new target.")
     return _release(record["release"])
 

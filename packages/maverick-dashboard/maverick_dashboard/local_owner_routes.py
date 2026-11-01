@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from . import local_owner, local_passphrases
+from .local_owner_second_factor import Challenge
 from .rbac import ROSTER_RECOVERY, RosterMissingError
 
 router = APIRouter()
@@ -76,8 +77,11 @@ def login_form(request: Request):
     return _form(request, setup=False)
 
 
-def _sign_in(request: Request, email: str, password: str, colleagues: bool) -> str:
-    """The owner on this computer, otherwise an invited colleague."""
+def _sign_in(request: Request, email: str, password: str, colleagues: bool):
+    """The owner on this computer, otherwise an invited colleague.
+
+    Returns the session token, or the owner's second-step challenge.
+    """
     if not colleagues:
         return local_owner.login(request, email=email, password=password)
     if _on_this_computer(request) and local_owner.claimed() and local_passphrases.owner_of(email):
@@ -123,6 +127,11 @@ async def _submit(request, *, setup):
         else:
             token = await run_in_threadpool(_sign_in, request, fields.get("email", ""),
                                             fields.get("password", ""), colleagues)
+        if isinstance(token, Challenge):
+            # The owner's authenticator app is set up or asked for before any session exists.
+            from .local_owner_mfa_routes import challenge_response, safe_return_to
+            return challenge_response(request, token, return_to=(
+                "" if setup else safe_return_to(request.query_params.get("return_to"))))
         from .invites import session_ttl_seconds
         from .oidc_login import _cookie_secure, _set_cookie
         # The owner lands on Get started; a colleague lands on their home page.

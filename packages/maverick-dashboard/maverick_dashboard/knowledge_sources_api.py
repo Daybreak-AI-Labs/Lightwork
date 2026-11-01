@@ -134,7 +134,7 @@ def _seal(request, kind, prepared, changes):
     token = crypto_at_rest.seal_to_str(json.dumps(envelope, sort_keys=True, allow_nan=False))
     if not crypto_at_rest.is_sealed_str(token):
         raise HTTPException(503, "Enable at-rest encryption before retaining a complete Knowledge source review.")
-    return {"context": current, "operation": operation, "token": token, "changes": changes, "notice": native.NOTICE}
+    return {"context": current, "operation": operation, "token": token, "changes": changes, "notice": native.notice()}
 
 
 def _preparation_review(value):
@@ -200,7 +200,7 @@ def catalog(request: Request):
         authority(request, context)
         return response({"context": context, "sources": current.catalog(), "accounts": accounts,
                          "kinds": [{"value": name, "label": spec["label"]} for name, spec in readers.SOURCES.items()],
-                         "permissions": choices, "permission_state": decisions["state"], "specialists": specialists, "notice": native.NOTICE})
+                         "permissions": choices, "permission_state": decisions["state"], "specialists": specialists, "notice": native.notice()})
     return call(action)
 
 
@@ -233,7 +233,7 @@ def save_review(request: Request, body: SaveIn):
         changes = {"Decision": "Save source settings", "Source name": plan["name"], "Account and destination": {"Account": cfg["connection"], "Destination": cfg["origin"], "Source": readers.SOURCES[cfg["kind"]]["label"], "Chosen container": cfg["selection"]},
                    "Actual approved use": {"Asset": plan["asset_id"], "Decision": plan["decision_id"], "Purpose": plan["purpose"], "Action": "Analyze only"},
                    "Refresh": {"Schedule": {0: "Manual only", 3600: "Hourly", 21600: "Every six hours", 86400: "Daily"}[plan["interval_seconds"]], "Paused": body.paused, "Maximum AI search preparation cost per refresh in USD": plan["max_dollars"]},
-                   "Consequences": "Saves this complete source plan. No remote documents are read or approved by this save. Scheduled refreshes use this owner and current grants; imported versions require a separate registry reviewer. Specialist publication remains a separate complete review.", "Limits": native.NOTICE}
+                   "Consequences": "Saves this complete source plan. No remote documents are read or approved by this save. Scheduled refreshes use this owner and current grants; imported versions require a separate registry reviewer. Specialist publication remains a separate complete review.", "Limits": native.notice()}
         return response(_seal(request, "save", prepared, changes))
     return call(action)
 
@@ -257,7 +257,7 @@ def refresh_review(request: Request, identifier: str, body: RefreshIn):
         changes = {"Decision": "Refresh saved source", "Complete current source": _source_review(current.public(current.owned(identifier))),
                    "Dated remote file inventory": {"Checked at": prepared["snapshot_at"], "Items": prepared["inventory"]},
                    "Current AI search preparation and limit": _preparation_review(prepared["embedding"]), "Earlier uncertain refresh": prepared["previous"],
-                   "Earlier uncertainty acknowledged as a separate new intent": body.acknowledge_unknown, "Limits": native.NOTICE}
+                   "Earlier uncertainty acknowledged as a separate new intent": body.acknowledge_unknown, "Limits": native.notice()}
         return response(_seal(request, "refresh", prepared, changes))
     return call(action)
 
@@ -299,6 +299,9 @@ def apply(request: Request, body: ApplyIn):
             return response({"kind": kind, **result})
         if kind == "refresh":
             job = current.start(prepared, value["operation"], acknowledge_unknown=prepared["acknowledge_unknown"])
+            if job.get("state") == "queued":
+                from .knowledge_sources_scheduler import wake
+                wake()
             return response({"kind": kind, "job": job, "message": job["message"]}, 202)
         if kind == "attach":
             row = current.owned(prepared["source"])

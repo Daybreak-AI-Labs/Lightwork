@@ -263,8 +263,9 @@ def _native_replay(value, *, guarded, path):
             role="operator", authority_versions={}, input_versions={}, credential_versions={}, budget={"currency": "USD", "maximum": 0},
             expires_at=1 if expired else 4102444800, known_effects=["Record a fictional vote in a disposable local database"], unresolved_assumptions=[], before="Fictional pending request", after="Fictional vote", irreversible=False)
     request_card = card()
+    # A request the consent wait holds, so the declared undo transition applies.
     identity = world.create_approval("modeled.local.review", detail=encode_approval_detail(request_card),
-        approvals_required=value["quorum"], requested_by="user:model-requester")
+        approvals_required=value["quorum"], requested_by="user:model-requester", undoable=True)
     review, last_event, violation = None, None, False
     for action in value["schedule"]:
         if action == "read_review":

@@ -67,3 +67,29 @@ def test_written_config_is_read_back_by_the_kernel(tmp_path, monkeypatch):
 def test_declined_writes_nothing(tmp_path, monkeypatch):
     text = _write(tmp_path, monkeypatch, my_work={}, notifications_email={})
     assert "[my_work]" not in text and "[notifications.email]" not in text
+
+
+def _email_answers(monkeypatch, port: str, sender: str):
+    from maverick_installer import wizard
+    answers = iter([True, True])
+    texts = iter(["8", "smtp.example.com", port, sender])
+    monkeypatch.setattr(wizard, "_q_confirm", lambda m, default=True: next(answers))
+    monkeypatch.setattr(wizard, "_q_text", lambda m, default="": next(texts))
+    return wizard.pick_daily_summary({})
+
+
+def test_port_465_uses_implicit_tls(monkeypatch):
+    # The step always wrote STARTTLS, which cannot talk to a port-465 server:
+    # TLS starts with the first byte there.
+    _, mail, _, _ = _email_answers(monkeypatch, "465", "lw@example.com")
+    assert mail["port"] == 465 and mail["tls"] == "ssl"
+    _, mail, _, _ = _email_answers(monkeypatch, "587", "lw@example.com")
+    assert mail["port"] == 587 and mail["tls"] == "starttls"
+
+
+def test_a_missing_sender_leaves_email_off(monkeypatch, capsys):
+    # Without a sender the kernel ignores this server and falls back to the
+    # platform mailer, so the answers only looked saved.
+    _, mail, _, envs = _email_answers(monkeypatch, "587", "")
+    assert mail == {} and envs == []
+    assert "need a sender address" in capsys.readouterr().out

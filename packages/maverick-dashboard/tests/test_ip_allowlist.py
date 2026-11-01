@@ -163,6 +163,24 @@ def test_a_mistyped_list_allows_only_loopback_instead_of_everyone(tmp_path, line
     assert ip_allowlist.configured() is True
 
 
+@pytest.mark.parametrize("gate", ["installation_allows", "workspace_allows"])
+def test_a_source_that_breaks_during_the_load_fails_closed(tmp_path, monkeypatch, gate):
+    # The check before the load sees a clean file; the file breaks just before
+    # the load reads it, so only the check after the load can notice the error.
+    _write_config(tmp_path, "[auth.ip_allowlist]\ncidrs = [\"192.0.2.0/24\"]\n")
+    assert config.config_source_errors() == {}
+    real_get = config.get_ip_allowlist
+
+    def get_after_the_file_breaks():
+        (tmp_path / "home" / "config.toml").write_text("[auth.ip_allowlist\n", encoding="utf-8")
+        return real_get()
+
+    monkeypatch.setattr(config, "get_ip_allowlist", get_after_the_file_breaks)
+    check = getattr(ip_allowlist, gate)
+    assert check(_req(host="203.0.113.7")) is False
+    assert check(_req(host="127.0.0.1")) is True
+
+
 # ---- the workspace gate ------------------------------------------------------------
 
 
@@ -171,6 +189,67 @@ def test_workspace_list_applies_after_the_workspace_is_known(tmp_path):
     assert ip_allowlist.installation_allows(_req(host="203.0.113.7")) is True
     assert ip_allowlist.workspace_allows(_req(host="203.0.113.7")) is False
     assert ip_allowlist.workspace_allows(_req(host="192.0.2.9")) is True
+
+
+def _write_workspace_overlay(monkeypatch, text: str) -> None:
+    """The pinned workspace's own config.toml (``tenants/<id>/config.toml``)."""
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    path = config.tenant_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    config.reset_config_cache()
+
+
+def test_corrupt_workspace_overlay_fails_closed_to_loopback(monkeypatch):
+    # An unparsable overlay must not read as "no workspace list", which would
+    # allow every address: the workspace is then reachable from this computer only.
+    _write_workspace_overlay(monkeypatch, "[auth.ip_allowlist\nworkspace_cidrs = [")
+    assert ip_allowlist.workspace_allows(_req(host="127.0.0.1")) is True
+    assert ip_allowlist.workspace_allows(_req(host="203.0.113.7")) is False
+
+
+def test_healthy_empty_workspace_overlay_still_allows_everyone(monkeypatch):
+    _write_workspace_overlay(monkeypatch, "[auth.ip_allowlist]\nworkspace_cidrs = []\n")
+    assert ip_allowlist.workspace_allows(_req(host="203.0.113.7")) is True
+
+
+def test_healthy_workspace_overlay_list_is_enforced(monkeypatch):
+    _write_workspace_overlay(monkeypatch, "[auth.ip_allowlist]\nworkspace_cidrs = [\"192.0.2.0/24\"]\n")
+    assert ip_allowlist.workspace_allows(_req(host="203.0.113.7")) is False
+    assert ip_allowlist.workspace_allows(_req(host="192.0.2.9")) is True
+
+
+# The installation list is read through the same load as the workspace list, so
+# an active tenant's overlay can set it too, and a corrupt overlay fails closed.
+
+
+def test_corrupt_tenant_overlay_fails_closed_for_the_installation_list(monkeypatch):
+    _write_workspace_overlay(monkeypatch, "[auth.ip_allowlist\ncidrs = [")
+    assert ip_allowlist.installation_allows(_req(host="127.0.0.1")) is True
+    assert ip_allowlist.installation_allows(_req(host="203.0.113.7")) is False
+
+
+def test_a_tenant_overlay_that_breaks_during_the_load_fails_closed(monkeypatch):
+    # The healthy overlay passes the check before the load; it breaks just before
+    # the load reads it, so only the check after the load can notice the error.
+    _write_workspace_overlay(monkeypatch, "[auth.ip_allowlist]\ncidrs = [\"192.0.2.0/24\"]\n")
+    assert config.config_source_errors() == {}
+    overlay = config.tenant_config_path()
+    real_get = config.get_ip_allowlist
+
+    def get_after_the_overlay_breaks():
+        overlay.write_text("[auth.ip_allowlist\n", encoding="utf-8")
+        return real_get()
+
+    monkeypatch.setattr(config, "get_ip_allowlist", get_after_the_overlay_breaks)
+    assert ip_allowlist.installation_allows(_req(host="203.0.113.7")) is False
+    assert ip_allowlist.installation_allows(_req(host="127.0.0.1")) is True
+
+
+def test_healthy_tenant_overlay_list_is_enforced_for_the_installation_list(monkeypatch):
+    _write_workspace_overlay(monkeypatch, "[auth.ip_allowlist]\ncidrs = [\"192.0.2.0/24\"]\n")
+    assert ip_allowlist.installation_allows(_req(host="203.0.113.7")) is False
+    assert ip_allowlist.installation_allows(_req(host="192.0.2.9")) is True
 
 
 def test_workspace_gate_refuses_a_bound_principal(tmp_path):

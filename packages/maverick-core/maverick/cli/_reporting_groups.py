@@ -31,7 +31,7 @@ def analytics_cmd(ctx, sql: str | None, top: int) -> None:
         # duckdb imports lazily inside the constructor, so the actionable
         # "python -m pip install -e './packages/maverick-core[duckdb]'" ImportError fires HERE --
         # construction must sit inside the catch or the user gets a raw
-        # traceback (round-3 platform-test finding).
+        # traceback.
         from . import open_world  # lazy: monkeypatch-reachable
         wa = WorldAnalytics(open_world(ctx.obj["db"]))
     except ImportError as e:
@@ -63,11 +63,10 @@ def analytics_cmd(ctx, sql: str | None, top: int) -> None:
 @click.option("--window", type=int, default=5, help="Cold/warm window per task class.")
 @click.pass_context
 def compounding(ctx, as_json: bool, window: int) -> None:
-    """Does the workforce get cheaper and better with use? (the compounding moat).
+    """Does the workforce get cheaper and better with use?
 
     Per task class, compares the earliest runs (cold) against the most recent
-    (warm) and reports the cost and reliability deltas -- the live, per-customer
-    proof that learning compounds. Read-only.
+    (warm) and reports the cost and reliability deltas. Read-only.
     """
     import json as _json
 

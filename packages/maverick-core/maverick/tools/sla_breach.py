@@ -1,4 +1,4 @@
-"""SLA-breach automation (roadmap: 2028 H1 — SLO-driven incident response).
+"""SLA-breach automation.
 
 Check recent measurements against an SLO and, on a breach, recommend the
 escalating response action (throttle -> page -> failover) by severity. The

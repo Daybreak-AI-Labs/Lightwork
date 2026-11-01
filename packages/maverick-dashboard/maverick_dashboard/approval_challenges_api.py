@@ -432,4 +432,5 @@ def challenge_page(request: Request):
 @page_router.get("/static/lightwork-approval-challenges.js")
 def challenge_asset():
     from .app import _STATIC_DIR
-    return FileResponse(_STATIC_DIR / "lightwork-approval-challenges.js", media_type="application/javascript")
+    return FileResponse(_STATIC_DIR / "lightwork-approval-challenges.js", media_type="application/javascript",
+                        headers={"Cache-Control": "public, max-age=300"})

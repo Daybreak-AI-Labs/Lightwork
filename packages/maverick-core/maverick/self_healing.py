@@ -1,4 +1,4 @@
-"""Self-healing UX (roadmap: 2028 H2 UX).
+"""Self-healing UX.
 
 When a run fails, the user shouldn't have to reverse-engineer the fix from a
 stack trace. This maps a failure (the goal's terminal ``result`` text and/or

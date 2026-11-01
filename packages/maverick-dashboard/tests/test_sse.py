@@ -1,4 +1,4 @@
-"""SSE migration for goal events (council perf-seat fix).
+"""SSE migration for goal events.
 
 Replaces the 2s/5s client-side polling chain with a Server-Sent Events
 stream. The endpoint:

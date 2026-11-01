@@ -150,7 +150,7 @@
   {% if tab_host %}</div>{% endif %}
 
 {% if can_operate %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   var task = document.getElementById('rt-task'), step = document.getElementById('rt-step');
   var ck = document.getElementById('rt-checkpoint'), forkBtn = document.getElementById('rt-fork');

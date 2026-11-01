@@ -23,7 +23,7 @@ def _synthetic_archive_capture(monkeypatch):
 # cp` the host workdir in, `kubectl exec` the real command, `kubectl cp` any
 # changes back out, then delete the pod. The old one-shot approach never gave
 # `kubectl cp` a running pod to target, so the workspace was never
-# transferred (platform audit W1-86) -- these tests exercise the new
+# transferred -- these tests exercise the new
 # pipeline instead of asserting on a single captured `kubectl run` call.
 
 def _subcommand(args):
@@ -232,7 +232,7 @@ def test_k8s_disallow_network_fails_closed(monkeypatch):
     out = backend.exec("echo hi")
     assert out.exit_code == 2
     assert "allow_network=false" in out.stderr
-    # Constructor verification plus the one NetworkPolicy lookup (W1-104):
+    # Constructor verification plus the one NetworkPolicy lookup:
     # with no deny-all policy in the namespace, no pod is ever started.
     assert calls["n"] == 2
 
@@ -240,7 +240,7 @@ def test_k8s_disallow_network_fails_closed(monkeypatch):
 def test_k8s_pod_overrides_non_root_and_limits(monkeypatch, tmp_path):
     """The pod spec must run non-root, drop caps, block privilege escalation,
     and carry resource limits (issue #461), plus the workspace emptyDir
-    mount `kubectl cp` streams the host workdir into/out of (W1-86)."""
+    mount `kubectl cp` streams the host workdir into/out of."""
     import json
 
     calls = _fake_kubectl(monkeypatch, exec_stdout="ok\n")
@@ -259,11 +259,13 @@ def test_k8s_pod_overrides_non_root_and_limits(monkeypatch, tmp_path):
     assert "--override-type=strategic" in run_args
     assert "--command" in run_args
     container = overrides["spec"]["containers"][0]
+    assert container["securityContext"]["readOnlyRootFilesystem"] is True
     assert container["securityContext"]["allowPrivilegeEscalation"] is False
     assert container["securityContext"]["capabilities"]["drop"] == ["ALL"]
     assert container["resources"]["limits"] == {"memory": "2Gi", "cpu": "1"}
     assert overrides["spec"]["automountServiceAccountToken"] is False
     assert container["volumeMounts"] == [{"name": "workspace", "mountPath": "/workspace"}]
+    assert not container.get("env"), "TMPDIR is private to each command after workspace copy-in"
     assert overrides["spec"]["volumes"] == [{"name": "workspace", "emptyDir": {"sizeLimit": str(512 * 1024 * 1024)}}]
     assert overrides["spec"]["activeDeadlineSeconds"] >= 3600
 

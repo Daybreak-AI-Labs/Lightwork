@@ -267,7 +267,7 @@
 
   {% include "_ops_audit_checkpoints.html" %}
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     function $(id) { return document.getElementById(id); }

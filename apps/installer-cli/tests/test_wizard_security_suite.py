@@ -1147,6 +1147,7 @@ def test_vendor_resume_preserves_saved_owner_decision(tmp_path, monkeypatch, own
         "workspace",
         "finance",
         "value",
+        "intent_value",
         "assessments",
         "advanced",
     )
@@ -1165,6 +1166,9 @@ def test_vendor_resume_preserves_saved_owner_decision(tmp_path, monkeypatch, own
         pytest.fail("Resume must preserve the saved vendor choice")
 
     monkeypatch.setattr(wizard, "pick_security_suite", no_reenrollment)
+    # The monitoring step is never saved (its credentials stay out of the partial state),
+    # so it is asked again on resume; this test is about the vendor answer, so it is stubbed.
+    monkeypatch.setattr(wizard, "pick_monitoring", lambda: ({}, {}))
     selected = wizard._run_simple_picks(resumed, lambda: None)
     assert selected["security_suite"] == saved["security_suite"]
     assert wizard._load_partial()["security_suite"] == saved["security_suite"]

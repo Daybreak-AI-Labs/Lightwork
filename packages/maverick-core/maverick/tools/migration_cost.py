@@ -1,4 +1,4 @@
-"""Provider migration cost calculator (roadmap: 2027 H2 cost — "migration cost").
+"""Provider migration cost calculator.
 
 Given a month of usage and two price books, work out what that usage would cost
 on each provider and whether switching is worth it. Deterministic and offline:

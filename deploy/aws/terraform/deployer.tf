@@ -1,6 +1,6 @@
-# Deploy identity for the owner's Claude Code sessions and CI: an IAM user whose
-# access key lives in the tooling's environment settings, so routine deploys stop
-# running as the account root through browser logins that expire every few hours.
+# Deploy identity for routine deploys and CI: an IAM user whose access key lives
+# in the deploying tool's environment settings, so routine deploys do not run as
+# the account root through browser logins that expire every few hours.
 #
 # This credential deploys the already bootstrapped stack. IAM identities and
 # policies, including this user's boundary, are changed only by a separate
@@ -95,12 +95,37 @@ data "aws_iam_policy_document" "deployer" {
   }
 
   # Network, load balancer, database, state volume, certificates, email.
+  # Infrastructure the stack creates has no ARN before it exists, so these
+  # actions cannot be resource-scoped; they are bound to the deploy region
+  # instead (every resource, including the ALB certificate and SES, lives in
+  # the one region), and the data stores are protected by the Deny below.
   statement {
     sid = "Infra"
     actions = [
       "ec2:*Vpc*", "ec2:*Subnet*", "ec2:*RouteTable*", "ec2:*Route", "ec2:*InternetGateway*",
       "ec2:*SecurityGroup*", "ec2:*NetworkInterface*", "ec2:*Address*", "ec2:CreateTags", "ec2:DeleteTags",
       "ec2:ModifyVpcAttribute", "elasticloadbalancing:*", "rds:*", "elasticfilesystem:*", "acm:*", "ses:*",
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [data.aws_region.current.name]
+    }
+  }
+
+  # The deploy identity creates and changes the database and the state
+  # volume but can never delete them or their backups: retiring either is a
+  # separately reviewed operation under a different identity
+  # (NEXT_STEPS.md, "Database protection on an existing deployment"). A Deny
+  # wins over every Allow above, including rds:* and elasticfilesystem:*.
+  statement {
+    sid    = "NeverDeleteDataStores"
+    effect = "Deny"
+    actions = [
+      "rds:DeleteDBInstance", "rds:DeleteDBCluster",
+      "rds:DeleteDBSnapshot", "rds:DeleteDBClusterSnapshot",
+      "elasticfilesystem:DeleteFileSystem",
     ]
     resources = ["*"]
   }

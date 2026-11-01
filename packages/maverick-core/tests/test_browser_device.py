@@ -1,4 +1,4 @@
-"""Browser device emulation presets (ROADMAP 2027 H2)."""
+"""Browser device emulation presets."""
 from __future__ import annotations
 
 import pytest

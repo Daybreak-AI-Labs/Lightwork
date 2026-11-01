@@ -227,43 +227,52 @@ class EmailChannel(Channel):
                 recovered, checkpoint = await asyncio.to_thread(journal.recovery_window, channel="email", account=self._account())
                 batch = {row["id"]: row for row in [*messages, *recovered]}
                 for row in batch.values():
-                    if row.get("restore_hold"):
-                        continue
-                    if row.get("route", {}).get("sender_auth") != "trusted_dmarc_pass":
-                        await asyncio.to_thread(
-                            journal.change, row, restore_hold=True,
-                            reason="Accepted before the inbound sender-authentication gate; review required",
-                        )
-                        continue
-                    sender = row["message"]["user_id"]
-                    if not is_allowed(sender.lower(), self.allowed_user_ids):
-                        continue
-                    incoming = IncomingMessage(user_id=sender, text=row["message"]["text"], channel="email",
-                                               message_id=row["external_id"])
-                    def authority(sender=sender):
-                        return is_allowed(sender.lower(), self.allowed_user_ids)
-                    async def send_saved(reply, sender=sender, row=row):
-                        if reply.text:
-                            return await self.send(sender, reply.text, subject=row["route"]["subject"])
-                        return None
-                    await self.process_message(incoming, external_id=row["external_id"], account=self._account(),
-                                               authorize=authority, send=send_saved, receipt=row, journal=journal)
-                    current = await asyncio.to_thread(journal.get, row["id"])
-                    if current and current.get("question_watch"):
-                        from .delivery import notify_queued_question
-
-                        async def send_question(message, reply, route):
-                            return await self.send(message.user_id, reply.text,
-                                                   subject=route["subject"])
-
-                        await notify_queued_question(
-                            current, authorize=lambda message: authority(),
-                            send=send_question, journal=journal,
-                        )
+                    try:
+                        await self._recover(row, journal)
+                    except Exception as exc:
+                        # One row that keeps failing (an unconfirmed send, a
+                        # missing file) must not pin the window: every row
+                        # after it would never be handled. It keeps its state.
+                        log.warning("Email row %s deferred (%s)", row.get("external_id"), type(exc).__name__)
                 await asyncio.to_thread(journal.finish_recovery_window, checkpoint)
             except Exception:
                 log.warning("Email durable recovery window requires review")
             await asyncio.sleep(backoff_delay(self.poll_interval, errors))
+
+    async def _recover(self, row, journal) -> None:
+        """Run or deliver one saved email from the durable journal."""
+        if row.get("restore_hold"):
+            return
+        if row.get("route", {}).get("sender_auth") != "trusted_dmarc_pass":
+            await asyncio.to_thread(
+                journal.change, row, restore_hold=True,
+                reason="Accepted before the inbound sender-authentication gate; review required",
+            )
+            return
+        sender = row["message"]["user_id"]
+        if not is_allowed(sender.lower(), self.allowed_user_ids):
+            return
+        incoming = IncomingMessage(user_id=sender, text=row["message"]["text"], channel="email",
+                                   message_id=row["external_id"])
+        def authority():
+            return is_allowed(sender.lower(), self.allowed_user_ids)
+        async def send_saved(reply):
+            if reply.text:
+                return await self.send(sender, reply.text, subject=row["route"]["subject"])
+            return None
+        await self.process_message(incoming, external_id=row["external_id"], account=self._account(),
+                                   authorize=authority, send=send_saved, receipt=row, journal=journal)
+        current = await asyncio.to_thread(journal.get, row["id"])
+        if current and current.get("question_watch"):
+            from .delivery import notify_queued_question
+
+            async def send_question(message, reply, route):
+                return await self.send(message.user_id, reply.text, subject=route["subject"])
+
+            await notify_queued_question(
+                current, authorize=lambda message: authority(),
+                send=send_question, journal=journal,
+            )
 
     @staticmethod
     def _extract_attachments(msg) -> list[dict]:
@@ -300,6 +309,31 @@ class EmailChannel(Channel):
 
     def _account(self):
         return self.imap_host.lower() + ":" + self.imap_user.lower()
+
+    def _admit(self, journal, incoming, external_id, route):
+        """Take one email in; None when intake refuses it for good.
+
+        A refusal (a file type or size the store does not accept, or an email
+        an earlier build admitted with a different fingerprint) is answered by
+        marking the email read: left unread it would come first on every poll
+        and no newer email would ever be taken in. Refused files are left out
+        and the text says so, so the request itself still runs. Errors that can
+        pass (a full intake, a workspace hold) still raise and leave it unread.
+        """
+        try:
+            return journal.admit(incoming, external_id=external_id, account=self._account(), route=route)
+        except ValueError as exc:
+            if incoming.attachments:
+                text_only = IncomingMessage(
+                    user_id=incoming.user_id, channel="email", message_id=incoming.message_id,
+                    text=incoming.text + "\n\n(The attached files were not accepted: "
+                                         "a file type or size is not supported.)")
+                try:
+                    return journal.admit(text_only, external_id=external_id, account=self._account(), route=route)
+                except ValueError:
+                    pass
+            log.warning("Incoming email refused at intake (%s)", type(exc).__name__)
+            return None
 
     def _fetch_unseen(self) -> list[dict]:
         from maverick.microsoft_mail import authenticate_imap, mail_effect
@@ -351,14 +385,15 @@ class EmailChannel(Channel):
                 incoming = IncomingMessage(user_id=sender, text=f"Subject: {subject}\n\n{body}" if subject else (body or "Process the attached file(s)."),
                                            channel="email", message_id=external_id, attachments=attachments)
                 with mail_effect(self._mail_cfg):
-                    row = journal.admit(incoming, external_id=external_id, account=self._account(),
-                                        route={"subject": f"Re: {subject}" if subject else "Lightwork",
-                                               "sender_auth": "trusted_dmarc_pass"})
+                    row = self._admit(journal, incoming, external_id,
+                                      {"subject": f"Re: {subject}" if subject else "Lightwork",
+                                       "sender_auth": "trusted_dmarc_pass"})
                 # Crash after this acknowledgement is recovered from the
                 # bounded rotating journal window, never from a second run.
                 with mail_effect(self._mail_cfg):
                     mail.uid("store", uid, "+FLAGS", "\\Seen")
-                out.append(row)
+                if row is not None:
+                    out.append(row)
         return out
 
     def _extract_body(self, msg) -> str:

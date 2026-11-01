@@ -1,4 +1,4 @@
-"""Local skill distillation (ROADMAP 2028 H2)."""
+"""Local skill distillation."""
 from __future__ import annotations
 
 from maverick.skill.distillation_local import (

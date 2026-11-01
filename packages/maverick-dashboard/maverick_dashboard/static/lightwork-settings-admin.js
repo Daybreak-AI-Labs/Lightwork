@@ -447,6 +447,10 @@
       say('cleanup', 'Counting…');
       try {
         var preview = await call(base + '/cleanup/preview?days=' + days + '&activity_days=' + activityDays, 'GET');
+        if (preview.held) {
+          say('cleanup', 'A legal hold applies to this workspace, so old records cannot be removed. Ask your records administrator to review the hold.');
+          return;
+        }
         var conversations = preview.conversations;
         var list = el('ul', 'maintenance-list');
         var li1 = el('li'); li1.appendChild(el('span', 'maintenance-label', 'Conversations'));

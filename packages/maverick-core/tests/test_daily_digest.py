@@ -645,3 +645,24 @@ def test_a_mail_login_failure_is_retried_once_the_password_is_fixed(tmp_path, re
     monkeypatch.setattr(notifications, "_smtp_session", lambda mail: _Smtp({}))
     fixed = _cycle(world, NOON + 300)
     assert fixed["sent"] == 1 and _last_sent() == "2026-07-01"
+
+
+def test_a_decider_sees_only_approvals_in_their_departments(tmp_path):
+    # The bell and the reminders skip approvals outside the person's
+    # departments; the summary (and /me and Slack status) did not.
+    from maverick.daily_digest import compose_digest
+
+    world = _world(tmp_path)
+    finance = world.create_approval("pay.invoice", requested_by="user:bob")
+    general = world.create_approval("send.email", requested_by="user:bob")
+    with world._writing() as conn:
+        conn.execute("UPDATE approvals SET department='finance' WHERE id=?", (finance,))
+    hr = compose_digest(world, "user:hr-lead", can_decide=True, suites=frozenset({"hr"}))
+    assert [row["id"] for row in hr["approvals"]] == [general]
+    finance_lead = compose_digest(world, "user:fin", can_decide=True, suites=frozenset({"finance"}))
+    assert {row["id"] for row in finance_lead["approvals"]} == {finance, general}
+    unrestricted = compose_digest(world, "user:root", can_decide=True)
+    assert {row["id"] for row in unrestricted["approvals"]} == {finance, general}
+    # A person's own request always shows, whatever its department.
+    own = compose_digest(world, "user:bob", can_decide=True, suites=frozenset({"hr"}))
+    assert {row["id"] for row in own["approvals"]} == {finance, general}

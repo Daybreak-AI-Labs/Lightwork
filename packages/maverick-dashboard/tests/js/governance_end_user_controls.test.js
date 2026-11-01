@@ -9,7 +9,7 @@ const {shell} = require('./_shell');
 const editor = require("../../maverick_dashboard/static/lightwork-consent-policy-editor.js");
 
 test("an unavailable consent editor visibly blocks policy publication while other consent tools remain usable", async () => {
-  const html=fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/templates/consent_preferences.html"),"utf8");
+  const html=fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/templates/consent_preferences.html"),"utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
   const helper=fs.readFileSync(path.resolve(__dirname,"../../maverick_dashboard/static/lightwork-consent-workbench.js"),"utf8");
   const script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1];
   const dom=new JSDOM(html,{url:"https://lightwork.test",runScripts:"outside-only"});
@@ -114,7 +114,7 @@ function playbookUI(responses) {
   nodes["pw-playbook"].open = true; nodes["pw-playbook-save"].disabled = true;
   const requests = [];
   const textareas = () => nodes["pw-playbook-rows"].children.flatMap(row => row.children.filter(node => node.tag === "textarea"));
-  const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/privacy.html"), "utf8");
+  const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/privacy.html"), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
   const script = source.split("  // The clause playbook editor:")[1].split("  // AI registry:")[0];
   vm.runInNewContext(script.slice(script.indexOf("  var playbook")), {
     document: { getElementById: id => nodes[id], createElement: tag => new Node(tag), querySelectorAll: textareas },
@@ -175,7 +175,7 @@ function governanceUI({get, post}) {
   const form = nodes["gov-grc-run"];
   form.elements = {limit:{value:"5"},confirm_dispatch:{checked:true}};
   form.querySelector = () => button; form.reportValidity = () => true;
-  const template = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/governance.html"), "utf8");
+  const template = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/governance.html"), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
   const start = template.indexOf("  const refreshAttention =");
   const script = template.slice(start, template.indexOf("  const download =", start));
   vm.runInNewContext(script, {

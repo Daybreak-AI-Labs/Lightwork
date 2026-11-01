@@ -81,7 +81,7 @@ def test_trusts_configured_proxies_replace_default(monkeypatch):
 
 
 def test_trusts_configured_proxies_by_cidr(monkeypatch):
-    # W2-25: a proxy pool / load balancer can't be pinned by one exact IP.
+    # A proxy pool / load balancer can't be pinned by one exact IP.
     _cfg(monkeypatch, {"auth": {"proxy": {"trusted_proxies": ["10.0.0.0/24"]}}})
     assert proxy_trusts("10.0.0.5") is True
     assert proxy_trusts("10.0.0.254") is True
@@ -108,7 +108,7 @@ def test_trusts_configured_proxies_ignores_unparsable_entry(monkeypatch, caplog)
 
 
 def test_uvicorn_launch_kwargs_disables_proxy_headers_when_enabled(monkeypatch):
-    # W2-8/W2-9: uvicorn's default ProxyHeadersMiddleware rewrites
+    # Uvicorn's default ProxyHeadersMiddleware rewrites
     # request.client.host from X-Forwarded-For for any peer it trusts
     # (127.0.0.1 by default), in place, with the original peer unrecoverable.
     # That both lets a co-located loopback peer spoof its way past a pinned
@@ -150,7 +150,7 @@ async def _run_asgi(app, *, client_host, headers):
 
 
 def test_proxy_headers_middleware_can_spoof_a_pinned_proxy_by_default(monkeypatch):
-    """ASGI-level proof of W2-8: uvicorn's ProxyHeadersMiddleware (installed
+    """ASGI-level proof: uvicorn's ProxyHeadersMiddleware (installed
     by default with trusted_hosts=127.0.0.1) rewrites scope["client"] in
     place from X-Forwarded-For for any loopback peer, so a co-located
     loopback process can present as the pinned proxy to proxy_trusts()."""

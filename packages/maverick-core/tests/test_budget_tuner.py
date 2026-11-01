@@ -112,3 +112,59 @@ def test_cli_budget_tune_insufficient_data(tmp_path):
     res = CliRunner().invoke(main, ["--db", str(db), "budget-tune"])
     assert res.exit_code == 0
     assert "not enough priced goals" in res.output
+
+
+class _GoalByGoal:
+    """A world without the batch reader: the pre-change per-goal reads."""
+
+    def __init__(self, world):
+        self._world = world
+
+    def list_goals(self, **kwargs):
+        return self._world.list_goals(**kwargs)
+
+    def list_episodes(self, **kwargs):
+        return self._world.list_episodes(**kwargs)
+
+
+def test_goal_costs_and_newest_runs_match_goal_by_goal_reads(tmp_path):
+    # One batched episode read per goal set must return, for each goal, the
+    # same newest runs list_episodes(goal_id=...) returns, and the same spend.
+    from maverick.budget_tuner import goal_costs
+    from maverick.world_model import WorldModel
+
+    world = WorldModel(tmp_path / "w.db")
+    goals = [world.create_goal(f"task {i}", owner="user:alice") for i in range(3)]
+    with world._writing() as conn:
+        for index in range(130):
+            conn.execute(
+                "INSERT INTO episodes(goal_id, started_at, cost_dollars, input_tokens, "
+                "output_tokens) VALUES (?, ?, ?, ?, ?)",
+                (goals[index % 3], 1_000.0 + index, 0.0 if index % 5 == 0 else 0.02 * (index % 9), index, 1),
+            )
+    batch = world.episodes_by_goal(goals, per_goal=50)
+    for gid in goals:
+        assert batch[gid] == world.list_episodes(goal_id=gid, limit=50)
+    assert world.episodes_by_goal([], per_goal=50) == {}
+    assert goal_costs(world) == goal_costs(_GoalByGoal(world))
+    assert goal_costs(world, limit=20) == goal_costs(_GoalByGoal(world), limit=20)
+    assert len(goal_costs(world)) == 3
+
+
+def test_episodes_by_goal_keeps_the_runs_list_episodes_keeps_at_a_tied_cut_off(tmp_path):
+    # Runs that share a start time straddle the per-goal cut-off here. The batch
+    # must keep the same runs list_episodes(goal_id=..., limit=...) keeps.
+    from maverick.world_model import WorldModel
+
+    world = WorldModel(tmp_path / "w.db")
+    goals = [world.create_goal(f"tied {i}", owner="user:alice") for i in range(2)]
+    with world._writing() as conn:
+        for index in range(90):
+            conn.execute(
+                "INSERT INTO episodes(goal_id, started_at, cost_dollars) VALUES (?, ?, ?)",
+                (goals[index % 2], 5_000.0 + index // 15, 0.01),
+            )
+    for per_goal in (7, 0, -1):   # 0 and negative limits read as list_episodes reads them
+        batch = world.episodes_by_goal(goals, per_goal=per_goal)
+        for gid in goals:
+            assert [e.id for e in batch[gid]] == [e.id for e in world.list_episodes(goal_id=gid, limit=per_goal)]

@@ -312,7 +312,10 @@ def renew(token, generation):
     with _locked():
         ident, secret = _split(token, PREFIX)
         state, now = _load(), time.time()
-        row = state["devices"][ident]
+        # Removed after it was authenticated above: removal drops the row.
+        row = state["devices"].get(ident)
+        if row is None:
+            raise HTTPException(401, "This device connection was removed or expired.")
         _current(principal.principal, row["issued_at"])
         if row.get("revoked") or min(row["expires_at"], row["enrollment_expires_at"]) <= now:
             raise HTTPException(401, "This device connection was removed or expired.")

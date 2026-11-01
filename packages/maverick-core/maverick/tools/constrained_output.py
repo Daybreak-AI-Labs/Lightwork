@@ -1,4 +1,4 @@
-"""Constrained-generation guard tool (roadmap: 2027 H1 capabilities).
+"""Constrained-generation guard tool.
 
 The pragmatic, model-agnostic half of "constrained generation": validate (and
 where safe, coerce) a candidate value against a compact constraint spec before

@@ -27,7 +27,8 @@ CAPS = {"max_dollars": .05, "max_input_tokens": 2048, "max_output_tokens": 64,
         "max_wall_seconds": 30, "max_tool_calls": 0}
 KINDS = {"generation": "Short text generation", "vision": "Synthetic image recognition"}
 PROVIDERS = frozenset({"anthropic", "openai", "openrouter", "ollama", "gemini", "moonshot",
-                      "deepseek", "xai", "tgi", "vllm", "azure", "bedrock", "openai_compatible"})
+                      "deepseek", "xai", "tgi", "vllm", "azure", "bedrock", "vertex",
+                      "openai_compatible"})
 
 
 def policy():

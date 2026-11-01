@@ -23,5 +23,5 @@ Shared assumptions:
 - **Surface**: the long-running process is `maverick dashboard --host 0.0.0.0
   --port 8765` (web UI + API + webhooks). One-shot goals run as jobs/exec:
   `maverick start "..."`.
-- **Self-host first** (house rule): none of these require a hosted Lightwork
+- **Self-hosted**: none of these require a hosted Lightwork
   service; they run entirely in your account.

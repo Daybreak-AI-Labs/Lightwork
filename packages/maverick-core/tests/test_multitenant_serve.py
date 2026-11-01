@@ -46,7 +46,7 @@ def test_tenant_over_quota_fires_at_cap(monkeypatch, tmp_path):
 
 
 def test_tenant_over_quota_counts_in_flight_reservations(monkeypatch, tmp_path):
-    """W2-83: holds taken by runs in flight are allowance already committed.
+    """Holds taken by runs in flight are allowance already committed.
     The gate must refuse when spend + holds reach the cap, not only when
     recorded spend does -- otherwise the run is admitted with a $0 cap and
     dies on its first model call."""

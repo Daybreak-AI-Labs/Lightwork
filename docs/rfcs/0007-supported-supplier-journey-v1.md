@@ -1,7 +1,9 @@
-# Supported supplier evidence journey, version 1
+# RFC 0007: Supported supplier evidence journey, version 1
 
-Status: implemented local product contract; provider and installed-app qualification
-remain separate. The normative retained outcome contract is
+- Status: **Implemented** as a local product contract. Qualification against live
+  providers and installed apps is separate.
+
+The normative retained outcome contract is
 `vendor_onboarding._JOURNEY_CONTRACT_V1`; its ID, version and content digest are
 recorded at intake. The mapping below documents the existing service and WorkItem
 contract without replacing either authority.
@@ -93,4 +95,5 @@ Workspace snapshots cover supported local state and validated references under
 the recovery contract in RFC 0005. Recovery requires application quiescence and
 does not reverse Drive or Jira changes. Unsupported sealed or additive governed
 store restores remain refused. Live provider access, native installation and
-representative buyer approval require their separate qualification evidence.
+acceptance testing with representative users require their separate
+qualification evidence.

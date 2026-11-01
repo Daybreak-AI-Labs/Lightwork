@@ -31,6 +31,7 @@
   <p><a href="/users">Give the verified person administrator access on People</a> first. Activation never grants a role.</p>
   <label>Verified person and check time <select class="select" data-saml-check><option value="">Choose a verified sign-in</option></select></label>
   <label>Owner passphrase <input class="input" type="password" data-saml-activation-phrase maxlength="1024" autocomplete="current-password"></label>
+  <label>Authenticator code or recovery code (only when the owner's app is on) <input class="input" type="text" data-saml-activation-code maxlength="32" autocomplete="one-time-code" spellcheck="false"></label>
   <button class="btn" type="button" data-saml-activation-review>Review activation</button>
   <div data-saml-activation-changes hidden></div>
   <p><a href="/auth/company-saml-recovery">Read an original activation or separately restore its previous choice on this computer</a></p>

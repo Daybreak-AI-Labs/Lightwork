@@ -4,7 +4,7 @@
 // plain cause is announced, and the AI-stop link lands on the right row.
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
-const template = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/templates/settings.html'), 'utf8');
+const template = fs.readFileSync(path.resolve(__dirname, '../../maverick_dashboard/templates/settings.html'), 'utf8').replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const marker = "var forms = Array.prototype.slice.call(document.querySelectorAll('form[action^=\"/settings\"]'));";
 const pageScript = (() => {
   const at = template.indexOf(marker);

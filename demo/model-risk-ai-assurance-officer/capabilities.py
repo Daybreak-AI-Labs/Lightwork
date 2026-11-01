@@ -56,7 +56,7 @@ CAPABILITY_LABELS = {
 
 
 def caps_summary() -> dict:
-    """Return the executable capability and upsell boundary."""
+    """Return the executable capability and platform boundary."""
     return {
         "standalone": True,
         "forced_standalone": FORCED_STANDALONE,

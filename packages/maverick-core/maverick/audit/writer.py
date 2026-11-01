@@ -17,7 +17,7 @@ it anyway", which is the failure the profile exists to prevent.
 It applies the contract for you. Catching ``Exception`` around a raw ``record()``
 is the documented mistake -- and note you must catch the BASE class, because a
 handler written against ``AuditWriteRefused`` alone misses the off-host refusal,
-which is the one that fires under the strictest posture the product sells.
+which is the one that fires under the strictest posture the product supports.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Cost forecasting for `maverick start --dry-cost` (ROADMAP Q4 2026)."""
+"""Cost forecasting for `maverick start --dry-cost`."""
 from __future__ import annotations
 
 from click.testing import CliRunner

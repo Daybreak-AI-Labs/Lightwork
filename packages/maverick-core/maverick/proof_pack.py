@@ -70,7 +70,7 @@ def collect_governance() -> Evidence:
     failed = [r for r in results if not r.passed and not r.skipped]
     skipped = [r for r in results if r.skipped]
     proven = [r for r in results if r.passed and not r.skipped]
-    parts = [f"{len(proven)} guarantees proven"]
+    parts = [f"{len(proven)} checks passed"]
     if skipped:
         parts.append(f"{len(skipped)} verified in CI (Ed25519)")
     if failed:
@@ -234,7 +234,7 @@ def sign(manifest: dict) -> dict:
 def verify(manifest: dict, *, trusted_pubkey_hex: str | None = None) -> tuple[bool, str]:
     """Verify a proof-pack manifest's Ed25519 signature. Returns ``(ok, reason)``.
 
-    Council H6: PROOF.md tells a diligence team to "verify the signature field,"
+    PROOF.md tells a diligence team to "verify the signature field,"
     but no verifier shipped. This is it. Fail-closed: an unsigned manifest or a
     bad signature returns False.
 

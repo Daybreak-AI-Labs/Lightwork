@@ -1,4 +1,4 @@
-"""DSAR Concierge — a sellable, standalone data-subject-request agent.
+"""DSAR Concierge — a standalone data-subject-request agent.
 
 The whole request lifecycle on one small surface: subject-facing intake
 (web form + message webhook with a deterministic detector), an identity-

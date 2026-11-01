@@ -503,6 +503,22 @@ def test_secret_registry_includes_platform_dsns_and_connector_tokens() -> None:
     assert classified("ACME_CONNECTOR_CLIENT_SECRET")
 
 
+def test_secret_registry_lists_the_vendor_siem_credentials() -> None:
+    # audit/forwarder.py passes these names to a parameter (_audit_secret), so the
+    # environment-read scan above cannot see them; they are listed by name instead.
+    registry = runpy.run_path(str(SECRET_REGISTRY))
+    names = set(registry["SECRET_ENV_NAMES"])
+    classified = registry["is_secret_env_name"]
+
+    assert {
+        "MAVERICK_DATADOG_API_KEY",
+        "MAVERICK_SENTINEL_CLIENT_SECRET",
+        "MAVERICK_SIEM_TOKEN",
+    } <= names
+    assert classified("MAVERICK_DATADOG_API_KEY")
+    assert classified("MAVERICK_SENTINEL_CLIENT_SECRET")
+
+
 def _sanitize(
     tmp_path: Path,
     raw: bytes,

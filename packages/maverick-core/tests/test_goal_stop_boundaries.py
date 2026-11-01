@@ -353,7 +353,7 @@ def test_sqlite_admission_refusal_changes_only_eligible_goal(stop_world, status)
     assert world.block_goal_admission(gid + 1, result="missing") is False
 
 
-def test_unreadable_handoff_record_fails_open_but_a_real_hold_or_cancel_still_stops(stop_world, monkeypatch):
+def test_unreadable_handoff_record_stops_cleanly_like_a_real_hold(stop_world, monkeypatch):
     from maverick import human_conversation_handoffs
     from maverick.goal_mutations import GoalMutationConflict
 
@@ -365,14 +365,23 @@ def test_unreadable_handoff_record_fails_open_but_a_real_hold_or_cancel_still_st
     def unreadable(*_a, **_k):
         raise PermissionError("invalid audit outbox")
     monkeypatch.setattr(human_conversation_handoffs, "require_ai_open", unreadable)
-    # A transient read error must not stop (or crash) the run...
-    assert Agent._goal_cancelled(agent) is False
-    # ...but an owner cancellation is still seen through it.
-    world.set_goal_status(gid, "cancelled")
+    # A hold that cannot be read may be a human's: the run stops through the
+    # normal stop path (no exception out of the poll loop), as for a real hold.
     assert Agent._goal_cancelled(agent) is True
 
     def held(*_a, **_k):
         raise GoalMutationConflict("A human handoff holds this conversation.")
     monkeypatch.setattr(human_conversation_handoffs, "require_ai_open", held)
     world.set_goal_status(gid, "active")
+    assert Agent._goal_cancelled(agent) is True
+
+
+def test_the_cancel_check_reads_only_the_status(stop_world, monkeypatch):
+    world, _ = stop_world
+    gid = world.create_goal("poll the stop checks", "")
+    world.set_goal_status(gid, "active")
+    agent = _guard_agent(world, gid, Budget())
+    monkeypatch.setattr(world, "get_goal", lambda *_a: pytest.fail("the whole goal was read"))
+    assert Agent._goal_cancelled(agent) is False
+    world.set_goal_status(gid, "cancelled")
     assert Agent._goal_cancelled(agent) is True

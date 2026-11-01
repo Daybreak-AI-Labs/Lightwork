@@ -151,12 +151,23 @@ def _writes_enabled(request) -> bool:
     return True
 
 
-def _context(request):
+def _account(request) -> dict:
     suites = auth.caller_suites(request)
-    return digest({"context": context_for(request), "role": auth.caller_role(request),
-                   "global_admin": auth.has_global_permission(request, "admin"),
-                   "suites": sorted(suites) if suites is not None else None,
-                   "families": sorted(enabled_families())})
+    return {"context": context_for(request), "role": auth.caller_role(request),
+            "global_admin": auth.has_global_permission(request, "admin"),
+            "suites": sorted(suites) if suites is not None else None}
+
+
+def _context(request):
+    return digest({**_account(request), "families": sorted(enabled_families())})
+
+
+def _access(request):
+    """The account part of the context (who, where, role, suites). It changes
+    when the person's account or access does, not when a Copilot action
+    family is turned on or off, so pages that drop private content on an
+    account change can tell the two apart."""
+    return digest(_account(request))
 
 
 def _adapter_modules():
@@ -227,6 +238,7 @@ def _adapter_modules():
         product_operations_installation_health,
         product_operations_installation_security,
         product_operations_instruction_capture,
+        product_operations_intent_value,
         product_operations_knowledge,
         product_operations_learning_acquisition,
         product_operations_learning_calibration,
@@ -401,6 +413,7 @@ def _adapter_modules():
         product_operations_request_program,
         product_operations_agent_activity,
         product_operations_agent_overrides,
+        product_operations_intent_value,
         product_operations_applicability_regions,
         product_operations_governed_rule_evolution,
         product_operations_operator_acquisition,
@@ -506,6 +519,9 @@ def catalog(request: Request, body: ContextInput):
     writes = _writes_enabled(request)
     page, selection = _page(body.page), _selection(body.selection)
     request.state.product_operations_page = page
+    # Both digests are read before the work and checked again after it, so
+    # one response never pairs an earlier context with a later access.
+    original_access = _access(request)
     original_context = _context(request)
     families = enabled_families()
     items = []
@@ -532,10 +548,11 @@ def catalog(request: Request, body: ContextInput):
                       "summary": state.summary, "details": state.details, "fields": state.fields,
                       "confirmation_required": adapter.execute is not None})
     _read_gate(request)
-    if original_context != _context(request) or writes != _writes_enabled(request):
+    if (original_context != _context(request) or original_access != _access(request)
+            or writes != _writes_enabled(request)):
         raise HTTPException(409, "Your account, workspace or access changed while these controls were read. Reopen Copilot to check current controls.")
-    return _response({"schema": 1, "page": page, "selection": selection,
-                      "context": original_context, "checked_at": time.time(), "operations": items})
+    return _response({"schema": 1, "page": page, "selection": selection, "context": original_context,
+                      "access": original_access, "checked_at": time.time(), "operations": items})
 
 
 def _arguments(adapter, raw):
@@ -722,4 +739,9 @@ def propose(request: Request, body: ProposeInput):
             operation = None
     # Only labels/IDs and the user's question leave the server. Current records,
     # preference values, receipt bodies and execution arguments never go to this model.
-    return _response({"operation": operation, "context": _context(request), "source": source, "execution": False})
+    access = _access(request)
+    context = _context(request)
+    if _access(request) != access:   # never pair an earlier context with a later access
+        raise HTTPException(409, "Your context changed. Refresh the available controls.")
+    return _response({"operation": operation, "context": context, "access": access,
+                      "source": source, "execution": False})

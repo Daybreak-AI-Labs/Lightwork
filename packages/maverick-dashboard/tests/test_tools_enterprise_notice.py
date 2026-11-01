@@ -1,4 +1,4 @@
-"""UX-081: the Tools and Connections pages tell an administrator which
+"""The Tools and Connections pages tell an administrator which
 connector tools Enterprise mode refuses, before rollout rather than as a
 refused task.
 

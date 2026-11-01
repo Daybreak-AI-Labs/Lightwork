@@ -34,7 +34,7 @@ def _decide(wm, aid, status, who="u:bob"):
 
 
 def test_undo_outcomes_and_round_bumped_vote_identity(wm):
-    aid = wm.create_approval("wire-funds", risk="high")
+    aid = wm.create_approval("wire-funds", risk="high", undoable=True)
     assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=30) == "not_decided"
     assert wm.undo_approval_decision(999, undone_by="u:bob", within_seconds=30) == "not_found"
 
@@ -154,3 +154,162 @@ def test_zero_grace_acts_at_once(wm, monkeypatch):
     t.join()
     assert decision is not None and not decision.granted
     assert time.time() - decided_at["t"] < 1.5
+
+
+def _park(wm):
+    from maverick.safety import consent
+
+    aid, _card = consent._park_approval(wm, "rm-rf", "high", "/tmp/x", "d", "test", None)
+    return aid
+
+
+def test_a_request_nobody_waits_on_cannot_be_undone(wm):
+    # Settings, codebase merges, data-use checks and agent credentials act on
+    # "approved" at once. Undoing one would show a request as waiting again
+    # after its effect already happened.
+    aid = wm.create_approval("codebase_merge", risk="high", provenance="codebase")
+    _decide(wm, aid, "approved")
+    assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=30) == "final"
+    assert wm.get_approval(aid).status == "approved"
+
+
+@pytest.mark.parametrize("by", ["system:task-stopped", "system:no-decision"])
+def test_a_system_withdrawal_cannot_be_undone(wm, by):
+    from maverick.safety import consent
+
+    aid = _park(wm)
+    consent._withdraw_approval(wm, aid, by)
+    assert wm.get_approval(aid).status == "denied"
+    assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=30) == "final"
+    assert wm.get_approval(aid).status == "denied"
+
+
+def test_a_recovery_denial_cannot_be_undone(wm):
+    aid = _park(wm)
+    with wm._writing() as conn:   # the statement workspace_recovery runs after a restore
+        conn.execute(
+            "UPDATE approvals SET status='denied', decided_at=?, decided_by=?, "
+            "claimed_by=NULL, claimed_at=NULL WHERE status IN ('pending','approved')",
+            (time.time(), "system:bootstrap-recovery"),
+        )
+    assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=30) == "final"
+
+
+def test_an_undo_after_the_consumer_acted_is_refused_whatever_the_window(wm, monkeypatch, tmp_path):
+    # The waiting task and the page that offers Undo can read different
+    # windows (a setting changed mid-wait, or another process's environment).
+    # Once the task has acted, no window reopens the decision.
+    from maverick.safety import consent
+
+    monkeypatch.setenv("MAVERICK_CONSENT_DASHBOARD_TIMEOUT", "15")
+    monkeypatch.setenv("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "0")
+    seen = {}
+
+    def approve():
+        seen["aid"] = _wait_for_pending(wm)
+        _decide(wm, seen["aid"], "approved")
+
+    t = threading.Thread(target=approve, daemon=True)
+    t.start()
+    decision = consent._decide_via_dashboard("rm-rf", "high", "/tmp/x", "d", "test")
+    t.join()
+    assert decision is not None and decision.granted
+    import maverick.world_model as world_model
+
+    fresh = world_model.WorldModel(tmp_path / "world.db")   # consent closed ``wm``
+    try:
+        assert fresh.undo_approval_decision(seen["aid"], undone_by="u:bob", within_seconds=300) == "too_late"
+        assert fresh.get_approval(seen["aid"]).status == "approved"
+    finally:
+        fresh.close()
+
+
+def test_an_undo_tells_webhook_subscribers(wm, monkeypatch):
+    from maverick import webhook_events
+
+    sent = []
+    monkeypatch.setattr(webhook_events, "emit", lambda event, **kw: sent.append((event, kw)))
+    aid = _park(wm)
+    _decide(wm, aid, "approved")
+    assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=30) == "undone"
+    (undone,) = [kw for event, kw in sent if event == "approval.undone"]
+    assert undone["record_id"] == str(aid)
+    assert undone["payload"]["previous_status"] == "approved" and undone["payload"]["undone_by"] == "u:bob"
+    assert "approval.undone" in webhook_events.EVENT_TYPES
+
+
+def _held_and_approved(wm, *, decided_ago):
+    aid, card = __import__("maverick.safety.consent", fromlist=["_park_approval"])._park_approval(
+        wm, "rm-rf", "high", "/tmp/x", "d", "test", None)
+    _decide(wm, aid, "approved")
+    with wm._writing() as conn:
+        conn.execute("UPDATE approvals SET decided_at = ? WHERE id = ?", (time.time() - decided_ago, aid))
+    return aid, card
+
+
+def test_a_settle_the_database_refuses_once_is_retried_not_a_refusal(wm, monkeypatch):
+    from maverick.safety import consent
+
+    monkeypatch.setenv("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "0")
+    aid, card = _held_and_approved(wm, decided_ago=5)
+    real, attempts = wm.settle_approval_decision, []
+
+    def busy_once(approval_id, **kw):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("database is locked")
+        return real(approval_id, **kw)
+
+    monkeypatch.setattr(wm, "settle_approval_decision", busy_once)
+    decision = consent._await_dashboard_decision(wm, aid, card, "high", goal_id=None, withdraw_on_timeout=False)
+    assert decision is not None and decision.granted and len(attempts) == 2
+    assert wm.get_approval(aid).undo_hold == "settled"
+
+
+def test_a_decision_made_again_after_an_undo_waits_out_its_own_window(wm, monkeypatch):
+    # The task read the first decision (its window over), then the person
+    # undid it and decided again before the task settled: the new decision
+    # gets its full window, as its card said.
+    from maverick.safety import consent
+
+    monkeypatch.setenv("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "1.5")
+    aid, card = _held_and_approved(wm, decided_ago=100)
+    stale = wm.get_approval(aid)
+    assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=300) == "undone"
+    _decide(wm, aid, "approved")
+    redecided_at = time.time()
+    reads, real = iter([stale]), wm.get_approval
+    monkeypatch.setattr(wm, "get_approval", lambda approval_id: next(reads, None) or real(approval_id))
+    decision = consent._await_dashboard_decision(wm, aid, card, "high", goal_id=None, withdraw_on_timeout=False)
+    assert decision is not None and decision.granted
+    assert time.time() - redecided_at >= 1.4
+
+
+def test_the_settle_retry_time_starts_again_for_a_decision_made_after_an_undo(wm, monkeypatch):
+    from maverick.safety import consent
+
+    monkeypatch.setenv("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "0")
+    monkeypatch.setattr(consent, "_SETTLE_RETRY_SECONDS", 0.5)
+    aid, card = _held_and_approved(wm, decided_ago=5)
+    real, calls = wm.settle_approval_decision, []
+
+    def settle(approval_id, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            # The database is busy, and meanwhile the person undoes.
+            assert wm.undo_approval_decision(aid, undone_by="u:bob", within_seconds=300) == "undone"
+            raise RuntimeError("database is locked")
+        if len(calls) == 2:
+            raise RuntimeError("database is locked")   # busy again for the new decision
+        return real(approval_id, **kw)
+
+    def approve_again():
+        time.sleep(1.2)
+        _decide(wm, aid, "approved")
+
+    monkeypatch.setattr(wm, "settle_approval_decision", settle)
+    t = threading.Thread(target=approve_again, daemon=True)
+    t.start()
+    decision = consent._await_dashboard_decision(wm, aid, card, "high", goal_id=None, withdraw_on_timeout=False)
+    t.join()
+    assert decision is not None and decision.granted and len(calls) == 3

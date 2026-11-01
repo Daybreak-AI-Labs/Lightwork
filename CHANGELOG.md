@@ -4,9 +4,22 @@ All notable changes to Lightwork. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+The 0.1.0 to 0.1.6 entries describe earlier releases made before this
+repository was published. Their tags, release binaries and package uploads are
+not available from this repository.
+
 ## [Unreleased]
 
 ### Added
+- **OpenTelemetry metrics and request spans** (opt-in). `MAVERICK_OTEL_METRICS=1`
+  (or `[observability] otlp_metrics`, on the All settings page) also sends the
+  Prometheus series over OTLP to the same collector, under the same names and
+  labels, at `/v1/metrics` beside the trace endpoint. With OTLP tracing on, each
+  dashboard HTTP request is one server span named by route template (for example
+  `HTTP GET /goals/{goal_id}`). With OTLP tracing on, FastAPI's own per-request
+  span, which records the raw path and query, is switched off; with tracing off
+  the app is built as before. The request span joins the caller's trace when the
+  request sends a W3C `traceparent` header.
 - **Chat threads** — a chat is now a conversation, not a single goal. The
   first message opens a thread; every later message from the page's composer
   becomes a follow-up goal (`POST /chat/goal/{id}/reply`) that runs inside
@@ -69,6 +82,23 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connectors onto saved connections is not part of this change.
 
 ### Changed
+- **Lightwork is open source under the Apache License 2.0.** `LICENSE` is the
+  verbatim Apache License, Version 2.0, a new `NOTICE` carries the copyright
+  line and the bundled swagger-ui attribution, and every published package
+  manifest declares `Apache-2.0`. Versions previously published under the MIT License
+  remain licensed under it. Contributions are accepted under the
+  contributor licence agreement in `CLA.md`.
+- **Documentation for an open-source project.** New `GOVERNANCE.md`,
+  `SUPPORT.md`, `RELEASING.md` and an RFC process index (`docs/rfcs/README.md`);
+  rewritten `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `MAINTAINERS.md`,
+  `TRADEMARK.md` and the unabridged Contributor Covenant 2.1. The from-source
+  install is the documented install path (`docs/source-install.md`), one public
+  roadmap (`docs/ROADMAP.md`) replaces the internal ones, and an
+  `.editorconfig` and a `Makefile` cover common contributor tasks.
+- **Workstation- and account-specific values became placeholders.** Personal
+  workstation paths and the AWS account id became placeholders, the Terraform
+  state bucket is supplied at `terraform init` time from a git-ignored
+  `backend.hcl`, and the logo moved under `docs/assets/`.
 - **Ordinary tasks have optional limits** — omitted dollar, time, token,
   tool-call and step limits remain unset across customer entrypoints. Existing
   numeric settings stay intact; Settings can reversibly disable saved task
@@ -132,6 +162,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/static/*?v=` links with a one-year immutable cache for the shell CSS/JS.
 - **`/compartments` search and pagination** (`q`, `page`, `per_page`), like
   `/tools`, instead of one multi-megabyte page.
+
+### Removed
+- **Internal project-administration documents.** Company records, dated
+  internal audits and readiness reviews, the long-range roadmap, marketing
+  pages and the website, contract templates, the licence-issuing vendor console
+  and dated machine-specific evidence files were removed; they are not part of
+  the software. A test keeps such material out of the tree.
 
 ### Fixed
 - **Client and consent state stays attached to the current action** — stale
@@ -224,8 +261,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Executive PDF paginates by vertical space, so no line lands in the footer.
 - OneTrust vendor import reports every skipped row with its reason
   (duplicate, invalid, capacity) in the API, CLI and privacy page.
-- Marketing page positions Lightwork as the governed AI workforce platform
-  with the Daybreak favicon and licensing-appropriate calls to action.
 - **Per-tenant BYOK provider keys** — a config-gated, default-off layer
   (`[providers] per_tenant_keys` / `MAVERICK_PER_TENANT_KEYS`) that lets an
   active tenant run on ITS OWN LLM/provider API key instead of the
@@ -242,7 +277,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   agent offline — and the key bytes never reach config, the repo, the tenant
   record, or logs (the name ends in `_API_KEY` so the GitHub Action output
   sanitizer redacts it). Installer wizard step + docs. BYOK only — no Bedrock
-  resale, usage metering, or markup (that waits on a separate pricing decision).
+  resale, usage metering, or markup.
   Distinct from per-tenant `[kms]` BYOK (envelope-encryption key custody).
 - **Stripe billing collection** — a config-gated, default-off integration
   (`maverick.billing_stripe`; `[billing.stripe] enable` / `MAVERICK_STRIPE_ENABLE`)
@@ -251,9 +286,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (create-or-lookup, idempotent; the `cus_...` id is stored on the tenant record),
   a **subscription** matching the tenant's plan (the recurring platform fee, priced
   from `[billing.stripe.prices]`), and the metered invoice pushed as Stripe invoice
-  items behind the `bill_metered_usage` **pricing-decision flag** — off by default,
-  so only the platform fee is billed until the model-usage markup is decided (no
-  markup is hardcoded; amounts come from the `RateCard` that rated the invoice). A
+  items behind the `bill_metered_usage` flag — off by default, so only the
+  platform fee is billed until an operator turns it on (no markup is
+  hardcoded; amounts come from the `RateCard` that rated the invoice). A
   signature-verified **webhook** (`MAVERICK_STRIPE_WEBHOOK_SECRET`, stdlib HMAC —
   no SDK needed) maps `invoice.payment_failed` / a past-due subscription to a
   downgrade to the base entitlement tier (via a new `billing_status` on the tenant
@@ -562,9 +597,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.6] -- 2026-05-31
 
-Post-0.1.4 hardening, plus the cross-language MCP client surface (the
-council's "drive Lightwork from any language over MCP" decision) and the
-polyglot sandbox / coding-mode work.
+Post-0.1.4 hardening, plus the cross-language MCP client surface (drive
+Lightwork from any language over MCP) and the polyglot sandbox / coding-mode
+work.
 
 ### Added
 - **Cross-language MCP clients.** Runnable example clients and quickstarts for
@@ -663,7 +698,7 @@ The launch-hardening pass that landed just after the 0.1.3 tag was cut.
   in the spec.
 
 ### Changed
-- The MCP server is published to PyPI as `maverick-mcp-server` (the
+- The MCP server's PyPI distribution name is `maverick-mcp-server` (the
   `maverick-mcp` name is taken by an unrelated project). The import
   package (`maverick_mcp`) and the `maverick-mcp` command are unchanged.
 - PyPI publishing runs one job per package (`fail-fast: false`), so a
@@ -691,16 +726,15 @@ The launch-hardening pass that landed just after the 0.1.3 tag was cut.
   skills, personas. Fault-isolated.
 - `benchmarks/harness.py` + RESULTS.md.
 - `ask_user` is now scoped to the running goal.
-- Council medium-priority polish: docs, schema migration tests,
+- Polish: docs, schema migration tests,
   orchestrator E2E test, channel adapter smoke tests, /chat/goal
   user-friendly labels, multi-line REPL.
 
 ## [0.1.0-alpha]
 
-First public release. Lightwork combines [Lightwork Agent](https://github.com/cdayAI/research/tree/main/maverick) (recursive multi-agent swarm)
-and [Agent Shield](https://github.com/cdayAI/agent-shield) (safety detection)
-into a single safest-by-default agent that anyone can install in one
-command.
+First public release. It combined the recursive multi-agent kernel
+(`maverick-core`) and the Agent Shield safety integration (`maverick-shield`)
+into one installable project.
 
 ### Added
 

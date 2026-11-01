@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 
 def iter_episodes(world, *, owner=None, since=None, until=None, finished_only=False):
-    from .world_model import _dec_field
+    from .world_model import _dec_fields
 
     high = int(world.query("SELECT COALESCE(MAX(id), 0) FROM episodes")[0][0])
     cursor = 0
@@ -35,8 +35,10 @@ def iter_episodes(world, *, owner=None, since=None, until=None, finished_only=Fa
         )
         if not rows:
             break
-        for row in rows:
+        # One encryption policy and key lookup per page, not per episode.
+        outcomes = _dec_fields([row[4] for row in rows])
+        for row, outcome in zip(rows, outcomes, strict=True):
             cursor = int(row[0])
             yield SimpleNamespace(id=cursor, goal_id=row[1], started_at=row[2], ended_at=row[3],
-                                  outcome=_dec_field(row[4]), cost_dollars=row[5], input_tokens=row[6] or 0,
+                                  outcome=outcome, cost_dollars=row[5], input_tokens=row[6] or 0,
                                   output_tokens=row[7] or 0, tool_calls=row[8] or 0, domain=row[9] or "")

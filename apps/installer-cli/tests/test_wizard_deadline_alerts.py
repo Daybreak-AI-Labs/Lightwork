@@ -56,3 +56,15 @@ def test_config_emits_the_table_and_its_lead_time_subtables():
 def test_step_is_registered_after_notifications():
     keys = [k for k, _ in wizard.STEPS]
     assert keys.index("deadline_alerts") == keys.index("notifications") + 1
+
+
+def test_warns_when_only_personal_alerts_are_set_up(monkeypatch, capsys):
+    # Declining shared delivery still returns the personal-alert choices, and an
+    # ntfy answer without a topic does too; neither sets a backend, so alerts
+    # would reach nobody. The warning used to check only for an empty answer.
+    _answers(monkeypatch, confirm=False)
+    for notifications in ({"personal_alerts": True, "personal_background": False}, {}, None):
+        wizard.pick_deadline_alerts(notifications)
+        assert "reach nobody" in capsys.readouterr().out
+    wizard.pick_deadline_alerts({"personal_alerts": True, "backend": "ntfy", "ntfy_topic": "t"})
+    assert "reach nobody" not in capsys.readouterr().out

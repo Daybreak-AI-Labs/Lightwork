@@ -1,4 +1,4 @@
-"""Annual safety report generator (roadmap: 2027 H2 Safety).
+"""Annual safety report generator.
 
 Aggregates what THIS deployment actually recorded over a reporting period into
 an honest markdown report: shield blocks, capability denials, killswitch

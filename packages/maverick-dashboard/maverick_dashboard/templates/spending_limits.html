@@ -208,7 +208,7 @@
     reset at midnight UTC<span data-mv-utc-midnight></span>. Work already running when a limit is reached stops before its
     next paid step.
   </p>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     // ask() returns {text, ok} when the change needs a yes, else null.

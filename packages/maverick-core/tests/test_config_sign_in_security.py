@@ -91,6 +91,22 @@ def test_bad_session_limits_fail_closed(tmp_path, line):
         config.get_auth_sessions()
 
 
+def test_session_limits_fail_closed_when_the_source_breaks_during_the_load(tmp_path, monkeypatch):
+    # The check before the load sees a clean file; the file breaks just before
+    # the load reads it. The defaults must not be used in its place.
+    _write(tmp_path, "[auth.sessions]\ncompany_hours = 8\n")
+    assert config.get_auth_sessions()["company_hours"] == 8
+    real_load = config.load_global_config
+
+    def load_after_the_file_breaks():
+        (tmp_path / "home" / "config.toml").write_text("[auth.sessions\n", encoding="utf-8")
+        return real_load()
+
+    monkeypatch.setattr(config, "load_global_config", load_after_the_file_breaks)
+    with pytest.raises(ValueError, match="Sign-in settings cannot be read"):
+        config.get_auth_sessions()
+
+
 @pytest.mark.parametrize("text", [
     "[auth.ip_allowlist]\ncidrs = 5\n",
     "[auth.ip_allowlist]\ncidrs = true\n",

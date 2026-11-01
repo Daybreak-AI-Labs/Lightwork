@@ -63,11 +63,14 @@ def _writer():
     """Fence authority, then freeze native source rows, then governed custody."""
     with authority_effect_fence():
         world = _world()
-        with world._writing() as connection:
+        # Checked before taking the write lock: a Postgres world has no local
+        # write connection to freeze the source rows with.
+        writing = getattr(world, "_writing", None)
+        backend = STORE._backend()
+        if not callable(writing) or backend.kind != "local":
+            raise HTTPException(503, "This bounded private check requires native local custody.")
+        with writing() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            backend = STORE._backend()
-            if backend.kind != "local":
-                raise HTTPException(503, "This bounded private check requires native local custody.")
             with cross_process_lock(backend._store._dir() / ".fixed-source-admission", strict=True):
                 yield world
 

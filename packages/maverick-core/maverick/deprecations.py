@@ -1,5 +1,4 @@
-"""Deprecation registry + sunset gate (roadmap: 2028 H2 performance —
-"sunset deprecated paths").
+"""Deprecation registry + sunset gate.
 
 Deprecations rot when they live in scattered comments: the warning ships, the
 removal never happens, and the old path is maintained forever. This is the
@@ -58,6 +57,14 @@ REGISTRY: tuple[Deprecation, ...] = (
         target="channel handlers returning bare str",
         replacement="return maverick_channels.Reply (RFC 0001 C2)",
         deprecated_in="0.1.6",
+        remove_in="0.3.0",
+    ),
+    Deprecation(
+        name="intent_value.checked_at",
+        kind="api",
+        target="GET /api/v1/intent-value response field checked_at",
+        replacement="recorded_as_of (checked_at carries the same value until removal)",
+        deprecated_in="0.1.7",
         remove_in="0.3.0",
     ),
 )

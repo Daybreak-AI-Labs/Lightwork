@@ -1,19 +1,19 @@
 # maverick-desktop
 
-The [Windows customer candidate](../installer-msi/CUSTOMER.md) uses this shell
+The [Windows desktop package candidate](../installer-msi/CUSTOMER.md) uses this shell
 with `customer-runtime` to start its bundled, complete executable. It adds
 **Lightwork → Install & updates** with explicit review, signature-verified
 updates, immutable-version repair, protected completed-upgrade rollback and
 in-app recovery logs. The default engineering build and developer
 setup below continue to use the installed CLI. Native packaging and trusted
-publisher acceptance must pass before the customer candidate is distributed.
+publisher acceptance must pass before the packaged candidate is distributed.
 
 **Lightwork → Workspace recovery mode** opens a bundled confirmation window.
 It switches only the owned runtime to an isolated recovery process, and offers
 an explicit return to normal work. Independent services are never taken over.
 See [workspace recovery](../../docs/workspace-recovery.md) for administrator
 setup, restore checks and excluded storage. Native Windows acceptance is still
-required. The customer maintenance protocol uses a separate explicit global
+required. The packaged-install maintenance protocol uses a separate explicit global
 administrator authorization covering every local workspace; it restores the
 exact prior application and matching snapshot together. See the candidate
 guide for its scope, failure recovery and unverified native release gates.
@@ -50,25 +50,21 @@ Run `cargo test --locked --lib --manifest-path apps/desktop/src-tauri/Cargo.toml
 from the repository root for Tauri mock-runtime reconnect tests. These require
 the platform build SDK and linker; they do not prove packaged app startup.
 
-## What was fixed (vs. the first scaffold)
-
-The original shell could not actually connect, and was bare. This version
-addresses:
+## Connection and startup behaviour
 
 1. **Dashboard identity.** The bundled splash asks native IPC for a bounded
    fixed-loopback health probe. HTTP 200 alone and opaque browser responses
    cannot authorize navigation. An unrelated listener yields an actionable
    conflict; valid setup-required 503 remains available.
-2. **CSP blocked the splash script.** The old CSP had no `script-src`, so under
-   `default-src 'self'` the inline `<script>` was itself blocked. The script is
-   now an external `app.js` and the CSP grants `script-src 'self'` plus
+2. **Content Security Policy.** The splash script is an external `app.js`
+   (no inline `<script>`), and the CSP grants `script-src 'self'` plus
    `ws://127.0.0.1:8765` for the dashboard's WebSocket firehose.
-3. **`maverick` not found on double-click.** GUI launches (Finder/Dock/Explorer)
-   get a minimal `PATH` without the pip/pipx install dirs, so
-   `Command::new("maverick")` failed. The shell now checks `MAVERICK_BIN`, then
-   `~/.local/bin`, Homebrew, and `/usr/local/bin` before falling back to the
-   bare name. (`src/lib.rs`)
-4. **Polish + usability.** Branded splash with staged status and an actionable
+3. **Finding `maverick` on a GUI launch.** GUI launches (Finder/Dock/Explorer)
+   get a minimal `PATH` without the pip/pipx install directories, so the shell
+   checks `MAVERICK_BIN`, then `PIPX_BIN_DIR`, `~/.local/bin`, `~/bin`,
+   `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin` before falling back to
+   the bare name (`apps/desktop-runtime/src/lib.rs`).
+4. **Window and menu.** Branded splash with staged status and an actionable
    trouble card; a native menu; explicit `main` window label; sensible minimum
    window size.
 
@@ -85,8 +81,8 @@ cargo tauri icon path/to/maverick-1024.png   # writes src-tauri/icons/*
 ## Build & run
 
 Needs Rust + the Tauri CLI (plus platform webview dev packages, e.g.
-`webkit2gtk` on Linux). None of that is available in the authoring
-environment, so **the first local build is the smoke-test.**
+`webkit2gtk` on Linux). The first local build on each platform is its
+smoke test.
 
 ```bash
 cargo install tauri-cli            # once
@@ -118,7 +114,7 @@ Bundle targets (`src-tauri/tauri.conf.json`):
 
 This dashboard shell is distinct from `apps/installer-desktop`: this app opens
 an already-installed Lightwork dashboard, while `installer-desktop` performs
-the authenticated source installation. It is not currently selected by
+the source installation. It is not currently selected by
 `.github/workflows/desktop.yml` and is not attached to product releases, so
 treat it as an unshipped engineering prototype rather than a supported
 installer.
@@ -164,4 +160,4 @@ external-resource blockers. Repair preserves current data; workspace recovery
 opens its explicit isolation confirmation and offers existing per-workspace export
 and restore drill controls. Save the metadata-only plan for the responsible
 administrators. Plan evidence never waives accounting or action-history checks.
-Native/installer/release qualification remains unrun in this audit implementation.
+Native, installer and release qualification has not been run.

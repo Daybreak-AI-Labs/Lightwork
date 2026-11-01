@@ -132,7 +132,7 @@
   {% else %}<tr><td colspan="4" class="muted">No gaps to show. Gaps appear here when a control fails its check.</td></tr>{% endfor %}
   </tbody></table>
 </div>
-<script>
+<script nonce="{{ csp_script_nonce }}">
   (function () {
     var p = document.getElementById('rpt-print');
     if (p) p.addEventListener('click', function () { window.print(); });

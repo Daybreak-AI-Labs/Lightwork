@@ -1,4 +1,4 @@
-name: Windows customer package
+name: Windows desktop package
 
 on:
   pull_request:
@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       customer_release:
-        description: 'Require configured publisher identity and produce a signed customer candidate (no publishing)'
+        description: 'Require configured publisher identity and produce a signed release candidate (no publishing)'
         type: boolean
         default: false
 

@@ -1,19 +1,20 @@
 # The self-extending agent factory — agent & skill genesis
 
-> **Status (June 2026):** counts and plans in this document are historical. The shipped catalog is 2,020 lint-clean agents across 53 suites with a full learning lifecycle — see [`docs/FEATURES.md`](../FEATURES.md).
+> **Status: Implemented.** The factory ships as capability provisioning at pack birth
+> (`maverick/provision.py`), programming by demonstration (`maverick/demonstration.py`)
+> and the self-improving factory loop (`maverick/factory_learning.py`), with the CLI
+> commands `maverick learn-demo` and `maverick factory-learn`. The counts and plans below
+> are historical; run `maverick domains-lint` for the current roster, and see
+> [`docs/FEATURES.md`](../FEATURES.md) for what ships.
 
-> **Status: Implemented** — the self-extending factory has shipped to main: capability provisioning at pack-birth (`maverick/provision.py`), programming by demonstration (`maverick/demonstration.py`), and the self-improving factory loop (`maverick/factory_learning.py`); CLI `maverick learn-demo` / `maverick factory-learn`.
-
-
-**Status:** implemented (see the banner above) — was design / roadmap; a load-bearing differentiator. Companion to the eight
+Companion to the eight
 agent suites ([`agent-suites-overview.md`](agent-suites-overview.md)) and the
 [agent-to-agent protocol](agent-to-agent-protocol.md). Builds on
 [`../enterprise/architecture.md`](../enterprise/architecture.md).
 
-> **The thesis, from first principles.** Every other "agent platform" ships a *fixed*
-> roster — a human writes each agent by hand, forever. That doesn't scale to "every
-> business function for every customer," and it isn't of the future. Lightwork's
-> difference: **the platform engineers its own agents and skills.** It studies a
+> **The thesis, from first principles.** A *fixed* roster — a human writes each agent
+> by hand — doesn't scale to "every business function for every customer." In
+> Lightwork **the platform engineers its own agents and skills.** It studies a
 > customer, *synthesizes* the agents and skills that customer needs, *proves* they're
 > safe, and routes them to a human to **promote to production** — then watches them in
 > the wild and **evolves** them. Humans approve; the platform authors. The one bright
@@ -28,7 +29,7 @@ parent template), with a hard human gate between the lab and production.
 
 ## Contents
 
-1. [Why this is the differentiator](#1-why-this-is-the-differentiator)
+1. [Why self-extension](#1-why-self-extension)
 2. [What's already shipped — the reuse map](#2-whats-already-shipped--the-reuse-map)
 3. [The genesis pipeline](#3-the-genesis-pipeline)
 4. [The two meta-agents](#4-the-two-meta-agents)
@@ -39,7 +40,7 @@ parent template), with a hard human gate between the lab and production.
 
 ---
 
-## 1. Why this is the differentiator
+## 1. Why self-extension
 
 A company is not a fixed org chart — it grows roles, retires them, and invents new ones
 as the business changes. A platform that claims to run "every business function" must do
@@ -47,17 +48,15 @@ the same **without a human hand-authoring each of the ~346 agents per customer**
 manual roster (the eight suites) is the *seed stock*; the factory is what turns a seed
 into a living, customer-specific org that adapts.
 
-The head-turning claim is narrow and defensible: **Lightwork writes, tests, and proposes
-its own workforce, and improves it from its own track record — under a human's signature.**
-Not an "AI-native OS," not a chatbot that "has agents." A self-extending system with the
-safety rails built into the substrate.
+The claim is narrow: **Lightwork writes, tests, and proposes its own workforce, and
+improves it from its own track record — under a human's signature** — with the safety
+rails built into the substrate.
 
 ---
 
 ## 2. What's already shipped — the reuse map
 
-The factory is mostly *assembly* of primitives that already exist — which is exactly why
-it's credible rather than vaporware.
+The factory is mostly *assembly* of primitives that already exist.
 
 | Capability | Module / surface | Status | Role in the factory |
 |---|---|---|---|
@@ -191,7 +190,7 @@ The whole point is autonomy *up to* the gate. Five rails make that safe:
 
 ## 6. Per-customer customization — the genome
 
-The **Operating Profile** (intake-produced, wizard-editable, signed + versioned — CLAUDE.md
+The **Operating Profile** (intake-produced, wizard-editable, signed + versioned — kernel
 rule 6) is the genome. It compiles to:
 
 - the **enabled suites/functions** (`[suites]`),
@@ -226,7 +225,7 @@ human writing 346 packs twice.
 
 - **The human gate is load-bearing — never auto-promote.** The autonomy is in the lab;
   production is a signature. Removing that gate is the failure mode that makes this
-  dangerous instead of differentiating.
+  dangerous instead of useful.
 - **Selection is only as good as the eval.** Garbage fitness → garbage evolution. The
   eval/assessment harness quality bounds the whole loop; invest there.
 - **Synthesized text is untrusted.** Generated personas/skill bodies are concatenated

@@ -44,6 +44,14 @@ _ENV = sorted({name for row in ROWS for name in row.env} | {
 
 # id -> (value sent by the page, value the kernel then reads)
 VALUES: dict[str, tuple[object, object]] = {
+    "contact_centre.provider": ("zendesk", "zendesk"),
+    "contact_centre.zendesk_subdomain": ("acme-support", "acme-support"),
+    "contact_centre.zendesk_email": ("agent@acme.example", "agent@acme.example"),
+    "contact_centre.zendesk_api_token": ("sample-zendesk-token-123", "sample-zendesk-token-123"),  # pragma: allowlist secret
+    "contact_centre.webhook_url": ("https://hooks.acme.example/lightwork", "https://hooks.acme.example/lightwork"),
+    "contact_centre.webhook_secret": ("sample-webhook-secret-123", "sample-webhook-secret-123"),  # pragma: allowlist secret
+    "contact_centre.dashboard_url": ("https://lightwork.acme.example", "https://lightwork.acme.example"),
+    "contact_centre.max_messages": (15, 15),
     "billing.enforce_plan_caps": (True, True),
     "image_edit.inpaint_model": ("stability-ai/stable-diffusion-inpainting:abc123",
                                  "stability-ai/stable-diffusion-inpainting:abc123"),
@@ -140,6 +148,14 @@ VALUES: dict[str, tuple[object, object]] = {
 
 # id -> a value the server must refuse
 INVALID: dict[str, object] = {
+    "contact_centre.provider": "salesforce",
+    "contact_centre.zendesk_subdomain": "Acme.Support",
+    "contact_centre.zendesk_email": "not an email",
+    "contact_centre.zendesk_api_token": "short",
+    "contact_centre.webhook_url": "http://hooks.acme.example/lightwork",
+    "contact_centre.webhook_secret": "x",
+    "contact_centre.dashboard_url": "http://lightwork.acme.example",
+    "contact_centre.max_messages": 0,
     "billing.enforce_plan_caps": "yes",
     # A web address, a path or a space is never a model name.
     "image_edit.inpaint_model": "https://replicate.com/stability-ai/stable-diffusion-inpainting",
@@ -428,7 +444,8 @@ def test_secrets_are_sealed_never_shown_and_audited_as_set(audit_rows):
                             "billing.stripe.webhook_secret", "github.app_webhook_secret",
                             "webhooks.gitlab_token", "data_map.graph_token",
                             "notifications.user_key", "notifications.app_token",
-                            "notifications.email.password", "channels.slack.signing_secret"}
+                            "notifications.email.password", "channels.slack.signing_secret",
+                            "contact_centre.zendesk_api_token", "contact_centre.webhook_secret"}
     r = _save([{"id": key, "value": value} for key, value in secrets.items()])
     assert r.status_code == 200, r.text
     stored = config.dashboard_overrides_path().read_text(encoding="utf-8")

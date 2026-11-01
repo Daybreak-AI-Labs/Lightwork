@@ -1,4 +1,4 @@
-"""Agent simulator harness tool (roadmap: 2028 H2 — "agent simulator").
+"""Agent simulator harness tool.
 
 Replays a scripted plan against a fixed set of "world responses" and checks
 each step's outcome against its expectation — a pure, deterministic simulation

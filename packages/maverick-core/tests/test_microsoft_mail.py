@@ -68,3 +68,24 @@ def test_saved_people_or_server_that_differ_from_the_running_channel_are_refused
 def test_saved_people_and_server_match_the_channel_built_from_them(isolated):
     _save(isolated, 'allowed_user_ids = ["alice@corp.com"]\ntrusted_authserv_id = "mx.corp.com"\n')
     microsoft_mail._saved_configuration(_running_channel()._mail_cfg)
+
+
+def test_xoauth2_greets_the_server_again_after_starttls(monkeypatch):
+    # STARTTLS discards the server's EHLO answer. login() greets again on its
+    # own; auth() does not, so XOAUTH2 went out before any EHLO in the TLS
+    # session and servers that require one refused it ("send hello first").
+    import smtplib
+    from contextlib import contextmanager
+
+    @contextmanager
+    def token(_cfg):
+        yield "access-token"  # pragma: allowlist secret
+
+    monkeypatch.setattr(microsoft_mail, "credential", token)
+    sent = []
+    smtp = smtplib.SMTP()  # not connected: the state right after starttls()
+    smtp.helo_resp = smtp.ehlo_resp = None
+    monkeypatch.setattr(smtp, "ehlo", lambda name="": sent.append("EHLO") or (250, b"ok"))
+    monkeypatch.setattr(smtp, "docmd", lambda cmd, args="": sent.append(cmd) or (235, b"accepted"))
+    microsoft_mail.authenticate_smtp(smtp, {"email_auth": "microsoft", "smtp_user": "bot@corp.com"})
+    assert sent == ["EHLO", "AUTH"]

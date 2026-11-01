@@ -1,4 +1,4 @@
-"""Digest-only foundation for Lightwork's own SOC 2 evidence collection.
+"""Digest-only foundation for SOC 2 evidence collection.
 
 This module creates bounded technical evidence for three operational areas:
 

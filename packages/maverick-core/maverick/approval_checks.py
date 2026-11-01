@@ -113,9 +113,10 @@ def _write(world: Any, sql: str, params: tuple = ()) -> None:
 
 
 def _rows(world: Any, sql: str, params: tuple = ()) -> list[dict]:
-    if not _is_sqlite(world):
-        sql = sql.replace("?", "%s")
-    return [dict(r) for r in world._read_all(sql, params)]
+    # PostgresWorldModel has no _read_all; this reads through a cursor there.
+    from .webhook_subscriptions import _rows as read_rows
+
+    return read_rows(world, sql, params)
 
 
 def _workspace() -> str:

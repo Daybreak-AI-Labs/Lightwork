@@ -1,4 +1,4 @@
-"""Adversarial-cost benchmark suite (ROADMAP 2027-H1 performance).
+"""Adversarial-cost benchmark suite.
 
 Capability evals ask "can the agent do the work?"; this suite asks "can the
 agent be tricked into WASTING money?". It scripts the classic spend-runaway

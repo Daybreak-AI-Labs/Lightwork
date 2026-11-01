@@ -1,5 +1,4 @@
-"""Modal sandbox backend (roadmap: 2027 H2 ecosystem — "Cloudflare Workers +
-Modal sandboxes").
+"""Modal sandbox backend.
 
 Runs agent shell commands in `Modal Sandboxes <https://modal.com/docs/guide/sandbox>`_
 — ephemeral cloud containers with hard resource limits — so a Lightwork on a
@@ -7,9 +6,9 @@ laptop can execute untrusted work on burstable remote compute without running
 its own cluster. Satisfies sandbox SDK v2 (``workdir`` + ``exec(cmd,
 timeout=None)``); select with ``[sandbox] backend = "modal"``.
 
-The Cloudflare-Workers half of the roadmap item is **declined for shell
-semantics**: Workers run JS/WASM request handlers, not processes — there is no
-honest ``exec("pytest ...")`` on that platform. The Workers deployment story
+A Cloudflare Workers backend is **declined for shell semantics**: Workers run
+JS/WASM request handlers, not processes — there is no honest
+``exec("pytest ...")`` on that platform. The Workers deployment story
 is covered where it fits: the self-hosted relay reference (a Worker-shaped
 HTTP shim) and ``wasm_run`` (WASI module execution). A "sandbox backend" that
 silently downgraded shell to something else would violate the contract.

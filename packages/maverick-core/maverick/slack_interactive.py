@@ -84,6 +84,8 @@ PrincipalResolver = Callable[[str], "str | None"]
 # ``authorize(principal, approval_id)`` -- the host's permission check for a vote
 # (the dashboard passes its ``operate`` role rule); None skips it.
 Authorizer = Callable[[str, int], None]
+# ``status_scope(principal)`` -> ``(can_decide, suites)`` for ``/lightwork status``.
+StatusScope = Callable[[str], "tuple[bool, frozenset[str] | None]"]
 
 
 # ----------------------------------------------------------------------------
@@ -622,10 +624,11 @@ def handle_view_submission(payload: dict[str, Any], *, world,
                                         principal=principal, result=result)}
 
 
-def _status_text(world, principal: str) -> str:
+def _status_text(world, principal: str, *, can_decide: bool,
+                 suites: frozenset[str] | None) -> str:
     from .daily_digest import compose_digest
 
-    digest = compose_digest(world, principal, can_decide=True)
+    digest = compose_digest(world, principal, can_decide=can_decide, suites=suites)
     parts = [
         f"{len(digest['approvals'])} waiting for your decision",
         f"{len(digest['questions'])} question(s) an agent is waiting on",
@@ -640,8 +643,13 @@ def _status_text(world, principal: str) -> str:
 
 def handle_slash_command(form: dict[str, Any], *, world, principal_for: PrincipalResolver,
                          ask: Callable[[str, str], str] | None = None,
-                         authorize: Authorizer | None = None) -> dict[str, Any]:
-    """``/lightwork approve|reject|status|help|ask|link`` -> a Slack response."""
+                         authorize: Authorizer | None = None,
+                         status_scope: StatusScope | None = None) -> dict[str, Any]:
+    """``/lightwork approve|reject|status|help|ask|link`` -> a Slack response.
+
+    ``status_scope(principal)`` -> ``(can_decide, suites)`` is the host's
+    side-effect-free role and department check for ``status``; without it the
+    person sees only their own requests, never the whole approval queue."""
     from . import channel_identities
 
     verb, rest = parse_slash_text(form.get("text"))
@@ -657,7 +665,11 @@ def handle_slash_command(form: dict[str, Any], *, world, principal_for: Principa
     if not principal:
         return _unlinked_note(user_id)
     if verb == "status":
-        return _ephemeral(_status_text(world, principal))
+        try:
+            can_decide, suites = status_scope(principal) if status_scope else (False, None)
+        except Exception:  # noqa: BLE001 -- an unreadable roster shows only their own requests
+            can_decide, suites = False, None
+        return _ephemeral(_status_text(world, principal, can_decide=can_decide, suites=suites))
     if verb == "ask":
         if not rest:
             return _ephemeral("Tell Lightwork what you need: `/lightwork ask <your request>`.")

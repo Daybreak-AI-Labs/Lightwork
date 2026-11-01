@@ -90,8 +90,20 @@ def private_cards(world, approvals: list, viewer: str) -> list[dict[str, Any]]:
 
 
 def waiting_in_chat(approvals: list, viewer: str) -> int:
-    """How many of these unopenable requests wait on ``viewer`` in chat."""
-    return sum(1 for approval in approvals if decides_in_chat(approval, viewer))
+    """How many of these unopenable requests wait on ``viewer`` in chat.
+
+    The same rule as :func:`decides_in_chat`, with the chat links and the
+    viewer's role read once: neither depends on the request, apart from a
+    protected-settings request, which is never decided in chat."""
+    from .approval_decisions import SETTINGS_PROVENANCE
+
+    who = " ".join(str(viewer or "").split())
+    candidates = [approval for approval in approvals
+                  if getattr(approval, "provenance", None) != SETTINGS_PROVENANCE
+                  and who != " ".join(str(getattr(approval, "requested_by", "") or "").split())]
+    if not candidates or not decides_in_chat(candidates[0], who):
+        return 0
+    return len(candidates)
 
 
 __all__ = ["decides_in_chat", "private_card", "private_cards", "waiting_in_chat"]

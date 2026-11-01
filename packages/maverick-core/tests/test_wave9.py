@@ -1,4 +1,4 @@
-"""Wave 9: SWE-bench Pro prep — coding mode fixes, polyglot, isolation."""
+"""SWE-bench Pro prep — coding mode fixes, polyglot, isolation."""
 from __future__ import annotations
 
 import pytest
@@ -26,7 +26,7 @@ class TestOrchestratorGetsCodingModeTemplate:
             goal_id=gid, max_depth=1,
         )
         agent = Agent(ctx=ctx, role="orchestrator", brief="fix bug", depth=0)
-        # Wave 9: the orchestrator's system prompt is now the coder
+        # The orchestrator's system prompt is now the coder
         # template when coding mode is on. Detect via the unique
         # phrase from CODER_CODING_MODE_TEMPLATE.
         assert "unified diff" in agent.system

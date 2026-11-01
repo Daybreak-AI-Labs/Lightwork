@@ -199,6 +199,36 @@ def active_for_principal(principal: str) -> bool | None:
     return all(_active(rec) for rec in matched.values())
 
 
+def active_check():
+    """``check(principal)``: :func:`active_for_principal`'s answer for many
+    principals (a list of people, not one sign-in). The SCIM users, subject
+    directory and retired ledger are read and indexed once, so each check is
+    a lookup. Corruption raises here, as it does there."""
+    from . import subject_directory
+    from .scim import _load
+
+    directory = subject_directory.load_index()
+    retired = subject_directory.retired_check(directory)
+    by_sub: dict[str, dict[str, dict]] = {}
+    for uid, rec in _load().items():
+        ext_id = str(rec.get("externalId") or "")
+        int_id = str(rec.get("id") or "")
+        for key in {ext_id, int_id} | subject_directory.subs_in(directory, [ext_id, int_id]):
+            by_sub.setdefault(key, {})[uid] = rec
+
+    def check(principal: str) -> bool | None:
+        sub = _sub_of(principal)
+        if not sub:
+            return None
+        if retired(sub):
+            return False
+        matched = by_sub.get(sub)
+        if not matched:
+            return None
+        return all(_active(rec) for rec in matched.values())
+    return check
+
+
 def group_names_for_principal(principal: str) -> frozenset[str]:
     """The displayNames of every SCIM group the (active) principal belongs to."""
     from .scim import _load_effective_groups
@@ -236,6 +266,10 @@ def role_for_principal(principal: str) -> str | None:
         # and falls through to the deployment default (historically operator).
         # Return the least-privileged valid role instead, so corrupt SCIM state
         # or policy cannot silently broaden access through that fallback.
+        from . import strict_reads
+
+        if strict_reads.active():
+            raise
         return "viewer"
 
 
@@ -277,6 +311,6 @@ def suites_for_principal(principal: str) -> frozenset[str] | None:
 register_grant_resolver(suites_for_principal)
 
 __all__ = [
-    "GroupAccessPolicyError", "active_for_principal", "group_names_for_principal",
+    "GroupAccessPolicyError", "active_check", "active_for_principal", "group_names_for_principal",
     "role_for_principal", "suites_for_principal",
 ]

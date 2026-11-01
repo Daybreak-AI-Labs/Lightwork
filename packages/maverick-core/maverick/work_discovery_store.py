@@ -1919,8 +1919,12 @@ class WorkDiscoveryStore:
         body = json.dumps(event.to_dict(), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
-    def _purge_expired_events(self, *, now: float | None = None) -> int:
-        """Physically delete expired ciphertext on every active store touch."""
+    def _purge_expired_events(self, *, now: float | None = None, audit: bool = False) -> int:
+        """Physically delete expired ciphertext on every active store touch.
+
+        ``audit`` also queues an ``ekko_retention_purge`` record in the same
+        transaction, so a deletion is never committed without its record.
+        """
         trusted_now = self._now() if now is None else _timestamp(now)
         with self._transaction() as conn:
             count = int(conn.execute(
@@ -1934,7 +1938,21 @@ class WorkDiscoveryStore:
                     "AND device_key=? AND expires_at<=?",
                     (*self._scope, trusted_now),
                 )
+                if audit:
+                    self._queue_audit(
+                        conn, "ekko_retention_purge",
+                        {"state": "expired_removed", "removed": count}, at=trusted_now,
+                    )
         return count
+
+    def purge_expired(self) -> int:
+        """Delete this scope's expired ciphertext now. Explicit write actions call this.
+
+        The deletion and its retention record commit together. A full audit outbox
+        raises and deletes nothing, so the rows wait for the next explicit write.
+        """
+        with self._deployment_control_barrier(), self._consent_barrier():
+            return self._purge_expired_events(audit=True)
 
     def append_collector_event(
         self,
@@ -2255,7 +2273,9 @@ class WorkDiscoveryStore:
                     ).fetchall()
                 ]
             with self._session_authority_barriers(session_ids):
-                self._purge_expired_events(now=trusted_now)
+                # A projection is a read: the listing below already excludes
+                # expired rows, and their physical deletion stays with the
+                # store's write and maintenance paths.
                 events = self._list_events_locked(
                     session_id=None,
                     since=None,

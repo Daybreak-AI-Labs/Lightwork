@@ -1,4 +1,4 @@
-"""OAuth 2.1 authorization-code grant + PKCE for remote MCP servers (ROADMAP B2).
+"""OAuth 2.1 authorization-code grant + PKCE for remote MCP servers.
 
 The user-redirect flow's protocol logic is pure and tested offline with an
 injected token endpoint; only the live browser redirect + real-IdP validation

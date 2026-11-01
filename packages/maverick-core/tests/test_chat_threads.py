@@ -324,3 +324,36 @@ def test_history_pages_relative_to_selected_turn_without_future_displacement(wor
         cursor = page[0].id
     assert len(collected) > 200
     assert len(collected) == len(set(collected))
+
+
+def test_members_are_the_roots_own_children_and_the_owner_index_is_not_scanned(worlds, monkeypatch):
+    # Members of a thread are the root and its children for that owner only.
+    # On SQLite the members query must reach them through the id and parent
+    # indexes, not by scanning every goal the owner has.
+    from maverick.chat_threads import ChatThreads as Threads
+
+    factory, world = worlds
+    root = _create(world)["goal_id"]
+    world.set_goal_status(root, "done")
+    reply = _create(world, root=root, token="reply")["goal_id"]
+    binding = Threads(world).binding(root)
+    intruder = world.create_goal("another owner's note", parent_id=root, owner="user:bob")
+    world.append_turn(binding.conversation_id, "user", "hello", goal_id=intruder)
+    assert [tuple(row[:1]) for row in Threads(world).members(binding)] == [(reply,), (root,)]
+    assert Threads(world).latest(root) == reply
+
+    if not isinstance(world, WorldModel):
+        return
+    seen = []
+    original = Threads._rows
+
+    def spy(self, sql, values=(), **kwargs):
+        if "FROM goals g WHERE (g.id=?" in sql and "g.owner" in sql:
+            seen.append((sql, values))
+        return original(self, sql, values, **kwargs)
+
+    monkeypatch.setattr(Threads, "_rows", spy)
+    Threads(world).members(binding)
+    sql, values = seen[0]
+    plan = " ".join(str(row[-1]) for row in world.query("EXPLAIN QUERY PLAN " + sql, values))
+    assert "idx_goals_owner" not in plan

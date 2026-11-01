@@ -1,4 +1,4 @@
-"""AutoGen adapter (roadmap: 2027 H2 — interop with Microsoft AutoGen).
+"""AutoGen adapter.
 
 Pure, offline schema translation between Lightwork tools and Microsoft AutoGen's
 function/tool spec shape. No SDK import, no network — this just reshapes dicts so

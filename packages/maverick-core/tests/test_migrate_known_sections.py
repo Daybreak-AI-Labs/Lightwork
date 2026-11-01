@@ -1,6 +1,6 @@
 """`maverick migrate` must not lint REAL config sections as unread.
 
-Platform-test finding (round 3): the fast wizard writes [capabilities] and
+The fast wizard writes [capabilities] and
 [security], the advanced wizard writes [models] -- and `maverick migrate`
 told the user all three "are not sections the runtime reads; silently does
 nothing." Acting on that advice would delete live configuration (the whole
@@ -36,17 +36,17 @@ def test_kernel_read_sections_are_known():
     assert not missing, sorted(missing)
 
 
-def test_council_sections_are_known():
+def test_runtime_sections_are_known():
     """The learning-engine sections the runtime reads (config.py get_* helpers)
     and the wizard writes -- enabling them must not make `maverick migrate` claim
     they 'do nothing', which would lead a user to delete a live feature."""
-    council = {"data_engine", "consequence", "emergent_protocol",
+    runtime_sections = {"data_engine", "consequence", "emergent_protocol",
                "emergent_codec", "operations_scientist"}
-    missing = council - KNOWN_SECTIONS
+    missing = runtime_sections - KNOWN_SECTIONS
     assert not missing, f"runtime reads these but migrate would flag them: {sorted(missing)}"
 
 
-def test_council_config_lints_clean():
+def test_runtime_section_config_lints_clean():
     from maverick.migrate import _lint_unknown_sections
     cfg = {s: {"enable": True} for s in
            ("data_engine", "consequence", "emergent_protocol",

@@ -1,4 +1,4 @@
-"""Cost retrospective (roadmap: 2028 H2 UX).
+"""Cost retrospective.
 
 A spend total tells you *how much*; a retrospective tells you *where it went
 and what to do about it*. This reads the world model's per-goal/episode spend
@@ -8,8 +8,8 @@ goals dominating), and rule-based observations an operator can act on.
 
 Deterministic and offline — every number is an aggregation over the recorded
 episodes, so it is tested against a seeded world with no model in the loop.
-``maverick cost-retro`` prints it. (The "AI" upsell — a narrated summary — can
-sit on top of this structured core, but the core is what's trustworthy.)
+``maverick cost-retro`` prints it. (A model-narrated summary can sit on top
+of this structured core, but the core is what's trustworthy.)
 """
 from __future__ import annotations
 
@@ -20,9 +20,14 @@ _FAILURE_OUTCOMES = frozenset({"failed", "error", "aborted", "cancelled",
 
 
 def _goal_rows(world, *, limit: int) -> list[dict]:
+    from ..world_model import episodes_by_goal_batch
+
     rows: list[dict] = []
-    for g in world.list_goals(limit=limit):
-        eps = world.list_episodes(goal_id=g.id, limit=limit)
+    goals = list(world.list_goals(limit=limit))
+    batch = episodes_by_goal_batch(world, [g.id for g in goals], per_goal=limit)
+    for g in goals:
+        eps = (batch[g.id] if batch is not None and g.id in batch
+               else world.list_episodes(goal_id=g.id, limit=limit))
         cost = sum(float(getattr(e, "cost_dollars", 0.0) or 0.0) for e in eps)
         if cost <= 0:
             continue

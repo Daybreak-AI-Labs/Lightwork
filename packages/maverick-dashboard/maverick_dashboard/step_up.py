@@ -4,8 +4,9 @@ While ``[auth.mfa] require`` is on, the operations listed in
 :data:`SENSITIVE_OPERATIONS` are allowed only from a named sign-in whose
 second factor is no older than ``[auth.mfa] step_up_minutes`` (default 15).
 Anything else gets a 403 with one plain sentence and a link that signs the
-person in again (the OIDC request then carries ``prompt=login``, so the
-provider asks for the authenticator again instead of reusing its session).
+person in again (the OIDC request then carries ``prompt=login`` and the SAML
+request ``ForceAuthn``, so the provider asks for the authenticator again
+instead of reusing its session).
 
 Where it does not apply, deliberately:
 
@@ -70,7 +71,7 @@ def reauthenticate_url(request: Request | None) -> str:
         from .saml import saml_enabled
 
         if saml_enabled():
-            return f"/saml/login?return_to={encoded}"
+            return f"/saml/login?fresh=1&return_to={encoded}"
     except Exception:
         pass
     return "/auth/logout"

@@ -122,7 +122,7 @@ def _provider_state(cfg: dict[str, Any] | None) -> tuple[Check, bool]:
                 "Model provider",
                 "blocked",
                 "Provider readiness cannot be established until config is valid.",
-                "maverick init --fast",
+                "maverick config-lint",
             ),
             False,
         )
@@ -241,6 +241,21 @@ def _route_configuration_missing(
             for item, present in (("api_key", key), ("region", region))
             if not present
         )
+    if provider == "vertex":
+        # Google ADC carries no key: the project and region are the prerequisites
+        # (the model id is named per route). Sign-in itself is checked when a
+        # client is built, not here.
+        project = (
+            _present(table.get("project_id"))
+            or _present(os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID"))
+            or _present(os.environ.get("GOOGLE_CLOUD_PROJECT"))
+        )
+        region = _present(table.get("region")) or _present(os.environ.get("CLOUD_ML_REGION"))
+        return tuple(
+            item
+            for item, present in (("project_id", project), ("region", region))
+            if not present
+        )
     if provider == "codex_cli":
         try:
             from .providers.codex_cli_provider import _auth_file_present
@@ -292,6 +307,8 @@ def _format_route_missing(
             "authentication",
         ): "AZURE_OPENAI_API_KEY or Azure Entra credentials",
         ("bedrock", "region"): "AWS_REGION",
+        ("vertex", "project_id"): "GOOGLE_CLOUD_PROJECT or ANTHROPIC_VERTEX_PROJECT_ID",
+        ("vertex", "region"): "CLOUD_ML_REGION",
         ("codex_cli", "login"): "codex login",
     }
     rendered: list[str] = []
@@ -328,7 +345,7 @@ def _route_state(cfg: dict[str, Any] | None) -> Check:
             "Model routes",
             "blocked",
             "Model routes cannot be checked until config is valid.",
-            "maverick init --fast",
+            "maverick config-lint",
         )
     try:
         routed = _routed_configuration_missing(cfg)
@@ -418,7 +435,7 @@ def _storage_state(cfg: dict[str, Any] | None) -> Check:
             "Runtime storage",
             "blocked",
             "Storage readiness cannot be established until config is valid.",
-            "maverick init --fast",
+            "maverick config-lint",
         )
     backend = str(
         os.environ.get("MAVERICK_WORLD_BACKEND")
@@ -692,6 +709,7 @@ def _wrapped_audit_key_error(value: str, cfg: dict[str, Any]) -> str:
     try:
         from .kms_backends import (
             _AWS_MAGIC,
+            _AZURE_MAGIC,
             _GCP_MAGIC,
             _VAULT_MAGIC,
             build_cloud_kms,
@@ -707,6 +725,7 @@ def _wrapped_audit_key_error(value: str, cfg: dict[str, Any]) -> str:
         )
     envelope_magic = {
         "aws": _AWS_MAGIC,
+        "azure": _AZURE_MAGIC,
         "gcp": _GCP_MAGIC,
         "vault": _VAULT_MAGIC,
     }[provider]
@@ -725,12 +744,13 @@ def _wrapped_audit_key_error(value: str, cfg: dict[str, Any]) -> str:
                 "The KMS-wrapped audit signing key does not use the configured "
                 "provider's runtime envelope format."
             )
-    dependency = {
-        "aws": "boto3",
-        "gcp": "google.cloud.kms",
-        "vault": "hvac",
+    dependencies = {
+        "aws": ("boto3",),
+        "azure": ("azure.keyvault.keys.crypto", "azure.identity"),
+        "gcp": ("google.cloud.kms",),
+        "vault": ("hvac",),
     }[provider]
-    if not _module_available(dependency):
+    if not all(_module_available(dependency) for dependency in dependencies):
         return (
             "The configured KMS backend dependency needed to unwrap the audit "
             "signing key is not installed."

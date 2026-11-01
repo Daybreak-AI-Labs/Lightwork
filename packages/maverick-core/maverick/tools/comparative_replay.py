@@ -1,4 +1,4 @@
-"""Comparative replay tool (roadmap: 2027 H1 UX — "comparative replay").
+"""Comparative replay tool.
 
 Diff two run traces step-by-step to answer "where did these two runs diverge?".
 Aligns the traces by their ``step`` field, reports the first step whose action

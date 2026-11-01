@@ -46,8 +46,11 @@ def get(pilot_id, context):
     return _owned(STORE.get(pilot_id), context)
 
 
-def listing(context, *, cursor="", limit=100):
-    """Page through records after filtering by the exact account context."""
+def listing(context, *, cursor="", limit=100, records=False):
+    """Page through records after filtering by the exact account context.
+
+    ``records=True`` returns the full records the scan already read, so a caller
+    that needs them does not read each one again."""
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
         raise ValueError("Pilot page size must be between 1 and 200")
     if not isinstance(cursor, str) or len(cursor) > 256:
@@ -69,7 +72,7 @@ def listing(context, *, cursor="", limit=100):
         if len(items) == limit:
             has_more = True
             break
-        items.append({
+        items.append(record if records else {
             "id": record["id"],
             "title": record["title"],
             "revision": record["revision"],

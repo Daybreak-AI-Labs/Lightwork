@@ -6,7 +6,7 @@ const {webcrypto}=require("node:crypto");
 const {JSDOM}=require("jsdom");
 const {shell} = require('./_shell');
 const root=path.resolve(__dirname,"../../maverick_dashboard");
-const read=name=>fs.readFileSync(path.join(root,name),"utf8");
+const read=name=>fs.readFileSync(path.join(root,name),"utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const flush=async()=>{for(let i=0;i<30;i++){await new Promise(setImmediate);await new Promise(r=>setTimeout(r,2));}};
 const reply=(status,body)=>({ok:status<400,status,json:async()=>body});
 const D=c=>c.repeat(64);

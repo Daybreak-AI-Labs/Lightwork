@@ -1,9 +1,0 @@
-[
-  {
-    "id": "LW-041",
-    "status": "implemented-test-needed",
-    "implementation_evidence": "Existing preferences provide permission-filtered page/template pins, keyboard ordering and starting page; Today supplies current owned recents. f6ac623 completes saved task filters over existing UxStore/native endpoints and reviewed Copilot adapters. The My Data follow-on inventories/exports exact owned views and task pins and routes snapshot-bound deletion through existing independent review, preservation holds, durable dispatch and audit state. It retains other accounts, task data, shared annotations/gallery and legacy UX files. The adapter requires root's trusted ux_store-v2.json constructor/factory correction and never scans or migrates old UX files.",
-    "validation": "Saved-view checkpoint29 native/core/legacy and41 selected JS tests passed. Follow-on71 local Python tests passed across exact-owner storage, My Data adapters/receipts/exports/Copilot and views. Eleven My Data controller cases passed. Ruff, JS syntax and whitespace checks passed. Counts overlap and are not a cumulative unique total. Exact source/limits: docs/ux-audit-2026-09-30/saved-views-personal-data-qualification.md.",
-    "remaining": "Final consolidated trusted-store migration/registry qualification and installed cross-device, keyboard, revocation and multi-process checks remain. Task filters state their200recent/100search result coverage. Deployment-local storage is not distributed storage; legacy files with unverified workspace lineage remain a separate records-custodian concern. The former missing owned UX My Data adapter is implemented."
-  }
-]

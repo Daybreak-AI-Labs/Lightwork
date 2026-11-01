@@ -1,4 +1,4 @@
-"""Chaos game-day script (roadmap: 2028 H2 performance).
+"""Chaos game-day script.
 
 The chaos harness (:mod:`maverick.chaos`) injects faults; a *game day* is the
 drill that uses it: a scripted sequence of fault scenarios run against a

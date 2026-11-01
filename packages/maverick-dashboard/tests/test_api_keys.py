@@ -972,3 +972,15 @@ def test_read_only_key_cannot_write_the_owner_s_preferences_or_alert_settings(mo
     refused = c.post("/navigation/areas", data={"op": "up", "area": "Work", "context": ctx},
                      headers=_key(read_key), follow_redirects=False)
     assert refused.status_code == 403 and "does not have a scope" in refused.json()["detail"]
+
+
+def test_the_page_title_is_words_and_its_script_loads_once():
+    # A script tag sat in the title block, which the layout puts inside
+    # <title>: the browser tab and screen readers showed the tag as text.
+    import re
+
+    page = _client().get("/account/api-keys")
+    assert page.status_code == 200
+    title = re.search(r"<title>(.*?)</title>", page.text, re.DOTALL).group(1)
+    assert title.strip() == "Access keys · Lightwork"
+    assert page.text.count("lightwork-access-key-requests.js") == 1

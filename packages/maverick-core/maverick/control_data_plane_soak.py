@@ -1,5 +1,5 @@
 """Control/data-plane soak: prove the dispatch substrate holds under concurrent
-load (roadmap follow-through on the e2e harness).
+load.
 
 ``control_data_plane_e2e`` proves one goal runs out-of-process. This drives
 *many* goals through the real control plane (``QueueDispatcher`` -> SQLite
@@ -8,8 +8,8 @@ world connection, standing in for separate worker processes -- and asserts the
 substrate's load-bearing guarantees:
 
 * **Zero loss** -- every enqueued goal reaches a terminal ``done``.
-* **Exactly-once** -- no goal is executed twice. This is the real contention
-  test: ``JobQueue.claim`` flips ``pending -> running`` with a guarded
+* **Atomic claims** -- no goal is claimed, and so executed, twice under
+  contention. This is the real contention test: ``JobQueue.claim`` flips ``pending -> running`` with a guarded
   ``UPDATE ... WHERE status='pending'``, so two workers racing the same row
   resolve to one winner. A duplicate here would mean the guard is broken (double
   work, double spend). SCOPE: this is DB-level exactly-once on the CLAIM path

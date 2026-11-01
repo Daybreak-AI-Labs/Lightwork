@@ -47,7 +47,8 @@ _BUCKET = r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]"
 _PREFIX = r"[A-Za-z0-9!_.*'()/{}-]{0,200}"
 _HOST = r"[A-Za-z0-9*]([A-Za-z0-9*.-]{0,251}[A-Za-z0-9])?"
 _HOST_PORT = r"[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?|\[[0-9A-Fa-f:.]{2,45}\](:[0-9]{1,5})?"
-_SIEM = r"(https?|tcp|udp)://[^\s\"'<>]{1,300}"
+_SIEM = r"(https?|tcp|udp|datadog|sentinel)://[^\s\"'<>]{1,300}"
+_AZURE_ID = r"[A-Za-z0-9][A-Za-z0-9.-]{0,254}"
 _REDIS = r"(rediss?|unix)://\S{1,500}"
 _PAGE = r"/[A-Za-z0-9/_.-]{0,200}"
 _ORIGIN = r"[a-z0-9][a-z0-9._-]{0,63}"
@@ -175,9 +176,9 @@ def _sign_in(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "text", grp, "", "maverick_dashboard.saml", subgroup=saml, pattern=_HTTPS,
           max_length=300, aliases="acs assertion consumer"),
         S("auth.saml", "want_assertions_signed", "Require signed sign-ins",
-          "Accept a single sign-on only when your provider signed it.",
+          "Accept a single sign-on only when your provider signed the person's details in it.",
           "toggle", grp, True, "maverick_dashboard.saml", subgroup=saml, weaker=False,
-          warning="Unsigned sign-ins from your provider will be accepted.",
+          warning="Your provider must still sign its reply, but the person's details in it no longer need their own signature.",
           aliases="signed assertions"),
         S("auth.saml", "sp_cert_file", "Lightwork's certificate file",
           "Optional: the certificate Lightwork shows your provider, as a file on the server.",
@@ -281,6 +282,18 @@ def _sign_in_security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           item_error="a context value with no spaces", max_items=40, weaker="grow",
           warning="More SAML authentication contexts will count as a second factor.",
           aliases="saml authncontext"),
+        S("auth.local_owner", "totp", "Owner's authenticator app at sign-in",
+          "Whether the owner of this installation signs in with a code from an authenticator "
+          "app as well as the passphrase. Optional lets the owner turn it on; required makes "
+          "them set it up at their next sign-in; off hides the option. An owner who already "
+          "has it on is always asked for a code.",
+          "select", grp, "optional", "maverick.config", subgroup=sec,
+          choices=(("optional", "Optional: the owner may turn it on (recommended)"),
+                   ("required", "Required: the owner must set it up at sign-in"),
+                   ("off", "Off: hide the option")),
+          weaker=True, order=("required", "optional", "off"),
+          warning="The owner will no longer be asked to set up an authenticator app.",
+          aliases="totp authenticator owner passphrase 2fa two-factor recovery codes"),
         S("auth.ip_allowlist", "cidrs", "Network addresses allowed to use Lightwork",
           "Only these addresses or ranges may reach Lightwork; everyone else sees a plain "
           "refusal. Empty allows every address. The address you are saving from must be on "
@@ -606,12 +619,17 @@ def _security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "the service can lock and unlock a test value and still open the keys already in use.",
           "select", grp, "local", "maverick.tenant.kms", subgroup=keys,
           choices=(("local", "On this server"), ("aws", "Amazon key service"),
-                   ("gcp", "Google Cloud key service"), ("vault", "HashiCorp Vault")),
+                   ("gcp", "Google Cloud key service"), ("vault", "HashiCorp Vault"),
+                   ("azure", "Azure key service")),
           restart=True, test="kms", weaker="change",
           warning="Lightwork will lock and unlock its data keys with a different service.",
           aliases="kms byok key management"),
         S("kms", "key_id", "Key name at the key service",
-          "The full name of the key at your key service.",
+          "The full name of the key at your key service. For Azure, the key's address, "
+          "such as https://<vault>.vault.azure.net/keys/<name>/<version>. Without the version, "
+          "the account needs the keys/get permission. For Azure, the key must allow wrapKey, "
+          "unwrapKey, sign and verify, and the account needs wrapKey, unwrapKey and sign, plus "
+          "keys/verify or keys/get.",
           "text", grp, "", "maverick.kms_backends", subgroup=keys, max_length=300,
           pattern=r"[A-Za-z0-9:/._-]{1,300}", restart=True, test="kms",
           env=("MAVERICK_KMS_KEY_ID",), aliases="key id arn"),
@@ -644,12 +662,12 @@ def _security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="The activity record may be signed with a key kept on this server.",
           aliases="off host signing key"),
         S("audit", "siem_dest", "Send the activity record to",
-          "Your security monitoring service's address, starting with https://, tcp:// or "
-          "udp://.",
+          "Your security monitoring service's address, starting with https://, tcp://, udp://, "
+          "datadog:// or sentinel://.",
           "text", grp, "", "maverick.cli", subgroup=custody, pattern=_SIEM,
           max_length=300, test="siem", env=("MAVERICK_SIEM_DEST",), weaker="change",
           warning="Activity records will be sent to a different place.",
-          aliases="siem splunk syslog forward"),
+          aliases="siem splunk syslog forward datadog sentinel azure"),
         S("audit", "siem_token", "Security monitoring access key",
           "The access key sent with the activity record to a web address. Stored sealed and "
           "never shown again.",
@@ -662,6 +680,27 @@ def _security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           env=("MAVERICK_SIEM_ALLOW_INSECURE",), weaker=True,
           warning="Activity records could be read by anyone on the network path.",
           aliases="insecure plaintext"),
+        S("audit", "datadog_api_key", "Datadog access key",
+          "The access key that lets Lightwork send activity records to Datadog. Stored sealed "
+          "and never shown again.",
+          "secret", grp, "", "maverick.audit.forwarder", subgroup=custody, max_length=1000,
+          env=("MAVERICK_DATADOG_API_KEY",), aliases="datadog dd key access"),
+        S("audit", "sentinel_tenant_id", "Microsoft Sentinel directory ID",
+          "The ID of the Microsoft directory that holds the app which sends activity records "
+          "to Sentinel.",
+          "text", grp, "", "maverick.audit.forwarder", subgroup=custody, pattern=_AZURE_ID,
+          max_length=255, env=("MAVERICK_SENTINEL_TENANT_ID",),
+          aliases="sentinel azure entra directory"),
+        S("audit", "sentinel_client_id", "Microsoft Sentinel app ID",
+          "The ID of the app registration that sends activity records to Sentinel.",
+          "text", grp, "", "maverick.audit.forwarder", subgroup=custody, pattern=_AZURE_ID,
+          max_length=255, env=("MAVERICK_SENTINEL_CLIENT_ID",),
+          aliases="sentinel azure entra app client"),
+        S("audit", "sentinel_client_secret", "Microsoft Sentinel app secret",
+          "The secret of the app registration that sends activity records to Sentinel. Stored "
+          "sealed and never shown again.",
+          "secret", grp, "", "maverick.audit.forwarder", subgroup=custody, max_length=1000,
+          env=("MAVERICK_SENTINEL_CLIENT_SECRET",), aliases="sentinel azure entra secret"),
         S("audit.unified", "enable", "Shared activity record",
           "Collect every workspace's activity into one signed record with its own reading "
           "position. Needs the signed activity record.",
@@ -1328,6 +1367,8 @@ def entries(S, C, Column) -> tuple:  # noqa: N803,ARG001 -- the catalog's row an
                 + _plumbing(S) + _journal(S))
     from .settings_catalog_conversation import entries as conversation_entries
     rows.extend(conversation_entries(S))
+    from .settings_catalog_public_chat import entries as public_chat_entries
+    rows.extend(public_chat_entries(S))
     for index, row in enumerate(rows):
         if row.id == "tenancy.egress":
             rows[index] = dataclasses.replace(row, columns=(

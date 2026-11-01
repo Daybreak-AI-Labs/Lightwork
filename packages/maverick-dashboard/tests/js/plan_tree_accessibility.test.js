@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {JSDOM} = require('jsdom');
 
-const template = fs.readFileSync(path.join(__dirname, '../../maverick_dashboard/templates/plan_tree.html'), 'utf8');
+const template = fs.readFileSync(path.join(__dirname, '../../maverick_dashboard/templates/plan_tree.html'), 'utf8').replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const controller = template.match(/<script>([\s\S]*?)<\/script>/)[1].replace('{{ goal.id }}', '7');
 const snapshot = '<ul><li><a href="/chat/goal/7">Root task - active $1.25</a><ul><li><a href="/chat/goal/8">Child task - pending $0.50</a></li></ul></li></ul>';
 const tree = {id: 7, title: 'Root task', status: 'active', dollars: 1.25,

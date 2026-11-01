@@ -70,13 +70,16 @@ def network_cmd(graph_file, levels, grounding, swarm, as_json, limit) -> None:
 @click.option("--flaw", required=True, help="The known flaw (kept private).")
 @click.option("--risk", default="medium", show_default=True)
 @click.option("--requested-by", default=None)
-def canary_cmd(action, detail, decision_class, flaw, risk, requested_by) -> None:
+@click.option("--acts-at-once", is_flag=True,
+              help="Imitate a request that takes effect when decided (a merge, settings change or agent "
+                   "access), which offers no Undo. Default: a task's step, which can be undone for a moment.")
+def canary_cmd(action, detail, decision_class, flaw, risk, requested_by, acts_at_once) -> None:
     """Seed one known-flawed approval into the real queue ([immune] canaries)."""
     from ..immune import oversight as o
     try:
         aid = o.seed_canary(open_world(), action=action, detail=detail,
                             decision_class=decision_class, flaw=flaw, risk=risk,
-                            requested_by=requested_by)
+                            requested_by=requested_by, undoable=not acts_at_once)
     except PermissionError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"seeded canary approval #{aid}")

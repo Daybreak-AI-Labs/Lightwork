@@ -384,6 +384,17 @@ class TestBuildEmbedderFailLoud:
         assert isinstance(e, HostedEmbedder)
         assert e.api_key == "voyage-credential"  # pragma: allowlist secret
 
+    def test_the_lightwork_key_wins_over_the_generic_voyage_key(self, monkeypatch):
+        # Before the Voyage variable was read, MAVERICK_EMBED_API_KEY was the key.
+        # Reading the generic VOYAGE_API_KEY first switched a host that sets both
+        # (another tool's, or an old key) to that credential on upgrade.
+        from maverick_knowledge.embed import build_embedder
+
+        monkeypatch.delenv("MAVERICK_EMBED_PROVIDER", raising=False)
+        monkeypatch.setenv("VOYAGE_API_KEY", "other-tool-credential")  # pragma: allowlist secret
+        monkeypatch.setenv("MAVERICK_EMBED_API_KEY", "lightwork-credential")  # pragma: allowlist secret
+        assert build_embedder({"embedder": "hosted", "dim": 8}).api_key == "lightwork-credential"  # pragma: allowlist secret
+
     def test_voyage_key_is_never_sent_to_another_host(self, monkeypatch):
         from maverick_knowledge.embed import HostedEmbedder, build_embedder
 

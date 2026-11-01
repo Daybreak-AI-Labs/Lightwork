@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gc
 import hashlib
 import hmac
 import ipaddress
@@ -18,6 +19,7 @@ import math
 import os
 import re
 import secrets
+import sys
 import threading
 import time
 from collections import deque
@@ -62,6 +64,8 @@ from . import auth_metrics as _auth_metrics
 from . import (
     capability_assessment_controls_api,
     learning_acquisition_api,
+    page_handoff,
+    request_spans,
     runtime_policy_recovery_api,
 )
 from . import health_routes as _health_routes
@@ -231,7 +235,23 @@ def _template_bytecode_cache():
         return None
 
 
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+class _Templates(Jinja2Templates):
+    """Page templates whose shell reads the deployment configuration once.
+
+    The context processors (navigation, theme, help, drafts, search, ...) and
+    the template each asked the configuration again: about 60 reads per page.
+    One render is one ``config.single_read()``; the route's own gates ran
+    before it with their own reads, and the next page reads the files again.
+    """
+
+    def TemplateResponse(self, *args, **kwargs):  # noqa: N802 -- Starlette's name
+        from maverick.config import single_read
+
+        with single_read():
+            return super().TemplateResponse(*args, **kwargs)
+
+
+templates = _Templates(directory=str(TEMPLATES_DIR))
 # Starlette builds the Environment itself; both are plain Environment
 # attributes read at get_template time.
 templates.env.auto_reload = _templates_auto_reload()
@@ -558,7 +578,7 @@ def _theme_context(request: Request) -> dict:
         "custom_theme_names": sorted(custom),
         # ``lang`` is the selected UI language (drives ``t()``); ``page_lang``
         # is what the page body is actually written in and is what
-        # ``<html lang>`` and ``dir`` declare (W3-73, UX-198). They differ
+        # ``<html lang>`` and ``dir`` declare. They differ
         # until the templates are translated, so an English body is never
         # mirrored because a few chrome strings are Arabic.
         "lang": lang,
@@ -572,6 +592,15 @@ def _theme_context(request: Request) -> dict:
 # Register the per-request context processor with Starlette so every
 # TemplateResponse picks up the resolved theme automatically.
 templates.context_processors.append(_theme_context)
+
+
+# Context processor: every page template gets this response's CSP script nonce
+# (drawn per request by security_headers) for its inline <script> tags.
+def _csp_nonce_context(request: Request) -> dict:
+    return {"csp_script_nonce": getattr(request.state, "csp_script_nonce", "")}
+
+
+templates.context_processors.append(_csp_nonce_context)
 
 templates.context_processors.append(_draft_page_context)
 templates.context_processors.append(_record_search_page_context)
@@ -651,6 +680,15 @@ def _account_pages_unavailable(request: Request) -> set[str]:
 
 
 def _nav_context(request: Request) -> dict:
+    """The navigation's permission and role checks share one current read
+    (``single_read(fresh=True)``), even inside the page render's own read."""
+    from maverick.config import single_read
+
+    with single_read(fresh=True):
+        return _nav_context_now(request)
+
+
+def _nav_context_now(request: Request) -> dict:
     from . import ui_visibility
     from .api import _shared_halt_backend
     from .auth import api_key_permissions, api_key_scopes
@@ -955,8 +993,11 @@ def _assert_dashboard_auth_configured() -> None:
 # ---- background automation (event polling + scheduled dreaming) -------------
 # Runs in the dashboard lifespan, NOT the core worker: event triggers are a
 # dashboard-owned store the core worker (a separate process) can't reach. Driven
-# by maverick-core's JobQueue/Worker -- durable, retrying, exactly-once (the
-# flock is gone) -- via maverick_dashboard.automation_queue. Per-trigger polling
+# by maverick-core's JobQueue/Worker -- durable and retrying. A claim is atomic
+# (one worker per job), but delivery is at-least-once: a job whose worker dies
+# after its effect and before completion runs again once its lease expires, so
+# handlers must be idempotent. The flock is gone -- via
+# maverick_dashboard.automation_queue. Per-trigger polling
 # cadence + scheduled dreaming are recurring cron jobs; fired goals are durable
 # run_goal jobs with retry + dead-letter. TestClient skips the lifespan, so this
 # never runs under tests; both halves are OFF by default (their own enabled()).
@@ -995,11 +1036,25 @@ async def _start_privacy_notice_publication_scheduler() -> None:
         log.exception("privacy-notice publication scheduler not started")
 
 
-#: Templates every session renders early: the shell, the page finder and the
-#: landing pages. Compiling them (and their includes) here moves the Jinja
-#: compile cost off the first request.
+#: Templates every session renders early: the shell, the page finder, the
+#: landing pages and the main tabs. Compiling them, and every shared partial
+#: (:func:`_warm_template_names`), here moves the Jinja compile cost off the
+#: first visits: after an install or upgrade (an empty or stale bytecode
+#: cache) that was about 1.15 s, 50-170 ms on each main tab's first click.
 _WARM_TEMPLATES = ("base.html", "_navfinder.html", "index.html", "goals.html",
-                   "chat.html", "approvals.html")
+                   "chat.html", "approvals.html", "agents.html", "audit.html",
+                   "billing.html", "chat_base.html", "compliance.html",
+                   "connections.html", "learning.html", "me.html",
+                   "permissions.html", "privacy.html", "security.html",
+                   "settings.html", "store.html", "tools.html", "users.html",
+                   "workflows_index.html", "workforce.html")
+
+
+def _warm_template_names() -> list[str]:
+    """The pages above, then every shared partial (``_*.html``) they include."""
+    partials = [name for name in templates.env.list_templates()
+                if name.startswith("_") and name.endswith(".html")]
+    return list(dict.fromkeys((*_WARM_TEMPLATES, *partials)))
 
 
 def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, float]:
@@ -1026,7 +1081,7 @@ def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, flo
         timings[name] = time.perf_counter() - started
 
     def _templates() -> None:
-        for name in _WARM_TEMPLATES:
+        for name in _warm_template_names():
             try:
                 templates.env.get_template(name)
             except Exception:  # pragma: no cover - a renamed page is not fatal
@@ -1068,16 +1123,7 @@ def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, flo
     return timings
 
 
-def _warm_pack_catalogue() -> None:
-    """Parse the shipped pack catalogue (2,031 files) and the roster's tool
-    inventory before hook discovery: both are person-independent and cached
-    for the process, and Ctrl+K's first agent lookup needs them."""
-    try:
-        from maverick.domain_edit import list_agents
-
-        list_agents()
-    except Exception:  # pragma: no cover - warm-up is best-effort
-        log.debug("pack catalogue warm-up skipped", exc_info=True)
+_SCHEMA_BUILD_SWITCH_INTERVAL = 0.0001
 
 
 def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float = 1800.0,
@@ -1089,35 +1135,119 @@ def _build_openapi_when_idle(quiet: float = 10.0, sleep=time.sleep, limit: float
     starts. A request for /openapi.json before then builds it on demand, as
     FastAPI always did. Gives up after ``limit`` seconds of steady traffic,
     or as soon as ``stop`` is set (the dashboard is shutting down)."""
-    from . import request_activity
-
-    waited = 0.0
-    while not request_activity.quiet_for(quiet):
-        if waited >= limit or (stop is not None and stop.is_set()):
-            return False
-        sleep(0.5)
-        waited += 0.5
-    if stop is not None and stop.is_set():
+    if not _wait_for_quiet(quiet, sleep, limit, stop):
         return False
+    # The build is about six seconds of pure-Python CPU. At the default 5 ms
+    # switch interval, a request arriving meanwhile waited for the GIL after
+    # each of its I/O calls: the clicks after someone's first pause took about
+    # a second each. A short interval for the build hands it back at once.
+    switch = sys.getswitchinterval()
+    sys.setswitchinterval(_SCHEMA_BUILD_SWITCH_INTERVAL)
     try:
         app.openapi()
     except Exception:  # pragma: no cover - the schema still builds on demand
         log.debug("OpenAPI warm-up skipped", exc_info=True)
         return False
+    finally:
+        sys.setswitchinterval(switch)
     return True
 
 
-def _warm_goal_runtime() -> threading.Event:
-    """Pay the kernel's once-per-process start-up cost (hook discovery across
-    installed distributions, about 1.5 s cold) and the dashboard's first-hit
-    costs (:func:`_warm_dashboard_caches`) now, in the background, instead of
-    on the first request or chat turn after start. Fail-open: never blocks
-    startup. Returns the event the lifespan sets on shutdown, so a stopped
-    dashboard does not keep warming (or build its schema) in the background."""
+def _wait_for_quiet(quiet: float, sleep, limit: float, stop: threading.Event | None) -> bool:
+    """Whether ``quiet`` seconds without a request arrived before ``limit``
+    seconds of traffic passed and before ``stop`` was set.
+
+    The quiet must also last ``quiet`` seconds from the start of the wait: a
+    dashboard that has just started has served nothing yet, and its schema
+    build used to begin at once, landing four seconds of CPU on the first
+    pages someone opened."""
+    from . import request_activity
+
+    waited = 0.0
+    while waited < quiet or not request_activity.quiet_for(quiet):
+        if waited >= limit or (stop is not None and stop.is_set()):
+            return False
+        sleep(0.5)
+        waited += 0.5
+    return not (stop is not None and stop.is_set())
+
+
+_GC_ROUND_SECONDS = 3600.0
+
+
+def _freeze_long_lived_objects() -> None:
+    """One full collection, then keep its survivors out of later ones.
+
+    After warm-up the process tracks about 700,000 long-lived objects (the
+    pack catalogue, templates, routes, modules, the OpenAPI schema). A full
+    collection walked all of them, 350-450 ms, on whichever request triggered
+    it. ``gc.freeze()`` leaves them out of every automatic collection. Each
+    round first unfreezes, so warmed structures replaced since the last round
+    (a rebuilt catalogue, a cleared cache) are reclaimed rather than kept.
+    """
+    try:
+        gc.unfreeze()
+        gc.collect()
+        gc.freeze()
+    except Exception:  # pragma: no cover - a tuning step never breaks the dashboard
+        log.debug("garbage-collector freeze skipped", exc_info=True)
+
+
+def _collect_when_idle(stop: threading.Event, quiet: float = 10.0, sleep=time.sleep,
+                       wait=None, every: float = _GC_ROUND_SECONDS, limit: float = 1800.0) -> None:
+    """Run :func:`_freeze_long_lived_objects` in quiet moments until shutdown.
+
+    Each round waits for ``quiet`` seconds without a request in flight or
+    started (open event streams and sockets do not count), so its own full
+    collection lands on none. When ``limit`` seconds of traffic pass first,
+    the round only unfreezes: automatic collections then reclaim garbage as
+    they did without a freeze, so nothing frozen is kept indefinitely. Rounds
+    are ``every`` seconds apart.
+    """
+    wait = wait or stop.wait
+    while not stop.is_set():
+        if _wait_for_quiet(quiet, sleep, limit, stop):
+            _freeze_long_lived_objects()
+        elif not stop.is_set():
+            gc.unfreeze()
+        if wait(every):
+            return
+
+
+# How long startup waits for the request-path caches before it serves anyway
+# (the desktop splash gives the whole start 60 s; this is about 5 s normally).
+_WARM_BEFORE_SERVING_SECONDS = 15.0
+
+
+def _warm_goal_runtime(thread_factory=threading.Thread,
+                       ready: threading.Event | None = None) -> threading.Event:
+    """Pay the dashboard's first-hit costs (:func:`_warm_dashboard_caches`)
+    and the kernel's once-per-process start-up cost (hook discovery across
+    installed distributions, about 1.5 s cold) in a background thread,
+    instead of on the first request or chat turn after start.
+
+    ``ready`` is set once the request-path caches are warm (or their warm-up
+    failed): the lifespan waits for it before serving, because a first page
+    opened while they were still cold took 4 to 9 seconds. Fail-open.
+    Returns the event the lifespan sets on shutdown, so a stopped dashboard
+    does not keep warming (or build its schema) in the background."""
     stop = threading.Event()
 
     def _warm() -> None:
-        _warm_pack_catalogue()
+        try:
+            timings = _warm_dashboard_caches(stop)
+            if not stop.is_set():
+                # Freeze what warm-up built while startup still waits: the
+                # first garbage round needs ten quiet seconds, and until then
+                # every full collection walked it, 0.4-0.6 s on a request.
+                started = time.perf_counter()
+                _freeze_long_lived_objects()
+                timings["freeze"] = time.perf_counter() - started
+            log.info("dashboard warm-up done: %s",
+                     ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
+        finally:
+            if ready is not None:
+                ready.set()
         if stop.is_set():
             return
         try:
@@ -1130,12 +1260,10 @@ def _warm_goal_runtime() -> threading.Event:
             log.debug("goal runtime warm-up skipped", exc_info=True)
         if stop.is_set():
             return
-        timings = _warm_dashboard_caches(stop)
-        log.info("dashboard warm-up done: %s",
-                 ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in timings.items()))
         _build_openapi_when_idle(stop=stop)
+        _collect_when_idle(stop)
 
-    threading.Thread(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
+    thread_factory(target=_warm, name="lightwork-warm-hooks", daemon=True).start()
     return stop
 
 
@@ -1231,7 +1359,6 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(repair_default_workspace)
         await _reclaim_orphans()
         await _install_queue_dispatcher()
-        await _install_automation_scheduler()
         try:
             from .personal_notification_scheduler import start_personal_notification_scheduler
             await run_in_threadpool(start_personal_notification_scheduler)
@@ -1243,7 +1370,8 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_knowledge_sources_scheduler)
         from .consent_delivery_scheduler import start_consent_delivery_scheduler
         await run_in_threadpool(start_consent_delivery_scheduler)
-        warm_stop = _warm_goal_runtime()
+        warm_ready = threading.Event()
+        warm_stop = _warm_goal_runtime(ready=warm_ready)
         try:
             from maverick_dashboard.security_api import start_hunter_scheduler
 
@@ -1317,6 +1445,14 @@ async def _lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - never block startup
             log.exception("deadline alerts scheduler not started")
         try:
+            # Contact-centre handoffs still waiting when the server stopped continue; a send
+            # that was in flight is shown as not confirmed and is never sent again.
+            from maverick.contact_centre import resume_all_workspaces
+
+            await run_in_threadpool(resume_all_workspaces)
+        except Exception:  # pragma: no cover - never block startup
+            log.exception("contact centre deliveries not resumed")
+        try:
             # Profiling, the kernel activity monitor and the model proxy, each
             # only when its setting is on (All settings); stopped at shutdown.
             from maverick_dashboard.background_programs import start_enabled
@@ -1327,7 +1463,7 @@ async def _lifespan(app: FastAPI):
         await _start_privacy_discovery_remediation_scheduler()
         await _start_privacy_notice_publication_scheduler()
         # Connected-entitlement auto-refresh: a deployment with [license] api_url
-        # configured polls the vendor console so an upgrade/downgrade issued there
+        # configured polls that license service so a license re-issued there
         # lands within ~a minute — no redeploy, no manual refresh. No-op (returns
         # None) without an API URL or with refresh_interval_seconds = 0, so tests
         # and offline/air-gapped boxes are untouched. Fail-open by construction:
@@ -1346,6 +1482,13 @@ async def _lifespan(app: FastAPI):
             start_warmup(app)
         except Exception:  # pragma: no cover - never block startup
             log.exception("voice STT warm-up not started")
+        # Serve only once the first page will not pay the cold caches (it
+        # waits, never fails: past the limit the warm-up simply continues).
+        await run_in_threadpool(warm_ready.wait, _WARM_BEFORE_SERVING_SECONDS)
+        # After the warm-up: a dream cycle that came due while the dashboard
+        # was stopped is claimed at once, and run beside the warm-up it
+        # stretched from about 0.3 s to 3 s and delayed serving by as much.
+        await _install_automation_scheduler()
         supervisor.phase = "running"
         from maverick.runtime_configuration import start as start_runtime_receipt
         runtime_receipt = start_runtime_receipt("dashboard")
@@ -1463,6 +1606,8 @@ app = FastAPI(
         Depends(enforce_page_visibility),
     ],
     lifespan=_lifespan,
+    # The request span (below) is the server span; see request_spans.
+    **request_spans.fastapi_telemetry_kwargs(),
 )
 from .administration_document_access_composition import (  # noqa: E402
     attach_administration_document_access_composition,
@@ -1811,7 +1956,7 @@ app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 def _compress_enabled() -> bool:
     """``[dashboard] compress`` (default on), overridden by
     ``MAVERICK_DASHBOARD_COMPRESS``. Response compression for a self-hosted
-    dashboard behind a bare uvicorn or a default ingress (W3-77); turn it off
+    dashboard behind a bare uvicorn or a default ingress; turn it off
     when a proxy in front already compresses."""
     env = os.environ.get("MAVERICK_DASHBOARD_COMPRESS", "").strip().lower()
     if env:
@@ -2171,6 +2316,16 @@ app.state.public_consent_error_origin_resolver = lambda request: public_consent_
     request, _public_consent_dependencies
 )
 app.include_router(create_consent_public_router(_public_consent_dependencies))
+# Public website chat: the visitor router is self-authenticated (publishable key
+# plus origin) and the admin router sits under dashboard auth. Both answer 404
+# while [public_chat] enabled is false, and store nothing until then.
+from .public_chat_api import (  # noqa: E402
+    create_public_chat_admin_router,
+    create_public_chat_router,
+)
+
+app.include_router(create_public_chat_router())
+app.include_router(create_public_chat_admin_router())
 # The public rights-request form: JSON API under /api/v1/public/rights and
 # the hosted pages under /rights/. Fail-closed on its module gate.
 from .public_rights_api import pages as _public_rights_pages  # noqa: E402
@@ -2328,11 +2483,13 @@ from .invite_routes import router as invite_router  # noqa: E402
 # Personal / service-account API keys: page + JSON routes. Self-gates on
 # [dashboard] api_keys (404 when off).
 app.include_router(api_keys_router)
+from .local_owner_mfa_routes import router as local_owner_mfa_router  # noqa: E402
 from .local_owner_routes import router as local_owner_router  # noqa: E402
 from .session_expiry import page_session as _page_session  # noqa: E402
 from .session_expiry import router as session_expiry_router  # noqa: E402
 
 app.include_router(local_owner_router)
+app.include_router(local_owner_mfa_router)
 app.include_router(session_expiry_router)
 # The page shell's sign-in timer (lightwork-session.js): when this browser's
 # sign-in ends and how to stay signed in. None when nobody is signed in.
@@ -2381,7 +2538,7 @@ _DOCS_CSP = (
     "default-src 'self'; "
     "img-src 'self' data: https:; "
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "script-src 'self' 'nonce-{script_nonce}' https://cdn.jsdelivr.net; "
     "connect-src 'self'; "
     "frame-ancestors 'none'; "
     "base-uri 'none'; "
@@ -2389,11 +2546,12 @@ _DOCS_CSP = (
     "object-src 'none'"
 )
 
+# {script_nonce} is filled per response by security_headers.
 _DEFAULT_CSP = (
     "default-src 'self'; "
     "img-src 'self' data:; "
     "style-src 'self' 'unsafe-inline'; "
-    "script-src 'self' 'unsafe-inline'; "
+    "script-src 'self' 'nonce-{script_nonce}'; "
     "connect-src 'self'; "
     "frame-ancestors 'none'; "
     "base-uri 'none'; "
@@ -2569,6 +2727,7 @@ _AUTH_EXEMPT = {
     "/auth/error",
     "/auth/local-owner",
     "/auth/local-login",
+    "/auth/owner-second-factor",
     # The stylesheet, brand images, fonts and share-page renderer the
     # signed-out pages (sign-in, invitation, public rights form, shared
     # result) load before any session exists. One reviewed set of exact files,
@@ -2606,6 +2765,14 @@ _MAX_PUBLIC_CONSENT_BODY_BYTES = 64 * 1024
 _MAX_NATIVE_CONSENT_BODY_BYTES = 256 * 1024
 _MAX_THIRD_PARTY_COLLABORATION_BODY_BYTES = 2 * 1024 * 1024
 _EVIDENCE_GATEWAY_PREFIX = "/api/v1/security/assurance/gateway/"
+# Owner passphrase and authenticator-code steps: their bodies hold both secrets, so a 422 names
+# the field and never echoes the value.
+_OWNER_SECRET_PREFIXES = (
+    "/auth/company-signin-recovery/",
+    "/auth/company-saml-recovery/",
+    "/api/v1/settings/sign-in-migration/review",
+    "/api/v1/settings/single-sign-on/activation-review",
+)
 _SECURITY_HUNTER_BODY_PATHS = {
     "/api/v1/security/threats/scan",
     "/api/v1/security/soc/ingest",
@@ -3099,6 +3266,9 @@ async def bearer_auth(request: Request, call_next):
         # design; gated, origin-checked and token-addressed in its router.
         or path.startswith("/rights/")
         or path.startswith("/api/v1/public/rights/")
+        # Public website chat (its own publishable key, origin and visitor
+        # session). The admin prefix /api/v1/public-chat stays authenticated.
+        or path.startswith("/public/chat/v1/")
     ):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
@@ -3397,7 +3567,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
         # The owner and invited colleagues both sign in on that page.
         if ((local_owner_claimed() or passphrase_sign_in())
-                and request.url.path not in {"/auth/local-owner", "/auth/local-login"}):
+                and request.url.path not in {"/auth/local-owner", "/auth/local-login", "/auth/owner-second-factor"}):
             # Back to this page after signing in again (the sign-in keeps
             # only a local path; see local_owner_routes).
             from urllib.parse import quote
@@ -3564,7 +3734,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     from fastapi.encoders import jsonable_encoder
 
     errors = jsonable_encoder(exc.errors())
-    if route_path(request).startswith(_EVIDENCE_GATEWAY_PREFIX):
+    if route_path(request).startswith(_EVIDENCE_GATEWAY_PREFIX) or route_path(request).startswith(
+        _OWNER_SECRET_PREFIXES
+    ):
         for error in errors:
             if isinstance(error, dict) and "input" in error:
                 error["input"] = "[redacted]"
@@ -3733,6 +3905,10 @@ async def security_headers(request: Request, call_next):
     (clickjacking, MIME sniffing, Referer leakage, cross-origin
     exfiltration) the dashboard had no defense against before.
     """
+    # One script nonce per response, for the inline <script> tags the templates
+    # render (csp_script_nonce, see _csp_nonce_context).
+    script_nonce = secrets.token_urlsafe(16)
+    request.state.csp_script_nonce = script_nonce
     response = await call_next(request)
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -3772,10 +3948,11 @@ async def security_headers(request: Request, call_next):
             "Strict-Transport-Security",
             "max-age=31536000; includeSubDomains",
         )
-    # Content-Security-Policy. The templates use first-party inline
-    # <style>, <script>, and style="" attributes, so script/style-src
-    # need 'unsafe-inline' for now (a nonce-based tightening is tracked
-    # tech debt). The value still hardens the dashboard meaningfully:
+    # Content-Security-Policy. Inline <script> tags carry this response's
+    # nonce, so script-src admits no 'unsafe-inline' and an injected inline
+    # script cannot run. The templates' first-party inline <style> and
+    # style="" attributes still need 'unsafe-inline' in style-src (out of
+    # scope for this change). The value still hardens the dashboard meaningfully:
     #   - default/connect/script/style 'self' → injected JS can't fetch()
     #     to an external exfil endpoint or pull a remote script
     #   - frame-ancestors 'none' → reinforces X-Frame-Options (clickjack)
@@ -3785,9 +3962,9 @@ async def security_headers(request: Request, call_next):
     # if any of it ever reaches an HTML sink, CSP is the backstop.
     path = route_path(request)
     if path == "/redoc":
-        csp = _DOCS_CSP
+        csp = _DOCS_CSP.format(script_nonce=script_nonce)
     else:
-        csp = _DEFAULT_CSP
+        csp = _DEFAULT_CSP.format(script_nonce=script_nonce)
     if path == "/connections" and str(request.base_url).rstrip("/") == "http://127.0.0.1:8765":
         from maverick.connection_oauth import desktop_return_enabled
 
@@ -3955,7 +4132,7 @@ async def tenant_pinning(request: Request, call_next):
 
 
 # ----- goal-creation rate limit -----
-# Council safety-seat (round 1): nothing throttled /chat/send or
+# Nothing throttled /chat/send or
 # POST /api/v1/goals. A runaway loop or a flood of same-origin posts
 # could spawn unbounded goals, each costing real money. This is an
 # in-process sliding-window limiter (no new dependency) shared by all
@@ -4120,7 +4297,7 @@ def check_goal_rate_limit(request: Request | None = None, *, source: str | None 
 
 
 # ----- SSE stream concurrency cap -----
-# Council security finding (exposed-deployment hardening): each open SSE
+# Exposed-deployment hardening: each open SSE
 # stream spawns a 300s task polling SQLite every 0.5s. Thousands of
 # EventSource opens exhaust file descriptors and the event loop. The cap now
 # lives in _shared so app and api share ONE process-wide semaphore (was a
@@ -4379,7 +4556,8 @@ async def perf_page(request: Request) -> HTMLResponse:
 
 @app.get("/static/lightwork-task-views.js")
 def task_views_script():
-    return FileResponse(Path(__file__).parent / "static" / "lightwork-task-views.js", media_type="application/javascript")
+    return FileResponse(Path(__file__).parent / "static" / "lightwork-task-views.js", media_type="application/javascript",
+                        headers={"Cache-Control": STATIC_SHORT_CACHE})
 @app.get("/nav/finder", response_class=HTMLResponse, include_in_schema=False)
 def nav_finder_items(request: Request) -> HTMLResponse:
     """The page finder's destinations for the caller, as the ``<li>`` items of
@@ -5009,13 +5187,19 @@ def spend_page(request: Request) -> HTMLResponse:
     episode_provenance = {e.id: {"runtime_basis": runtime_basis(e.cost_dollars), **for_goal(e.goal_id)} for e in episodes}
     # Task titles for the table (the episodes are already scoped to the caller).
     goal_titles: dict[int, str] = {}
-    for gid in {e.goal_id for e in episodes if e.goal_id}:
-        try:
-            g = w.get_goal(gid)
-            if g is not None and getattr(g, "title", ""):
-                goal_titles[gid] = g.title
-        except Exception:  # noqa: BLE001 - a missing title falls back to "Task"
-            continue
+    try:
+        from maverick.world_model import goals_by_id
+
+        goal_titles = {gid: g.title for gid, g in goals_by_id(w, [e.goal_id for e in episodes if e.goal_id]).items()
+                       if getattr(g, "title", "")}
+    except Exception:  # noqa: BLE001 - a missing title falls back to "Task"
+        for gid in {e.goal_id for e in episodes if e.goal_id}:
+            try:
+                g = w.get_goal(gid)
+                if g is not None and getattr(g, "title", ""):
+                    goal_titles[gid] = g.title
+            except Exception:  # noqa: BLE001
+                continue
     import datetime as _dt
     today = _dt.date.today().replace(day=1)
     months = []
@@ -7028,6 +7212,13 @@ async def finance_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "finance.html", context)
 
 
+@app.get("/work-value", response_class=HTMLResponse)
+def work_value_page(request: Request) -> HTMLResponse:
+    from .intent_value_api import authority
+    authority(request)
+    return templates.TemplateResponse(request, "intent_value.html", {})
+
+
 @app.get("/savings", response_class=HTMLResponse)
 def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     """The value dashboard: money saved vs the typical human cost, computed
@@ -7278,7 +7469,7 @@ async def providers_page(request: Request) -> HTMLResponse:
     )
 
 
-# ----- Control surface pages (council pass) -----
+# ----- Control surface pages -----
 
 
 def safe_audit_day(day: str | None) -> str | None:
@@ -7813,7 +8004,7 @@ async def compartments_page(
     Reads the discoverable domain packs (built-in + onboarded) so an operator
     can see which sealed agents exist and the capability envelope each runs
     under -- the compartments a Rung-2 seal acts on. Searched and paginated
-    like /tools (W3-30): unscoped, the full roster is 2,000+ packs and rendered
+    like /tools: unscoped, the full roster is 2,000+ packs and rendered
     every capability envelope into one multi-megabyte page."""
     query = q.strip()
     domain_page = {
@@ -8042,17 +8233,22 @@ def chat_specialist_choices(
     """
     require_permission(request, "operate")
     require_page_visible(request, "/chat")
+    from maverick.governed_operations import dataclass_digest
+
     from .product_operations_task_launch import published_specialists
 
-    current = published_specialists(request)
+    current = published_specialists(request, revisions=False)
     query = " ".join(q.split()).casefold()
     matches = [
         choice for choice in current["choices"]
         if not query or query in choice["label"].casefold() or query in choice["value"].casefold()
     ]
     matches.sort(key=lambda choice: (not choice["label"].casefold().startswith(query), choice["label"].casefold()))
+    # Each revision digests a whole specialist: only the page returned needs one.
+    items = [{"value": choice["value"], "label": choice["label"], "revision": dataclass_digest(choice["profile"])}
+             for choice in matches[:limit]]
     return JSONResponse(
-        {"context": current["context"], "items": matches[:limit], "total": len(matches)},
+        {"context": current["context"], "items": items, "total": len(matches)},
         headers={"Cache-Control": "no-store, private"},
     )
 
@@ -8651,6 +8847,9 @@ async def compliance_page(request: Request, tab: str = "") -> HTMLResponse:
     view["can_operate"] = has_permission(request, "operate")
     view["can_global_admin"] = has_global_permission(request, "admin")
     view.update(_compliance_owner_view(request, view["can_admin"]))
+    from .ediscovery_api import page_context as ediscovery_page_context
+
+    view.update(ediscovery_page_context(request))
     return templates.TemplateResponse(request, "compliance.html", view)
 
 
@@ -10383,7 +10582,7 @@ def _render_channels_page(request: Request, *, saved: str = "",
         "email_failed": "The test email could not be sent. Check the mail settings "
                         "(Settings > All settings > Integrations > Email alerts).",
     }.get(saved, "")
-    from . import plain_labels, teams_links_api
+    from . import plain_labels, public_chat_api, teams_links_api
     try:
         from .service_supervisor import status as service_status
 
@@ -10419,6 +10618,7 @@ def _render_channels_page(request: Request, *, saved: str = "",
             "sendable": ["email", "sms", "slack"],
             "channel_runtime": channel_runtime,
             **teams_links_api.page_context(issued_code),
+            **public_chat_api.admin_section_context(request),
             "mail_configured": _mail_configured(),
             "channel_context": _channel_form_context(request),
             "channel_review": _channel_form_review(request),
@@ -10766,6 +10966,15 @@ def goal_cost_breakdown(request: Request, goal_id: int) -> JSONResponse:
     return JSONResponse({"goal_id": goal_id, "total_dollars": round(total, 4), "buckets": rows})
 
 
+def _owned_goal_ids(world, owner: str) -> set[int]:
+    """Ids of the owner's newest 10,000 goals. A world that reads the status
+    columns alone is asked for the ids only, so no goal is decrypted here."""
+    states = getattr(world, "goal_states", None)
+    if callable(states):
+        return {gid for gid, _status, _updated in states(owner=owner, limit=10_000, order="desc")}
+    return {g.id for g in world.list_goals(owner=owner, limit=10_000, order="desc")}
+
+
 @app.get("/api/v1/cost/anomalies")
 def cost_anomalies(
     request: Request,
@@ -10788,7 +10997,7 @@ def cost_anomalies(
     owner = goal_owner_filter(request)
     owned: set[int] | None = None
     if owner is not None:
-        owned = {g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")}
+        owned = _owned_goal_ids(w, owner)
     by_goal: dict[int, float] = {}
     for ep in w.list_episodes(limit=limit):
         gid = getattr(ep, "goal_id", None)
@@ -11186,10 +11395,16 @@ def cost_by_tag_api(
     limit = max(1, min(int(limit), 10_000))
     w = _world()
     owner = goal_owner_filter(request)
-    goal_ids = None
-    if owner is not None:
-        goal_ids = [g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")]
-    buckets = split_by_tag(gather(w, tag_field=tag_field, limit=limit, goal_ids=goal_ids))
+    if owner is not None and hasattr(w, "episodes_for_owner_goals"):
+        # One owner-scoped query: the newest goals' runs, no per-goal reads.
+        rows = gather(w, tag_field=tag_field,
+                      episodes=w.episodes_for_owner_goals(owner, limit=limit))
+    else:
+        goal_ids = None
+        if owner is not None:
+            goal_ids = [g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")]
+        rows = gather(w, tag_field=tag_field, limit=limit, goal_ids=goal_ids)
+    buckets = split_by_tag(rows)
     return JSONResponse({"tag_field": tag_field, "buckets": buckets})
 
 
@@ -11243,15 +11458,17 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
         published_selection,
         published_specialists,
     )
-    specialist_choices = published_specialists(request) if has_permission(request, "operate") else {"context": "", "choices": []}
     requested_specialist = request.query_params.get("specialist")
-    if requested_specialist is not None:
-        published_selection(request, requested_specialist)
+
     # The roster has 2,000+ specialists: the page ships only the requested and
     # saved choices, and Find a specialist searches the rest (/api/v1/chat/specialists).
-    shown = {requested_specialist, specialist_choices.get("personal_default")} - {None, ""}
-    specialist_choices = {**specialist_choices,
-                          "choices": [c for c in specialist_choices["choices"] if c["value"] in shown]}
+    def shown(personal_default):
+        return {requested_specialist, personal_default} - {None, ""}
+
+    specialist_choices = (published_specialists(request, only=shown) if has_permission(request, "operate")
+                          else {"context": "", "choices": []})
+    if requested_specialist is not None:
+        published_selection(request, requested_specialist)
     return templates.TemplateResponse(
         request,
         "chat.html",
@@ -11260,6 +11477,7 @@ def chat_page(request: Request, compose: str = "") -> HTMLResponse:
             "threads": _chat_threads(request, w),
             "prefill_title": prefill_title,
             "prefill_description": prefill_description,
+            "value_opportunity": request.query_params.get("value_opportunity", "")[:100],
             "published_specialists": specialist_choices,
             "specialist_work_notice": SPECIALIST_NOTICE,
             "requested_specialist": requested_specialist,
@@ -11363,6 +11581,12 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
         pass  # Current authorized tasks remain readable if organization storage is unavailable.
     from .run_status import status_label
 
+    try:  # one read for the listed conversations; each is still checked below
+        from maverick.world_model import goals_by_id
+
+        loaded = goals_by_id(w, [g.id for g in goals])
+    except Exception:
+        loaded = {}
     threads: list[dict] = []
     for g in goals:
         target_id = ChatThreads(w).latest(g.id)
@@ -11379,7 +11603,7 @@ def _chat_threads(request: Request, w, *, active_root: int | None = None) -> lis
             except Exception:
                 pass  # A sidebar label must not make a task page unavailable.
         try:
-            metadata = organization(request, w, g.id)
+            metadata = organization(request, w, g.id, goal=loaded.get(g.id))
         except Exception:
             metadata = {"title": "", "pinned": False, "archived": False}
         if metadata["archived"] and g.id != active_root:
@@ -11475,7 +11699,11 @@ def _dispatch_goal(request: Request, bg: BackgroundTasks, goal_id: int, *, conve
     user_id = execution_user_id_from_request(request)
     if user_id:
         kwargs.update(channel="dashboard", user_id=user_id)
-    bg.add_task(dispatch, _world(), receipt, run_goal_in_background_async, goal_id, **kwargs)
+    # Every caller redirects to the task's page: the run starts once that page
+    # was served (at most half a second later), not while the browser waits.
+    page_handoff.expect(goal_id)
+    bg.add_task(dispatch, _world(), receipt, page_handoff.after_page(run_goal_in_background_async),
+                goal_id, **kwargs)
 
 
 def _submission_conversation(w, receipt) -> int | None:
@@ -11546,6 +11774,7 @@ async def chat_send(
     domain: str = Form(""),
     specialist_context: str = Form(""),
     specialist_revision: str = Form(""),
+    value_opportunity: str = Form(""),
 ) -> RedirectResponse:
     _require_same_origin(request)
     require_permission(request, "operate")
@@ -11555,13 +11784,17 @@ async def chat_send(
     from .task_model_selection_api import selection as select_task_ai
 
     task_selection = select_task_ai(request, task_model, task_effort, task_model_context)
+    from .intent_value_handoff import bind as bind_opportunity
+    from .intent_value_handoff import validate as validate_opportunity
     from .product_operations_task_launch import published_guard
+    validate_opportunity(request, value_opportunity)
     chosen_specialist = domain.strip()
     if len(chosen_specialist) > 120:
         raise HTTPException(422, "Choose a named published specialist from the list.")
     task_model_guard = task_ai_guard(request, task_selection, task_model_context)
     specialist_guard = published_guard(request, chosen_specialist, specialist_context, specialist_revision) if chosen_specialist else None
     def start_guard():
+        validate_opportunity(request, value_opportunity)
         task_model_guard()
         if specialist_guard is not None:
             specialist_guard()
@@ -11625,6 +11858,7 @@ async def chat_send(
                            effect_guard=start_guard)
     start_guard()
     goal_id = receipt["goal_id"]
+    bind_opportunity(request, value_opportunity, w, goal_id)
     if director is not None and receipt.get("created"):
         from maverick.director_mode import record
 
@@ -12379,6 +12613,30 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
     )
 
 
+_FORM_LOOKUPS_PER_MINUTE = 30
+_FORM_LOOKUP_LIMIT = None
+
+
+def _limit_form_lookups(request: Request) -> None:
+    """Throttle public form-token lookups per address, before any lookup runs.
+
+    Each lookup scans the registered form triggers and the vendor
+    questionnaires, so unknown-token guesses get their own per-address limit
+    instead of spending the goal ceiling that real task starts share."""
+    global _FORM_LOOKUP_LIMIT
+    if _FORM_LOOKUP_LIMIT is None:
+        from maverick.public_rights_form import SlidingWindowLimit
+
+        _FORM_LOOKUP_LIMIT = SlidingWindowLimit(60.0)
+    from .ip_allowlist import client_ip
+
+    address = client_ip(request)
+    if not _FORM_LOOKUP_LIMIT.hit(f"ip:{address if address is not None else 'unknown'}",
+                                  _FORM_LOOKUPS_PER_MINUTE, time.time()):
+        raise HTTPException(status_code=429, detail="too many attempts; try again shortly",
+                            headers={"Retry-After": "60"})
+
+
 def _vendor_questionnaire_for(token: str) -> dict | None:
     """Resolve one form; unavailable authority must not masquerade as a 404."""
     try:
@@ -12398,6 +12656,7 @@ async def form_page(request: Request, token: str) -> HTMLResponse:
     """
     from maverick import automation_events
 
+    _limit_form_lookups(request)
     if automation_events.enabled():
         try:
             trigger = await run_in_threadpool(_registered_form_trigger, token)
@@ -12581,9 +12840,10 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
     from .form_inputs import FormInputError
 
     # Unknown tokens must never allocate a per-token file, and an anonymous
-    # guess must not spend the goal ceiling real task starts share: resolve the
-    # token first, then check the shared admission limit before parsing even a
-    # multipart request.
+    # guess must not spend the goal ceiling real task starts share: throttle
+    # lookups per address, resolve the token, then check the shared admission
+    # limit before parsing even a multipart request.
+    _limit_form_lookups(request)
     trigger = None
     if automation_events.enabled():
         trigger = await run_in_threadpool(_registered_form_trigger, token)
@@ -13170,7 +13430,10 @@ def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     """A task's page; built again when the task changed while it was read."""
     from .answer_projection import settled
 
-    return settled(lambda: _chat_goal_page(request, goal_id))
+    try:
+        return settled(lambda: _chat_goal_page(request, goal_id))
+    finally:
+        page_handoff.served(goal_id)
 
 
 def _chat_goal_page(request: Request, goal_id: int) -> HTMLResponse:
@@ -13756,7 +14019,7 @@ def errors_page(request: Request, goal_id: int) -> HTMLResponse:
 def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
     """CSV rollup of episode spend, streamed.
 
-    Council perf finding: prior version fetched up to 100k episodes
+    The prior version fetched up to 100k episodes
     into memory, then filtered by month in Python before writing the
     CSV to a StringIO. Now: stream rows directly from the DB, with the
     month filter pushed to SQL.
@@ -13888,7 +14151,7 @@ async def api_goal_events_stream(
 ) -> StreamingResponse:
     """Server-Sent Events stream of new goal events.
 
-    Council perf-seat fix: client polled this route every 2s (visible
+    The client used to poll this route every 2s (visible
     tab) / 5s (hidden tab) over the lifetime of every open goal page,
     burning 30 req/min/tab idle on a goal that finished an hour ago.
     SSE holds one TCP connection open, server polls SQLite at 0.5s
@@ -13929,10 +14192,32 @@ async def api_goal_events_stream(
                                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-# ----- roadmap cluster: graph editor / goal builder / embed / benchmarks /
+# ----- feature cluster: graph editor / goal builder / embed / benchmarks /
 #       walkthroughs / 3D plan tree -----
 
 _STATIC_DIR = Path(__file__).parent / "static"
+
+
+@app.get("/static/intent-value.js")
+def intent_value_script(request: Request):
+    require_permission(request, "view")
+    return FileResponse(_STATIC_DIR / "intent-value.js", media_type="application/javascript")
+
+
+@app.get("/static/intent-value.css")
+def intent_value_styles(request: Request):
+    require_permission(request, "view")
+    return FileResponse(_STATIC_DIR / "intent-value.css", media_type="text/css")
+
+
+@app.get("/static/lightwork-archive-viewer.html")
+def archive_viewer_download(request: Request):
+    """The offline archive viewer the trajectory page offers. Sent only as a
+    download: it runs its own inline script when opened from disk, so it is
+    never rendered as a page under the dashboard's address."""
+    require_permission(request, "view")
+    return FileResponse(_STATIC_DIR / "lightwork-archive-viewer.html", media_type="text/html",
+                        filename="lightwork-archive-viewer.html")
 
 
 @app.get("/static/lightwork-analytics.js")
@@ -14027,6 +14312,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-employee-companion.css")
 @app.get("/static/lightwork-product-operations.js")
 @app.get("/static/lightwork-specialist-drafts.js")
+@app.get("/static/lightwork-specialist-trials.js")
 @app.get("/static/lightwork-company-signin-migration.js")
 @app.get("/static/lightwork-company-saml-setup.js")
 @app.get("/static/lightwork-connected-event-sources.js")
@@ -14254,6 +14540,20 @@ async def consent_native_admin_client() -> FileResponse:
 
     return FileResponse(
         _STATIC_DIR / "lightwork-consent-native-admin.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/static/lightwork-public-chat-admin.js")
+async def public_chat_admin_client() -> FileResponse:
+    """Same-origin client for the public website chat section of the Channels page."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-public-chat-admin.js",
         media_type="application/javascript; charset=utf-8",
         headers={
             "Cache-Control": "no-store, private, max-age=0",
@@ -15049,8 +15349,7 @@ async def benchmarks_page(request: Request) -> HTMLResponse:
 
     Per-suite trend sparklines + a comparison table over the real
     ``~/.maverick/benchmarks/history.json`` store. No competitor numbers are
-    shown or invented here — see docs/comparison.md for the qualitative
-    comparison."""
+    shown or invented here."""
     from .api import _benchmark_snapshot
 
     snap = _benchmark_snapshot()
@@ -15469,6 +15768,21 @@ from .request_activity import RequestActivityMiddleware  # noqa: E402
 
 app.add_middleware(RequestMemoMiddleware)
 app.add_middleware(RequestActivityMiddleware)
+# Added last, so outermost: one OTLP span per request, when tracing is on. Decided
+# here, once; with tracing off nothing is added and a request pays nothing for it.
+request_spans.install(app)
+
+# The 13 consecutive function middlewares above run as one layer (about 2 ms
+# of task groups and streams per request); order and isolation are unchanged.
+from .middleware_chain import merge_function_middleware  # noqa: E402
+
+merge_function_middleware(app)
+
+# A request for a path served before goes straight to its route instead of
+# trying the 575 entries before it (6.5-7.4 ms for a late page).
+from .route_dispatch import install as _remember_route_matches  # noqa: E402
+
+_remember_route_matches(app.router)
 
 
 if __name__ == "__main__":

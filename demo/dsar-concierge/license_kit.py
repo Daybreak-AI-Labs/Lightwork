@@ -1,6 +1,6 @@
 """License verification for the standalone agent — the seam's gatekeeper.
 
-The agent ships with the vendor's PUBLIC key only; the token arrives via
+The agent ships with the issuer's PUBLIC key only; the token arrives via
 ``LIGHTWORK_LICENSE`` (the key itself or a file path) and the key via
 ``LIGHTWORK_LICENSE_PUBKEY`` (PEM text or a file path). Verification is
 Ed25519 over the exact token format ``maverick.licensing`` mints.
@@ -8,7 +8,7 @@ Ed25519 over the exact token format ``maverick.licensing`` mints.
 No license, a bad license, or an expired one all mean EVALUATION MODE:
 the agent stays fully functional but caps concurrent open cases — bounded
 and honest, never crippled mid-flight, and the banner says exactly why.
-An upsell or renewal is a key swap, not a reinstall.
+A new or renewed license is a key swap, not a reinstall.
 
 Standalone-safe: cryptography + stdlib only (cryptography is already in
 requirements-standalone.txt).

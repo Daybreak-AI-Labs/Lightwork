@@ -79,7 +79,7 @@ def test_http_fetch_enterprise_denial_happens_before_robots(monkeypatch):
 
 
 def test_websocket_tool_blocks_egress_under_enterprise(monkeypatch):
-    # W2-87: websockets.connect is not wrapped by egress_guard (httpx/requests/
+    # Websockets.connect is not wrapped by egress_guard (httpx/requests/
     # urllib only), so without a manual check the enterprise tool-egress lock
     # never saw a websocket connection at all.
     import asyncio
@@ -147,7 +147,7 @@ def test_web_search_allows_an_allow_listed_backend(monkeypatch):
     assert "disabled in enterprise mode" not in out
 
 
-# ---------- browser tool (platform audit W2-88) ----------
+# ---------- browser tool ----------
 #
 # The browser tool (Playwright) previously had no enterprise/tenant egress
 # check at all -- a prompt-injected page could navigate anywhere even with

@@ -1,4 +1,4 @@
-"""Round-3 channel regressions: Discord dispatch wiring + IRC CRLF injection."""
+"""Channel regressions: Discord dispatch wiring + IRC CRLF injection."""
 from __future__ import annotations
 
 import asyncio

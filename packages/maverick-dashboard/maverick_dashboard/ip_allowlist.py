@@ -109,9 +109,15 @@ def client_ip(request) -> _Address | None:
 def _policy() -> dict:
     from maverick.config import config_source_errors, get_ip_allowlist
 
-    if config_source_errors(include_tenant=False):
+    # get_ip_allowlist() reads the merged config, so the active tenant's overlay
+    # is a source of this list too: an unreadable overlay must not drop it.
+    if config_source_errors(include_tenant=True):
         raise PolicyUnreadable("ip allowlist policy unreadable")
-    return get_ip_allowlist()
+    policy = get_ip_allowlist()
+    # The load can be what finds the source unreadable: check again after it.
+    if config_source_errors(include_tenant=True):
+        raise PolicyUnreadable("ip allowlist policy unreadable")
+    return policy
 
 
 def address_allowed(addr: _Address | None, entries: list | tuple) -> bool:
@@ -141,9 +147,16 @@ def workspace_allows(request) -> bool:
     """The list for the pinned workspace (its config overlay is active now)."""
     addr = client_ip(request)
     try:
-        from maverick.config import get_ip_allowlist
+        from maverick.config import config_source_errors, get_ip_allowlist
 
-        entries = get_ip_allowlist()["workspace_cidrs"]
+        # The workspace overlay is a source too: unreadable means loopback only.
+        # Checked again after the load, which is what first reads a fresh overlay.
+        if config_source_errors(include_tenant=True):
+            raise PolicyUnreadable("workspace ip allowlist policy unreadable")
+        policy = get_ip_allowlist()
+        if config_source_errors(include_tenant=True):
+            raise PolicyUnreadable("workspace ip allowlist policy unreadable")
+        entries = policy["workspace_cidrs"]
     except Exception:
         return addr is not None and addr.is_loopback
     return address_allowed(addr, entries)

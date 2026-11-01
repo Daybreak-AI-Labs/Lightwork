@@ -16,7 +16,7 @@ router = APIRouter(prefix=native.API, tags=["specialist-drafts"])
 class ReviewIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str = Field(min_length=1, max_length=128)
-    action: Literal["save", "try", "check", "publish", "restore"]
+    action: Literal["save", "try", "check", "publish", "restore", "promote", "rollback"]
     context: str = Field(pattern=r"^[a-f0-9]{64}$")
     entered: dict | None = None
     selected: str | None = Field(default=None, pattern=r"^SPD-[a-f0-9]{32}$")
@@ -39,6 +39,11 @@ def response(value):
 @router.get("")
 def inventory(request: Request, name: str):
     return response(native.inventory(request, name))
+
+
+@router.get("/trials")
+def trial_list(request: Request):
+    return response(native.trials(request))
 
 
 @router.get("/drafts/{identifier}")

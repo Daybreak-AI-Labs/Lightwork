@@ -1,4 +1,4 @@
-"""Right-to-explanation for governance decisions (roadmap: 2028 H1 safety).
+"""Right-to-explanation for governance decisions.
 
 GDPR Art. 22 / EU AI Act Art. 14: a person subject to an automated decision is
 owed a *meaningful explanation*. Lightwork's governance engine

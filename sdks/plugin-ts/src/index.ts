@@ -67,6 +67,11 @@ export function defineValidatedTool<T extends Record<string, unknown>>(def: {
   parseArgs: (input: unknown) => T;
   handler: (args: T, context: InvocationContext) => string | Promise<string>;
 }): ToolDef {
+  // The type requires a parser; a JavaScript caller (or a typo) must not get a
+  // "validated" tool whose handler runs on unchecked input.
+  if (typeof (def as { parseArgs?: unknown } | undefined)?.parseArgs !== "function") {
+    throw new TypeError(`defineValidatedTool(${String(def?.name)}): parseArgs must be a function`);
+  }
   return defineTool({ ...def, handler: (args, context) => def.handler(args as T, context) });
 }
 

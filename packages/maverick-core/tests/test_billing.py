@@ -1,4 +1,4 @@
-"""Metering -> billing & entitlements (ROADMAP platform spine)."""
+"""Metering -> billing & entitlements."""
 from __future__ import annotations
 
 import pytest

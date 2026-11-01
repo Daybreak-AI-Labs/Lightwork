@@ -1,5 +1,4 @@
-"""Reliability SLO / tail-latency calculator (roadmap: 2027 H2 "reliability SLO",
-2028 H1 "p999").
+"""Reliability SLO / tail-latency calculator.
 
 Summarise a batch of latency samples into the percentiles operators actually
 gate on (p50/p90/p95/p99/p999) and judge them against an SLO target. Deterministic

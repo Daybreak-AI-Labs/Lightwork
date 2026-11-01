@@ -19,8 +19,9 @@ def install(app, world, tenant, principal):
     @app.post("/__browser_fixture/approvals/setup", include_in_schema=False)
     async def setup(request: Request):
         owner(request)
-        rehearsal = request.query_params.get("kind") == "rehearsal"
-        if request.query_params.get("kind", "") not in ("", "rehearsal"):
+        kind = request.query_params.get("kind", "")
+        rehearsal = kind == "rehearsal"
+        if kind not in ("", "rehearsal", "immediate"):
             raise HTTPException(422, "unsupported fixture kind")
         card = build_approval_card(
             action="write_file" if rehearsal else "salesforce.update_records",
@@ -57,5 +58,9 @@ def install(app, world, tenant, principal):
                 scope="Task 42: save a file" if rehearsal else "Salesforce accounts",
                 detail=encode_approval_detail(card), provenance="rehearsal" if rehearsal else "consent",
                 requested_by=principal,
+                # The default fixture models a consent requester still waiting
+                # through the undo window. Other consumers do not promise that
+                # hold, so their decisions must remain final.
+                undoable=kind == "",
             )
         return {"synthetic": True, "approval_id": approval_id, "provider_calls": 0}

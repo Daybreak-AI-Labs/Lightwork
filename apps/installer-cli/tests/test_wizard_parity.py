@@ -1,4 +1,4 @@
-"""Council pass: wizard parity with kernel features.
+"""Wizard parity with kernel features.
 
 Confirms the eight new wizard steps emit correct TOML, the three new
 channel adapters round-trip, and the `_safe_*` helpers replace the
@@ -640,7 +640,7 @@ def test_pick_retention_skipped(monkeypatch):
 
 
 def test_pick_retention_accepted_includes_messages_days(monkeypatch):
-    """W1-57: messages is the fourth retention knob, prompted alongside
+    """Messages is the fourth retention knob, prompted alongside
     audit/episodes/events when the operator opts in to auto-pruning."""
     from maverick_installer import wizard
     monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: True)
@@ -1343,11 +1343,21 @@ def test_pick_notifications_writes_the_keys_the_kernel_reads(monkeypatch):
     answers = iter(["ntfy      - free, no signup, push to phone via ntfy.sh"])
     monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **_k: True)
     monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_k: next(answers))
-    monkeypatch.setattr(wizard, "_q_text", lambda *_a, **_k: "my-alerts")
+    monkeypatch.setattr(wizard, "_q_text", lambda message, **_k: (
+        "https://lightwork.example/" if "origin" in message else "my-alerts"))
     cfg, _ = wizard.pick_notifications()
     assert cfg == {"backend": "ntfy", "ntfy_topic": "my-alerts", "delivery_receipts": True,
                    "personal_alerts": True, "personal_critical_bypass": True, "personal_background": True,
-                   "personal_external": True, "personal_dashboard_url": "my-alerts", "metric_alerts": True}
+                   "personal_external": True, "personal_dashboard_url": "https://lightwork.example",
+                   "metric_alerts": True}
+    # Private delivery refuses anything but an HTTPS origin at send time, so the
+    # step does not save one it would refuse (it used to keep "my-alerts").
+    for origin in ("my-alerts", "http://lightwork.example", "https://lightwork.example/app"):
+        monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_k: "ntfy      - free, no signup, push to phone via ntfy.sh")
+        monkeypatch.setattr(wizard, "_q_text", lambda message, origin=origin, **_k: (
+            origin if "origin" in message else "my-alerts"))
+        cfg, _ = wizard.pick_notifications()
+        assert "personal_external" not in cfg and "personal_dashboard_url" not in cfg
     for choice, key in (("slack     - incoming webhook", "slack_webhook"),
                         ("discord   - webhook URL", "discord_webhook")):
         monkeypatch.setattr(wizard, "_q_select", lambda *_a, choice=choice, **_k: choice)

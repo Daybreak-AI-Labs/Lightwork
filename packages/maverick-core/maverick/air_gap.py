@@ -1,4 +1,4 @@
-"""Air-gapped preflight verification (roadmap: 2028 H2 safety — "air-gapped mode").
+"""Air-gapped preflight verification.
 
 A regulated / classified deployment needs to *prove* there is no outbound path
 before it trusts the box. Full OS-level air-gapping (firewall, no NIC) is the
@@ -94,7 +94,7 @@ def _audit_egress(config: dict) -> list[str]:
             'egress is not deny-all — set [egress] deny = ["*"] to block '
             "all outbound hosts")
 
-    # W2-90: [egress] deny is honored only by a handful of callers
+    # [egress] deny is honored only by a handful of callers
     # (tenant.egress.egress_allowed) — NOT the process-wide runtime guard
     # (egress_guard.py), which wraps httpx/requests across ~80 connectors
     # and every provider SDK. That guard's default-deny (enterprise.
@@ -195,16 +195,33 @@ def _audit_telemetry(config: dict) -> list[str]:
 
     These reach the network directly, not through the ``[egress]`` deny list the
     LLM/tool paths honor, so the other passes are blind to them: Sentry error
-    reporting, SIEM audit forwarding, and outbound webhooks all ship run data
-    off-box. (Prometheus is an inbound 127.0.0.1 listener — not egress — and OTEL
-    is env-var driven and not config-visible, so neither is flagged here.)
+    reporting, OTLP trace and metrics export, SIEM audit forwarding, and outbound
+    webhooks all ship run data off-box. The OTLP switches are read from
+    ``[observability]`` as the All settings page writes them, with the runtime's own
+    truth rules, so a value the runtime would treat as on is flagged. (Prometheus is
+    an inbound 127.0.0.1 listener, not egress, so it is not flagged here.)
     """
+    from .observability import setting_is_blank_or_off, switch_is_on
+
     violations: list[str] = []
-    dsn = str((config.get("observability") or {}).get("sentry_dsn") or "").strip()
-    if dsn:
+    obs = config.get("observability") or {}
+    # Read as the runtime reads them, so a switch the runtime treats as off (a TOML false,
+    # "off") is not flagged.
+    if not setting_is_blank_or_off(obs.get("sentry_dsn")):
         violations.append(
             "[observability] sentry_dsn is set — Sentry ships errors/traces off-box; "
             "clear it (and unset MAVERICK_SENTRY_DSN) for an air-gapped deployment")
+    if switch_is_on(obs.get("otel_exporter"), extra_on=frozenset({"otlp"})):
+        violations.append(
+            "[observability] otel_exporter is set — timing traces are sent to an OpenTelemetry "
+            "collector off-box; clear it (and unset MAVERICK_OTEL_EXPORTER) for an air-gapped "
+            "deployment")
+    # Parsed as the runtime parses MAVERICK_OTEL_METRICS: only a true value is on.
+    if switch_is_on(obs.get("otlp_metrics")):
+        violations.append(
+            "[observability] otlp_metrics is on — measurements are sent to an OpenTelemetry "
+            "collector off-box; turn it off (and unset MAVERICK_OTEL_METRICS) for an "
+            "air-gapped deployment")
     siem = str((config.get("audit") or {}).get("siem_dest") or "").strip()
     if siem:
         violations.append(

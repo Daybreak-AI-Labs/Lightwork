@@ -1,4 +1,4 @@
-"""HTML-to-app scaffolder (ROADMAP 2027 H2)."""
+"""HTML-to-app scaffolder."""
 from __future__ import annotations
 
 from maverick.html_to_app import analyze_html, html_to_app, scaffold

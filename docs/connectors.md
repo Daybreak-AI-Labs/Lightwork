@@ -42,7 +42,7 @@ qualification requires the customer's endpoint, scopes, revisions and readback.
 There are **2,877 write-capable long-tail enterprise connectors** in the
 catalog below, plus dedicated-module connectors (Salesforce, HubSpot, Stripe,
 ServiceNow, Snowflake, Notion, Gmail, Microsoft Graph (Outlook/Teams/
-OneDrive), Google Drive, Jira, Confluence, ...), part of **286 built-in tool
+OneDrive), Google Drive, Jira, Confluence, ...), part of the **built-in tool
 modules** in the kernel. They span nearly every category of enterprise and
 SMB software: ITSM/ESM, CRM & sales, ERP & finance, HCM & payroll,
 observability & APM, security/IAM/GRC, cloud & infra, DevOps/CI/CD, data/BI/

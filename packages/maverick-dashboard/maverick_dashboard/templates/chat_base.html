@@ -392,7 +392,7 @@
   <script src="{{ asset('lightwork-settings-search.js') }}" defer></script>
   {% if record_search_context %}<link rel="stylesheet" href="{{ asset('lightwork-record-search.css') }}"><script src="{{ asset('lightwork-record-search.js') }}" defer></script>{% endif %}
   {% if web_vitals_on %}<script src="{{ asset('lightwork-web-vitals.js') }}" data-sample-rate="{{ web_vitals_sample_rate }}" defer></script>{% endif %}
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // Small screens: the Menu button opens the sidebar as a drawer. Esc, the
     // Close button or a tap outside closes it and returns focus to Menu.
     (function () {

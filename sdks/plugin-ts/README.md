@@ -18,6 +18,10 @@ const greet = defineTool({
 await servePlugin([greet]);
 ```
 
+The SDK is not published to npm. Build it from this folder and depend on it with
+a `file:` path, as `examples/minimal/package.json` does
+(`"@maverick/plugin-sdk": "file:../.."`).
+
 Compile it (`npm run build` here is just `tsc`) and you have a plugin.
 For a complete project, use [examples/minimal](examples/minimal), including its
 package manifest, TypeScript settings and validated handler. From this SDK folder:
@@ -34,8 +38,7 @@ npm run describe
 The example pins TypeScript 7.0.2 and Node type declarations 26.0.0, matching the
 SDK's declared development toolchain. Use a compatible Node runtime with ES2022
 support. Register the resulting absolute `examples/minimal/dist/plugin.js` path
-below. Build/load commands are provided for later qualification and were not run
-during the audit implementation's explicit testing deferral.
+below.
 
 `inputSchema` describes the wire contract; `defineTool` does **not** enforce a
 JSON Schema dialect on standalone calls. Legacy handlers still receive an object

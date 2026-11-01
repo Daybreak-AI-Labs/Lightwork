@@ -1,5 +1,11 @@
 // Actual local dashboard and case store; synthetic provider consent and renewal.
 const {test,expect}=require('@playwright/test');
+async function expectShellReady(page){
+  // Copilot loads after window.load, during idle. Finish that real download
+  // before navigating away so the journey's zero-failed-requests check does
+  // not mistake navigation-cancelled scripts for a broken connection flow.
+  await expect(page.locator('#mv-copilot-fab')).toHaveAttribute('data-copilot-ready','true');
+}
 function expectUnchangedCase(after,original){
   // The attention observation clock advances on every GET; persisted revision,
   // effective time, state, assessment and every other field must remain equal.
@@ -9,10 +15,11 @@ function expectUnchangedCase(after,original){
 test.skip(process.env.LIGHTWORK_BROWSER_SHOW_VENDOR_SETUP!=='1','Requires the explicit synthetic setup fixture.');
 test.beforeEach(async({page,context,baseURL})=>{
   page.__errors=[];page.__failures=[];page.on('pageerror',error=>page.__errors.push(error.message));
-  page.on('requestfailed',request=>page.__failures.push(new URL(request.url()).pathname));
+  page.on('requestfailed',request=>page.__failures.push({path:new URL(request.url()).pathname,error:request.failure()?.errorText}));
   await context.route('**/*',route=>new URL(route.request().url()).origin===new URL(baseURL).origin?route.continue():route.abort());
 });
 test.afterEach(async({page,context},info)=>{
+  await expectShellReady(page);
   await info.attach('rendered-state',{body:await page.screenshot({fullPage:true}),contentType:'image/png'});
   expect(page.__errors).toEqual([]);expect(page.__failures).toEqual([]);await context.unrouteAll({behavior:'ignoreErrors'});
 });
@@ -21,6 +28,7 @@ async function beginTask({page,request},width){
   const original=await(await request.get('/api/v1/vendor-onboarding/cases/'+fixture.case_id)).json();
   await page.goto('/third-party/vendor-onboarding?case='+fixture.case_id);
   await expect(page.locator('#vo-case-reference a')).toHaveAttribute('href',new RegExp('[?&]case='+fixture.case_id+'(?:&|$)'));
+  await expectShellReady(page);
   await page.locator('#vs-panel').getByRole('link',{name:'Connections',exact:true}).click();await expect(page.locator('#cs-task-return')).toBeVisible();
   if(await page.locator('#cs-enable').isVisible()){
     await page.locator('#cs-enable-confirm').check();await page.locator('#cs-enable-button').click();
@@ -34,7 +42,7 @@ async function beginTask({page,request},width){
     await page.locator('#cs-app-confirm').check();await page.locator('#cs-app-save').click();
     await expect(page.locator('#cs-status')).toContainText('Provider application saved securely');
   }
-  return{fixture,original};
+  await expectShellReady(page);return{fixture,original};
 }
 test('denied sign-in returns to the same saved request without a credential or workflow write',async({page,request},info)=>{
   const {fixture,original}=await beginTask({page,request},1280);
@@ -43,6 +51,7 @@ test('denied sign-in returns to the same saved request without a credential or w
   await page.goto('/connections?'+new URLSearchParams({error:'access_denied',error_description:'synthetic-private-provider-detail',state}));
   await expect(page).toHaveURL(/\/connections$/);await expect(page.locator('#cs-status')).toContainText('denied');await expect(page.locator('#cs-name')).toHaveValue('denied-task-drive');
   await expect(page.locator('#cs-authorize-confirm')).not.toBeChecked();await expect(page.locator('#cs-task-return')).toBeVisible();
+  await expectShellReady(page);
   await info.attach('denied-connection',{body:await page.screenshot({fullPage:true}),contentType:'image/png'});
   await page.locator('#cs-task-link').click();await expect(page.locator('#vo-case-reference a')).toHaveAttribute('href',new RegExp('[?&]case='+fixture.case_id+'(?:&|$)'));
   const after=await(await request.get('/api/v1/vendor-onboarding/cases/'+fixture.case_id)).json();expectUnchangedCase(after,original);

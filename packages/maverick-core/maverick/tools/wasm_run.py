@@ -1,4 +1,4 @@
-"""WASM sandbox tool (roadmap: 2027 H2 capabilities).
+"""WASM sandbox tool.
 
 Run a WebAssembly/WASI module under the **wasmtime** runtime — the strongest
 practical isolation for running an untrusted compute artifact: no ambient

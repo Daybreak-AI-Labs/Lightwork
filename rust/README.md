@@ -1,10 +1,8 @@
 # Lightwork native core (`rust/`)
 
-The Rust "engine" carve. Per the architecture review (Karpathy / Cloudflare /
-Pydantic / ServiceNow / Palo Alto): **rewrite the hot engine in Rust, keep the
-ecosystem in Python + TypeScript.** One pure-logic core crate is exposed to both
-runtimes through thin bindings — never a rewrite of the agent loop, the tools, or
-the 1,022 packs.
+The Rust native core. Performance-critical scanning logic lives in one
+pure-logic crate and is exposed to Python and TypeScript through thin bindings;
+the agent loop, the tools and the 2,031 domain packs stay in Python.
 
 ```
 mvk-scan/        core logic (pure Rust, no FFI) — the only place behaviour lives

@@ -234,7 +234,7 @@ def _withdraw(path, approval_id):
 
 def test_withdrawing_an_approval_whose_decision_was_undone_still_denies_it(db):
     world = WorldModel(path=db)
-    approval_id = world.create_approval("shell", risk="high")
+    approval_id = world.create_approval("shell", risk="high", undoable=True)
     event = world.decide_approval_audited(approval_id, "approved", decided_by="user:dana.admin@northwind.example")
     assert world.mark_approval_audit_delivered(event.event_id)
     assert world.undo_approval_decision(approval_id, undone_by="user:dana.admin@northwind.example",

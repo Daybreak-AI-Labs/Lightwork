@@ -1,6 +1,6 @@
 """config-lint must recognize the flagship governance config keys.
 
-Client-journey finding (round 5): a regulated client configured the two
+A regulated client configured the two
 headline governance features straight from the docs --
 
     [audit]
@@ -28,6 +28,23 @@ def _unknown(findings, section):
 def test_audit_sign_is_recognized():
     findings = lint_config({"audit": {"sign": True}})
     assert not _unknown(findings, "audit"), [f.message for f in findings]
+
+
+def test_vendor_siem_credential_keys_are_recognized():
+    # audit/forwarder.py reads these [audit] fallbacks for the Datadog and
+    # Sentinel destinations. Referenced through env vars, as the lint asks, they
+    # must lint clean: no "unknown key" warning and no inline-secret warning.
+    cfg = {
+        "audit": {
+            "siem_dest": "datadog://datadoghq.com",
+            "datadog_api_key": "${MAVERICK_DATADOG_API_KEY}",
+            "sentinel_tenant_id": "${MAVERICK_SENTINEL_TENANT_ID}",
+            "sentinel_client_id": "${MAVERICK_SENTINEL_CLIENT_ID}",
+            "sentinel_client_secret": "${MAVERICK_SENTINEL_CLIENT_SECRET}",
+        }
+    }
+    findings = lint_config(cfg)
+    assert findings == [], [f.message for f in findings]
 
 
 def test_capabilities_enforce_is_recognized():

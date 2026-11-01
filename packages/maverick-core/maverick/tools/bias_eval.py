@@ -1,5 +1,4 @@
-"""Group-fairness metrics for model/decision outcomes (roadmap: 2028 safety —
-"bias eval suite").
+"""Group-fairness metrics for model/decision outcomes.
 
 Given per-group outcome counts, computes the standard disparate-impact metrics:
 the **four-fifths rule** (each group's selection rate must be >= 0.8x the best

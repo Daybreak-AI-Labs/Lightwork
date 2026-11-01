@@ -76,7 +76,7 @@ def test_title_and_charter_fallback_for_unlabeled_suite():
     assert dept.department_charter("some_new_suite") == ""
 
 
-# --- deploy a department as a fleet (paid add-on) ---
+# --- deploy a department as a fleet (plan-gated add-on) ---
 
 def test_fleet_from_department_maps_packs_to_agents():
     d = dept.get_department("finance")

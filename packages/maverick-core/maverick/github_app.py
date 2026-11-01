@@ -22,7 +22,7 @@ Trigger conditions (any of):
 Output:
   - new branch `maverick/issue-<n>-<slug>`
   - PR linked to the issue with the agent's FINAL as body
-  - `--draft` by default per CLAUDE.md repo policy
+  - opened as a draft by default (`draft=True`)
 """
 from __future__ import annotations
 
@@ -273,7 +273,7 @@ def create_pr_via_gh(
 ) -> str | None:
     """Use the `gh` CLI to push + open a draft PR. Returns the PR URL or None.
 
-    The PR is opened as a draft per repo policy (see CLAUDE.md). The
+    The PR is opened as a draft unless ``draft=False`` is passed. The
     caller is expected to have a `gh auth login` set up in the
     environment (or GH_TOKEN set), since we can't reasonably ship a
     token-mint flow inside Lightwork.
@@ -391,7 +391,7 @@ async def process_issue(
     branch_name = f"maverick/issue-{payload.issue_number}-{slugify(payload.issue_title)}"
     workdir = Path(tempfile.mkdtemp(prefix="maverick-gh-"))
     try:
-        # W1-71: this coroutine is awaited directly on the dashboard's shared
+        # This coroutine is awaited directly on the dashboard's shared
         # event loop (Starlette's async BackgroundTask awaits it inline), so
         # every blocking git/gh subprocess call below must run off-thread via
         # to_thread -- otherwise a slow clone/push/PR-create stalls every

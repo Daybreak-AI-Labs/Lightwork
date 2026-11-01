@@ -1,4 +1,4 @@
-"""Generic OAuth2 helper (roadmap: 2027 H2 — "generic OAuth helper").
+"""Generic OAuth2 helper.
 
 Build the wire artifacts for the two common OAuth2 flows without ever touching
 the network: the client-credentials token request (POST body + headers) and the

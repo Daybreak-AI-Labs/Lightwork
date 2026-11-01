@@ -218,3 +218,47 @@ def test_replay_storyboard_endpoint():
     assert data["ffmpeg_command"][0] == "ffmpeg"
     assert data["total_seconds"] >= 0
     assert client.get("/api/v1/goals/99999/replay-storyboard").status_code == 404
+
+
+def test_cost_anomalies_owner_scope_matches_a_full_read_and_decrypts_no_goal(monkeypatch):
+    from maverick.world_model import WorldModel
+
+    alice = [_goal(f"alice {i}", owner="user:alice") for i in range(6)]
+    bob = _goal("bob private", owner="user:bob")
+    world = app_mod._world()
+    with world._writing() as conn:
+        for gid, cost in zip(alice, (0.10, 0.10, 0.10, 0.10, 0.10, 25.0), strict=True):
+            conn.execute("INSERT INTO episodes(goal_id, started_at, cost_dollars) VALUES (?, ?, ?)",
+                         (gid, 1.0, cost))
+        conn.execute("INSERT INTO episodes(goal_id, started_at, cost_dollars) VALUES (?, ?, ?)",
+                     (bob, 1.0, 900.0))
+    monkeypatch.setattr(app_mod, "goal_owner_filter", lambda request: "user:alice")
+    fast = client.get("/api/v1/cost/anomalies?threshold_sigma=1.5")
+    assert fast.status_code == 200, fast.text
+
+    class _FullRead:
+        """The pre-change read: owner ids from decrypted goal rows."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        def list_goals(self, **kwargs):
+            return self._inner.list_goals(**kwargs)
+
+        def list_episodes(self, **kwargs):
+            return self._inner.list_episodes(**kwargs)
+
+    monkeypatch.setattr(app_mod, "_world", lambda: _FullRead(world))
+    reference = client.get("/api/v1/cost/anomalies?threshold_sigma=1.5").json()
+    assert fast.json() == reference
+    assert [a["goal_id"] for a in reference["anomalies"]] == [alice[-1]]
+    assert reference["goals_considered"] == 6
+
+    def no_full_decrypt(self, **kwargs):
+        raise AssertionError("the anomaly scope must not decrypt the owner's goals")
+
+    monkeypatch.setattr(app_mod, "_world", lambda: world)
+    monkeypatch.setattr(WorldModel, "list_goals", no_full_decrypt)
+    again = client.get("/api/v1/cost/anomalies?threshold_sigma=1.5")
+    assert again.status_code == 200 and again.json() == reference
+

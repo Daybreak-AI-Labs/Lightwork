@@ -40,6 +40,16 @@ def _day(value: str, *, end: bool = False) -> float | None:
         raise HTTPException(422, "Choose a valid date in year-month-day order.") from None
 
 
+def _page_states(world, owner, offset: int) -> list[tuple[int, str, float | None]]:
+    """One page of the newest goals as ``(id, status, updated_at)``, without
+    decrypting the goals the picker will not show."""
+    states = getattr(world, "goal_states", None)
+    if callable(states):
+        return states(owner=owner, limit=100, offset=offset, order="desc")
+    return [(g.id, g.status, g.updated_at)
+            for g in world.list_goals(owner=owner, limit=100, offset=offset, order="desc")]
+
+
 def _task(request, world, task):
     goal = world.get_goal(task)
     if goal is None:
@@ -62,20 +72,27 @@ async def stopped_tasks(
         raise HTTPException(422, "The start date must be on or before the end date.")
 
     def read() -> dict:
+        from maverick.world_model import goals_by_id
+
         world = _world()
         rows, cursor, scanned = [], offset, 0
         # Bound work per request, but expose a continuation over the complete
         # authorized history rather than silently discarding older records.
         more = True
         while len(rows) < 25 and scanned < 2000:
-            goals = world.list_goals(owner=owner, limit=100, offset=cursor, order="desc")
-            if not goals:
+            page = _page_states(world, owner, cursor)
+            if not page:
                 more = False
                 break
-            for goal in goals:
+            # Decrypt only the stopped goals on this page, in one read.
+            stopped = goals_by_id(world, [gid for gid, status, _ in page if status in _STOPPED])
+            for gid, status, _ in page:
                 cursor += 1
                 scanned += 1
-                if goal.status not in _STOPPED:
+                if status not in _STOPPED:
+                    continue
+                goal = stopped.get(gid)
+                if goal is None:
                     continue
                 try:
                     assert_goal_access(request, goal)

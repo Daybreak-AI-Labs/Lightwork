@@ -7,7 +7,7 @@ const {test} = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path");
 const {JSDOM} = require("jsdom");
-const template = name => fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates", name), "utf8").replace(/\r\n/g, "\n");
+const template = name => fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates", name), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>").replace(/\r\n/g, "\n");
 
 function settingsPage() {
   const source = template("settings.html");

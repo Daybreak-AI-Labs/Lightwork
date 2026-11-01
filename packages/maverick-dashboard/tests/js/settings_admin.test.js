@@ -204,6 +204,20 @@ test('tidy up shows the counts first and removes only after confirming', async (
   assert.match(ui.document.querySelector('[data-maintenance-status="cleanup"]').textContent, /Removed 2 conversations and 5 activity entries/);
 });
 
+test('tidy up says a legal hold applies and offers no removal when the preview is held', async (t) => {
+  const ui = await fixture((url, options) => {
+    if (options.method === 'POST') throw new Error('removal must not be offered');
+    return response({conversations: 0, activity: 0, days: 180, activity_days: 30, held: true});
+  });
+  t.after(() => ui.window.close());
+  const form = ui.document.querySelector('[data-maintenance-cleanup]');
+  form.dispatchEvent(new ui.window.Event('submit', {cancelable: true}));
+  await ui.settle();
+  assert.equal(ui.calls.length, 1);
+  assert.match(ui.document.querySelector('[data-maintenance-status="cleanup"]').textContent, /A legal hold applies to this workspace/);
+  assert.equal(ui.document.querySelector('[data-maintenance-out="cleanup"] button'), null);
+});
+
 test('a refused request shows the server sentence only when it is plain', async (t) => {
   const ui = await fixture(() => response({detail: 'Choose a workspace first. Nothing was changed.'}, 409));
   t.after(() => ui.window.close());

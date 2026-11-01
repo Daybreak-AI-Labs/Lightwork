@@ -1,4 +1,4 @@
-"""Wave 12 (council F17): SQLite indexes for SWE-bench scale.
+"""SQLite indexes for SWE-bench scale.
 
 A 1865-instance Pro sweep creates ~7500 episode rows (best-of-4). The
 dashboard's recent-episodes query (`ORDER BY ended_at DESC LIMIT 50`)

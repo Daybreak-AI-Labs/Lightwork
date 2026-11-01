@@ -77,9 +77,14 @@ class ChatThreads:
         gs, gv = self._scope("g")
         tail = " LIMIT ?" if limit is not None else ""
         capped = (max(1, int(limit)),) if limit is not None else ()
+        # SQLite: the unary "+" keeps the planner off idx_goals_owner_created_history,
+        # which would scan and sort every goal the owner has to find one root's
+        # children; the id and parent_id indexes reach them directly. The owner
+        # predicate itself is unchanged.
+        owner = "+g.owner=?" if self.store.sqlite else "g.owner=?"
         return self._rows(
             "SELECT g.id,g.status FROM goals g WHERE (g.id=? OR g.parent_id=?) "
-            "AND g.owner=? AND EXISTS (SELECT 1 FROM turns t WHERE t.goal_id=g.id "
+            f"AND {owner} AND EXISTS (SELECT 1 FROM turns t WHERE t.goal_id=g.id "
             "AND t.conversation_id=? AND t.role='user') "
             f"AND {gs} ORDER BY g.id DESC{tail}",
             (binding.root_id, binding.root_id, binding.owner, binding.conversation_id, *gv, *capped),
