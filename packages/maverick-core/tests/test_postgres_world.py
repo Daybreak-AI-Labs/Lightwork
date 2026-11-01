@@ -409,7 +409,7 @@ def test_list_goals_filter_and_order(world):
 
 
 def test_list_goals_filters_by_domain_and_project_id(world):
-    # W1-49: parity with SQLite's list_goals(domain=..., project_id=...) --
+    # Parity with SQLite's list_goals(domain=..., project_id=...) --
     # the dashboard's project-detail page and domain-scoped inbox both call
     # these kwargs, which this backend previously rejected with a TypeError.
     pid = world.create_project("Q3 Migration")
@@ -478,7 +478,7 @@ def test_list_episodes_and_total_spend(world):
 
 
 def test_total_spend_accepts_owner_kwarg(world):
-    """PLATFORM_IMPROVEMENT_AUDIT.md W1-48: total_spend(owner=...) used to
+    """total_spend(owner=...) used to
     raise TypeError on this backend -- it took no owner argument at all,
     while the SQLite backend (and /api/v1/spend, external-agent spend
     records) call it with one."""
@@ -506,7 +506,7 @@ def test_total_spend_accepts_owner_kwarg(world):
 
 
 def test_create_goal_accepts_domain_and_project_id(world):
-    """PLATFORM_IMPROVEMENT_AUDIT.md W1-47: create_goal(domain=..., project_id=...)
+    """create_goal(domain=..., project_id=...)
     used to raise TypeError on this backend -- checkpoint sub-goal spawning
     and the finance CLI pass both kwargs, matching the SQLite signature."""
     project_id = world.create_project("Q3 rollout", owner="admin@corp.test")
@@ -908,7 +908,7 @@ def test_prune_conversations_keeps_fresh(world):
 # ---------- #469: messages, attachments, dedup, pruning (final batch) ----------
 
 def test_append_message(world, monkeypatch):
-    # W1-53: search_messages was removed (zero production callers on either
+    # Search_messages was removed (zero production callers on either
     # backend; its FTS index/GIN index remain in the schema only because the
     # additive-only migration policy blocks dropping them -- see
     # append_message's own comment). append_message itself is still the only

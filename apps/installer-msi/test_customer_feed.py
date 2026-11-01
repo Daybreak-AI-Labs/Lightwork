@@ -45,7 +45,7 @@ def test_feed_rejects_mutable_or_unsafe_installer_address(url):
 
 def test_acceptance_fixture_never_becomes_an_update_offer():
     metadata = dict(inventory(), acceptance_fixture=True)
-    with pytest.raises(ValueError, match="complete customer"):
+    with pytest.raises(ValueError, match="complete release"):
         module.feed(metadata, fixture_signature(), "https://updates.example.test/{version}/Lightwork.msi")
 
 

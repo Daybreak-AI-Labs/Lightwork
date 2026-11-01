@@ -1,4 +1,4 @@
-"""Local-first model routing (ROADMAP 2028 H2)."""
+"""Local-first model routing."""
 from __future__ import annotations
 
 from maverick import provider_local_first as lf

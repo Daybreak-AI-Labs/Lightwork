@@ -169,6 +169,8 @@ def _temporary_workspace():
 
 
 def _run_fixture(directory):
+    from maverick import workspace_recovery as recovery
+
     script = Path(__file__).resolve()
     python = sys.executable
     allowed = {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "LANG", "LC_ALL", "TZ"}
@@ -179,12 +181,15 @@ def _run_fixture(directory):
                    "TEMP": str(directory), "TMP": str(directory), "HOME": str(directory / "source-profile"),
                    "USERPROFILE": str(directory / "source-profile"), "APPDATA": str(directory / "source-profile"),
                    "PYTHONUTF8": "1"}
+    if not getattr(sys, "frozen", False):
+        # Source and target must read the same application bytes even when a
+        # different Lightwork checkout is installed on the host.
+        environment["PYTHONPATH"] = os.pathsep.join(recovery._application_roots())
     subprocess.run([python, str(script), "--_source", str(directory)], env=environment, check=True, capture_output=True, timeout=60)
     fixture = json.loads((directory / "source-evidence.json").read_text())
     retained = directory / "retained"
     original_hashes, custody_hashes = digest_tree(home), digest_tree(retained)
     from maverick import backup, file_lock
-    from maverick import workspace_recovery as recovery
     key = bytes.fromhex((retained / "recovery.key").read_text())
     with backup.recovery_scope(retained, TENANT, key):
         manifest = backup.read_manifest(retained / "snapshot.tgz")

@@ -1,4 +1,4 @@
-"""Image-content classifier (roadmap: 2027 H1 safety).
+"""Image-content classifier.
 
 A model-free, deterministic screen for images entering or leaving a run —
 the chokepoint counterpart to the text floors. It reports measurable facts

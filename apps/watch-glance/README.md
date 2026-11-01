@@ -1,6 +1,6 @@
 # Lightwork watch glance (watchOS scaffold)
 
-**Preview source; no signed customer installer or delivered complication.**
+**Preview source; no signed installer or delivered complication.**
 
 Settings now offers expiring [device pairing](../../docs/device-pairing.md)
 with explicit browser approval and own-work credentials, plus protected renewal.
@@ -35,6 +35,5 @@ failures remove it. Refreshes have one owner, cancellation on leaving/background
 and a 64 KB streamed-response cap. These changes are not device-qualified.
 
 `Tests/GlanceModelTests.swift` is included in the generated `MaverickGlanceTests`
-Xcode test target; it has not run on this Windows executor. Shared transport cap and error-classification
-tests live in `apps/apple-companion-core`. No signing identity, provisioning
-profile, store upload or production service was changed.
+Xcode test target; it has not been run yet. Shared transport cap and error-classification
+tests live in `apps/apple-companion-core`.

@@ -19,7 +19,7 @@ const RAW = /HTTP|Error:|\b[45]\d\d\b|privacy_ops|SyntaxError|Unexpected token|J
 const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((done) => setImmediate(done)); };
 
 function load(file, prefix, reply) {
-  const template = fs.readFileSync(path.join(dir, "templates", file), "utf8");
+  const template = fs.readFileSync(path.join(dir, "templates", file), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
   const start = template.indexOf(`<details class="panel" id="${prefix}-technical">`);
   const block = template.slice(start, template.indexOf("</details>", template.indexOf("<script>", start)));
   assert.ok(start >= 0, file);

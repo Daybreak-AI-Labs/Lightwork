@@ -1,4 +1,4 @@
-"""QA-052: tool usability is the conjunction of explicit prerequisites."""
+"""Tool usability is the conjunction of explicit prerequisites."""
 from __future__ import annotations
 
 import pytest

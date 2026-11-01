@@ -341,12 +341,12 @@
   </aside>
 </div>
 
-<script id="ekko-initial" type="application/json">{{ ekko | tojson }}</script>
+<script nonce="{{ csp_script_nonce }}" id="ekko-initial" type="application/json">{{ ekko | tojson }}</script>
 {% endblock %}
 
 {% block scripts_extra %}
 <script src="/static/lightwork-ekko-recording.js" defer></script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   var initial = JSON.parse(document.getElementById('ekko-initial').textContent || '{}');

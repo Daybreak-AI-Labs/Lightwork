@@ -1,4 +1,4 @@
-"""Auto-skill distillation v2 (roadmap: 2027 H1 capabilities).
+"""Auto-skill distillation v2.
 
 Turn a successful execution trace into a reusable skill spec. v1 naively
 replayed every recorded action; v2 distills — it keeps only the steps that

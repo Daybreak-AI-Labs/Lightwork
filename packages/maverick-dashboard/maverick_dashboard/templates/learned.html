@@ -148,7 +148,7 @@
     .lnd-model { margin-top: var(--space-4); }
   </style>
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     (function () {
       var msg = document.getElementById('gt-msg');
       function say(text) { window.mvStatus(msg, text); }

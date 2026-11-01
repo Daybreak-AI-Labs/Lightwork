@@ -1,4 +1,4 @@
-"""Honeytoken planting + tripwire (roadmap: 2027 H2 safety — "honeytoken planting").
+"""Honeytoken planting + tripwire.
 
 Mint decoy secrets (canary tokens) that look like real credentials but are
 never valid, then detect them in any text the agent is about to send or store.

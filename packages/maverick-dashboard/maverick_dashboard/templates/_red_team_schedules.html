@@ -5,7 +5,7 @@
 <div id="rts-root" class="rts" data-api-base="/api/v1/security/assurance/red-team" data-admin="{{ '1' if gateway_admin else '0' }}">
   <div class="section-head"><h3 id="rts-title">Scheduled checks</h3></div>
   <p class="muted">Repeat an attack test on a timetable so each AI system keeps being checked without anyone having to remember to start it.</p>
-  <script type="application/json" id="rts-names">{{ {"assets": MRA_NAMES, "agents": RTS_AGENTS}|tojson }}</script>
+  <script nonce="{{ csp_script_nonce }}" type="application/json" id="rts-names">{{ {"assets": MRA_NAMES, "agents": RTS_AGENTS}|tojson }}</script>
   <div class="assurance-table"><table aria-labelledby="rts-title">
     <thead><tr><th scope="col">AI system</th><th scope="col">Testing agent</th><th scope="col">How often</th>
       <th scope="col">Next check</th><th scope="col">Checks so far</th><th scope="col">Status</th>

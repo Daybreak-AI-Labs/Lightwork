@@ -1,7 +1,7 @@
-"""Regression tests for the adversarial-council round-1 fixes.
+"""Regression tests for a first batch of reliability and security fixes.
 
-Each test pins a specific finding so a future refactor can't silently
-reintroduce the bug. Findings are referenced by their seat tag.
+Each test pins a specific bug so a future refactor can't silently
+reintroduce it. Each bug is referenced by a short tag such as REL-1.
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def test_worker_does_not_retry_deliberately_blocked_goal(tmp_path, monkeypatch):
 
 
 def test_worker_defers_when_goal_could_not_start(tmp_path, monkeypatch):
-    """W1-73: a missing concurrency slot must not be treated like a crashed
+    """A missing concurrency slot must not be treated like a crashed
     handler. Re-raising through fail() would bump the SAME row toward
     max_attempts and eventually dead-letter a goal that never even started;
     deferring to a fresh job lets the original complete normally."""
@@ -142,7 +142,7 @@ def test_runner_refuses_when_no_concurrency_slot(monkeypatch):
 
 
 def test_run_goal_in_thread_acquire_timeout_override(monkeypatch):
-    """W1-73: an explicit acquire_timeout overrides the module default -- the
+    """An explicit acquire_timeout overrides the module default -- the
     knob the job-queue's run_goal/start_goal handlers use so a busy lane
     can't block a shared worker thread for the full 5-minute default."""
     import threading

@@ -1,4 +1,4 @@
-"""Provider failover policy engine (roadmap: 2027 H1 perf).
+"""Provider failover policy engine.
 
 Given a set of upstream providers and a health policy, decide which are eligible
 and rank them best-first so the agent loop can pick a primary and an ordered

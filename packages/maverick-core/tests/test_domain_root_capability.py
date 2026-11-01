@@ -1,4 +1,4 @@
-"""UX-012: a domain-routed goal root runs under the REQUESTER's grant too.
+"""A domain-routed goal root runs under the REQUESTER's grant too.
 
 ``run_goal(domain=...)`` builds its root with ``agent_from_profile`` and no
 parent, so the pack's own tool envelope used to be the only grant the agent

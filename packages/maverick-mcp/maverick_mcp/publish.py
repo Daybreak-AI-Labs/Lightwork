@@ -1,4 +1,4 @@
-"""MCP server publishing manifest (roadmap: 2028 H2 ecosystem).
+"""MCP server publishing manifest.
 
 Generate the ``server.json`` an operator submits to publish this server to an
 MCP registry (the modelcontextprotocol/registry format): the reverse-DNS

@@ -140,7 +140,7 @@
     <p class="muted">Where this vendor came from: {{ vendor.source | humanize or '—' }}. Record version {{ vendor.revision }}.</p>
   </details>
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   var root = document.getElementById('vd-root');
   var vendor = root.getAttribute('data-vendor');

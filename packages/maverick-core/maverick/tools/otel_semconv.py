@@ -1,4 +1,4 @@
-"""OpenTelemetry semantic-conventions mapper (roadmap: 2028 H2 perf — "OTel semconv").
+"""OpenTelemetry semantic-conventions mapper.
 
 Rename a span's ad-hoc attribute keys to stable OpenTelemetry semantic-
 conventions keys so traces are queryable across tools. The caller supplies a

@@ -6,17 +6,16 @@
 oidc_issuer    = "https://login.daybreakailabs.com/"
 oidc_client_id = "L9M8pKZRBty3pbiT02t1FsHLUCwPBAUg"
 
-# Break-glass master admin: chris@daybreakailabs.com. Both Auth0 identities
-# (Google and email/password) are listed so admin holds regardless of how he
-# signs in. daychristopher91@gmail.com is intentionally NOT here (demo user).
-dashboard_admins = "user:google-oauth2|115836816027351327475,user:auth0|6a9ad1a287e571a6c9d4d080"
+# Who holds break-glass admin (dashboard_admins) and which address platform
+# email is sent from (email_from) identify people, so they are not tracked:
+# they live in local.auto.tfvars, copied from local.auto.tfvars.example.
+# Terraform loads every *.auto.tfvars in this directory.
 
 # Invite-by-email flow on the /users page (accept -> Auth0 sign-in -> role bound).
 dashboard_invites = true
 
 # Platform email via the Amazon SES API using the task role (no SMTP credential).
-# SES domain identity daybreakailabs.com is verified; from noreply@daybreakailabs.com.
+# The SES domain identity daybreakailabs.com is verified.
 email_enabled    = true
-email_from       = "noreply@daybreakailabs.com"
 flows_enabled    = true
 data_use_enabled = true

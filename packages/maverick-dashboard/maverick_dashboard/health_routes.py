@@ -136,8 +136,10 @@ async def health_response(
 
     checks: dict[str, str] = {}
     overall_ok = True
+    world = None
     try:
-        world_provider().ping()
+        world = world_provider()
+        world.ping()
         checks["db"] = "ok"
     except Exception as exc:
         checks["db"] = (
@@ -145,6 +147,12 @@ async def health_response(
             if health_should_redact()
             else f"fail: {type(exc).__name__}: {exc}"
         )
+        overall_ok = False
+    # A login that bypasses row-level security (a superuser or BYPASSRLS role)
+    # defeats the tenant policies: a degraded reason, not only a log line.
+    bypass = getattr(world, "rls_bypass_reason", None)
+    if isinstance(bypass, str) and bypass:
+        checks["database_role"] = f"fail: {bypass}"
         overall_ok = False
 
     if provider_key_set():

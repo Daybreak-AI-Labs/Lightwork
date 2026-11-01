@@ -1,4 +1,4 @@
-"""Voice-cloning consent gate (roadmap: 2028 H1 safety/UX).
+"""Voice-cloning consent gate.
 
 Decide whether a voice-clone operation is permitted for a given subject. A
 clone is only allowed when the subject has *granted* consent, the requested

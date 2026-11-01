@@ -1,4 +1,4 @@
-"""Obsidian vault tool (ROADMAP 2027 H1, Ecosystem)."""
+"""Obsidian vault tool."""
 from __future__ import annotations
 
 import pytest

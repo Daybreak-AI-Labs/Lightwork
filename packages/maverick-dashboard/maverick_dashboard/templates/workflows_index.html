@@ -147,7 +147,7 @@
 </div>
 {% if can_operate_workflows and flows_enabled %}
 <script src="{{ asset('lightwork-flow-retirement.js') }}"></script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
   document.querySelectorAll('[data-flow-retire]').forEach(function (button) {
     button.addEventListener('click', function () {
       window.LightworkFlowRetirement.change(button.dataset.flowId, button.dataset.flowRetire, {

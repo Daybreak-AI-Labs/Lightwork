@@ -4,7 +4,7 @@ Uses a stub entry_points iterator monkey-patched into
 `maverick.plugins._entry_points` so we don't need to actually install a
 sibling plugin package in CI.
 
-v0.2 (council Tier 0 fix): plugin discovery now requires an explicit
+v0.2: plugin discovery now requires an explicit
 allowlist. These tests set MAVERICK_PLUGINS_ALLOW=* to preserve the
 pre-0.2 "everything loads" behavior so they keep testing the
 discovery / contract semantics specifically. The allowlist itself is

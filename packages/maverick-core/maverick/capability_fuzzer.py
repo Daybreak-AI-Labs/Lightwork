@@ -1,5 +1,5 @@
 """Capability-leak fuzzer: hunt for permission-boundary holes
-(roadmap: 2028 H1 safety).
+.
 
 :class:`maverick.capability.Capability` is the least-privilege boundary —
 ``permits(name)`` decides whether a principal may use a tool, via exact

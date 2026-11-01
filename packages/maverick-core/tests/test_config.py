@@ -5,6 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 
+import maverick.config as config_module
 import pytest
 from maverick.config import _interp, config_path, get_safety, load_config
 
@@ -1411,3 +1412,57 @@ def test_a_key_rewritten_in_place_with_its_time_restored_is_read_again(config_ho
         os.utime(key, ns=(before.st_atime_ns, before.st_mtime_ns))
         assert "providers" not in _decision(config)  # the saved secret no longer opens
     assert len(reads) == 2
+
+
+def _knowledge_sources_section(monkeypatch, section):
+    monkeypatch.setattr(config_module, "load_config", lambda: {"knowledge_sources": section})
+
+
+def test_knowledge_sources_defaults_keep_the_historical_bounds(monkeypatch):
+    _knowledge_sources_section(monkeypatch, {})
+    assert config_module.get_knowledge_sources() == {
+        "max_items": 64, "max_pages": 16, "max_download_mib": 4, "max_text_kib": 256,
+        "max_refresh_minutes": 5, "permission_filter": "off",
+    }
+
+
+@pytest.mark.parametrize("value", ["off", "by_email"])
+def test_knowledge_sources_permission_filter_accepts_its_two_modes(monkeypatch, value):
+    _knowledge_sources_section(monkeypatch, {"permission_filter": value})
+    assert config_module.get_knowledge_sources()["permission_filter"] == value
+
+
+@pytest.mark.parametrize("value", ["on", "by_group", "", True, None, 1])
+def test_an_unknown_knowledge_sources_permission_filter_fails_closed_with_a_named_error(monkeypatch, value):
+    _knowledge_sources_section(monkeypatch, {"permission_filter": value})
+    with pytest.raises(config_module.KnowledgeSourcesConfigError,
+                       match=r'^knowledge_sources\.permission_filter must be "off" or "by_email"$'):
+        config_module.get_knowledge_sources()
+
+
+@pytest.mark.parametrize(("key", "low", "high"), [
+    ("max_items", 1, 1000), ("max_pages", 1, 200), ("max_download_mib", 1, 32), ("max_text_kib", 1, 8192),
+    ("max_refresh_minutes", 1, 60),
+])
+def test_knowledge_sources_limits_accept_their_documented_range(monkeypatch, key, low, high):
+    for value in (low, high):
+        _knowledge_sources_section(monkeypatch, {key: value})
+        assert config_module.get_knowledge_sources()[key] == value
+
+
+@pytest.mark.parametrize(("key", "value"), [
+    ("max_items", 0), ("max_items", 1001), ("max_items", True), ("max_items", "64"), ("max_items", 64.0),
+    ("max_pages", 0), ("max_pages", 201), ("max_download_mib", 33), ("max_download_mib", -1),
+    ("max_text_kib", 8193), ("max_text_kib", None),
+    ("max_refresh_minutes", 0), ("max_refresh_minutes", 61), ("max_refresh_minutes", 5.0),
+])
+def test_out_of_range_knowledge_sources_limits_fail_closed_with_a_named_error(monkeypatch, key, value):
+    _knowledge_sources_section(monkeypatch, {key: value})
+    with pytest.raises(config_module.KnowledgeSourcesConfigError, match=rf"^knowledge_sources\.{key} must be a whole number"):
+        config_module.get_knowledge_sources()
+
+
+def test_a_knowledge_sources_table_that_is_not_a_table_fails_closed(monkeypatch):
+    monkeypatch.setattr(config_module, "load_config", lambda: {"knowledge_sources": "64"})
+    with pytest.raises(config_module.KnowledgeSourcesConfigError, match="knowledge_sources must be a table"):
+        config_module.get_knowledge_sources()

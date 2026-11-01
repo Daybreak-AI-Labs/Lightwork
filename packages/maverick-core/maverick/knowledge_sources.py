@@ -14,24 +14,44 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from urllib.parse import urlsplit
 
-from . import connections
+from . import config, connections
 from . import knowledge_source_readers as readers
 from .authority_effects import authority_effect_fence
 from .governed_records import GovernedRecordCapacityError, GovernedRecordStore
 from .paths import canonical_tenant_id, tenant_scope
 from .privacy_ops import RecordConflict
 
-MAX_SOURCES, MAX_JOBS, MAX_TEXT_BYTES = 100, 10000, 256 * 1024
-MAX_WALL_SECONDS = 300
+MAX_SOURCES, MAX_JOBS = 100, 10000
+# The default refresh limit ([knowledge_sources] max_refresh_minutes = 5), in seconds.
+DEFAULT_REFRESH_WALL_SECONDS = 300
 SOURCE_STORE = GovernedRecordStore("knowledge-remote-sources", "KNS", "knowledge_remote_source")
 JOB_STORE = GovernedRecordStore("knowledge-source-refreshes", "KNJ", "knowledge_source_refresh")
 SNAPSHOT_STORE = GovernedRecordStore("knowledge-source-snapshots", "KNV", "knowledge_source_snapshot")
 DECISION_STORE = GovernedRecordStore("knowledge-source-decisions", "KNO", "knowledge_source_decision")
-NOTICE = ("Refresh reads only the selected folder's direct files or the selected space's current pages. "
-          "Subfolders need separate sources. At most 64 items, 4 MiB per download and 256 KiB of extracted source text are supported. "
-          "Changed items are screened and indexed through the native Knowledge writer. A complete snapshot requires a different authorized registry reviewer before specialists may use it. "
-          "Connection sharing determines who can use its cached knowledge; attaching it never grants account or data-use rights. "
-          "A dated refresh does not confirm future provider delivery or permanent deletion. Interrupted outcomes are kept and are never repeated automatically.")
+
+
+def notice():
+    """The saved-source limits, stated with this workspace's configured bounds."""
+    bounds = config.get_knowledge_sources()
+    return ("Refresh reads only the selected folder's direct files or the selected space's current pages. "
+            f"Subfolders need separate sources. At most {bounds['max_items']} items, {bounds['max_download_mib']} MiB per download "
+            f"and {bounds['max_text_kib']} KiB of extracted source text are supported. "
+            f"Each refresh must finish within {bounds['max_refresh_minutes']} minutes. "
+            "Changed items are screened and indexed through the native Knowledge writer. A complete snapshot requires a different authorized registry reviewer before specialists may use it. "
+            "Connection sharing determines who can use its cached knowledge; attaching it never grants account or data-use rights. "
+            "A dated refresh does not confirm future provider delivery or permanent deletion. Interrupted outcomes are kept and are never repeated automatically.")
+
+
+def refresh_wall_seconds() -> float:
+    """The wall-clock limit of one refresh, read from [knowledge_sources] when the refresh is queued.
+
+    An invalid [knowledge_sources] value keeps the default here, and the refresh then
+    reports that named setting when it runs, as its other limits do.
+    """
+    try:
+        return config.get_knowledge_sources()["max_refresh_minutes"] * 60.0
+    except config.KnowledgeSourcesConfigError:
+        return float(DEFAULT_REFRESH_WALL_SECONDS)
 
 
 def digest(value):
@@ -62,7 +82,8 @@ def _safe_error(exc):
     from .secrets import scrub
 
     # Transport errors can contain provider-signed URLs. Never journal them.
-    if isinstance(exc, readers.SourceReadError):
+    # A refused [knowledge_sources] setting names only the setting, never its value.
+    if isinstance(exc, (readers.SourceReadError, config.KnowledgeSourcesConfigError)):
         return scrub(str(exc))[:500]
     return "This item could not be confirmed (" + type(exc).__name__ + "). Review the saved account and source before a separate refresh."
 
@@ -149,11 +170,14 @@ class KnowledgeSources:
                 approval = str(view.get("status") or view.get("state") or "Draft awaiting an independent reviewer")
             except Exception:
                 approval = "Current registry state unavailable; use is blocked"
+        bounds = config.get_knowledge_sources()
+        needs_refresh = bool(_by_email(bounds) and snapshot and any(not isinstance(item.get("permissions"), dict) for item in snapshot.get("items", [])))
         return {"id": row["id"], "revision": row["revision"], "name": row["plan"]["name"], "plan": row["plan"],
+                "permission_filter": bounds["permission_filter"], "permissions_need_refresh": needs_refresh,
                 "state": row["state"], "paused": row.get("paused", False), "last_refresh": row.get("last_refresh"),
                 "next_refresh": row.get("next_refresh"), "item_count": len(snapshot.get("items", [])) if snapshot else 0,
                 "registry_state": approval, "reference": reference, "active_job": self.job_public(active) if active else None,
-                "notice": NOTICE, "audit_pending": bool(row.get("_audit_pending"))}
+                "notice": notice(), "audit_pending": bool(row.get("_audit_pending"))}
 
     @staticmethod
     def job_public(row):
@@ -286,6 +310,9 @@ class KnowledgeSources:
 
     def save(self, plan, *, expected_revision, paused=False, operation=None):
         self._plan_guard(plan)
+        # An invalid [knowledge_sources] setting refuses the save before anything is
+        # written: the receipt built after the write states the configured limits.
+        config.get_knowledge_sources()
         existing_intent = self._save_intent(plan, expected_revision, paused, operation)
         if existing_intent is not None:
             return existing_intent
@@ -368,6 +395,8 @@ class KnowledgeSources:
             if existing.get("binding") != digest(prepared):
                 raise RecordConflict("This original request has different reviewed settings.")
             return self.original_job(job_id)
+        # Read before the claim, so the deadline is fixed at the reviewed limit when the refresh is queued.
+        wall_seconds = refresh_wall_seconds()
         row = self.owned(prepared["source"])
         if row.get("_audit_pending") or row["plan_sha256"] != prepared["plan_sha256"] or row["revision"] != prepared["revision"]:
             raise RecordConflict("The saved source changed. Read its original outcome or review a fresh refresh.")
@@ -387,7 +416,8 @@ class KnowledgeSources:
                 return {"id": job_id, "state": "unconfirmed", "message": "Refresh admission has a retained pending activity record. It will not run automatically."}
             try:
                 job = self.jobs.create({"id": job_id, "source": row["id"], "tenant": self.tenant, "owner": self.actor, "plan": row["plan"],
-                                        "plan_sha256": row["plan_sha256"], "binding": digest(prepared), "state": "queued", "deadline": time.time() + MAX_WALL_SECONDS,
+                                        "plan_sha256": row["plan_sha256"], "binding": digest(prepared), "state": "queued",
+                                        "deadline": time.time() + wall_seconds, "max_wall_seconds": wall_seconds,
                                         "prepared": prepared, "items": [], "changed": 0, "unchanged": 0, "removed": 0,
                                         "observed_dollars": 0.0, "unresolved_dollars": 0.0, "price_basis": prepared["embedding"]["price_basis"],
                                         "message": "Refresh queued. No document delivery or registry approval is yet confirmed."},
@@ -451,6 +481,9 @@ class KnowledgeSources:
             rows = readers.inventory(job["plan"]["binding"], self.actor, lambda: self._job_guard(job))
             if digest(rows) != job["prepared"]["inventory_sha256"]:
                 raise ValueError("The dated source inventory changed. Review its current refresh before importing.")
+            # The text bound is read at this refresh, so a changed setting applies to the next one.
+            bounds = config.get_knowledge_sources()
+            text_kib, filtered = bounds["max_text_kib"], _by_email(bounds)
             source = self.sources.get(job["source"])
             prior = self.snapshots.get(source["snapshot"]) if source.get("snapshot") else None
             previous = {row["remote_id"]: row for row in prior.get("items", [])} if prior else {}
@@ -464,7 +497,10 @@ class KnowledgeSources:
                     continue
                 old = previous.get(item["id"])
                 collection = "remote-" + job["source"][4:] + "-" + digest(item["id"])[:16]
-                if old and item["revision"] and old["provider_revision"] == item["revision"]:
+                # Permissions are read for every item on every refresh, because a sharing change alone never changes its revision.
+                grants = readers.permissions(job["plan"]["binding"], self.actor, item, lambda: self._job_guard(job)) if filtered else None
+                reused = bool(old and item["revision"] and old["provider_revision"] == item["revision"])
+                if reused:
                     exact = kb.exact_document(collection, old["document_sha256"])
                     text_bytes = len(exact["text"].encode())
                     candidate = old
@@ -473,8 +509,8 @@ class KnowledgeSources:
                     try:
                         text, raw_sha, extraction = readers.document(job["plan"]["binding"], self.actor, item, lambda: self._job_guard(job))
                         text_bytes = len(text.encode())
-                        if total + text_bytes > MAX_TEXT_BYTES:
-                            raise readers.SourceReadError("The extracted source exceeds 256 KiB. Choose a smaller source.")
+                        if total + text_bytes > text_kib * 1024:
+                            raise readers.SourceReadError(f"The extracted source exceeds {text_kib} KiB. Choose a smaller source.")
                         document_sha = hashlib.sha256(text.encode()).hexdigest()
                         # KB's exact document digest owns immutable provenance.
                         # Mutable provider revision/byte-extraction commitments
@@ -500,10 +536,15 @@ class KnowledgeSources:
                         self._job_update(job, items=outcomes, changed=changed, unchanged=unchanged)
                         continue
                 total += text_bytes
-                if total > MAX_TEXT_BYTES:
+                if total > text_kib * 1024:
                     raise ValueError("The exact source exceeds its complete text bound.")
+                if grants is not None:
+                    candidate = {**candidate, "permissions": grants}
+                else:
+                    # A reused item keeps the record of an earlier filtered refresh, which this refresh did not read.
+                    candidate = {key: value for key, value in candidate.items() if key != "permissions"}
                 imported.append(candidate)
-                outcomes.append({"name": item["name"], "state": "unchanged" if candidate is old else "imported", "message": "Exact extracted text retained; dataset approval is separate.",
+                outcomes.append({"name": item["name"], "state": "unchanged" if reused else "imported", "message": "Exact extracted text retained; dataset approval is separate.",
                                  "coverage_notes": candidate["extraction"].get("warnings", [])})
                 self._job_update(job, items=outcomes, changed=changed, unchanged=unchanged)
             removed = len(set(previous) - {row["id"] for row in rows})
@@ -597,7 +638,8 @@ class KnowledgeSources:
             return
         from .budget import Budget
         from .tenant.provider_admission import bind_budget
-        budget = Budget(max_dollars=job["plan"]["max_dollars"], max_wall_seconds=MAX_WALL_SECONDS)
+        # The wall cap is the limit this refresh was queued with, the same one its deadline uses.
+        budget = Budget(max_dollars=job["plan"]["max_dollars"], max_wall_seconds=job.get("max_wall_seconds", DEFAULT_REFRESH_WALL_SECONDS))
         budget._organization_run_id = job["id"]
         budget._organization_run_ids = [job["id"]]
         budget._organization_principal = job["owner"]
@@ -652,6 +694,21 @@ def _committed_document(record):
     return committed
 
 
+def _by_email(bounds=None):
+    return (bounds or config.get_knowledge_sources())["permission_filter"] == "by_email"
+
+
+def _visible(item, email):
+    """Under by_email: a verified signed-in address must match the item's recorded grants. Unknown, group-only,
+    unrecorded (older snapshot) and no-address cases are withheld, never guessed."""
+    permissions = item.get("permissions")
+    if not email or not isinstance(permissions, dict) or permissions.get("unknown"):
+        return False
+    if permissions.get("anyone"):
+        return True
+    return email in permissions.get("emails", ()) or email.rpartition("@")[2] in permissions.get("domains", ())
+
+
 def require_remote_document_authority(tenant, collection, document_sha256, authority):
     match = re.fullmatch(r"remote-([a-f0-9]{32})-[a-f0-9]{16}", collection)
     if not match:
@@ -663,8 +720,11 @@ def require_remote_document_authority(tenant, collection, document_sha256, autho
                 or authority.purpose != source["plan"]["purpose"]):
             raise PermissionError("Current saved remote source rights are unavailable.")
         snapshot = SNAPSHOT_STORE.get(source.get("snapshot"))
-        if (not snapshot or snapshot.get("_audit_pending") or not any(row["collection"] == collection and row["document_sha256"] == document_sha256 for row in snapshot["items"])):
+        match = [row for row in (snapshot or {}).get("items", ()) if row["collection"] == collection and row["document_sha256"] == document_sha256]
+        if (not snapshot or snapshot.get("_audit_pending") or not match):
             raise PermissionError("This exact document is no longer in the current remote source.")
+        if _by_email() and not _visible(match[0], getattr(authority, "verified_email", "")):
+            raise PermissionError("This document is not shared with the signed-in person.")
         readers.account(source["plan"]["binding"], authority.principal)
 
 
@@ -684,9 +744,14 @@ def exact_source_snapshot(tenant, identifier, version, *, knowledge_base, author
                     or authority.action != "analyze" or authority.purpose != source["plan"]["purpose"]):
                 raise PermissionError("The remote source needs a complete current refresh and use approval.")
             readers.account(source["plan"]["binding"], authority.principal)
+        # A manifest keeps the item limit it was retained under, which may since have
+        # been lowered, so it is checked against the hard ceiling rather than the
+        # current setting. The text bound is the current setting, read at this use.
         items = snapshot.get("items")
-        if not isinstance(items, list) or not 1 <= len(items) <= readers.MAX_ITEMS:
+        if not isinstance(items, list) or not 1 <= len(items) <= readers.MAX_ITEMS_CEILING:
             raise ValueError("The exact source item manifest is incomplete.")
+        bounds = config.get_knowledge_sources()
+        text_limit = bounds["max_text_kib"] * 1024
         records, total = [], 0
         for item in items:
             record = knowledge_base.exact_document(item["collection"], item["document_sha256"])
@@ -694,11 +759,20 @@ def exact_source_snapshot(tenant, identifier, version, *, knowledge_base, author
             if metadata.get("remote_source_id") != identifier or metadata.get("remote_item_id") != item["remote_id"]:
                 raise PermissionError("The source document's actual provenance changed.")
             total += len(record["text"].encode())
-            if total > MAX_TEXT_BYTES:
+            if total > text_limit:
                 raise ValueError("The exact remote source exceeds its bounded text projection.")
             committed = _committed_document(record)
             if digest(committed) != item["native_document_sha256"]:
                 raise PermissionError("The source document's exact native publication changed.")
             records.append({"item": item, "document": committed})
+        # items keeps every record, so the commitment is the same for every reader. Only the
+        # records this authority may see under the permission filter are projected to it;
+        # with the filter on and no authority, none are.
+        email = getattr(authority, "verified_email", "") if authority is not None else ""
+        if _by_email(bounds):
+            visible = [record for record in records if _visible(record["item"], email)] if authority is not None else []
+        else:
+            visible = records
         return {"source": identifier, "version": version, "plan_sha256": snapshot["plan_sha256"], "items": records,
+                "visible_items": visible, "withheld_for_permissions": len(records) - len(visible),
                 "observed_at": snapshot["observed_at"], "name": snapshot["name"], "text_bytes": total}

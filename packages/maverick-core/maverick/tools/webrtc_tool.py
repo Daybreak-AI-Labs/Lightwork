@@ -1,4 +1,4 @@
-"""WebRTC data-channel tool (roadmap: 2028 H2 — capabilities).
+"""WebRTC data-channel tool.
 
 Speaks WebRTC via ``aiortc`` so an agent can hold a peer-to-peer DATA CHANNEL
 with a browser, another agent, or any WebRTC endpoint and exchange text:

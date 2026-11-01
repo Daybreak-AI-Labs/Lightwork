@@ -14,10 +14,16 @@ from base64 import b64encode
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urljoin, urlsplit
 
-from . import connections
+from . import config, connections
 from .authority_effects import authority_effect_fence
 
-MAX_ITEMS, MAX_PAGES, MAX_BYTES = 64, 16, 4 * 1024 * 1024
+# The item, page and download bounds are [knowledge_sources] settings, read at
+# every listing, download and refresh (config.get_knowledge_sources). This is
+# the most items any saved manifest can hold, whatever the current setting.
+MAX_ITEMS_CEILING = 1000
+# Metadata, listing pages and Confluence page bodies are read as JSON under this
+# fixed limit. max_download_mib governs file downloads only.
+_JSON_READ_BYTES = 2 * 1024 * 1024
 SOURCES = {
     "sharepoint": {"label": "SharePoint library folder", "connector": "msgraph"},
     "onedrive": {"label": "OneDrive folder", "connector": "msgraph"},
@@ -89,11 +95,13 @@ def _url(binding, path):
     return url
 
 
-def read_bytes(binding, actor, path, guard, *, limit=MAX_BYTES):
+def read_bytes(binding, actor, path, guard, *, limit=None):
     """Use the native pinned transport, with no cross-origin credential redirect."""
     from .automation_events import _http_read_bytes
     from .enterprise import enterprise_egress_denial
 
+    if limit is None:
+        limit = config.get_knowledge_sources()["max_download_mib"] * 1024 * 1024
     cfg = validate(binding)
     url = _url(cfg, path)
     with authority_effect_fence(), connections._mutation_lock():
@@ -109,9 +117,15 @@ def read_bytes(binding, actor, path, guard, *, limit=MAX_BYTES):
                                             "Accept": "application/json"}, max_bytes=limit)
 
 
+def _download_too_large(max_mib):
+    return f"The document is larger than the {max_mib} MiB download limit (max_download_mib), so it was not imported."
+
+
 def _download(binding, actor, url, guard):
     from .doc_discovery import _guarded_client
 
+    max_mib = config.get_knowledge_sources()["max_download_mib"]
+    max_bytes = max_mib * 1024 * 1024
     deadline = time.monotonic() + 45
     for _ in range(5):
         parsed = urlsplit(url)
@@ -136,15 +150,17 @@ def _download(binding, actor, url, guard):
                     chunks, total = [], 0
                     for chunk in response.iter_bytes():
                         total += len(chunk)
-                        if total > MAX_BYTES or time.monotonic() >= deadline:
-                            raise SourceReadError("The document exceeded its bounded download limit.")
+                        if time.monotonic() >= deadline:
+                            raise SourceReadError("The document download exceeded its time limit.")
+                        if total > max_bytes:
+                            raise SourceReadError(_download_too_large(max_mib))
                         chunks.append(chunk)
                     return b"".join(chunks)
     raise SourceReadError("The provider returned too many document redirects.")
 
 
 def read_json(binding, actor, path, guard):
-    raw = read_bytes(binding, actor, path, guard, limit=2 * 1024 * 1024)
+    raw = read_bytes(binding, actor, path, guard, limit=_JSON_READ_BYTES)
     try:
         body = json.loads(raw.decode("utf-8"))
     except (UnicodeError, ValueError) as exc:
@@ -155,9 +171,10 @@ def read_json(binding, actor, path, guard):
 
 
 def collection(binding, actor, path, guard, *, key="value"):
+    bounds = config.get_knowledge_sources()
     rows, seen = [], set()
     initial = urlsplit(_url(binding, path))
-    for _ in range(MAX_PAGES):
+    for _ in range(bounds["max_pages"]):
         if path in seen:
             raise SourceReadError("The provider repeated a result page. Nothing was marked complete.")
         seen.add(path)
@@ -166,8 +183,8 @@ def collection(binding, actor, path, guard, *, key="value"):
         if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
             raise SourceReadError("The selected account did not return a complete document list.")
         rows.extend(page)
-        if len(rows) > MAX_ITEMS:
-            raise SourceReadError("This source exceeds 64 items. Choose a smaller folder or space.")
+        if len(rows) > bounds["max_items"]:
+            raise SourceReadError(f"This source exceeds {bounds['max_items']} items. Choose a smaller folder or space.")
         if binding["kind"] == "drive":
             token = body.get("nextPageToken")
             path = (path.split("&pageToken=", 1)[0] + "&pageToken=" + quote(str(token), safe="")) if token else None
@@ -187,7 +204,7 @@ def collection(binding, actor, path, guard, *, key="value"):
             before, after = parse_qs(initial.query), parse_qs(parsed.query)
             if any(before.get(name) != after.get(name) for name in ("spaceKey", "type", "status") if name in before):
                 raise SourceReadError("The provider changed the selected space between result pages.")
-    raise SourceReadError("The document listing exceeded 16 pages. Nothing was marked complete.")
+    raise SourceReadError(f"The document listing exceeded {bounds['max_pages']} pages. Nothing was marked complete.")
 
 
 def picker(binding, actor, step, chosen, guard):
@@ -256,9 +273,12 @@ def inventory(binding, actor, guard):
 
 def document(binding, actor, item, guard):
     """Read a selected stable item; metadata changes during the read are refused."""
+    from .automation_events import EventSourceTooLarge
+
     kind, chosen = binding["kind"], binding["selection"]
     item_id = quote(identifier(item["id"]), safe="")
     name, mime = item["name"], item["mime"]
+    max_mib = config.get_knowledge_sources()["max_download_mib"]
     if item["kind"] != "file":
         raise SourceReadError("Subfolders are not imported. Add each desired folder as a separate source.")
     if kind in {"sharepoint", "onedrive"}:
@@ -288,17 +308,25 @@ def document(binding, actor, item, guard):
             raise SourceReadError("This Google document type is not supported; export it to PDF, text, Word or Excel first.")
         else:
             path += "?alt=media"
-        raw = read_bytes(binding, actor, path, guard)
+        try:
+            raw = read_bytes(binding, actor, path, guard, limit=max_mib * 1024 * 1024)
+        except EventSourceTooLarge as exc:
+            raise SourceReadError(_download_too_large(max_mib)) from exc
     else:
-        current = read_json(binding, actor, "/wiki/rest/api/content/" + item_id + "?expand=body.storage,version", guard)
+        try:
+            current = read_json(binding, actor, "/wiki/rest/api/content/" + item_id + "?expand=body.storage,version", guard)
+        except EventSourceTooLarge as exc:
+            raise SourceReadError(
+                f"This Confluence page is larger than its {_JSON_READ_BYTES // (1024 * 1024)} MiB read limit, so it was not imported. "
+                "Split it into smaller pages; max_download_mib does not apply to Confluence pages.") from exc
         if str(current.get("version", {}).get("number") or "") != item["revision"]:
             raise SourceReadError("The page changed after listing. Refresh this source again.")
         value = current.get("body", {}).get("storage", {}).get("value")
         if not isinstance(value, str):
             raise SourceReadError("This page has no complete readable body.")
         raw, name = value.encode("utf-8"), name + ".html"
-    if not raw or len(raw) > MAX_BYTES:
-        raise SourceReadError("The document is empty or exceeds the 4 MiB download limit.")
+    if not raw or len(raw) > max_mib * 1024 * 1024:
+        raise SourceReadError(f"The document is empty or exceeds the {max_mib} MiB download limit.")
     from maverick_knowledge.parse import extract_document
     suffix = Path(name).suffix.lower()
     if suffix not in {".txt", ".md", ".csv", ".html", ".htm", ".pdf", ".docx", ".xlsx"}:
@@ -315,3 +343,117 @@ def document(binding, actor, item, guard):
     if not text.strip():
         raise SourceReadError("The document contains no readable text.")
     return text, hashlib.sha256(raw).hexdigest(), parsed.metadata()
+
+
+_EMAIL = re.compile(r"[a-z0-9._%+-]{1,64}@[a-z0-9.-]{1,253}\.[a-z]{2,63}")
+_DOMAIN = re.compile(r"[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+")
+
+
+def _permission_record(emails=(), domains=(), anyone=False, groups=False, unknown=False):
+    """The only permission data kept per item: lower-case addresses, domains and three flags. No tokens or payloads."""
+    return {"emails": sorted(set(emails)), "domains": sorted(set(domains)), "anyone": bool(anyone),
+            "has_group_grants": bool(groups), "unknown": bool(unknown)}
+
+
+def _email(value):
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if _EMAIL.fullmatch(text) else None
+
+
+def _domain(value):
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if _DOMAIN.fullmatch(text) else None
+
+
+def _graph_permission_record(rows):
+    """Microsoft Graph driveItem permissions. Unrecognised grants make the item unknown."""
+    emails, domains, anyone, groups, unknown = [], [], False, False, False
+    for row in rows:
+        if not isinstance(row, dict):
+            unknown = True
+            continue
+        link, invitation = row.get("link"), row.get("invitation")
+        identities = row.get("grantedToIdentitiesV2")
+        if identities is None and isinstance(row.get("grantedToV2"), dict):
+            identities = [row["grantedToV2"]]
+        if not isinstance(link, dict) and not isinstance(invitation, dict) and not isinstance(identities, list):
+            unknown = True
+            continue
+        if isinstance(link, dict):
+            scope = link.get("scope")
+            if scope == "anonymous":
+                anyone = True
+            elif scope != "users":
+                unknown = True  # organization-wide links need the tenant's domain, which is not read
+        if isinstance(invitation, dict):
+            email = _email(invitation.get("email"))
+            if email:
+                emails.append(email)
+            else:
+                unknown = True
+        for identity in identities or ():
+            if not isinstance(identity, dict):
+                unknown = True
+            elif isinstance(identity.get("group"), dict):
+                groups = True
+            elif isinstance(identity.get("user"), dict) and _email(identity["user"].get("email")):
+                emails.append(_email(identity["user"]["email"]))
+            else:
+                unknown = True
+    return _permission_record(emails, domains, anyone, groups, unknown)
+
+
+def _drive_permission_record(rows):
+    """Google Drive permissions.list rows. Deleted rows are skipped."""
+    emails, domains, anyone, groups, unknown = [], [], False, False, False
+    for row in rows:
+        if row.get("deleted") is True:
+            continue
+        kind = row.get("type")
+        if kind == "anyone":
+            anyone = True
+        elif kind == "domain" and _domain(row.get("domain")):
+            domains.append(_domain(row.get("domain")))
+        elif kind == "group":
+            groups = True
+        elif kind == "user" and _email(row.get("emailAddress")):
+            emails.append(_email(row.get("emailAddress")))
+        else:
+            unknown = True
+    return _permission_record(emails, domains, anyone, groups, unknown)
+
+
+def _confluence_permission_record(body):
+    """Confluence page read restrictions. A page with no restriction of its own inherits space permissions, which are not read."""
+    restrictions = body.get("restrictions") if isinstance(body, dict) else None
+    if not isinstance(restrictions, dict):
+        return _permission_record(unknown=True)
+    users = (restrictions.get("user") or {}).get("results") or []
+    groups = (restrictions.get("group") or {}).get("results") or []
+    if not users and not groups:
+        return _permission_record(unknown=True)
+    emails, unknown = [], False
+    for user in users:
+        email = _email(user.get("email")) if isinstance(user, dict) else None
+        if email:
+            emails.append(email)
+        else:
+            unknown = True  # a restricted user whose address is not returned cannot be matched
+    return _permission_record(emails, (), False, bool(groups), unknown)
+
+
+def permissions(binding, actor, item, guard):
+    """One item's sharing permissions as a bounded record. A failed or unrecognised read is unknown, never a refresh failure."""
+    try:
+        cfg = validate(binding)
+        item_id = quote(identifier(item["id"]), safe="")
+        kind = cfg["kind"]
+        if kind in {"sharepoint", "onedrive"}:
+            path = "/v1.0/drives/" + quote(identifier(cfg["selection"]["drive"]), safe="") + "/items/" + item_id + "/permissions?$top=100"
+            return _graph_permission_record(collection(cfg, actor, path, guard))
+        if kind == "drive":
+            query = urlencode({"fields": "nextPageToken,permissions(type,emailAddress,domain,deleted)", "pageSize": 100})
+            return _drive_permission_record(collection(cfg, actor, "/drive/v3/files/" + item_id + "/permissions?" + query, guard, key="permissions"))
+        return _confluence_permission_record(read_json(cfg, actor, "/wiki/rest/api/content/" + item_id + "/restriction/byOperation/read", guard))
+    except Exception:  # noqa: BLE001 -- an unreadable permission is unknown; the caller's guard still stops a lost authority
+        return _permission_record(unknown=True)

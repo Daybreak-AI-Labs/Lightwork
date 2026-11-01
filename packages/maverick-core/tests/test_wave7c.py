@@ -1,4 +1,4 @@
-"""Wave 7c — Firecracker sandbox scaffold + PRM + training pipeline."""
+"""Firecracker sandbox scaffold + PRM + training pipeline."""
 from __future__ import annotations
 
 import pytest

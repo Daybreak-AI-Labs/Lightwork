@@ -88,7 +88,7 @@
   .wt-video { width: 100%; max-width: 720px; background: #000; border-radius: var(--radius-sm); }
   .wt-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 </style>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   const form = document.getElementById("wt-export");
   const out = document.getElementById("wt-result");

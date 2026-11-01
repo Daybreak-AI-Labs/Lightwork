@@ -740,7 +740,10 @@ def test_a_blocked_conversation_keeps_its_order_through_a_store_wide_read_outage
     # X's send is refused and Y waits behind X; then no receipt can be read
     # (the at-rest key is unavailable) for a few retry periods. Y cannot be
     # read either, so once the key is back X is sent before Y.
-    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)
+    # X's retry must not come due before the outage starts, and one retry must
+    # fall inside the outage: 0.05 s left ~20 ms of slack, which a loaded
+    # machine overran (X was resent before the outage began).
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.5)
     outage = [False]
     journal = _unreadable_journal(0, lambda record_id: outage[0])
     sends = []
@@ -764,7 +767,7 @@ def test_a_blocked_conversation_keeps_its_order_through_a_store_wide_read_outage
                                             message_id="y"), external_id="y")
         await asyncio.sleep(0.02)
         outage[0] = True
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(1.0)  # spans X's next retry, which cannot read its receipt
         assert sends == ["X"]
         outage[0] = False
         await until(lambda: len(sends) == 3)

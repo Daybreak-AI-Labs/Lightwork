@@ -10,7 +10,7 @@ const path = require("node:path");
 const { JSDOM } = require("jsdom");
 
 const root = path.resolve(__dirname, "../../maverick_dashboard");
-const template = fs.readFileSync(path.join(root, "templates/_action_center_body.html"), "utf8");
+const template = fs.readFileSync(path.join(root, "templates/_action_center_body.html"), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const ui = fs.readFileSync(path.join(root, "static/lightwork-ui.js"), "utf8");
 const start = template.indexOf('<div class="panel" id="ac-queue">');
 const end = template.indexOf("</script>", start) + "</script>".length;

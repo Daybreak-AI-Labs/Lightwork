@@ -1,4 +1,4 @@
-# RUNBOOK — credible security numbers (v2)
+# Runbook: publishable security numbers (v2)
 
 v1 (`detector_score.py`) is an offline, internal dashboard. This runbook is
 how a maintainer produces the **publishable** numbers: a held-out detection
@@ -10,7 +10,7 @@ documented rather than wired into CI.
 
 1. **Never vendor harmful payloads.** HarmBench / AdvBench carry live harmful
    content and licensing weight. Pull on demand, pin the revision, and do not
-   commit raw payloads (matches the corpus convention in CLAUDE.md).
+   commit raw payloads.
 2. **Guard against leakage.** Before scoring any external prompt set, run it
    through `detector_score.train_overlap(prompts)` and drop the overlaps.
    Report the dropped count. A number measured on phrases the rules were tuned
@@ -18,7 +18,7 @@ documented rather than wired into CI.
 3. **Report provenance.** Every `RESULTS.md` row gets `source=measured`, the
    dataset name + pinned `revision=<sha>`, the split, the shield backend, and
    the N. Quote TPR/FPR with Wilson CIs.
-4. **Don't launder the dashboard into the public claim.** The `docs/safety.md`
+4. **Keep the dashboard figure out of published claims.** The `docs/safety.md`
    F1 figure may only be updated from a held-out, per-backend measurement —
    never from v1's train-corpus dashboard.
 
@@ -45,11 +45,11 @@ from benchmarks.security import detector_score, corpus
 leaks = detector_score.train_overlap(prompts)          # drop trained-on phrases
 held = [p for p in prompts if p not in set(leaks)]
 # score `held` (positives) + corpus benign (negatives) across BACKENDS,
-# Include the full SDK only from its authorized private distribution/source;
-# it is not available from public PyPI. Then add it as a distinct backend.
+# The full agent-shield SDK is not published (only the built-in rule set
+# ships); if you have a build of it, add it as a distinct backend.
 ```
 
-If an authorized full-SDK build is available, record its immutable source and
+If a full-SDK build is available, record its immutable source and
 add `agent_shield_sdk` as a distinct backend. Do not attribute an old SDK score
 to the built-in rules or fetch an unverified public namesake package.
 
@@ -57,8 +57,8 @@ to the built-in rules or fetch an unverified public namesake package.
 
 Run the **whole agent** through AgentDojo with the shield ON vs OFF and report
 the attack-success-rate delta plus the benign task-completion delta (the
-over-refusal cost). This is the headline "Lightwork blocks N% of AgentDojo
-injections" claim.
+over-refusal cost). This run produces the "Lightwork blocks N% of AgentDojo
+injections" figure.
 
 ```bash
 pip install agentdojo
@@ -67,10 +67,11 @@ python benchmarks/preflight.py                 # validate key + model IDs first
 # shield ON:                                   python -m benchmarks.security.agentdojo_e2e --suite injection
 ```
 
-`agentdojo_e2e` is intentionally not implemented offline-untested — wire it
+`agentdojo_e2e` is not in the tree: it cannot be tested offline, so wire it
 against the installed AgentDojo API when you run it, mirroring the
-`cost_tracker` + `RESULTS.md` conventions in `benchmarks/harness.py`. Track
-`$`/tokens/wall via `cost_tracker`, and respect `Budget` (CLAUDE.md rule 3).
+`cost_tracker` + `RESULTS.md` conventions in `benchmarks/harness.py`. (The
+offline chokepoint measurement is `end_to_end_asr.py`.) Track `$`/tokens/wall
+via `cost_tracker`, and respect `Budget` caps.
 
 ## Definition of done for v2
 

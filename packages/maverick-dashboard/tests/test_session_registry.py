@@ -1,6 +1,7 @@
 """Server-side session record: register, list, end one, end all, prune."""
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
@@ -13,7 +14,12 @@ def _home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     config.reset_config_cache()
+    # The throttle and the open store connection are process-wide: one test's
+    # refresh must not throttle the next test's touch, nor keep its file open.
+    sr._TOUCHED.clear()
     yield
+    sr._drop_shared()
+    sr._TOUCHED.clear()
     config.reset_config_cache()
 
 
@@ -123,3 +129,73 @@ def test_a_bearer_key_cannot_end_sessions_and_a_late_audit_refusal_is_reported_h
     with pytest.raises(HTTPException) as late:
         sessions_page._audit_revoke(object(), target="user:x", sid="", count=1, everywhere=True)
     assert late.value.status_code == 503 and "were signed out" in late.value.detail
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows keeps no store handle between calls (_KEEP_OPEN)")
+def test_the_store_connection_is_reused_until_the_file_is_replaced():
+    with sr._connect() as first:
+        pass
+    with sr._connect() as second:
+        pass
+    assert second is first
+    sr._path().unlink()
+    with sr._connect() as third:
+        pass
+    assert third is not first
+    _register("after-replace")
+    assert sr.status("after-replace") is True
+    assert sr.status("never-registered") is None
+
+
+def test_no_store_handle_outlives_a_call_where_the_file_cannot_be_replaced(monkeypatch):
+    # Windows: an open store file cannot be removed or swapped by an operator,
+    # so nothing may keep it open between calls.
+    monkeypatch.setattr(sr, "_KEEP_OPEN", False)
+    _register("s1")
+    assert sr._SHARED["conn"] is None
+    assert sr.status("s1") is True
+    assert sr._SHARED["conn"] is None
+    sr._path().unlink()
+    assert sr.status("s1") is None
+    _register("s2")
+    assert sr.status("s2") is True and sr._SHARED["conn"] is None
+
+
+def test_a_refresh_inside_the_window_does_not_reach_the_store(monkeypatch):
+    sr._TOUCHED.clear()
+    _register("s1", issued_at=time.time() - 120)
+    sr.touch("s1", ip="203.0.113.10", activity=True)   # this process's first refresh writes
+    assert sr.get("s1").ip == "203.0.113.10"
+    calls = []
+    real_connect = sr._connect
+
+    def counting_connect():
+        calls.append(1)
+        return real_connect()
+
+    monkeypatch.setattr(sr, "_connect", counting_connect)
+    sr.touch("s1", activity=True)
+    sr.touch("s1", activity=True)
+    assert calls == []
+    sr._TOUCHED.clear()
+    sr.touch("s1", ip="203.0.113.11", activity=True)
+    assert calls == [1]
+    assert sr.get("s1").ip == "203.0.113.10"   # last_seen is recent, so the UPDATE matches nothing, as before
+
+
+def test_a_refresh_another_process_wrote_does_not_throttle_this_one(monkeypatch):
+    # A touch whose UPDATE matched nothing (another process refreshed the row
+    # inside the window) must not start this process's window: the row's time
+    # is unknown here, so the next touch asks the store again.
+    start = time.time()
+    _register("s1", issued_at=start - 30)        # refreshed 30 s ago elsewhere
+    clock = [start]
+    monkeypatch.setattr(sr.time, "time", lambda: clock[0])
+    sr.touch("s1", ip="198.51.100.4", activity=True)
+    assert sr.get("s1").ip == "203.0.113.9"      # inside that window: no write
+    assert "s1" not in sr._TOUCHED
+    clock[0] = start + 40                         # 70 s after the other refresh
+    sr.touch("s1", ip="198.51.100.5", activity=True)
+    record = sr.get("s1")
+    assert record.ip == "198.51.100.5" and record.last_seen == start + 40
+

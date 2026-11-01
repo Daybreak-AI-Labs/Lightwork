@@ -50,7 +50,7 @@ def _provider_audit_value(data: dict, name: str) -> dict[str, str]:
     value = providers.get(name) if isinstance(providers, dict) else None
     value = value if isinstance(value, dict) else {}
     setup = {field: value.get(field) for field in
-             ("auth_mode", "deployment", "api_version", "endpoint", "region", "model_id")
+             ("auth_mode", "deployment", "api_version", "endpoint", "region", "model_id", "project_id")
              if value.get(field)}
     return {
         "api_key": "set" if value.get("api_key") else "not set",  # pragma: allowlist secret
@@ -71,7 +71,7 @@ def _provider_changed_fields(old: dict, new: dict, name: str) -> list[str]:
         "api_key": "access key", "base_url": "service address",  # pragma: allowlist secret
         "auth_mode": "sign-in method", "deployment": "deployment",
         "api_version": "service version", "endpoint": "endpoint",
-        "region": "region", "model_id": "model",
+        "region": "region", "model_id": "model", "project_id": "project",
     }
     return [label for field, label in labels.items() if before.get(field) != after.get(field)]
 
@@ -188,7 +188,6 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
     from maverick_dashboard import settings_store
     from maverick_dashboard.integration_readiness import (
         IntegrationConfigurationUnavailable,
-        provider_readiness,
         require_readable_config,
     )
 
@@ -205,10 +204,6 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
             detail="integration configuration is unavailable",
         ) from exc
 
-    for provider in cfg_state["providers"]:
-        provider["readiness"] = provider_readiness(
-            provider["name"], configured=provider["configured"]
-        )
     # The one truth about whether an AI service is connected: the header,
     # each provider row and every other page read the same verdict.
     from maverick_dashboard.provider_readiness import (
@@ -218,6 +213,9 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
     )
 
     workspace = workspace_readiness()
+    present = {row["name"] for row in workspace.get("providers") or []}
+    if any(provider["name"] not in present for provider in cfg_state["providers"]):
+        raise HTTPException(status_code=503, detail="provider readiness is unavailable")
     apply_to_rows(cfg_state["providers"], workspace)
     # Grouped pickers: every model the configured keys can reach (cached live
     # discovery) plus the shipped catalog, capped by the allow-list.
@@ -721,6 +719,7 @@ async def settings_set_provider(
     endpoint: str = Form(""),
     region: str = Form(""),
     model_id: str = Form(""),
+    project_id: str = Form(""),
 ) -> RedirectResponse:
     """Rotate only provider fields this dashboard can make effective.
 
@@ -737,7 +736,9 @@ async def settings_set_provider(
     setup = ({"auth_mode": auth_mode, "deployment": deployment, "api_version": api_version}
              if provider_name == "azure" else
              {"auth_mode": auth_mode, "endpoint": endpoint, "region": region, "model_id": model_id}
-             if provider_name == "bedrock" else None)
+             if provider_name == "bedrock" else
+             {"project_id": project_id, "region": region, "model_id": model_id}
+             if provider_name == "vertex" else None)
     try:
         with _setting_write(request, "providers", provider_name, lambda d:
                             _provider_audit_value(d, provider_name), changed_fields=lambda old, new:

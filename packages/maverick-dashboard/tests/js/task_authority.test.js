@@ -6,7 +6,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { fetchHelpers } = require('./_shell');
 const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-task-authority.js"), "utf8");
-const html = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/chat_goal.html"), "utf8");
+const html = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/chat_goal.html"), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 function fixture(initial = true) {
   const callbacks = {}, focus = {}, root = {dataset: {operate: initial ? "1" : "0", goal: "1"}, textContent: ""};
   const control = {tagName: "SELECT", dataset: initial ? {} : {permissionDisabled: "1"}, disabled: !initial, value: "draft project", closest: () => control};
@@ -21,7 +21,9 @@ function fixture(initial = true) {
 }
 function event(target) { return {target, prevented: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; }}; }
 test("project selection uses checked submission and initial viewer controls are disabled", () => {
-  assert.match(html, /onchange="this\.form\.requestSubmit\(\)"/);
+  // The page wires the change in its nonce-stamped script (no inline handler under the CSP).
+  assert.doesNotMatch(html, /onchange=/);
+  assert.match(html, /projectSelect\.addEventListener\('change', function \(\) \{ this\.form\.requestSubmit\(\); \}\)/);
   assert.doesNotMatch(html, /this\.form\.submit\(\)/);
   for (const id of ["ps-run", "goal-project-sel", "answer-send", "reply-files", "recover-submission-btn"]) {
     const tag = html.match(new RegExp('<(?:button|input|select)[^>]*id="' + id + '"[^>]*>'))[0];

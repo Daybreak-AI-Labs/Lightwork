@@ -19,7 +19,7 @@ fleet-scale operation needs:
 Re-wrap only: no tenant data is re-encrypted (the DEK is unchanged), so the
 operation is O(tenants), not O(data).
 
-Cloud/BYOK rotation (each tenant under its own AWS/GCP/Vault key) uses the
+Cloud/BYOK rotation (each tenant under its own AWS/GCP/Vault/Azure key) uses the
 library ``kms.rotate_kek_fleet`` with custom per-tenant resolvers instead.
 """
 from __future__ import annotations

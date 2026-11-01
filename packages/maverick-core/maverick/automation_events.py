@@ -32,6 +32,10 @@ class EventSourceError(RuntimeError):
     """Configuration / fetch problem for an event source (bad URL, unreachable)."""
 
 
+class EventSourceTooLarge(EventSourceError):
+    """A response refused for exceeding its byte limit; callers can name that limit."""
+
+
 @dataclass
 class PollResult:
     """The outcome of polling a source once.
@@ -276,7 +280,7 @@ def _http_read_bytes(
                     raise EventSourceError(f"source returned HTTP {resp.status_code}")
                 length = resp.headers.get("content-length")
                 if length and int(length) > max_bytes:
-                    raise EventSourceError(
+                    raise EventSourceTooLarge(
                         f"source response exceeds {max_bytes} byte limit")
                 deadline = time.monotonic() + timeout
                 chunks: list[bytes] = []
@@ -286,7 +290,7 @@ def _http_read_bytes(
                         raise EventSourceError("source response exceeded fetch timeout")
                     total += len(chunk)
                     if total > max_bytes:
-                        raise EventSourceError(
+                        raise EventSourceTooLarge(
                             f"source response exceeds {max_bytes} byte limit")
                     chunks.append(chunk)
                 if time.monotonic() > deadline:
@@ -835,7 +839,7 @@ def _register_connected_sources():
 
 
 __all__ = [
-    "EventSource", "EventSourceError", "PollResult",
+    "EventSource", "EventSourceError", "EventSourceTooLarge", "PollResult",
     "available_sources", "get_source", "register", "enabled",
     "poll_source", "diff_new_items", "HttpJsonSource", "RssSource",
     "OAuthHttpJsonSource", "GithubIssuesSource", "FileDirSource", "ImapEmailSource",

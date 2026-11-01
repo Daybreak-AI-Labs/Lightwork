@@ -1,4 +1,4 @@
-# Rigorous compounding-moat — results (2026-06-16)
+# Warm-vs-cold memory benchmark — results (2026-06-16)
 
 > ## ⚠️ CORRECTION (2026-06-16, later): these numbers are INVALID — do not cite them.
 > A follow-up **correctness-graded** run found that the agent never had the
@@ -56,7 +56,7 @@ succeeded 2/4, distilled a skill 2/4.
 
 ## The finding (and why it matters)
 
-**The moat appears exactly when learning occurred, and is absent when it
+**The benefit appears exactly when learning occurred, and is absent when it
 didn't.** Both observations where A distilled a skill (auth s1, s2) show warm
 recalling it and finishing the related task in **3–22 tool calls at −54% to
 −93% cost**, while cold re-explored **36–48 tool calls** and failed to finish

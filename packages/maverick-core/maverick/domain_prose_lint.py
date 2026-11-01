@@ -85,7 +85,7 @@ _ARTICLE_RE = re.compile(
 # Tool names every pack may reference without appearing in the registry:
 # the swarm/spawn tools the agent loop registers itself, plus the
 # operator-provisioned read adapters the audited catalog documents as
-# deployment prerequisites (``docs/audits/customer-readiness-consolidation``).
+# deployment prerequisites.
 # This is a ratchet: a new adapter name is a deliberate addition here, not a
 # typo that slips through.
 # Real tools that are deliberately NOT in the default registry but that a

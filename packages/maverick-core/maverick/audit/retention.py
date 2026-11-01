@@ -246,7 +246,7 @@ def _purge_table_by_time(
     try:
         # The agent may be writing concurrently; wait rather than fail fast.
         conn.execute("PRAGMA busy_timeout=5000")
-        # W1-50: the canonical (--db-path-less) path opens with foreign_keys
+        # The canonical (--db-path-less) path opens with foreign_keys
         # ON, so this raw connection must too or the two routes silently
         # disagree -- without it, deleting an episode any fact still cites
         # leaves a dangling facts.source_episode_id/fact_history.source_episode_id
@@ -574,6 +574,13 @@ def _enforce(
         raise RetentionScopeError("Preservation holds could not be verified; no records were deleted.") from exc
     if preservation["blocked"] and not dry_run:
         raise RetentionScopeError("Recorded preservation holds block broad deletion in this workspace.")
+    if not dry_run:
+        from ..ediscovery import LegalHoldApplies, assert_no_active_matters
+
+        try:
+            assert_no_active_matters()
+        except LegalHoldApplies as exc:
+            raise RetentionScopeError(str(exc)) from exc
     report: dict = {"dry_run": dry_run, "preservation": preservation}
     if audit_days:
         report["audit"] = purge_audit_files(

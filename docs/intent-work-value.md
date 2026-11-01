@@ -71,16 +71,34 @@ publication evidence survives later publication changes.
 | Recovery authority and persistence inventories | Derived analytics/assumptions restore as data and are rechecked against current sources; recommendation draft/adoption receipts retain the native restore hold until reconciled |
 | Domain profiles and owned native flows | Accessible capability matching prefers an existing process; reuse does not create a duplicate builder |
 | `flow.evolve`, node outcomes/tool traces | Existing supported evolution signals are shown in reuse explanations; linked execution costs update the next-review reference without overwriting forecasts |
-| Ekko `governed_candidate_projection` | Live owner/device/consent-bound patterns appear with native evidence/draft links; no raw event content is copied, no business intent or executed benefit is fabricated |
+| Ekko `governed_candidate_projection` | Live owner/device/consent-bound patterns appear with native evidence/draft links; no raw event content is copied, no business intent or executed benefit is fabricated. A read excludes expired events and never deletes them; expired ciphertext is removed by the store's own write and maintenance paths |
 | Copilot sealed conversation context, product operations | Provider-free metric answers call `read_report`; scoped follow-ups are sealed to tenant/account/current permissions. Reviewed correction, recalculation, optional confirmation, company assumptions, benchmark override, decision, use and draft operations call the native endpoints |
 | Dashboard route catalogue, Jinja shell, shared style tokens | `/work-value`, native explanation dialog, responsive report, opportunities, benchmark/rate controls, error and retry states |
 | Installer and All settings | `[intent_value] enabled` and `recommendations` controls; optional completion confirmation defaults off |
 
 There is no new world-schema migration or queue. Derived work is refreshed on
 demand from complete native reads, including page/Copilot requests. A bad source
-read returns unavailable rather than a zero report. Native governed stores
-support both existing storage backends; this feature does not change deployment,
-API authentication, billing, connection or activation policy.
+read returns unavailable rather than a zero report. Read endpoints do not record
+work or suggestions: `GET` reports the recorded ledger, and the page records newly
+observed work through `POST /api/v1/intent-value/sync` before it reads. A read
+never retries a pending audit receipt; the sync, saves and prepared actions do.
+A read withholds a work item whose recorded flow run, task or conversation turn
+has since been deleted, until the sync retires or re-derives it; the item's
+explanation answers not found. `recorded_as_of` in a report is the newest
+recorded change, not the time of the read. `checked_at` in a report is a
+deprecated alias with the same value; use `recorded_as_of`. It is removed in
+0.3.0. The sync takes `device_id`, the enrolled Ekko device it reviews, and
+deletes that device's expired Ekko observations; a name that is not a device name
+deletes none, and the sync still records. Another enrolled device's expired
+observations are deleted when that device is reviewed in Ekko. Each newly observed item keeps the
+estimate assumptions in force when it was first recorded. Saving company
+assumptions or a benchmark first records observed work. If that work cannot be
+read completely, the save is refused (503 or 422) and nothing changes, so an
+administrator cannot change the rate during a source outage. The guarantee
+covers work recorded before the save: work that finishes while a save runs is
+recorded afterwards under the new assumptions. Native governed stores support
+both existing storage backends; this feature does not change deployment, API
+authentication, billing, connection or activation policy.
 
 ## Economic and grouping contract
 
@@ -189,7 +207,7 @@ ranges, action factors, attributable shares and retained-review assumptions are
 explicitly **provisional Lightwork planning assumptions**. They are not validated
 industry averages. No mandatory benchmark-design onboarding is required.
 
-Research checked while implementing:
+Related research:
 
 - Noy & Zhang, *Experimental evidence on the productivity effects of generative
   artificial intelligence*, Science 381 (2023), 187–192,
@@ -284,15 +302,15 @@ connection and learning controls remain the existing ones.
   use the existing recovery hold, preserving their bytes without replaying a
   build or adoption. Analytics snapshots and benchmark/preferences cannot admit
   execution and restore as data; fresh source checks still determine totals.
-- Work recorded before this change may lack a workflow completion receipt or
+- Work recorded by earlier versions may lack a workflow completion receipt or
   agent/run correlation. Such evidence is not fabricated or inferred solely from
   `completed` status. Legacy gaps are unvalued/missing, with the alternative
   Savings bridge available. Historical goal receipts remain usable when the
   native evidence is present.
 - Complete invoice/subscription/external-tool coverage, causal time savings,
-  calibrated inference probabilities, inferred external data bindings and
-  deployment-scale/load qualification are not claimed. No paid-provider
-  test, production migration, deployment or merge is part of this delivery.
+  calibrated inference probabilities, inferred external data bindings, live
+  provider output quality, measured employee labor reduction and
+  deployment-scale/load qualification are not claimed.
 
 ## Requirement and verification map
 
@@ -343,93 +361,3 @@ are obtained from current authorized records.
 | Use an existing capability | Opportunity action / `work_value_use` | Current accessible specialist/process; current source and ownership checks | Native chat or builder handoff; subsequent actual work linked; selection starts no execution |
 | Create a populated draft | Opportunity build action / `work_value_build` | Current supported evidence, operate, native flow enablement, reservation and CAS | Same saved draft on duplicate/recovered clicks; changed/deleted generation refuses replacement; no activation |
 | Publish, run, approve and inspect adopted work | Existing workflow designer/run views / existing native workflow operations | Existing publication, release, connection, budget, queue and human approval controls | Audit-backed outcomes and separate before/after estimates; partial/failed costs retained; no additional platform credit |
-
-## Validation record
-
-October 9 recheck added regressions for explicit invoice boundaries, multiple
-RFP components, unexecuted intent changes, existing-workflow outcome readback,
-Copilot business-name clarification and ambiguity, numeric period/cost/activity
-comparisons, guidance versus deliverable intent, dashboard scope parity,
-pending audit access, reviewed settings/benchmark changes, and additional native
-workflow spend above linked agent episodes.
-October 10 also reproduced and fixed retrospective revaluation caused by task-map
-renaming. Tests cover renamed work before first ingestion, immutable completed
-request intent after ingestion, subsequent real execution, explicit correction,
-native retitle API/Copilot parity and omission of audited request content from
-explanations. A later audited request whose intent is unknown also clears the
-current inferred benchmark instead of borrowing the earlier task's value; prior
-estimates and incurred costs remain available.
-Conditional-workflow rechecking also reproduced credit from unexecuted branches.
-Native receipts now identify completed work steps, and estimates use only those
-agent components. Regressions cover both routes, earlier derived estimates,
-ambiguous legacy receipts, tool-only work and linked-agent partial evidence. A
-separate browser journey completes the fully manual draft through native approvals
-and confirms unchanged executed-work/labor totals and no agent invocation.
-
-Recorded local qualification on October 9–10:
-
-- Native configuration, setup guide, localized navigation, recovery inventory,
-  shared UI helpers, installer resume and live settings-control checks after the
-  CI repair: **2,091 passed** with Python 3.10 secure defaults. The native usage
-  fixture now verifies that both agent nodes retain the same workflow-run
-  correlation; invalid-source module tests retain a valid audit tenant.
-- Final Python 3.10 feature/API/installer suite with **secure defaults and live PostgreSQL**:
-  **66 passed, no skips**. The database fixture uses encryption and an isolated
-  non-superuser, non-BYPASSRLS role. It covers tenant isolation, repeated
-  ingestion, correction history and recommendation persistence.
-- Rebased Python 3.12 feature/adjacent suite: **771 passed** across work value,
-  Copilot, flow execution and installer settings. The subsequent guidance-intent
-  correction passed **3 focused Python 3.12 tests**; another **3 focused Python
-  3.12 checks** cover the rename/evidence correction. The final uncertainty and
-  rename group passed **5 Python 3.12 checks**. These are included in the
-  final 66-test suite above. The final workflow/feature Python 3.12 recheck passed
-  **136 tests**, with one Windows-only path test skipped and the live PostgreSQL
-  test deselected in that run (included in the separate 66-test database run).
-  Additional pre-rebase qualification included **98 PostgreSQL backend
-  tests** and **783 adjacent/packaging tests**; these are not presented as final
-  whole-product coverage.
-- Chromium feature journeys: **5 passed**, including native publication,
-  cancelled and confirmed starts, input approval, queued execution, result
-  approval, opportunity conversion, outcome readback and identical
-  Copilot/dashboard totals. The agent runner supplies synthetic output, cost and
-  a completion receipt; native workflow admission, queue, approvals, receipt
-  ingestion and reporting run normally, with outbound calls blocked. Separate
-  checks cover manual preparation, repeated draft clicks, 390-pixel layout,
-  keyboard focus, unavailable/retry states, access revocation while an explanation
-  is open, authorized recovery, a fully manual completion with no executed labor
-  credit, and scoped axe checks. Desktop and
-  narrow screenshots were inspected.
-- Dashboard DOM tests: **2,334 passed**; desktop JavaScript tests: **40 passed**.
-- Setup browser CI repair: all **7 journeys passed twice**. The hosted trace
-  showed idle-loaded Copilot scripts cancelled by immediate page navigation;
-  the connection-return fixture now waits for actual shell readiness and keeps
-  its strict request-failure checks. An initial concurrent local run exceeded
-  the existing 45-second test deadline; both isolated runs passed without
-  extending that deadline or adding retries.
-- Ruff, Vulture, the **17 custom contract/governance commands**, specialist
-  catalog, attribution and release-packaging gates: **passed**. No Python type
-  checker is configured; the TypeScript SDK is unchanged.
-- Core and dashboard wheels: **built successfully**; their contents include the
-  new backend modules, current classifier and UI assets.
-- OSV dependency audit across **17 lockfiles**: **passed under the existing
-  repository policy**, with no new exceptions. Both signed offline benchmark
-  artifacts were regenerated by their real runners from clean source commit
-  `1ef71de03` and verified against their separate public keys and source digests.
-
-Interrupted runs are not counted as passes. Initial regressions and local
-build-tool/setup failures were corrected and the affected checks rerun. The PR
-verification record supplies the full-repository secret-scan and hosted CI
-outcomes for the final remote commit.
-
-PR #2539 was rebased onto `d741e73f4e70db8eddda212508ebda77398a4c75`, which
-contains the upstream Python 3.10, dependency, secret-baseline, native browser and
-desktop CI repairs from #2538. Those unrelated repairs are not duplicated in this
-feature's diff. The feature's HTML pattern was corrected, its own-server browser
-configuration is discovered by the native test runner, and live PostgreSQL
-coverage is included in the existing database job. Signed offline benchmark
-artifacts are regenerated from a clean source commit, without relaxing verification.
-
-The final PR verification record identifies the exact remote commit and final
-rebased results. Full-product certification, live paid-provider output quality,
-complete invoices, measured employee labor reduction and production/large-tenant
-load qualification are **not claimed**. No merge or deployment is performed.

@@ -1,4 +1,4 @@
-# Legal — council-added — Insurance-Coverage.
+# Legal — Insurance-Coverage.
 name = "legal_insurance"
 compartment = "legal_regulatory"
 description = "Insurance-coverage analysis and claim tender (D&O/cyber/E&O)."

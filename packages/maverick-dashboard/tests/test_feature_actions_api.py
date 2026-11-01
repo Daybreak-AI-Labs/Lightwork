@@ -277,3 +277,27 @@ def test_new_scripts_are_served(client):
     for name in ("lightwork-feature-actions.js", "lightwork-tax.js"):
         r = client.get("/static/" + name)
         assert r.status_code == 200 and "javascript" in r.headers["content-type"]
+
+
+def test_customizations_load_waits_for_a_new_specialist_while_the_switch_is_on(client, monkeypatch):
+    import os
+    from pathlib import Path
+
+    from maverick import config
+    from maverick.domain import available_domains
+
+    switch = Path(os.environ["MAVERICK_CONFIG"])
+    switch.write_text("[agent_tests]\nrequire_for_new_specialists = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    raw = _bundle({"bundle/domains/acme_route.toml":
+                   'name = "acme_route"\nallow_tools = ["read_file"]\nmax_risk = "low"\npersona = "A route specialist."\n'})
+    try:
+        held = client.post("/api/v1/customizations/load", content=raw).json()
+        assert held["specialists"] == 0 and held["skipped"] == 1
+        assert "acme_route" not in available_domains()
+        switch.write_text("", encoding="utf-8")
+        config.reset_config_cache()
+        loaded = client.post("/api/v1/customizations/load", content=raw).json()
+        assert loaded["specialists"] == 1 and "acme_route" in available_domains()
+    finally:
+        config.reset_config_cache()

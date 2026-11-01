@@ -11,8 +11,7 @@ name: Compliance Posture
 # Purpose — this is a REGRESSION GATE, not a check of a live production system
 # (CI cannot reach prod). It proves that the documented compliant config + the
 # evidence collector still produce a green posture, so a code/config change can't
-# silently break a customer's ability to pass the gate. (It would have caught the
-# off-host-key false-negative fixed alongside it.) Because this workflow runs on
+# silently break a deployment's ability to pass the gate. Because this workflow runs on
 # pull_request and executes code from the checked-out tree, it must stay on
 # GitHub-hosted runners and must never be retargeted to production or other
 # privileged self-hosted runners. To gate an actual deployment, run

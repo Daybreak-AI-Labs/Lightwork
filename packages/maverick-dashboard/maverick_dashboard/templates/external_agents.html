@@ -169,7 +169,7 @@
   </div>
   {% if outside_agent_tabs %}</div>{% endif %}
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   function slug(text) {
     return String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);

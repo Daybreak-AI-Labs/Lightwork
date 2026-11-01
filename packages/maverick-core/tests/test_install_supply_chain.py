@@ -234,7 +234,7 @@ def test_vps_installer_requires_a_clean_immutable_checkout():
 
 
 def test_vps_installer_installs_the_container_images_core_extras():
-    """W5-48: the VPS path installed only release-runtime while the container
+    """The VPS path installed only release-runtime while the container
     image installed postgres/oidc/s3 too, so MAVERICK_WORLD_BACKEND=postgres
     or OIDC login on a VPS failed with an ImportError at first use."""
     text = _read("deploy/vps/install.sh")
@@ -686,7 +686,6 @@ def test_public_publish_workflow_uses_an_explicit_package_allowlist():
         "packages/maverick-knowledge",
         "apps/installer-cli",
     }
-    assert "apps/vendor-console" not in text
     assert "for d in packages/* apps/*" not in text
     # OIDC is granted only on the publish/sign jobs, never the dependency-
     # installing build job through a workflow-wide permission.
@@ -711,7 +710,22 @@ def test_active_runtime_guidance_never_resolves_first_party_from_public_index():
         assert unsafe.search(_read(path)) is None, path
 
 
-def test_customer_install_guides_do_not_direct_customers_to_clone_internal_source():
+def test_install_guides_use_the_source_install_path():
+    """No PyPI package, binary or container image is published, so the
+    documented install is a clone of the public repository followed by
+    scripts/install_release_cohort.py, written out in docs/source-install.md.
+    The README carries that quickstart, every install guide links the source
+    install guide, and none tells users to install a Lightwork package from
+    public PyPI."""
+    clone = "git clone https://github.com/Daybreak-AI-Labs/Lightwork"
+    cohort_installer = "scripts/install_release_cohort.py"
+    source_install = (REPO_ROOT / "docs" / "source-install.md").read_text(encoding="utf-8")
+    assert clone in source_install
+    assert cohort_installer in source_install
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    assert clone in readme
+    assert cohort_installer in readme
+    assert "(docs/source-install.md)" in readme
     guides = [
         REPO_ROOT / name
         for name in (
@@ -723,14 +737,12 @@ def test_customer_install_guides_do_not_direct_customers_to_clone_internal_sourc
         )
     ]
     guides.extend(sorted((REPO_ROOT / "docs" / "i18n").glob("*/getting-started.md")))
+    public_pypi_install = re.compile(r"\bpipx? install\s+['\"]?maverick-")
     for path in guides:
         text = path.read_text(encoding="utf-8")
-        assert "git clone https://github.com/Daybreak-AI-Labs/Lightwork" not in text, path
-        assert "pipx install 'maverick-agent[installer]'" not in text
-        # Each guide points at a verified binary: a release asset or, since
-        # d827a611, a requested (licensed) customer package.
-        assert ("https://github.com/Daybreak-AI-Labs/Lightwork/releases" in text
-                or "customer package" in text), path
+        assert "pipx install 'maverick-agent[installer]'" not in text, path
+        assert not public_pypi_install.search(text), path
+        assert "source-install.md" in text, path
 
 
 def _metadata(relative_path: str) -> dict:

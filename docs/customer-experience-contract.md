@@ -1,7 +1,7 @@
 # Lightwork customer experience contract
 
-Product requirement established September 27, 2026. This document defines the
-target and acceptance evidence; it does not certify current coverage.
+This document defines the product's experience target and acceptance evidence;
+it does not certify current coverage.
 
 After installation, a customer must be able to set up, configure, operate,
 supervise, improve and recover every supported Lightwork capability inside the
@@ -129,8 +129,6 @@ direct and Copilot entry points, the shared operation, current-state check,
 observable result, repair path and dated evidence. Track implementation and
 acceptance separately. A static form scan supplies review candidates, not proof
 that a required manual step exists or that an ordinary alternative is absent.
-Maintain the current findings in the
-[post-install operation coverage register](./post-install-operation-coverage.md).
 
 Qualify each delivered journey through the real authenticated application using
 an isolated local workspace. Test navigation, actual state changes, current

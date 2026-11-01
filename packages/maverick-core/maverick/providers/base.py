@@ -128,7 +128,7 @@ class Provider(Protocol):
     ) -> LLMResponse: ...
 
 
-# W1-11: ``tool_choice`` is expressed in Anthropic's vocabulary and translated
+# ``tool_choice`` is expressed in Anthropic's vocabulary and translated
 # per provider: ``{"type": "auto" | "any" | "tool" | "none", "name": <tool>,
 # "disable_parallel_tool_use": bool}``. Providers that cannot honour a forced
 # choice clamp it to ``auto`` rather than fail the call.

@@ -1,4 +1,4 @@
-"""Tiered world-model storage: hot SQLite + cold archive files (roadmap: 2027 H1 performance).
+"""Tiered world-model storage: hot SQLite + cold archive files.
 
 The world model (``world_model.py``) accumulates ``episodes`` and
 ``goal_events`` rows forever. Both tables are append-mostly and only the

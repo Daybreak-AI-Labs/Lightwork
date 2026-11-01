@@ -1,4 +1,4 @@
-# Operations / Supply Chain — council-added — Continuous Improvement / OpEx (Lean).
+# Operations / Supply Chain — Continuous Improvement / OpEx (Lean).
 name = "ops_opex"
 compartment = "ops_manufacturing"
 description = "Lean / operational-excellence — VSM, kaizen, 5S, SMED, kanban, A3, DMAIC."

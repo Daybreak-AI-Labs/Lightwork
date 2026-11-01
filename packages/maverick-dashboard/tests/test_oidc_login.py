@@ -200,6 +200,7 @@ def test_callback_happy_path_sets_session_and_redirects(login_env, client, monke
     payload = verify_session(session_raw, SESSION_SECRET)
     assert payload is not None and payload["sub"] == "user-xyz"
     assert payload["idp_email"] == "alice@example.com"
+    assert payload["verified_email"] == "alice@example.com"
     set_cookie = resp.headers["set-cookie"].lower()
     assert "httponly" in set_cookie and "samesite=lax" in set_cookie
 
@@ -582,3 +583,29 @@ def test_consume_tx_falls_back_when_shared_store_errors(monkeypatch):
     assert asyncio.run(ol._consume_tx_once("tx-Z", ol._now() + 600)) is True
     assert asyncio.run(ol._consume_tx_once("tx-Z", ol._now() + 600)) is False
     assert "tx-Z" in ol._CONSUMED_TX_IDS  # fell back to in-process recording
+
+
+@pytest.mark.parametrize("claims", [
+    {"email": "alice@corp.example"},  # no email_verified asserted
+    {"email": "alice@corp.example", "email_verified": "true"},  # not the boolean True
+    {"email": "alice@corp.example", "email_verified": False},
+    {"preferred_username": "alice@corp.example", "email_verified": True},  # a mutable alias, not the email claim
+    {"upn": "alice@corp.example", "email_verified": True},
+    {"sub": "alice@corp.example", "email_verified": True},
+])
+def test_only_a_verified_email_claim_is_the_permission_address(claims):
+    assert ol._oidc_permission_email(claims) == ""
+
+
+def test_the_permission_address_is_the_verified_email_claim_normalised():
+    assert ol._oidc_permission_email({"email": "Alice@Corp.example", "email_verified": True}) == "alice@corp.example"
+
+
+def test_the_session_carries_the_permission_address_only_for_a_signed_in_session():
+    import time
+
+    fresh = {"verified_email": "Alice@Corp.example", "iat": time.time()}
+    assert ol.session_claims(fresh, None, via="session")["verified_email"] == "alice@corp.example"
+    assert "verified_email" not in ol.session_claims(dict(fresh, iat=time.time()), None, via="invite")
+    # The invitation address alone is not a permission address.
+    assert "verified_email" not in ol.session_claims({"idp_email": "alice@corp.example", "iat": time.time()}, None, via="session")

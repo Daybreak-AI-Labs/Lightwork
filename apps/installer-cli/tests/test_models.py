@@ -110,7 +110,7 @@ def test_wizard_model_ids_have_pricing():
         aggregated, or self-hosted catalogs whose model id is a placeholder
         for whatever the endpoint serves (dynamic, zero per-token cost known
         to the kernel).
-      - azure / bedrock: paid hosted providers with dynamic placeholders;
+      - azure / bedrock / vertex: paid hosted providers with dynamic placeholders;
         budget._lookup_price must fail closed for those placeholders rather
         than billing them at a fallback estimate.
       - codex_cli: ChatGPT/Codex subscription via the Codex CLI -- no
@@ -122,7 +122,7 @@ def test_wizard_model_ids_have_pricing():
     except ImportError:
         pytest.skip("maverick-core not installed in this environment")
     unpriced: list[str] = []
-    fail_closed_dynamic = {"azure", "bedrock"}
+    fail_closed_dynamic = {"azure", "bedrock", "vertex"}
     for prov_id, info in models.PROVIDERS.items():
         if prov_id in ("ollama", "openrouter", "tgi", "openai_compatible",
                        "vllm", "codex_cli") or prov_id in fail_closed_dynamic:
@@ -154,6 +154,17 @@ def test_paid_dynamic_hosted_placeholders_fail_closed():
     except ImportError:
         pytest.skip("maverick-core not installed in this environment")
 
-    for model in ("azure", "azure:azure", "bedrock", "bedrock:bedrock"):
+    for model in ("azure", "azure:azure", "bedrock", "bedrock:bedrock", "vertex", "vertex:vertex"):
         with pytest.raises(UnpricedModelError):
             _lookup_price(model)
+
+
+def test_a_typed_vertex_model_is_refused_with_the_google_billing_remedy():
+    """Google bills Vertex AI, so a typed Vertex id never falls back to a Claude API price."""
+    try:
+        from maverick.budget import UnpricedModelError, _lookup_price
+    except ImportError:
+        pytest.skip("maverick-core not installed in this environment")
+
+    with pytest.raises(UnpricedModelError, match="Google Cloud invoices"):
+        _lookup_price("vertex:claude-haiku-4-5@20251001", estimate_only=False)

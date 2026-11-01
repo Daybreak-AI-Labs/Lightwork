@@ -1,4 +1,4 @@
-"""Tests for Wave 11 defensive_validate — grader brittleness rules."""
+"""Tests for defensive_validate — grader brittleness rules."""
 from __future__ import annotations
 
 
@@ -51,7 +51,7 @@ class TestForbiddenPaths:
         assert graded in result.blocked_paths
 
     def test_conftest_warned_not_blocked(self):
-        """Wave 12 (council F8a): conftest.py changes are no longer
+        """conftest.py changes are no longer
         hard-blocked; the grader either accepts the edit (when the
         test_patch doesn't touch conftest) or silently drops it. Warn,
         but don't fail the candidate — real fixes do legitimately
@@ -67,7 +67,7 @@ class TestForbiddenPaths:
         assert result.fn_risk in ("medium", "high")
 
     def test_setup_py_warned_not_blocked(self):
-        """Wave 12 (council F8a): setup.py warns; some fixes legitimately
+        """setup.py warns; some fixes legitimately
         adjust entry_points or extras_require."""
         from maverick.coding_mode import defensive_validate
         patch = (
@@ -79,7 +79,7 @@ class TestForbiddenPaths:
         assert any("setup.py" in w for w in result.warnings)
 
     def test_pyproject_warned_not_blocked(self):
-        """Wave 12 (council F8a): pyproject.toml warns. Many fixes touch
+        """pyproject.toml warns. Many fixes touch
         [tool.*] sections, which are safe."""
         from maverick.coding_mode import defensive_validate
         patch = (
@@ -91,7 +91,7 @@ class TestForbiddenPaths:
         assert any("pyproject.toml" in w for w in result.warnings)
 
     def test_lockfile_still_blocked(self):
-        """Wave 12: lock files remain hard-blocked. Modifying a lock
+        """Lock files remain hard-blocked. Modifying a lock
         file is the surest way to break the grader's dep resolution."""
         from maverick.coding_mode import defensive_validate
         for fname in ("poetry.lock", "Cargo.lock", "yarn.lock", "go.sum"):
@@ -305,7 +305,7 @@ class TestCheatingDetectorMinSize:
 
 
 class TestQuotedPaths:
-    """Wave 12 (council F8c): git quotes paths with spaces / non-ASCII.
+    """git quotes paths with spaces / non-ASCII.
     The pre-Wave-12 \\S+ regex matched only the first whitespace-delimited
     segment, silently bypassing the test-file blocker."""
 
@@ -336,7 +336,7 @@ class TestQuotedPaths:
 
 
 class TestTokenizedCheatingDetector:
-    """Wave 12 (council F8b): token-level overlap is more meaningful
+    """Token-level overlap is more meaningful
     than character-level and immune to whitespace games."""
 
     def test_whitespace_diff_does_not_reduce_overlap(self):

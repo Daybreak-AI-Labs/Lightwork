@@ -31,7 +31,7 @@ class Element {
 }
 
 const template = fs.readFileSync(path.resolve(__dirname,
-  "../../maverick_dashboard/templates/permissions.html"), "utf8");
+  "../../maverick_dashboard/templates/permissions.html"), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const scripts = [...template.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
 
 function response(body, { status = 200, invalid = false } = {}) {

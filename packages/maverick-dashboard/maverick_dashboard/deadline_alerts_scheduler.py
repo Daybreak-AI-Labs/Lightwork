@@ -12,7 +12,10 @@ One daemon thread, started with the dashboard, does two jobs:
   event arrives;
 * every hour it re-checks each active workspace's compliance protections
   (:func:`maverick.compliance_history.recheck_if_due`), so a protection that
-  breaks shows as failing within the hour, with when it changed.
+  breaks shows as failing within the hour, with when it changed;
+* every hour it removes public website chat transcripts past their site's
+  retention (:func:`public_chat_store.purge_expired_if_due`), in every
+  workspace, so an install with no visits or admin views still purges.
 
 The retry pump runs whenever the thread runs; the deadline evaluation only
 when alerts are enabled. Both are wrapped so one bad cycle is logged and the
@@ -21,8 +24,11 @@ next one still happens. Stopped through the dashboard's shutdown supervisor
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
+
+log = logging.getLogger(__name__)
 
 _scheduler_lock = threading.Lock()
 _scheduler_stop: threading.Event | None = None
@@ -59,6 +65,22 @@ def last_cycle() -> dict:
     return dict(_last_cycle.get(_workspace(), {}))
 
 
+def _sweep_public_chat(now: float) -> None:
+    """Remove public chat transcripts past retention, at most once an hour (the store keeps that
+    time). The sweep opens every workspace's file itself, so it runs once per pass, not per
+    workspace. A failure is logged and the next pass still tries."""
+    from . import public_chat_store
+
+    try:
+        failed = public_chat_store.purge_expired_if_due(now=now)
+    except Exception:
+        log.exception("public chat retention sweep failed")
+        return
+    if failed:
+        log.warning("public chat retention sweep did not finish for %d workspace(s); it is tried again "
+                    "at the next pass", len(failed))
+
+
 def _tick(now: float, next_eval: dict[str, float]) -> None:
     """One pass of the thread. The retry pump and the deadline evaluation run
     once per active workspace, each pinned to it like the other background
@@ -72,6 +94,7 @@ def _tick(now: float, next_eval: dict[str, float]) -> None:
                             lambda: webhook_subscriptions.process_due(world=_world(), now=now))
     # Each workspace keeps its own history; a failed check is retried next pass.
     _run_for_active_tenants("compliance re-check", lambda: compliance_history.recheck_if_due(now=now))
+    _sweep_public_chat(now)
 
     def evaluate() -> None:
         key = _workspace()

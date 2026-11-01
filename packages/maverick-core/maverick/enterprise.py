@@ -89,6 +89,7 @@ CLOUD_PROVIDERS = frozenset({
     "anthropic",
     "azure",
     "bedrock",
+    "vertex",
     "deepseek",
     "gemini",
     "moonshot",

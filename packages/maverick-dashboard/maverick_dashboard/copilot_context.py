@@ -700,7 +700,7 @@ _CONTEXTS = tuple(
                 "Changing workspaces or settings cannot make this preview available.",
             ),
             next_steps=(
-                "Ask Daybreak about availability using the email link on this page.",
+                "If something else isn't working, open Help and use Prepare support report.",
             ),
             suggested_questions=(
                 "Can I oversee cloud agents in this installation?",

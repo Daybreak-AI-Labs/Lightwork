@@ -8,6 +8,7 @@ bounded device id selects only a device inside that scope.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import secrets
@@ -19,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import auth
 
+log = logging.getLogger(__name__)
 router = APIRouter()
 
 _DEVICE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
@@ -154,6 +156,37 @@ def _store(request: Request, device_id: str):
         _device_id(device_id),
         tenant=current_tenant_id(),
     )
+
+
+def _purge_expired(store) -> int:
+    """Delete this device's expired Ekko events during an explicit write action (start, pause, resume, stop or the work-value sync).
+
+    The deletion and its retention record commit together. The write action has
+    already been made, so a purge that cannot run is retried by the next explicit
+    write and never fails that write.
+    """
+    if not store.path.exists():
+        return 0
+    try:
+        removed = store.purge_expired()
+    except Exception as exc:
+        log.warning("Ekko retention purge deferred (%s)", type(exc).__name__)
+        return 0
+    try:
+        store.flush_audit_outbox(limit=100)
+    except Exception:
+        # The record is already durable in the outbox; a later status read or write delivers it.
+        pass
+    return removed
+
+
+def _purge_expired_for_device(request: Request, device_id: str) -> int:
+    """The work-value sync's purge for the device it names. A name that is not a device name purges nothing."""
+    try:
+        store = _store(request, device_id)
+    except HTTPException:
+        return 0
+    return _purge_expired(store)
 
 
 def _public_enrollment(value) -> dict | None:
@@ -575,6 +608,7 @@ def ekko_start_session(request: Request, payload: StartSessionIn) -> dict:
     except (ValueError, WorkDiscoveryStoreError) as exc:
         raise HTTPException(status_code=409, detail="Watching could not start. Refresh the page and try again.") from exc
     _audit(EventKind.EKKO_SESSION, session_id=session.session_id, state="running")
+    _purge_expired(store)
     return {"session": _public_session(session), "unsaved": True}
 
 
@@ -604,6 +638,7 @@ def _transition(request: Request, device_id: str, session_id: str, target: str) 
     except WorkDiscoveryStoreError as exc:
         raise HTTPException(status_code=409, detail="That change could not be made. Refresh the page and try again.") from exc
     _audit(EventKind.EKKO_SESSION, session_id=sid, state=target)
+    _purge_expired(store)
     return {"session": _public_session(session)}
 
 

@@ -494,7 +494,8 @@ def denied_tools() -> set[str]:
 # A model spec is a bare id ("claude-sonnet-4-6") or "provider:model-id"
 # ("anthropic:claude-opus-4-8"). Keep the charset tight so a hand-edited /
 # corrupt override can't push junk into model resolution.
-_VALID_MODEL = re.compile(r"^[A-Za-z0-9_.:/-]{1,128}$")
+# "@" admits Vertex AI name@version ids; it is not a path or query character here.
+_VALID_MODEL = re.compile(r"^[A-Za-z0-9_.:/@-]{1,128}$")
 # Override keys under [models]: a role name (orchestrator, coder, ...) or the
 # special "default" that applies to every role. Tight charset so a hand-edited
 # file can't inject junk keys.

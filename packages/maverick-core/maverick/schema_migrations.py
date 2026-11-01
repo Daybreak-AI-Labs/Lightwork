@@ -1,4 +1,4 @@
-"""Online schema migrations (roadmap: 2028 H1 performance).
+"""Online schema migrations.
 
 The world model already runs ordered migrations at open
 (``world_model.MIGRATIONS`` + the ``schema_version`` ledger). What it lacked

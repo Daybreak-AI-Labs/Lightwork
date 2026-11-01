@@ -1039,12 +1039,15 @@ def provider_configuration_state(provider: str) -> dict[str, Any]:
                 base_source = f"environment:{env_name}"
                 break
 
-    sources = [source for source in (key_source, base_source) if source]
+    # Vertex AI has no key: its configured project is the set-up, so it counts.
+    project_present = name == "vertex" and bool(_text(effective.get("project_id")))
+    project_source = field_sources.get("project_id") if project_present else None
+    sources = [source for source in (key_source, base_source, project_source) if source]
     via = " + ".join(dict.fromkeys(sources)) or None
     protected_sources = {"operator overlay", "tenant config"}
     return {
         "name": name,
-        "configured": bool(key_present or base_url),
+        "configured": bool(key_present or base_url or project_present),
         "api_key_configured": key_present,
         "api_key_source": key_source,
         "api_key_env": key_env,
@@ -1092,6 +1095,12 @@ PROVIDER_KEY_ENV_VARS = tuple(
 PROVIDER_CREDENTIAL_ENV_MAP: dict[str, tuple[str, ...]] = {
     **PROVIDER_KEY_ENV_MAP,
     "azure": (*PROVIDER_KEY_ENV_MAP["azure"], "AZURE_OPENAI_AD_TOKEN"),
+    # Vertex AI signs in with Google Application Default Credentials, which
+    # have no provider variable. GOOGLE_APPLICATION_CREDENTIALS is deliberately
+    # not listed: it is shared with other Google tooling, so listing it here
+    # would make such a host look configured. The GitHub Action sanitizer
+    # registry still tracks it as a secret file.
+    "vertex": (),
 }
 PROVIDER_CREDENTIAL_ENV_VARS = tuple(
     dict.fromkeys(v for vs in PROVIDER_CREDENTIAL_ENV_MAP.values() for v in vs)
@@ -1350,8 +1359,12 @@ def any_provider_configured() -> bool:
         if str(pcfg.get("api_key", "")).strip() or str(pcfg.get("base_url", "")).strip():
             return True
         # Bedrock signing with AWS IAM credentials carries no key at all: the
-        # explicit auth_mode is the configuration (W1-10).
+        # explicit auth_mode is the configuration.
         if provider == "bedrock" and str(pcfg.get("auth_mode", "")).strip().lower() == "iam":
+            return True
+        # Vertex AI signs in with Google Application Default Credentials: the
+        # configured project is the configuration (no key exists).
+        if provider == "vertex" and str(pcfg.get("project_id", "")).strip():
             return True
     return False
 
@@ -1657,6 +1670,44 @@ def get_auth_mfa() -> dict:
     }
 
 
+LOCAL_OWNER_TOTP_MODES: tuple[str, ...] = ("optional", "required", "off")
+
+
+def _unrecognised_local_owner_totp(value: object) -> None:
+    """Log that a mode was read as optional. A short plain word is named; anything else is not written out."""
+    shown = f'"{value}"' if isinstance(value, str) and re.fullmatch(r"[a-z]{1,20}", value) else "a value"
+    logging.getLogger(__name__).warning(
+        "[auth.local_owner] totp is %s, which is not one of optional, required or off; "
+        "reading it as optional. Fix the setting.", shown)
+
+
+def get_auth_local_owner_totp() -> str:
+    """``[auth.local_owner] totp``: the owner's authenticator app at local sign-in.
+
+    ``"optional"`` (the default): the owner may turn it on; nothing changes until
+    they do. ``"required"``: the owner must set it up right after the next
+    password sign-in, before anything else. ``"off"``: the option is hidden.
+    An unreadable or unrecognised value is read as ``"optional"``, and a
+    warning says so (``maverick config-lint`` reports it too).
+
+    This never turns off a second factor the owner already has: an enrolled
+    owner is asked for a code whatever this says.
+    """
+    try:
+        table = (load_global_config().get("auth") or {}).get("local_owner") or {}
+    except Exception:
+        return "optional"
+    if not isinstance(table, dict):
+        logging.getLogger(__name__).warning(
+            "[auth.local_owner] is not a table; reading the owner's authenticator app setting as optional.")
+        return "optional"
+    value = table.get("totp", "optional")
+    if isinstance(value, str) and value.strip().lower() in LOCAL_OWNER_TOTP_MODES:
+        return value.strip().lower()
+    _unrecognised_local_owner_totp(value)
+    return "optional"
+
+
 def get_ip_allowlist() -> dict:
     """``[auth.ip_allowlist]``: network addresses allowed to use the dashboard.
 
@@ -1694,7 +1745,10 @@ def get_auth_sessions() -> dict:
     """Installation-wide browser limits and ended-session retention."""
     if config_source_errors(include_tenant=False):
         raise ValueError("Sign-in settings cannot be read.")
-    authentication = load_global_config().get("auth", {})
+    loaded = load_global_config()
+    if config_source_errors(include_tenant=False):  # the load itself may have found it
+        raise ValueError("Sign-in settings cannot be read.")
+    authentication = loaded.get("auth", {})
     if not isinstance(authentication, dict):
         raise ValueError("Sign-in settings must contain named choices.")
     cfg = authentication.get("sessions", {})
@@ -1816,6 +1870,52 @@ def get_knowledge() -> dict:
         "api_key": cfg.get("api_key", ""),
         # Never reuse the embedding provider's key for the vector store.
         "store_api_key": cfg.get("store_api_key", ""),
+    }
+
+
+class KnowledgeSourcesConfigError(ValueError):
+    """An invalid [knowledge_sources] limit, named without its configured value."""
+
+
+def get_knowledge_sources() -> dict:
+    """Return the ``[knowledge_sources]`` bounds for saved company folders and spaces.
+
+    ``max_items`` (default 64, 1-1000) bounds the direct items one refresh reads,
+    ``max_pages`` (default 16, 1-200) the provider listing pages read to find them,
+    ``max_download_mib`` (default 4, 1-32) one downloaded document and
+    ``max_text_kib`` (default 256, 1-8192) the extracted text one refresh keeps,
+    and ``max_refresh_minutes`` (default 5, 1-60) the wall-clock time one refresh may run.
+    ``permission_filter`` (default "off") set to "by_email" reads each item's sharing
+    permissions at refresh and shows an item only to a signed-in person whose verified
+    email, or whose email domain, the item is shared with, or to anyone when it is shared
+    by link. The verified email is an OIDC ``email`` claim the provider marks
+    ``email_verified``; SAML sign-ins have none, so they see no items. Group grants are
+    not expanded, so group-only items are withheld.
+    The defaults are the historical bounds. A malformed value raises instead of
+    falling back, so a reviewed bound never changes silently.
+    """
+    cfg = load_config().get("knowledge_sources", {})
+    if not isinstance(cfg, dict):
+        raise KnowledgeSourcesConfigError("knowledge_sources must be a table of whole-number limits")
+
+    def bounded(key: str, default: int, low: int, high: int) -> int:
+        value = cfg.get(key, default)
+        if type(value) is not int or not low <= value <= high:
+            raise KnowledgeSourcesConfigError(
+                f"knowledge_sources.{key} must be a whole number from {low} to {high}"
+            )
+        return value
+
+    mode = cfg.get("permission_filter", "off")
+    if mode not in ("off", "by_email"):
+        raise KnowledgeSourcesConfigError('knowledge_sources.permission_filter must be "off" or "by_email"')
+    return {
+        "permission_filter": mode,
+        "max_items": bounded("max_items", 64, 1, 1000),
+        "max_pages": bounded("max_pages", 16, 1, 200),
+        "max_download_mib": bounded("max_download_mib", 4, 1, 32),
+        "max_text_kib": bounded("max_text_kib", 256, 1, 8192),
+        "max_refresh_minutes": bounded("max_refresh_minutes", 5, 1, 60),
     }
 
 
@@ -2706,6 +2806,57 @@ def get_support() -> dict:
             "contact_email": email if _SUPPORT_EMAIL_RE.fullmatch(email) else ""}
 
 
+_CONTACT_CENTRE_PROVIDERS = ("off", "zendesk", "webhook")
+_CONTACT_CENTRE_SUBDOMAIN_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
+_CONTACT_CENTRE_EMAIL_RE = re.compile(r"[^@\s\"'<>,;]{1,64}@[^@\s\"'<>,;]{1,190}\.[A-Za-z]{2,24}")
+
+
+def _https_or_empty(value: object) -> str:
+    """An https address without credentials, or ``""``."""
+    from urllib.parse import urlsplit
+    text = str(value or "").strip()
+    try:
+        parts = urlsplit(text)
+        _ = parts.port  # raises ValueError for an out-of-range port
+    except ValueError:
+        return ""
+    if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
+        return ""
+    return text
+
+
+def get_contact_centre() -> dict:
+    """Return the ``[contact_centre]`` section: where a conversation goes when a person takes it over.
+
+    ``provider`` is ``off`` (default: nothing is sent), ``zendesk`` or ``webhook``.
+    An unknown provider reads as ``off``. The Zendesk subdomain must be a single
+    host label; the email must look like an address; the webhook and dashboard
+    addresses must be https without credentials. Anything else reads as empty so
+    the setting is reported as incomplete rather than sent somewhere unexpected.
+    Secrets (the Zendesk API token and webhook signing secret) are not returned
+    here; :mod:`maverick.contact_centre` reads them from the environment or the
+    sealed settings value.
+    """
+    cfg = load_config().get("contact_centre", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    provider = str(cfg.get("provider") or "off").strip().lower()
+    if provider not in _CONTACT_CENTRE_PROVIDERS:
+        provider = "off"
+    subdomain = str(cfg.get("zendesk_subdomain") or "").strip()
+    email = str(cfg.get("zendesk_email") or "").strip()
+    raw_max = cfg.get("max_messages", 20)
+    max_messages = raw_max if type(raw_max) is int and 1 <= raw_max <= 50 else 20
+    return {
+        "provider": provider,
+        "zendesk_subdomain": subdomain if _CONTACT_CENTRE_SUBDOMAIN_RE.fullmatch(subdomain) else "",
+        "zendesk_email": email if _CONTACT_CENTRE_EMAIL_RE.fullmatch(email) else "",
+        "webhook_url": _https_or_empty(cfg.get("webhook_url")),
+        "dashboard_url": _https_or_empty(cfg.get("dashboard_url")).rstrip("/"),
+        "max_messages": max_messages,
+    }
+
+
 def get_fleet_memory() -> dict:
     """Return the ``[fleet_memory]`` section (agent-agnostic learning plane).
     OFF by default: exposing governed memory to third-party agents is an
@@ -2836,8 +2987,8 @@ def get_billing_stripe() -> dict:
     from ``MAVERICK_STRIPE_SECRET_KEY`` / ``MAVERICK_STRIPE_WEBHOOK_SECRET`` via
     the secret provider, else from the sealed values saved on the All settings
     page (read only by :mod:`maverick.billing_stripe`) -- so this returns only
-    the enable flag, the metered-usage pricing flag (a pricing decision is
-    pending; default off bills the platform fee only), the currency, and the
+    the enable flag, the metered-usage flag (default off: only the platform
+    fee is billed), the currency, and the
     per-plan ``prices`` map of Stripe recurring price ids for the platform
     subscription fee."""
     billing = load_config().get("billing", {})
@@ -2852,7 +3003,7 @@ def get_billing_stripe() -> dict:
     currency = cfg.get("currency", "usd")
     return {
         "enable": _strict_config_bool(cfg, "enable", False),
-        # The pricing-decision flag: when off (default) only the recurring
+        # The metered-usage flag: when off (default) only the recurring
         # platform fee is billed; the metered model-usage line items are computed
         # but NOT pushed to Stripe. No markup is hardcoded here -- the rate is
         # whatever RateCard the operator supplies when generating the invoice.
@@ -3698,7 +3849,7 @@ def get_consequence() -> dict:
 
 
 def get_earned_autonomy() -> dict:
-    """Return the ``[earned_autonomy]`` section (Bet 5: consequence-proven trust).
+    """Return the ``[earned_autonomy]`` section (consequence-proven trust).
 
     Agents earn policy-auto-approval per action type by proving they predict
     consequences correctly (maverick.earned_autonomy). OFF by default: enabling
@@ -4080,7 +4231,7 @@ def get_value(*, config: dict | None = None) -> dict:
     (``[value.departments.<name>]`` tables with ``hourly_rate`` /
     ``hours_per_task``) so legal work can be priced differently from support.
     ``enable`` only shows/hides the dashboard page; the numbers are always safe
-    (read-only, they never tune anything -- the council's warning that cost
+    (read-only, they never tune anything -- cost
     pressure must not defund safety). Defaults are deliberately conservative so
     an out-of-box ROI claim is defensible, not inflated.
     Env override: ``MAVERICK_VALUE_HOURLY_RATE`` / ``MAVERICK_VALUE_HOURS``.

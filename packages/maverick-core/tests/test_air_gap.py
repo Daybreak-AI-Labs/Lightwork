@@ -1,6 +1,7 @@
 """Air-gapped preflight audit: flag remote providers / egress / sandbox network."""
 from __future__ import annotations
 
+import pytest
 from click.testing import CliRunner
 from maverick.air_gap import audit
 from maverick.cli import main
@@ -154,8 +155,38 @@ def test_flags_outbound_webhook_telemetry_sink():
     assert any("webhooks" in v.lower() for v in rep["violations"])
 
 
+def _fully_local_with(observability: dict) -> dict:
+    return {"models": _all_local_models(), "egress": {"deny": ["*"]},
+            "sandbox": {"backend": "docker"}, "enterprise": {"mode": True},
+            "observability": observability}
+
+
+@pytest.mark.parametrize(("switch", "value"), [
+    ("otel_exporter", "otlp"), ("otlp_metrics", True), ("otlp_metrics", "1")])
+def test_flags_otlp_telemetry_switches_in_config(switch, value):
+    # The All settings page writes these into [observability]; the audit reads the table.
+    rep = audit(config=_fully_local_with({switch: value}))
+    assert rep["clean"] is False
+    assert any(switch in v for v in rep["violations"])
+
+
+@pytest.mark.parametrize(("switch", "value"), [
+    ("otel_exporter", ""), ("otel_exporter", False), ("otel_exporter", "false"),
+    ("otel_exporter", "0"), ("otel_exporter", "off"), ("otel_exporter", "console"),
+    ("otlp_metrics", False), ("otlp_metrics", "false"), ("otlp_metrics", "0"),
+    ("otlp_metrics", "off")])
+def test_off_otlp_telemetry_switches_stay_clean(switch, value):
+    # A TOML false, or a word the runtime reads as off, is not a telemetry sink.
+    assert audit(config=_fully_local_with({switch: value}))["clean"] is True
+
+
+@pytest.mark.parametrize("value", [False, "false", "0", "off", ""])
+def test_off_sentry_dsn_stays_clean(value):
+    assert audit(config=_fully_local_with({"sentry_dsn": value}))["clean"] is True
+
+
 def test_deny_all_egress_without_enterprise_mode_is_flagged():
-    # W2-90: the runtime egress guard (egress_guard.py, wrapping httpx/requests
+    # The runtime egress guard (egress_guard.py, wrapping httpx/requests
     # across ~80 connectors and every provider SDK) only enforces default-deny
     # when enterprise mode is on -- enterprise.egress_permitted() returns True
     # unconditionally otherwise, whatever [egress] says. A config with

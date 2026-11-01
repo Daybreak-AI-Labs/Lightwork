@@ -142,3 +142,6 @@ agent_run_ledger.json
 # Agent per-instance forensics sidecars (model result text, cost, diffs)
 /forensics/
 /.browser-runtime/
+# Operator-specific Terraform inputs that identify people (deploy/aws/terraform/
+# local.auto.tfvars.example is the tracked template).
+deploy/aws/terraform/local.auto.tfvars

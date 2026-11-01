@@ -532,7 +532,7 @@ def create_tenant(
     tid = _validate_id(tenant_id)
     quota = _quota_value(max_daily_dollars)
     display_name = display_name.strip()
-    # Provisioning a named tenant IS multi-tenant mode — a paid (Platinum)
+    # Provisioning a named tenant IS multi-tenant mode — a tier-gated (Platinum)
     # capability. Fail-open: a no-op unless license enforcement is on and the
     # deployment isn't entitled (a genuine single-tenant box never calls this —
     # it uses the default tenant).
@@ -1057,6 +1057,26 @@ def _erasure_unlink(root, entries, check):
         path.rmdir() if entry["directory"] else path.unlink()
 
 
+def _assert_no_legal_hold(tid: str) -> None:
+    """Refuse erasing a removed workspace while one of its legal matters is active.
+
+    The matter ledger lives inside the workspace's own tree, so erasing the tree
+    would remove the hold with the records it protects.  Fails closed.
+    """
+    from ..ediscovery import active_matter_count
+    from ..paths import tenant_scope
+
+    try:
+        with tenant_scope(tenant=tid):
+            held = active_matter_count()
+    except Exception as exc:  # failure-policy: fail_closed -- an unreadable ledger holds the workspace
+        raise TenantRegistryError("Legal holds could not be checked, so nothing was erased.") from exc
+    if held:
+        raise TenantRegistryError(
+            "A legal hold is active in this workspace, so it cannot be erased. "
+            "Ask your records administrator to release the hold first.")
+
+
 def erase_removed_tenant(tenant_id: str, *, revision: str, operation: str, actor: str,
                         context: str, previous_attempt: str = "", effect_guard=None) -> dict:
     """Reviewed retired-only purge using the native deletion history.
@@ -1082,6 +1102,7 @@ def erase_removed_tenant(tenant_id: str, *, revision: str, operation: str, actor
             if original["actor"] != actor or original["context"] != context:
                 raise PermissionError("This original erasure belongs to another account or workspace.")
             return dict(original)
+        _assert_no_legal_hold(tid)
         value, saved, entries = _erasure_snapshot_unlocked(tid, check)
         if value["revision"] != revision or value["previous_attempt"] != previous_attempt:
             raise ValueError("The removed workspace changed. Review its remaining records again.")
@@ -1308,7 +1329,7 @@ def tenant_over_quota(tenant_id: str | None) -> str | None:
     if spent >= cap:
         return (f"workspace {tid!r} is over its daily spend cap "
                 f"(${spent:.2f} >= ${cap:.2f}); resets at midnight UTC")
-    # Runs in flight hold the allowance they may still spend (W2-83). Without
+    # Runs in flight hold the allowance they may still spend. Without
     # counting them here the gate admitted a run that reserve_tenant_budget
     # then granted $0, so it was created, started, and died on its first
     # model call with "budget exceeded" instead of a clean over-quota refusal.

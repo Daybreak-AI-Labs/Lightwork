@@ -153,6 +153,9 @@ def can_read_approval(request, approval, world=None) -> bool:
     if settings_quorum.is_settings_approval(approval) and auth.has_global_permission(request, "admin"):
         if settings_quorum.has_bound_admin_review(approval):
             return True
+    from . import agent_publish_bypass
+    if agent_publish_bypass.is_bypass(approval) and agent_publish_bypass.may_decide(request):
+        return True  # a pack editor decides a bypass request, so can read its card
     if world is None:
         from ._shared import _world
         world = _world()

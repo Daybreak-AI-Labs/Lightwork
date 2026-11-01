@@ -18,12 +18,13 @@ python build.py
 
 The command runs `cargo build --locked --release --target wasm32-wasip2`, verifies
 the component header and writes `build/lightwork-zed-preview.zip` and its SHA256.
-The archive contains `extension.wasm`, the complete source/lock/task inputs and a
-build manifest with compiler versions and each file's SHA256. Archive order and
-timestamps are normalized. It is a release-engineering input, not a signed store
-installer. Cargo may fetch public locked dependencies on the first build. Rustup
-may fetch the pinned toolchain/target when absent. The build script does not
-invoke an installer or change Rust defaults.
+The archive contains `extension.wasm`, the complete source/lock/task inputs, the
+`LICENSE` and `NOTICE` files and a build manifest with compiler versions and
+each file's SHA256. Archive order and timestamps are normalized. It is a
+release-engineering input, not a signed store installer. Cargo may fetch
+public locked dependencies on the first build. Rustup may fetch the pinned
+toolchain/target when absent. The build script does not invoke an installer or
+change Rust defaults.
 
 For local installed-host qualification, use Zed **Extensions → Install Dev
 Extension** and select this source directory (or the extracted source bundle).

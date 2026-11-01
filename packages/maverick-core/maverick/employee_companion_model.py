@@ -21,7 +21,7 @@ from .paths import current_tenant_id_strict, tenant_scope
 # CLI adapter can execute work on the host and is deliberately not eligible.
 _DRAFT_PROVIDERS = frozenset({
     "anthropic", "openai", "openrouter", "ollama", "gemini", "moonshot",
-    "deepseek", "xai", "tgi", "vllm", "azure", "bedrock", "openai_compatible",
+    "deepseek", "xai", "tgi", "vllm", "azure", "bedrock", "vertex", "openai_compatible",
 })
 _TURN_CAPS = {
     "max_dollars": 0.5, "max_input_tokens": 16000,

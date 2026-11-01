@@ -45,7 +45,7 @@
 {% endmacro %}
 
 {% macro script() %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   var pw = document.getElementById('owner-password');

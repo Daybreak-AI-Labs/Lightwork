@@ -8,7 +8,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path");
 const {JSDOM} = require("jsdom");
 const pkg = path.resolve(__dirname, "../../maverick_dashboard");
-const read = name => fs.readFileSync(path.join(pkg, name), "utf8").replace(/\r\n/g, "\n");
+const read = name => fs.readFileSync(path.join(pkg, name), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>").replace(/\r\n/g, "\n");
 const ui = read("static/lightwork-ui.js");
 const flush = async () => { for (let i = 0; i < 20; i++) await new Promise(setImmediate); };
 

@@ -192,3 +192,58 @@ def test_dashboard_consent_attributes_requester(wm, monkeypatch):
         reset_goal_context(tokens)
     assert decision is None                       # timed out: no human decision
     assert captured.get("requested_by") == "u:alice"
+
+
+def test_approval_states_batch_matches_per_id_state(wm, monkeypatch):
+    # The audit binder reads quorum state for a whole window through one batch;
+    # every entry must equal the per-id reader for the same approval.
+    monkeypatch.setattr(dual_control, "allow_self_approval", lambda: True)
+    pending = wm.create_approval("p", risk="high", approvals_required=2)
+    quorum = wm.create_approval("q", risk="critical", approvals_required=2)
+    solo = wm.create_approval("s", risk="low", approvals_required=1)
+    wm.decide_approval(quorum, "approved", decided_by="u:alice")
+    wm.decide_approval(quorum, "approved", decided_by="u:bob")   # quorum met
+    wm.decide_approval_audited(solo, "approved", decided_by="u:carol")  # audit row pending
+    listed = wm.list_approvals(limit=50)
+    batch = wm.approval_states(listed)
+    assert set(batch) == {pending, quorum, solo}
+    for approval in listed:
+        assert batch[approval.id] == wm.approval_state(approval.id)
+    assert batch[pending]["approved_count"] == 0 and batch[pending]["effective"] is False
+    assert batch[quorum]["approvers"] == ["u:alice", "u:bob"] and batch[quorum]["effective"]
+    assert batch[solo]["effective"] is False and batch[solo]["audit_pending_count"] == 1
+    assert wm.approval_states([]) == {}
+
+
+def test_approvals_requested_between_is_the_python_window_filter(wm, monkeypatch):
+    # The audit binder reads its window in SQL. Rows, order and every field must
+    # equal list_approvals filtered on requested_at, for ties and both edges,
+    # and only the window's rows may be decoded.
+    import random
+
+    from maverick import world_model
+
+    rng = random.Random(7)
+    ids = [wm.create_approval(f"a{i}", risk="low", approvals_required=1) for i in range(120)]
+    stamps = [float(rng.choice([100, 150, 200, 200, 250, 300, 300.5, 400])) for _ in ids]
+    with wm._writing() as conn:
+        for approval_id, stamp in zip(ids, stamps, strict=True):
+            conn.execute("UPDATE approvals SET requested_at = ? WHERE id = ?", (stamp, approval_id))
+    everything = wm.list_approvals(limit=10_000)
+    assert len(everything) == len(ids)
+    for since, until in [(100.0, 300.0), (200.0, 200.0), (150.0, 150.0), (300.5, 1e12),
+                         (0.0, 1e12), (401.0, 500.0), (300.0, 100.0)]:
+        expected = [a for a in everything if since <= float(a.requested_at or 0) <= until]
+        assert wm.approvals_requested_between(since, until) == expected
+
+    decoded: list[int] = []
+    real_decode = world_model._approvals_from_rows
+
+    def spy(rows):
+        decoded.append(len(rows))
+        return real_decode(rows)
+
+    monkeypatch.setattr(world_model, "_approvals_from_rows", spy)
+    in_window = [a for a in everything if a.requested_at == 200.0]
+    assert [a.id for a in wm.approvals_requested_between(200.0, 200.0)] == [a.id for a in in_window]
+    assert decoded == [len(in_window)]

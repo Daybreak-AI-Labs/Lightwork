@@ -39,7 +39,7 @@ CATALOG = (
     {"name": "Usage and cost receipts", "stage": "bounded", "feature": None, "href": "/billing", "permission": "view",
      "scope": "Lightwork keeps its own record of what each task used and what it cost, including tasks that were retried.",
      "limit": "This is not your AI provider's bill. Some older usage recorded before a crash may be missing, so compare with your provider's statement."},
-    {"name": "Windows customer application", "stage": "release_candidate", "feature": None, "href": None, "permission": "view",
+    {"name": "Windows desktop application", "stage": "release_candidate", "feature": None, "href": None, "permission": "view",
      "how": "Ask your administrator for the Windows installer.",
      "scope": "A Windows app with built-in setup, updates, repair and recovery.",
      "limit": "It is still being tested on fresh computers before its general release."},

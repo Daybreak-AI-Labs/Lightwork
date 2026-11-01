@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import logging
 import threading
 from contextlib import contextmanager
 
@@ -489,7 +490,7 @@ def test_rls_apply_raises_when_policy_cannot_be_installed_or_verified(monkeypatc
         world._apply_rls()
 
 def test_rls_covers_tables_added_after_the_v10_tenant_migration():
-    # Council #7: projects (v15) and fact_history (v18) carry tenant_id but were
+    # projects (v15) and fact_history (v18) carry tenant_id but were
     # absent from the RLS set, so a PG deployment left them app-layer-only. They
     # must be RLS-scoped, while staying OUT of the v10 column-add migration list.
     assert "projects" in postgres._RLS_TABLES
@@ -592,7 +593,7 @@ def test_explicit_env_off_overrides_enterprise(_clean_toggle_env, monkeypatch):
 
 
 def test_list_goals_filters_by_domain_and_project_id(monkeypatch):
-    # W1-49: SQLite's list_goals accepts domain=/project_id= (used by the
+    # SQLite's list_goals accepts domain=/project_id= (used by the
     # dashboard's project-detail page and domain-scoped inbox); the Postgres
     # port didn't, so both callers 500'd with a TypeError on this backend.
     world = PostgresWorldModel.__new__(PostgresWorldModel)
@@ -718,7 +719,7 @@ def test_preflight_skipped_when_explicitly_opted_in(monkeypatch):
 
 @pytest.mark.skipif(not _HAS_PSYCOPG, reason="psycopg not installed")
 class TestReconnectOnBrokenConnection:
-    """W1-54: the single shared (non-pooled) connection must self-heal after
+    """The single shared (non-pooled) connection must self-heal after
     a managed-Postgres failover or idle-connection reset instead of raising
     OperationalError on every call until the process restarts."""
 
@@ -841,6 +842,138 @@ class TestReconnectOnBrokenConnection:
             ("SELECT set_config('maverick.tenant', %s, true)", ("acme",)),
             ("SELECT 1", None),
         ]
+
+
+class _RoleCursor:
+    """Answers the login-role lookup; any other statement is accepted silently."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self._row = None
+
+    def execute(self, sql, params=None):
+        if "pg_roles" in sql:
+            if self._conn.lookup_fails:
+                raise RuntimeError("permission denied for table pg_roles")
+            self._row = self._conn.role_row
+        else:
+            self._row = None
+
+    def fetchone(self):
+        return self._row
+
+    def fetchall(self):
+        return []
+
+    def close(self):
+        pass
+
+
+class _RoleConnection:
+    def __init__(self, role_row=(False, False), lookup_fails=False):
+        self.closed = 0
+        self.role_row = role_row
+        self.lookup_fails = lookup_fails
+
+    def cursor(self):
+        return _RoleCursor(self)
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        self.closed = 1
+
+
+def _open_as(monkeypatch, *, conn=None, rls=False, enterprise=False):
+    """Open a Postgres world on a fake login: no server, no migrations, no RLS DDL."""
+    from maverick.postgres_io import BoundedConnection
+
+    conn = conn or _RoleConnection()
+    monkeypatch.setattr(BoundedConnection, "connect", lambda *args, **kwargs: conn)
+    monkeypatch.setattr(postgres, "_rls_enabled", lambda: rls)
+    monkeypatch.setattr(postgres, "_enterprise_default", lambda: enterprise)
+    monkeypatch.setattr(postgres, "_pool_size", lambda: 0)
+    monkeypatch.setattr(PostgresWorldModel, "_migrate", lambda self: None)
+    monkeypatch.setattr(PostgresWorldModel, "_preflight_rls_or_die", lambda self: None)
+    monkeypatch.setattr(PostgresWorldModel, "_apply_rls", lambda self: None)
+    return PostgresWorldModel("postgresql://fake")
+
+
+def _role_warnings(caplog):
+    return [r for r in caplog.records
+            if r.levelno == logging.WARNING and "row-level security" in r.getMessage()]
+
+
+@pytest.mark.skipif(not _HAS_PSYCOPG, reason="psycopg not installed")
+class TestDatabaseLoginBypassingRls:
+    """A superuser or BYPASSRLS login skips every RLS policy, FORCE included, so
+    the tenant policies protect nothing for it. Checked once, when the backend
+    first connects."""
+
+    def test_a_superuser_login_warns_once_and_is_reported(self, monkeypatch, caplog):
+        with caplog.at_level(logging.WARNING, logger=postgres.__name__):
+            world = _open_as(monkeypatch, conn=_RoleConnection(role_row=(True, False)), rls=True)
+
+        assert len(_role_warnings(caplog)) == 1
+        assert "superuser" in _role_warnings(caplog)[0].getMessage()
+        assert "NOSUPERUSER NOBYPASSRLS" in _role_warnings(caplog)[0].getMessage()
+        assert "superuser" in world.rls_bypass_reason
+
+    def test_a_bypassrls_login_warns_once_and_is_reported(self, monkeypatch, caplog):
+        with caplog.at_level(logging.WARNING, logger=postgres.__name__):
+            world = _open_as(monkeypatch, conn=_RoleConnection(role_row=(False, True)), rls=True)
+
+        assert len(_role_warnings(caplog)) == 1
+        assert "BYPASSRLS" in world.rls_bypass_reason
+
+    def test_a_login_with_neither_privilege_is_silent(self, monkeypatch, caplog):
+        with caplog.at_level(logging.WARNING, logger=postgres.__name__):
+            world = _open_as(monkeypatch, conn=_RoleConnection(role_row=(False, False)), rls=True)
+
+        assert _role_warnings(caplog) == []
+        assert world.rls_bypass_reason is None
+
+    def test_enterprise_mode_relying_on_rls_refuses_to_open(self, monkeypatch):
+        conn = _RoleConnection(role_row=(True, False))
+
+        with pytest.raises(RuntimeError, match="row-level security.*superuser"):
+            _open_as(monkeypatch, conn=conn, rls=True, enterprise=True)
+
+        assert conn.closed == 1  # refused before any DDL, and the connection is released
+
+    def test_rls_without_enterprise_mode_only_warns(self, monkeypatch, caplog):
+        conn = _RoleConnection(role_row=(True, False))
+        with caplog.at_level(logging.WARNING, logger=postgres.__name__):
+            world = _open_as(monkeypatch, conn=conn, rls=True, enterprise=False)
+
+        assert conn.closed == 0
+        assert len(_role_warnings(caplog)) == 1
+        assert "superuser" in world.rls_bypass_reason
+
+    def test_enterprise_mode_without_rls_only_warns(self, monkeypatch, caplog):
+        # Without the policies in use, the app-layer predicates still isolate
+        # tenants, so refusing would be a stricter rule than the one written down.
+        with caplog.at_level(logging.WARNING, logger=postgres.__name__):
+            world = _open_as(monkeypatch, conn=_RoleConnection(role_row=(True, False)),
+                             rls=False, enterprise=True)
+
+        assert len(_role_warnings(caplog)) == 1
+        # No policy is in use, so nothing is bypassed: the health check stays ok.
+        assert world.rls_bypass_reason is None
+
+    def test_a_failed_role_check_warns_once_and_never_crashes_the_open(self, monkeypatch, caplog):
+        with caplog.at_level(logging.WARNING, logger=postgres.__name__):
+            world = _open_as(monkeypatch, conn=_RoleConnection(lookup_fails=True),
+                             rls=True, enterprise=True)
+
+        assert world.rls_bypass_reason is None
+        warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "Could not check" in warnings[0]
 
 
 def test_create_approval_notifies_with_the_committing_world(monkeypatch):

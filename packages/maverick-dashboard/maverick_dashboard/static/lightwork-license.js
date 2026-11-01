@@ -6,7 +6,7 @@
   'use strict';
 
   var API = '/api/v1/admin/license';
-  var REPLACE = 'This replaces the license installed now. Paid features change to match the new license straight away.';
+  var REPLACE = 'This replaces the license installed now. Licensed features change to match the new license straight away.';
   var page = document.getElementById('license-page');
   if (!page) return;
 
@@ -69,7 +69,7 @@
       ['Licensed to', lic.customer],
       ['Plan', lic.plan],
       ['Add-ons', (lic.add_ons || []).join(', ') || 'None'],
-      ['Paid features added on their own', (lic.features || []).join(', ')],
+      ['Features added on their own', (lic.features || []).join(', ')],
       ['Ends on', lic.expires ? when(lic.expires) : 'Does not end'],
       ['Number of people', lic.seats ? String(lic.seats) : '']
     ]);
@@ -86,7 +86,7 @@
       ['Add-ons', (summary.add_ons || []).join(', ') || 'None']
     ]));
     var list = el('ul', 'license-features');
-    list.setAttribute('aria-label', 'Paid features');
+    list.setAttribute('aria-label', 'Licensed features');
     (summary.features || []).forEach(function (f) {
       var li = el('li');
       li.appendChild(el('span', null, f.label));
@@ -151,7 +151,7 @@
     var details = el('details', 'license-more');
     details.appendChild(el('summary', null, 'Technical details'));
     details.appendChild(el('p', 'muted', 'The public key that signed this license. Whoever runs your server adds it ' +
-      'to the trusted license keys so the license turns on paid features.'));
+      'to the trusted license keys so the license turns on its features.'));
     details.appendChild(el('code', null, result.signed_with.public_key));
     var copy = el('button', 'btn btn--ghost', 'Copy the public key');
     copy.type = 'button';
@@ -204,7 +204,7 @@
           try {
             var done = await installing(function (confirmed) { return send({confirm: confirmed}); });
             if (!done) { say('license-file-status', 'Nothing was installed.'); go.disabled = false; return; }
-            say('license-file-status', 'The license is installed. Paid features now follow it.');
+            say('license-file-status', 'The license is installed. Licensed features now follow it.');
             go.remove();
             await refresh();
           } catch (failure) {

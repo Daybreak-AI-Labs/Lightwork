@@ -1,4 +1,4 @@
-"""License compliance scanner (ROADMAP 2028 H1)."""
+"""License compliance scanner."""
 from __future__ import annotations
 
 from maverick.license_scan import (

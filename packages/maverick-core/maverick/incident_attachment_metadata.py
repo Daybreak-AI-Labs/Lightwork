@@ -22,7 +22,7 @@ import json
 import math
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -686,6 +686,65 @@ def _append_history(
     raw["history"] = history
 
 
+def principal_ref_for_subject(tenant_id: str, subject: str) -> str:
+    """The uploader reference stored for one authenticated subject in one workspace.
+
+    The reference is a one-way digest, so a stored record names its uploader only
+    through it.  A legal matter names a person with the same derivation.
+    """
+
+    tenant = canonical_tenant_id(tenant_id)
+    digest = hashlib.sha256(
+        f"lightwork.incident-attachment.identity.v1:{tenant}:{subject}".encode()
+    ).hexdigest()
+    return f"incident-principal-{digest[:32]}"
+
+
+def _default_record_store() -> GovernedRecordStore:
+    return GovernedRecordStore(
+        "incident_attachment_metadata",
+        "IAT",
+        "incident_attachment_metadata",
+        event_kind="incident_attachment_metadata_changed",
+    )
+
+
+def records_for_principal_refs(
+    tenant_id: str, principal_refs: Collection[str], *, limit: int = 10_000
+) -> list[IncidentAttachmentMetadata]:
+    """Validated attachment records of one workspace whose uploader is in ``principal_refs``.
+
+    Read only, and the caller must already be in that workspace's scope.  More
+    than ``limit`` stored records is refused, so a caller never works from a partial list.
+    """
+
+    tenant = _tenant(tenant_id)
+    rows = _default_record_store().list(limit=limit + 1)
+    if len(rows) > limit:
+        raise IncidentAttachmentIntegrityError(
+            "too many incident attachment records to list completely"
+        )
+    wanted = set(principal_refs)
+    return [
+        _normalize_record(raw)
+        for raw in rows
+        if raw.get("tenant_id") == tenant and raw.get("principal_ref") in wanted
+    ]
+
+
+def _matter_refusal(tenant_id: str, metadata: IncidentAttachmentMetadata, *, actor: str) -> str | None:
+    """The plain refusal text when a legal matter holds this attachment (see ``ediscovery``)."""
+
+    from .ediscovery import incident_attachment_refusal
+
+    return incident_attachment_refusal(
+        tenant_id,
+        principal_ref=metadata.principal_ref,
+        created_at=metadata.created_at,
+        actor=actor,
+    )
+
+
 class IncidentAttachmentStore:
     """Tenant/principal-bound durable incident attachment metadata authority."""
 
@@ -752,12 +811,7 @@ class IncidentAttachmentStore:
             max_attachments, "max_attachments", 1, _MAX_ATTACHMENTS
         )
         self._clock = clock
-        self._records = record_store or GovernedRecordStore(
-            "incident_attachment_metadata",
-            "IAT",
-            "incident_attachment_metadata",
-            event_kind="incident_attachment_metadata_changed",
-        )
+        self._records = record_store or _default_record_store()
 
     @property
     def backend_kind(self) -> str:
@@ -1101,6 +1155,11 @@ class IncidentAttachmentStore:
         current = _normalize_record(current_raw)
         if current.status != "active":
             raise IncidentAttachmentConflict("deleted attachment metadata is immutable")
+        # A rebind overwrites the binding in place and keeps no copy of the earlier one, so
+        # a held record cannot be changed at all while its matter is active.
+        refusal = _matter_refusal(self.tenant_id, current, actor=actor)
+        if refusal is not None:
+            raise IncidentAttachmentConflict(refusal)
         incident_authority = self._resolve_incident(
             current.incident_kind, current.incident_id
         )
@@ -1236,6 +1295,9 @@ class IncidentAttachmentStore:
         current = _normalize_record(current_raw)
         if current.status != "active":
             raise IncidentAttachmentConflict("attachment is already deleted")
+        refusal = _matter_refusal(self.tenant_id, current, actor=actor)
+        if refusal is not None:
+            raise IncidentAttachmentConflict(refusal)
         now = self._now()
 
         def mutate(raw: dict[str, Any]) -> None:
@@ -1459,6 +1521,8 @@ class IncidentAttachmentStore:
         now = self._now()
         removed = 0
         for item in due:
+            if _matter_refusal(self.tenant_id, item, actor=actor) is not None:
+                continue  # a legal matter holds this attachment until it is released
             def mutate(raw: dict[str, Any], expected: IncidentAttachmentMetadata = item) -> None:
                 live = _normalize_record(raw)
                 if (

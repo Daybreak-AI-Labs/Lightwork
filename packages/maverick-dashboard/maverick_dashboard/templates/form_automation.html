@@ -40,7 +40,7 @@
   </form>
 </section>
 </div>
-<script{% if csp_script_nonce is defined %} nonce="{{ csp_script_nonce }}"{% endif %}>
+<script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     var form = document.getElementById('af-form');

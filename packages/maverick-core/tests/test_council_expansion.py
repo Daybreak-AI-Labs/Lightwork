@@ -1,8 +1,7 @@
-"""The 2026 council-expansion roster: the net-new packs load and stay governed.
+"""The 2026 pack-expansion roster: the net-new packs load and stay governed.
 
-Pins the specialist + platform packs the expansion council proposed (see
-``docs/proposals/council-expansion-2026.md``) so a future edit can't silently
-drop one or relax its envelope. Mirrors the finance-roster pattern: every pack
+Pins the specialist + platform packs added in the 2026 expansion so a future
+edit can't silently drop one or relax its envelope. Mirrors the finance-roster pattern: every pack
 lints clean, carries a draft-not-do ("never") guardrail, and -- unless it is a
 sandbox builder -- denies ``shell``/``write_file`` (read-only by construction).
 """
@@ -72,7 +71,7 @@ def packs():
 
 def test_all_new_packs_present(packs):
     missing = [n for n in _ALL if n not in packs]
-    assert not missing, f"missing council-expansion packs: {missing}"
+    assert not missing, f"missing expansion packs: {missing}"
 
 
 @pytest.mark.parametrize("name", _ALL)

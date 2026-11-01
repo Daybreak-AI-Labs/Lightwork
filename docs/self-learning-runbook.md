@@ -90,32 +90,41 @@ The two training inputs are generated from this data (you don't hand-write them)
 - `trajectories.jsonl` ← `python -m maverick.training.ingest` (from the outbox + world DB)
 - `proposer_texts.jsonl` ← `python -m maverick.training.export_texts` (raw transcripts from the world DB, keyed to the same ids)
 
-The one-command runner does both for you. **No outbox data ⇒ nothing to train on.**
+The training script in Option A does both for you. **No outbox data ⇒ nothing to train on.**
 
 ---
 
-## Option A — everything in the cloud, one command (no laptop)
+## Option A — everything on a cloud GPU pod (no laptop)
 
 On a GPU pod (RunPod / Lambda / Vast / any GPU VM):
 
 1. Get your data onto the pod — **either** copy your `~/.maverick/` (so the
    outbox + `world.db` are present and inputs auto-generate), **or** pre-run the
    two `ingest`/`export_texts` commands at home and upload the two `.jsonl` files.
-2. Paste one line:
+2. Clone Lightwork at an exact commit and run the training script from that
+   checkout. The script installs only from a clean checkout whose `HEAD`
+   matches `MAVERICK_SOURCE_REF`:
 
 ```bash
-# cheap proof run (default base model, full-param, any GPU):
-curl -fsSL https://raw.githubusercontent.com/Daybreak-AI-Labs/Lightwork/main/scripts/train_runpod.sh -o train.sh \
-  && bash train.sh
+LIGHTWORK_REF=<full-40-character-commit-sha>
+git clone https://github.com/Daybreak-AI-Labs/Lightwork lightwork
+git -C lightwork checkout --detach "$LIGHTWORK_REF"
 
-# …or graduate to the strongest ownable model on one 80GB GPU (QLoRA):
-BASE_MODEL=Qwen/Qwen3-Coder-30B-A3B LORA=1 BITS=4 bash train.sh
+# cheap proof run (default base model, full-parameter, any GPU):
+MAVERICK_SOURCE_DIR="$PWD/lightwork" MAVERICK_SOURCE_REF="$LIGHTWORK_REF" \
+  bash lightwork/scripts/train_runpod.sh
+
+# …or a larger model on one 80GB GPU (QLoRA):
+BASE_MODEL=Qwen/Qwen3-Coder-30B-A3B LORA=1 BITS=4 \
+  MAVERICK_SOURCE_DIR="$PWD/lightwork" MAVERICK_SOURCE_REF="$LIGHTWORK_REF" \
+  bash lightwork/scripts/train_runpod.sh
 ```
 
-It installs (`maverick-agent[training]` → torch + transformers + peft +
-bitsandbytes), generates any missing inputs, trains the L2 PRM (CPU), runs real
-DPO (GPU, `--require-real-text`; `LORA=1 BITS=4` uses 4-bit QLoRA so 7B–30B fit
-one GPU), and prints where the outputs are.
+It installs `packages/maverick-core[training]` from the checkout (torch +
+transformers + peft + bitsandbytes + accelerate), generates any missing inputs,
+trains the L2 PRM (CPU), runs real DPO (GPU, `--require-real-text`;
+`LORA=1 BITS=4` uses 4-bit QLoRA so 7B–30B fit one GPU), and prints where the
+outputs are.
 
 > **Right-size to your data.** Start with the default tiny model to prove the
 > loop cheaply; only graduate to 8B–30B once you have real trajectory volume —
@@ -126,8 +135,9 @@ one GPU), and prints where the outputs are.
    → S3 / Hugging Face.
 
 Useful env vars: `BASE_MODEL`, `OUTBOX`, `OUT_DIR`, `SKIP_DPO=1` (CPU PRM only),
-`DRY_RUN=1` (preview the commands), `BETA/EPOCHS/LR/MIN_MARGIN/MAX_PAIRS`.
-`bash train.sh --help` prints them all.
+`DRY_RUN=1` (preview the commands), `INSTALL=0` (skip installation),
+`BETA/EPOCHS/LR/MIN_MARGIN/MAX_PAIRS`. `bash lightwork/scripts/train_runpod.sh --help`
+prints them all.
 
 > Privacy: `export_texts` writes your raw transcripts to a local file (the thing
 > the shared corpus deliberately avoids). Fine on a box you control; sending it
@@ -189,9 +199,9 @@ improved — a CI gate you can wire in.
   attempts at the *same* task; use `maverick start --repeat N "…task…"`.
 - **DPO is extremely slow** → you're on a CPU pod. The PRM/proof steps are CPU,
   but L3 needs a GPU.
-- **OOM during DPO** → the reference loop is full-param (no LoRA/4-bit); use a
-  smaller `BASE_MODEL` or a bigger card. (Ask for LoRA/4-bit support if you need
-  to tune a 7B+ model on one mid-range GPU.)
+- **OOM during DPO** → the default run is full-parameter. Use a smaller
+  `BASE_MODEL`, a bigger card, or 4-bit QLoRA (`LORA=1 BITS=4`, see Option A) to
+  tune a 7B+ model on one GPU.
 - **`import transformers` fails** → from the reviewed checkout, install the
   extra: `python -m pip install -e './packages/maverick-core[training]'`.
 

@@ -103,7 +103,7 @@
   No numbers from other products are shown or made up here.
 </p>
 {% if can_record %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   var form = document.getElementById('bench-record');
   if (!form) return;

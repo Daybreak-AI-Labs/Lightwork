@@ -486,6 +486,99 @@ def test_gateway_preflight_validates_wrapped_envelope_without_unwrapping(
     assert not (isolated_config.parent / "state").exists()
 
 
+def test_gateway_preflight_validates_azure_envelope_without_unwrapping(
+    monkeypatch,
+    isolated_config,
+):
+    from maverick import client, kms_backends
+    from maverick import operator_preflight as preflight
+
+    wrapped = base64.b64encode(
+        kms_backends._AZURE_MAGIC + b"opaque-azure-envelope"
+    ).decode("ascii")
+    monkeypatch.setenv("MAVERICK_TENANT", "valid-azure-wrapped-company")
+    monkeypatch.setenv("MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY", "1")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY_WRAPPED", wrapped)
+    real_module_available = preflight._module_available
+    monkeypatch.setattr(
+        preflight,
+        "_module_available",
+        lambda name: (
+            True if name in {"azure.keyvault.keys.crypto", "azure.identity"}
+            else real_module_available(name)
+        ),
+    )
+
+    def unexpected_unwrap(self, value, *, context=None):
+        raise AssertionError("offline preflight must not call KMS unwrap")
+
+    monkeypatch.setattr(
+        kms_backends.AzureKeyVaultKEK,
+        "unwrap",
+        unexpected_unwrap,
+    )
+    client.reset_client_cache()
+
+    checks = preflight._gateway_evidence_checks(
+        {
+            "audit": {"require_offhost_key": True},
+            "evidence_gateway": {"enable": True},
+            "kms": {
+                "provider": "azure",
+                "key_id": "https://acme-kv.vault.azure.net/keys/audit-kek",
+            },
+        }
+    )
+
+    by_id = {check.id: check for check in checks}
+    assert by_id["gateway_key_custody"].status == "ready"
+    assert by_id["gateway_signing"].status == "ready"
+    assert (
+        preflight.os.environ["MAVERICK_AUDIT_SIGNING_KEY_WRAPPED"] == wrapped
+    )
+    assert not (isolated_config.parent / "state").exists()
+
+
+def test_gateway_preflight_blocks_azure_envelope_without_azure_identity(
+    monkeypatch,
+    isolated_config,
+):
+    from maverick import client, kms_backends
+    from maverick import operator_preflight as preflight
+
+    wrapped = base64.b64encode(
+        kms_backends._AZURE_MAGIC + b"opaque-azure-envelope"
+    ).decode("ascii")
+    monkeypatch.setenv("MAVERICK_TENANT", "azure-identity-missing-company")
+    monkeypatch.setenv("MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY", "1")
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY_WRAPPED", wrapped)
+    real_module_available = preflight._module_available
+    monkeypatch.setattr(
+        preflight,
+        "_module_available",
+        lambda name: (
+            False if name == "azure.identity" else real_module_available(name)
+        ),
+    )
+    client.reset_client_cache()
+
+    checks = preflight._gateway_evidence_checks(
+        {
+            "audit": {"require_offhost_key": True},
+            "evidence_gateway": {"enable": True},
+            "kms": {
+                "provider": "azure",
+                "key_id": "https://acme-kv.vault.azure.net/keys/audit-kek",
+            },
+        }
+    )
+
+    by_id = {check.id: check for check in checks}
+    assert by_id["gateway_key_custody"].status == "blocked"
+    assert "not installed" in by_id["gateway_key_custody"].detail
+    assert wrapped not in " ".join(check.detail for check in checks)
+
+
 def test_historical_injected_marker_is_not_current_offhost_custody(
     monkeypatch,
     isolated_config,

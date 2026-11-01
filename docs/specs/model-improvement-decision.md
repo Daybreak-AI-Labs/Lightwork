@@ -10,7 +10,7 @@ was the right decision for speculative GPU training, but it did not distinguish
 training execution from the governance, taskset, evidence, and qualification
 plumbing required to make a later run safe and useful.
 
-Lightwork now has a sharper commercial target: deterministic specialist models
+Lightwork now has a sharper target: deterministic specialist models
 for narrow, repeated, human-reviewed work products, starting with privacy and
 compliance decisions. Those environments reuse shipping deterministic engines
 and the existing weights-rung promotion transaction.

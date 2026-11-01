@@ -1,7 +1,7 @@
 # Lightwork browser demo
 
 Run Lightwork as a **website** — the dashboard (web UI + REST API) in a browser
-— instead of the terminal, for live and sales demos. All three options below
+— instead of the terminal, for live demos. All three options below
 serve the **same** hardened image (`deploy/docker/Dockerfile`, unprivileged
 uid 1000) running `maverick dashboard`; they differ only in *where* it runs and
 *how* it's reached. Pick whichever fits the moment — having all three means a
@@ -52,14 +52,14 @@ caddy run --config deploy/demo/Caddyfile
 `Authorization` header, so `https://demo.example.com/` still needs the
 Bearer header (curl/Postman/a header-injecting extension), same as Model 1.
 For an actual send-a-link demo where the proxy injects the header so
-prospects get a plain clickable URL, use
+viewers get a plain clickable URL, use
 `deploy/reference-architectures/demo-cluster/nginx.conf.template` instead
 (it sets `proxy_set_header Authorization "Bearer ${MAVERICK_DASHBOARD_TOKEN}"`)
 — treat that link like a password, since anyone who has it is authenticated.
 
 ## Model 3 — One-click cloud blueprint (managed)
 
-Infrastructure-as-code so you (or a prospect) can spin up an isolated instance
+Infrastructure-as-code so you can spin up an isolated instance
 on a managed platform. Two ready-to-use blueprints:
 
 - **Render** — `deploy/demo/render.yaml`. In Render: *New → Blueprint*, point at

@@ -315,9 +315,9 @@
 
 {% endblock %}
 {% block scripts_extra %}
-<script>{% include "flow_hardening_review.js" %}</script>
+<script nonce="{{ csp_script_nonce }}">{% include "flow_hardening_review.js" %}</script>
 <script src="/static/lightwork-connected-event-sources.js"></script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   var fmtWhen = window.mvWhen, el = window.mvEl;   // shared primitives (base.html)
   var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];

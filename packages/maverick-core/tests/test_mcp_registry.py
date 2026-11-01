@@ -1,4 +1,4 @@
-"""MCP server registry: discovery + install + config mutation (ROADMAP B2)."""
+"""MCP server registry: discovery + install + config mutation."""
 from __future__ import annotations
 
 from pathlib import Path

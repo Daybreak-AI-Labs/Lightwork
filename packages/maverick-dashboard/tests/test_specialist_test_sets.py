@@ -400,3 +400,75 @@ def test_instruction_comparison_freezes_both_versions_recovers_and_marks_stale(c
     rbac.set_role(actor["name"], "admin")
     assert app.get(API + "/customer/run/" + body["operation_id"]).status_code == 403
     assert app.post(API + "/customer/compare", json=body).status_code == 409 and len(calls) == 2
+
+
+def test_saved_checks_stop_at_twenty_by_default_and_a_raised_limit_admits_more(client):
+    app, tmp = client
+    from maverick import config
+
+    for index in range(20):
+        row = app.post(API + "/customer", json=_case(task=f"Invoice number {index} might be a duplicate?"))
+        assert row.status_code == 200, row.text
+    full = app.post(API + "/customer", json=_case(task="One more invoice that might be a duplicate?"))
+    assert full.status_code == 409 and "list is full" in full.json()["detail"]
+    assert app.get(API + "/customer", params={"specialist": "finance_ap"}).json()["max_checks"] == 20
+
+    (tmp / "config.toml").write_text("[agent_tests]\nmax_cases_per_specialist = 25\n", encoding="utf-8")
+    config.reset_config_cache()
+    for index in range(20, 25):
+        row = app.post(API + "/customer", json=_case(task=f"Invoice number {index} might be a duplicate?"))
+        assert row.status_code == 200, row.text
+    assert app.post(API + "/customer", json=_case(task="A twenty-sixth invoice question?")).status_code == 409
+    listed = app.get(API + "/customer", params={"specialist": "finance_ap"}).json()
+    assert len(listed["cases"]) == 25 and listed["max_checks"] == 25
+
+
+def test_one_run_checks_no_more_than_the_limit_and_keeps_stored_checks_readable(client):
+    app, tmp = client
+    from maverick import config
+    from maverick_dashboard import specialist_test_sets as saved
+
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n[agent_tests]\nmax_cases_per_specialist = 21\n",
+                                    encoding="utf-8")
+    config.reset_config_cache()
+    for index in range(21):
+        row = app.post(API + "/customer", json=_case(task=f"Invoice number {index} might be a duplicate?"))
+        assert row.status_code == 200, row.text
+    revisions = _revisions(app)
+    # Back at the default of 20, the twenty-one stored checks are still listed and can be run in parts.
+    (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    assert len(app.get(API + "/customer", params={"specialist": "finance_ap"}).json()["cases"]) == 21
+    refused = app.post(API + "/customer/run", json={"specialist": "finance_ap", "operation_id": "a" * 32,
+                                                    "case_revisions": revisions})
+    assert refused.status_code == 409 and "at most 20" in refused.json()["detail"]
+    ids = list(revisions)
+    assert len(saved.snapshot("finance_ap", ids[:3])) == 3
+    with pytest.raises(ValueError, match="at most 20"):
+        saved.snapshot("finance_ap")
+
+
+def test_the_whole_store_limit_grows_with_the_per_specialist_limit(tmp_path, monkeypatch):
+    from maverick import config
+    from maverick_dashboard import specialist_test_sets as saved
+
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    config.reset_config_cache()
+    try:
+        assert saved._max_all_cases() == 1000
+        (tmp_path / "config.toml").write_text("[agent_tests]\nmax_cases_per_specialist = 200\n", encoding="utf-8")
+        config.reset_config_cache()
+        assert saved._max_all_cases() == 10000
+    finally:
+        config.reset_config_cache()
+
+
+def test_a_must_not_contain_check_fails_an_answer_that_says_the_forbidden_phrase():
+    from maverick_dashboard import specialist_test_sets as saved
+
+    case = {"id": "c" * 32, "specialist": "finance_ap", "task": "Two invoices have the same amount?",
+            "includes": ["duplicate"], "excludes": ["payment sent"], "refusal": False, "citation": False}
+    said = saved.grade(case, "This is a duplicate, so the payment sent today.")
+    held = saved.grade(case, "This is a duplicate; hold it for review.")
+    assert said["passed"] is False and said["checks"]["excludes"] == 0.0
+    assert held["passed"] is True and held["checks"]["excludes"] == 1.0

@@ -9,7 +9,7 @@
 <section class="panel" id="ed-new" hidden><h2>Review an employee</h2><form id="ed-preview" data-draft-recovery="off"><label>Employee <select class="select" id="ed-person" required></select></label><button class="btn" type="submit">Preview access and work</button></form>
 <div id="ed-inventory"></div><form id="ed-begin" hidden data-draft-recovery="off"><label>Retained-data and handoff owner <select class="select" id="ed-custodian" required></select></label><p><label><input id="ed-preserve" type="checkbox" required> Retain all existing data and preservation holds. I understand this does not transfer private content access or revoke external provider consent.</label></p><button class="btn btn--danger" type="submit">Deactivate and begin handoff</button></form></section>
 <section class="panel"><h2>Saved cases and outstanding handoffs</h2><div id="ed-cases"></div></section>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   const byId = id => document.getElementById(id); let model, reviewed, busy = false;

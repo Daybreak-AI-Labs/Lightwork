@@ -33,7 +33,7 @@ def test_effort_supported_matrix():
 
 
 def test_effort_supported_current_generation():
-    # W1-9: Opus 5 / Sonnet 5 / Fable 5.1 were unknown to this predicate --
+    # Opus 5 / Sonnet 5 / Fable 5.1 were unknown to this predicate --
     # verified against https://platform.claude.com/docs/en/build-with-claude/effort
     # ("Supported models" list).
     assert effort_supported(OPUS5) is True
@@ -110,7 +110,7 @@ def test_xhigh_clamped_off_opus_78(monkeypatch):
 def test_max_clamped_off_opus_tier(monkeypatch):
     monkeypatch.setenv("MAVERICK_EFFORT", "max")
     assert effort_for_role("coder", OPUS) == "max"        # opus 4.8 supports max
-    # W1-9: Sonnet 4.6 supports "max" too (verified against
+    # Sonnet 4.6 supports "max" too (verified against
     # https://platform.claude.com/docs/en/build-with-claude/effort) -- it
     # used to be wrongly clamped down to "high" here.
     assert effort_for_role("coder", SONNET) == "max"
@@ -128,7 +128,7 @@ def test_preselected_effort_clamps_for_actual_model():
     # the fallback model must still get its own model-specific ceiling.
     assert effort_for_model("xhigh", OPUS) == "xhigh"
     assert effort_for_model("xhigh", SONNET) == "high"
-    assert effort_for_model("max", SONNET) == "max"  # W1-9: Sonnet 4.6 supports max
+    assert effort_for_model("max", SONNET) == "max"  # Sonnet 4.6 supports max
     assert effort_for_model("medium", HAIKU) is None
 
 

@@ -34,8 +34,8 @@ from pathlib import Path
 from typing import Any
 
 # The agent talks to the platform (or its standalone stand-ins) through the
-# backend seam only -- so the same app is the Lightwork-bundled build AND the
-# sold-on-its-own standalone agent, depending on capabilities.
+# backend seam only -- so the same app runs in platform mode AND in
+# standalone mode, depending on capabilities.
 import backend
 import contract_guard
 import httpx

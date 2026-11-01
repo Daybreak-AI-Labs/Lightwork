@@ -1,6 +1,6 @@
 """Recall-precision benchmark: does relevance-gating cut injected noise?
 
-The compounding-moat A/B was mixed because recalled-but-irrelevant memory was
+The warm-vs-cold memory A/B was mixed because recalled-but-irrelevant memory was
 injected into warm runs (precision >> recall for agent memory: hard negatives
 flip answers -- GSM-DC/GSM-IC; large/noisy memory degrades -- LifelongAgentBench
 2505.11942; the inverted-U of long-context RAG -- 2410.05983). This measures the

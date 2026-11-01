@@ -226,6 +226,42 @@ class TestDsar:
         listed = privacy_ops.list_dsars()
         assert [x["status"] for x in listed if x["id"] == r["id"]] == ["fulfilled"]
 
+    def test_unreadable_world_does_not_fulfill_or_claim_zero_holdings(self, monkeypatch):
+        opened = privacy_ops.open_dsar("alice", "access", channel="email")
+
+        class UnreadableWorld:
+            def list_conversations(self, _channel):
+                raise OSError("private world path should not be shown")
+
+        monkeypatch.setattr(
+            "maverick.dsar._resolve_world",
+            lambda _tenant, *, strict=False: UnreadableWorld(),
+        )
+
+        worksheet = privacy_ops.dsar_estate_worksheet(opened["id"])
+        assert worksheet["platform_holdings"] == {"enabled": False, "error": "unavailable"}
+        with pytest.raises(ValueError, match="could not be verified"):
+            privacy_ops.fulfill_dsar(opened["id"])
+        assert privacy_ops.get_dsar(opened["id"])["status"] == "open"
+        assert privacy_ops.read_dsar_export(opened["id"]) is None
+
+    def test_malformed_audit_file_does_not_fulfill_or_claim_zero_holdings(self):
+        from maverick.paths import data_dir
+
+        opened = privacy_ops.open_dsar("alice", "access", channel="email")
+        audit_dir = data_dir("audit")
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        (audit_dir / "2026-01-01.ndjson").write_text(
+            "{malformed audit record}\n", encoding="utf-8"
+        )
+
+        worksheet = privacy_ops.dsar_estate_worksheet(opened["id"])
+        assert worksheet["platform_holdings"] == {"enabled": False, "error": "unavailable"}
+        with pytest.raises(ValueError, match="could not be verified"):
+            privacy_ops.fulfill_dsar(opened["id"])
+        assert privacy_ops.get_dsar(opened["id"])["status"] == "open"
+        assert privacy_ops.read_dsar_export(opened["id"]) is None
+
     def test_close_removes_export_only_after_durable_close(self, monkeypatch):
         opened = privacy_ops.open_dsar("jordan@example.com", "access", channel="email")
         fulfilled = privacy_ops.fulfill_dsar(opened["id"])
@@ -345,7 +381,8 @@ class TestDsar:
         calls = 0
         calls_lock = threading.Lock()
 
-        def fake_export(user_id, *, channel=None, tenant=None):
+        def fake_export(user_id, *, channel=None, tenant=None, strict=False):
+            assert strict is True
             nonlocal calls
             with calls_lock:
                 calls += 1
@@ -387,7 +424,8 @@ class TestDsar:
         monkeypatch.setattr(audit, "record", lambda *a, **k: True)
         calls = []
 
-        def fake_export(user_id, *, channel=None, tenant=None):
+        def fake_export(user_id, *, channel=None, tenant=None, strict=False):
+            assert strict is True
             calls.append((user_id, channel, tenant))
             return {
                 "subject": {"user_id": user_id, "channel": channel},
@@ -428,7 +466,8 @@ class TestDsar:
         monkeypatch.setattr(audit, "record", lambda *a, **k: True)
         calls = []
 
-        def fake_export(user_id, *, channel=None, tenant=None):
+        def fake_export(user_id, *, channel=None, tenant=None, strict=False):
+            assert strict is True
             calls.append((user_id, channel, tenant))
             return {
                 "subject": {"user_id": user_id, "channel": channel},
@@ -462,7 +501,8 @@ class TestDsar:
         monkeypatch.setattr(audit, "record", lambda *a, **k: True)
         calls = 0
 
-        def fake_export(user_id, *, channel=None, tenant=None):
+        def fake_export(user_id, *, channel=None, tenant=None, strict=False):
+            assert strict is True
             nonlocal calls
             calls += 1
             return {

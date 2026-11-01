@@ -2,9 +2,8 @@
 
 The common embedded path: read/write a microcontroller, sensor, or embedded
 Linux board over a serial/USB-serial line (``/dev/ttyUSB0``, ``COM3``, …) via
-``pyserial`` (the ``[serial]`` extra). Covers the serial leg of the roadmap's
-"embedded device (serial/JTAG/I2C)" item; JTAG/I2C are bus-specific and out of
-scope here.
+``pyserial`` (the ``[serial]`` extra). Covers the serial leg of
+embedded-device access; JTAG/I2C are bus-specific and out of scope here.
 
 Safety: the port is validated to be a real serial device path (``/dev/tty*`` /
 ``/dev/cu.*`` / ``COM<n>`` / ``/dev/serial/by-id/*``), so this tool can't be

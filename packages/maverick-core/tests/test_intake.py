@@ -464,3 +464,20 @@ class TestGeneratedPackRefusals:
 
         assert len(prof.refuse) == 20
         assert all(len(item) == 500 for item in prof.refuse)
+
+
+class TestNewSpecialistSwitch:
+    def test_a_new_specialist_is_not_saved_while_the_switch_is_on(self, tmp_path, monkeypatch):
+        from maverick import config
+        from maverick.agent_tests_policy import NewSpecialistNeedsTests
+
+        monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+        (tmp_path / "config.toml").write_text("[agent_tests]\nrequire_for_new_specialists = true\n", encoding="utf-8")
+        config.reset_config_cache()
+        try:
+            profile = generate_profile(IntakeSpec(name="Zeta Desk"))
+            with pytest.raises(NewSpecialistNeedsTests, match="saved check"):
+                save_profile(profile, approved=True, dest_dir=tmp_path)
+            assert not (tmp_path / "zeta_desk.toml").exists()
+        finally:
+            config.reset_config_cache()

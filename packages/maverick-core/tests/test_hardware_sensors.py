@@ -1,5 +1,5 @@
 """Hardware sensor tool: psutil (faked), /sys/class/thermal fallback, injected
-reader; never fabricates a reading (ROADMAP 2028 H1). Offline."""
+reader; never fabricates a reading. Offline."""
 from __future__ import annotations
 
 import sys

@@ -14,6 +14,7 @@ ADAPTERS = {
     "openai": ("openai_provider", "OpenAIClient"),
     "azure": ("azure_openai_provider", "AzureOpenAIClient"),
     "bedrock": ("bedrock_provider", "BedrockClient"),
+    "vertex": ("vertex_provider", "VertexClient"),
     "openrouter": ("openrouter_provider", "OpenRouterClient"),
     "ollama": ("ollama_provider", "OllamaClient"),
     "gemini": ("gemini_provider", "GeminiClient"),
@@ -42,7 +43,10 @@ def test_capability_inventory_covers_every_provider():
 @pytest.mark.parametrize("provider", KNOWN_PROVIDERS)
 def test_supported_factory_options_reach_exact_adapter(monkeypatch, provider):
     calls = recorder(monkeypatch, provider)
-    kwargs = {"api_key": "fixture-key", "environment": {"FIXTURE": "admitted"}}  # pragma: allowlist secret - synthetic provider recorder fixture
+    kwargs = {"environment": {"FIXTURE": "admitted"}}
+    # Only fields the adapter admits are passed (vertex has no api_key: Google ADC only).
+    if "api_key" in CAPABILITIES[provider].fields:
+        kwargs["api_key"] = "fixture-key"  # pragma: allowlist secret - synthetic provider recorder fixture
     if "base_url" in CAPABILITIES[provider].fields:
         kwargs["base_url"] = "https://fixture.invalid/v1"
     if "default_headers" in CAPABILITIES[provider].fields:

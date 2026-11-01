@@ -233,7 +233,7 @@ def main() -> int:
             failed += 0 if r.passed else 1
             print(f"  [{tag}]  {r.label:34}  {r.detail}")
     print("=" * 78)
-    print(f"  {4 - failed} guarantees PROVEN, {failed} failed"
+    print(f"  {4 - failed} checks passed, {failed} failed"
           "   (real number: --proposer llm over Verified instances, needs a key)")
     print("=" * 78)
     return 1 if failed else 0

@@ -1,4 +1,4 @@
-"""Self-tuning budgets (roadmap: 2028 H2 performance).
+"""Self-tuning budgets.
 
 ``Budget.max_dollars`` defaults to a hand-picked constant. That is either too
 loose (a runaway burns the whole cap before anyone notices) or too tight (a
@@ -57,10 +57,15 @@ def recommend(costs: list[float], *, pct: float = DEFAULT_PERCENTILE,
 
 def goal_costs(world, *, limit: int = 2000) -> dict[int, float]:
     """Total spend per goal (sum of its episodes' ``cost_dollars``)."""
+    from .world_model import episodes_by_goal_batch
+
     out: dict[int, float] = {}
-    for g in world.list_goals(limit=limit):
+    goals = list(world.list_goals(limit=limit))
+    batch = episodes_by_goal_batch(world, [g.id for g in goals], per_goal=limit)
+    for g in goals:
         total = 0.0
-        for e in world.list_episodes(goal_id=g.id, limit=limit):
+        for e in (batch[g.id] if batch is not None and g.id in batch
+                  else world.list_episodes(goal_id=g.id, limit=limit)):
             total += float(getattr(e, "cost_dollars", 0.0) or 0.0)
         if total > 0:
             out[g.id] = total

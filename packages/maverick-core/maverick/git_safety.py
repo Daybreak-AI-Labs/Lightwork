@@ -22,8 +22,8 @@ Every host-side git call against a workdir in that position must:
 This was previously implemented once, inside `orchestrator.py`'s best-of-N
 candidate path, and nowhere else -- `edit_format.render_diff`,
 `reviewer.get_diff`, and `coding_mode`'s candidate evaluation each ran `git`
-on the host with none of these protections. See PLATFORM_IMPROVEMENT_AUDIT.md
-finding W2-1 (host-git RCE) / W2-2 (secret leakage into the child env).
+on the host with none of these protections, which allowed host-side code
+execution through git and secret leakage into the child environment.
 
 Known limits: this is a static scan of what git will read, not a sandbox. The
 real fix is to run these git calls through `sandbox.exec()` (see

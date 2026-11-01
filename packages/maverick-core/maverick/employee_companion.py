@@ -37,6 +37,13 @@ from contextlib import contextmanager
 
 from . import crypto_at_rest, file_lock
 from .authority_effects import authority_effect_fence
+from .ediscovery import (
+    LegalHoldApplies,
+    assert_personal_chats_erasable,
+    in_hold,
+    personal_hold_windows,
+    personal_holds,
+)
 from .paths import canonical_tenant_id, current_tenant_id_strict, data_dir
 
 MAX_EMPLOYEES = 1000
@@ -287,7 +294,8 @@ class EmployeeCompanionStore:
                 with file_lock.cross_process_lock(self.root / "authority", strict=True):
                     self._check_context()
                     yield
-        except CompanionError:
+        except (CompanionError, LegalHoldApplies):
+            # A legal hold is a refusal, not a storage fault: it must reach the caller as itself.
             raise
         except (OSError, RuntimeError) as exc:
             raise CompanionError("Companion storage is unavailable; access refused") from exc
@@ -478,9 +486,27 @@ class EmployeeCompanionStore:
                 turn.update(state="cancelled", finished_at=now)
                 self._event(state, state["owner"], "turn_cancelled")
 
+    def _held_by_matter(self, state: dict, kept: list[dict]) -> list[dict]:
+        """``kept`` plus every stored exchange that an active legal matter holds in scope.
+
+        Retention, disabling and pruning never remove a held exchange.  An unreadable
+        matter ledger keeps every stored exchange.  Call this before the stored
+        history is replaced.
+        """
+        try:
+            windows = personal_hold_windows(state["owner"])
+        except LegalHoldApplies:
+            return self._history(state)
+        if not windows:
+            return kept
+        original = self._history(state)
+        by_id = {item["id"]: item for item in kept}
+        return [by_id.get(item["id"], item) for item in original
+                if item["id"] in by_id or in_hold(float(item["time"]), windows)]
+
     def _prune_history(self, state: dict) -> list[dict]:
         original = self._history(state)
-        history = self._retained(state, now=self._now(state))
+        history = self._held_by_matter(state, self._retained(state, now=self._now(state)))
         if history != original:
             self._set_history(state, history)
             self._invalidate_turns(state)
@@ -768,7 +794,8 @@ class EmployeeCompanionStore:
                 exchange["expires_at"] = min(
                     exchange["expires_at"], exchange["time"] + retention_days * 86400,
                 )
-            self._set_history(state, [entry for entry in history if entry["expires_at"] > time.time()])
+            kept = [entry for entry in history if entry["expires_at"] > time.time()]
+            self._set_history(state, self._held_by_matter(state, kept))
             self._invalidate_turns(state)
             self._event(state, actor, "policy_updated")
             self._save(state)
@@ -780,6 +807,12 @@ class EmployeeCompanionStore:
             state = self._read(owner)
             history = self._prune_history(state)
             return copy.deepcopy(history)
+
+    def held_exchanges(self, owner: str) -> list[dict]:
+        """Every stored exchange of ``owner``, read without pruning or saving (legal-matter export)."""
+        owner = _identity(owner)
+        with self._locked():
+            return copy.deepcopy(self._history(self._read(owner)))
 
     def record_exchange(self, owner: str, *, message: str, response: str,
                         source_refs: list[str], expected_revision: int) -> dict:
@@ -826,6 +859,11 @@ class EmployeeCompanionStore:
                 self._prune_history(state)
                 if self._history_review(state)["revision"] != expected_revision:
                     raise CompanionConflictError("Companion conversation changed; review it again")
+            # A legal matter naming this person may hold any of these exchanges; the clear stops
+            # before anything changes.  Without such a matter the history need not be opened.
+            if personal_holds(owner):
+                assert_personal_chats_erasable(owner, [float(item["time"]) for item in self._history(state)],
+                                               actor=actor)
             state["history"] = None
             self._invalidate_turns(state)
             event = self._event(state, actor, "history_cleared")

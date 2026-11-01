@@ -1,4 +1,4 @@
-"""Citation verifier tool (roadmap: 2028 H2 capabilities).
+"""Citation verifier tool.
 
 Checks that each cited quote actually appears in the source it is attributed
 to — the cheap guard against fabricated or drifted citations in agent output.

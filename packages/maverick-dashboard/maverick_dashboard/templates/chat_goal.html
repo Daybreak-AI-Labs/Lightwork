@@ -584,7 +584,7 @@
     {% if projects %}
     <form method="post" action="/chat/goal/{{ goal.id }}/project" class="goal-project">
       <label class="muted" for="goal-project-sel">{{ ui('Project') }}</label>
-      <select id="goal-project-sel" name="project_id" class="input" onchange="this.form.requestSubmit()"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
+      <select id="goal-project-sel" name="project_id" class="input"{% if not can_operate %} disabled data-permission-disabled="1"{% endif %}>
         <option value="" lang="{{ ul('— none —') }}">{{ ut('— none —') }}</option>
         {% for p in projects %}
           <option value="{{ p.id }}"{% if p.id == goal.project_id %} selected{% endif %}>{{ p.name or 'Untitled' }}</option>
@@ -604,7 +604,7 @@
       </select>
       <button type="button" id="share-create" class="btn btn--ghost"{% if goal.status != 'done' or not goal.result %} hidden disabled{% endif %}>{{ ui('Review share link') }}</button>
       <input type="text" id="share-url" class="input" readonly aria-label="{{ ut('Share link') }}"
-             style="display: none; max-width: 28rem;" onclick="this.select()">
+             style="display: none; max-width: 28rem;">
       <button type="button" id="share-copy" class="btn btn--ghost" hidden>{{ ui('Copy link') }}</button>
       <span id="share-msg" class="muted" role="status" aria-live="polite"></span>
       <ul id="share-list" class="share-list">
@@ -721,7 +721,7 @@
   <script src="/static/lightwork-planning-steps.js" defer></script>
   <script src="{{ asset('lightwork-read-aloud.js') }}"></script>
   <script src="{{ asset('lightwork-run-status.js') }}"></script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // Explicit product bindings. Source text is passed only to textContent/renderers.
     function cgText(source,values) { return window.LightworkI18n ? window.LightworkI18n.text(source,values) : String(source||'').replace(/\{(\w+)\}/g,function(whole,key){return values&&Object.prototype.hasOwnProperty.call(values,key)?String(values[key]):whole;}); }
     function cgCopy(node,source,values) { if(window.LightworkI18n)window.LightworkI18n.set(node,source,values);else node.textContent=cgText(source,values); }
@@ -733,7 +733,7 @@
       return window.mvErrorText ? window.mvErrorText(failure, what) : 'Could not ' + what + '. Try again.';
     }
   </script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     (function() {
       const goalId = {{ goal.id }};
       const eventsEl = document.getElementById('events');
@@ -1609,9 +1609,14 @@
   </script>
   <script src="/static/lightwork-task-resume.js" defer></script>
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // Earlier answers retain the exact text shown in the conversation.
     (function () {
+      // The project picker submits on change; the share link selects itself on click.
+      var projectSelect = document.getElementById('goal-project-sel');
+      if (projectSelect) projectSelect.addEventListener('change', function () { this.form.requestSubmit(); });
+      var shareUrl = document.getElementById('share-url');
+      if (shareUrl) shareUrl.addEventListener('click', function () { this.select(); });
       Array.prototype.forEach.call(document.querySelectorAll('.turn-copy, .turn-print'), function (button) {
         button.addEventListener('click', function () {
           if (button.classList.contains('turn-print')) {
@@ -1638,7 +1643,7 @@
     })();
   </script>
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // "Show work" strip: mirror the latest trace line into the collapsed
     // summary (so a glance shows the current step, not a firehose) and
     // auto-collapse once the goal reaches a terminal state. Purely additive —
@@ -1709,7 +1714,7 @@
 
 
   <script src="/static/lightwork-deliverable-sharing.js" defer></script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     // Attachments panel: list the goal's files (uploads + machine-generated
     // transcript/extract companions), download each, add more to a goal.
     (function () {
@@ -1867,7 +1872,7 @@
       window.addEventListener('pagehide', clearPrivate);
     })();
   </script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     {% include "_voice_mic.js" %}
 
     // Voice: dictate a clarifying-question answer (mic → browser-side 16 kHz

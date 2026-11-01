@@ -1,7 +1,7 @@
-# Single-Client Deployment — one Lightwork per enterprise
+# Single-client deployment — one Lightwork instance per client
 
-**Delivery model (decided, non-negotiable): one Lightwork instance per enterprise
-client, always.** This runbook uses separate instances, hosts and storage.
+**Deployment model: one Lightwork instance per client.** This runbook uses
+separate instances, hosts and storage.
 Application authorization and workspace isolation remain required within each
 instance. Client binding does not provision or prove physical isolation.
 
@@ -10,8 +10,8 @@ client**. Tenant-aware stores use that binding as their default scope. Global
 configuration, account administration and some keys live outside the tenant
 root; include them in installation recovery and offboarding planning.
 
-This document is (1) the architecture + guarantee, (2) the remediation roadmap
-to get fully enterprise-ready, and (3) the per-client deployment runbook.
+This document covers (1) the isolation guarantee, (2) the controls that support
+it, and (3) the per-client deployment runbook.
 
 ---
 
@@ -25,23 +25,20 @@ to get fully enterprise-ready, and (3) the per-client deployment runbook.
 | **At-rest encryption** | Per-tenant DEK wrapped by a KEK, with the client id bound into the AEAD context (`tenant/kms.py`), so a key cannot decrypt another scope's data. Enable with `[encryption] at_rest = true` + `per_tenant = true`. |
 | **Audit** | Signed, hash-chained, per-client audit dir + signing key; `maverick doctor` shows the bound client + data root. |
 
-**Status (this PR): the client-binding keystone is shipped** — binding, tenant
-floor, dashboard routing through the client world DB, fail-closed `serve()`
-guards, a `doctor` check, config + wizard. Everything below is the roadmap to
-"fully deliverable."
+Client binding provides the tenant floor, dashboard routing through the client
+world DB, fail-closed `serve()` guards, a `doctor` check, and a config knob with
+a wizard step.
 
 ---
 
-## 2. Remediation roadmap
+## 2. Supporting controls
 
-Sequenced by leverage. Each phase is independently shippable.
-
-### Phase 0 — Client binding & no un-scoped state ✅ (this PR)
+### Client binding and scoped state
 - `[client] id` + `enforce`; client id as tenant floor; dashboard world DB
   scoped to the client; fail-closed guards on the gRPC/federation servers;
   `doctor` binding check; wizard step.
 
-### Phase 1 — Transport encryption (TLS/mTLS) ✅
+### Transport encryption (TLS/mTLS)
 - `maverick/grpc_tls.py` builds gRPC server + channel credentials from config;
   the gRPC goal API and federation servers bind TLS via `bind_port()` and the
   federation client dials `secure_channel`. `[grpc]`/`[federation]` `tls`,
@@ -54,7 +51,7 @@ Sequenced by leverage. Each phase is independently shippable.
 - Still document TLS termination for the dashboard + MCP HTTP surfaces (reverse
   proxy or native). The federation shared token never crosses plaintext now.
 
-### Phase 2 — Trust-plane & key administration (`maverick trust` CLI) ✅
+### Trust-plane and key administration (`maverick trust` CLI)
 - `maverick trust status / list / show / add / rm / revoke / unrevoke / verify`
   and `maverick trust pubkey` (print this deployment's pinned key to hand to
   peers). Write-ops manage a per-client JSON overlay (`agent_trust.json`, under
@@ -63,9 +60,9 @@ Sequenced by leverage. Each phase is independently shippable.
 - `revoke` flips `revoked` (denied immediately via `is_active`); rotation is
   `add --pubkey <new>` (overlay overrides config), with `expires_at` /
   `not_before` available for zero-downtime overlap.
-- Mirror in the dashboard (read-only at minimum) — remaining follow-up.
+- Not yet available: a dashboard view of the trust registry.
 
-### Phase 3 — Backup / restore / failover (HA for single-node) ✅
+### Backup, restore and failover (single node)
 - `maverick backup create` snapshots the **client-scoped data root** — world DB
   (via the SQLite **online backup API**, consistent under WAL), signed **audit
   chain + public verification material**, memory, fleet, and the managed trust registry — into
@@ -84,35 +81,40 @@ Sequenced by leverage. Each phase is independently shippable.
 - **Warm standby**: cron `backup create`, ship the `.tgz` offsite + to a standby
   host, `backup restore` + start on failover (see runbook §3.6).
 
-### Phase 4 — Security hardening ✅ (BYOK follow-up)
-- **Mandatory shield** ✅: `maverick/shield_policy.py` — `[safety] require_shield`
+### Security hardening
+- **Mandatory shield**: `maverick/shield_policy.py` — `[safety] require_shield`
   / `MAVERICK_REQUIRE_SHIELD` / enterprise mode make the shield required;
   `scan_block` fails toward the gate (a *missing* shield blocks external traffic
   when required, a scan error always blocks). Federation inbound + A2A route
   through it; `doctor` goes RED when the shield is required but absent.
-- **Loopback-trust disabled** ✅ when client-bound/enterprise — the dashboard's
+- **Loopback-trust disabled** when client-bound/enterprise — the dashboard's
   no-token mode is refused; a token (or OIDC) is required.
-- **Secrets hygiene** ✅: `doctor` warns when `config.toml` is group/world-
+- **Secrets hygiene**: `doctor` warns when `config.toml` is group/world-
   accessible; use `${ENV}` refs for tokens (the systemd unit injects them).
-- **BYOK** ✅: real cloud-KMS backends (`maverick/kms_backends.py`) behind the
-  `tenant/kms.py` `KMS` Protocol — AWS KMS, GCP KMS, and Vault transit. `[kms]
-  provider = aws|gcp|vault` keeps the KEK in the customer's HSM (the tenant
-  context binds as the KMS EncryptionContext / AAD); a missing SDK or unknown
-  provider fails closed (never downgrades to in-process keys). Env-injected
-  keys (`MAVERICK_ENCRYPTION_KEY` / `MAVERICK_KMS_KEK`) remain for self-managed.
+- **BYOK**: real cloud-KMS backends (`maverick/kms_backends.py`) behind the
+  `tenant/kms.py` `KMS` Protocol — AWS KMS, GCP KMS, Vault transit, and Azure
+  Key Vault / Managed HSM (`azure-kms` extra). `[kms] provider =
+  aws|gcp|vault|azure` keeps the KEK in the client's own HSM (the tenant context
+  binds as the KMS EncryptionContext / AAD; Azure binds it locally, since its RSA
+  wrap takes no context, and the vault signs each envelope so a holder of the
+  public key alone cannot forge one. An Azure key must allow the wrapKey, unwrapKey,
+  sign and verify operations; the identity needs wrapKey, unwrapKey and sign, plus
+  verify or get); a missing SDK or unknown provider fails closed (never
+  downgrades to in-process keys). Env-injected keys (`MAVERICK_ENCRYPTION_KEY` /
+  `MAVERICK_KMS_KEK`) remain for self-managed.
 
-### Phase 5 — Packaging & headless provisioning (VM + image) ✅
-- **Build-time gRPC stubs** ✅: `maverick gen-stubs` pre-generates every
+### Packaging and headless provisioning (VM and image)
+- **Build-time gRPC stubs**: `maverick gen-stubs` pre-generates every
   `*_pb2.py`; set `MAVERICK_NO_RUNTIME_PROTOC=1` in the runtime so a missing stub
   **fails fast** instead of invoking `protoc` (immutable/read-only FS; SBOM).
   Both loaders honour the guard.
-- **Declarative install** ✅: `maverick init --from-file client.toml` validates
+- **Declarative install**: `maverick init --from-file client.toml` validates
   and installs the config (0600) with no prompts — bake it into the image/VM.
 - Hardened `systemd` unit + install script and baked image: see the runbook (the
   image just runs `gen-stubs` + `init --from-file` at build).
 
-### Phase 6 — Compliance & data-subject operations ✅ (certs are organizational)
-- **Per-client export + erasure** ✅: `maverick client export` (full data
+### Compliance and data-subject operations
+- **Per-client export + erasure**: `maverick client export` (full data
   portability / DSAR — a consistent snapshot of the client's data root) and
   `maverick client erase --confirm [--keep-audit]` (right-to-erasure /
   offboarding). Erase refuses unless a client is bound and targets that client's
@@ -124,10 +126,10 @@ Sequenced by leverage. Each phase is independently shippable.
   and whether deletion completed; a failed or partial erase is not success.
 - Residual-plaintext (`[privacy] anonymous = true`) and `[audit] retention`
   remain config knobs as before.
-- **Certification track** (organizational, not code): SOC 2 Type II, HIPAA BAA,
-  third-party pen test — the control machinery (signed audit, compliance
-  profiles, egress lock, erasure) is in place; the attestations are a
-  process/audit-firm engagement.
+- **Certifications** are organizational, not code: SOC 2 Type II, a HIPAA BAA
+  and a third-party penetration test are engagements for the operating
+  organization. The control machinery they rely on (signed audit, compliance
+  profiles, egress lock, erasure) is in place.
 
 ---
 
@@ -177,22 +179,22 @@ id = "acme-corp"          # this deployment serves ONLY acme-corp.
 enforce = true            # refuse to start unbound — data can't hit the shared root
 
 [enterprise]
-mode = true               # egress lock + fail-closed consent + capabilities + (Phase 4) mandatory shield
+mode = true               # egress lock + fail-closed consent + capabilities + mandatory shield
 
 [encryption]
 at_rest = true
 per_tenant = true         # DEK bound to the client id
 
-# BYOK: keep the KEK in the customer's HSM (omit for the in-process/env key).
+# BYOK: keep the KEK in the client's HSM (omit for the in-process/env key).
 [kms]
-provider = "aws"          # aws | gcp | vault | local
-key_id   = "arn:aws:kms:us-east-1:123:key/<uuid>"   # or GCP resource name / Vault key
-region   = "us-east-1"    # AWS; Vault uses address + VAULT_TOKEN
+provider = "aws"          # aws | gcp | vault | azure | local
+key_id   = "arn:aws:kms:us-east-1:123:key/<uuid>"   # or GCP resource name / Vault key / Azure key URL
+region   = "us-east-1"    # AWS; Vault uses address + VAULT_TOKEN; Azure uses DefaultAzureCredential
 
 [audit]
 sign = true               # tamper-evident, per-client signed chain
 
-# Transport encryption (Phase 1). Required automatically under client binding /
+# Transport encryption. Required automatically under client binding /
 # enterprise mode — the gRPC + federation servers refuse to start in plaintext.
 [grpc]
 tls = true
@@ -228,7 +230,7 @@ Environment=MAVERICK_CLIENT_ENFORCE=1
 EnvironmentFile=/etc/maverick/dashboard.env
 Environment=MAVERICK_NO_RUNTIME_PROTOC=1
 ExecStart=/usr/local/bin/maverick dashboard --host 127.0.0.1 --port 8770
-# TLS terminated by the front proxy (Phase 1 adds native TLS for gRPC/federation)
+# TLS terminated by the front proxy (gRPC/federation use native TLS)
 Restart=on-failure
 # Hardening
 ProtectSystem=strict
@@ -265,6 +267,12 @@ default tenant data tree should resolve under `…/tenants/acme-corp/`.
 Inventory explicit workspaces, shared administration/configuration, separately
 custodied keys and configured external stores as additional recovery scopes.
 
+### 3.5 Cloud marketplace image
+
+Bake the above: pinned wheels, pre-generated stubs, the systemd unit,
+and a first-boot hook that requires `MAVERICK_CLIENT_ID` (and rejects boot
+without it). One image template → one instance per client at launch.
+
 ### 3.6 Backup & warm-standby failover
 
 ```bash
@@ -296,7 +304,7 @@ systemctl start maverick-dashboard
 This archive covers the bound tenant's local data. Before starting the standby,
 restore its separately retained encryption/audit signing keys and installation
 configuration, and recover external databases through their own backup system.
-Test reading encrypted customer records on the standby; archive authentication
+Test reading encrypted client records on the standby; archive authentication
 alone cannot demonstrate decryption or complete application recovery.
 
 The restore first authenticates the manifest with the standby's
@@ -321,21 +329,15 @@ Erase refuses unless a client is bound, so it can only ever target
 receipt and inspect its completion status. Separately inventory and remove
 external stores and exported copies before decommissioning the VM/instance.
 
-### 3.5 Cloud marketplace image
-
-Bake the above (Phase 5): pinned wheels, pre-generated stubs, the systemd unit,
-and a first-boot hook that requires `MAVERICK_CLIENT_ID` (and rejects boot
-without it). One image template → one instance per client at launch.
-
 ---
 
 ## 4. Pre-go-live checklist (per client)
 
 - [ ] `[client] id` set and `enforce = true`; `doctor` shows the bound client.
 - [ ] Default tenant paths resolve correctly; additional workspaces, global administration, keys and external stores are inventoried.
-- [ ] TLS on every listener (Phase 1); no plaintext gRPC/federation.
+- [ ] TLS on every listener; no plaintext gRPC/federation.
 - [ ] Tokens injected from secrets (not literal in `config.toml`); config is `0600`.
 - [ ] `[encryption] at_rest + per_tenant`, `[audit] sign` on; `maverick audit verify` passes.
-- [ ] Backup job runs; a separate-host restore reads encrypted records and restores configuration plus any external stores (Phase 3).
+- [ ] Backup job runs; a separate-host restore reads encrypted records and restores configuration plus any external stores.
 - [ ] Trust registry populated; `doctor` not RED on an empty engaged registry.
-- [ ] Shield present and (Phase 4) mandatory.
+- [ ] Shield present and mandatory.

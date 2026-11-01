@@ -187,6 +187,6 @@
   .ft__save { position: sticky; bottom: var(--space-3); }
   .ft label.ft__cell { display: grid; gap: var(--space-1); font-size: var(--text-sm); }
 </style>
-<script>{% include "flow_designer_inputs.js" %}</script>
+<script nonce="{{ csp_script_nonce }}">{% include "flow_designer_inputs.js" %}</script>
 <script src="/static/lightwork-flow-teach.js" defer></script>
 {% endblock %}

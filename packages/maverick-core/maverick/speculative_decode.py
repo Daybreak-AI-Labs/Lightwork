@@ -1,5 +1,4 @@
-"""Cross-provider speculative drafting (roadmap: 2028 H2 — "speculative
-decoding across providers").
+"""Cross-provider speculative drafting.
 
 HONEST SCOPE: this is APPLICATION-LEVEL speculative drafting, not logit-level
 speculative decoding. True speculative decoding verifies draft tokens against

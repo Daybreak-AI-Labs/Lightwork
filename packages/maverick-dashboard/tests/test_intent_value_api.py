@@ -1,6 +1,8 @@
 """Real native API/builder boundaries with synthetic audit and identity inputs."""
 from __future__ import annotations
 
+import hashlib
+import sqlite3
 import time
 
 import pytest
@@ -56,9 +58,28 @@ def seed(world, *, owner="user:alice", count=1, performed=True):
 
 
 def get(client, path="", user="alice"):
+    # Reads never record work; the page records it first through the explicit sync.
+    synced = client.post(BASE + "/sync", headers=headers(user))
+    assert synced.status_code == 200, synced.text
     response = client.get(BASE + path, headers=headers(user))
     assert response.status_code == 200, response.text
     return response.json()
+
+
+# A first render of a fresh home may create these, and nothing else: the empty
+# authority fence that the shared navigation takes, and the template bytecode cache.
+FIRST_RENDER_FILES = {"home/authority-effects.lock"}
+
+
+def tree(root):
+    """Content digests of every file under ``root``, lock files and caches included."""
+    return {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+def stable(payload):
+    """A report without its read-time stamps (the check time and the default period end)."""
+    return {key: value for key, value in payload.items() if key not in {"checked_at", "end"}}
 
 
 def test_native_completed_task_rename_preserves_report_and_copilot_value(context):
@@ -312,8 +333,11 @@ def test_source_failure_is_unavailable_not_zero(context, monkeypatch):
     def unavailable():
         raise OSError("synthetic unreadable audit history")
     monkeypatch.setattr(sources, "audit_population", unavailable)
-    response = client.get(BASE, headers=headers())
+    # Reads report the recorded ledger; the sync that records new work is where an unreadable source surfaces.
+    response = client.post(BASE + "/sync", headers=headers())
     assert response.status_code == 503 and "not zero" in response.text
+    response = client.get(BASE, headers=headers())
+    assert response.status_code == 200 and response.json()["totals"]["performed_work"] == 1
     response = client.post("/api/v1/copilot", headers=headers(), json={"message": "What value delivered this month?", "page": "/work-value"})
     assert response.status_code == 503
 
@@ -736,6 +760,401 @@ def test_copilot_admin_assumptions_require_review_preserve_history_and_deduplica
     assert get(client)["totals"] == original
     ordinary = client.post(base + "/catalog", headers=headers(), json=scope).json()
     assert action["id"] not in {row["id"] for row in ordinary["operations"]}
+
+
+def test_reads_leave_stores_unchanged_until_the_page_syncs(context, tmp_path):
+    client, world = context
+    seed(world, count=3)
+    empty = tree(tmp_path)
+    assert client.get("/work-value", headers=headers()).status_code == 200
+    created = set(tree(tmp_path)) - set(empty)
+    assert all(path in FIRST_RENDER_FILES or path.startswith("home/cache/templates/") for path in created), created
+    before = tree(tmp_path)
+    unrecorded = client.get(BASE, headers=headers())
+    assert unrecorded.status_code == 200 and unrecorded.json()["totals"]["performed_work"] == 0
+    for path in ("/opportunities", "/settings", "/benchmarks"):
+        assert client.get(BASE + path, headers=headers()).status_code == 200
+    assert tree(tmp_path) == before
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    recorded = tree(tmp_path)
+    assert recorded != before
+    first = client.get(BASE, headers=headers()).json()
+    assert first["totals"]["performed_work"] == 3
+    assert client.get(BASE + "/work/" + first["rows"][0]["id"], headers=headers()).status_code == 200
+    assert tree(tmp_path) == recorded
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    assert tree(tmp_path) == recorded
+    assert stable(client.get(BASE, headers=headers()).json()) == stable(first)
+
+
+def test_saved_rate_change_does_not_reprice_work_seen_before_it(context):
+    client, world = context
+    seed(world)
+    settings = client.get(BASE + "/settings", headers=headers("root")).json()
+    response = client.put(BASE + "/settings", headers=headers("root"), json={
+        "revision": settings["revision"], "hourly_rate": 120, "currency": "USD", "completion_confirmation": False})
+    assert response.status_code == 200, response.text
+    row = get(client)["rows"][0]
+    estimate = get(client, "/work/" + row["id"])["estimates"][0]
+    assert estimate["assumptions"]["hourly_rate"] == 60.0
+    assert get(client)["rows"][0]["revision"] == row["revision"]
+
+
+def test_catalogue_listing_reads_the_callers_grants_once(context, monkeypatch):
+    client, world = context
+    seed(world, count=2)
+    get(client)
+    reads = []
+    original = auth.caller_suites
+    monkeypatch.setattr(auth, "caller_suites", lambda request: reads.append(1) or original(request))
+    response = client.get(BASE + "/opportunities", headers=headers())
+    assert response.status_code == 200, response.text
+    assert len(reads) <= 1
+
+
+def test_domain_suites_checker_matches_each_pack_check(monkeypatch):
+    from fastapi import HTTPException
+    from maverick.domain import available_domains, suites_for_domain
+    names = sorted(available_domains())
+    suites = sorted({suite for name in names for suite in suites_for_domain(name) if suite})
+    assert suites
+    grants = {"unrestricted": None, "none": frozenset(), "half": frozenset(suites[::2]), "all": frozenset(suites)}
+    request = object()
+    reads = []
+    for label, granted in grants.items():
+        monkeypatch.setattr(auth, "caller_suites", lambda request, granted=granted: reads.append(1) or granted)
+        expected = {name: auth.domain_suites_allowed(request, name) for name in names}
+        reads.clear()
+        check = auth.domain_suites_checker(request)
+        assert {name: check(name) for name in names} == expected, label
+        assert len(reads) <= 1, label
+
+    def broken(request):
+        raise RuntimeError("grant store unavailable")
+    monkeypatch.setattr(auth, "caller_suites", broken)
+    with pytest.raises(HTTPException) as direct:
+        auth.domain_suites_allowed(request, next(name for name in names if suites_for_domain(name)))
+    with pytest.raises(HTTPException) as checked:
+        auth.domain_suites_checker(request)(next(name for name in names if suites_for_domain(name)))
+    assert checked.value.status_code == direct.value.status_code == 503
+
+
+def test_opportunities_read_with_ekko_enabled_leaves_expired_events_in_place(context, monkeypatch, tmp_path):
+    from maverick.work_discovery import CapturePolicy, WorkEvent
+    from maverick.work_discovery_store import WorkDiscoveryStore
+    from maverick_dashboard import ekko_routes, intent_value_discovery
+
+    client, world = context
+    seed(world)
+    monkeypatch.setenv("MAVERICK_KMS_KEK", "ab" * 32)
+    monkeypatch.setattr(intent_value_discovery, "get_ekko", lambda: {"enable": True})
+    now = 1_800_000_000.0
+    path = tmp_path / "ekko.sqlite3"
+    policy = CapturePolicy(
+        enabled=True, capture_level="guided", allowed_apps=frozenset({"chrome"}),
+        allowed_actions=frozenset({"download"}), allowed_object_types=frozenset({"report"}),
+        retention_days=14, min_occurrences=2, min_distinct_days=2, poll_interval_seconds=1,
+        provider_egress=False,
+    )
+
+    def ekko(clock):
+        return WorkDiscoveryStore("user:alice", "local-device", tenant="acme", path=path,
+                                  clock=lambda: clock, authority_check=lambda _policy: None)
+
+    writer = ekko(now)
+    writer.enroll(policy)
+    writer.create_session(policy=policy, session_id="expired-session")
+    writer.claim_collector("expired-session", "collector-test-capability", policy=policy, ttl_seconds=30)
+    writer.append_event(WorkEvent(event_id="event-1", session_id="expired-session", sequence=1, occurred_at=now,
+                                  app="chrome", action="download", object_type="report", duration_seconds=8),
+                        policy=policy, collector_id="collector-test-capability")
+    with sqlite3.connect(path) as conn:
+        stored = conn.execute("SELECT event_id,event_digest,ingested_at,expires_at,payload FROM ekko_events").fetchall()
+    assert len(stored) == 1
+    monkeypatch.setattr(ekko_routes, "_store", lambda request, device_id: ekko(now + 15 * 86_400.0))
+
+    response = client.get(BASE + "/opportunities", headers=headers())
+    assert response.status_code == 200, response.text
+    assert response.json()["external_observations"]["state"] == "available"
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT event_id,event_digest,ingested_at,expires_at,payload FROM ekko_events").fetchall() == stored
+
+
+def test_pending_audit_receipts_are_retried_only_by_the_explicit_sync(context, monkeypatch, tmp_path):
+    from maverick import audit
+
+    client, world = context
+    seed(world)
+    settings_before = client.get(BASE + "/settings", headers=headers("root")).json()
+    item = client.get(BASE + "/benchmarks", headers=headers("root")).json()["benchmarks"][0]
+    real_record = audit.record
+    # The audit receipt cannot be written yet: both rows keep their pending receipts.
+    monkeypatch.setattr(audit, "record", lambda *args, **kwargs: None)
+    saved = client.put(BASE + "/settings", headers=headers("root"), json={
+        "revision": settings_before["revision"], "hourly_rate": 90, "currency": "USD", "completion_confirmation": False})
+    assert saved.status_code == 200 and saved.json()["state"] == "audit_pending", saved.text
+    benchmark = client.put(BASE + "/benchmarks/" + item["id"], headers=headers("root"), json={
+        "revision": item["revision"], "minutes": 10, "low_minutes": 5, "high_minutes": 15,
+        "attributable_share": 0.5, "review_minutes": 1, "reason": "Company time study"})
+    assert benchmark.status_code == 200 and benchmark.json()["state"] == "audit_pending", benchmark.text
+    pending = tree(tmp_path)
+
+    # Reads report the pending state; they neither retry the receipt nor write it.
+    assert client.get(BASE + "/settings", headers=headers("root")).status_code == 503
+    assert client.get(BASE + "/benchmarks", headers=headers("root")).status_code == 503
+    assert tree(tmp_path) == pending
+    monkeypatch.setattr(audit, "record", real_record)
+    assert client.get(BASE + "/settings", headers=headers("root")).status_code == 503
+    assert client.get(BASE + "/benchmarks", headers=headers("root")).status_code == 503
+    assert tree(tmp_path) == pending
+
+    # The explicit sync is the one read-path-adjacent write that retries receipts.
+    assert client.post(BASE + "/sync", headers=headers("root")).status_code == 200
+    settings_after = client.get(BASE + "/settings", headers=headers("root"))
+    assert settings_after.status_code == 200 and settings_after.json()["hourly_rate"] == 90
+    benchmarks_after = client.get(BASE + "/benchmarks", headers=headers("root"))
+    assert benchmarks_after.status_code == 200
+    assert next(row for row in benchmarks_after.json()["benchmarks"] if row["id"] == item["id"])["benchmark"]["minutes"] == 10
+
+
+def test_deleted_flow_run_is_withheld_from_reads_until_the_sync(context):
+    from maverick.flow.store import FlowRun
+
+    client, _world = context
+    now = time.time()
+    store.save_run(FlowRun(run_id="probe-run", flow_id="probe-flow", owner="user:alice", status="completed",
+                           created=now, updated=now, definition_revision=1))
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    identifier = next(row["id"] for row in service.WORKS.list(limit=100)
+                      if any(source.get("id") == "probe-run" for source in row["source"]["sources"]))
+    assert client.get(BASE + "/work/" + identifier, headers=headers()).status_code == 200
+
+    # The run is deleted, but no sync has run: reads must not release its cost or evidence.
+    assert store.delete_run("probe-run")
+    assert client.get(BASE + "/work/" + identifier, headers=headers()).status_code == 404
+    report = client.get(BASE, headers=headers()).json()
+    assert identifier not in {row["id"] for row in report["rows"]}
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    assert client.get(BASE + "/work/" + identifier, headers=headers()).status_code == 404
+
+
+def test_report_states_when_its_recorded_work_last_changed_not_the_read_time(context):
+    client, world = context
+    seed(world, count=2)
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    report = client.get(BASE, headers=headers()).json()
+    newest = max(row["updated_at"] for row in service.WORKS.list(limit=100))
+    assert report["recorded_as_of"] == newest
+    # The deprecated checked_at is kept for existing clients, with the same value.
+    assert report["checked_at"] == newest
+    assert client.get(BASE, headers=headers()).json()["recorded_as_of"] == newest
+    empty = client.get(BASE, headers=headers("bob")).json()
+    assert empty["recorded_as_of"] is None
+    assert empty["checked_at"] is None
+
+
+def test_saving_assumptions_fails_closed_when_work_cannot_be_read(context, monkeypatch):
+    # An edit first records observed work. If that cannot be read completely, the
+    # edit is refused, so unrecorded work can never be priced under the new rate.
+    from maverick.intent_value import sources
+
+    client, world = context
+    seed(world)
+    before = client.get(BASE + "/settings", headers=headers("root")).json()
+    readable = sources.audit_population
+
+    def unreadable():
+        raise OSError("synthetic unreadable audit history")
+    monkeypatch.setattr(sources, "audit_population", unreadable)
+    refused = client.put(BASE + "/settings", headers=headers("root"), json={
+        "revision": before["revision"], "hourly_rate": 90, "currency": "USD", "completion_confirmation": False})
+    assert refused.status_code == 503 and "not zero" in refused.text, refused.text
+    assert client.get(BASE + "/settings", headers=headers("root")).json()["revision"] == before["revision"]
+    monkeypatch.setattr(sources, "audit_population", readable)
+    saved = client.put(BASE + "/settings", headers=headers("root"), json={
+        "revision": before["revision"], "hourly_rate": 90, "currency": "USD", "completion_confirmation": False})
+    assert saved.status_code == 200, saved.text
+    assert client.get(BASE + "/settings", headers=headers("root")).json()["hourly_rate"] == 90
+
+
+def test_report_and_suggestions_read_source_goals_in_one_batch_with_identical_output(context, monkeypatch):
+    from maverick.world_model import WorldModel
+
+    client, world = context
+    seed(world, count=4)
+    get(client)
+    single = []
+    per_goal = WorldModel.get_goal
+
+    def counting(self, goal_id):
+        single.append(goal_id)
+        return per_goal(self, goal_id)
+    monkeypatch.setattr(WorldModel, "get_goal", counting)
+    batched = {path: client.get(BASE + path, headers=headers()) for path in ("", "/opportunities")}
+    assert all(response.status_code == 200 for response in batched.values())
+    assert single == []  # Source access checks read each row's goals in one batch, not one read per goal.
+
+    # The batch must answer exactly as one read per goal does.
+    monkeypatch.setattr(WorldModel, "get_goals", lambda self, goal_ids: {
+        goal_id: goal for goal_id in goal_ids if (goal := per_goal(self, goal_id)) is not None})
+    for path, response in batched.items():
+        # The report's default period end is the read time, so compare without it.
+        assert stable(client.get(BASE + path, headers=headers()).json()) == stable(response.json()), path
+
+
+def test_specialist_intents_are_memoised_without_changing_the_classification():
+    from maverick.domain import available_domains
+    from maverick.intent_value import taxonomy
+    from maverick_dashboard import intent_value_api
+
+    domains = available_domains()
+    assert len(domains) > 100
+    for profile in domains.values():
+        direct = taxonomy.classify(profile.description)["intents"]
+        assert list(intent_value_api._domain_intents(profile.description)) == direct
+        assert list(intent_value_api._domain_intents(profile.description)) == direct
+
+
+def _ekko_with_an_expired_event(monkeypatch, tmp_path):
+    """An enrolled device whose only observation is 15 days old: past its 14-day retention."""
+    from maverick.work_discovery import CapturePolicy, WorkEvent
+    from maverick.work_discovery_store import WorkDiscoveryStore
+    from maverick_dashboard import ekko_routes, intent_value_discovery
+
+    monkeypatch.setenv("MAVERICK_KMS_KEK", "ab" * 32)
+    monkeypatch.setattr(intent_value_discovery, "get_ekko", lambda: {"enable": True})
+    now = 1_800_000_000.0
+    path = tmp_path / "ekko.sqlite3"
+    policy = CapturePolicy(
+        enabled=True, capture_level="guided", allowed_apps=frozenset({"chrome"}),
+        allowed_actions=frozenset({"download"}), allowed_object_types=frozenset({"report"}),
+        retention_days=14, min_occurrences=2, min_distinct_days=2, poll_interval_seconds=1,
+        provider_egress=False,
+    )
+
+    def ekko(clock, device="local-device"):
+        return WorkDiscoveryStore("user:alice", device, tenant="acme", path=path,
+                                  clock=lambda: clock, authority_check=lambda _policy: None)
+
+    writer = ekko(now)
+    writer.enroll(policy)
+    writer.create_session(policy=policy, session_id="expired-session")
+    writer.claim_collector("expired-session", "collector-test-capability", policy=policy, ttl_seconds=30)
+    writer.append_event(WorkEvent(event_id="event-1", session_id="expired-session", sequence=1, occurred_at=now,
+                                  app="chrome", action="download", object_type="report", duration_seconds=8),
+                        policy=policy, collector_id="collector-test-capability")
+    def store(request, device_id):
+        # The real route checks the device name before it opens a store.
+        return ekko(now + 15 * 86_400.0, ekko_routes._device_id(device_id))
+
+    monkeypatch.setattr(ekko_routes, "_store", store)
+    return path
+
+
+def _ekko_event_ids(path):
+    with sqlite3.connect(path) as conn:
+        return [row[0] for row in conn.execute("SELECT event_id FROM ekko_events").fetchall()]
+
+
+def test_the_sync_deletes_expired_ekko_events_for_the_device_it_is_called_for(context, monkeypatch, tmp_path):
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+
+    # The read leaves expired ciphertext in place; the explicit sync of another device leaves it too.
+    assert client.get(BASE + "/opportunities", headers=headers()).status_code == 200
+    assert _ekko_event_ids(path) == ["event-1"]
+    assert client.post(BASE + "/sync?device_id=laptop-2", headers=headers()).status_code == 200
+    assert _ekko_event_ids(path) == ["event-1"]
+
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    assert _ekko_event_ids(path) == []
+
+
+def test_a_sync_naming_an_invalid_device_still_records_and_deletes_no_ekko_events(context, monkeypatch, tmp_path):
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+
+    response = client.post(BASE + "/sync?device_id=not%20a%20device", headers=headers())
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "recorded"
+    assert _ekko_event_ids(path) == ["event-1"]
+
+
+def test_a_viewer_sync_does_not_delete_expired_ekko_events(context, monkeypatch, tmp_path):
+    from maverick_dashboard import auth
+
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+    real = auth.has_permission
+    monkeypatch.setattr(auth, "has_permission", lambda request, permission, **kwargs: permission != "operate" and real(request, permission, **kwargs))
+
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    assert _ekko_event_ids(path) == ["event-1"]
+
+
+def test_pausing_watching_deletes_expired_ekko_events(context, monkeypatch, tmp_path):
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+
+    response = client.post("/api/v1/ekko/sessions/expired-session/pause", json={"device_id": "local-device"}, headers=headers())
+    assert response.status_code == 200, response.text
+    assert _ekko_event_ids(path) == []
+
+
+def test_starting_watching_deletes_expired_ekko_events(context, monkeypatch, tmp_path):
+    from maverick import config
+    from maverick.work_discovery import SessionState
+
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+    # The earlier session is stopped first, so the device may be watched again.
+    monkeypatch.setattr(config, "get_ekko", lambda: {"enable": True, "allowed_apps": ["chrome"]})
+    monkeypatch.setattr(config, "validate_ekko_policy_ceiling", lambda policy: None)
+    from maverick_dashboard import ekko_routes
+    store = ekko_routes._store(None, "local-device")
+    store.transition_session("expired-session", SessionState.STOPPED)
+
+    response = client.post("/api/v1/ekko/sessions", json={"device_id": "local-device", "acknowledge_capture_scope": True},
+                           headers=headers())
+    assert response.status_code == 201, response.text
+    assert _ekko_event_ids(path) == []
+
+
+def test_pausing_watching_still_pauses_when_its_retention_record_cannot_be_queued(context, monkeypatch, tmp_path):
+    from maverick import work_discovery_store
+
+    client, world = context
+    seed(world)
+    path = _ekko_with_an_expired_event(monkeypatch, tmp_path)
+    monkeypatch.setattr(work_discovery_store, "MAX_AUDIT_OUTBOX", 0)
+
+    response = client.post("/api/v1/ekko/sessions/expired-session/pause", json={"device_id": "local-device"}, headers=headers())
+    # The pause is the safety action and stands; nothing is deleted without its record.
+    assert response.status_code == 200, response.text
+    assert response.json()["session"]["state"] == "paused"
+    assert _ekko_event_ids(path) == ["event-1"]
+
+    monkeypatch.setattr(work_discovery_store, "MAX_AUDIT_OUTBOX", 2_000)
+    assert client.post(BASE + "/sync", headers=headers()).status_code == 200
+    assert _ekko_event_ids(path) == []
+
+
+def test_a_pause_delivers_the_retention_record_with_the_number_removed(context, monkeypatch, tmp_path):
+    client, world = context
+    seed(world)
+    _ekko_with_an_expired_event(monkeypatch, tmp_path)
+    delivered = []
+    monkeypatch.setattr(audit, "record", lambda kind, **payload: delivered.append((kind, payload)) or True)
+
+    response = client.post("/api/v1/ekko/sessions/expired-session/pause", json={"device_id": "local-device"}, headers=headers())
+    assert response.status_code == 200, response.text
+    purges = [payload["lifecycle"] for kind, payload in delivered if kind == "ekko_retention_purge"]
+    assert purges == [{"state": "expired_removed", "removed": 1}]
 
 
 def test_ekko_factory_finds_owned_work_and_respects_customer_decisions(context):

@@ -26,6 +26,6 @@
 <form id="pd-delete" data-draft-recovery="off"><label>Verified scope <select class="select" id="pd-delete-scope"></select></label><fieldset id="pd-delete-stores"><legend>Stores in this request</legend></fieldset><button class="btn" type="submit">Preview exact deletion request</button></form>
 <div id="pd-delete-preview"></div><button class="btn" type="button" id="pd-delete-status">Refresh my deletion requests</button><button class="btn" type="button" id="pd-delete-review" hidden>Review workspace deletion requests</button><div id="pd-delete-requests"></div></section>
 <section class="panel"><h2>Source of a remembered preference</h2><pre id="pd-source-text" style="white-space:pre-wrap;overflow-wrap:anywhere">Choose a note's source to read the authorized original turn.</pre></section>
-<script id="pd-bootstrap" type="application/json">{{ personal_data|tojson }}</script>
+<script nonce="{{ csp_script_nonce }}" id="pd-bootstrap" type="application/json">{{ personal_data|tojson }}</script>
 <script src="/static/lightwork-personal-data.js" defer></script>
 {% endblock %}

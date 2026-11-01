@@ -267,6 +267,8 @@
     {% include "_retention_maintenance.html" %}
   </div>
 
+  {% if ediscovery_can_audit %}{% include "ediscovery_legal_holds.html" %}{% endif %}
+
   <div class="section-head"><h2 id="cmp-reports">Reports for auditors</h2></div>
   <div class="panel" data-report-context="{{ report_download_context }}">
     <div class="cmp-links" style="margin-top: 0;">

@@ -1,4 +1,4 @@
-"""i18n community portal (roadmap: 2027 H2 UX).
+"""i18n community portal.
 
 The chrome catalog (``i18n.MESSAGES``, en/fr/de/ja/zh) ships in-tree; this is
 the **community on-ramp** for adding a language without touching Python:

@@ -1,4 +1,4 @@
-"""Federated swarm protocol (roadmap: 2028 H2 capabilities + ecosystem).
+"""Federated swarm protocol.
 
 Two Lightwork swarms peer and delegate goals to each other. The wire contract
 is ``grpc_api/federation.proto`` (Hello / DelegateGoal / GoalStatus); this
