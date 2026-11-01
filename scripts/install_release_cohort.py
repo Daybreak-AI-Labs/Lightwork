@@ -59,7 +59,7 @@ print(json.dumps(value, sort_keys=True))
                     "--no-deps",
                     "--target",
                     tmp,
-                    "tomli==2.4.1",
+                    "tomli==2.5.0",
                 ],
                 check=True,
             )
@@ -71,7 +71,7 @@ import sys
 sys.path.insert(0, sys.argv[1])
 import tomli
 
-if getattr(tomli, "__version__", "") != "2.4.1":
+if getattr(tomli, "__version__", "") != "2.5.0":
     raise SystemExit("unexpected tomli bootstrap version")
 value = tomli.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 print(json.dumps(value, sort_keys=True))
@@ -98,7 +98,7 @@ def _read_toml(path: Path, python: str) -> dict:
             import tomli
         except ModuleNotFoundError:
             return _parse_toml_with_python(path, python)
-        if getattr(tomli, "__version__", "") != "2.4.1":
+        if getattr(tomli, "__version__", "") != "2.5.0":
             return _parse_toml_with_python(path, python)
         return tomli.loads(path.read_text(encoding="utf-8"))
     return tomllib.loads(path.read_text(encoding="utf-8"))

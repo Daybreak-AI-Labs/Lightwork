@@ -472,7 +472,9 @@ def test_public_python_release_cohort_is_complete_and_lockstep():
                 package_root / name
             )
         assert project["urls"]["Homepage"] == canonical_homepage
-        assert metadata["build-system"]["requires"] == ["setuptools==84.0.0"]
+        assert metadata["build-system"]["requires"] == [
+            f"setuptools=={_ci_constraints()['setuptools']}"
+        ]
 
         requirements = list(project.get("dependencies", []))
         for extra_requirements in project.get("optional-dependencies", {}).values():
@@ -718,8 +720,8 @@ def test_release_cohort_dependency_environments_are_complete():
     assert "python -m pip check" in binary_step
     assert "python scripts/verify_constraint_closure.py" in binary_step
     for build_tool in (
-        "pip==26.2.1",
-        "setuptools==84.0.0",
+        f"pip=={_ci_constraints()['pip']}",
+        f"setuptools=={_ci_constraints()['setuptools']}",
         "wheel==0.48.0",
         "packaging==26.3",
     ):
@@ -748,8 +750,8 @@ def test_release_cohort_dependency_environments_are_complete():
     assert "--pyproject packages/maverick-core/pyproject.toml" in sbom_step
     assert sbom_step.count("scripts/verify_constraint_closure.py") == 2
     for build_tool in (
-        "pip==26.2.1",
-        "setuptools==84.0.0",
+        f"pip=={_ci_constraints()['pip']}",
+        f"setuptools=={_ci_constraints()['setuptools']}",
         "wheel==0.48.0",
         "packaging==26.3",
     ):
@@ -887,8 +889,8 @@ def test_pypi_release_builds_are_commit_anchored_and_byte_reproducible():
     assert "release artifacts are not reproducible from this commit" in build_step
     assert "python -I scripts/verify_constraint_closure.py" in bootstrap_step
     for build_tool in (
-        "pip==26.2.1",
-        "setuptools==84.0.0",
+        f"pip=={_ci_constraints()['pip']}",
+        f"setuptools=={_ci_constraints()['setuptools']}",
         "wheel==0.48.0",
         "packaging==26.3",
         f"build=={_ci_constraints()['build']}",
@@ -1244,18 +1246,21 @@ def test_customer_surfaces_do_not_reference_the_retired_repository_owner():
 
 def test_ci_posture_tools_are_exactly_pinned_and_secret_scan_uses_module():
     constraints = _ci_constraints()
-    expected = {
-        "bandit": "1.9.4",
-        "cyclonedx-bom": "7.5.0",
-        "detect-secrets": "1.5.0",
-        "pip-audit": "2.10.1",
-        "psycopg": "3.3.6",
-        "psycopg-binary": "3.3.6",
-        "psycopg-pool": "3.3.3",
-        "ruff": "0.16.9",
-        "vulture": "2.16",
-    }
-    assert {name: constraints.get(name) for name in expected} == expected
+    posture_tools = (
+        "bandit",
+        "cyclonedx-bom",
+        "detect-secrets",
+        "pip-audit",
+        "psycopg",
+        "psycopg-binary",
+        "psycopg-pool",
+        "ruff",
+        "vulture",
+    )
+    missing = [name for name in posture_tools if name not in constraints]
+    assert not missing, f"posture tools missing from requirements/ci.txt: {missing}"
+    # The workflow installs each tool at exactly the locked version, never a floor.
+    expected = {name: constraints[name] for name in posture_tools}
 
     workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
         encoding="utf-8"
@@ -1523,10 +1528,9 @@ def test_native_release_uses_locked_python_tools_and_preserves_wheel_bytes():
         "PIP_CONSTRAINT: ${{ github.workspace }}/requirements/ci.txt"
         in workflow
     )
-    assert "'pip==26.2.1'" in workflow
-    assert "'pytest==9.1.1'" in workflow
-    assert "'certifi==2026.7.22'" in workflow
-    assert "'cryptography==50.0.1'" in workflow
+    locked = _ci_constraints()
+    for locked_tool in ("pip", "pytest", "certifi", "cryptography"):
+        assert f"'{locked_tool}=={locked[locked_tool]}'" in workflow
     assert "maturin-version: v1.14.1" in workflow
     assert workflow.count('toolchain: "1.97.1"') == 4
     assert "jetli/wasm-pack-action@" not in workflow
@@ -1813,15 +1817,13 @@ def test_release_delivery_toolchains_and_artifacts_are_deterministic():
 
     assert f"pyinstaller=={_ci_constraints()['pyinstaller']}" in release
     assert "pyinstaller>=" not in release
-    constraints = (
-        REPO_ROOT / "requirements" / "ci.txt"
-    ).read_text(encoding="utf-8")
+    constraints = _ci_constraints()
     for pinned_helper in (
-        "altgraph==0.17.5",
-        "macholib==1.16.4",
-        "pefile==2024.8.26",
-        "pyinstaller-hooks-contrib==2026.7",
-        "pywin32-ctypes==0.2.3",
+        "altgraph",
+        "macholib",
+        "pefile",
+        "pyinstaller-hooks-contrib",
+        "pywin32-ctypes",
     ):
         assert pinned_helper in constraints
     assert "provenance: mode=max" in release
@@ -1961,7 +1963,7 @@ def test_release_delivery_toolchains_and_artifacts_are_deterministic():
     assert "COPY requirements/ci.txt ./requirements/ci.txt" in dockerfile
     assert " AS wheel-builder" in dockerfile
     assert " AS runtime" in dockerfile
-    assert "pip==26.2.1" in dockerfile
+    assert f"pip=={_ci_constraints()['pip']}" in dockerfile
     assert dockerfile.count("--constraint /tmp/requirements/ci.txt") == 1
     assert "--core-extra release-runtime" in dockerfile
     assert "--no-index" in dockerfile

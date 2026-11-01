@@ -1,7 +1,7 @@
 # Checkout-only helper. Not published, not a uv workspace member, not in the
 # release cohort. Install from a checkout with: pip install ./sdks/python-client
 [build-system]
-requires = ["setuptools==84.0.0"]
+requires = ["setuptools==84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
