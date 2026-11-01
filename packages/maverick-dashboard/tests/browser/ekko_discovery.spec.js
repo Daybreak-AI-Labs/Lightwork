@@ -33,7 +33,7 @@ test('real evidence, task review, recovery, responsive layout and unsaved native
   await page.setViewportSize({width:390,height:844});
   const widths=await page.evaluate(()=>[document.documentElement.scrollWidth,document.documentElement.clientWidth]);
   expect(widths[0]).toBeLessThanOrEqual(widths[1]+1);
-  await page.addScriptTag({content:axe.source});
+  await page.evaluate(axe.source);
   const audit=await page.evaluate(async()=>axe.run(document.getElementById('ekko-review'),{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}}));
   expect(audit.violations).toEqual([]);
   await page.evaluate(()=>window.scrollTo(0,0));
@@ -149,7 +149,7 @@ test('private plans survive reload, recover an unconfirmed pilot, park and erase
   await page.getByRole('button',{name:'Record pilot run'}).click();
   await expect(page.locator('#ekko-pilot-summary')).toContainText('1/2 results accepted. Net time saved: 14');
   await page.setViewportSize({width:390,height:844});
-  await page.addScriptTag({content:axe.source});
+  await page.evaluate(axe.source);
   const audit=await page.evaluate(async()=>axe.run(document.getElementById('ekko-planning'),{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}}));
   expect(audit.violations).toEqual([]);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1)).toBe(true);
@@ -248,7 +248,7 @@ test('Ekko discovers native business work and bulk-builds saved workflows with r
   await expect(page.locator('#ekko-build-message')).toContainText('0 workflows built; 3 available to review');
   const flows=(await (await request.get('/api/v1/flows')).json()).flows;
   expect(flows).toHaveLength(3);expect(flows.every(flow=>!flow.published&&!flow.schedule)).toBe(true);
-  await page.addScriptTag({content:axe.source});
+  await page.evaluate(axe.source);
   const audit=await page.evaluate(async()=>axe.run(document.getElementById('ekko-build'),{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}}));
   expect(audit.violations).toEqual([]);
   await page.evaluate(()=>window.scrollTo(0,0));
