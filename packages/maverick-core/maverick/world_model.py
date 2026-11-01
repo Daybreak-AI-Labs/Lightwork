@@ -61,7 +61,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 50
+SCHEMA_VERSION = 51
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -447,6 +447,9 @@ def _bootstrap_schema(conn: sqlite3.Connection) -> str:
 
 
 MIGRATIONS: dict[int, list[str]] = {
+    # v51: which decisions can still be undone. Only a request a waiting task
+    # holds ("open") can be; the task marks it "settled" when it acts on it.
+    51: ["ALTER TABLE approvals ADD COLUMN undo_hold TEXT"],
     # v50: ordered per-task question reads avoid scanning unrelated history.
     50: ["CREATE INDEX IF NOT EXISTS idx_questions_goal_id ON questions(goal_id, id)"],
     # v49: retire only unused derived message-search storage. Authoritative
@@ -492,7 +495,7 @@ MIGRATIONS: dict[int, list[str]] = {
     4: [],  # conversations/turns tables are in SCHEMA (idempotent CREATE)
     5: [],  # attachments table is in SCHEMA (idempotent CREATE)
     6: [],  # processed_messages table is in SCHEMA (idempotent CREATE)
-    # Wave 12 (council F17): episodes.ended_at + goal_events.ts indexes.
+    # episodes.ended_at + goal_events.ts indexes.
     # list_episodes() does `ORDER BY ended_at DESC LIMIT N` which is a
     # full table scan without the index — visible above ~5k episodes;
     # SWE-bench Pro creates ~7500 episodes per sweep (1865 instances ×
@@ -504,7 +507,7 @@ MIGRATIONS: dict[int, list[str]] = {
         "CREATE INDEX IF NOT EXISTS idx_goal_events_ts "
         "ON goal_events(ts)",
     ],
-    # Q1 2026 index audit: hot queries identified via EXPLAIN QUERY PLAN.
+    # Schema v8: hot-query indexes identified via EXPLAIN QUERY PLAN.
     #
     # - list_episodes(goal_id=...) filters by goal_id then orders by
     #   started_at: needs idx_episodes_goal_started.
@@ -759,6 +762,9 @@ class Approval:
     requested_by: str | None = None
     goal_id: int | None = None
     department: str = ""
+    # "open" while a waiting task holds the decision for undo, "settled" once
+    # it acted; None for every request whose consumer acts at once.
+    undo_hold: str | None = None
 
 
 @dataclass(frozen=True)
@@ -814,11 +820,48 @@ def _approval_audit_event_id(
 
 
 APPROVAL_UNDO_STATUS = "undone"
+# ``approvals.undo_hold``: a waiting task holds the decision for undo, or has acted on it.
+APPROVAL_UNDO_OPEN = "open"
+APPROVAL_UNDO_SETTLED = "settled"
+
+
+def approval_held_open(approval: Any) -> bool:
+    """A request a waiting task holds open for undo (not yet settled)."""
+    return getattr(approval, "undo_hold", None) == APPROVAL_UNDO_OPEN
+
+
+def approval_undo_refusal(status: str, decided_by: str | None, undo_hold: str | None) -> str | None:
+    """Why a decided approval cannot be undone, or None when it still can be.
+
+    ``"final"``: no waiting task holds it (its consumer acts on the decision
+    at once) or the system decided it (a stopped task, a timed-out wait, a
+    recovery); ``"too_late"``: the waiting task has already acted on it.
+    """
+    if status == "pending":
+        return None
+    if str(decided_by or "").startswith("system:"):
+        return "final"
+    if undo_hold == APPROVAL_UNDO_SETTLED:
+        return "too_late"
+    if undo_hold != APPROVAL_UNDO_OPEN:
+        return "final"
+    return None
 
 
 def _approval_undo_marker_id(tenant_id: str | None, approval_id: int, undo_round: int) -> str:
     """Outbox row id for one undo of an approval (never delivered; a counter)."""
     return _approval_audit_event_id(tenant_id, approval_id, APPROVAL_UNDO_STATUS, "", undo_round)
+
+
+_EPISODE_SPEND_COLS = (
+    "e.id, e.goal_id, e.started_at, e.ended_at, e.outcome, "
+    "COALESCE(e.cost_dollars, 0) AS cost_dollars, "
+    "COALESCE(e.input_tokens, 0) AS input_tokens, "
+    "COALESCE(e.output_tokens, 0) AS output_tokens, "
+    "COALESCE(e.tool_calls, 0) AS tool_calls, "
+    "COALESCE(e.cache_read_tokens, 0) AS cache_read_tokens, "
+    "COALESCE(e.cache_write_tokens, 0) AS cache_write_tokens "
+)
 
 
 @dataclass
@@ -1053,11 +1096,48 @@ def _goal_from_row(row, *, at_rest: bool | None = None) -> Goal:
 
 
 def _goals_from_rows(rows) -> list[Goal]:
-    """Build Goals from a result set with one at-rest policy check per query."""
-    from .crypto_at_rest import at_rest_enabled
+    """Build Goals from a result set with one at-rest policy and key lookup
+    per query (each sealed field used to load the key again)."""
+    records = [dict(row) for row in rows]
+    texts: list[str | None] = []
+    for d in records:
+        texts += [d.get("title"), d.get("description")]
+        if "result" in d:
+            texts.append(d["result"])
+    decoded = iter(_dec_fields(texts))
+    for d in records:
+        d["title"] = next(decoded)
+        d["description"] = next(decoded)
+        if "result" in d:
+            d["result"] = next(decoded)
+    return [Goal(**_row_for(Goal, d)) for d in records]
 
-    at_rest = at_rest_enabled()
-    return [_goal_from_row(r, at_rest=at_rest) for r in rows]
+
+def goals_by_id(world, goal_ids) -> dict:
+    """``{id: goal}`` for the ids that exist, in one read when the world can
+    (:meth:`WorldModel.get_goals`), else one :meth:`get_goal` per id."""
+    batch = getattr(world, "get_goals", None)
+    if callable(batch):
+        return batch(goal_ids)
+    found = {}
+    for goal_id in dict.fromkeys(goal_ids):
+        goal = world.get_goal(goal_id)
+        if goal is not None:
+            found[goal_id] = goal
+    return found
+
+
+def episodes_by_goal_batch(world, goal_ids, *, per_goal: int) -> dict | None:
+    """``{goal_id: newest per_goal runs}`` in one read when the world can batch
+    (:meth:`WorldModel.episodes_by_goal`). ``None`` when it cannot, or when the
+    batch read fails, so the caller reads goal by goal as it did before."""
+    batch = getattr(world, "episodes_by_goal", None)
+    if not callable(batch):
+        return None
+    try:
+        return batch(goal_ids, per_goal=per_goal)
+    except Exception:
+        return None
 
 
 def _goal_event_from_row(row) -> GoalEvent:
@@ -1078,12 +1158,15 @@ def _goal_events_from_rows(rows: list) -> list[GoalEvent]:
     return events
 
 
-def _episode_spend_from_row(row) -> EpisodeSpend:
-    """Build an EpisodeSpend from a row, decrypting the sealed outcome field."""
-    d = dict(row)
-    if "outcome" in d:
-        d["outcome"] = _dec_field(d.get("outcome"))
-    return EpisodeSpend(**_row_for(EpisodeSpend, d))
+def _episode_spends_from_rows(rows: list) -> list[EpisodeSpend]:
+    """Build run-cost episodes, decrypting the sealed outcome field, while
+    resolving encryption policy and keys once."""
+    records = [dict(row) for row in rows]
+    decoded = iter(_dec_fields([d.get("outcome") for d in records if "outcome" in d]))
+    for d in records:
+        if "outcome" in d:
+            d["outcome"] = next(decoded)
+    return [EpisodeSpend(**_row_for(EpisodeSpend, d)) for d in records]
 
 
 def _notify_approval_created(world, approval_id: int, provenance: str | None) -> None:
@@ -1106,6 +1189,22 @@ def _approval_from_row(row) -> Approval:
     return Approval(**_row_for(Approval, d))
 
 
+def _approvals_from_rows(rows: list) -> list[Approval]:
+    """Build approvals while resolving encryption policy and keys once.
+
+    Decoding each row on its own checked the policy (the compliance profile
+    configuration) and loaded the key for every sealed field: listing 500
+    approvals took 250-450 ms.
+    """
+    sealed = ("action", "scope", "detail")
+    records = [dict(row) for row in rows]
+    decoded = iter(_dec_fields([d.get(name) for d in records for name in sealed]))
+    for d in records:
+        for name in sealed:
+            d[name] = next(decoded)
+    return [Approval(**_row_for(Approval, d)) for d in records]
+
+
 def _single_approver(approval, approvers: list[str]) -> list[str]:
     """A one-approver request keeps no sign-off rows: its approver is the decider."""
     if (
@@ -1116,6 +1215,20 @@ def _single_approver(approval, approvers: list[str]) -> list[str]:
     ):
         return [approval.decided_by]
     return approvers
+
+
+def _approval_state_view(approval, approvers: list[str], audit_pending: int) -> dict:
+    """The operator/UI quorum view of one approval (shared by the per-id and
+    the batched readers so both return the same shape and values)."""
+    return {
+        "status": approval.status,
+        "approvals_required": max(1, int(approval.approvals_required or 1)),
+        "approved_count": len(approvers),
+        "approvers": approvers,
+        "requested_by": approval.requested_by,
+        "audit_pending_count": audit_pending,
+        "effective": approval.status != "pending",
+    }
 
 
 def _approval_audit_event_from_row(row) -> ApprovalAuditEvent:
@@ -1268,7 +1381,7 @@ class WorldModel:
         # with WAL + busy_timeout this is safe for the agent+dashboard
         # concurrency pattern (one writer process + many readers).
         #
-        # Council round-2 perf-seat fix: ``check_same_thread=False`` alone
+        # ``check_same_thread=False`` alone
         # is insufficient. Two threadpool workers driving execute()+commit()
         # on the same connection can interleave: thread A opens an implicit
         # transaction with INSERT, thread B's INSERT joins the same
@@ -1279,6 +1392,9 @@ class WorldModel:
         # mutation so each commit() bounds exactly one logical write.
         self._write_lock = threading.RLock()
         self._write_depth = 0
+        # Goals whose stored state this transaction changed; their in-process
+        # watchers (the chat page's event stream) are woken after it commits.
+        self._changed_goals: set[int] = set()
         # Per-thread READ connections: WAL gives each its own connection a
         # consistent committed snapshot, so reads run concurrently with the one
         # writer instead of serialising on the write lock (WAL's many-readers
@@ -1348,7 +1464,7 @@ class WorldModel:
         # opt into FULL (durable on every commit) via [world_model] synchronous
         # / MAVERICK_WORLD_SYNCHRONOUS. Default NORMAL — behaviour unchanged.
         self.conn.execute(f"PRAGMA synchronous = {_synchronous_mode()}")
-        # May 26 council fix (long-tail audit #4): bound WAL file
+        # Bound WAL file
         # growth. Default autocheckpoint=1000 pages is fine, but with
         # a dashboard reader holding a snapshot lock, autocheckpoint
         # can stall and the WAL file grows monotonically. Explicit
@@ -1412,14 +1528,37 @@ class WorldModel:
                 yield self.conn
                 if is_outermost:
                     self.conn.commit()
+                    self._wake_changed_goals()
             except Exception:
                 if is_outermost:
                     self.conn.rollback()
+                    self.__dict__.pop("_changed_goals", None)
                 raise
             finally:
                 self._write_depth -= 1
                 if self._write_depth == 0:
                     self._writer_ident = None
+
+    def _goal_changed(self, goal_id: int) -> None:
+        """Note, inside a write, that a watched goal's stored state changes."""
+        self.__dict__.setdefault("_changed_goals", set()).add(int(goal_id))
+
+    def _wake_changed_goals(self) -> None:
+        """After the commit: wake in-process watchers. Never raises (the write
+        already succeeded); a missed wake only leaves a watcher on its timer."""
+        changed = self.__dict__.pop("_changed_goals", None)
+        if not changed or getattr(self, "_is_memory", True):
+            return
+        try:
+            from .goal_wakeup import notify, watching, world_key
+
+            if not watching():
+                return
+            world = world_key(self.path)
+            for goal_id in changed:
+                notify(world, goal_id)
+        except Exception:  # noqa: BLE001
+            log.debug("goal wake-up skipped", exc_info=True)
 
     def _prune_dead_reader_conns_locked(self) -> None:
         """Close and drop reader connections whose owning thread has exited.
@@ -1488,11 +1627,11 @@ class WorldModel:
     def close(self) -> None:
         """Close the underlying SQLite connection.
 
-        Wave 9 fix (council H1): benchmark runs construct ~1865
+        Benchmark runs construct ~1865
         WorldModel instances in one process; without close() the
         FD count climbs and the host eventually OOMs.
 
-        May 26 council fix (long-tail audit #4): checkpoint + truncate
+        Checkpoint + truncate
         the WAL on close so the sidecar file doesn't persist into the
         next instance's open. Best-effort; close still runs even if
         checkpoint fails.
@@ -1531,7 +1670,7 @@ class WorldModel:
         set_goal_status('done'/'blocked') leaves the row 'active' forever
         and `active_goal()` returns a ghost.
 
-        Council security/integrity finding: previous default was 0,
+        The previous default was 0,
         which reclaimed every active row -- including goals running in
         a sibling process (dashboard restarting while `maverick serve`
         is mid-goal would flip the live goal to 'blocked'). Default now
@@ -1718,7 +1857,7 @@ class WorldModel:
         # A recovery point before any forward-only migration runs.
         if current < SCHEMA_VERSION:
             self._backup_before_migration(current)
-        # Wave 12 hardening: temporarily bump busy_timeout for the
+        # Temporarily bump busy_timeout for the
         # migration. CREATE INDEX on a multi-million-row table
         # (long-lived production DB) can take 30s+ and the 5s default
         # would raise "database is locked" against a running dashboard.
@@ -1734,7 +1873,7 @@ class WorldModel:
         try:
             while current < SCHEMA_VERSION:
                 next_version = current + 1
-                # W1-56: Python's sqlite3 legacy driver auto-commits DDL/
+                # Python's sqlite3 legacy driver auto-commits DDL/
                 # backfill statements one at a time outside any transaction,
                 # so a failing multi-statement migration left EARLIER
                 # statements of the SAME version permanently applied while
@@ -2246,6 +2385,7 @@ class WorldModel:
                 "result = COALESCE(?, result) WHERE id = ?",
                 (status, now, status, now, _enc_field(result), goal_id),
                 )
+                self._goal_changed(goal_id)
             # A sign-off is authority over one immutable terminal payload, not
             # over a goal id forever.  Reruns, failures, and any result rewrite
             # revoke it atomically so old approval cannot authorize new bytes.
@@ -2285,6 +2425,8 @@ class WorldModel:
                 "('done', 'completed', 'failed', 'cancelled', 'blocked', 'error')",
                 (_enc_field(text), now, goal_id),
             )
+            if cur.rowcount == 1:
+                self._goal_changed(goal_id)
             return cur.rowcount == 1
 
     def shoring_measurements(self, department: str, *, since: float, until: float, owner: str | None = None) -> dict:
@@ -2419,7 +2561,20 @@ class WorldModel:
 
     def get_goal(self, goal_id: int) -> Goal | None:
         row = self._read_one("SELECT * FROM goals WHERE id = ?", (goal_id,))
-        return _goal_from_row(row) if row else None
+        # One at-rest policy and key lookup for the row's sealed fields.
+        return _goals_from_rows([row])[0] if row else None
+
+    def get_goals(self, goal_ids) -> dict[int, Goal]:
+        """``{id: goal}`` for the ids that exist: one read per 500 ids, each
+        decrypted with one at-rest policy and key lookup (a page that read 50
+        goals one by one loaded the key for every sealed field of each)."""
+        found: dict[int, Goal] = {}
+        for chunk in self._chunks(sorted({int(goal_id) for goal_id in goal_ids})):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self._read_all(f"SELECT * FROM goals WHERE id IN ({placeholders})", tuple(chunk))
+            for goal in _goals_from_rows(rows):
+                found[goal.id] = goal
+        return found
 
     def recent_goals_by_domain(self, domains: list[str], *, owner: str | None = None,
                                per_domain: int = 5) -> dict[str, list[Goal]]:
@@ -2503,6 +2658,35 @@ class WorldModel:
             sql += " LIMIT ? OFFSET ?"
             params = params + (max(1, int(limit)), max(0, int(offset)))
         rows = self._read_all(sql, params)
+        return _goals_from_rows(rows)
+
+    def goal_states(self, *, owner: str | None = None, limit: int = 10_000,
+                    offset: int = 0, order: str = "asc") -> list[tuple[int, str, float | None]]:
+        """``(id, status, updated_at)`` for the goals ``list_goals`` returns for
+        the same owner, limit, offset and order, read without decrypting any
+        goal (the callers only count, compare or page on these columns)."""
+        direction = "DESC" if order.lower() == "desc" else "ASC"
+        where = " WHERE owner = ?" if owner is not None else ""
+        params = (owner,) if owner is not None else ()
+        rows = self._read_all(
+            f"SELECT id, status, updated_at FROM goals{where} ORDER BY id {direction} LIMIT ? OFFSET ?",
+            (*params, max(1, int(limit)), max(0, int(offset))),
+        )
+        return [(int(row[0]), row[1], row[2]) for row in rows]
+
+    def goals_due_by(self, horizon: float, *, owner: str | None = None,
+                     limit: int = 2000) -> list[Goal]:
+        """The pending or active goals with a non-zero deadline at or before
+        ``horizon`` among the ``limit`` oldest goals (owner-scoped), oldest
+        first. Filtering happens before decryption, so only matches are decoded."""
+        where = " WHERE owner = ?" if owner is not None else ""
+        params = (owner,) if owner is not None else ()
+        rows = self._read_all(
+            "SELECT * FROM (SELECT * FROM goals" + where + " ORDER BY id ASC LIMIT ?) "
+            "WHERE status IN ('pending', 'active') AND deadline IS NOT NULL "
+            "AND deadline != 0 AND deadline <= ? ORDER BY id ASC",
+            (*params, max(1, int(limit)), float(horizon)),
+        )
         return _goals_from_rows(rows)
 
     def list_goal_results(self, *, owner: str, limit: int = 26,
@@ -2740,15 +2924,7 @@ class WorldModel:
         Without this filter ``/api/v1/spend`` returned every user's runs + cost
         to any caller.
         """
-        cols = (
-            "e.id, e.goal_id, e.started_at, e.ended_at, e.outcome, "
-            "COALESCE(e.cost_dollars, 0) AS cost_dollars, "
-            "COALESCE(e.input_tokens, 0) AS input_tokens, "
-            "COALESCE(e.output_tokens, 0) AS output_tokens, "
-            "COALESCE(e.tool_calls, 0) AS tool_calls, "
-            "COALESCE(e.cache_read_tokens, 0) AS cache_read_tokens, "
-            "COALESCE(e.cache_write_tokens, 0) AS cache_write_tokens "
-        )
+        cols = _EPISODE_SPEND_COLS
         join = ("FROM episodes e JOIN goals g ON e.goal_id = g.id "
                 if owner is not None else "FROM episodes e ")
         where, params = [], []
@@ -2764,7 +2940,47 @@ class WorldModel:
         sql += "ORDER BY e.started_at DESC LIMIT ?"
         params.append(limit)
         rows = self._read_all(sql, tuple(params))
-        return [_episode_spend_from_row(r) for r in rows]
+        return _episode_spends_from_rows(rows)
+
+    def episodes_by_goal(self, goal_ids, *, per_goal: int = 50) -> dict[int, list[EpisodeSpend]]:
+        """The newest ``per_goal`` runs of each listed goal, newest first: the
+        rows ``list_episodes(goal_id=..., limit=per_goal)`` returns for each
+        goal, in the same order. Each goal is read by its own query, which the
+        (goal_id, started_at) index stops after ``per_goal`` rows, so a goal
+        with many runs is never read in full; the rows are then decoded in one
+        pass, resolving the encryption policy and keys once for all of them.
+        Every listed goal is a key, with an empty list when it has no runs.
+        """
+        ids = list(dict.fromkeys(int(goal_id) for goal_id in goal_ids))
+        limit = int(per_goal)   # passed to LIMIT as list_episodes does, so 0 and negatives match it
+        rows: list = []
+        for gid in ids:
+            rows.extend(self._read_all(
+                "SELECT " + _EPISODE_SPEND_COLS + "FROM episodes e WHERE e.goal_id = ? "
+                "ORDER BY e.started_at DESC LIMIT ?",
+                (gid, limit),
+            ))
+        found: dict[int, list[EpisodeSpend]] = {gid: [] for gid in ids}
+        for episode in _episode_spends_from_rows(rows):
+            found[episode.goal_id].append(episode)
+        return found
+
+    def episodes_for_owner_goals(self, owner: str, *, goal_limit: int = 10_000,
+                                 limit: int = 500) -> list[EpisodeSpend]:
+        """The owner's runs for their newest ``goal_limit`` goals: newest goal
+        first, newest run first within a goal, at most ``limit`` rows.
+
+        Same rows and order as ``list_goals(owner=..., limit=goal_limit,
+        order="desc")`` followed by ``list_episodes(goal_id=...)`` for each goal
+        until ``limit`` rows, in one query and one decode.
+        """
+        rows = self._read_all(
+            "SELECT " + _EPISODE_SPEND_COLS + "FROM episodes e JOIN ("
+            "SELECT id FROM goals WHERE owner = ? ORDER BY id DESC LIMIT ?"
+            ") g ON e.goal_id = g.id ORDER BY g.id DESC, e.started_at DESC LIMIT ?",
+            (owner, max(1, int(goal_limit)), max(1, int(limit))),
+        )
+        return _episode_spends_from_rows(rows)
 
     def episode_costs_since(self, since: float, *, limit: int = 100_000) -> list[tuple[str, float, float]]:
         """Finished runs that ended at or after ``since``, oldest first, as
@@ -2814,7 +3030,7 @@ class WorldModel:
         operation on the world model (instead of opening its SQLite file behind
         its back) preserves backend selection and transaction ownership.
 
-        W1-50: ``facts.source_episode_id``/``fact_history.source_episode_id``
+        ``facts.source_episode_id``/``fact_history.source_episode_id``
         are ``REFERENCES episodes(id)`` with no ``ON DELETE`` clause, and the
         world opens with ``PRAGMA foreign_keys = ON`` -- deleting an episode
         any fact still cites (retention prunes by AGE, not by whether a fact
@@ -2894,6 +3110,7 @@ class WorldModel:
                 "INSERT INTO goal_events(goal_id, agent, kind, content, ts) VALUES(?, ?, ?, ?, ?)",
                 (goal_id, agent, kind, _enc_field(content), time.time()),
             )
+            self._goal_changed(goal_id)
             return cur.lastrowid
 
     def goal_events(self, goal_id: int, since_id: int = 0, limit: int = 200) -> list[GoalEvent]:
@@ -2962,7 +3179,7 @@ class WorldModel:
     ) -> int:
         """Count or delete conversation messages older than an absolute cutoff.
 
-        W1-57: unlike episodes, nothing references ``messages.id`` via a
+        Unlike episodes, nothing references ``messages.id`` via a
         foreign key, so this is a plain age-based delete with no dangling
         provenance to null out first.
         """
@@ -3110,10 +3327,11 @@ class WorldModel:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY key LIMIT ? OFFSET ?"
         rows = self._read_all(sql, (*params, max(1, min(limit, 101)), max(0, offset)))
+        values = _dec_fields([row["value"] for row in rows])  # one policy and key lookup
         result = []
-        for row in rows:
+        for row, value in zip(rows, values, strict=True):
             item = dict(row)
-            item["value"] = _dec_field(item["value"])
+            item["value"] = value
             item["tags"] = json.loads(item.pop("tags_json"))
             result.append(item)
         return result
@@ -3132,7 +3350,8 @@ class WorldModel:
         rows = self._read_all(
             "SELECT key, value FROM facts ORDER BY id DESC"
         )
-        return {r["key"]: _dec_field(r["value"]) for r in rows}
+        values = _dec_fields([r["value"] for r in rows])
+        return {r["key"]: value for r, value in zip(rows, values, strict=True)}
 
     def get_facts_with_trust(self) -> dict[str, tuple[str, int]]:
         """All current facts as ``{key: (value, trust_tier)}``, newest first --
@@ -3142,7 +3361,9 @@ class WorldModel:
             "SELECT key, value, trust_tier FROM facts "
             "ORDER BY id DESC"
         )
-        return {r["key"]: (_dec_field(r["value"]), int(r["trust_tier"])) for r in rows}
+        values = _dec_fields([r["value"] for r in rows])
+        return {r["key"]: (value, int(r["trust_tier"]))
+                for r, value in zip(rows, values, strict=True)}
 
     def facts_matching(self, token: str) -> dict[str, str]:
         """Facts explicitly scoped to ``token`` by key prefix.
@@ -3443,6 +3664,7 @@ class WorldModel:
         provenance: str | None = None,
         approvals_required: int = 1,
         requested_by: str | None = None,
+        undoable: bool = False,
     ) -> int:
         """Park a high-risk action for out-of-band (dashboard) approval.
 
@@ -3454,6 +3676,9 @@ class WorldModel:
         before the action is granted (segregation of duties; 1 = legacy single
         approver). ``requested_by`` is the requesting principal, so a multi-party
         approval can bar the requester from approving their own request.
+        ``undoable`` is only for a requester that waits out the undo window
+        before acting on a decision (the consent wait, which then calls
+        :meth:`settle_approval_decision`); every other decision is final.
         """
         from .logging_config import current_goal_id
 
@@ -3462,12 +3687,13 @@ class WorldModel:
             goal = conn.execute("SELECT id, domain FROM goals WHERE id = ?", (context_goal,)).fetchone()
             cur = conn.execute(
                 "INSERT INTO approvals(action, risk, scope, detail, provenance, "
-                "status, requested_at, approvals_required, requested_by, goal_id, department) "
-                "VALUES(?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
+                "status, requested_at, approvals_required, requested_by, goal_id, department, "
+                "undo_hold) VALUES(?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
                 (_enc_field(action), risk, _enc_field(scope), _enc_field(detail),
                  provenance, time.time(), max(1, int(approvals_required)),
                  (requested_by or None), goal["id"] if goal else None,
-                 goal["domain"] if goal else ""),
+                 goal["domain"] if goal else "",
+                 APPROVAL_UNDO_OPEN if undoable else None),
             )
             approval_id = cur.lastrowid
         _notify_approval_created(self, approval_id, provenance)
@@ -3500,13 +3726,24 @@ class WorldModel:
             "SELECT * FROM approvals ORDER BY requested_at DESC, id DESC LIMIT ?",
             (max(1, int(limit)),),
         )
-        return [_approval_from_row(r) for r in rows]
+        return _approvals_from_rows(rows)
+
+    def approvals_requested_between(self, since: float, until: float) -> list[Approval]:
+        """Approvals with ``since <= requested_at <= until``, in the order
+        :meth:`list_approvals` returns them. The window is applied in SQL, so
+        rows outside it are never decrypted (the audit binder reads one window)."""
+        rows = self._read_all(
+            "SELECT * FROM approvals WHERE requested_at >= ? AND requested_at <= ? "
+            "ORDER BY requested_at DESC, id DESC",
+            (float(since), float(until)),
+        )
+        return _approvals_from_rows(rows)
 
     def pending_approvals(self) -> list[Approval]:
         rows = self._read_all(
             "SELECT * FROM approvals WHERE status = 'pending' ORDER BY id"
         )
-        return [_approval_from_row(r) for r in rows]
+        return _approvals_from_rows(rows)
 
     def approval_audit_event_id(
         self,
@@ -3533,6 +3770,25 @@ class WorldModel:
         row = conn.execute(sql, params).fetchone() if conn is not None else self._read_one(sql, params)
         return int(row[0]) if row else 0
 
+    def settle_approval_decision(self, approval_id: int, *, decided_before: float) -> Approval | None:
+        """The waiting task is about to act on this decision: make it final.
+
+        Only a decision made at or before ``decided_before`` (the end of the
+        task's own undo window) is settled. Returns the approval as it stands:
+        when settled, an undo from now on is refused (``"too_late"``), whatever
+        window the page that offers it reads; when an undo got there first it
+        is pending again, and a decision made again since then is still
+        ``undo_hold == "open"``, so the task keeps waiting.
+        """
+        with self._writing() as conn:
+            conn.execute(
+                "UPDATE approvals SET undo_hold = ? WHERE id = ? AND status <> 'pending' "
+                "AND undo_hold = ? AND decided_at <= ?",
+                (APPROVAL_UNDO_SETTLED, int(approval_id), APPROVAL_UNDO_OPEN, float(decided_before)),
+            )
+            row = conn.execute("SELECT * FROM approvals WHERE id = ?", (int(approval_id),)).fetchone()
+        return _approval_from_row(row) if row else None
+
     def undo_approval_decision(
         self,
         approval_id: int,
@@ -3544,28 +3800,33 @@ class WorldModel:
 
         Outcomes: ``"undone"``, ``"not_found"``, ``"not_decided"`` (still
         pending, or its final vote is awaiting audit delivery), ``"too_late"``
-        (the window of ``within_seconds`` after ``decided_at`` has passed, so
-        the consumer may already have acted). On success the sign-offs are
+        (the window of ``within_seconds`` after ``decided_at`` has passed, or
+        the waiting task already acted on it), ``"final"`` (no waiting task
+        holds this request, or the system decided it; see
+        :func:`approval_undo_refusal`). On success the sign-offs are
         cleared, the delivered vote rows keep their place in the outbox but no
         longer carry a final status, and an undo marker row bumps the vote
         identity round so the next decision is a new signed audit event.
         """
         with self._writing() as conn:
             row = conn.execute(
-                "SELECT status, decided_at FROM approvals WHERE id = ?",
+                "SELECT status, decided_at, decided_by, undo_hold, action FROM approvals WHERE id = ?",
                 (int(approval_id),),
             ).fetchone()
             if row is None:
                 return "not_found"
             if row["status"] == "pending":
                 return "not_decided"
+            refusal = approval_undo_refusal(row["status"], row["decided_by"], row["undo_hold"])
+            if refusal is not None:
+                return refusal
             decided_at = row["decided_at"]
             if decided_at is None or time.time() - float(decided_at) > float(within_seconds):
                 return "too_late"
             conn.execute(
                 "UPDATE approvals SET status = 'pending', decided_at = NULL, "
-                "decided_by = NULL WHERE id = ? AND status = ?",
-                (int(approval_id), row["status"]),
+                "decided_by = NULL WHERE id = ? AND status = ? AND undo_hold = ?",
+                (int(approval_id), row["status"], APPROVAL_UNDO_OPEN),
             )
             conn.execute(
                 "DELETE FROM approval_signoffs WHERE approval_id = ?",
@@ -3591,7 +3852,11 @@ class WorldModel:
                     now,
                 ),
             )
-            return "undone"
+        # approval.decided already went out; subscribers learn it was retracted.
+        self._emit_approval_event("approval.undone", int(approval_id), {
+            "previous_status": row["status"], "undone_by": (undone_by or "").strip(),
+            "action": _dec_field(row["action"])})
+        return "undone"
 
     def get_approval_audit_event(
         self,
@@ -4050,7 +4315,7 @@ class WorldModel:
             return None
         rows = self._read_all(
             "SELECT approver, decision FROM approval_signoffs "
-            "WHERE approval_id = ? ORDER BY decided_at", (approval_id,),
+            "WHERE approval_id = ? ORDER BY decided_at, approver", (approval_id,),
         )
         approvers = [r["approver"] for r in rows if r["decision"] == "approved"]
         approvers = _single_approver(appr, approvers)
@@ -4061,14 +4326,39 @@ class WorldModel:
                 (approval_id,),
             )[0]
         )
+        return _approval_state_view(appr, approvers, audit_pending)
+
+    def approval_states(self, approvals) -> dict[int, dict]:
+        """:meth:`approval_state` for approvals the caller has already listed,
+        in two queries for the whole set instead of three per approval (the
+        audit binder spent ~1.2 ms per approval re-reading each one). Each
+        value equals ``approval_state(id)`` for that approval."""
+        listed = {int(a.id): a for a in approvals}
+        approvers: dict[int, list[str]] = {approval_id: [] for approval_id in listed}
+        pending: dict[int, int] = dict.fromkeys(listed, 0)
+        ids = list(listed)
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            marks = ",".join("?" * len(chunk))
+            for approval_id, approver, decision in self._read_all(
+                "SELECT approval_id, approver, decision FROM approval_signoffs "
+                f"WHERE approval_id IN ({marks}) ORDER BY decided_at, approver",
+                tuple(chunk),
+            ):
+                if decision == "approved":
+                    approvers[approval_id].append(approver)
+            for approval_id, count in self._read_all(
+                "SELECT approval_id, COUNT(*) FROM approval_audit_outbox "
+                f"WHERE approval_id IN ({marks}) AND delivered_at IS NULL "
+                "GROUP BY approval_id",
+                tuple(chunk),
+            ):
+                pending[approval_id] = int(count)
         return {
-            "status": appr.status,
-            "approvals_required": max(1, int(appr.approvals_required or 1)),
-            "approved_count": len(approvers),
-            "approvers": approvers,
-            "requested_by": appr.requested_by,
-            "audit_pending_count": audit_pending,
-            "effective": appr.status != "pending",
+            approval_id: _approval_state_view(
+                appr, _single_approver(appr, approvers[approval_id]), pending[approval_id]
+            )
+            for approval_id, appr in listed.items()
         }
 
     def claim_approval(self, approval_id: int, principal: str) -> bool:
@@ -5119,7 +5409,7 @@ class PostgresAtRestUnsupported(RuntimeError):
     The Postgres backend does not seal content at rest yet (the SQLite backend
     does, via ``crypto_at_rest``). Rather than silently storing regulated /
     encrypted-at-rest data as plaintext, :func:`open_world` fails closed. See
-    ``docs/encryption.md`` and ``FIXES.md`` (P1)."""
+    ``docs/encryption.md``."""
 
 
 def reclaim_window_seconds(default: float = 60.0) -> float:

@@ -341,6 +341,31 @@ def test_channel_message_strips_mention_and_ignores_unknown_sender(rsa_key, monk
     assert not ch.handler.await_count
 
 
+def test_without_company_sign_in_a_sender_with_no_entra_id_is_answered(rsa_key, monkeypatch):
+    # The allowlist admits the bot-scoped id when the activity carries no
+    # aadObjectId, but intake compared it with an empty sender id and refused
+    # (503), so Teams redelivered the message forever.
+    ch = _channel(rsa_key, allowed_user_ids=["29:user-scoped"])
+    _claim_ok(monkeypatch)
+    assert _post(ch, rsa_key, _message("plan the launch", aad="", activity_id="bot-scoped")).status_code == 200
+    assert ch.handler.await_args.args[0].text == "plan the launch"
+
+
+def test_a_signing_key_fetch_failure_is_a_refusal_not_a_server_error(rsa_key):
+    # Network errors, error statuses and malformed keys escaped as 500s.
+    def unreachable(url):
+        raise ConnectionError("login.botframework.com timed out")
+
+    with pytest.raises(TeamsAuthError, match="could not be fetched"):
+        verify_bot_token(_token(rsa_key), app_id=APP_ID, keys=SigningKeys(fetch_json=unreachable))
+    broken = SigningKeys(jwks={"keys": [{"kid": "k1", "kty": "RSA", "n": "not-a-modulus", "e": "AQAB"}]})
+    with pytest.raises(TeamsAuthError, match="unusable"):
+        verify_bot_token(_token(rsa_key, kid="k1"), app_id=APP_ID, keys=broken)
+    ch = _channel(rsa_key, keys=SigningKeys(fetch_json=unreachable))
+    assert _post(ch, rsa_key, _message("hello", activity_id="keys-down")).status_code == 403
+    ch.handler.assert_not_called()
+
+
 def test_handler_error_reply_is_redacted(rsa_key, monkeypatch):
     secret = "boom token=sk-SECRET"  # pragma: allowlist secret
     ch = _channel(rsa_key, handler=AsyncMock(side_effect=RuntimeError(secret)))
@@ -643,6 +668,22 @@ def test_a_multiline_reply_keeps_its_lines_and_paragraphs_on_the_card():
     assert [b["text"] for b in blocks] == ["Lightwork", "Summary", "- a", "- b", "```", "code", "```"]
     assert blocks[2].get("spacing") == "medium"                 # the blank line before the list
     assert blocks[3].get("spacing") is None
+
+
+def test_a_reply_of_many_short_lines_is_sent_as_text_when_its_card_would_be_too_large(rsa_key):
+    import asyncio
+    import json
+
+    from maverick_channels.teams_cards import MAX_MESSAGE_BYTES
+    ch = _channel(rsa_key)
+    asyncio.run(ch.send("a:conv1", "Summary\n- a\n- b"))
+    short = "\n".join("x" for _ in range(2000))           # within the 4000-character reply limit
+    asyncio.run(ch.send("a:conv1", short))
+    sent = [c["json"] for c in ch.transport.calls if c["url"].endswith("/activities")]
+    assert sent[0]["attachments"][0]["content"]["body"][1]["text"] == "Summary"
+    assert "attachments" not in sent[1] and sent[1]["text"] == short
+    assert sent[1]["textFormat"] == "markdown"
+    assert all(len(json.dumps(body).encode("utf-16-le")) <= MAX_MESSAGE_BYTES for body in sent)
 
 
 def test_only_a_link_code_is_a_link_attempt_and_never_under_company_sign_in(rsa_key, monkeypatch):

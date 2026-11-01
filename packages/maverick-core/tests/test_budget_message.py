@@ -89,7 +89,7 @@ class _StrictInvoiceClient:
 async def test_unpriced_model_gives_pricing_message_not_a_cap_message(
     tmp_path: Path,
 ):
-    """W1-30: UnpricedModelError is a BudgetExceeded subclass (so the run
+    """UnpricedModelError is a BudgetExceeded subclass (so the run
     still aborts), but it is NOT a spending/time cap -- it's Lightwork
     refusing to bill a model with no verified price. The old behavior
     reported this identically to a real cap trip ('hit your spending or

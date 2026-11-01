@@ -1,4 +1,4 @@
-"""Onboarding personalization v2 (roadmap: 2028 H2 UX).
+"""Onboarding personalization v2.
 
 v1 personalizes the *wizard* (mode picker, deployment branching). v2
 personalizes **after** install, from how the deployment is actually used in

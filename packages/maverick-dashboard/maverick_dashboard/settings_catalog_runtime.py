@@ -108,6 +108,46 @@ def _models(S, C) -> tuple:
           "AI models", True, "maverick.agent_publish_policy", subgroup="Effort and planning", weaker=False,
           warning="Changed instructions could be published without any test run.",
           aliases="publish gate test set test cases agent tests answer checks"),
+        S("agent_tests", "max_cases_per_specialist", "Saved answer checks per specialist",
+          "How many saved answer checks one specialist can keep, and how many one run checks at once. "
+          "Lowering it keeps the checks already saved, but a set larger than the limit cannot pass "
+          "a full run.", "number", "AI models", 20, "maverick.agent_tests_policy",
+          subgroup="Effort and planning", minimum=1, maximum=200, integer=True, unit="checks",
+          aliases="test cases answer checks test set limit"),
+        S("agent_tests", "require_for_new_specialists", "Require a passing run before a new specialist is published",
+          "A specialist that has never been published needs at least one saved check, and a full run of "
+          "every saved check on its exact draft must pass, before it can be published. A reason does not "
+          "skip this.", "toggle", "AI models", False, "maverick.agent_tests_policy",
+          subgroup="Effort and planning", weaker=False,
+          warning="A new specialist could be published without any test run.",
+          aliases="new agent publish gate test cases answer checks"),
+        S("agent_tests", "bypass_requires_second_person", "Second administrator approves publishing without passing tests",
+          "When changed instructions are published without a passing run, a different administrator must "
+          "approve the reason first. The person who asked cannot approve their own reason.", "toggle",
+          "AI models", False, "maverick.agent_tests_policy", subgroup="Effort and planning", weaker=False,
+          warning="A reason alone is enough to publish changed instructions without a passing run.",
+          aliases="four eyes approval reason publish gate test cases answer checks"),
+        S("agent_tests", "tool_checks", "Saved answer checks may test which tools a specialist calls",
+          "A saved check can say which tools a specialist must call, must not call, and what the call must "
+          "include. Each tool is replaced by a test stub that records the call and answers with a fixed result, "
+          "so no real tool, file, network call or shell command runs. Checks that use tools are skipped while this is off.",
+          "toggle", "AI models", False, "maverick.agent_tests_policy", subgroup="Effort and planning",
+          aliases="tool use tool calls stub test checks answer checks"),
+        S("agent_tests", "canary_percent", "Share of new goals that try a changed specialist first",
+          "0 publishes changed instructions straight away, as today. From 1 to 50, a changed specialist "
+          "is first tried on that share of new goals, chosen by goal, while the rest keep the current "
+          "version. Goals already running are not changed. Promote the new version for everyone, or roll it back, "
+          "in Workforce.", "number", "AI models", 0, "maverick.agent_tests_policy",
+          subgroup="Effort and planning", minimum=0, maximum=50, integer=True, unit="percent", weaker="higher",
+          warning="Some new goals would use changed instructions before everyone does.",
+          aliases="canary gradual rollout trial share percent candidate changed instructions"),
+        S("agent_tests", "canary_auto_rollback", "Roll back a trial version that fails clearly more often",
+          "After at least 10 finished goals on the trial version, roll it back automatically when its share of "
+          "failed goals is more than 20 percentage points above the current version. It needs a finished goal on "
+          "the current version to compare with. The roll back is recorded.",
+          "toggle", "AI models", False, "maverick.agent_tests_policy", subgroup="Effort and planning", weaker=False,
+          warning="A trial version that fails more often would stay live until someone rolls it back.",
+          aliases="canary automatic rollback trial failures"),
 
         # ------------------------------------------------ conversation length
         S("context", "max_output_tokens", "Longest reply per step",
@@ -302,6 +342,18 @@ def _providers(S) -> tuple:
           "The Bedrock access key, when Lightwork signs in with one. It is stored sealed and "
           "never shown again.", "secret", "Integrations", "", "maverick.llm",
           subgroup="Amazon Bedrock", max_length=500),
+        S("providers.vertex", "project_id", "Google Cloud project",
+          "The Google Cloud project whose Vertex AI access Lightwork uses.", "text",
+          "Integrations", "", "maverick.llm", subgroup="Google Cloud Vertex AI",
+          pattern=r"([A-Za-z0-9][A-Za-z0-9.:_-]{0,127})?", max_length=128),
+        S("providers.vertex", "region", "Vertex AI region",
+          "The Vertex AI region for your Claude models, such as us-east5.", "text",
+          "Integrations", "", "maverick.llm", subgroup="Google Cloud Vertex AI",
+          pattern=r"([a-z0-9][a-z0-9-]{0,62})?", max_length=63),
+        S("providers.vertex", "model_id", "Claude model on Vertex AI",
+          "The model ID exactly as shown in the Vertex AI Model Garden.", "text",
+          "Integrations", "", "maverick.llm", subgroup="Google Cloud Vertex AI",
+          pattern=r"([A-Za-z0-9][A-Za-z0-9._@-]{0,119})?", max_length=120),
         S("providers", "per_tenant_keys", "Let each workspace use its own AI service key",
           "A workspace that has its own key for an AI service uses it instead of the shared "
           "one.", "toggle", "Integrations", False, "maverick.config",
@@ -1246,6 +1298,35 @@ def _switches(S) -> tuple:
           "maverick_knowledge.parse", subgroup="Document search", minimum=1,
           maximum=100000, integer=True, unit="pages",
           env=("MAVERICK_KNOWLEDGE_MAX_PDF_PAGES",)),
+        S("knowledge_sources", "max_items", "Most items in one saved company folder or space",
+          "A refresh stops when the selected folder or space lists more items than this. Each refresh must also finish within the time limit in Longest time one saved company refresh may run.",
+          "number", "Memory & learning", 64, "maverick.config", subgroup="Saved company sources",
+          minimum=1, maximum=1000, integer=True, unit="items"),
+        S("knowledge_sources", "max_pages", "Most listing pages for one saved company folder or space",
+          "A refresh stops when the provider needs more pages than this to list every item. Each page holds up to 64 items.",
+          "number", "Memory & learning", 16, "maverick.config", subgroup="Saved company sources",
+          minimum=1, maximum=200, integer=True, unit="pages"),
+        S("knowledge_sources", "max_download_mib", "Largest saved company document to import",
+          "Bigger SharePoint, OneDrive and Google Drive files are not imported. Confluence pages keep a fixed 2 MiB read limit.",
+          "number", "Memory & learning", 4, "maverick.config",
+          subgroup="Saved company sources", minimum=1, maximum=32, integer=True, unit="MiB"),
+        S("knowledge_sources", "max_text_kib", "Most source text kept for one saved company refresh",
+          "A refresh stops when the text read from its documents would exceed this.", "number",
+          "Memory & learning", 256, "maverick.config", subgroup="Saved company sources",
+          minimum=1, maximum=8192, integer=True, unit="KiB"),
+        S("knowledge_sources", "max_refresh_minutes", "Longest time one saved company refresh may run",
+          "A refresh that runs past this time fails and publishes no new snapshot.",
+          "number", "Memory & learning", 5, "maverick.config", subgroup="Saved company sources",
+          minimum=1, maximum=60, integer=True, unit="minutes"),
+        S("knowledge_sources", "permission_filter", "Who sees each saved company file",
+          "Off keeps the current rule: anyone the connection is shared with can use the cached content. "
+          "Email matching reads each file's sharing permissions at refresh and shows a file only to people "
+          "it is shared with by email or email domain, or to anyone with its link. Group-shared files are "
+          "withheld, because group members are not read. Sources refreshed before this setting was turned on "
+          "must be refreshed again.",
+          "select", "Memory & learning", "off", "maverick.config", subgroup="Saved company sources",
+          choices=(("off", "Off: connection sharing decides (default)"),
+                   ("by_email", "Match each file's sharing permissions by email"))),
         # ------------------------------------------------------- diagnostics
         S("logging", "level", "How much the server records in its log",
           "More detail helps find problems; less keeps the log small.", "select",
@@ -1280,6 +1361,12 @@ def _switches(S) -> tuple:
           "separated by commas. They are stored sealed and never shown again.", "secret",
           "Performance", "", "maverick.observability", subgroup="Error reporting",
           max_length=2000, restart=True, env=("MAVERICK_OTEL_HEADERS",)),
+        S("observability", "otlp_metrics", "Send measurements to the collector",
+          "Also send the server's measurements (counts, timings and spending) to the same "
+          "collector as the timing traces.", "toggle", "Performance", False,
+          "maverick.observability", subgroup="Error reporting", restart=True,
+          env=("MAVERICK_OTEL_METRICS",), weaker=True,
+          warning="Measurements, which name tools and models, will be sent to the collector."),
         S("observability", "prometheus_port", "Share server measurements on port",
           "Publish the server's measurements on this port for a monitoring system. Leave "
           "empty to not publish them.", "number", "Performance", None,

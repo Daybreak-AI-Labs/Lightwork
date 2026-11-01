@@ -1,4 +1,4 @@
-"""Semantic-ish code search tool (roadmap: 2028 H1 capabilities).
+"""Semantic-ish code search tool.
 
 Indexes the functions and classes under one or more paths (via ``ast``, no
 import execution) and ranks them against a natural-language query using a

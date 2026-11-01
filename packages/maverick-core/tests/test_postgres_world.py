@@ -409,7 +409,7 @@ def test_list_goals_filter_and_order(world):
 
 
 def test_list_goals_filters_by_domain_and_project_id(world):
-    # W1-49: parity with SQLite's list_goals(domain=..., project_id=...) --
+    # Parity with SQLite's list_goals(domain=..., project_id=...) --
     # the dashboard's project-detail page and domain-scoped inbox both call
     # these kwargs, which this backend previously rejected with a TypeError.
     pid = world.create_project("Q3 Migration")
@@ -478,7 +478,7 @@ def test_list_episodes_and_total_spend(world):
 
 
 def test_total_spend_accepts_owner_kwarg(world):
-    """PLATFORM_IMPROVEMENT_AUDIT.md W1-48: total_spend(owner=...) used to
+    """total_spend(owner=...) used to
     raise TypeError on this backend -- it took no owner argument at all,
     while the SQLite backend (and /api/v1/spend, external-agent spend
     records) call it with one."""
@@ -506,7 +506,7 @@ def test_total_spend_accepts_owner_kwarg(world):
 
 
 def test_create_goal_accepts_domain_and_project_id(world):
-    """PLATFORM_IMPROVEMENT_AUDIT.md W1-47: create_goal(domain=..., project_id=...)
+    """create_goal(domain=..., project_id=...)
     used to raise TypeError on this backend -- checkpoint sub-goal spawning
     and the finance CLI pass both kwargs, matching the SQLite signature."""
     project_id = world.create_project("Q3 rollout", owner="admin@corp.test")
@@ -684,6 +684,42 @@ def test_approval_webhook_events_reach_subscribers_only_after_commit(world, monk
         ("approval.created", {single: "approved", audited: "pending"}),
         ("approval.decided", {single: "approved", audited: "denied"}),
     ]
+
+
+def test_only_a_held_decision_is_undone_and_settling_it_makes_it_final(world, monkeypatch):
+    import time
+
+    from maverick import webhook_events
+
+    sent = []
+    monkeypatch.setattr(webhook_events, "emit", lambda event, **kw: sent.append((event, kw)))
+
+    def decide(aid, status, who):
+        event = world.decide_approval_audited(aid, status, decided_by=who)
+        assert event is not None and world.mark_approval_audit_delivered(event.event_id)
+
+    acts_at_once = world.create_approval("codebase_merge", risk="high", provenance="codebase")
+    decide(acts_at_once, "approved", "ana")
+    assert world.undo_approval_decision(acts_at_once, undone_by="ana", within_seconds=30) == "final"
+    assert world.get_approval(acts_at_once).undo_hold is None
+
+    held = world.create_approval("rm -rf /tmp/x", risk="high", undoable=True)
+    assert world.get_approval(held).undo_hold == "open"
+    assert world.settle_approval_decision(held, decided_before=time.time()).status == "pending"  # nothing yet
+    decide(held, "approved", "ana")
+    assert world.undo_approval_decision(held, undone_by="ana", within_seconds=30) == "undone"
+    assert world.get_approval(held).status == "pending"
+    assert [kw["payload"]["previous_status"] for event, kw in sent if event == "approval.undone"] == ["approved"]
+
+    decide(held, "denied", "ben")
+    assert world.settle_approval_decision(held, decided_before=time.time() - 60).undo_hold == "open"
+    settled = world.settle_approval_decision(held, decided_before=time.time())
+    assert settled.status == "denied" and settled.undo_hold == "settled"
+    assert world.undo_approval_decision(held, undone_by="ben", within_seconds=300) == "too_late"
+
+    stopped = world.create_approval("send", risk="high", undoable=True)
+    assert world.decide_approval(stopped, "denied", decided_by="system:task-stopped") is True
+    assert world.undo_approval_decision(stopped, undone_by="ana", within_seconds=30) == "final"
 
 
 def test_decide_approval_rejects_bad_status(world):
@@ -872,7 +908,7 @@ def test_prune_conversations_keeps_fresh(world):
 # ---------- #469: messages, attachments, dedup, pruning (final batch) ----------
 
 def test_append_message(world, monkeypatch):
-    # W1-53: search_messages was removed (zero production callers on either
+    # Search_messages was removed (zero production callers on either
     # backend; its FTS index/GIN index remain in the schema only because the
     # additive-only migration policy blocks dropping them -- see
     # append_message's own comment). append_message itself is still the only
@@ -2120,3 +2156,28 @@ def test_query_rewrites_sqlite_paramstyle_and_buckets_days(world):
     with pytest.raises(psycopg.Error):
         world.query("SELECT * FROM no_such_table_here WHERE id = ?", (1,))
     assert world.query("SELECT COUNT(*) FROM goals WHERE id = ?", (gid,))[0][0] == 1
+
+
+def test_results_page_and_monthly_spend_match_the_sqlite_backend(world):
+    # list_goal_results and total_spend(since=) existed only on SQLite: on this
+    # backend /deliverables raised AttributeError and the month's spend read $0.
+    import time
+
+    token = uuid.uuid4().hex
+    owner = f"user:results:{token}"
+    finished = world.create_goal("finished report", owner=owner)
+    world.set_goal_status(finished, "done", result="the report")
+    world.create_goal("still running", owner=owner)
+    subtask = world.create_goal("subtask", owner=owner, parent_id=finished)
+    world.set_goal_status(subtask, "done", result="part of it")
+    other = world.create_goal("someone else's", owner=f"user:other:{token}")
+    world.set_goal_status(other, "done", result="theirs")
+    results = world.list_goal_results(owner=owner)
+    assert [goal.id for goal in results] == [finished]
+    assert results[0].result == "the report"
+
+    before = time.time()
+    world.end_episode(world.start_episode(finished), "done", "success",
+                      cost_dollars=3.0, input_tokens=1, output_tokens=1)
+    assert world.total_spend(owner=owner, since=before - 1)["dollars"] == 3.0
+    assert world.total_spend(owner=owner, since=time.time() + 60)["dollars"] == 0

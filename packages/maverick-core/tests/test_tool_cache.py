@@ -1,4 +1,4 @@
-"""Tool-output cache: memoize side-effect-free tool calls (ROADMAP 2028 H1)."""
+"""Tool-output cache: memoize side-effect-free tool calls."""
 from __future__ import annotations
 
 import asyncio
@@ -193,7 +193,7 @@ def test_ttl_expiry(monkeypatch, tmp_path):
 
 
 class TestWarmOnStart:
-    """Cache-warm-on-start: snapshot persistence + reload (roadmap 2027-H1 perf)."""
+    """Cache-warm-on-start: snapshot persistence + reload."""
 
     def _tool(self):
         import types

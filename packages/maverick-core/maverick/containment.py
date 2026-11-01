@@ -1,5 +1,5 @@
 """Containment mode: a no-egress, ephemeral-filesystem run profile
-(roadmap: 2028 H1 safety).
+.
 
 For goals that handle untrusted input (a suspicious attachment, a scraped
 repo, an unvetted plugin) the safe posture is "nothing leaves, nothing

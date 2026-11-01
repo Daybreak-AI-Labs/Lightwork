@@ -93,6 +93,12 @@ def test_catalog_does_not_change_kernel_defaults():
         "commerce.max_session_spend": config.get_commerce()["max_session_spend"],
         "durable.keep_last": config.get_durable()["keep_last"],
         "flows.max_node_retries": config.get_flows()["max_node_retries"],
+        "knowledge_sources.max_items": config.get_knowledge_sources()["max_items"],
+        "knowledge_sources.max_pages": config.get_knowledge_sources()["max_pages"],
+        "knowledge_sources.max_download_mib": config.get_knowledge_sources()["max_download_mib"],
+        "knowledge_sources.max_text_kib": config.get_knowledge_sources()["max_text_kib"],
+        "knowledge_sources.max_refresh_minutes": config.get_knowledge_sources()["max_refresh_minutes"],
+        "knowledge_sources.permission_filter": config.get_knowledge_sources()["permission_filter"],
     }
     for setting_id, kernel_default in defaults.items():
         assert catalog.BY_ID[setting_id].default == kernel_default, setting_id

@@ -8,7 +8,7 @@ const path = require("node:path");
 const { JSDOM } = require("jsdom");
 
 const folder = path.resolve(__dirname, "../../maverick_dashboard");
-const template = fs.readFileSync(path.join(folder, "templates/trust.html"), "utf8");
+const template = fs.readFileSync(path.join(folder, "templates/trust.html"), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 // The page script is inline; fill its two data slots the way the server does.
 const script = template.slice(template.lastIndexOf("<script>") + "<script>".length,
   template.lastIndexOf("</script>"))

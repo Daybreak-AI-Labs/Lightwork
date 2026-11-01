@@ -142,7 +142,7 @@ def test_plan_reflect_command_registered():
 
 
 def test_plan_reflect_command_prints_trace(monkeypatch):
-    # The commands now preflight providers (round-3 fix); the LLM is
+    # The commands now preflight providers; the LLM is
     # still mocked -- a dummy key just satisfies the gate.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     import maverick.plan_execute_reflect as per_mod

@@ -57,7 +57,7 @@
   — expect rough edges.
 </p>
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 // 3D goal forest in vanilla WebGL (no three.js, no CDN). Nodes are drawn as
 // billboarded point sprites (circular, status-colored), edges as GL lines.
 // Layout (x, y per node) comes from the shared /api/v1/goal-tree endpoint;

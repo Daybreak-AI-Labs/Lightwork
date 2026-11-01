@@ -6,7 +6,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import company_saml_setup as native
+from . import local_owner_second_factor as second
 from .company_signin_migration_api import CredentialsIn, RecoveryApplyIn, RecoveryReviewIn
+from .local_owner_mfa_routes import cancel_flow, passphrase_step
 
 router = APIRouter(prefix="/api/v1/settings/single-sign-on", tags=["settings"])
 recovery_router = APIRouter(prefix="/auth/company-saml-recovery", tags=["auth"])
@@ -25,6 +27,8 @@ class ReviewIn(BaseModel):
     check: str = Field(min_length=1, max_length=64)
     context: str = Field(pattern=r"^[a-f0-9]{64}$")
     password: str = Field(min_length=14, max_length=1024, repr=False)
+    # The owner's authenticator code or an unused recovery code; empty when the owner has none.
+    code: str = Field(default="", max_length=32, repr=False)
 
 
 class ActivateIn(BaseModel):
@@ -85,7 +89,13 @@ def start(request: Request):
 
 @router.post("/activation-review")
 def activation_review(request: Request, body: ReviewIn):
-    return JSONResponse(native.activation_review(request, body.check, body.context, body.password), headers=PRIVATE)
+    return passphrase_step(request, lambda: native.activation_review(
+        request, body.check, body.context, body.password, body.code), headers=PRIVATE)
+
+
+@router.post("/cancel")
+def activation_cancel(request: Request):
+    return cancel_flow(request, native.ACTIVATION_FLOW)
 
 
 @router.post("/activate")
@@ -94,6 +104,7 @@ def activate(request: Request, body: ActivateIn):
         raise HTTPException(422, "Read and confirm the complete single-sign-on activation first.")
     result = native.activate(request, body.token)
     response = JSONResponse(result, headers=PRIVATE)
+    second.close_flow(response, flow=native.ACTIVATION_FLOW)
     if result["confirmed"]:
         response.delete_cookie("mvk_session", path="/")
     return response
@@ -106,21 +117,31 @@ def activation_original(request: Request, operation: str, context: str):
 
 @recovery_router.post("/lookup")
 def recovery_catalog(request: Request, body: CredentialsIn):
-    return JSONResponse(native.recovery_catalog(request, body.email, body.password), headers=PRIVATE)
+    return passphrase_step(request, lambda: native.recovery_catalog(
+        request, body.email, body.password, body.code), headers=PRIVATE)
 
 
 @recovery_router.post("/original")
 def recovery_original(request: Request, body: RecoveryReviewIn):
-    return JSONResponse(native.recovery_original(request, body.operation, body.email, body.password), headers=PRIVATE)
+    return passphrase_step(request, lambda: native.recovery_original(
+        request, body.operation, body.email, body.password, body.code), headers=PRIVATE)
 
 
 @recovery_router.post("/review")
 def recovery_review(request: Request, body: RecoveryReviewIn):
-    return JSONResponse(native.recovery_review(request, body.operation, body.email, body.password), headers=PRIVATE)
+    return passphrase_step(request, lambda: native.recovery_review(
+        request, body.operation, body.email, body.password, body.code), headers=PRIVATE)
 
 
 @recovery_router.post("/apply")
 def recover(request: Request, body: RecoveryApplyIn):
     if body.confirmed is not True:
         raise HTTPException(422, "Read and confirm this separate restoration review first.")
-    return JSONResponse(native.recover(request, body.token, body.email, body.password), headers=PRIVATE)
+    return passphrase_step(request, lambda: native.recover(
+        request, body.token, body.email, body.password, body.code), headers=PRIVATE,
+        completes=native.RECOVERY_FLOW)
+
+
+@recovery_router.post("/cancel")
+def recovery_cancel(request: Request):
+    return cancel_flow(request, native.RECOVERY_FLOW)

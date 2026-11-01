@@ -14,6 +14,8 @@
   function cancelRequests() { pendingRequests.forEach(function (controller) { controller.abort(); }); pendingRequests.clear(); }
   function node(tag, text, parent) { var element = document.createElement(tag); if (text !== undefined) element.textContent = String(text); if (parent) parent.appendChild(element); return element; }
   function clear(element) { element.replaceChildren(); }
+  // Without an access digest on either side, assume the account changed.
+  function accessChanged(before, after) { return !before.access || !after.access || before.access !== after.access; }
   function filterControls() {
     var query = search ? search.value.trim().toLocaleLowerCase() : '', found = 0;
     buttons.querySelectorAll('button').forEach(function (control) {
@@ -1331,7 +1333,11 @@
       if (fresh.schema !== 1 || !Array.isArray(fresh.operations) || JSON.stringify(fresh.selection) !== JSON.stringify(context())) throw new Error('The current record could not be confirmed. Refresh the page and try again.');
       if (previous && previous.context !== fresh.context) {
         clear(formHost); selected = null;
-        document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed'));
+        // When the account, role or suites changed (``access``), bubble, so
+        // pages that clear private content on window hear it too. Only the
+        // permitted Copilot actions changing, or a selection change (below),
+        // stays on document.
+        document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {bubbles: accessChanged(previous, fresh)}));
       }
       catalog = fresh; host.hidden = fresh.operations.length === 0; clear(buttons);
       fresh.operations.forEach(function (item) {
@@ -1790,8 +1796,9 @@
         var result = await request('/propose', Object.assign(payload(), {message: message, context: catalog.context}));
         if (!active(started)) return true;
         if (result.context !== catalog.context) {
+          var before = catalog;
           clear(formHost); catalog = null; status.textContent = 'Your context changed. Reopen Copilot.';
-          document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed'));
+          document.dispatchEvent(new CustomEvent('lightwork:copilot-context-changed', {bubbles: accessChanged(before, result)}));
           return true;
         }
         if (!result.operation) return false;

@@ -73,8 +73,16 @@ class PackAudit:
     runtime_reachable_dangerous: list[str] = field(default_factory=list)
 
 
-def audit_profile(profile: DomainProfile) -> PackAudit:
-    """The governance posture of one pack (pure)."""
+def audit_profile(profile: DomainProfile, *, levels: bool | None = None,
+                  grounding: bool | None = None, runtime: bool = True) -> PackAudit:
+    """The governance posture of one pack (pure).
+
+    ``levels`` / ``grounding`` pass through to :func:`domain_capability`:
+    ``None`` reads the deployment's dial, ``False`` is that dial off.
+    ``runtime=False`` leaves ``runtime_expansion`` and
+    ``runtime_reachable_dangerous`` empty instead of computing the runtime
+    capability, for a caller that shows neither.
+    """
     allow = set(profile.allow_tools)
     # Builder status is a roster classification, not something a drafting pack
     # can acquire merely by adding shell/code_exec to its allowlist.
@@ -89,7 +97,9 @@ def audit_profile(profile: DomainProfile) -> PackAudit:
     )
     reachable = [t for t in dangerous if cap.permits(t)]
     denied = [t for t in _IRREVERSIBLE if t in set(profile.deny_tools)]
-    runtime = domain_capability(profile, None, f"agent:{profile.name}")
+    runtime_cap = (domain_capability(profile, None, f"agent:{profile.name}",
+                                     levels=levels, grounding=grounding)
+                   if runtime else None)
     refusals = refusals_for(profile.name, profile.refuse)
     from .agent_autonomy import effective_profile
     _auto = effective_profile(profile.name, profile.autonomy)
@@ -114,15 +124,51 @@ def audit_profile(profile: DomainProfile) -> PackAudit:
         knowledge_sources=list(profile.knowledge_sources),
         autonomy=_auto.default.value,
         autonomy_onboarding=_auto.onboarding,
-        runtime_expansion=sorted(runtime.allow_tools - allow),
-        runtime_reachable_dangerous=[t for t in dangerous if runtime.permits(t)],
+        runtime_expansion=sorted(runtime_cap.allow_tools - allow) if runtime_cap else [],
+        runtime_reachable_dangerous=[t for t in dangerous if runtime_cap.permits(t)] if runtime_cap else [],
     )
 
 
-def audit_roster(domains: dict[str, DomainProfile] | None = None) -> list[PackAudit]:
-    """Audit every discoverable pack (built-in + operator overrides)."""
-    domains = domains if domains is not None else available_domains()
-    return [audit_profile(domains[name]) for name in sorted(domains)]
+def audit_roster(domains: dict[str, DomainProfile] | None = None, *,
+                 runtime: bool = True) -> list[PackAudit]:
+    """Audit every discoverable pack (built-in + operator overrides).
+
+    The whole roster is audited against one read of the configuration: each
+    pack's workforce settings used to read it again (about 6,400 reads, most
+    of the time of the workforce pages).
+    """
+    from .agent_autonomy import levels_enabled
+    from .config import single_read
+    from .domain import data_grounding_enabled
+
+    with single_read():
+        domains = domains if domains is not None else available_domains()
+        # A deployment-wide dial that is off is off for every pack: say so
+        # once instead of reading the settings again for each one. A dial that
+        # is on is still checked per pack, as before.
+        levels = None if levels_enabled() else False
+        grounding = None if data_grounding_enabled() else False
+        return [audit_profile(domains[name], levels=levels, grounding=grounding, runtime=runtime)
+                for name in sorted(domains)]
+
+
+def autonomy_posture(domains: dict[str, DomainProfile] | None = None) -> dict:
+    """The ``autonomy_posture`` and ``packs_onboarding`` of :func:`summarize`,
+    from each pack's effective autonomy alone: the workforce posture call
+    audited all 2,031 packs (165-210 ms) to count these two."""
+    from .agent_autonomy import effective_profile
+    from .config import single_read
+
+    with single_read():
+        domains = domains if domains is not None else available_domains()
+        profiles = [effective_profile(domains[name].name, domains[name].autonomy) for name in sorted(domains)]
+    return {
+        "autonomy_posture": {
+            rung: sum(1 for p in profiles if p.default.value == rung)
+            for rung in ("observe", "suggest", "request", "auto")
+        },
+        "packs_onboarding": sum(1 for p in profiles if p.onboarding),
+    }
 
 
 def summarize(audits: list[PackAudit]) -> dict:
@@ -168,4 +214,4 @@ def to_json(audits: list[PackAudit]) -> dict:
     return {"summary": summarize(audits), "packs": [asdict(a) for a in audits]}
 
 
-__all__ = ["PackAudit", "audit_profile", "audit_roster", "summarize", "to_json"]
+__all__ = ["PackAudit", "audit_profile", "audit_roster", "autonomy_posture", "summarize", "to_json"]

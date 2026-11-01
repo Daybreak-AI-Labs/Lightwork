@@ -1,4 +1,4 @@
-"""Vision-grounded clicking (roadmap: 2028 H1 capabilities).
+"""Vision-grounded clicking.
 
 Resolve "click the <description>" to screen coordinates instead of making the
 model eyeball pixel positions from a screenshot:

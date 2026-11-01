@@ -12,10 +12,11 @@ names are refused.
 | `anthropic`, `openai` | `api_key`, `base_url`, `default_headers` |
 | `azure` | `api_key`, `base_url`, `default_headers`, `auth_mode` |
 | `bedrock` | `api_key`, `base_url`, `default_headers`, `auth_mode`, `endpoint` |
+| `vertex` | `base_url`, `default_headers`, `project_id`, `region`, `model_id`; no `api_key` (Google Application Default Credentials only) |
 | `openrouter`, `gemini`, `moonshot`, `deepseek`, `xai`, `ollama`, `tgi`, `vllm`, `openai_compatible` | `api_key`, `base_url` |
 | `codex_cli` | `api_key`, `binary`, `sandbox_mode`, `timeout_seconds`, `cwd` |
 
-Headers remain supported by the same four adapters. This change does not infer
+Headers remain supported by the same four adapters. Lightwork does not infer
 header, reasoning, tool or streaming support from the phrase "OpenAI compatible"
 or forward policy headers to additional endpoints. `codex_cli` cannot select a
 backend with `base_url`; the external CLI owns that selection.
@@ -53,13 +54,21 @@ request and closes the constructed client. Remove the conflicting bearer token,
 or explicitly configure `auth_mode = "api_key"` and the intended token. The
 adapter does not rewrite private signing state to conceal that conflict.
 
+Vertex AI takes no key. It signs in with Google Application Default Credentials;
+the `vertex` extra provides google-auth. The project and region are checked
+before any client exists. The model id must be the `name@version` form shown in
+the Vertex AI Model Garden: any other id is refused before a request is built,
+and before a cache warm-up is sent. `base_url` is accepted only from the server
+configuration or environment, never from Settings, because the Google token is
+sent to the endpoint. Constructor tests establish no live Google authentication.
+
 IAM role/profile refresh and Azure Identity credential acquisition remain the
 respective SDKs' credential authority. Immutable adapter configuration does not
 freeze externally rotated role credentials, credential files, machine trust
 stores or operating-system DNS. No live AWS/Azure authentication is established
 by constructor tests.
 
-Migration: previously ignored provider fields now fail visibly. For a required
+Upgrading: provider fields that earlier versions ignored now fail visibly. For a required
 residency/retention header, choose a supported adapter and an explicitly reviewed
 endpoint; deleting the field means removing that requested control. Azure
 deployment/API version/region and SDK timeouts retain their documented

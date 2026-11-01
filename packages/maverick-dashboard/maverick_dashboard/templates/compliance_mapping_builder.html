@@ -78,6 +78,6 @@
   </section>
   <section id="cm-detail" class="panel cm-card" hidden style="margin-top:var(--space-4)"><h2 id="cm-detail-title"></h2><p id="cm-detail-status"></p><div id="cm-detail-rows" class="cm-list"></div><button id="cm-more-details" type="button" class="btn btn--ghost" hidden>Show more mapped controls</button></section>
 </div>
-<script>{% include "flow_designer_action_fields.js" %}</script>
+<script nonce="{{ csp_script_nonce }}">{% include "flow_designer_action_fields.js" %}</script>
 <script src="{{ asset('lightwork-compliance-mapping-builder.js') }}" defer></script>
 {% endblock %}

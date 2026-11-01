@@ -1,4 +1,4 @@
-"""Self-tuning budgets (roadmap: 2028 H2 performance).
+"""Self-tuning budgets.
 
 A fixed ``[budget] max_dollars`` is a blunt instrument: a one-line "summarize
 this" goal and a multi-hour refactor get the same cap. This learns a sensible

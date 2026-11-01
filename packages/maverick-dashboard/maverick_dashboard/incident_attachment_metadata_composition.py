@@ -198,11 +198,7 @@ def principal_ref_from_request(request: Request, tenant_id: str) -> str:
         raise attachments.IncidentAttachmentPermissionDenied(
             "authenticated principal authority is unavailable"
         )
-    tenant = canonical_tenant_id(tenant_id)
-    digest = hashlib.sha256(
-        f"lightwork.incident-attachment.identity.v1:{tenant}:{subject.strip()}".encode()
-    ).hexdigest()
-    return f"incident-principal-{digest[:32]}"
+    return attachments.principal_ref_for_subject(tenant_id, subject.strip())
 
 
 def _canonical_sha256(value: object) -> str:

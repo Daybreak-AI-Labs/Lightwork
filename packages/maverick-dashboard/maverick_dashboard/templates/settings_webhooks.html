@@ -113,7 +113,7 @@
 </dialog>
 {% endblock %}
 {% block scripts_extra %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };

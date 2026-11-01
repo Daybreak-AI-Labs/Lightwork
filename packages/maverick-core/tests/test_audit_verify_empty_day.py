@@ -1,6 +1,6 @@
 """`audit verify` on a day with no events is CLEAN, not a missing_file FAIL.
 
-Client-journey finding (round 5): a regulated client enabled [audit] sign,
+A regulated client enabled [audit] sign,
 ran a benign goal (which records no security events -- the audit log is a
 security-event log, the execution trace lives in the world model), then ran
 `maverick audit verify` as a routine check. With no day-file for today it

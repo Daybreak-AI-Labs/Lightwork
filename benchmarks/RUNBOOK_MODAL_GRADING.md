@@ -1,17 +1,17 @@
 # Runbook — governed SWE-bench grading in official per-instance containers
 
-## What this fixes
+## Why per-instance containers
 
-Yesterday's wasted money was the **environment**: one host can't reproduce 500
-different Python eras + pinned deps, so instances graded `NOENV`/`EMPTY` and we
-paid the agent to work on things that could never grade.
+The limiting factor for host-based grading is the **environment**: one host
+cannot reproduce 500 different Python eras and pinned dependencies, so instances
+grade `NOENV`/`EMPTY` and agent spend goes to instances that can never grade.
 
 The SWE-bench project publishes a **pre-built image per instance**
 (`swebench/sweb.eval.x86_64.<id>`) that already contains the repo at
 `base_commit` with the correct environment. `benchmarks/swebench_container_grade.py`
 grades **inside that image**, reusing the official spec, eval script, and grader,
 so the era-mismatch bug class **cannot recur** — the environment travels with the
-instance. Our governance (anti-cheat boundary, mis-seed guard, signed promotion)
+instance. Lightwork's governance (anti-cheat boundary, mis-seed guard, signed promotion)
 runs around it, unchanged.
 
 Backends: **Docker** (a VM with a Docker daemon) for untrusted patches, or
@@ -25,13 +25,13 @@ pip install modal
 modal token new          # opens a browser once; links your Modal account
 ```
 
-(Modal gives new accounts free monthly credit; a single-instance validation is
-a few cents. No Anthropic key is used — this is grading only, no agent.)
+(A single-instance validation uses a few cents of Modal compute. No Anthropic
+key is used — this is grading only, no agent.)
 
 ## Step 1 — validate the environment on ONE instance ($0 Anthropic, ~cents Modal)
 
-This is the whole point: prove the official image + grading work end-to-end
-**before** spending on an agent. Grade the instance's **gold patch** — it must
+Prove that the official image and grading work end to end **before** spending
+on an agent. Grade the instance's **gold patch** — it must
 resolve. Then grade the **baseline** (no patch) — it must NOT resolve.
 
 ```bash
@@ -57,9 +57,9 @@ grading:  GOLD patch (must resolve) via docker
 VALIDATION: PASS -- official image + grading work end to end
 ```
 
-If the gold run prints `VALIDATION: PASS`, the environment problem is solved for
-real — every instance now grades in its own correct container. If it fails,
-**stop and send the output** before spending on any run.
+If the gold run prints `VALIDATION: PASS`, the official image and grading work
+and each instance grades in its own container. If it fails, **stop and
+investigate the output** before spending on any run.
 
 ### Modal for trusted isolated validation only
 
@@ -90,18 +90,18 @@ signed promotion) is identical. The corpus no longer needs a hand-built winnable
 set — **every** Verified instance is gradable because every instance carries its
 own environment.
 
-## Cost shape (honest)
+## Cost shape (estimates)
 
 - **Per-instance grade:** seconds-to-minutes of container CPU. Modal bills per
-  second; a full-500 grade sweep is compute-cheap (no GPUs — this was never a
-  GPU workload, which is why RunPod overcharged).
-- **The expensive part remains the agent** (Anthropic), and that is now spent
-  ONLY on instances that provably grade — no more NOENV/EMPTY waste.
+  second; a full-500 grade sweep is compute-cheap (no GPUs — this is not a
+  GPU workload).
+- **The expensive part remains the agent** (Anthropic), and it is spent only on
+  instances that are known to grade, which avoids `NOENV`/`EMPTY` results.
 - Validate on one instance first; only then scale.
 
-## Why this is the credibility unlock
+## Why per-instance environments matter
 
 With correct per-instance environments you can grade a **random** sample of the
-500 (or all of it), which is what kills the "you cherry-picked the easy ones"
-criticism the old 62-instance winnable set invited. Correct environments + the
-existing governance chain = an honest, non-cherry-picked, signed governed number.
+500 (or all of them) instead of a hand-picked winnable subset. Correct
+environments plus the existing governance chain give a signed governed score
+over an unselected sample.

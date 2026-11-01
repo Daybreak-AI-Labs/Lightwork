@@ -15,7 +15,7 @@ import click
 
 from ..sandbox_names import BUILTIN_SANDBOX_BACKENDS
 
-# Council round-2 perf-seat fix: keep the top-level import surface
+# Keep the top-level import surface
 # minimal so `maverick --help` and `maverick version` don't pay for
 # heavy submodules (orchestrator, agent, swarm, skills, sandbox) they
 # never use. Submodules import lazily inside the command bodies that
@@ -125,8 +125,9 @@ def _require_llm_key(model_spec: str | None = None) -> str:
         "Lightwork can't reach an LLM through every selected model route. "
         f"Missing: {detail}.\n"
         "\n"
-        "Configure that route with:  maverick init\n"
-        "Then verify it with:       maverick preflight",
+        "Add its key in Lightwork > Settings (on a computer with no Lightwork\n"
+        "setup yet, run:  maverick init)\n"
+        "Then verify it with:  maverick preflight",
         err=True,
     )
     sys.exit(2)
@@ -163,7 +164,7 @@ def _humanize_run_error(e: Exception) -> str:
     from ..budget import UsageAccountingError
 
     if isinstance(e, UsageAccountingError):
-        # A gateway fault, not a cap breach (W1-17): say so, and don't send
+        # A gateway fault, not a cap breach: say so, and don't send
         # the user off to raise max_dollars.
         return (
             "The model provider returned invalid usage accounting, so Lightwork "
@@ -716,12 +717,12 @@ def launch_check() -> None:
 def license_group() -> None:
     """Issue and inspect the deployment's signed feature license.
 
-    The signed license is the offline floor that unlocks paid tiers/suites (see
-    ``maverick.entitlements``). ``issue``/``set`` sign a new license, ``show``
-    resolves the installed one, and ``keygen`` mints a publisher keypair. The
-    publisher PRIVATE key is a SECRET: supply it via MAVERICK_LICENSE_PRIVATE_KEY
-    (env or your secret manager); it is never read from config and never
-    printed by ``issue``."""
+    The signed license is the offline floor that unlocks gated tiers/suites when
+    license enforcement is on (off by default; see ``maverick.entitlements``).
+    ``issue``/``set`` sign a new license, ``show`` resolves the installed one,
+    and ``keygen`` mints a publisher keypair. The publisher PRIVATE key is a
+    SECRET: supply it via MAVERICK_LICENSE_PRIVATE_KEY (env or your secret
+    manager); it is never read from config and never printed by ``issue``."""
 
 
 @license_group.command("issue")
@@ -747,7 +748,7 @@ def license_group() -> None:
 def license_issue(customer: str, tier: str, edition: str, suites: tuple,
                   features: tuple, expires: str | None, grace_days: int | None,
                   seats: int | None, out: str | None, to_stdout: bool) -> None:
-    """Sign a license for a customer, declaring its tier + enabled add-on suites.
+    """Sign a license for a licensee, declaring its tier + enabled add-on suites.
 
     Re-issuing with different --suite/--feature/--tier is how you change what a
     deployment is entitled to (``set`` is an alias). The signing key comes from
@@ -793,11 +794,11 @@ def license_issue(customer: str, tier: str, edition: str, suites: tuple,
     click.echo(f"  {customer} · tier={tier} · suites={list(suites) or '—'} · "
                f"key_id={doc['key_id'][:16]}…")
     # A license signed by a key the deployment doesn't trust grants nothing, so
-    # warn instead of letting the operator think paid features are now on.
+    # warn instead of letting the operator think gated features are now on.
     if not key_trusted(doc["key_id"]):
         click.echo(
             "  NOTE: this signing key is not in the deployment trust anchor "
-            "(MAVERICK_LICENSE_PUBKEYS / [license] publisher_pubkeys); paid "
+            "(MAVERICK_LICENSE_PUBKEYS / [license] publisher_pubkeys); gated "
             "features stay OFF until you publish its PUBLIC key there.", err=True)
 
 
@@ -822,7 +823,7 @@ def license_show(file: str | None, pubkey: str | None) -> None:
     trust = [k.strip() for k in pubkey.split(",")] if pubkey else None
     ent = load_entitlements(file, trusted_pubkeys=trust)
     click.echo(ent.summary())
-    click.echo(f"  paid features active: {ent.paid_active}")
+    click.echo(f"  licensed features active: {ent.paid_active}")
     click.echo(f"  suites: {list(ent.suites) or '—'}")
     for feat in sorted(GATED_FEATURES):
         click.echo(f"    {'✓' if ent.allows(feat) else '·'} {feat}")
@@ -1166,6 +1167,7 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
     approval, and on approval saves it so the sealed, knowledge-loaded agent
     goes live. Nothing is activated without your yes.
     """
+    from ..agent_tests_policy import NewSpecialistNeedsTests
     from ..intake import IntakeSpec, attach_docs_to_profile, run_intake, save_profile
 
     # Only prompt when a human is attached (a TTY). In non-interactive use (CI,
@@ -1212,14 +1214,15 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
             # The client explicitly attached docs AND the generated persona
             # tells the agent to answer from them -- so a quiet "skipping"
             # aside under-sells that the domain agent ends up with NO document
-            # memory. Make it a clear, actionable warning (client-journey
-            # finding): name the count and the exact remediation.
+            # memory. Make it a clear, actionable warning: name the count
+            # and the exact remediation.
             click.echo(
                 f"WARNING: knowledge is disabled, so the {len(doc_paths)} "
                 "document(s) you attached were NOT loaded; this domain agent "
-                "will have no document memory. Enable it with `maverick init` "
-                "(turn on knowledge) or set [knowledge] enable = true in "
-                "~/.maverick/config.toml, then re-run onboard.",
+                "will have no document memory. Turn on \"Document search for "
+                "agents\" in Lightwork > Settings > All settings, or set "
+                "[knowledge] enable = true in ~/.maverick/config.toml, then "
+                "re-run onboard.",
                 err=True,
             )
         elif kb_problem is not None:
@@ -1249,7 +1252,11 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
         return
     if kb is not None and doc_paths:
         attach_docs_to_profile(spec, profile, kb)
-    path = save_profile(profile, approved=True)
+    try:
+        path = save_profile(profile, approved=True)
+    except NewSpecialistNeedsTests as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(1)
     click.echo(click.style(f"\nActivated. Pack saved to {path}", fg="green"))
     click.echo(f"Domain '{profile.name}' is now available to the swarm.")
 
@@ -1275,6 +1282,7 @@ def learn_demo(ctx: click.Context, demo_file, name, industry, source, no_llm, ye
     your approval, and on approval saves it and provisions its skills/tools.
     Nothing is activated without your yes.
     """
+    from ..agent_tests_policy import NewSpecialistNeedsTests
     from ..demonstration import induce_profile, load_demonstration
     from ..intake import save_profile
 
@@ -1313,7 +1321,11 @@ def learn_demo(ctx: click.Context, demo_file, name, industry, source, no_llm, ye
     if not yes and not click.confirm("\nApprove and activate this agent?", default=False):
         click.echo("Discarded. Nothing was saved.")
         return
-    path = save_profile(profile, approved=True)
+    try:
+        path = save_profile(profile, approved=True)
+    except NewSpecialistNeedsTests as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(1)
     click.echo(click.style(f"\nActivated. Pack saved to {path}", fg="green"))
     click.echo(f"Domain '{profile.name}' is now available to the swarm.")
 
@@ -2461,8 +2473,8 @@ def fleet_run(ctx, fleet_name: str, agent_name: str, prompt: str,
         click.echo(f"no such fleet: {fleet_name}", err=True)
         sys.exit(1)
     if not governance_enabled():
-        click.echo("fleet governance is a paid (Gold) add-on; this deployment's "
-                   "license does not include it", err=True)
+        click.echo("license enforcement is on and this deployment's license "
+                   "does not grant the fleet_governance entitlement", err=True)
         sys.exit(2)
     agent = next((a for a in f.agents if a.name == agent_name), None)
     if agent is None:
@@ -3514,7 +3526,7 @@ def billing_stripe_status(as_json: bool) -> None:
                f"webhook secret present: {st.has_webhook_secret}")
     click.echo(f"  stripe SDK installed: {st.sdk_available}")
     click.echo(f"  bill metered usage: {st.bill_metered_usage}"
-               f"   (pricing-decision flag; off = platform fee only)")
+               f"   (off = platform fee only)")
     click.echo(f"  plans priced: {', '.join(st.plans_priced) or '(none)'}   "
                f"currency: {st.currency}")
 
@@ -3557,7 +3569,7 @@ def billing_stripe_preview(tenant_id: str, since: str | None, until: str | None,
     else:
         click.echo(f"  metered model usage: computed (${prev['metered_total']:.2f} "
                    f"{prev['currency'].upper()}) but NOT billed "
-                   "(pricing decision pending; platform fee only)")
+                   "(bill_metered_usage is off; platform fee only)")
 
 
 @billing.command("stripe-sync")
@@ -3605,7 +3617,7 @@ def billing_stripe_sync(tenant_id: str, since: str | None, until: str | None,
     if items is not None:
         click.echo(f"  metered usage items pushed: {len(items)}")
     else:
-        click.echo("  metered usage: not billed (pricing decision pending; "
+        click.echo("  metered usage: not billed (bill_metered_usage is off; "
                    "platform fee only)")
 
 
@@ -3809,6 +3821,69 @@ def _apply_director(profile: str, outcome: str, description: str,
     return run.goal_title, run.goal_description + extra, capped
 
 
+def _sample_task(value, template_name, title, description, domain):
+    """``start --sample``: the dashboard's first-outcome title, brief and
+    specialist, so the run knows which sample files to read and the sample rule
+    (a title alone did not). Returns the inputs unchanged without ``--sample``."""
+    if not value:
+        return title, description, domain, None
+    from .. import sample_outcomes
+
+    department = sample_outcomes.resolve_department(value, default=None)
+    if department is None:
+        names = ", ".join(row["department"] for row in sample_outcomes.departments())
+        click.echo(f"ERROR: unknown sample department {value!r}; choose one of: {names}", err=True)
+        sys.exit(2)
+    if template_name or title or description or domain:
+        click.echo("ERROR: --sample sets the task, its brief and its specialist; "
+                   "drop TITLE, --template, --description and --domain", err=True)
+        sys.exit(2)
+    outcome = sample_outcomes.get(department)
+    return outcome.title, sample_outcomes.goal_description(department), outcome.pack, department
+
+
+def _validate_sample_backend(department, backend) -> None:
+    """Refuse sample runs when the backend cannot read fixtures from the host."""
+    if department is None:
+        return
+    from ..config import get_sandbox
+
+    chosen = str(backend or get_sandbox().get("backend") or "local").strip().lower()
+    # These backends mount the host workdir or copy it into the execution
+    # environment. SSH, Modal, Firecracker and third-party backends do not
+    # guarantee that host files are visible to the run.
+    if chosen not in {"local", "docker", "podman", "gvisor", "devcontainer", "kubernetes"}:
+        click.echo(
+            f"ERROR: --sample is not supported with the {chosen!r} sandbox because "
+            "its work folder is not shared with this computer. "
+            "Choose --sandbox docker, podman, gvisor, devcontainer, kubernetes or local "
+            "to run the bundled sample. No task was started.",
+            err=True,
+        )
+        sys.exit(2)
+
+
+def _place_sample(department, sandbox) -> None:
+    """Copy the sample files into the work folder the run reads (no-op without ``--sample``)."""
+    if department is None:
+        return
+    from .. import sample_outcomes
+
+    try:
+        sample_outcomes.create_sample_workspace(department, sandbox.workdir)
+    except OSError as exc:
+        click.echo(f"ERROR: the sample files could not be placed in the work folder ({exc}).", err=True)
+        sys.exit(2)
+
+
+def _mark_sample(world, goal_id, department) -> None:
+    """Record the sample-data event on the goal (no-op without ``--sample``)."""
+    if department is not None:
+        from .. import sample_outcomes
+
+        sample_outcomes.mark_goal_as_sample(world, goal_id, department)
+
+
 def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
     """Export the coding-mode / best-of-N env flags that ``coding_mode.from_env()``
     reads everywhere. ``--best-of-n`` only takes effect under ``--coding-mode``,
@@ -3829,6 +3904,9 @@ def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
 @click.argument("title", required=False)
 @click.option("--description", default="")
 @click.option("--template", "template_name", default=None)
+@click.option("--sample", "sample_department", default=None,
+              help="Run a department's first task on sample data: the same brief, files "
+                   "and sample record as the dashboard's first outcome (e.g. finance).")
 @click.option("--param", "-p", "params", multiple=True)
 @click.option("--max-dollars", default=None, type=float)
 @click.option("--max-wall-seconds", default=None, type=float)
@@ -3874,7 +3952,7 @@ def start(
     ctx, title, description, template_name, params,
     max_dollars, max_wall_seconds, max_depth, workdir, sandbox_backend,
     domain, coding_mode, best_of_n, fail_to_pass, pass_to_pass, dry_cost,
-    repeat, director_profile, result_file=None, result_key_file=None,
+    repeat, director_profile, result_file=None, result_key_file=None, sample_department=None,
 ) -> None:
     """Start a new goal and run the swarm."""
     from .run_result import prepare_result_target, read_result_key, write_if_requested
@@ -3892,6 +3970,8 @@ def start(
     # gate it on a provider key.
     if not dry_cost:
         _require_llm_key()
+    title, description, domain, sample = _sample_task(
+        sample_department, template_name, title, description, domain)
     if template_name:
         from ..templates import load_template
         try:
@@ -3934,7 +4014,7 @@ def start(
 
     # Refuse BEFORE creating the goal row -- both of these used to surface
     # after `goal #N created`, leaving an orphan blocked/failed row per
-    # attempt (platform-test finding).
+    # attempt.
     from .. import killswitch as _ks
     try:
         _ks.check()
@@ -3977,9 +4057,13 @@ def start(
     # cannot write files or run programs. Say so before creating a paid task.
     _warn_file_work_before_start(_start_config, sandbox_backend)
 
+    _validate_sample_backend(sample, sandbox_backend)
     k = _kernel()
-    llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     sandbox = k.build_sandbox(workdir=workdir, backend=sandbox_backend)
+    # Containment and devcontainer settings can change the actual work folder.
+    # Use the constructed backend's directory, not the CLI/config input.
+    _place_sample(sample, sandbox)
+    llm = k.LLM(model=_cli_model(ctx, "orchestrator"))
     import threading
     import types as _types
 
@@ -3993,6 +4077,7 @@ def start(
     for _run_i in range(n_runs):
         world = open_world(ctx.obj["db"])
         goal_id = world.create_goal(title, description)
+        _mark_sample(world, goal_id, sample)
         _label = f" [{_run_i + 1}/{n_runs}]" if n_runs > 1 else ""
         click.echo(f"goal #{goal_id} created{_label}: {title}")
         # Honor [budget] in config.toml (start used to build Budget() directly,
@@ -4010,7 +4095,7 @@ def start(
             max_wall_seconds=max_wall_seconds,
         )
 
-        # Council UX finding: `maverick start "..."` used to look hung
+        # `maverick start "..."` used to look hung
         # between "goal created" and the final printout. A background poller
         # streams goal_events to stderr so the user sees the swarm thinking
         # in real time. Non-tty output (e.g. piped to a file) skips the
@@ -4369,8 +4454,8 @@ def debate(ctx, question: str, rounds: int, max_dollars: float | None,
     from ..debate import DebateParticipant, run_debate
     from ..llm import model_for_role
 
-    # Friendly preflight (round-3 platform-test finding: an unconfigured
-    # install got a raw anthropic-SDK TypeError traceback here), and route
+    # Friendly preflight (an unconfigured install would otherwise get a raw
+    # anthropic-SDK TypeError traceback here), and route
     # through the configured role models instead of hard DEFAULT_MODEL
     # (kernel rule 2) -- debaters argue at the analyst tier.
     selected_model = ctx.obj["model"] or model_for_role("analyst")
@@ -4430,7 +4515,7 @@ def config_lint_cmd() -> None:
     # load_config() is deliberately fail-soft: a corrupt config.toml yields {}
     # with only a warning, so linting it would find nothing and print
     # "config OK" -- the one tool meant to catch a broken config blessing a
-    # file in which every setting is being dropped (round-4 finding; mirrors
+    # file in which every setting is being dropped (mirrors
     # health._check_config). Parse the raw file FIRST so a syntax error is a
     # hard lint failure, not invisible.
     p = config_path()
@@ -4528,7 +4613,7 @@ def plan_reflect(ctx, goal: str, max_iterations: int, max_dollars: float | None)
     from ..llm import model_for_role
     from ..plan_execute_reflect import run_plan_execute_reflect
 
-    # Same preflight + role routing as `debate` (round-3 finding): planning
+    # Same preflight + role routing as `debate`: planning
     # belongs to the orchestrator tier, and a missing provider must refuse
     # cleanly, not traceback inside the anthropic client constructor.
     selected_model = ctx.obj["model"] or model_for_role("orchestrator")
@@ -5337,7 +5422,7 @@ def plugin_stats_cmd() -> None:
 def plugin_new(name: str, kind: str, dest: str) -> None:
     """Generate a working plugin skeleton at ./<NAME>/.
 
-    Closes the council ecosystem-seat gap: third-party contributors had
+    Third-party contributors had
     no on-ramp besides hand-writing pyproject.toml + the entry-point
     block + a manifest. This generates all four files with a working
     factory the contributor can ``pip install -e .`` and exercise
@@ -5466,20 +5551,10 @@ def monitor(ctx, goal_id, interval) -> None:
 
 
 def _conversation_user_matches(conv_user_id: str, requested: str, channel: str) -> bool:
-    """Match a conversation's user_id for erase/export-user.
+    """Match a conversation's user_id for erase/export-user (see ``ediscovery``)."""
+    from ..ediscovery import conversation_user_matches
 
-    Most channels store externally supplied user ids and must match exactly:
-    identifiers such as Twilio WhatsApp ``whatsapp:+15551234567`` or Matrix
-    room ids naturally contain colons, so treating any ``<prefix>:`` as the
-    requested user can disclose or erase unrelated conversations.
-
-    The only family match Lightwork currently needs is the local CLI chat
-    namespace: each REPL session is stored as ``local:<uuid>``, while the
-    documented GDPR subject is ``--channel cli --user local``.
-    """
-    if conv_user_id == requested:
-        return True
-    return channel == "cli" and requested == "local" and conv_user_id.startswith("local:")
+    return conversation_user_matches(conv_user_id, requested, channel)
 
 
 def _erase_subject_knowledge(channel: str, user: str) -> dict[str, int]:
@@ -5604,6 +5679,19 @@ def _dispatch_backend_erasure(world, conversation_ids, erasure_plan):
     return backend_erase(conversation_ids)
 
 
+def _refuse_under_legal_hold(ctx, world, conversation_ids) -> None:
+    """Stop before any deletion when an active legal matter covers this closure."""
+    from ..ediscovery import erasure_refusal
+
+    plan_hook = getattr(world, "plan_conversation_erasure", None)
+    goal_ids = plan_hook(conversation_ids)["goal_ids"] if callable(plan_hook) else []
+    message = erasure_refusal(world, conversation_ids=conversation_ids, goal_ids=goal_ids, actor="cli")
+    if message:
+        ctx.obj["erase_refusal"] = message
+        click.echo(message, err=True)
+        ctx.exit(1)
+
+
 def _erasure_failure_label(error: BaseException) -> str:
     """Describe an erase failure without echoing subject-bearing paths/data."""
     errno = getattr(error, "errno", None)
@@ -5712,7 +5800,7 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
         click.echo(f"This will erase {len(convs)} conversation(s) for {channel}:{user}.")
         click.confirm("Proceed?", abort=True)
 
-    # Council security finding: previous version left goals, messages,
+    # The previous version left goals, messages,
     # episodes, questions, goal_events, attachments-rows, and
     # processed_messages intact -- a documented Art. 17 violation. Full
     # cascade now wipes every row referencing goals tied to this user's
@@ -5725,6 +5813,7 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
     # these conversations. We use ALL turns (not just recent), so a
     # conversation with >10k turns doesn't leave orphan attachments.
     conv_ids = [c.id for c in convs]
+    _refuse_under_legal_hold(ctx, world, conv_ids)
     (
         erasure_plan,
         erasure_manifest,
@@ -6298,7 +6387,7 @@ def export_user(ctx, channel: str, user: str, output) -> None:
 def gc(ctx, days: int, events_days: int, yes: bool) -> None:
     """Garbage-collect old conversations and goal_events.
 
-    Tier 1 council finding: retention was "forever" by default; this
+    Retention was "forever" by default; this
     command (plus the systemd timer in deploy/vps/) enforces a policy.
     """
     if not yes:
@@ -6339,11 +6428,21 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
                 f"pruned {convs} conversation(s), {events} goal_event row(s), "
                 f"{dedup} processed-message row(s) across {len(tenants)} tenant(s)"
             )
+            held = sum(1 for row in rows if row.get("held"))
+            if held:
+                click.echo(
+                    f"{held} workspace(s) were skipped because a legal hold is active there.",
+                    err=True,
+                )
             return
+
+    from ..ediscovery import LegalHoldApplies
 
     world = open_world(ctx.obj["db"])
     try:
         convs, events, dedup = prune_world(world, days=days, events_days=events_days)
+    except LegalHoldApplies as exc:
+        raise click.ClickException(str(exc)) from exc
     finally:
         close_world_if_owned(world)
     click.echo(
@@ -6465,7 +6564,8 @@ def watch(ctx, path: str, run: bool, max_dollars: float | None) -> None:
                 detail = _format_route_missing(missing_routes)
                 click.echo(
                     f"Skipping --run: selected routes are incomplete ({detail}). "
-                    "Run 'maverick init' to configure.",
+                    "Add the missing key in Lightwork > Settings, then run "
+                    "'maverick preflight'.",
                     err=True,
                 )
                 continue
@@ -6971,7 +7071,7 @@ def audit_export(
                 click.echo(f"ERROR: {_label} must be YYYY-MM-DD", err=True)
                 sys.exit(2)
 
-    # Plan feature gating: SIEM audit export is a paid-tier entitlement. Deny
+    # Plan feature gating: SIEM audit export is a plan-gated feature. Deny
     # either an explicit --tenant or the active deployment tenant when it names
     # a provisioned tenant whose plan omits "audit_export"; unscoped/self-host
     # export is unaffected because feature_allowed fails open at the edges.
@@ -7064,9 +7164,10 @@ def audit_export(
 @click.option("--format", "fmt", type=click.Choice(["json", "cef"]), default="json",
               help="Wire format for the SIEM (default: json).")
 @click.option("--to", "dest", default=None,
-              help="Destination URI: tcp://host:port, udp://host:port, or "
-                   "http(s)://host/path. Default: MAVERICK_SIEM_DEST / "
-                   "[audit] siem_dest.")
+              help="Destination URI: tcp://host:port, udp://host:port, "
+                   "http(s)://host/path, datadog://<site>, or "
+                   "sentinel://<dce-host>/<dcr-id>/Custom-<stream>. Default: "
+                   "MAVERICK_SIEM_DEST / [audit] siem_dest.")
 @click.option("--day", default=None, help="YYYY-MM-DD (default: today).")
 @click.option("--all", "all_days", is_flag=True,
               help="Forward every YYYY-MM-DD.ndjson day-file in the audit dir.")
@@ -7120,7 +7221,7 @@ def audit_forward(
         )
         sys.exit(2)
 
-    # Same paid-tier entitlement gate as export, including active deployment
+    # Same plan gate as export, including active deployment
     # tenants resolved by feature_allowed when --tenant is omitted.
     from ..billing import feature_allowed
     if not feature_allowed("audit_export", tenant=tenant):
@@ -7464,6 +7565,7 @@ from . import (  # noqa: E402,F401
     _knowledge_groups,
     _learning_groups,
     _ops_groups,
+    _owner_groups,
     _reporting_groups,
     _training_groups,
     _trust_groups,

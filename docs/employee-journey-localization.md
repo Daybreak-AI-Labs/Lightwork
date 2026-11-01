@@ -35,19 +35,19 @@ Product validation adds a language-labelled error without modifying the draft.
 path; ordinary caller messages remain unchanged.
 
 Run `python scripts/journey_i18n_coverage.py --output
-docs/ux-audit-2026-09-30/web-localization-coverage.json` from the repository root
-to regenerate the engineering inventory. It reports literal HTML occurrences,
+<path>/web-localization-coverage.json` from the repository root to generate the
+engineering inventory (the output is a working file, not a tracked document). It reports literal HTML occurrences,
 with source locations. It deliberately does **not** qualify dynamic labels,
 shared includes, browser/API messages, linguistic quality or screen-reader
-behavior. The audit slice lists the remaining work rather than treating zero
-literal fragments as a complete journey.
+behavior, so a count of zero literal fragments does not mean that a journey is
+fully localized.
 
 Local tests cover locale precedence and inheritance, unchanged response prompts,
 account-bound cookies and locks, Arabic fallback, escaped parameter/source text,
 explicit dialog/table regions, streamed content, date/number/plural formatting
 and required-field error recovery. Provider services are not called.
 
-Workflow review now binds publication/restoration effects, draft/version states,
+Workflow review binds publication/restoration effects, draft/version states,
 sample checks, schedules and triggers explicitly. Stored schema labels/choices,
 workflow names and version diffs retain their own language and exact values.
 Generic request errors localize only classified product reasons; unknown server
@@ -69,6 +69,6 @@ permission loss and uncertain outcomes, with synthetic HTTP responses only.
 
 The live conversation controller binds product messages explicitly: clarification changes, prepared-file state, exact answer receipts, stop and live-update recovery, work summaries and speech-input feedback. Source messages, tool output and filenames retain their own direction and remain verbatim. File counts, sizes, dates, step counts and the inherited restart ceiling use the selected regional formatter.
 
-Preference reviews now translate field/source labels and consequence copy while retaining exact before/after values and custom guidance. Saving interface language keeps the editor in place and records that the change applies on the next page load. Built-in theme labels are product copy; custom theme names are preserved exactly. Select options use text-only labels with explicit language metadata.
+Preference reviews translate field/source labels and consequence copy while retaining exact before/after values and custom guidance. Saving interface language keeps the editor in place and records that the change applies on the next page load. Built-in theme labels are product copy; custom theme names are preserved exactly. Select options use text-only labels with explicit language metadata.
 
-This checkpoint contains 1055 source messages before the independent shared-shell, budget, answer and recovery catalogs are integrated. Draft catalogs remain subject to native-language and consequence-copy review; Arabic is still a community seed and English remains the only qualified complete-body language.
+Draft catalogs remain subject to native-language and consequence-copy review; Arabic is still a community seed and English remains the only qualified complete-body language.

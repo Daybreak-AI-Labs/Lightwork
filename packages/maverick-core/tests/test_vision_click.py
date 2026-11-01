@@ -1,5 +1,5 @@
 """Vision-grounded clicking: memory-first resolution, injected vision fallback,
-confidence floor, calibration applied (ROADMAP 2028 H1). Fully offline."""
+confidence floor, calibration applied. Fully offline."""
 from __future__ import annotations
 
 import json

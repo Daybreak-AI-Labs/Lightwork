@@ -155,6 +155,31 @@ def _archive_namespace(namespace: str) -> str:
     return namespace[:95] + "-" + hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:24] + "-archive"
 
 
+# Statuses that end a record's workflow in every store that uses them. Only
+# such records, and records with no status or state at all (receipts, logs),
+# are archived when a namespace is full: an archived record leaves the store's
+# lists, so archiving open work would hide it. A record in any other status,
+# including an unknown one, stays; a namespace full of open work refuses new
+# records instead. Deliberately absent because a store uses them for open work:
+# "sent" (a questionnaire awaiting its answer), "approved", "accepted", and
+# "failed" / "dead_letter" (may still need someone's attention).
+_SETTLED_STATUSES = frozenset({
+    "archived", "canceled", "cancelled", "closed", "complete", "completed",
+    "confirmed", "declined", "delivered", "denied", "done", "erased", "expired",
+    "finished", "invalidated", "passed", "purged", "refused", "rejected",
+    "replaced", "replayed", "request_denied", "resolved", "retired", "revoked",
+    "rolled_back", "settled", "succeeded", "superseded", "waived", "withdrawn",
+})
+
+
+def _settled(record: dict[str, Any]) -> bool:
+    for key in ("status", "state"):
+        value = record.get(key)
+        if isinstance(value, str) and value.strip().lower() not in _SETTLED_STATUSES:
+            return False
+    return True
+
+
 class GovernedRecordBackendError(RuntimeError):
     """A governed-record backend cannot preserve its persistence contract."""
 
@@ -390,6 +415,11 @@ class LocalGovernedRecordBackend:
     def load_archived(self, record_id: str) -> dict[str, Any] | None:
         return self._archive.load(record_id)
 
+    def list_archived(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        if limit is None:
+            return self._archive.list()
+        return self._archive.list_bounded(limit=_list_limit(limit))
+
     def archive(self, record_id: str, *, expected_revision: int) -> bool:
         """Move one delivered record, unchanged, out of the capped namespace."""
         from .file_lock import cross_process_lock, ensure_private_directory
@@ -438,23 +468,30 @@ class LocalGovernedRecordBackend:
         expected = _expected_revision(expected_revision)
         if expected is None:
             raise ValueError("expected_revision is required for governed deletion")
-        path = self._store._path(record_id)  # noqa: SLF001 - backend-owned store
-        if path is None:
+        active_path = self._store._path(record_id)  # noqa: SLF001 - backend-owned store
+        if active_path is None:
             return False
-        try:
-            info = path.lstat()
-        except FileNotFoundError:
-            return False
-        if _unsafe_path_alias(path, info):
-            raise PermissionError("governed record path alias is not permitted")
-        with cross_process_lock(path, strict=True):
+        # Archive and restore use this same active-record lock. Choose the
+        # record's location and validate CAS before removing it, without ever
+        # moving an archived record into the capacity-limited active namespace.
+        with cross_process_lock(active_path, strict=True):
+            store, path = self._store, active_path
             try:
                 locked_info = path.lstat()
             except FileNotFoundError:
-                return False
+                if self._lookup is not None:
+                    return False
+                store = self._archive
+                path = store._path(record_id)  # noqa: SLF001 - backend-owned store
+                if path is None:
+                    return False
+                try:
+                    locked_info = path.lstat()
+                except FileNotFoundError:
+                    return False
             if _unsafe_path_alias(path, locked_info):
                 raise PermissionError("governed record path alias is not permitted")
-            current = self._store._read_path(path)  # noqa: SLF001 - backend-owned store
+            current = store._read_path(path)  # noqa: SLF001 - backend-owned store
             if current is None:
                 return False
             revision = _RecordStore._revision(current)
@@ -1383,6 +1420,12 @@ class PostgresGovernedRecordBackend:
                 )
 
     def list(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        return self._list_namespace(self.namespace, limit)
+
+    def list_archived(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        return self._list_namespace(_archive_namespace(self.namespace), limit)
+
+    def _list_namespace(self, namespace: str, limit: int | None) -> list[dict[str, Any]]:
         tenant = self._tenant_key()
         bounded = None if limit is None else _list_limit(limit)
         with self._operation("list"):
@@ -1392,7 +1435,7 @@ class PostgresGovernedRecordBackend:
                     "FROM governed_records WHERE tenant_id=%s AND namespace=%s "
                     "ORDER BY created_at DESC, record_id"
                 )
-                parameters: tuple[object, ...] = (tenant, self.namespace)
+                parameters: tuple[object, ...] = (tenant, namespace)
                 if bounded is not None:
                     statement += " LIMIT %s"
                     parameters += (bounded,)
@@ -1522,7 +1565,26 @@ class PostgresGovernedRecordBackend:
         tenant = self._tenant_key()
         with self._operation("delete"):
             with self._transaction(tenant) as cur:
-                row = self._select_for_update(cur, tenant, validated)
+                namespace = self.namespace
+                if self._lookup is not None:
+                    row = self._select_for_update(cur, tenant, validated)
+                else:
+                    # Lock either location in one query: a concurrent restore
+                    # may move the row while we wait for its lock. Both its old
+                    # and new location must still match the locking predicate.
+                    cur.execute(
+                        "SELECT namespace, revision, record_json, created_at, updated_at "
+                        "FROM governed_records WHERE tenant_id=%s AND namespace IN (%s, %s) "
+                        "AND record_id=%s "
+                        "ORDER BY CASE WHEN namespace=%s THEN 0 ELSE 1 END LIMIT 1 FOR UPDATE",
+                        (tenant, namespace, _archive_namespace(namespace), validated, namespace),
+                    )
+                    located = self._row(cur)
+                    row = None
+                    if located is not None:
+                        if not isinstance(located, (tuple, list)) or len(located) != 5:
+                            raise PrivacyStateError("governed record row has an invalid shape")
+                        namespace, *row = located
                 if row is None:
                     return False
                 current = _row_record(
@@ -1544,7 +1606,7 @@ class PostgresGovernedRecordBackend:
                 cur.execute(
                     "DELETE FROM governed_records WHERE tenant_id=%s "
                     "AND namespace=%s AND record_id=%s AND revision=%s",
-                    (tenant, self.namespace, validated, revision),
+                    (tenant, namespace, validated, revision),
                 )
                 if cur.rowcount != 1:
                     raise RecordConflict("governed record changed during delete")
@@ -2257,11 +2319,13 @@ class GovernedRecordStore:
     def _archive_oldest(self, backend, maximum: int) -> int:
         """Make room in a full namespace by archiving its oldest delivered records.
 
-        Archived records are kept unchanged and stay readable and updatable by
-        id; they only stop counting against the cap. Each move is first an
+        Only settled records move (see ``_SETTLED_STATUSES``). Archived records
+        are kept unchanged and stay readable, updatable and deletable by id;
+        they only stop counting against the cap. Each move is first an
         audited update, so a record whose activity record is not delivered
         stays where it is. Returns how many records moved."""
-        rows = [row for row in backend.list(limit=maximum) if not row.get("_audit_pending")]
+        rows = [row for row in backend.list(limit=maximum)
+                if not row.get("_audit_pending") and _settled(row)]
         rows.sort(key=lambda row: (float(row.get("updated_at") or 0), str(row.get("id"))))
         moved = 0
         for row in rows[:max(1, maximum // 100)]:
@@ -2353,6 +2417,17 @@ class GovernedRecordStore:
         backend = self._backend()
         return backend.list() if limit is None else backend.list(limit=limit)
 
+    def list_archived(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        """Records this namespace archived when it was full (not in :meth:`list`).
+
+        Callers that must see every record (personal-data erasure) read these
+        too; ordinary views list only the active namespace."""
+        backend = self._backend()
+        listed = getattr(backend, "list_archived", None)
+        if self.lookup_spec is not None or not callable(listed):
+            return []
+        return listed() if limit is None else listed(limit=limit)
+
     def delete(self, record_id: str, *, expected_revision: int) -> bool:
         """Delete a retention-expired record only after its audit outbox cleared.
 
@@ -2373,7 +2448,8 @@ class GovernedRecordStore:
             raise GovernedRecordBackendError(
                 "governed-record backend does not support retained deletion"
             )
-        return bool(delete(str(record_id or ""), expected_revision=expected_revision))
+        record_id = str(record_id or "")
+        return bool(delete(record_id, expected_revision=expected_revision))
 
     def count(self, *, maximum: int = 100_000) -> int:
         """Records in the namespace, WITHOUT reading any record bodies.

@@ -1,5 +1,18 @@
 # Lightwork benchmark results
 
+> **No live-model results are recorded yet.** The only row in the results
+> table is a `dry-run` CI smoke (`MAVERICK_BENCH_DRY_RUN=1`). It makes no model
+> call and measures nothing. To record a live run, set `ANTHROPIC_API_KEY` and
+> run this from the repository root, replacing `v0.1.6` with the release tag
+> being measured:
+>
+> ```bash
+> python benchmarks/harness.py benchmarks/longhorizon/research-report.md --max-dollars 2.0 --tag v0.1.6
+> ```
+>
+> The harness appends a `measured` row to this file. Hand-added comparator
+> rows must be marked `manual`.
+
 This file is **append-only**, written by `benchmarks/harness.py` and
 hand-edited only for comparator rows from external agents.
 
@@ -37,7 +50,7 @@ MAVERICK_BENCH_DRY_RUN=1 python benchmarks/harness.py \
 
 ## Comparator notes
 
-Lightwork's wedge is **long-horizon work** — multi-day plans, recursive
+Lightwork targets **long-horizon work** — multi-day plans, recursive
 decomposition, persistent learning. The fair comparison is against
 agents that ALSO target multi-step work:
 

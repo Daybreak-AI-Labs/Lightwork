@@ -3,19 +3,17 @@ name = "maverick-installer-desktop"
 version = "0.1.7"
 edition = "2021"
 description = "Tauri GUI installer for Lightwork"
-authors = ["cdayAI"]
-license = "LicenseRef-Proprietary"
+authors = ["The Lightwork Authors"]
+license = "Apache-2.0"
 repository = "https://github.com/Daybreak-AI-Labs/Lightwork"
 
 [lib]
 name = "maverick_installer_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-# Council distribution-seat fix: the package had only [lib] and a
-# src/main.rs with a bare fn main(), but no [[bin]] target — cargo had
-# no binary to build, so `tauri build` produced nothing. The standard
-# Tauri v2 layout splits the logic into lib.rs (run()) and a thin
-# main.rs that calls it; this declares the binary explicitly.
+# Standard Tauri v2 layout: logic in lib.rs (run()), and a thin main.rs
+# that calls it. The binary is declared explicitly so `tauri build` has a
+# binary target to build.
 [[bin]]
 name = "maverick-installer-desktop"
 path = "src/main.rs"

@@ -1,4 +1,4 @@
-"""Operable, resumable fleet KEK rotation (roadmap: per-tenant KMS at scale)."""
+"""Operable, resumable fleet KEK rotation."""
 from __future__ import annotations
 
 import pytest

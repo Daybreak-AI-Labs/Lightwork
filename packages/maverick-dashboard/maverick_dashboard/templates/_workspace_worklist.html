@@ -126,7 +126,7 @@
     {% endif %}
     </div>
   </div>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function assessmentIntake() {
     const form = document.getElementById('pw-start-form');
     const type = document.getElementById('pw-start-type'), subject = document.getElementById('pw-start-subject');

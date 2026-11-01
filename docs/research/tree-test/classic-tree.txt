@@ -60,6 +60,7 @@ Insights
 	Discovery
 	Branches
 	Spend
+	Work value & opportunities
 	Savings
 	Autonomous shoring
 	Billing

@@ -234,7 +234,7 @@ class Blackboard:
         max_entries: int = 12,
     ) -> tuple[str, int]:
         """Entries posted after ``cursor`` by OTHER agents, rendered like
-        :meth:`render`, plus the new cursor (W1-44).
+        :meth:`render`, plus the new cursor.
 
         The orchestrator used to read the blackboard once, on its first turn,
         so fan-out caps, quarantine seals, sibling findings and disagreement

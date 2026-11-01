@@ -406,7 +406,7 @@ def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
             if claimed is None:
                 continue
             ident, fresh = claimed
-            links, buttons = [], []
+            lines, buttons = [], []
             for item in fresh[:5]:
                 href = item.get("href", "")
                 if (isinstance(href, str) and href.startswith("/") and not href.startswith("//")
@@ -418,9 +418,9 @@ def dispatch(principal: str, inbox: dict, preferences: dict) -> None:
                         line += "\n" + quiet[0] + ": " + quiet[1]
                         if len(buttons) < 4:
                             buttons.append(quiet[2])
-                    links.append(line)
-            text = "Lightwork has " + str(len(fresh)) + " update(s) for you. Sign in to review.\n" + "\n".join(links)
-            if len(fresh) > 5 or not links:
+                    lines.append(line)
+            text = "Lightwork has " + str(len(fresh)) + " update(s) for you. Sign in to review.\n" + "\n".join(lines)
+            if len(fresh) > 5 or not lines:
                 text += "\n" + base + "/notifications"
             try:
                 # The caller's authority fence excludes local revocation across

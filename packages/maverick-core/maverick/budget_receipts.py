@@ -1,5 +1,5 @@
 """Cryptographic budget receipts: tamper-evident spend records
-(roadmap: 2028 H1 safety).
+.
 
 A spend number in a mutable JSON file is an assertion, not evidence. When an
 agent platform bills (or is audited on) what its runs cost, the operator

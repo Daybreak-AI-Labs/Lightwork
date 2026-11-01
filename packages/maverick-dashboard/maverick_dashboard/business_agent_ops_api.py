@@ -135,8 +135,11 @@ def _approve(profile, plan, docs: list[tuple[str, bytes]], actor: str, principal
                     agent_name=profile.name, documents=len(docs))
     except AuditRefused:
         return {"saved": False, "message": "The activity log couldn't record this approval, so nothing was saved."}
+    from maverick.agent_tests_policy import NEW_SPECIALIST_NEEDS_TESTS, NewSpecialistNeedsTests
     try:
         saved_path = Path(save_profile(profile, approved=True))
+    except NewSpecialistNeedsTests:
+        return {"saved": False, "message": NEW_SPECIALIST_NEEDS_TESTS}
     except PermissionError:
         return {"saved": False, "message": "This installation's plan doesn't include new agents, so it wasn't saved."}
     except FileExistsError:

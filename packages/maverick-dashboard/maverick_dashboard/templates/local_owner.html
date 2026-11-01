@@ -1,5 +1,5 @@
 {% extends "public_base.html" %}
-{% from "_passphrase_fields.html" import styles, passphrase, script %}
+{% from "_passphrase_fields.html" import styles, passphrase, script with context %}
 {% block title %}{{ title }} · Lightwork{% endblock %}
 {% block public_label %}{{ 'First-time setup' if setup else 'Sign in' }}{% endblock %}
 {% block public_footer %}{{ 'Owner setup on this computer' if setup else 'Sign in to this workspace' }}{% endblock %}

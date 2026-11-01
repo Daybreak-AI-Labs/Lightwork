@@ -112,7 +112,7 @@
   </div>
   {% endif %}
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     var surface = document.getElementById('sim-surface');
     var action = document.getElementById('sim-action');

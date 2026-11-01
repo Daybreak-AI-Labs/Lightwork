@@ -7,7 +7,7 @@ This is the highest-level test in the kernel — proves that:
     (pending -> active -> done / blocked)
   - blackboard posts mirror into `goal_events` so the dashboard can stream
 
-The council called out that we had unit tests for every component but
+We had unit tests for every component but
 nothing exercised the wire connecting them.
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ from maverick.world_model import WorldModel
 async def test_simple_final_answer_marks_goal_done(tmp_path: Path, fake_llm, make_llm_response):
     fake_llm.scripted = [
         make_llm_response(text="FINAL: the answer is 42"),
-        # Wave 5: verifier runs on orchestrator's FINAL. Accept the answer.
+        # Verifier runs on orchestrator's FINAL. Accept the answer.
         make_llm_response(
             text='{"confidence": 0.95, "accepts": true, "critique": "ok", "issues": []}',
         ),
@@ -78,7 +78,7 @@ async def test_ask_user_pauses_goal_as_blocked(tmp_path: Path, fake_llm, make_ll
         sandbox=LocalBackend(workdir=tmp_path), max_depth=1,
     )
 
-    # Council UX fix: message is now sentence-case "Paused" not "PAUSED".
+    # The message is sentence-case "Paused", not "PAUSED".
     assert "Paused" in out
     goal = world.get_goal(gid)
     assert goal.status == "blocked"
@@ -92,7 +92,7 @@ async def test_blackboard_posts_mirror_into_goal_events(tmp_path: Path, fake_llm
     """Live progress streaming depends on this."""
     fake_llm.scripted = [
         make_llm_response(text="FINAL: done"),
-        # Wave 5 verifier call on orchestrator FINAL.
+        # Verifier call on orchestrator FINAL.
         make_llm_response(
             text='{"confidence": 0.95, "accepts": true, "critique": "ok", "issues": []}',
         ),

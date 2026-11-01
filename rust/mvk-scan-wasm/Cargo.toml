@@ -7,7 +7,7 @@ edition.workspace = true
 # "invalid type: map, expected a string for key package.license". Cargo itself
 # (the other Rust jobs) resolves the inherited value fine; only wasm-pack needs
 # the literal. Must stay in sync with [workspace.package] license in rust/Cargo.toml.
-license = "LicenseRef-Proprietary"
+license = "Apache-2.0"
 description = "wasm-bindgen binding for the Lightwork native safety scanners (TypeScript / edge)."
 repository = "https://github.com/Daybreak-AI-Labs/Lightwork"
 

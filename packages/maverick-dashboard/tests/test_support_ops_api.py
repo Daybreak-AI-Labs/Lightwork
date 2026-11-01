@@ -155,3 +155,33 @@ def test_charts_are_for_installation_administrators(client, monkeypatch):
     _as(monkeypatch, "operator", "user:olive@example.com")
     assert client.get("/api/v1/insights/charts").status_code == 403
     assert client.get("/api/v1/insights/value-report").status_code == 200
+
+
+def test_support_picker_pages_stopped_tasks_and_decrypts_only_those(client, monkeypatch):
+    from maverick import world_model
+    from maverick_dashboard._shared import _world
+
+    stopped = []
+    for index in range(130):
+        if index % 3 == 0:
+            done = _world().create_goal(f"Finished {index}", owner="user:vic@example.com")
+            _world().set_goal_status(done, "done", result="finished output")
+        else:
+            stopped.append(_stopped_task("user:vic@example.com", f"Stopped {index}"))
+    _as(monkeypatch, "viewer", "user:vic@example.com")
+    decrypted: list[int] = []
+    real_get_goals = world_model.WorldModel.get_goals
+
+    def counting(self, goal_ids):
+        decrypted.extend(goal_ids)
+        return real_get_goals(self, goal_ids)
+
+    monkeypatch.setattr(world_model.WorldModel, "get_goals", counting)
+    seen, cursor = [], 0
+    while cursor is not None:
+        page = client.get("/api/v1/support/issue-report/tasks", params={"offset": cursor}).json()
+        seen.extend(row["id"] for row in page["tasks"])
+        cursor = page["next_offset"]
+    assert seen == sorted(stopped, reverse=True)
+    assert set(decrypted) and set(decrypted) <= set(stopped)
+

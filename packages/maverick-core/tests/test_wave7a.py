@@ -1,4 +1,4 @@
-"""Wave 7a — self-reviewer agent + MAV ensemble verifier."""
+"""Self-reviewer agent + MAV ensemble verifier."""
 from __future__ import annotations
 
 import pytest

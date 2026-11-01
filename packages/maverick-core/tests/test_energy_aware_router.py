@@ -1,4 +1,4 @@
-"""Energy-aware routing (ROADMAP 2028 H2)."""
+"""Energy-aware routing."""
 from __future__ import annotations
 
 from maverick.energy_aware_router import (

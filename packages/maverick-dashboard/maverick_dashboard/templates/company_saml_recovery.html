@@ -7,6 +7,7 @@
   <p>Only this computer's original owner can review restoring the single-sign-on choice from their retained activation. This does not change provider files, passwords, roles, proxy policy, enterprise requirements or second-factor rules. It never signs you into the dashboard.</p>
   <label>Original owner's email <input class="input" type="email" data-saml-email maxlength="320" autocomplete="username"></label>
   <label>Owner passphrase <input class="input" type="password" data-saml-phrase maxlength="1024" autocomplete="current-password"></label>
+  <label>Authenticator code or recovery code (only when the owner's app is on) <input class="input" type="text" data-saml-code maxlength="32" autocomplete="one-time-code" spellcheck="false"></label>
   <button class="btn" type="button" data-saml-lookup>Read retained requests</button>
   <label>Your original request <select class="select" data-saml-recovery-original><option value="">Choose a dated request</option></select></label>
   <button class="btn" type="button" data-saml-original-read>Read original outcome</button>

@@ -3,7 +3,8 @@
 
 Requires only Python 3.10+ and ``cryptography``. This verifies manifest
 integrity and the separately distributed publisher key. It does not recompute
-the proprietary control-source digests recorded by the manifest.
+the control-source digests recorded by the manifest; source-binding
+verification requires a Lightwork source snapshot at the measured commit.
 """
 from __future__ import annotations
 

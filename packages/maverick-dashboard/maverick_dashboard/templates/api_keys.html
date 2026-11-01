@@ -1,6 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Access keys · Lightwork<script src="{{ static_url('lightwork-access-key-requests.js') }}" defer></script>
-{% endblock %}
+{% block title %}Access keys · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero %}
   {{ hero('Your account', 'Access keys',
@@ -94,7 +93,7 @@
     #ak-keys table td, #ak-sa-list table td { vertical-align: top; }
     .ak-actions button { margin-right: var(--space-2); }
   </style>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     function $(id) { return document.getElementById(id); }

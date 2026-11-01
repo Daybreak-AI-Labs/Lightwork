@@ -110,7 +110,7 @@
   {% endif %}
 </div>
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   var errBox = document.getElementById('tsel-err');

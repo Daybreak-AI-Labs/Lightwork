@@ -745,7 +745,7 @@ def main(argv: list[str] | None = None) -> int:
     # The two expected startup errors are operator-config, not crashes: a
     # missing bearer token (fail-closed auth default) and a missing grpcio
     # extra. Both already carry a one-line, actionable message -- print it and
-    # exit non-zero instead of dumping a traceback (round-4 finding).
+    # exit non-zero instead of dumping a traceback.
     try:
         server = serve(
             args.address, max_workers=args.max_workers,

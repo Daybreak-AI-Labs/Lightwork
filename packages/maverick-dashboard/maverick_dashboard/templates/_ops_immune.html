@@ -18,6 +18,11 @@
         </select></label>
       <label for="ops-canary-from">Shown as requested by
         <select id="ops-canary-from" name="requested_by" class="select"><option value="">Nobody in particular</option></select></label>
+      <label for="ops-canary-undo">After a decision
+        <select id="ops-canary-undo" name="undoable" class="select">
+          <option value="yes" selected>Can be undone for a moment, like a task's step</option>
+          <option value="no">Takes effect at once, like a merge, settings change or agent access</option>
+        </select></label>
     </div>
     <label for="ops-canary-detail">What the reviewer sees
       <textarea id="ops-canary-detail" name="detail" class="textarea" rows="3" maxlength="4000" required></textarea></label>

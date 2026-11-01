@@ -1,13 +1,14 @@
 # Governed model improvement platform
 
-## Decision
+## Scope
 
-Lightwork will build the governance and evaluation substrate for specialist
-models now, while keeping real GPU training demand-driven. The platform is
+Lightwork provides the governance and evaluation substrate for specialist
+models. GPU training runs only through an optional, operator-provisioned
+training backend. The platform is
 vendor-neutral: Prime Intellect is a strong optional training backend, not an
 architectural dependency and not a trust boundary.
 
-The near-term product is not "we train a foundation model." It is:
+Lightwork does not train a foundation model. The design goal is:
 
 > Every legally usable, human-reviewed decision can become a provenance-bound
 > evaluation or training signal. A specialist artifact is adopted only when it
@@ -15,9 +16,8 @@ The near-term product is not "we train a foundation model." It is:
 > safety and deployment qualification, carries an externally verifiable
 > receipt, and receives explicit human authority.
 
-That gives Lightwork a credible route to lower inference cost, lower latency,
-air-gapped deployment, and a proprietary per-customer learning loop without
-claiming results that have not been measured.
+The aim is lower inference cost, lower latency, air-gapped deployment and a
+per-tenant learning loop, without claiming results that have not been measured.
 
 ## What is implemented
 
@@ -34,7 +34,7 @@ claiming results that have not been measured.
 | Training receipt | Tenant-private, hash-chained, digest-bound run evidence with separate human and platform signatures and minimal public commitment | Built; verification checks the full store prefix, while signed tail rollback needs an externally published latest commitment |
 | Model Risk connection | Training evidence is part of the weights-change assurance path | See Model Risk section and tests |
 | External backend | Version-pinned, non-executing export/run specifications | Optional operator path; never auto-installs or uploads |
-| Real specialist weights | None claimed | Requires customer-authorized data, sealed holdout, GPU run, and approval |
+| Real specialist weights | None claimed | Requires authorized real data, sealed holdout, GPU run, and approval |
 
 ## Architecture
 
@@ -216,8 +216,8 @@ The integration:
 - records the backend version/commit, lock/container, config, egress policy,
   checkpoints, metrics, and output artifact in the training receipt.
 
-Prime hosted training is useful when the customer contract and consent boundary
-permit it. Local Prime, local DPO/QLoRA, or another backend remains available
+Prime hosted training is an option only when the deployment's data agreements
+and consent boundary permit it. Local Prime, local DPO/QLoRA, or another backend remains available
 for sovereign deployments.
 
 ## Promotion lifecycle
@@ -239,11 +239,9 @@ for sovereign deployments.
     configured role model.
 12. Monitor acceptance, safety, drift, latency, cost, and rollback triggers.
 
-## Roadmap
+## Status and planned work
 
-### Phase 0 — foundation
-
-Status: implemented.
+### Implemented
 
 - Vendor-neutral environments and deterministic rewards.
 - Structured consent/redaction/data-boundary enforcement.
@@ -254,79 +252,50 @@ Status: implemented.
 - Default-off configuration and installer controls.
 - Optional external-backend export specifications.
 
-Exit criteria: focused tests, wheel-content verification, Ruff, and full-suite
-regression pass.
+### Planned
 
-### Phase 1 — first design-partner corpus
+No trained specialist weights exist yet. The steps below are the intended
+order; each has its own completion criteria.
 
-- Pick one work product: PIA scoring is the recommended first environment.
-- Contract for allowed purpose, retention, deletion, hosting, and derived
-  artifacts.
-- Collect real reviewer accept/edit/reject signals and reason codes.
-- Build at least 20 independent train families and 20 separately authored
-  sealed holdout families; target hundreds of cases before expecting stable
-  training lift.
-- Establish reviewer agreement and adjudication before labels become ground
-  truth.
+1. **First real-data corpus.** Pick one work product; PIA scoring is the
+   recommended first environment. Agree the allowed purpose, retention,
+   deletion, hosting, and derived artifacts with the data owner. Collect real
+   reviewer accept/edit/reject signals and reason codes. Build at least 20
+   independent train families and 20 separately authored sealed holdout
+   families; expect to need hundreds of cases before training lift is stable.
+   Establish reviewer agreement and adjudication before labels become ground
+   truth. Complete when privacy approval, a taskset lock, a contamination
+   check, a label-quality report, and baseline measurements exist.
+2. **Base-model bakeoff.** Run edge, single-GPU, and upper-bound candidates on
+   the exact same sealed protocol. Eliminate candidates on quality/safety
+   before optimizing cost. Select one dense primary and one upper-bound
+   reference per work product. Complete when reproducible qualification
+   records exist on target deployment hardware, with no model silently marked
+   "best."
+3. **Per-tenant specialist adapter.** Start with supervised or DPO/QLoRA where
+   deterministic labels and reviewer preferences support it. Use online RL
+   only where an interactive task/harness actually warrants it. Compare base
+   versus adapter with confidence intervals and quantization loss. Complete
+   with statistically credible heldout lift, no safety regression, a signed
+   receipt, Model Risk approval, and one-step rollback.
+4. **Serving.** Canary by role and tenant through existing routing. Measure
+   first-pass acceptance, review time, latency, cost, and incident rate. Roll
+   back automatically on technical health failures; require human authority
+   for model-risk decisions.
+5. **Additional work products**, in recommended order: DSAR routing; Article
+   28 clause review; control/evidence classification; regulatory-change
+   triage; finance anomaly disposition support; sanctions-case narrative
+   support, never autonomous screening disposition. Each environment earns a
+   separate model; do not force one specialist to cover unrelated risk
+   boundaries.
+6. **Fleet learning research** is explicitly deferred. Begin only after
+   multiple tenants have sufficient volume and have separately opted in, and
+   only after completing the secure-aggregation/privacy/poisoning threat
+   model. Per-tenant adapters remain the production default.
 
-Exit criteria: counsel/privacy approval, taskset lock, contamination check,
-label-quality report, and baseline measurements.
+## Operating metrics
 
-### Phase 2 — base-model bakeoff
-
-- Run edge, single-GPU, and upper-bound candidates on the exact same sealed
-  protocol.
-- Eliminate candidates on quality/safety before optimizing cost.
-- Select one dense primary and one upper-bound reference per work product.
-
-Exit criteria: reproducible qualification records on target deployment
-hardware, with no model silently marked "best."
-
-### Phase 3 — per-tenant specialist adapter
-
-- Start with supervised or DPO/QLoRA where deterministic labels and reviewer
-  preferences support it.
-- Use online RL only where an interactive task/harness actually warrants it.
-- Compare base versus adapter with confidence intervals and quantization loss.
-
-Exit criteria: statistically credible heldout lift, no safety regression,
-signed receipt, Model Risk approval, and one-step rollback.
-
-### Phase 4 — serving and economics
-
-- Canary by role and tenant through existing routing.
-- Measure first-pass acceptance, review time, latency, cost, and incident rate.
-- Roll back automatically on technical health failures; require human authority
-  for model-risk decisions.
-
-Exit criteria: sustained service objective and a customer-validated margin
-improvement.
-
-### Phase 5 — additional work products
-
-Recommended order:
-
-1. DSAR routing.
-2. Article 28 clause review.
-3. Control/evidence classification.
-4. Regulatory-change triage.
-5. Finance anomaly disposition support.
-6. Sanctions-case narrative support, never autonomous screening disposition.
-
-Each environment earns a separate model; do not force one specialist to cover
-unrelated risk boundaries.
-
-### Phase 6 — fleet learning research
-
-Status: explicitly deferred.
-
-Begin only after multiple tenants have sufficient volume and have separately
-opted in, and only after completing the secure-aggregation/privacy/poisoning
-threat model. Per-tenant adapters remain the production default.
-
-## Company metrics
-
-Track the flywheel with numbers a customer or investor can audit:
+Track the learning loop with auditable numbers:
 
 - eligible human-reviewed decisions per tenant and work product;
 - consented percentage and deletion/expiry backlog;
@@ -339,10 +308,8 @@ Track the flywheel with numbers a customer or investor can audit:
 - signed-receipt coverage for promoted weights;
 - canary rollback and incident rate.
 
-Do not use seeded demo data as customer learning volume. Do not describe public
-seed packs as a moat. The moat begins when legally usable, high-quality,
-human-reviewed customer decisions accumulate and measurably improve a model
-without weakening governance.
+Do not count seeded demo data as learning volume. Public seed packs are
+integration fixtures, not evidence of model improvement.
 
 ## Configuration
 
@@ -365,13 +332,3 @@ and resolve approver fingerprints only through deployment-owned global trust
 policy. Keep retired approver public keys in that trust history while historical
 receipts must remain verifiable; removing one deliberately revokes its receipts
 as future promotion authority.
-
-## Defensible YC statement
-
-> Lightwork turns customer-authorized, human-reviewed compliance decisions into
-> deterministic evaluation and training environments. As volume grows, we can
-> distill per-customer specialist models that reduce cost and latency and run
-> inside regulated environments. Every adopted model change is bound to the
-> exact data boundary, base artifact, evaluation, runtime, and human approval.
-> The platform and governance plumbing exist now; production model lift will be
-> claimed only after real customer data and sealed evaluations prove it.

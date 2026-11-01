@@ -1,4 +1,4 @@
-"""Adversarial-prompt corpus release (roadmap: 2028 H2 safety).
+"""Adversarial-prompt corpus release.
 
 The red-team corpus (``redteam_corpus.jsonl``) gates CI; *releasing* it means
 turning the working file into a **versioned, validated, documented artifact**
@@ -26,7 +26,7 @@ import json
 from pathlib import Path
 
 CORPUS_PATH = Path(__file__).with_name("redteam_corpus.jsonl")
-LICENSE = "LicenseRef-Proprietary (evaluation use permitted; see README)"
+LICENSE = "Apache-2.0"
 INTENDED_USE = (
     "Evaluating prompt-injection / jailbreak / exfiltration detectors. "
     "NOT a training set for attack generation."

@@ -482,6 +482,26 @@ def test_restore_is_audited_before_it_happens(monkeypatch):
     assert restored.status_code == 200 and restored.json()["status"] == "suspended"
 
 
+def test_a_restore_that_then_fails_is_recorded_as_failed(monkeypatch):
+    # The restore is recorded before it runs; a refusal after that left only
+    # "restored" in the activity log for a workspace that stayed removed.
+    import maverick.audit as audit
+    from maverick.tenant import registry
+
+    assert client.post("/api/v1/admin/tenants", json={"id": "lost"}).status_code == 201
+    assert client.request("DELETE", "/api/v1/admin/tenants/lost").status_code == 204
+    kinds = []
+    monkeypatch.setattr(audit, "record_global", lambda kind, *a, **k: kinds.append(str(kind)) or True)
+
+    def gone(tenant_id):
+        raise ValueError("The retained workspace records are no longer available.")
+
+    monkeypatch.setattr(registry, "restore_tenant", gone)
+    response = client.post("/api/v1/admin/tenants/lost/restore")
+    assert response.status_code == 409
+    assert kinds == ["tenant_restored", "tenant_restore_failed"]
+
+
 def test_tenant_role_routes_take_the_cross_process_fence_off_the_event_loop(monkeypatch):
     """Nothing in these handlers is awaited, so declaring them ``async`` ran the
     cross-process authority fence and the role files on the event loop."""

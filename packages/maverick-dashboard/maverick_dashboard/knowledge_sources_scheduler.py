@@ -15,6 +15,15 @@ from . import auth, rbac, research_workspace_api
 log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _stop = _thread = None
+# Saved schedules are hourly at the finest, so a 30-second check finds every
+# due refresh; a refresh queued from this dashboard wakes the worker at once.
+_POLL_SECONDS = 30.0
+_wake = threading.Event()
+
+
+def wake():
+    """Run the next cycle now (a refresh was just queued)."""
+    _wake.set()
 
 
 def owner_authority(owner):
@@ -48,7 +57,21 @@ def _workspace_cycle():
                 if row.get("active_job"):
                     job = native.JOB_STORE.get(row["active_job"])
                     if job and job.get("state") == "queued" and not job.get("_audit_pending"):
-                        service.run(job["id"])
+                        try:
+                            service.run(job["id"])
+                        except Exception as exc:
+                            # Refused before it started: withheld and backed
+                            # off, not retried every cycle.
+                            try:
+                                native.KnowledgeSources.withhold_queued(job, exc)
+                            except Exception as receipt_error:
+                                log.warning("Knowledge source withheld receipt unavailable (%s)",
+                                            type(receipt_error).__name__)
+                            raise
+                    elif job and job.get("state") == "withheld" and not job.get("_audit_pending"):
+                        # The job receipt may have committed before releasing
+                        # its source failed. Finish only that bookkeeping.
+                        native.KnowledgeSources.withhold_queued(job)
                     # Running/uncertain claims are never taken over.
                 elif (not row.get("paused") and row["plan"]["interval_seconds"]
                       and row.get("next_refresh") is not None and row["next_refresh"] <= time.time()):
@@ -78,7 +101,8 @@ def _loop(stop):
             cycle()
         except Exception as exc:
             log.warning("Knowledge source worker unavailable (%s)", type(exc).__name__)
-        stop.wait(2)
+        _wake.wait(_POLL_SECONDS)
+        _wake.clear()
 
 
 def start_knowledge_sources_scheduler():
@@ -87,6 +111,9 @@ def start_knowledge_sources_scheduler():
         if _thread is not None and _thread.is_alive():
             return False
         _stop = threading.Event()
+        # A wake from while the worker was stopped (or from that stop) is
+        # covered by the first cycle, which runs at once.
+        _wake.clear()
         _thread = threading.Thread(target=_loop, args=(_stop,), name="knowledge-sources", daemon=True)
         _thread.start()
         return True
@@ -98,6 +125,7 @@ def stop_knowledge_sources_scheduler(*, timeout=5.0, wait=True):
         stop, worker = _stop, _thread
         if stop is not None:
             stop.set()
+            _wake.set()
     if worker is None:
         return False
     if wait:

@@ -29,7 +29,15 @@
       response = await fetch(url, {method:body === undefined?'GET':'POST',headers,credentials:'same-origin',cache:'no-store',body:body === undefined?undefined:JSON.stringify(body)});
       value = await response.json();
     } catch (_) { throw new Error('The reply was interrupted. Check the saved result before continuing.'); }
-    if (!response.ok) { const error = new Error(typeof value.detail === 'string'?value.detail:'Retention is unavailable. Check the saved result before continuing.'); error.status = response.status; throw error; }
+    if (!response.ok) {
+      // A refusal can carry {message, effective}: an installation policy that
+      // overrides periods that were saved is explained, not reported as a failure.
+      const detail = value && value.detail;
+      const message = typeof detail === 'string' ? detail
+        : detail && typeof detail.message === 'string' ? detail.message
+        : 'Retention is unavailable. Check the saved result before continuing.';
+      const error = new Error(message); error.status = response.status; throw error;
+    }
     const actual = value.context || (value.receipt && value.receipt.context);
     if (expected && actual && expected !== actual) { receipt = null; pending = null; review.hidden = true; throw new Error('Your account or workspace changed. Reload this page before continuing.'); }
     return value;

@@ -154,20 +154,10 @@ def undo_from_dashboard(world, approval_id: int, *, who: str) -> dict:
 # ----------------------------------------------------------------- channels
 
 
-def _channel_authority(principal: str, *, channel: str, approval_id: int) -> None:
-    """The linked Lightwork user must hold ``operate``, like a dashboard voter.
-
-    A denial is audited the same way ``require_approval_authority`` audits one.
-    """
-    from maverick.approval_cards import digest
-
-    from . import rbac
-    from .auth import role_for_principal
-
-    role = role_for_principal(principal)
-    if "operate" in rbac.permissions_for(role):
-        return
+def _audit_channel_denial(principal: str, *, channel: str, approval_id: int, reason: str) -> None:
+    """Record a refused chat decision the way ``require_approval_authority`` records a refused one."""
     from maverick import audit
+    from maverick.approval_cards import digest
     from maverick.paths import current_tenant_id_strict
 
     audit.audit_event(
@@ -178,17 +168,51 @@ def _channel_authority(principal: str, *, channel: str, approval_id: int) -> Non
         channel=channel,
         tenant=current_tenant_id_strict() or "",
         resource_sha256=digest({"kind": "approval", "resource": str(approval_id)}),
-        reason="approval_authority_missing",
+        reason=reason,
     )
+
+
+def _channel_authority(principal: str, *, channel: str, approval_id: int) -> None:
+    """The linked Lightwork user must hold ``operate``, like a dashboard voter.
+
+    A denial is audited the same way ``require_approval_authority`` audits one.
+    """
+    from . import rbac
+    from .auth import role_for_principal
+
+    role = role_for_principal(principal)
+    if "operate" in rbac.permissions_for(role):
+        return
+    _audit_channel_denial(principal, channel=channel, approval_id=approval_id, reason="approval_authority_missing")
     raise ApprovalDecisionRefused(
         "Your Lightwork account can't decide approvals. Ask an administrator for "
         "the operator role.", status_code=403, reason="not_permitted",
     )
 
 
+def _bypass_authority(principal: str, *, channel: str, approval_id: int) -> None:
+    """A publication bypass is decided by a pack editor, in chat as on the Approvals page.
+
+    The linked person must be on the same pack-editor roster the dashboard checks. Only the
+    approval itself is refused here; the requester's own approval is refused by the shared rule.
+    """
+    from . import agent_publish_bypass
+    from ._shared import _world
+
+    approval = _world().get_approval(int(approval_id))
+    if not agent_publish_bypass.is_bypass(approval) or agent_publish_bypass.pack_editor(principal):
+        return
+    _audit_channel_denial(principal, channel=channel, approval_id=approval_id, reason="pack_editing_missing")
+    raise ApprovalDecisionRefused(
+        "Only an administrator who can edit agents can decide this publication. Ask one to decide it "
+        "on the Approvals page or in chat.", status_code=403, reason="not_permitted",
+    )
+
+
 def _authority_for(channel: str):
     def authorize(principal: str, approval_id: int) -> None:
         _channel_authority(principal, channel=channel, approval_id=approval_id)
+        _bypass_authority(principal, channel=channel, approval_id=approval_id)
     return authorize
 
 

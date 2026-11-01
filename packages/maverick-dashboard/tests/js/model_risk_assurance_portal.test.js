@@ -10,7 +10,7 @@ const path = require("node:path");
 const {JSDOM} = require("jsdom");
 const {shell} = require('./_shell');
 
-const template = fs.readFileSync(path.join(__dirname, "../../maverick_dashboard/templates/model_risk_assurance.html"), "utf8");
+const template = fs.readFileSync(path.join(__dirname, "../../maverick_dashboard/templates/model_risk_assurance.html"), "utf8").replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const scripts = [...template.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
 const helpers = scripts.find(source => source.includes("window.mraFailure ="));
 const supplier = scripts.find(source => source.includes("const portalInvitations"))

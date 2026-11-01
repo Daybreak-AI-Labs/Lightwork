@@ -1,6 +1,6 @@
-"""Local-runtime launcher + autoscaler (ROADMAP: continuous batching local,
-persistent KV-cache / KV offload to disk, autoscaling local backends,
-mixed-precision local inference). All offline: fake runner, fake probe,
+"""Local-runtime launcher + autoscaler: continuous batching, persistent
+KV-cache / KV offload to disk, autoscaling local backends and mixed-precision
+local inference. All offline: fake runner, fake probe,
 virtual clock."""
 from __future__ import annotations
 

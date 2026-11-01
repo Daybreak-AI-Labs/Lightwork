@@ -1,4 +1,4 @@
-"""Default-on local failure-mode telemetry (roadmap: 2027 H2 performance).
+"""Default-on local failure-mode telemetry.
 
 When runs fail, *how* they fail is the signal worth having: is it mostly budget
 caps, provider auth, timeouts, the shield, sandbox errors? This records a

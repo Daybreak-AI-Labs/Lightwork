@@ -1,4 +1,4 @@
-"""Marketplace ratings — local ledger (roadmap 2027-H1 distribution/ecosystem).
+"""Marketplace ratings — local ledger.
 
 The catalog indexes carry community aggregates (``rating`` /
 ``ratings_count`` on :class:`maverick.catalog.CatalogEntry` — display-only,

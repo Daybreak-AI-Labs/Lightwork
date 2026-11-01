@@ -1217,7 +1217,7 @@ def test_signing_identity_admission_is_an_explicit_installer_opt_in(tmp_path, mo
 
 
 def test_dashboard_compress_decline_is_written_and_accept_is_the_default(tmp_path, monkeypatch):
-    # W3-77: response compression is default-on in the app, so only a
+    # Response compression is default-on in the app, so only a
     # deliberate "no" (a proxy already compresses) reaches config.toml.
     off = _write(tmp_path, monkeypatch, {"dashboard_compress": False})
     assert tomllib.loads(off)["dashboard"]["compress"] is False
@@ -1302,7 +1302,7 @@ def test_model_discovery_decline_is_written_and_accept_is_the_default(tmp_path, 
 
 
 def test_bedrock_auth_mode_is_written_and_iam_needs_no_key(tmp_path, monkeypatch):
-    # W1-10: the wizard asks how to authenticate to Bedrock and writes it; IAM
+    # The wizard asks how to authenticate to Bedrock and writes it; IAM
     # signing carries no api_key line, a bearer token does.
     from maverick_installer import wizard
 
@@ -1410,3 +1410,24 @@ def test_employee_connected_accounts_are_written_with_named_connections(monkeypa
     written = tomllib.loads("\n".join(wizard._cfg_advanced(answers, [])))
     assert written["connections"]["enable"] is True
     assert written["connections"]["allow_self_connect"] is True
+
+
+def test_public_chat_is_off_by_default_and_on_only_when_chosen(tmp_path, monkeypatch):
+    """Public website chat stays closed unless the owner answers yes: no section
+    is written by default, and the dashboard gate reads the section the wizard writes."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+
+    default = _write(cfg_dir, monkeypatch, {})
+    assert "[public_chat]" not in default
+
+    chosen = _write(cfg_dir, monkeypatch, {"allow_public_chat": True})
+    assert tomllib.loads(chosen)["public_chat"] == {"enabled": True}
+
+    from maverick import config
+    from maverick_dashboard import public_chat_api
+
+    config.reset_config_cache()
+    assert public_chat_api.public_chat_enabled() is True

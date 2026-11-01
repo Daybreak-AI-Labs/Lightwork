@@ -64,7 +64,7 @@ fn reviewed_authorization(state: &Maintenance, manual: Option<String>) -> Result
     #[cfg(not(windows))]
     {
         let _ = state;
-        Err("Customer maintenance is currently supported on Windows.".into())
+        Err("In-app maintenance is currently supported on Windows.".into())
     }
 }
 
@@ -97,7 +97,7 @@ pub fn review_maintenance_handoff(
     }
     #[cfg(not(windows))]
     {
-        Err("Customer maintenance is currently supported on Windows.".into())
+        Err("In-app maintenance is currently supported on Windows.".into())
     }
 }
 
@@ -291,7 +291,7 @@ pub async fn check_desktop_update(
     local_controls(&window)?;
     let _busy = acquire(&state)?;
     if !channel_configured(&app) {
-        return Err("This build has no verified customer update channel. Obtain a customer installer from your administrator.".into());
+        return Err("This build has no verified update channel. In-app updates are available only in a signed packaged build configured with an update channel.".into());
     }
     #[cfg(windows)]
     {
@@ -387,7 +387,7 @@ pub async fn check_desktop_update(
     #[cfg(not(windows))]
     {
         let _ = repair;
-        Err("Customer maintenance is currently supported on Windows.".into())
+        Err("In-app maintenance is currently supported on Windows.".into())
     }
 }
 
@@ -566,7 +566,7 @@ pub async fn install_desktop_update(
     #[cfg(not(windows))]
     {
         let _ = (app, review, authorization);
-        Err("Customer maintenance is currently supported on Windows.".into())
+        Err("In-app maintenance is currently supported on Windows.".into())
     }
 }
 
@@ -609,7 +609,7 @@ pub fn review_offline_repair(
     local_controls(&window)?;
     let _busy = acquire(&state)?;
     if !cfg!(all(windows, feature = "customer-runtime")) {
-        return Err("Offline customer repair is currently supported on Windows.".into());
+        return Err("Offline repair is currently supported on Windows.".into());
     }
     let key = app
         .config()
@@ -665,7 +665,7 @@ pub fn install_offline_repair(
     #[cfg(not(windows))]
     {
         let _ = (app, review);
-        Err("Offline customer repair is currently supported on Windows.".into())
+        Err("Offline repair is currently supported on Windows.".into())
     }
 }
 
@@ -1284,7 +1284,7 @@ impl Drop for ProtocolProcessTree {
 #[cfg(windows)]
 fn version_endpoints(app: &tauri::AppHandle, version: &str) -> Result<Vec<tauri::Url>, String> {
     if version.is_empty() || !version.chars().all(|ch| ch.is_ascii_digit() || ch == '.') {
-        return Err("The installed version has no immutable customer manifest.".into());
+        return Err("The installed version has no immutable release manifest.".into());
     }
     app.config()
         .plugins
@@ -1292,7 +1292,7 @@ fn version_endpoints(app: &tauri::AppHandle, version: &str) -> Result<Vec<tauri:
         .get("updater")
         .and_then(|v| v.get("endpoints"))
         .and_then(|v| v.as_array())
-        .ok_or("The customer update channel is unavailable.".to_string())?
+        .ok_or("The update channel is unavailable.".to_string())?
         .iter()
         .map(|value| {
             let base = tauri::Url::parse(

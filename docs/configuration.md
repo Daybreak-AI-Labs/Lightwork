@@ -73,6 +73,26 @@ base_url = "http://localhost:11434"
 auth_mode = "iam"
 # endpoint = "mantle"
 
+[providers.vertex]
+# Claude on Google Cloud Vertex AI through the Anthropic SDK's Vertex client
+# (prompt caching, thinking, tool_choice all work). There is no key: sign-in is
+# Google Application Default Credentials (a service-account file named by
+# GOOGLE_APPLICATION_CREDENTIALS, `gcloud auth application-default login`, or
+# workload identity). Needs the `vertex` extra: google-auth.
+# project_id falls back to ANTHROPIC_VERTEX_PROJECT_ID, then GOOGLE_CLOUD_PROJECT;
+# region falls back to CLOUD_ML_REGION; model_id falls back to VERTEX_MODEL_ID;
+# base_url (optional) falls back to ANTHROPIC_VERTEX_BASE_URL. The table wins
+# over the environment. The model_id is the id shown in the Vertex AI Model
+# Garden (name@version form, for example claude-haiku-4-5@20251001); Lightwork
+# ships no Vertex model id.
+# Billing: Google Cloud invoices Vertex AI at its own rates, which are not in
+# Lightwork's verified rate card. Like Bedrock, planning estimates use the Claude
+# API list rate for the model behind the id; set [budget] strict_pricing=false to
+# account live usage at that estimate.
+project_id = "my-gcp-project"
+region = "us-east5"
+model_id = "claude-haiku-4-5@20251001"   # copy the exact id from Model Garden
+
 [models]
 # Settings > Models offers every model a saved provider key can reach: each
 # configured provider's own model-list endpoint is read (one bounded request,
@@ -109,6 +129,20 @@ task_limits_enabled = true
 # max_input_tokens  = 1000000
 # max_output_tokens = 200000
 strict_pricing      = true
+
+[contact_centre]
+# Where a human handoff goes outside Lightwork when a person takes over a
+# conversation. Off by default: nothing is sent and no outbox is kept.
+# provider = "off"                 # "off" | "zendesk" | "webhook"
+# zendesk_subdomain = "acme-support"   # the part before .zendesk.com
+# zendesk_email = "agent@acme.example" # agent whose API token is used
+# webhook_url = "https://hooks.acme.example/lightwork"
+# dashboard_url = "https://lightwork.acme.example"  # links back to conversations
+# max_messages = 20                # 1-50 recent messages, each 2,000 characters
+# The Zendesk API token and the webhook signing secret are never set here. Enter
+# them in Settings > Integrations > Contact centre (stored sealed), or set
+# MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN / MAVERICK_CONTACT_CENTRE_WEBHOOK_SECRET.
+# See contact-centre-handoff.md.
 
 [safety]
 profile         = "balanced"   # strict | balanced | permissive | off
@@ -189,7 +223,7 @@ keep_last = 5
 # Consent-gated, OFF by default. When true, the MCP server tallies a coarse
 # language bucket from each client's User-Agent (typescript/go/rust/c#/java/
 # python) into a local counts file — no request content, no identifiers,
-# nothing uploaded. Feeds the language-bindings decision gate.
+# nothing uploaded. It shows you which languages your MCP clients use.
 # The wizard asks for consent in its Analytics step (`maverick init`).
 mcp_client_language = false
 
@@ -260,11 +294,11 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # "Finance Team" = ["finance", "tax"]
 
 [license]
-# Signed-license entitlement enforcement (paid tier + add-on suites). Fail-open
-# by default: the kernel runs everything unless you turn enforcement on. Set the
-# trust anchor to the publisher PUBLIC key(s) so a signed license activates paid
-# features; the matching PRIVATE key is a secret supplied only via
-# MAVERICK_LICENSE_PRIVATE_KEY (never here). Issue/inspect with
+# Optional signed-license feature gate for operators (gated tier features and
+# add-on suites). Off by default: every feature runs unless you turn enforcement
+# on. Set the trust anchor to the publisher PUBLIC key(s) so a signed license
+# grants its gated features. The matching PRIVATE key is a secret supplied only
+# via MAVERICK_LICENSE_PRIVATE_KEY (never here). Issue/inspect with
 # `maverick license issue|set|show`; `maverick license keygen` mints a keypair.
 enforce           = false                 # or MAVERICK_LICENSE_ENFORCE=1
 # publisher_pubkeys = ["<publisher public key hex>"]  # or MAVERICK_LICENSE_PUBKEYS
@@ -694,7 +728,7 @@ enable = true              # set false to hide the surface. Env: MAVERICK_SHORIN
 [billing.stripe]           # Platform billing collection (maverick.billing_stripe):
                            #   turn metered-usage invoices into real Stripe charges.
 enable = false             # explicit opt-in; env: MAVERICK_STRIPE_ENABLE
-bill_metered_usage = false # PRICING DECISION PENDING: false bills only the
+bill_metered_usage = false # false bills only the
                            #   recurring platform fee; true also pushes the metered
                            #   model-usage line items (no markup is set here — the
                            #   amounts come from whatever RateCard rated the invoice).
@@ -709,7 +743,9 @@ currency = "usd"
 # Operator surface: `maverick billing stripe-status`, `stripe-preview <tenant>`
 # (dry-run), `stripe-sync <tenant>`. A failed-payment webhook downgrades a tenant
 # to the base entitlement tier; a recovered payment restores it. The `stripe` SDK
-# is an OPTIONAL extra: `pip install 'maverick-core[stripe]'`.
+# is an OPTIONAL extra: `python -m pip install -e './packages/maverick-core[stripe]'`
+# from the repository root (or add `stripe` to `--core-extra` when running
+# `scripts/install_release_cohort.py`).
 
 [suites]                   # disable whole suites (all on by default)
 # healthcare = false
@@ -921,6 +957,32 @@ client_token = ""             # MAVERICK_PROXY_CLIENT_TOKEN (sealed when set on 
 jd_hiring = true              # Agent Factory: draft or match agents from a job description
 require_passing_tests = true  # changed instructions publish only after every saved test passes (or with a recorded reason)
 
+[agent_tests]
+# Saved answer checks that gate publishing (maverick.agent_tests_policy). The defaults keep today's behaviour.
+max_cases_per_specialist = 20          # 1 to 200: saved checks one specialist can keep; one run checks at most this many.
+                                       # Lowering it keeps saved checks, but a set larger than the limit cannot pass a full run.
+require_for_new_specialists = false    # true: a specialist never published before needs a saved check and a passing full
+                                       # run of every check on its exact draft. A reason does not skip this. Business setup,
+                                       # customization bundles and the CLI (onboard, learn-demo) cannot add a new specialist
+                                       # while it is on; add it in Agent Factory instead.
+bypass_requires_second_person = false  # true: publishing changed instructions without a passing run (with a reason) needs
+                                       # another administrator's approval on the Approvals page or in chat. The requester cannot approve it
+                                       # on either. Rejecting is never refused.
+tool_checks = false                    # true: a saved check may say which tools the specialist must call, must not call, and
+                                       # what the call must include. Tools run as recording stubs with fixed answers; nothing real runs.
+                                       # While false, such checks cannot be created and any existing ones are skipped (never counted as passing).
+canary_percent = 0                     # 0 (off): publishing changed instructions replaces the current version, as before.
+                                       # 1 to 50: the changed version is a trial on that share of NEW goals (chosen by goal id);
+                                       # the rest keep the current version. Goals already running are not changed. Each goal
+                                       # records which version it used. Promote or roll back the trial in Workforce. Only one
+                                       # trial per specialist; a second change is refused until then. A new specialist publishes normally.
+                                       # Goals that ran before or after a trial record no version. Work a trial goal hands to other
+                                       # specialists, and public chat, use the current version. Unreadable settings publish nothing.
+canary_auto_rollback = false           # true: roll the trial back on its own once at least 10 of its goals have finished and its
+                                       # failed share is more than 20 percentage points above the current version's. Recorded in the
+                                       # activity log. It needs a finished goal on the current version to compare with, and it is
+                                       # checked at most once a minute. Unreadable settings or a value other than true leave it off.
+
 [autonomy]
 confirm_plan = false          # show the plan in Approvals and wait before a task's first action that reaches outside Lightwork
 
@@ -1039,8 +1101,8 @@ row reads real config/env:
 - a provider credential resolvable (an API key or a `[providers.<name>]` table).
 
 Onboard a tenant and mint its first admin in one step with
-`maverick tenant onboard <id> --admin-email <email> --plan <plan>`; control a
-deployment's paid features with `maverick license issue|set|show`.
+`maverick tenant onboard <id> --admin-email <email> --plan <plan>`; manage the
+optional signed license with `maverick license issue|set|show`.
 
 ## Environment variables
 

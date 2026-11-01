@@ -48,13 +48,12 @@ fail-closed (`maverick/enterprise.py`):
 > able to bypass application-layer controls.
 
 **Prove it, don't trust the flag.** `maverick enterprise verify`
-
-**Governance invariants proven across the whole roster.** Beyond per-deployment checks, a roster-wide invariant test suite verifies six safety invariants across **all 2,020 specialist packs**, each fault-injected with a non-vacuous control (property-fuzzed up to 5,000 iterations): (1) **tool-reachability** — no drafting/non-builder agent can reach a state-mutating tool; (2) **autonomy dial** — an onboarding agent is never autonomous and a high-risk action is never autonomous even when graduated; (3) **capability attenuation** — a spawned child can never exceed its parent's grant; (4) **compartment isolation** — a quarantine seal never bleeds across compartments/suites; (5) **hard refusals** — the universal refusal floor is unstrippable; (6) **budget caps** — no cap is ever silently exceeded. Hostile-argument fuzzing covers all connectors and tools.
-
 (`deployment.py`) *actively exercises* the application controls — it confirms
 the governed LLM path refuses a cloud provider and that at-rest sealing
 round-trips on the host. It does not test host firewall, VPC, or packet-level
 sandbox policy.
+
+**Governance invariants proven across the whole roster.** Beyond per-deployment checks, a roster-wide invariant test suite verifies six safety invariants across **all 2,031 built-in specialist packs**, each fault-injected with a non-vacuous control: (1) **tool-reachability** — no drafting/non-builder agent can reach a state-mutating tool; (2) **autonomy dial** — an onboarding agent is never autonomous and a high-risk action is never autonomous even when graduated; (3) **capability attenuation** — a spawned child can never exceed its parent's grant; (4) **compartment isolation** — a quarantine seal never bleeds across compartments/suites; (5) **hard refusals** — the universal refusal floor is unstrippable; (6) **budget caps** — no cap is ever silently exceeded. Hostile-argument fuzzing covers all connectors and tools.
 
 ## Identity & access
 
@@ -117,7 +116,7 @@ sandbox policy.
   regulation articles; an EU AI Act risk-classification helper ships (`ai_act.py`).
 - **SOC 2 readiness.** A readiness probe (`soc2.py`) checks the load-bearing
   controls (encryption-at-rest, capability enforcement, audit signing). *This is
-  self-assessment tooling, not a certification* — SOC 2 Type II is in progress.
+  self-assessment tooling, not a certification.*
 
 ## Reference architecture (self-host / air-gap)
 
@@ -126,7 +125,7 @@ sandbox policy.
   user →│  channel / OIDC ──→ maverick serve ──→ orchestrator + swarm  │
         │                          │                  │                │
         │                    tenant_scope        sandbox (local/       │
-        │                    per-tenant world.db  docker/k8s/firecracker)│
+        │                    per-tenant world.db  docker/k8s)          │
         │                          │                  │                │
         │   self-hosted LLM ←──────┘   signed audit ──┴─→ SIEM export  │
         │   (Ollama/vLLM/TGI)          (encrypted at rest)             │
@@ -138,20 +137,13 @@ Deployable on a laptop, a VPC, Kubernetes, or a disconnected/air-gapped network.
 No hyperscaler dependency; Lightwork emits no telemetry of its own. Use an
 air gap or OS/VPC deny policy when network-level non-egress is required.
 
-## Roadmap (not yet built)
-
-A **managed multi-tenant SaaS** offering (the self-host per-tenant substrate —
-Postgres tenancy with fail-closed RLS, per-tenant KMS/DEK, the out-of-process
-control/data-plane split — ships today), external **SOC 2 Type II /
-penetration-test** attestations, and a **live-IdP certification** of the built-in
-SAML SSO.
+## SSO and provisioning status
 
 OIDC SSO, **SAML SSO** (via pysaml2, off by default), and **SCIM 2.0**
 provisioning + deprovisioning all ship today; SCIM deprovision force-revokes live
 sessions, including pairwise-`sub` IdPs (Entra) via a login-time subject directory.
 SAML and SCIM have been exercised against the protocol test suites in this
-repository, not yet certified against a live identity provider (that
-certification is the roadmap item above).
+repository, not yet certified against a live identity provider.
 
 ## Sign-in security: second factor, step-up, sessions, allowed addresses
 
@@ -183,8 +175,12 @@ to hold a second factor.
   workspace keys, changing sign-in/administrator/key-service settings,
   deleting a workspace, signing others out) need a second factor no older than
   that. Otherwise the API answers 403 with a plain sentence and a
-  `reauthenticate` link (`/auth/login?fresh=1`, which sends `prompt=login` so
-  the provider asks again), and the page shows a "Sign in again" button.
+  `reauthenticate` link (`/auth/login?fresh=1`, which sends `prompt=login`, or
+  `/saml/login?fresh=1`, which sends `ForceAuthn`, so the provider asks again),
+  and the page shows a "Sign in again" button. The second factor is dated by
+  the provider's `auth_time` or `AuthnInstant`; a step-up sign-in that cannot
+  show a recent one does not count, so a provider that ignores the request and
+  reuses its own session gets a refusal, not a new session.
 - **Sessions** (`/settings/sessions`, `/api/v1/sessions`). Every browser
   session is recorded server-side (`dashboard-sessions.sqlite3`: person,
   sign-in method, second factor, issued, last seen, address, device summary)
@@ -204,6 +200,5 @@ to hold a second factor.
   an administrator cannot lock themselves out; entries that do not parse are
   refused rather than skipped. Changes are audited like every other setting.
 
-> Licensing: Lightwork is proprietary, commercially licensed software
+> Licensing: Lightwork is licensed under the Apache License 2.0
 > ([`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)).
-> Contact us for evaluation or enterprise access.

@@ -121,4 +121,5 @@ def page(request: Request):
 
 @page_router.get("/static/lightwork-compliance-mapping-builder.js", include_in_schema=False)
 def script():
-    return FileResponse(Path(__file__).parent / "static" / "lightwork-compliance-mapping-builder.js", media_type="application/javascript")
+    return FileResponse(Path(__file__).parent / "static" / "lightwork-compliance-mapping-builder.js",
+                        media_type="application/javascript", headers={"Cache-Control": "public, max-age=300"})

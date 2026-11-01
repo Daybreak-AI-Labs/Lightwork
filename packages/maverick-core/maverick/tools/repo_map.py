@@ -24,16 +24,16 @@ from . import Tool
 
 _MAX_TOP_ENTRIES = 80
 _MAX_NESTED_PER_DIR = 30
-_MAX_OUTPUT_BYTES = 8000  # Wave 9 council H7: hard token cap
+_MAX_OUTPUT_BYTES = 8000  # Hard token cap
 _IGNORE_DIRS = {
     ".git", "node_modules", ".venv", "venv", "__pycache__",
     "dist", "build", "target", ".pytest_cache", ".mypy_cache",
     ".tox", ".idea", ".vscode", "coverage",
 }
 
-# Wave 9 council H7: cache per-workdir so a chatty agent calling
+# Cache per-workdir so a chatty agent calling
 # repo_map every turn doesn't pay the walk cost N times.
-# May 26 council fix (long-tail audit #2): bounded LRU. Best-of-N
+# Bounded LRU. Best-of-N
 # with future per-attempt worktrees would each carry a distinct
 # cache key; a 500-instance × 4-attempt sweep would otherwise
 # accumulate ~2000 entries (60MB+) in this dict. Also: cache key

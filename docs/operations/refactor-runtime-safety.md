@@ -1,8 +1,8 @@
 # Runtime integrity and bounded work
 
-These changes preserve the existing configuration and authority boundaries.
-Local synthetic tests exercise failure and concurrency mechanics; they do not
-establish acceptance against a customer's providers or production workload.
+The behaviors below preserve the existing configuration and authority
+boundaries. Local synthetic tests exercise failure and concurrency mechanics;
+they do not establish acceptance against real providers or production workloads.
 
 ## Sandbox dispatch and cleanup
 
@@ -48,7 +48,7 @@ An independently lower interpreter field limit may also reject a field.
 
 Callbacks still need fresh case, identity, source revision, adapter,
 credential, capability, predecessor, retention, legal-hold and approval
-checks before a lease is issued. A tenant/source-filter keyset cursor now
+checks before a lease is issued. A tenant/source-filter keyset cursor
 advances through examined candidates instead of repeatedly selecting the
 same blocked head of the queue. Progress is committed with the claim and
 survives store reconstruction or worker restart. It is a scheduling hint,

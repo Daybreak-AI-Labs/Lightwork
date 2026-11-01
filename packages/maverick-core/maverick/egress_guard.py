@@ -192,7 +192,7 @@ def _denied(url: str) -> str | None:
     consulted directly by exactly one tool (``http_fetch``) despite its own
     docstring claiming it applies to every tool -- hooking it in here, at the
     seam every httpx/requests/urllib call already funnels through, is what
-    actually makes that claim true (platform audit W2-69).
+    actually makes that claim true.
     """
     host = ""
     try:

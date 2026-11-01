@@ -1,4 +1,4 @@
-"""Tamper-evident screenshots (roadmap: 2027 H2 safety).
+"""Tamper-evident screenshots.
 
 A screenshot used as evidence ("the agent saw this page before clicking") is
 only evidence if it can't be quietly swapped. This seals captures the moment

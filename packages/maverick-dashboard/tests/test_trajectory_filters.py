@@ -93,3 +93,18 @@ def test_trajectory_steps_read_in_plain_words_with_the_recording_folded_away(tmp
     assert "role=orchestrator depth=0 brief=" not in before
     assert "role=orchestrator depth=0 brief=" in after
     assert ">Orchestrator 0 72eb85<" not in body and ">Planner<" in body
+
+
+def test_the_offline_archive_viewer_link_downloads_the_viewer(client, world_with_events):
+    # The trajectory page offers the viewer for a saved archive. The link must
+    # reach the file, sent as a download so it never renders as a page under
+    # the dashboard's address (it runs its own inline script from disk).
+    _, g1 = world_with_events
+    page = client.get(f"/goals/{g1}/trajectory").text
+    assert 'href="/static/lightwork-archive-viewer.html"' in page
+    resp = client.get("/static/lightwork-archive-viewer.html")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert resp.headers["content-disposition"].startswith("attachment;")
+    assert 'filename="lightwork-archive-viewer.html"' in resp.headers["content-disposition"]
+    assert "<script" in resp.text

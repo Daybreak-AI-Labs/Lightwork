@@ -1,38 +1,34 @@
 # PIA Concierge — governed privacy-assessment demo
 
-## Two SKUs from one codebase
+## Standalone and platform modes
 
-PIA Concierge sells two ways:
+PIA Concierge runs in two modes from one codebase:
 
-* **Standalone agent** — sold on its own. Run `bash run_standalone.sh` (sets
+* **Standalone mode** — run `bash run_standalone.sh` (sets
   `PIA_STANDALONE=1`). The agent takes the intake (chat / voice / guided),
   scores the risk on its **own self-contained engine** (`pia_engine.py`,
   imports nothing from `maverick`), files into OneTrust, and a human reviews
   and approves there. There is **no audit trail, no governance, no learning,
-  no dashboard, and no control-catalog citations** — those are Lightwork
-  features. The agent still works end to end. `/about` shows the live
-  capability matrix.
-* **Lightwork platform** — the same agent bundled with the governed engine,
-  the Ed25519 signed audit chain, the world-model approval queue, the privacy
-  workspace + program insights, cross-run learning, and the connectors.
+  no dashboard, and no control-catalog citations** in this mode. The agent
+  still works end to end. `/about` shows the live capability matrix.
+* **Platform mode** — the same agent running on the Lightwork platform, which
+  adds the governed engine, the Ed25519 signed audit chain, the world-model
+  approval queue, the privacy workspace + program insights, the full
+  framework catalog with control citations, cross-run memory / suggested
+  answers, connected-source document discovery, the Art. 28 clause-by-clause
+  DPA review, model-assisted chat understanding, and the connectors.
 
 The seam is `capabilities.py` (what's on) and `backend.py` (binds each
 capability to the platform or its standalone stand-in). The app never branches
-on the mode itself — set `PIA_STANDALONE=1` to preview the standalone SKU on a
+on the mode itself — set `PIA_STANDALONE=1` to preview standalone mode on a
 machine that has the platform installed.
 
-**Installing for a client?** See **[DEPLOYMENT.md](DEPLOYMENT.md)** — the
-partner install guide covering Docker (`Dockerfile.standalone` +
+**Deploying the standalone agent?** See **[DEPLOYMENT.md](DEPLOYMENT.md)** —
+the install guide covering Docker (`Dockerfile.standalone` +
 `requirements-standalone.txt`), AWS (App Runner / ECS / EC2), GCP (Cloud Run /
 GCE), Azure (Container Apps / VM), Linux systemd, Windows, and macOS, plus the
 TLS/auth requirements, environment reference, backups, upgrades, and the
 go-live checklist.
-
-**What a standalone client gives up (and what unlocks it):** the signed audit
-chain, the governed approval queue and program workspace, the full framework
-catalog with control citations, cross-run memory / suggested answers,
-connected-source document discovery, the Art. 28 clause-by-clause DPA review,
-and model-assisted chat understanding — all of it comes with Lightwork.
 
 ---
 
@@ -111,7 +107,7 @@ No LLM key and no external accounts needed. State lives in
 in ONE process on purpose: the audit chain's signer requires a single writing
 process — the same shape as `maverick dashboard` itself.
 
-**Make it look like a year of use** (optional, recommended before a pitch):
+**Seed a year of history** (optional, recommended for a populated demo):
 
 ```bash
 MAVERICK_HOME=demo/pia-concierge/.demo-home python3 demo/pia-concierge/seed_workspace.py
@@ -126,8 +122,8 @@ servers or restart them after. Marker-guarded; `--force` adds another batch.
 
 ## The Privacy workspace (right window → Govern → Privacy)
 
-The program-of-record view worth showing after (or instead of) the ticket
-flow — everything below runs on real records:
+The program-of-record view behind the ticket flow — everything below runs
+on real records:
 
 - **Worklist** — every assessment with the inherent→residual risk pair,
   status, follow-ups, and the re-review countdown; filters for needs-review /
@@ -151,7 +147,7 @@ flow — everything below runs on real records:
   author a new one; custom versions override built-ins until deleted.
 
 `Govern → Finance` is the same chassis over SOX / fraud / ITGC / credit /
-close-readiness — the "one workspace per department" proof.
+close-readiness — the same workspace pattern applied to another department.
 
 ## The reviewer desk (`/reviewer`) — when the vendor sends their own paper
 
@@ -168,8 +164,8 @@ button. Deterministic — the clause body is the operator's playbook; no model
 touches it. On **their** paper, upload the document (`.docx` or a digital
 PDF) and the desk does the review by hand-equivalent steps:
 
-1. **Reads it** — stdlib extraction, and a scanned PDF is refused honestly
-   rather than reviewed as "10 clauses missing".
+1. **Reads it** — stdlib extraction; a scanned PDF is refused rather than
+   reviewed as "10 clauses missing".
 2. **Decides the instrument** — GDPR Art. 28 DPA vs CCPA/CPRA privacy
    addendum, scored from the text and filename; a tie resolves to the stronger
    instrument and says so.
@@ -196,89 +192,84 @@ the tracked-changes `.docx` for Word), and the same files appear under
 opens inline and the redline downloads. The mock tenant retains attachment
 bytes (bounded) exactly so this click works in the demo.
 
-The governance line is the point: **which clauses fall short is always decided
+The governance boundary: **which clauses fall short is always decided
 deterministically** — a model can neither invent a finding nor clear one. A
 model is used only to re-word *our* required clause into the vendor's defined
 terms, and any draft that drops a load-bearing term is thrown away in favour of
 the template language. Set `[paper_review] use_model = false` (or answer no in
 the wizard) and no model sees the contract at all; the findings are identical.
 
-## Demo script (~6 minutes) — Part 1: the agent alone, Part 2: the platform
+## Walkthrough (~6 minutes)
 
-Two browser windows: **left** = external world (:8890) — this is ALL of
-Part 1: the agent plus the tools the customer already uses (ServiceNow,
-email, OneTrust). **right** = Lightwork dashboard (:8765) — Part 2, the
-governance layer, shown after the value lands.
+Open two browser windows: **left** = the external world (:8890) — the agent
+plus the tools the organization already uses (ServiceNow, email, OneTrust).
+**right** = the Lightwork dashboard (:8765) — the governance layer.
 
 **Part 1 — the agent (left window only):**
 
-1. **[ServiceNow]** File the pre-filled privacy request. *"An employee asks
-   for a privacy review the way they already do — a ticket. They never learn
-   a new tool."*
-2. **[Requester inbox]** Open the intake email, click the link. The interview
-   opens in **Chat** mode — tap the 🎤 and *talk* an answer, type another in
-   plain words, then flip the toggle to **Guided** to show the one-click
-   version. Click **Find my documents**: the DPA and security overview attach
-   AND auto-answer their questions with quoted evidence — the interview skips
-   them visibly. *"The agent asks only what the paperwork can't prove. Every
-   skipped question shows its source, and the requester's own words are kept
-   for the reviewer."*
-3. **[OneTrust]** The money shot: your assessment is **already at the top of
-   the queue, Under Review**, in a tenant that shows a year of history — open
-   it: the full interview verbatim with the provenance notes, findings,
-   required controls with GDPR / ISO 27001 / SOC 2 / NIST citations, and the
-   **Agent speed** row. Scroll to **Documents — vendor record** and open the
-   risk analysis and notice cross-check the agent wrote — real Word
-   documents; any paper-review redline or our-paper draft (red-filled
-   values) downloads there too. Click **Approve**. *"The agent did the input and the
-   analysis; your team reviews and approves in the tool they already live
-   in. Nothing is Completed until a person clicks."*
+1. **[ServiceNow]** File the pre-filled privacy request. The requester uses
+   the ticketing system they already have.
+2. **[Requester inbox]** Open the intake email and click the link. The
+   interview opens in **Chat** mode: tap the 🎤 and speak an answer, type
+   another in plain words, then flip the toggle to **Guided** for the
+   one-click version. Click **Find my documents**: the DPA and security
+   overview attach and auto-answer their questions with quoted evidence, and
+   the interview skips those questions visibly. Every skipped question shows
+   its source, and the requester's own words are kept for the reviewer.
+3. **[OneTrust]** The assessment is **already at the top of the queue, Under
+   Review**, in a tenant seeded with a year of history. Open it: the full
+   interview verbatim with the provenance notes, findings, required controls
+   with GDPR / ISO 27001 / SOC 2 / NIST citations, and the **Agent speed**
+   row. Scroll to **Documents — vendor record** and open the risk analysis
+   and notice cross-check the agent wrote (real Word documents); any
+   paper-review redline or our-paper draft (red-filled values) downloads
+   there too. Click **Approve**. Nothing is Completed until a person clicks.
 4. The record flips to Completed; the ServiceNow ticket is Resolved with the
-   risk rating in the work notes; the requester got a completion email; the
-   landing page's **speed story** strip updates. *"Repoint one hostname at
-   your OneTrust tenant and this is live."*
+   risk rating in the work notes; the requester gets a completion email; the
+   landing page's **speed story** strip updates. Pointing `ONETRUST_HOSTNAME`
+   at a real tenant uses the same code path.
 5. **[OneTrust record]** Click **＋ Add document to this vendor** and drop the
-   updated DPA. *"Already assessed the vendor and just adding stuff? The
-   addendum is clause-reviewed on the spot, diffed against the last review's
-   gaps, and flagged for re-review only if the risk picture changed."* (Same
-   from chat: a new ticket for a known vendor opens with everything we know
-   and offers "just adding documents" — or a fresh assessment that carries
-   the old answers forward.)
+   updated DPA. The addendum is clause-reviewed on the spot, diffed against
+   the last review's gaps, and flagged for re-review only if the risk picture
+   changed. (The same works from chat: a new ticket for a known vendor opens
+   with everything on file and offers "just adding documents" — or a fresh
+   assessment that carries the old answers forward.)
 
 **Part 2 — the platform (right window):**
 
 6. **[Govern → Privacy]** The program of record behind the agent: worklist
    with re-review cadences, DPA reviews, AI registry, RoPA, DSARs,
    incidents, the board-pack report.
-7. **[Govern → Audit]** The silent governance: GOAL_START → TOOL_CALL(email)
+7. **[Govern → Audit]** The governance trail: GOAL_START → TOOL_CALL(email)
    → INTAKE_PREFILL → ASSESSMENT_REVIEW → AUTONOMY_GATED →
-   TOOL_CALL(onetrust) → APPROVAL_DECISION (via onetrust). *"Your reviewer
-   never left OneTrust, yet every step — including their click and every
-   auto-answered question — is on a tamper-evident, Ed25519-signed chain.
-   That's how assessments get faster without losing the audit."*
+   TOOL_CALL(onetrust) → APPROVAL_DECISION (via onetrust). The reviewer never
+   left OneTrust, yet every step — including their click and every
+   auto-answered question — is on the Ed25519-signed, tamper-evident chain.
 
-Optional closer (terminal):
+### Verify from the terminal
 
 ```bash
 MAVERICK_HOME=demo/pia-concierge/.demo-home maverick audit verify
 MAVERICK_HOME=demo/pia-concierge/.demo-home maverick assess list
 ```
 
-## Preflight (demo day)
+## Preflight
 
 ```bash
 pkill -f serve.py; rm -rf demo/pia-concierge/.demo-home   # clean slate
 bash demo/pia-concierge/run_demo.sh                        # then dry-run once
 ```
 
+On Windows, `reset-demo.ps1` performs the same reset and relaunch.
+
 - Dry-run the whole flow once, then reset `.demo-home` again.
-- Voice input: use Chrome and grant the mic on the intake page during the
-  dry-run so the permission prompt doesn't appear on stage. No key needed.
+- Voice input: use Chrome and grant the microphone on the intake page during
+  the dry run so the permission prompt does not appear later. No key needed.
 - Don't set `MAVERICK_DASHBOARD_TOKEN` locally (it gates every page).
 - The launcher already sets `MAVERICK_SHIELD_PROFILE=strict` and
   `MAVERICK_DEFAULT_MAX_DOLLARS=10`.
-- Keep both windows pre-opened; the OneTrust page refreshes on reload only —
-  F5 after the requester submits.
+- Keep both windows open; the OneTrust page refreshes on reload only —
+  press F5 after the requester submits.
 
 ## Architecture
 

@@ -462,6 +462,19 @@ def owned_inventory(principal):
     return result
 
 
+def owned_items(principal):
+    """Every message still held for ``principal`` across their conversations (legal-matter scope).
+
+    Read only: erased items are left out, and no record is changed.
+    """
+    items = []
+    for record in owned_inventory(principal):
+        for item in export_owned(principal, record["id"], record["revision"])["items"]:
+            if item["state"] != "erased":
+                items.append({**item, "conversation_id": record["id"]})
+    return items
+
+
 def export_owned(principal, record_id, expected_revision):
     record = STORE.get(record_id)
     if not record or record.get("owner") != principal:
@@ -499,6 +512,10 @@ def erase_owned(principal, record_id, expected_revision, operation_id, *, actor)
         raise RecordConflict("Read the original decision and hand back any active human conversation first. Unconfirmed sharing and AI holds cannot be erased silently.")
     if any(item["state"] in {"consuming", "dispatching"} for item in value["items"]):
         raise RecordConflict("A conversation message is being consumed or admitted. Review its durable receipt before erasure")
+    from .ediscovery import assert_personal_chats_erasable
+    # A legal matter that holds any message of this conversation refuses the erasure before any change.
+    assert_personal_chats_erasable(principal, [item["created_at"] for item in value["items"]
+                                               if item["state"] != "erased"], actor=actor)
     for item in value["items"]:
         item.update(text="", files=[], snapshot=None, acknowledgement=None, state="erased",
                     message="Private message contents erased by the reviewed owner data request.", revision=item["revision"] + 1)

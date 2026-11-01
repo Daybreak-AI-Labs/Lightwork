@@ -1,4 +1,4 @@
-"""Query-plan regression guard (ROADMAP 2027 H1, Performance).
+"""Query-plan regression guard.
 
 The world model ships indexes for its hot access paths (goal_events by goal_id,
 turns by conversation_id, episodes by goal_id, approvals by status, ...). A

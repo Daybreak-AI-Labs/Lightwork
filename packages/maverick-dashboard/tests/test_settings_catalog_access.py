@@ -134,6 +134,8 @@ _TEXT = {
     "kms.address": "https://vault.example.com",
     "kms.mount": "lightwork-transit",
     "audit.siem_dest": "https://siem.example.com/raw",
+    "audit.sentinel_tenant_id": "11111111-2222-3333-4444-555555555555",
+    "audit.sentinel_client_id": "66666666-7777-8888-9999-000000000000",
     "audit.worm.bucket": "acme-audit-worm",
     "audit.worm.prefix": "lightwork/audit/",
     "audit.worm.region": "us-east-1",
@@ -521,6 +523,14 @@ def test_the_key_service_check_opens_the_keys_already_in_use(tmp_path, monkeypat
     assert not settings_tests.check_kms({"kms.provider": "aws"}).ok
 
 
+
+def test_the_key_service_offers_azure_and_rejects_a_bare_key_name():
+    from maverick_dashboard.settings_catalog import BY_ID
+
+    assert "azure" in {key for key, _label in BY_ID["kms.provider"].choices}
+    assert not settings_tests.check_kms({"kms.provider": "azure", "kms.key_id": "tenant-kek"}).ok
+
+
 # ------------------------------------------------------------- safety
 def test_loosening_access_rows_needs_confirmation(as_token, audit_rows):
     for change in (
@@ -877,6 +887,52 @@ def test_the_page_shows_the_new_controls_in_plain_language(workspaces):
     assert "Test connection" in html and "Check this location" in html
     assert 'data-control="path"' in html
     assert developer_terms(html) == []
+
+
+def test_the_page_renders_a_row_for_each_vendor_audit_control(workspaces):
+    # The plain-language test above checks wording only; this one checks the rows exist.
+    html = every_group(client)
+    for setting_id in ("audit.datadog_api_key", "audit.sentinel_tenant_id",
+                       "audit.sentinel_client_id", "audit.sentinel_client_secret"):
+        assert f'data-setting-id="{setting_id}"' in html, setting_id
+
+
+def test_vendor_destination_settings_reach_the_forwarder(monkeypatch, as_token, audit_rows):
+    from maverick.audit import forwarder
+
+    sentinel = ("sentinel://my-dce-5kyl.eastus-1.ingest.monitor.azure.com/"
+                "dcr-000a00a000a00000a000000aa000a0aa/Custom-MaverickAudit")
+    r = _save([
+        {"id": "audit.siem_dest", "value": sentinel},
+        {"id": "audit.datadog_api_key", "value": _SECRET},
+        {"id": "audit.sentinel_tenant_id", "value": _TEXT["audit.sentinel_tenant_id"]},
+        {"id": "audit.sentinel_client_id", "value": _TEXT["audit.sentinel_client_id"]},
+        {"id": "audit.sentinel_client_secret", "value": _SECRET},
+    ], confirm=True)
+    assert r.status_code == 200, r.text
+    assert forwarder._audit_secret("MAVERICK_DATADOG_API_KEY", "datadog_api_key") == _SECRET
+    assert forwarder._sentinel_credentials() == (
+        _TEXT["audit.sentinel_tenant_id"], _TEXT["audit.sentinel_client_id"], _SECRET)
+    assert _row("audit.datadog_api_key")["is_set"] is True
+    assert _SECRET not in r.text and _SECRET not in client.get(API).text
+    monkeypatch.setenv("MAVERICK_SENTINEL_CLIENT_SECRET", "from-the-environment")
+    assert forwarder._sentinel_credentials()[2] == "from-the-environment"
+    # Saving checks the address shape; the vendor form (site, stream) is checked by
+    # the Test connection button and again when forwarding, as for the other schemes.
+    for bad in ("ftp://siem.example.com/raw", "datadog://example com"):
+        r = _save([{"id": "audit.siem_dest", "value": bad}], confirm=True)
+        assert r.status_code == 400, bad
+
+
+def test_vendor_addresses_are_checked_for_form_and_reachability(monkeypatch, audit_rows):
+    reached = []
+    monkeypatch.setattr(settings_tests, "reach", lambda host, port: reached.append((host, port)))
+    r = client.post(CHECK, json={"id": "audit.siem_dest", "value": "datadog://datadoghq.eu"})
+    assert r.json() == {"ok": True, "message": "Lightwork reached your security monitoring service."}
+    assert reached == [("http-intake.logs.datadoghq.eu", 443)]
+    r = client.post(CHECK, json={"id": "audit.siem_dest", "value": "datadog://example.com"})
+    assert r.json()["ok"] is False and "form this service needs" in r.json()["message"]
+    assert len(reached) == 1
 
 
 def test_switches_that_lived_only_in_the_environment_now_have_settings(monkeypatch, as_token,

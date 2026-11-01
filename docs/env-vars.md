@@ -140,7 +140,7 @@ explicit limits, retry behavior and unknown provider charges.
 | `MAVERICK_PG_RLS` | config `[world_model] rls`; **auto-on under enterprise mode** | DB-native Postgres Row-Level Security on the tenant tables (defense-in-depth over the app predicate). When auto-enabled by enterprise mode, a boot preflight refuses to start on legacy `tenant_id IS NULL` rows (run `maverick tenant backfill`); explicit `=1` keeps the fail-closed opt-in path. |
 | `MAVERICK_KMS_KEK` | derived from the at-rest key | The per-tenant-DEK Key Encryption Key (32 bytes, hex/base64) for `tenant/kms.py`. |
 | `MAVERICK_KMS_DEK_CACHE_TTL` | config `[kms] dek_cache_ttl` (`0` = process lifetime) | Seconds a tenant DEK stays cached before it must be re-unwrapped by the KMS. A positive TTL bounds how long a *revoked* cloud-KMS key keeps opening data (the next access re-hits the KMS and fails closed). Per-tenant **BYOK** is configured in each tenant's own `tenants/<id>/config.toml` `[kms]` section (provider/key_id/region), resolved deterministically by `get_kms(tenant_id)`. A workspace's own `key_id` always outranks the server-wide `MAVERICK_KMS_KEY_ID`, which applies only to workspaces that pinned no key of their own, so a customer's key is never silently replaced by the operator's. Data keys that were locked under the server-wide key while a workspace's own key was configured (the earlier behaviour) must be re-wrapped to the workspace's key, or they will not open: run `tenant.kms.rotate_kek_fleet` with `old_kms_for=lambda t: build_cloud_kms(provider, key_id=<server-wide key>)` and `new_kms_for=get_kms`. **Rolling the local KEK** across the fleet: `maverick tenant kms-rotate --old-kek-file /run/secrets/old-kek --new-kek-file /run/secrets/new-kek` (re-wrap only, idempotent/resumable, `--dry-run` to preview; omit file options to use hidden prompts). Avoid passing KEKs in command-line arguments; set `MAVERICK_KMS_KEK` to the new value live only after rotation reports 0 failed. Cloud/BYOK rotation uses `tenant.kms.rotate_kek_fleet` with per-tenant resolvers. |
-| `MAVERICK_MCP_ANALYTICS` | config `[analytics] mcp_client_language` (off) | Opt-in, consent-gated tally of MCP-client language (feeds the language-bindings gate). |
+| `MAVERICK_MCP_ANALYTICS` | config `[analytics] mcp_client_language` (off) | Opt-in, consent-gated local tally of the languages your MCP clients use. |
 | `MAVERICK_LICENSE_PRIVATE_KEY` | — (secret) | Publisher Ed25519 signing key hex used by `maverick license issue`/`set` to sign a deployment license. Resolved through the secret provider (env or a mounted vault/secret file); **never** read from `config.toml` and never printed. Mint one with `maverick license keygen`; publish the matching **public** key as the trust anchor (`[license] publisher_pubkeys` / `MAVERICK_LICENSE_PUBKEYS`). |
 | `MAVERICK_PUBLIC_URL` | config `[dashboard] public_url` / `[flows] public_url` | Externally-reachable dashboard base URL. `maverick tenant onboard` uses it to build the printed first-admin invite link (also used for flow-approval links). Unset → the command prints the relative `/auth/invite/<token>` path and tells you to prepend your host. |
 | `IRC_ALLOWED_ACCOUNTS` | — | Comma-separated allowlist of authenticated IRC account names that may drive the agent over the IRC channel. Requires an IRC server that provides the IRCv3 `account-tag` capability. |
@@ -151,7 +151,9 @@ explicit limits, retry behavior and unknown provider charges.
 
 Turn the metered-usage invoices (`maverick.billing`) into real charges
 (`maverick.billing_stripe`). Off by default; the `stripe` SDK is an optional
-extra (`pip install 'maverick-core[stripe]'`). Distinct from the agent-facing
+extra (`python -m pip install -e './packages/maverick-core[stripe]'` from the
+repository root, or add `stripe` to `--core-extra` in
+`scripts/install_release_cohort.py`). Distinct from the agent-facing
 `stripe` **tool** (which uses `STRIPE_SECRET_KEY` to read a customer's account) —
 these drive the *platform's own* Stripe account to bill tenants.
 
@@ -160,7 +162,9 @@ these drive the *platform's own* Stripe account to bill tenants.
 | `MAVERICK_STRIPE_ENABLE` | config `[billing.stripe] enable` (off) | Master switch for platform billing collection. Even on, nothing charges until a secret key is present. |
 | `MAVERICK_STRIPE_SECRET_KEY` | — | The platform Stripe secret key (`sk_...`). Resolved through the secret provider; NEVER read from config or logged. Required to create customers/subscriptions and push usage. |
 | `MAVERICK_STRIPE_WEBHOOK_SECRET` | — | Webhook signing secret (`whsec_...`) used to verify inbound Stripe events (stdlib HMAC; no SDK needed). A verified `invoice.payment_failed` / past-due subscription downgrades the tenant to the base entitlement tier; a recovered payment restores it. |
-| `MAVERICK_STRIPE_BILL_METERED` | config `[billing.stripe] bill_metered_usage` (off) | **Pricing decision pending.** Off bills only the recurring platform-fee subscription; on also pushes the metered model-usage line items. No markup is set here — amounts come from whatever `RateCard` rated the invoice. |
+| `MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN` | — | Zendesk API token for contact-centre handoffs (see `docs/contact-centre-handoff.md` in the repository). Resolved through the secret provider; overrides the sealed value saved in Settings. Never logged. |
+| `MAVERICK_CONTACT_CENTRE_WEBHOOK_SECRET` | — | Signing secret for contact-centre webhook handoffs. Resolved through the secret provider; overrides the sealed value saved in Settings. Without it nothing is sent to the webhook. |
+| `MAVERICK_STRIPE_BILL_METERED` | config `[billing.stripe] bill_metered_usage` (off) | Off bills only the recurring platform-fee subscription; on also pushes the metered model-usage line items. No markup is set here — amounts come from whatever `RateCard` rated the invoice. |
 
 ### Fleet queue
 
@@ -204,11 +208,11 @@ Other config-only knobs: `[billing.plans]` (override plan entitlements), `[egres
 
 **Operator lifecycle:** `maverick tenant onboard <id> --admin-email <email>`
 provisions a tenant and mints its first-admin invite in one step;
-`maverick license issue|set|show|keygen` controls the deployment's signed
-feature license (tier + add-on suites); `maverick launch-check` prints PASS/FAIL
-for each go-live switch (cost-cap enforcement, per-user tenancy, a license trust
-anchor, at-rest encryption, and a resolvable provider key) and exits non-zero if
-any is off, so a deploy pipeline can gate on it.
+`maverick license issue|set|show|keygen` manages the deployment's optional
+signed feature license (enforcement is off by default); `maverick launch-check`
+prints PASS/FAIL for each go-live switch (cost-cap enforcement, per-user
+tenancy, a license trust anchor, at-rest encryption, and a resolvable provider
+key) and exits non-zero if any is off, so a deploy pipeline can gate on it.
 
 ## LLM cost & latency
 
@@ -320,8 +324,12 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_RESIDENCY_STRICT` | config `[residency] strict` (off) | Refuse to boot when the declared data region is missing or outside the allowed set (`require_residency_or_die`). Off = informational only. |
 | `MAVERICK_DATA_REGION` | config `[residency] region` | The deployment's declared data region (ISO code or group, e.g. `DE`, `EU`). |
 | `MAVERICK_RESIDENCY_ALLOWED` | config `[residency] allowed_regions` | Comma-separated permitted storage regions; `EU`/`EEA` groups expand to members. Empty = region unconstrained. |
-| `MAVERICK_SIEM_DEST` | config `[audit] siem_dest` | Destination for `maverick audit forward`: `tcp://host:port` / `udp://host:port` (syslog) or `http(s)://host/path` (Splunk HEC `/raw`, etc.). |
+| `MAVERICK_SIEM_DEST` | config `[audit] siem_dest` | Destination for `maverick audit forward`: `tcp://host:port` / `udp://host:port` (syslog), `http(s)://host/path` (Splunk HEC `/raw`, etc.), `datadog://<site>` (Datadog Logs intake for a documented site such as `datadoghq.com` or `datadoghq.eu`), or `sentinel://<dce-host>/<dcr-immutable-id>/Custom-<stream>` (Microsoft Sentinel through the Azure Monitor Logs Ingestion API; the host must end in `.monitor.azure.com`). The Sentinel DCR stream must declare `TimeGenerated` (datetime) and `RawData` (string). Each line becomes one row with the event time from its `ts` field, or now. A Datadog log over 1,000,000 bytes or a Sentinel line over 64,000 bytes is refused instead of truncated (the vendors do not define MB or KB, so the smaller decimal reading is used; the Sentinel call is capped at 1,000,000 bytes). |
 | `MAVERICK_SIEM_TOKEN` | — | Bearer sent on HTTP(S) audit forwarding (read via the secret provider). |
+| `MAVERICK_DATADOG_API_KEY` | config `[audit] datadog_api_key` | Datadog API key for `datadog://` forwarding, sent in the `DD-API-KEY` header (read via the secret provider; never logged or put in the URI). |
+| `MAVERICK_SENTINEL_TENANT_ID` | config `[audit] sentinel_tenant_id` | Microsoft Entra directory (tenant) ID for `sentinel://` forwarding. |
+| `MAVERICK_SENTINEL_CLIENT_ID` | config `[audit] sentinel_client_id` | Application (client) ID of the Entra app registration that has the Monitoring Metrics Publisher role on the data collection rule. |
+| `MAVERICK_SENTINEL_CLIENT_SECRET` | config `[audit] sentinel_client_secret` | Client secret of that app registration (read via the secret provider; never logged). |
 
 ## Observability
 
@@ -330,10 +338,11 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_LOG_LEVEL` | `INFO` | Logging level. |
 | `MAVERICK_LOG_FORMAT` | `text` | Log format: `text` or `json`. |
 | `MAVERICK_LOG_TURNS` | unset | Set to log full LLM turns (verbose). |
-| `MAVERICK_OTEL_EXPORTER` | unset (off) | Set to enable the OpenTelemetry trace exporter. |
+| `MAVERICK_OTEL_EXPORTER` | unset (off) | Set to `otlp` to enable the OpenTelemetry trace exporter. `false`, `0`, `off`, `no` or blank keep it off, in the environment and in `[observability] otel_exporter` alike. |
 | `MAVERICK_OTEL_ENDPOINT` | `http://localhost:4318/v1/traces` | OTLP collector endpoint. |
+| `MAVERICK_OTEL_METRICS` | config `[observability] otlp_metrics` (off) | Also send the Prometheus series over OTLP to the same collector, under the same names. Needs `MAVERICK_OTEL_EXPORTER=otlp`; the metrics URL is the endpoint with `/v1/traces` replaced by `/v1/metrics`, so the endpoint must end in `/v1/traces`. |
 | `MAVERICK_RESIDENCY_REGION` | config `[residency] region` (unset) | Declare a data-residency requirement (e.g. `eu`). `maverick doctor` then warns about any residency-sensitive feature still defaulting to a US region (`AWS_REGION`→us-east-1, `VERTEX_LOCATION`→us-central1). No effect unset. |
-| `MAVERICK_PROMETHEUS_PORT` | unset (off) | Set a port to expose Prometheus metrics. |
+| `MAVERICK_PROMETHEUS_PORT` | unset (off) | Set a port to expose Prometheus metrics. `false`, `0`, `off`, `no` or blank keep it off. |
 | `MAVERICK_PROMETHEUS_ADDR` | `127.0.0.1` | Bind address for the Prometheus metrics server. |
 | `MAVERICK_ALERTS` | config `[alerts] enabled` (off) | Enable OPERATIONAL alerts — page the operator (via the configured notification backends) on infrastructure events like a killswitch trip or a deployment-wide provider cost-cap exhaustion. Distinct from agent-task notifications. |
 
@@ -377,7 +386,7 @@ system-specific shapes (e.g. `SERVICENOW_INSTANCE_URL`, `SNOWFLAKE_ACCOUNT`,
 | `<SYSTEM>_BASE_URL` / `<SYSTEM>_TOKEN` | unset | Per-connector endpoint + credential; see [connectors.md](connectors.md). Writes stay confirm-gated regardless. |
 | `DATABASE_URL` | unset | SQLAlchemy URL for the `database` tool (Postgres / MySQL / SQL Server / Oracle / Redshift / ...). |
 | `MAVERICK_ENABLE_CRED_TOOLS` | unset (off) | `1`/`true` registers connectors that can use ambient host credentials (AWS Lambda/DynamoDB, Google Drive, Airtable, Asana, ClickUp, Vercel). Off by default. |
-| `MAVERICK_WORKFORCE_DATA_GROUNDING` | config `[workforce] data_grounding` (on) | Kill-switch for primary-source data grounding. When on, each analyst pack is auto-granted its suite's 37 read-only public-data connectors (SEC EDGAR, FRED, openFDA, USAspending, NWS/NOAA weather, ...) — GET-only, low-risk, deferred. Set `off`/`0` to withhold them. See [connectors.md](connectors.md). |
+| `MAVERICK_WORKFORCE_DATA_GROUNDING` | config `[workforce] data_grounding` (on) | Kill-switch for primary-source data grounding. When on, each analyst pack is granted its suite's read-only public-data connectors (37 in total across suites: SEC EDGAR, FRED, openFDA, USAspending, NWS/NOAA weather, ...) — GET-only, low-risk, deferred. Set `off`/`0` to withhold them. See [connectors.md](connectors.md). |
 | `MAVERICK_WORKFORCE_LEVELS` | config `[workforce] levels` (off) | Enable per-agent autonomy levels (observe/suggest/request/auto). Off = every agent stages actions for human execution. |
 
 ## Agent-to-agent (A2A)
@@ -433,6 +442,10 @@ variable still wins; with neither set, behaviour is unchanged.
 | `MAVERICK_FEDERATION_RATE_LIMIT` | `[federation] rate_limit` |
 | `MAVERICK_SIEM_TOKEN` | `[audit] siem_token` |
 | `MAVERICK_SIEM_ALLOW_INSECURE` | `[audit] siem_allow_insecure` |
+| `MAVERICK_DATADOG_API_KEY` | `[audit] datadog_api_key` |
+| `MAVERICK_SENTINEL_TENANT_ID` | `[audit] sentinel_tenant_id` |
+| `MAVERICK_SENTINEL_CLIENT_ID` | `[audit] sentinel_client_id` |
+| `MAVERICK_SENTINEL_CLIENT_SECRET` | `[audit] sentinel_client_secret` |
 | `MAVERICK_PUBLIC_BASE_URL` | `[channels] public_base_url` |
 
 `MAVERICK_SETTINGS_PATH_ROOTS` (deployment only) replaces the list of places a

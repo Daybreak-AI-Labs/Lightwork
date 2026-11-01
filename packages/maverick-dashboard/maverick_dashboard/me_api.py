@@ -134,7 +134,7 @@ def _my_work(request: Request, principal: str) -> dict:
     world = _world()
     digest = daily_digest.compose_digest(
         world, principal, can_decide=can_decide, sees_everything=everything,
-        time_zone=prefs["time_zone"],
+        suites=auth.caller_suites(request), time_zone=prefs["time_zone"],
     )
     for row in digest["approvals"]:
         row["waiting_on"] = _waiting_on(request, world, principal, row, can_decide=can_decide)
@@ -403,7 +403,7 @@ def _prepared_digest(request: Request, principal: str, prefs: dict) -> dict:
 
     return daily_digest.prepare_digest(
         _world(), principal, can_decide=auth.has_permission(request, "operate"), prefs=prefs,
-        sees_everything=auth.goal_owner_filter(request) is None)
+        sees_everything=auth.goal_owner_filter(request) is None, suites=auth.caller_suites(request))
 
 
 def _delivery_notes(principal: str, prefs: dict, digest: dict) -> tuple[bool, list[str]]:
@@ -611,12 +611,13 @@ async def webhook_slack_commands(request: Request) -> JSONResponse:
     from maverick.slack_interactive import handle_slash_command, parse_form
 
     from .approval_decisions import _authority_for
+    from .daily_digest_scheduler import status_scope
 
     body = await _verified_slack_body(request)
     form = parse_form(body)
     result = await run_in_threadpool(
         handle_slash_command, form, world=_world(), principal_for=_slack_principal_for, ask=None,
-        authorize=_authority_for("slack"))
+        authorize=_authority_for("slack"), status_scope=status_scope)
     return JSONResponse(result)
 
 

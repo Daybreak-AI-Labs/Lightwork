@@ -142,6 +142,12 @@ def recall(
         # the unowned/local principal, never the WorldModel's owner=None
         # administrator view that spans every user in the tenant.
         episodes = world.list_episodes(limit=scan, owner=owner)
+        from .world_model import goals_by_id
+
+        # One read for the goals, before the first model call of the turn
+        # (one per episode cost 10-30 ms here, 60 ms in a standalone runner).
+        goals = goals_by_id(world, [ep.goal_id for ep in episodes
+                                    if getattr(ep, "outcome", None) and getattr(ep, "goal_id", None) is not None])
         for ep in episodes:
             outcome = getattr(ep, "outcome", None)
             if not outcome:
@@ -149,7 +155,7 @@ def recall(
             gid = getattr(ep, "goal_id", None)
             if gid is None:
                 continue
-            goal = world.get_goal(gid)
+            goal = goals.get(gid)
             title = getattr(goal, "title", None) if goal else None
             if title:
                 prior.append((title, outcome))

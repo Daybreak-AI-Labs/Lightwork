@@ -3,8 +3,8 @@
 The six compliance suites already ship as separate dashboard pages scattered
 across several nav groups. This page presents them as ONE product -- the
 compliance platform run by governed agents -- each module carrying an honest
-shipped / preview / external status badge, a link to the real module page, and
-a packaging/pricing call. Status is read from ``maverick.compliance_catalog``,
+shipped / preview / external status badge and a link to the real module page.
+Status is read from ``maverick.compliance_catalog``,
 the single source of truth, so the product surface can never claim more than
 the capability review supports.
 """
@@ -18,12 +18,6 @@ from fastapi.templating import Jinja2Templates
 from .auth import require_permission
 
 PAGE_PATH = "/autonomous-compliance"
-#: Packaging/pricing contact. A mailto keeps the call honest -- there is no
-#: fabricated self-serve checkout behind the "one product" story.
-PRICING_MAILTO = (
-    "mailto:chris@daybreakailabs.com"
-    "?subject=Autonomous%20Compliance%20pricing"
-)
 
 
 #: One plain sentence per module, shown on its card instead of the page address.
@@ -63,7 +57,7 @@ STATUS_MEANINGS: dict[str, str] = {
 
 
 def visible_suites(suites, not_ready) -> list:
-    """The catalog with every module held back from customers removed, and any
+    """The catalog with every module held back from users removed, and any
     suite left empty dropped: the landing must never link a visitor into a
     workbench the sidebar and finder deliberately do not offer."""
     from dataclasses import replace
@@ -94,7 +88,6 @@ def landing_context() -> dict:
         # Each card names its page exactly as the sidebar and heading do.
         "page_names": {page["path"]: page["label"] for page in ui_visibility.PAGES},
         "status_badge_class": catalog.STATUS_BADGE_CLASS,
-        "pricing_mailto": PRICING_MAILTO,
     }
 
 
@@ -140,5 +133,5 @@ def with_landing_headers(response: Response) -> Response:
     return response
 
 
-__all__ = ["MODULE_SUMMARIES", "PAGE_PATH", "PRICING_MAILTO", "create_autonomous_compliance_page_router",
+__all__ = ["MODULE_SUMMARIES", "PAGE_PATH", "create_autonomous_compliance_page_router",
            "landing_context", "with_landing_headers"]

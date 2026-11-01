@@ -244,7 +244,9 @@ class Environment:
 
 @pytest.fixture(autouse=True)
 def scanner_gates(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config, "config_source_errors", list)
+    # Readable config: no unreadable sources (the real function takes
+    # include_tenant=, which a bare ``list`` refused when nothing had warmed it).
+    monkeypatch.setattr(config, "config_source_errors", lambda **kwargs: {})
     monkeypatch.setattr(
         config,
         "load_config",

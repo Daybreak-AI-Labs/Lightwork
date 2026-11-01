@@ -1,14 +1,14 @@
 # Agent compartments: per-agent threat isolation + swarm immunity
 
-**Status:** Rung 0 (swarm immunity) and Rung 1 (agent containment) **IMPLEMENTED**
-behind `[safety] compartments` (off by default). Rung 2 (latched *sector* seal)
-**DESIGNED** here, not yet built — it needs domain tagging and an unseal policy
-(see open decisions), so per CLAUDE.md it is written up for sign-off before coding.
+**Status:** Rung 0 (swarm immunity), Rung 1 (agent containment) and Rung 2
+(latched *sector* seal) are implemented behind `[safety] compartments` (off by
+default). Rung 2 lives in `maverick/quarantine.py`; the open decisions below
+record what is still to be tuned.
 
 ## Vision
 
 Lightwork is becoming an *agent factory*: domain agents (finance, legal, …) spun
-up from one kernel. The safety goal, in the user's words: when one agent finds
+up from one kernel. The safety goal: when one agent finds
 something, we "close it off like a door on a submarine," and the rest of the
 agents become immune to the attack.
 
@@ -99,7 +99,15 @@ upholding the trust invariant (local detection → privileged promotion). Same
 - **Run-scoped immunity first.** The ledger dies with the run.
 - **Triage-driven ladder**, not a fixed containment granularity.
 
-## Open decisions (Rung 2 + tuning)
+## What's implemented (Rung 2)
+
+Also in `maverick/quarantine.py`: an agent registers its domain with
+`QuarantineRegistry.register_agent()`. Once `_DOMAIN_SEAL_THRESHOLD` (default 2)
+distinct agents in one domain are sealed, `maybe_seal_domain()` latches a
+*sector* seal, and every agent in that domain, current and future, is refused
+until `unseal_domain()` clears it. Agents with no domain are unaffected.
+
+## Open decisions (tuning)
 
 1. **Persistence.** Run-scoped today. A cross-run ledger (via the world model)
    would *permanently harden* the factory — but the immunity channel then
@@ -110,11 +118,11 @@ upholding the trust invariant (local detection → privileged promotion). Same
    false positives, catches obfuscation variants, misses rewrites). Phase 2:
    simhash/shingle similarity to catch paraphrases — at a measured
    false-positive cost.
-3. **Domain tagging.** Rung 2 ("seal all finance agents") needs a `compartment`
-   tag on agents. Roles are free strings today; add a compartment attribute on
-   the capability/identity.
-4. **Unseal policy.** Who clears a latched Rung-2 seal — orchestrator policy,
-   a human, or a TTL?
+3. **Domain tagging.** Rung 2 keys on the agent's `domain` attribute. A
+   dedicated compartment attribute on the capability or identity would make
+   the boundary explicit rather than inherited from the agent definition.
+4. **Unseal policy.** `unseal_domain()` exists; who should call it (orchestrator
+   policy, a human, or a TTL) is still open.
 
 ## Verification
 
@@ -125,5 +133,7 @@ upholding the trust invariant (local detection → privileged promotion). Same
 - Implemented (Rung 1): `packages/maverick-core/tests/test_quarantine.py` —
   registry seal/strike, conservative triage (critical-first vs repeat-offender),
   and blackboard withholding of a sealed agent's posts.
-- Rung 2 (when built): a fake swarm asserting a domain seal latches until
-  cleared — without touching other domains.
+- Implemented (Rung 2): `packages/maverick-core/tests/test_quarantine.py`
+  (`TestSectorSeal`) — a domain seal reaches registered agents and no others,
+  two sealed agents escalate to a sector seal, unsealing lifts it, and an
+  untagged agent is unaffected.

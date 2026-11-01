@@ -757,6 +757,9 @@ MIGRATIONS.append((49, ["DROP INDEX IF EXISTS idx_pg_messages_fts"]))
 # Questions inherit tenant scope through their goal; keep that guarded join.
 MIGRATIONS.append((50, ["CREATE INDEX IF NOT EXISTS idx_pg_questions_goal_id ON questions(goal_id, id)"]))
 
+# v51: which decisions can still be undone (mirrors SQLite v51).
+MIGRATIONS.append((51, ["ALTER TABLE approvals ADD COLUMN IF NOT EXISTS undo_hold TEXT"]))
+
 _PG_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 _MIGRATIONS_TABLE = (
@@ -1169,14 +1172,16 @@ def _dec_approval_row(r):
     """Build an Approval, unsealing action/scope/detail (provenance is trusted
     plaintext metadata, sealed neither here nor in SQLite). Row order: id,
     action, risk, scope, detail, provenance, status, requested_at, decided_at,
-    claimed_by, claimed_at, decided_by, approvals_required, requested_by."""
+    claimed_by, claimed_at, decided_by, approvals_required, requested_by,
+    goal_id, department, undo_hold."""
     from ..world_model import Approval
     return Approval(r[0], _unseal(r[1]), r[2], _unseal(r[3]), _unseal(r[4]),
                     r[5], r[6], r[7], r[8], r[9], r[10], r[11],
                     int(r[12]) if len(r) > 12 and r[12] is not None else 1,
                     r[13] if len(r) > 13 else None,
                     r[14] if len(r) > 14 else None,
-                    r[15] if len(r) > 15 else "")
+                    r[15] if len(r) > 15 else "",
+                    r[16] if len(r) > 16 else None)
 
 
 def _dec_approval_audit_row(r):
@@ -1277,7 +1282,9 @@ class PostgresWorldModel:
         # point there but harmless.
         self._lock = threading.RLock()
         self._tx_depth = threading.local()
+        self.rls_bypass_reason: str | None = None
         try:
+            self._check_database_role()
             self._migrate()
             if self._rls:
                 self._preflight_rls_or_die()
@@ -1286,6 +1293,51 @@ class PostgresWorldModel:
             self.close()
             raise
 
+    def _check_database_role(self) -> None:
+        """Note, once per open, whether this login bypasses row-level security.
+
+        A superuser or BYPASSRLS role skips every RLS policy, FORCE included.
+        With RLS in use, enterprise mode refuses to open; otherwise the problem
+        is logged once and reported by the deep health check. With RLS off no
+        policy is bypassed, so it is only logged. A failed lookup is only
+        logged, so an unreadable catalog never blocks boot.
+        """
+        try:
+            with self._tx() as cur:
+                cur.execute(
+                    "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user"
+                )
+                superuser, bypass = cur.fetchone()
+        except Exception as e:
+            log.warning(
+                "Could not check whether the Postgres login bypasses row-level security "
+                "(%s); tenant row policies are not verified at this start.", e,
+            )
+            return
+        if not (superuser or bypass):
+            return
+        problem = (
+            "the Postgres login is a superuser, which bypasses row-level security"
+            if superuser
+            else "the Postgres login has BYPASSRLS, which bypasses row-level security"
+        )
+        fix = (
+            "connect with a dedicated login that is neither a superuser nor BYPASSRLS "
+            "(for example CREATE ROLE maverick_app LOGIN NOSUPERUSER NOBYPASSRLS)"
+        )
+        if not self._rls:
+            # No row policy is in use, so nothing is bypassed yet: a hint only.
+            log.warning("%s. Turning on [world_model] rls would not protect tenants "
+                        "for this login. Fix: %s.", problem, fix)
+            return
+        self.rls_bypass_reason = f"{problem}; {fix}"
+        if _enterprise_default():
+            raise RuntimeError(
+                "Enterprise mode relies on Postgres row-level security for tenant "
+                f"isolation, but {problem}. Fix: {fix}."
+            )
+        log.warning("%s. Tenant row policies do not apply to this login. Fix: %s.", problem, fix)
+
     def __enter__(self) -> PostgresWorldModel:
         return self
 
@@ -1293,7 +1345,7 @@ class PostgresWorldModel:
         self.close()
 
     def _reconnect_if_broken(self) -> None:
-        """W1-54: reopen the single shared connection (non-pooled mode) after
+        """Reopen the single shared connection (non-pooled mode) after
         it's been killed out from under us.
 
         Managed Postgres (RDS/CloudSQL multi-AZ) fails over and resets idle
@@ -1324,7 +1376,7 @@ class PostgresWorldModel:
         InFailedSqlTransaction until the process restarts. Rolling back
         keeps the connection usable.
 
-        W1-54: a rollback can't save a connection the SERVER killed (a
+        A rollback can't save a connection the SERVER killed (a
         managed-Postgres failover, or an idle-connection reset) -- the
         rollback itself fails too. In that case, close and drop the
         connection instead of leaving a dead one in ``self.conn``, so
@@ -1588,13 +1640,12 @@ class PostgresWorldModel:
         project_id: int | None = None,
         connection_references: list | None = None,
     ) -> int:
-        # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-47): `domain` and
-        # `project_id` mirror the SQLite backend's create_goal signature. Both
-        # columns already exist on Postgres (migrations above) and were
-        # settable after creation via set_goal_domain/set_goal_project, but a
-        # caller that passes them AT creation (checkpoint sub-goal spawning,
-        # the finance CLI) got a TypeError on this backend instead of a
-        # created goal.
+        # `domain` and `project_id` mirror the SQLite backend's create_goal
+        # signature. Both columns already exist on Postgres (migrations above)
+        # and were settable after creation via set_goal_domain/set_goal_project,
+        # but a caller that passes them AT creation (checkpoint sub-goal
+        # spawning, the finance CLI) got a TypeError on this backend instead of
+        # a created goal.
         if execution_principal is None:
             execution_principal = ""
         if not isinstance(execution_principal, str):
@@ -2065,7 +2116,7 @@ class PostgresWorldModel:
         sql = (
             "SELECT id, action, risk, scope, detail, provenance, status, "
             "requested_at, decided_at, claimed_by, claimed_at, decided_by, "
-            "approvals_required, requested_by, goal_id, department "
+            "approvals_required, requested_by, goal_id, department, undo_hold "
             "FROM approvals"
         )
         p: list = list(params) if frag else []
@@ -2073,6 +2124,27 @@ class PostgresWorldModel:
             sql += " WHERE " + frag
         sql += " ORDER BY requested_at DESC, id DESC LIMIT %s"
         p.append(max(1, int(limit)))
+        with self._tx() as cur:
+            cur.execute(sql, tuple(p))
+            rows = cur.fetchall()
+        return [_dec_approval_row(r) for r in rows]
+
+    def approvals_requested_between(self, since: float, until: float) -> list:
+        """The SQLite twin's window read: same bounds, same order, same
+        tenant scope as :meth:`list_approvals`."""
+        frag, params = _tenant_scope()
+        where = ["requested_at >= %s", "requested_at <= %s"]
+        p: list = [float(since), float(until)]
+        if frag:
+            where.insert(0, frag)
+            p = list(params) + p
+        sql = (
+            "SELECT id, action, risk, scope, detail, provenance, status, "
+            "requested_at, decided_at, claimed_by, claimed_at, decided_by, "
+            "approvals_required, requested_by, goal_id, department, undo_hold "
+            "FROM approvals WHERE " + " AND ".join(where)
+            + " ORDER BY requested_at DESC, id DESC"
+        )
         with self._tx() as cur:
             cur.execute(sql, tuple(p))
             rows = cur.fetchall()
@@ -2697,7 +2769,7 @@ class PostgresWorldModel:
     ) -> list[PGGoal]:
         """List goals, optionally filtered by status + paginated (mirrors SQLite).
 
-        W1-49: ``domain``/``project_id`` were missing here (unlike SQLite's
+        ``domain``/``project_id`` were missing here (unlike SQLite's
         ``list_goals``), so the dashboard's project-detail page and
         domain-scoped inbox both 500 on this backend --
         ``list_goals(project_id=...)`` / ``list_goals(domain=...)`` raised
@@ -2742,6 +2814,25 @@ class PostgresWorldModel:
         if limit is not None:
             sql += " LIMIT %s OFFSET %s"
             params += [max(1, int(limit)), max(0, int(offset))]
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [_dec_goal_row(r) for r in rows]
+
+    def list_goal_results(self, *, owner: str, limit: int = 26,
+                          offset: int = 0) -> list[PGGoal]:
+        """Completed root tasks with saved output for the owner's Results page
+        (mirrors SQLite); subtasks stay in their parent conversation."""
+        sql = ("SELECT id, parent_id, title, description, status, created_at, updated_at, "
+               "deadline, result, owner, execution_principal, domain, project_id FROM goals "
+               "WHERE owner = %s AND parent_id IS NULL AND status = 'done' AND result IS NOT NULL")
+        params: list = [str(owner)]
+        frag, fparams = _tenant_scope()
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        sql += " ORDER BY id DESC LIMIT %s OFFSET %s"
+        params += [max(1, min(int(limit), 100)), max(0, int(offset))]
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
@@ -3219,13 +3310,15 @@ class PostgresWorldModel:
             )
             return cur.fetchone() is not None
 
-    def total_spend(self, owner: str | None = None) -> dict[str, float]:
+    def total_spend(self, owner: str | None = None, *,
+                    since: float | None = None) -> dict[str, float]:
         """Aggregate spend. ``owner`` scopes to one principal's runs (join to
         the owning goal), matching the SQLite backend's signature; ``None``
-        is the deployment-wide admin / auth-off view. (Sept 2026 fix,
-        PLATFORM_IMPROVEMENT_AUDIT.md W1-48: this backend previously took no
-        ``owner`` argument at all, so any owner-scoped caller -- ``/api/v1/spend``,
-        external-agent spend records -- raised TypeError on Postgres.)
+        is the deployment-wide admin / auth-off view; ``since`` keeps only runs
+        that started at or after that time, as on SQLite. (This backend
+        previously took no ``owner`` argument at all, so any owner-scoped
+        caller -- ``/api/v1/spend``, external-agent spend records -- raised
+        TypeError on Postgres.)
         """
         frag, params = _tenant_scope("g.tenant_id")
         table = "episodes e"
@@ -3241,6 +3334,9 @@ class PostgresWorldModel:
         if owner is not None:
             sql += " AND g.owner = %s"
             params = (*params, owner)
+        if since is not None:
+            sql += " AND e.started_at >= %s"
+            params = (*params, float(since))
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
             row = cur.fetchone()
@@ -4007,14 +4103,18 @@ class PostgresWorldModel:
         provenance: str | None = None,
         approvals_required: int = 1,
         requested_by: str | None = None,
+        undoable: bool = False,
     ) -> int:
         """Park a high-risk action for out-of-band (dashboard) approval.
 
         ``provenance`` is trusted caller-supplied metadata for operator UIs; it
         is not inferred from ``detail`` (which may carry untrusted text).
         ``approvals_required`` is the N-of-M quorum; ``requested_by`` the
-        requester (so a multi-party approval can bar self-approval)."""
+        requester (so a multi-party approval can bar self-approval).
+        ``undoable`` mirrors SQLite: only a requester that waits out the undo
+        window before acting sets it."""
         from ..logging_config import current_goal_id
+        from ..world_model import APPROVAL_UNDO_OPEN
 
         context_goal = current_goal_id()
         frag, fparams = _tenant_scope()
@@ -4026,11 +4126,13 @@ class PostgresWorldModel:
             goal = cur.fetchone()
             cur.execute(
                 "INSERT INTO approvals(action, risk, scope, detail, provenance, status, "
-                "requested_at, tenant_id, approvals_required, requested_by, goal_id, department) "
-                "VALUES(%s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s) RETURNING id",
+                "requested_at, tenant_id, approvals_required, requested_by, goal_id, department, "
+                "undo_hold) VALUES(%s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s) "
+                "RETURNING id",
                 (_seal(action), risk, _seal(scope), _seal(detail), provenance,
                  time.time(), _active_tenant(), max(1, int(approvals_required)),
-                 (requested_by or None), goal[0] if goal else None, goal[1] if goal else ""),
+                 (requested_by or None), goal[0] if goal else None, goal[1] if goal else "",
+                 APPROVAL_UNDO_OPEN if undoable else None),
             )
             row = cur.fetchone()
         from ..world_model import _notify_approval_created
@@ -4051,7 +4153,7 @@ class PostgresWorldModel:
         sql = (
             "SELECT id, action, risk, scope, detail, provenance, status, "
             "requested_at, decided_at, claimed_by, claimed_at, decided_by, "
-            "approvals_required, requested_by, goal_id, department "
+            "approvals_required, requested_by, goal_id, department, undo_hold "
             "FROM approvals WHERE id = %s"
         )
         p: list = [approval_id]
@@ -4068,7 +4170,7 @@ class PostgresWorldModel:
         sql = (
             "SELECT id, action, risk, scope, detail, provenance, status, "
             "requested_at, decided_at, claimed_by, claimed_at, decided_by, "
-            "approvals_required, requested_by, goal_id, department "
+            "approvals_required, requested_by, goal_id, department, undo_hold "
             "FROM approvals WHERE status = 'pending'"
         )
         if frag:
@@ -4110,6 +4212,21 @@ class PostgresWorldModel:
         row = cur.fetchone()
         return int(row[0]) if row else 0
 
+    def settle_approval_decision(self, approval_id: int, *, decided_before: float):
+        """The waiting task is about to act on this decision (mirrors SQLite; see there)."""
+        from ..world_model import APPROVAL_UNDO_OPEN, APPROVAL_UNDO_SETTLED
+
+        approval_scope, approval_params = _tenant_scope()
+        sql = ("UPDATE approvals SET undo_hold = %s WHERE id = %s AND status <> 'pending' "
+               "AND undo_hold = %s AND decided_at <= %s")
+        values: list = [APPROVAL_UNDO_SETTLED, int(approval_id), APPROVAL_UNDO_OPEN, float(decided_before)]
+        if approval_scope:
+            sql += " AND " + approval_scope
+            values += approval_params
+        with self._tx() as cur:
+            cur.execute(sql, tuple(values))
+        return self.get_approval(int(approval_id))
+
     def undo_approval_decision(
         self,
         approval_id: int,
@@ -4119,14 +4236,16 @@ class PostgresWorldModel:
     ) -> str:
         """Return a just-decided approval to pending (mirrors SQLite; see there)."""
         from ..world_model import (
+            APPROVAL_UNDO_OPEN,
             APPROVAL_UNDO_STATUS,
             _approval_undo_marker_id,
+            approval_undo_refusal,
         )
 
         tenant = _active_tenant()
         approval_scope, approval_params = _tenant_scope()
         outbox_scope, outbox_params = _approval_outbox_scope()
-        sql = "SELECT status, decided_at FROM approvals WHERE id = %s"
+        sql = "SELECT status, decided_at, decided_by, undo_hold, action FROM approvals WHERE id = %s"
         values: list = [int(approval_id)]
         if approval_scope:
             sql += " AND " + approval_scope
@@ -4139,12 +4258,15 @@ class PostgresWorldModel:
                 return "not_found"
             if row[0] == "pending":
                 return "not_decided"
+            refusal = approval_undo_refusal(row[0], row[2], row[3])
+            if refusal is not None:
+                return refusal
             if row[1] is None or time.time() - float(row[1]) > float(within_seconds):
                 return "too_late"
             cur.execute(
                 "UPDATE approvals SET status = 'pending', decided_at = NULL, "
-                "decided_by = NULL WHERE id = %s AND status = %s",
-                (int(approval_id), row[0]),
+                "decided_by = NULL WHERE id = %s AND status = %s AND undo_hold = %s",
+                (int(approval_id), row[0], APPROVAL_UNDO_OPEN),
             )
             cur.execute(
                 "DELETE FROM approval_signoffs WHERE approval_id = %s",
@@ -4172,7 +4294,11 @@ class PostgresWorldModel:
                     tenant,
                 ),
             )
-            return "undone"
+        # approval.decided already went out; subscribers learn it was retracted.
+        self._emit_approval_event("approval.undone", int(approval_id), {
+            "previous_status": row[0], "undone_by": (undone_by or "").strip(),
+            "action": _unseal(row[4])})
+        return "undone"
 
     def get_approval_audit_event(self, event_id: str):
         scope, params = _approval_outbox_scope()
@@ -4229,7 +4355,7 @@ class PostgresWorldModel:
 
         approval_scope, approval_params = _tenant_scope()
         outbox_scope, outbox_params = _approval_outbox_scope()
-        sql = ("SELECT id, action, risk, scope, detail, provenance, status, requested_at, decided_at, claimed_by, claimed_at, decided_by, approvals_required, requested_by, goal_id, department FROM approvals WHERE id = %s")
+        sql = ("SELECT id, action, risk, scope, detail, provenance, status, requested_at, decided_at, claimed_by, claimed_at, decided_by, approvals_required, requested_by, goal_id, department, undo_hold FROM approvals WHERE id = %s")
         values = [int(approval_id)]
         if approval_scope:
             sql += " AND " + approval_scope
@@ -4638,10 +4764,10 @@ class PostgresWorldModel:
         with self._tx() as cur:
             cur.execute(
                 "SELECT approver, decision FROM approval_signoffs "
-                "WHERE approval_id = %s ORDER BY decided_at", (approval_id,),
+                "WHERE approval_id = %s ORDER BY decided_at, approver", (approval_id,),
             )
             rows = cur.fetchall()
-        from ..world_model import _single_approver
+        from ..world_model import _approval_state_view, _single_approver
 
         approvers = _single_approver(appr, [r[0] for r in rows if r[1] == "approved"])
         scope, params = _approval_outbox_scope()
@@ -4652,14 +4778,43 @@ class PostgresWorldModel:
                 tuple([approval_id, *params]),
             )
             audit_pending = int(cur.fetchone()[0])
+        return _approval_state_view(appr, approvers, audit_pending)
+
+    def approval_states(self, approvals) -> dict[int, dict]:
+        """Batched :meth:`approval_state` for approvals the caller has already
+        listed (tenant-scoped): two queries for the set, each value equal to
+        ``approval_state(id)``."""
+        from ..world_model import _approval_state_view, _single_approver
+
+        listed = {int(a.id): a for a in approvals}
+        if not listed:
+            return {}
+        ids = list(listed)
+        signoffs: dict[int, list[str]] = {approval_id: [] for approval_id in ids}
+        pending: dict[int, int] = dict.fromkeys(ids, 0)
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT approval_id, approver, decision FROM approval_signoffs "
+                "WHERE approval_id = ANY(%s) ORDER BY decided_at, approver", (ids,),
+            )
+            for approval_id, approver, decision in cur.fetchall():
+                if decision == "approved":
+                    signoffs[int(approval_id)].append(approver)
+        scope, params = _approval_outbox_scope()
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT approval_id, COUNT(*) FROM approval_audit_outbox "
+                f"WHERE approval_id = ANY(%s) AND delivered_at IS NULL AND {scope} "
+                "GROUP BY approval_id",
+                tuple([ids, *params]),
+            )
+            for approval_id, count in cur.fetchall():
+                pending[int(approval_id)] = int(count)
         return {
-            "status": appr.status,
-            "approvals_required": max(1, int(appr.approvals_required or 1)),
-            "approved_count": len(approvers),
-            "approvers": approvers,
-            "requested_by": appr.requested_by,
-            "audit_pending_count": audit_pending,
-            "effective": appr.status != "pending",
+            approval_id: _approval_state_view(
+                appr, _single_approver(appr, signoffs[approval_id]), pending[approval_id]
+            )
+            for approval_id, appr in listed.items()
         }
 
     def claim_approval(self, approval_id: int, principal: str) -> bool:
@@ -5835,7 +5990,7 @@ class PostgresWorldModel:
     ) -> int:
         """Count or delete old conversation messages in the active tenant.
 
-        W1-57: nothing references ``messages.id`` via foreign key, so this
+        Nothing references ``messages.id`` via foreign key, so this
         is a plain age-based delete scoped through the owning goal's tenant.
         """
         tenant = _required_retention_tenant("message retention")

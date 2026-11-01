@@ -1,4 +1,4 @@
-"""IRC channel adapter — pure protocol logic + dispatch (ROADMAP connector)."""
+"""IRC channel adapter — pure protocol logic + dispatch."""
 from __future__ import annotations
 
 import asyncio

@@ -200,7 +200,8 @@ def test_error_type_attribute_set_on_failed_span(monkeypatch):
     span = _Span()
 
     class _Tracer:
-        def start_as_current_span(self, name):
+        # The SDK's record_exception / set_status_on_exception keywords are accepted.
+        def start_as_current_span(self, name, **_kwargs):
             return span
 
     monkeypatch.setattr(obs, "_initialized", True)

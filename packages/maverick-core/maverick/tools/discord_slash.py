@@ -1,4 +1,4 @@
-"""Discord slash-command framework (roadmap: 2028 H1).
+"""Discord slash-command framework.
 
 Produce the JSON Discord expects when registering an application (slash) command
 — the ``name`` / ``description`` / ``options`` payload for the

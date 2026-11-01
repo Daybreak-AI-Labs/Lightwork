@@ -107,10 +107,20 @@ def _can_decide(principal: str) -> bool:
         return False
 
 
-def _sees_everything(principal: str) -> bool:
+def _suites(principal: str) -> frozenset[str] | None:
+    """The departments whose approvals the person may decide; None is all."""
+    from . import suite_grants
     from .auth import is_dashboard_admin
 
-    return is_dashboard_admin(principal)
+    try:
+        return None if is_dashboard_admin(principal) else suite_grants.granted_suites(principal)
+    except Exception:  # noqa: BLE001 -- an unreadable grant store shows no departmental approvals
+        return frozenset()
+
+
+def status_scope(principal: str) -> tuple[bool, frozenset[str] | None]:
+    """``/lightwork status``: the same role and department rule as the summary."""
+    return _can_decide(principal), _suites(principal)
 
 
 def scheduler_cycle(holder: str, *, now: float | None = None,
@@ -133,7 +143,9 @@ def scheduler_cycle(holder: str, *, now: float | None = None,
     if not acquire_lease(holder, now=clock() if now is None else now):
         return None
     world = _world()
-    options = {"can_decide": _can_decide, "sees_everything": _sees_everything, "now": now}
+    # Every named account, administrators included, gets only its own work:
+    # the summary leaves Lightwork by chat or email, and /me lists the same.
+    options = {"can_decide": _can_decide, "suites_for": _suites, "now": now}
     summary: dict[str, Any] | None = None
     for principal in _recipients():
         if summary is not None and not acquire_lease(holder, now=clock() if now is None else now):

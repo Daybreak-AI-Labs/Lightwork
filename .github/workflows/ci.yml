@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Release/client-readiness reviews can exercise the full interpreter and
+  # Release-readiness reviews can exercise the full interpreter and
   # security-posture matrix on a branch without merging it into main.
   workflow_dispatch: {}
   # The merge queue builds a temporary branch per entry and gates the merge on
@@ -27,6 +27,9 @@ concurrency:
 
 jobs:
   document-engines:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['document-engines'] != false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -70,10 +73,8 @@ jobs:
 
   lint:
     runs-on: ubuntu-24.04
-    # The secret scan alone is ~18 CPU-minutes (two recorded-evidence files
-    # under docs/ux-audit-2026-09-30 carry a ~970 KB single line each and take
-    # ~4.3 minutes apiece on one core), which two hosted cores did not finish
-    # in the former 15.
+    # The secret scan is the slow step; 30 minutes gives two hosted cores room
+    # for it plus the custom gates.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -111,10 +112,10 @@ jobs:
           if grep -rn --include='*.py' -E '^import[[:space:]]+tomllib([[:space:]]|$)' apps packages benchmarks; then
             echo ""
             echo "ERROR: bare 'import tomllib' found above. tomllib is 3.11+ stdlib."
-            echo "Use the try/except fallback documented in CLAUDE.md."
+            echo "Use the try/except fallback documented in CONTRIBUTING.md."
             exit 1
           fi
-      - name: Confine `shell=True` to the sandbox backends (CLAUDE.md rule 4)
+      - name: Confine `shell=True` to the sandbox backends (kernel rule 4)
         # Security boundary: tools must never call subprocess with shell=True
         # directly -- model-generated input goes through sandbox.exec(), the
         # single chokepoint that applies the configured backend AND the
@@ -128,7 +129,7 @@ jobs:
             echo "$hits"
             echo ""
             echo "ERROR: shell=True outside maverick/sandbox/. Route shell through"
-            echo "sandbox.exec() (CLAUDE.md rule 4), or move the call into a sandbox"
+            echo "sandbox.exec() (kernel rule 4), or move the call into a sandbox"
             echo "backend. If genuinely required, add it to this grep's allowlist"
             echo "with a justification."
             exit 1
@@ -183,19 +184,17 @@ jobs:
         run: |
           pip install -e ./packages/maverick-core -q
           python -m maverick.plugin_matrix --ci
-      - name: Specialist catalog gate (1,000 packs, zero envelope errors)
-        # Every domain pack must keep a non-empty tool allowlist, a valid
-        # risk ceiling, a working persona, and its deny list -- the honest-
-        # counting receipt behind the catalog claim. Errors fail the build.
+      - name: Specialist catalog gate (zero envelope errors)
+        # Every domain pack, built-in or operator-supplied, must keep a
+        # non-empty tool allowlist, a valid risk ceiling and effort level, and
+        # pass the prose lint (text defects, duplicate personas, unknown
+        # tools). Errors fail the build.
         run: maverick domains-lint --ci
       - name: Reachability ledger (nothing goes dark unnoticed)
-        # Two defect classes shared one root cause: nobody could answer "does
-        # production reach this?", so everyone guessed, and the guesses went
-        # both ways. A strategy review cited sigstore_signing.py as shipped
-        # capability (roadmap-tagged, no production importer) and in the same
-        # pass skipped erasure_verify.py as unbuilt (also roadmap-tagged, but
-        # it backs a shipping CLI command). The roadmap header was the only
-        # signal and it is wrong ~80% of the time in both directions.
+        # Answers "does production code reach this module?" mechanically
+        # instead of relying on module header comments, which drift in both
+        # directions: a module can look shipped with no production importer,
+        # or look unbuilt while it backs a shipping CLI command.
         #
         # This walks the import graph from real entry points and fails when a
         # module loses its last caller, or when a new one arrives that nothing
@@ -216,7 +215,7 @@ jobs:
         # rather than trusting a comment.
         run: python -m maverick.dispatch_contract --ci
       - name: Egress contract (no outbound path outside the guarded libraries)
-        # enterprise.py sells one property -- "sensitive data physically cannot
+        # enterprise.py promises one property -- "sensitive data physically cannot
         # reach a third-party API" -- and documented it as enforced "at each
         # tool's request". The check existed at 11 call sites; 87 of the 94
         # modules that make outbound HTTP had none, including gmail,
@@ -327,6 +326,9 @@ jobs:
         run: python -m maverick.control_data_plane_soak --ci
 
   audit:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['audit'] != false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -498,9 +500,10 @@ jobs:
           python -m bandit -q -r packages apps -lll -ii \
             -x '*/tests/*,*/test_*.py'
       - name: License policy (no strong-copyleft — GPL / AGPL / SSPL)
-        # BLOCKING: a strong-copyleft dependency creates distribution
-        # obligations incompatible with the proprietary license. Runs the
-        # shipped scanner over the installed tree (the same env pip-audit saw).
+        # BLOCKING: a strong-copyleft dependency would impose copyleft terms
+        # on distributions of Lightwork, which is licensed under Apache-2.0.
+        # Runs the shipped scanner over the installed tree (the same env
+        # pip-audit saw).
         run: |
           python - <<'PY'
           import sys
@@ -526,7 +529,7 @@ jobs:
         # Build the same isolated release-runtime profile shipped in frozen
         # binaries/containers, then describe that target environment. CI tools
         # (bandit, pip-audit, CycloneDX itself) are deliberately excluded from
-        # the buyer-facing runtime inventory.
+        # the release-runtime inventory.
         run: |
           set -euo pipefail
           python -I -m pip install 'cyclonedx-bom==7.5.0'
@@ -557,6 +560,9 @@ jobs:
           if-no-files-found: error
 
   release-cohort:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['release-cohort'] != false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -598,14 +604,65 @@ jobs:
           done
           test "$(find dist-cohort -maxdepth 1 -name '*.whl' | wc -l)" -eq 8
 
+  select-tests:
+    # On a pull request, choose the test files the floor-interpreter `test`
+    # legs run from the files the PR changes (scripts/select_pr_tests.py): a
+    # change to the kernel, a conftest, the pinned requirements, the
+    # workflows or the scripts still means the whole suite; a change inside
+    # another package means its tests plus every test that names it; any
+    # other file means the tests that name it by path. Everywhere else -- the
+    # merge queue's commit, pushes to main, workflow_dispatch -- the mode is
+    # `full` and the legs run everything, so a selection that was too narrow
+    # fails in the queue, before the commit reaches main, never on it.
+    #
+    # The same change set gates the heavier jobs below (`jobs` output, one
+    # boolean per job id from JOB_PREFIXES in the script): a job whose inputs
+    # the pull request cannot have touched is skipped on that pull request
+    # and runs on the queue's commit. A skipped job reports success to the
+    # required check; a job skipped because this selection failed would too,
+    # so every gated job runs under `!cancelled()` and treats a missing map
+    # (empty outputs) as "run".
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.select.outputs.mode }}
+      paths: ${{ steps.select.outputs.paths }}
+      jobs: ${{ steps.select.outputs.jobs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          # The change set is diffed from the PR's merge base, which a
+          # shallow clone does not have.
+          fetch-depth: 0
+      - name: Select the test files the changed files can affect
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "$EVENT_NAME: the test legs run the whole suite."
+            printf 'mode=full\npaths=[]\njobs={}\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Merge-base to head is what the PR changes even after main moved;
+          # when git cannot answer the script selects the full suite.
+          python3 scripts/select_pr_tests.py --git "$BASE_SHA" "$HEAD_SHA" \
+            --output "$RUNNER_TEMP/test-selection.json" \
+            --github-output "$GITHUB_OUTPUT"
+
   test:
     runs-on: ubuntu-24.04
     # The complete deterministic suite is intentionally broad: ~39,000 tests
     # (~24,700 when this job was first sliced). Each leg runs one of four
     # disjoint file-level slices (--shard, root conftest.py) under pytest-xdist
     # (one worker per core, tests grouped by file so module-scoped fixtures
-    # and module-level TestClients stay per-worker). GitHub's hosted runners
-    # for private repositories have two cores, so in-job parallelism alone
+    # and module-level TestClients stay per-worker). On the two-core hosted
+    # runners the suite was first sliced on, in-job parallelism alone
     # measured ~17 minutes at ~24,700 tests; at ~39,000 three slices ran out
     # the 20-minute bound, so four slices keep a leg inside it for one
     # extra install each. At ~45,000 tests the slowest hosted slice needs more
@@ -614,6 +671,16 @@ jobs:
     # matching required checks) over a longer ceiling. The ceiling below is
     # headroom for runner variance and setup, not the expected duration: a run
     # that needs all of it is hung, and pytest-timeout/GNU timeout say where.
+    #
+    # On a pull request these legs run only the test files `select-tests`
+    # chose from the changed files (mode=paths, or none when no test names a
+    # changed file); the merge queue's commit and main run the whole suite
+    # (mode=full), as do these legs when a shared file changed. `!cancelled()`
+    # runs them even if the selection job failed: its empty outputs mean
+    # mode=full to the action, whereas a skipped job would still satisfy the
+    # required check and let an untested PR through.
+    needs: select-tests
+    if: ${{ !cancelled() }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -633,6 +700,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           shard: ${{ matrix.shard }}
+          mode: ${{ needs.select-tests.outputs.mode }}
+          paths: ${{ needs.select-tests.outputs.paths }}
 
   test-window:
     # The rest of the supported window. A pull request proves the floor
@@ -674,6 +743,12 @@ jobs:
 
   windows-process-containment:
     name: Windows process containment (Python ${{ matrix.python-version }})
+    # Gated on its steps, not the job: a job skipped by `if` never expands its
+    # matrix, so the required check context would never appear (see
+    # test-window). The steps skip when the pull request's change set cannot
+    # reach the local sandbox backend (select-tests `jobs`).
+    needs: select-tests
+    if: ${{ !cancelled() }}
     runs-on: windows-2022
     timeout-minutes: 10
     permissions:
@@ -685,15 +760,24 @@ jobs:
         # windows-process-containment-window below (queue and main only).
         python-version: ["3.10"]
     steps:
+      - name: Not needed on this pull request
+        if: fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment'] == false
+        run: >-
+          echo "No changed file reaches the local sandbox backend; the merge
+          queue runs this job on the queue's commit."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment'] != false
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment'] != false
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install the focused test dependency
+        if: fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment'] != false
         run: python -m pip install "pytest==9.1.1"
       - name: Test Windows Job Object process-tree containment
+        if: fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment'] != false
         env:
           PYTHONPATH: ${{ github.workspace }}/packages/maverick-core
         run: >-
@@ -745,7 +829,7 @@ jobs:
     # control's explicit on/off mechanics under test; this job runs the same
     # maverick-core tree under the PRODUCTION posture (audit signing,
     # at-rest encryption, fail-closed consent for high-risk actions, the
-    # tool-risk ceiling) -- the configuration customers actually run.
+    # tool-risk ceiling) -- the configuration a production deployment runs.
     #
     # The debt register started at 91 tests and has been driven to zero, so
     # this job is fully blocking: any posture failure is new by definition.
@@ -859,7 +943,10 @@ jobs:
           retention-days: 14
 
   redteam:
-    # Red-team CI (ROADMAP 2027-H1 safety): run the labelled adversarial
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['redteam'] != false }}
+    # Red-team CI: run the labelled adversarial
     # corpus through the shield's built-in detector and fail the build on any
     # missed attack or over-blocked benign case. A named job (not buried in
     # the test matrix) so the gate is visible in the checks list. The corpus
@@ -881,7 +968,10 @@ jobs:
         run: python -m maverick_shield.redteam --calibrate
 
   eval-smoke:
-    # Eval-gated-release foundation (ROADMAP P3). Real evals drive `maverick
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['eval-smoke'] != false }}
+    # Eval-gated-release foundation. Real evals drive `maverick
     # start` against a live provider -- no models/network in CI -- so this gate
     # runs the eval harness machinery (registry + scorers + tau2 verifier +
     # pass@1 aggregation) against scripted solvers and asserts grading still
@@ -907,6 +997,9 @@ jobs:
         run: python -m pytest -vvs --tb=long benchmarks/test_eval_smoke.py
 
   governance-frontier-offline:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['governance-frontier-offline'] != false }}
     # Forty deterministic control-path definitions, each in governed and
     # controls-disabled arms under three pinned order seeds. No provider key,
     # model, or network. Semantics and signed evidence are hard gates; local
@@ -952,6 +1045,9 @@ jobs:
           --trusted-pubkey-file "$RUNNER_TEMP/governance-frontier.pub"
 
   harness-overhead:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['harness-overhead'] != false }}
     # What the governance record COSTS: identical deterministic tasks run in
     # governed and ungoverned arms, stubbed at the model boundary so both call
     # the same pure function. No provider key, model, or network. The
@@ -995,6 +1091,9 @@ jobs:
           --trusted-pubkey-file "$RUNNER_TEMP/harness-overhead.pub"
 
   postgres:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['postgres'] != false }}
     # DB-backed tests for the Postgres world-model backend. The default `test`
     # job has no Postgres, so test_postgres_world.py skips there; this job
     # stands up a service + DSN so the backend is actually exercised in CI.
@@ -1049,6 +1148,7 @@ jobs:
           timeout --verbose --signal=ABRT --kill-after=30s 10m
           python -m pytest -vvs --timeout=180 --timeout-method=signal
           packages/maverick-core/tests/test_postgres_world.py
+          packages/maverick-core/tests/test_intent_value.py
           packages/maverick-core/tests/test_database_tool.py
           packages/maverick-core/tests/test_database_connection_timeouts.py
           packages/maverick-core/tests/test_database_connection_hosts.py
@@ -1077,6 +1177,9 @@ jobs:
           packages/maverick-knowledge/tests/test_knowledge.py -k PgVectorLive
 
   docker:
+    needs: select-tests
+    # Skipped on a pull request whose change set cannot affect this job (select-tests).
+    if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['docker'] != false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

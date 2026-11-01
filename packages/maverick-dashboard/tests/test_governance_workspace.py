@@ -835,7 +835,7 @@ def test_page_speaks_plainly_and_uses_in_page_dialogs():
     page = client.get("/security/governance")
     assert page.status_code == 200
     main = page.text.split('<main id="content"', 1)[1].split("</main>", 1)[0]
-    script = main[main.index("<script>"):]
+    script = main[main.index('<script nonce="'):]
     visible = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>|<[^>]+>", " ", main)
     assert not re.search(
         r"\b(tenant|principal|payload|endpoint|schema|uuid|sha-?256|digest|json|revision|"

@@ -1,6 +1,6 @@
 # Decision: freeze breadth, invest in depth — re-home the connector tail
 
-**Status:** Decided — freeze breadth; re-home (don't delete) the 47-connector tail to the plugin/registry tier · **Roadmap ref:** [`ROADMAP.md`](../ROADMAP.md) → "Current state & gap analysis" (the breadth-vs-depth call) · **Grounds in:** [`tool-inventory.md`](./tool-inventory.md) · **Date:** June 2026
+**Status:** Decided — freeze breadth; re-home (don't delete) the 47-connector tail to the plugin/registry tier · **Grounds in:** [`tool-inventory.md`](./tool-inventory.md) · **Date:** June 2026
 
 ## The question
 
@@ -22,22 +22,18 @@ consumer build using the inventory's risk tiers.
 
 ## Why
 
-1. **The differentiation is depth, not connectors.** Lightwork's edge is the
-   long-horizon recursive swarm + the governed/provable runtime — not having a
-   Salesforce tool nobody else has. The 47 connectors are table-stakes; carrying
+1. **The value is depth, not connectors.** What Lightwork adds is the
+   long-horizon recursive swarm + the governed/provable runtime — not one more
+   Salesforce tool. The 47 connectors are table-stakes; carrying
    them in-core spends the scarcest resource (maintenance + security review) on
    the least-differentiated surface.
 2. **The re-homing target now exists.** The inventory's recommendation hinged on
-   "the plugin SDK + MCP **Registry** (roadmap B2) is the natural home." B2's
-   **registry shipped this cycle** (`mcp_registry.py` +
+   "the plugin SDK + MCP **Registry** is the natural home." The
+   **registry has shipped** (`mcp_registry.py` +
    `maverick mcp-registry browse/add/remove/list` + `specs/mcp-registry.md`), so
    connectors can be discovered and installed on demand instead of bundled. The
    prerequisite that blocked this decision is cleared.
-3. **It matches the commercial wedge.** The commercialization synthesis is
-   explicit that the plan "deliberately does not clone OneTrust's breadth" — the
-   surviving wedge is the self-hostable, provable, regulated runtime (depth).
-   Breadth-as-pitch competes with everyone; depth is defensible.
-4. **It shrinks the consumer attack surface.** The high-risk connectors (money:
+3. **It shrinks the consumer attack surface.** The high-risk connectors (money:
    `stripe`/`plaid`/`shopify`; cloud-infra mutate/spend; send-as-user comms;
    `home_assistant`) are exactly the tail. Moving them out of the default build
    and behind explicit install + consent narrows what a non-technical consumer's
@@ -55,7 +51,7 @@ This is a **direction**, executed as sequenced work — not a cut to make today:
    discovery surface.
 3. **Migrate with a deprecation window.** Move connectors to the plugin tier
    behind a published deprecation window; keep them importable (with a warning)
-   for that window so existing configs don't break. Per CLAUDE.md #5–#6 each
+   for that window so existing configs don't break. Per kernel rules 5 and 6 each
    already needs a config knob + wizard entry, which the plugin tier provides.
 4. **Tighten the default risk ceiling.** Use the inventory's tiers to set the
    consumer default: high-risk tools off-by-default / consent-gated.
@@ -63,8 +59,8 @@ This is a **direction**, executed as sequenced work — not a cut to make today:
 ## Answers to the teed-up questions
 
 - *Is "freeze breadth, invest in depth" the call, or is wide connector coverage
-  part of the consumer pitch?* — **Freeze breadth.** Wide coverage is not the
-  pitch; depth (long-horizon autonomy + governed runtime) is.
+  a goal in itself?* — **Freeze breadth.** Depth (long-horizon autonomy +
+  governed runtime) is the focus; wide coverage is not.
 - *Ship the plugin tier + registry first, then migrate — deprecation window?* —
   **Yes, registry first (done).** A one-to-two-minor-release deprecation window for
   the connector re-home, gated on the telemetry data.

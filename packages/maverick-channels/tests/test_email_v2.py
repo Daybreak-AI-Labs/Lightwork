@@ -1,4 +1,4 @@
-"""Email channel v2: threading + IMAP IDLE (ROADMAP 2028 H2)."""
+"""Email channel v2: threading + IMAP IDLE."""
 from __future__ import annotations
 
 from maverick_channels.email_v2 import (

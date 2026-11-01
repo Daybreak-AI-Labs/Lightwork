@@ -1,5 +1,4 @@
-"""Longitudinal benchmark retrospective (roadmap: 2028 H2 performance —
-"3-year retrospective benchmark").
+"""Longitudinal benchmark retrospective.
 
 ``continuous_benchmark`` answers "did the last run regress vs the recent
 baseline?" — a short-window question. The retrospective answers the long one:

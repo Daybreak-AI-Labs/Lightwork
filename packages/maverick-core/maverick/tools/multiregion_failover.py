@@ -1,4 +1,4 @@
-"""Multi-region failover (roadmap: 2028 H1 perf).
+"""Multi-region failover.
 
 Pick the region to serve a client from and the ordered fallback list behind it.
 Deterministic and offline: the caller supplies the candidate regions (each

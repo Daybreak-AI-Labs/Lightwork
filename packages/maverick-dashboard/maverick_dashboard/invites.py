@@ -582,12 +582,14 @@ def session_ttl_seconds() -> int:
     return LOCAL_SESSION_DAYS * 86400
 
 
-def mint_local_session(email: str, request=None) -> str:
+def mint_local_session(email: str, request=None, *, mfa: bool = False, mfa_at: float | None = None) -> str:
     """A signed session cookie value for ``user:<email>`` (no-IdP mode).
 
     With ``request`` the session is recorded for the Sessions page (a ``sid``
-    in the cookie, no second factor: a passphrase is one factor). Without one
-    -- tests and older callers -- it is an untracked legacy cookie."""
+    in the cookie). A passphrase is one factor, so by default there is no second
+    factor; ``mfa``/``mfa_at`` are given only when the session carries one that
+    was already proved (a renewal keeps it). Without ``request`` -- tests and
+    older callers -- it is an untracked legacy cookie."""
     from maverick.oidc import validate_subject
     from maverick.web_session import sign_session
 
@@ -596,7 +598,7 @@ def mint_local_session(email: str, request=None) -> str:
         from .oidc_login import mint_browser_session
 
         return mint_browser_session(request, sub=email, secret=local_session_secret(),
-                                    via="invite", mfa=False, ttl=session_ttl_seconds())
+                                    via="invite", mfa=mfa, ttl=session_ttl_seconds(), mfa_at=mfa_at)
     now = int(time.time())
     return sign_session({"sub": email, "iat": now, "exp": now + session_ttl_seconds()},
                         local_session_secret())

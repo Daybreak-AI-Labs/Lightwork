@@ -1,4 +1,4 @@
-"""W1-11: tool_choice, per-tool strict, and disable_parallel_tool_use reach
+"""Tool_choice, per-tool strict, and disable_parallel_tool_use reach
 the providers.
 
 The Provider protocol, LLM.complete, AnthropicClient._build_request and

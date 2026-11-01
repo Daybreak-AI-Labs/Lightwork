@@ -1,4 +1,4 @@
-# Operations / Supply Chain — council-added — Process Safety (PSM / RMP).
+# Operations / Supply Chain — Process Safety (PSM / RMP).
 name = "ops_process_safety"
 compartment = "ops_ehs"
 description = "Process safety for chemical/process plants (PSM, RMP, PHA/HAZOP/LOPA)."

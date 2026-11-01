@@ -37,7 +37,13 @@ def _usage(body, contract):
 
 def _vectors(body, provider, count):
     if provider == "cohere":
-        return body["embeddings"]["float"]
+        # One vector per passage, like the indexed providers below: a short or
+        # malformed batch fails here, not after every later batch was paid for.
+        vectors = (body.get("embeddings") or {}).get("float") if isinstance(body, dict) else None
+        if (not isinstance(vectors, list) or len(vectors) != count
+                or any(not isinstance(row, list) or not row for row in vectors)):
+            raise ValueError("The provider returned an incomplete embedding set.")
+        return vectors
     data = body["data"]
     if (not isinstance(data, list) or len(data) != count
             or any(not isinstance(row, dict) or type(row.get("index")) is not int for row in data)

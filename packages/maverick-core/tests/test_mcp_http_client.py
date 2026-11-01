@@ -1,4 +1,4 @@
-"""Remote MCP servers over Streamable HTTP (ROADMAP B2, transport half).
+"""Remote MCP servers over Streamable HTTP.
 
 StreamableHttpMCPClient lets Lightwork consume a REMOTE MCP server (a `url` in
 config) instead of only stdio subprocesses. These tests drive it against an

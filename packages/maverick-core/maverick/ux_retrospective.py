@@ -1,5 +1,4 @@
-"""UX retrospective generator (roadmap: 2028 H2 UX — "36-month UX
-retrospective + reset").
+"""UX retrospective generator.
 
 The period generator for the UX half of the retrospective trio (safety:
 ``safety_report``; perf: ``benchmark_retrospective``). Aggregates what the

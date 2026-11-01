@@ -377,6 +377,19 @@ def is_retired(subject: str) -> bool:
     )
 
 
+def retired_check(directory: dict | None = None):
+    """``check(subject)``: :func:`is_retired`'s answer, with the retired ledger
+    (and ``directory``, see :func:`load_index`) read once for many subjects."""
+    retired = _load_retired()
+    entries = _load() if directory is None else directory
+    retired_subs = {entry.get("sub") for identifier_key, entry in entries.items() if identifier_key in retired}
+
+    def check(subject: str) -> bool:
+        value = str(subject or "").strip()
+        return bool(value) and (_subject_key(value) in retired or value in retired_subs)
+    return check
+
+
 def forget(identifiers: Iterable[str]) -> None:
     """Drop the directory entries for ``identifiers`` (e.g. after a hard SCIM
     delete). Best-effort; a re-login re-records them."""

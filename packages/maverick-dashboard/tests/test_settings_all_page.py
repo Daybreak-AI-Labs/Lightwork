@@ -9,6 +9,7 @@ unless the request confirms it.
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 from fastapi.testclient import TestClient
@@ -66,6 +67,24 @@ def _row(setting_id):
             if row["id"] == setting_id:
                 return row
     raise AssertionError(setting_id)
+
+
+def test_work_value_controls_round_trip_into_live_report_authority():
+    from maverick.intent_value.settings import policy
+
+    report = "/api/v1/intent-value"
+    assert policy()["enabled"] is True
+    saved = _save([{"id": "intent_value.enabled", "value": False}])
+    assert saved.status_code == 200, saved.text
+    assert _loaded()["intent_value"]["enabled"] is False
+    assert client.get(report).status_code == 403
+    saved = _save([{"id": "intent_value.enabled", "value": True},
+                   {"id": "intent_value.recommendations", "value": False}])
+    assert saved.status_code == 200, saved.text
+    assert policy() == {"enabled": True, "recommendations": False, "completion_confirmation": False}
+    assert client.get(report).status_code == 200
+    assert client.get(report + "/settings").json()["completion_confirmation"] is False
+    assert client.get(report + "/opportunities").json()["opportunities"] == []
 
 
 # ------------------------------------------------------------------ page
@@ -566,3 +585,72 @@ def test_tightening_spending_rate_and_outbound_controls_needs_no_confirmation(au
                  confirm=True).status_code == 200
     # Removing an address only sends less, so it needs no confirmation.
     assert _save([{"id": "webhooks.outbound", "value": []}]).status_code == 200
+
+
+def test_saving_the_contact_centre_token_sends_a_waiting_handoff_without_a_restart(monkeypatch, audit_rows):
+    from maverick import contact_centre
+
+    token = "tok-SECRET-98765"  # pragma: allowlist secret
+    handoff = "handoff-settings-0123456789ab"
+    calls: list[tuple[str, bytes, dict]] = []
+
+    def fake_transport(url, body, headers):
+        # Fake receiving system: one accepted ticket per request.
+        calls.append((url, body, dict(headers)))
+        return (201, 9, '{"ticket":{"url":"https://acme-support.zendesk.com/api/v2/tickets/4242.json","id":4242}}', "")
+
+    assert _save([{"id": "contact_centre.provider", "value": "zendesk"},
+                  {"id": "contact_centre.zendesk_subdomain", "value": "acme-support"},
+                  {"id": "contact_centre.zendesk_email", "value": "agent@acme.example"}]).status_code == 200
+    # Queued without a token: the handoff waits for Settings and is not sent.
+    monkeypatch.setattr(contact_centre, "_start", lambda key: None)
+    assert contact_centre.enqueue_handoff(
+        handoff_id=handoff, title="Card declined", reason="Customer asked for a person",
+        requester_name="Ana Ruiz", requester_email="ana@example.com",
+        messages=[("user", "My card was declined")], link="https://lightwork.acme.example/conversations?goal=7",
+    ) is not None
+    assert contact_centre.status_for(handoff)["state"] == "waiting"
+
+    monkeypatch.setattr(contact_centre, "_post", fake_transport)
+    monkeypatch.setattr(contact_centre, "_start", lambda key: contact_centre.run_delivery(key))
+    # An unrelated save starts nothing.
+    assert _save([{"id": "sandbox.timeout", "value": 30}]).status_code == 200
+    assert calls == [] and contact_centre.status_for(handoff)["state"] == "waiting"
+
+    # Saving the token is a contact-centre save: the waiting handoff is sent now, with no restart.
+    assert _save([{"id": "contact_centre.zendesk_api_token", "value": token}]).status_code == 200
+    status = contact_centre.status_for(handoff)
+    assert status["state"] == "sent" and status["ticket_id"] == "4242"
+    assert len(calls) == 1
+    assert token not in repr(audit_rows)
+
+
+def test_the_contact_centre_resume_runs_after_the_settings_writer_lock_is_released(monkeypatch, audit_rows):
+    from maverick import contact_centre
+    from maverick_dashboard import settings_store
+
+    def writer_lock_is_free() -> bool:
+        # Another thread can take the settings writer lock only once the save has released it.
+        taken = []
+
+        def probe():
+            if settings_store._SETTINGS_LOCK.acquire(timeout=2):
+                taken.append(True)
+                settings_store._SETTINGS_LOCK.release()
+
+        thread = threading.Thread(target=probe)
+        thread.start()
+        thread.join()
+        return bool(taken)
+
+    seen = []
+    monkeypatch.setattr(contact_centre, "resume_all_workspaces",
+                        lambda *, restarted=True: seen.append(writer_lock_is_free()) or 0)
+    assert _save([{"id": "contact_centre.provider", "value": "zendesk"},
+                  {"id": "contact_centre.zendesk_subdomain", "value": "acme-support"},
+                  {"id": "contact_centre.zendesk_email", "value": "agent@acme.example"}]).status_code == 200
+    assert seen == [True]
+    # A save that touches no contact-centre setting resumes nothing.
+    assert _save([{"id": "sandbox.timeout", "value": 30}]).status_code == 200
+    assert seen == [True]
+

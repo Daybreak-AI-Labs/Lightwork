@@ -257,7 +257,17 @@ def _check_siem(value: object, values: Mapping[str, object]) -> Outcome:
     if scheme == "udp":
         return Outcome(False, "This kind of address sends records without any reply, so it can't be tested. "
                               "Check your monitoring service for new records after saving.")
-    return Outcome(False, "Enter an address that starts with https://, tcp:// or udp:// first.")
+    if scheme in {"datadog", "sentinel"}:
+        from maverick.audit import forwarder
+        try:
+            _, host, port, _ = forwarder.parse_dest(text)
+        except ValueError:
+            return Outcome(False, "This address is not in the form this service needs. "
+                                  "Check the example in the help.")
+        reach(host, port)
+        return Outcome(True, "Lightwork reached your security monitoring service.")
+    return Outcome(False, "Enter an address that starts with https://, tcp://, udp://, datadog:// "
+                          "or sentinel:// first.")
 
 
 _DEFAULT_PORTS = {"redis": 6379, "rediss": 6379, "postgres": 5432, "postgresql": 5432}

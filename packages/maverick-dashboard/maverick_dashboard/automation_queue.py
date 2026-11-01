@@ -14,7 +14,8 @@ Replaces the old bespoke asyncio scheduler with maverick-core's durable
   thread whose failure was lost. A small pool of worker threads drains them so a
   slow goal doesn't stall polling.
 * **Dreaming is its own ``dream_cycle`` cron job**, re-armed by the worker.
-* JobQueue's exactly-once ``claim`` dedupes the tick/dream *jobs*; a non-blocking
+* JobQueue's atomic ``claim`` hands each tick/dream *job* to one worker at a time
+  (at-least-once across a lease reclaim); a non-blocking
   ``flock`` around the poll body dedupes the *poll/cursor* critical section, so
   two overlapping ticks (N dashboard workers, a slow source) can't both advance
   the same cursor and double-create goals.

@@ -17,8 +17,10 @@ as real evidence.
 - **Dashboard:** open Get started and use "Run your first task on sample
   data". Pick the team and click Run. If no AI service is connected yet, the
   button reads "Connect an AI service first" and opens Settings.
-- **Command line:** copy the command under the team below. No `--model`
-  flag is needed; the specialist and your configured models decide.
+- **Command line:** copy the command under the team below. It places the
+  sample files in your work folder and gives the run the same brief,
+  specialist and sample marking as the dashboard. No `--model` flag is
+  needed; the specialist and your configured models decide.
 
 The sample files live in the installed package under
 `maverick/sample_outcomes/<team>/`. Each folder has a `README.md` that says
@@ -32,7 +34,7 @@ Specialist: `proc_p2p_exceptions` (the three-way match exception clerk).
 Result waits in **Results**; nothing is staged or paid.
 
 ```
-maverick start "Sample: Match this month's invoices to purchase orders and receipts, and list every exception before anything is paid." --domain proc_p2p_exceptions
+maverick start --sample finance
 ```
 
 Sample data: six invoices, five purchase orders, five goods receipts and a
@@ -46,7 +48,7 @@ Specialist: `data_pii_scan` (the personal-data inventory specialist).
 Result waits in **Results**.
 
 ```
-maverick start "Sample: Work out which systems hold this customer's data and what we must tell them to answer their rights request." --domain data_pii_scan
+maverick start --sample privacy
 ```
 
 Sample data: a five-row data map and one customer access-and-objection
@@ -61,7 +63,7 @@ Specialist: `itgrc_incident_response`. Result waits in **Approvals**
 (containment steps need the on-call person's approval).
 
 ```
-maverick start "Sample: Check these reported emails, tell me which ones are phishing and who needs warning, and propose containment steps." --domain itgrc_incident_response
+maverick start --sample security
 ```
 
 Sample data: a five-message mailbox export and the company's known sender
@@ -74,7 +76,7 @@ details) as suspicious and clears the rest.
 Specialist: `legal_nda_desk`. Result waits in **Results**.
 
 ```
-maverick start "Sample: Review these three NDAs against our playbook and tell me which ones counsel needs to look at and why." --domain legal_nda_desk
+maverick start --sample legal
 ```
 
 Sample data: a seven-point playbook and three short NDAs. A correct result
@@ -87,7 +89,7 @@ clause) while accepting its Delaware governing law.
 Specialist: `hr_onboarding`. Result waits in **Results**.
 
 ```
-maverick start "Sample: Build the day-one plan for our new warehouse coordinator from the hire record and the provisioning checklist." --domain hr_onboarding
+maverick start --sample hr
 ```
 
 Sample data: one new-hire record and the day-one checklist. A correct
@@ -100,7 +102,7 @@ the forklift check.
 Specialist: `proc_po_chaser`. Result waits in **Results**.
 
 ```
-maverick start "Sample: Which open purchase orders are overdue, which ones put us closest to a stockout, and who should chase them?" --domain proc_po_chaser
+maverick start --sample procurement
 ```
 
 Sample data: five open POs and a supplier contact list (today is
@@ -113,7 +115,7 @@ been acknowledged.
 Specialist: `cx_ticket_insights`. Result waits in **Results**.
 
 ```
-maverick start "Sample: Tell me what is driving this month's support tickets, which ones are still open, and where we need more coverage." --domain cx_ticket_insights
+maverick start --sample customer_support
 ```
 
 Sample data: twelve September tickets. A correct result names delivery as
@@ -126,7 +128,7 @@ smaller recurring theme.
 Specialist: `tax_irs_notice`. Result waits in **Results**.
 
 ```
-maverick start "Sample: Read this tax notice, tie the proposed adjustment to our workpapers, and draft a response for the preparer." --domain tax_irs_notice
+maverick start --sample tax
 ```
 
 Sample data: a mock notice proposing a 22,500.00 income adjustment and the

@@ -1,20 +1,19 @@
 {
   "permissions": {
     "allow": [
-      "Bash(aws s3 cp:*)",
-      "Bash(aws codebuild start-build:*)",
-      "Bash(aws codebuild batch-get-builds:*)",
-      "Bash(aws ecs update-service:*)",
-      "Bash(aws ecs wait:*)",
-      "Bash(aws ecs run-task:*)",
-      "Bash(aws ecs list-tasks:*)",
-      "Bash(aws ecs describe-tasks:*)",
-      "Bash(aws ecs describe-services:*)",
-      "Bash(aws ecr describe-images:*)",
-      "Bash(aws logs get-log-events:*)",
-      "Bash(terraform init:*)",
-      "Bash(terraform plan:*)",
-      "Bash(terraform apply:*)"
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git grep:*)",
+      "Bash(git ls-files:*)",
+      "Bash(python3 -m pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python3 -m ruff check:*)",
+      "Bash(python -m ruff check:*)",
+      "Bash(python3 -m vulture:*)",
+      "Bash(python -m vulture:*)",
+      "Bash(bash scripts/pre-push-lint.sh)"
     ]
   }
 }

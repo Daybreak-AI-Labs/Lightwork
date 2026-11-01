@@ -1,4 +1,4 @@
-"""Spreadsheet tool: CSV (stdlib) + XLSX (openpyxl extra) (ROADMAP 2027 H1)."""
+"""Spreadsheet tool: CSV (stdlib) + XLSX (openpyxl extra)."""
 from __future__ import annotations
 
 import json

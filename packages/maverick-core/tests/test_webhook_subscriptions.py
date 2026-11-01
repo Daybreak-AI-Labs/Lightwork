@@ -330,3 +330,26 @@ def test_explicit_urls_keep_the_direct_path(monkeypatch):
     monkeypatch.setattr(webhooks, "_submit", lambda executor, fn, url, *a: posted.append(url) or True)
     assert webhooks.fire("deliverable.approved", {"a": 1}, urls=["https://x.example.com/h"], secret=None) == 1
     assert posted == ["https://x.example.com/h"]
+
+
+def test_a_call_without_a_world_closes_the_world_it_opened(monkeypatch, tmp_path):
+    # open_world() is a new connection each time on an unscoped or Postgres
+    # install: the executor's first attempt and the retry pump pass no world.
+    from maverick import world_model
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "pump.db")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    real_open, closed, opened = world_model.open_world, [], []
+
+    def tracking_open(*args, **kwargs):
+        world = real_open(*args, **kwargs)
+        real_close = world.close
+        world.close = lambda: closed.append(world) or real_close()
+        opened.append(world)
+        return world
+
+    monkeypatch.setattr(world_model, "open_world", tracking_open)
+    assert subs.process_due() == 0
+    assert subs.list_subscriptions() == []
+    assert subs.attempt_delivery("missing") is None
+    assert len(opened) == 3 and closed == opened

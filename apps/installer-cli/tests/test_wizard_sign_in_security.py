@@ -24,10 +24,11 @@ def _write(cfg_dir, monkeypatch, advanced):
     return (cfg_dir / "config.toml").read_text()
 
 
-def _answers(monkeypatch, confirms, texts):
-    confirms, texts = list(confirms), list(texts)
+def _answers(monkeypatch, confirms, texts, selects=()):
+    confirms, texts, selects = list(confirms), list(texts), list(selects)
     monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **k: confirms.pop(0))
     monkeypatch.setattr(wizard, "_q_text", lambda *a, **k: texts.pop(0))
+    monkeypatch.setattr(wizard, "_q_select", lambda *a, **k: selects.pop(0) if selects else k.get("default"))
 
 
 def test_step_declined_writes_nothing(tmp_path, monkeypatch):
@@ -35,8 +36,9 @@ def test_step_declined_writes_nothing(tmp_path, monkeypatch):
     # Browser time limits declined, then second factor declined.
     _answers(monkeypatch, [False, False], [""])
     assert wizard.pick_sign_in_security(True) == {}
-    # Without company sign-in the second-factor question is not even asked.
-    _answers(monkeypatch, [False], [""])
+    # Without company sign-in the second-factor question is not even asked; the
+    # owner's authenticator choice is, and optional writes nothing.
+    _answers(monkeypatch, [False], [""], ["optional"])
     assert wizard.pick_sign_in_security(False) == {}
     cfg_dir = tmp_path / ".maverick"
     cfg_dir.mkdir(parents=True)
@@ -74,6 +76,23 @@ def test_step_answers_write_and_are_read(tmp_path, monkeypatch):
     assert config.get_ip_allowlist()["cidrs"] == ["10.0.0.0/8", "203.0.113.7"]
     sessions = config.get_auth_sessions()
     assert (sessions["company_hours"], sessions["idle_minutes"]) == (12, 45)
+
+
+def test_owner_authenticator_choice_is_written_and_read(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _answers(monkeypatch, [False, False], ["10.0.0.0/8"], ["required"])
+    chosen = wizard.pick_sign_in_security(False)
+    assert chosen == {"local_owner_totp": "required", "cidrs": ["10.0.0.0/8"]}
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True)
+    cfg = _write(cfg_dir, monkeypatch, {"sign_in_security": chosen})
+    parsed = tomllib.loads(cfg)
+    assert parsed["auth"]["local_owner"] == {"totp": "required"}
+    assert "mfa" not in parsed["auth"]
+    from maverick import config
+
+    config.reset_config_cache()
+    assert config.get_auth_local_owner_totp() == "required"
 
 
 def test_bad_address_is_asked_again(tmp_path, monkeypatch):

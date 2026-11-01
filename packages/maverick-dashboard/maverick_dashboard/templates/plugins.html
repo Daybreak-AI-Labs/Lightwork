@@ -310,7 +310,7 @@
 {% endblock %}
 {% block scripts_extra %}
   <script src="/static/lightwork-plugins.js" defer></script>
-  <script>{% include "flow_designer_action_fields.js" %}</script>
+  <script nonce="{{ csp_script_nonce }}">{% include "flow_designer_action_fields.js" %}</script>
   <script src="/static/lightwork-plugin-practice.js" defer></script>
   <script src="/static/lightwork-plugin-workbench.js" defer></script>
   <script src="/static/lightwork-tool-ops.js" defer></script>

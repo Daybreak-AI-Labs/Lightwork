@@ -1,4 +1,4 @@
-"""Cost/perf canary per release (roadmap: 2028 H2 performance).
+"""Cost/perf canary per release.
 
 A release can pass every test and still quietly get **slower or pricier**.
 This is the guard: snapshot a release's cost/perf metrics, and before shipping

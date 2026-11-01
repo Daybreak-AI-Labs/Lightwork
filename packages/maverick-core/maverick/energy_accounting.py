@@ -1,5 +1,5 @@
 """Energy/CO2 accounting for token usage — clearly labeled ESTIMATES
-(roadmap: 2027 H2 performance).
+.
 
 Sustainability reporting increasingly asks what an agent fleet's inference
 *footprint* is, but vendors don't publish per-token energy. What exists are

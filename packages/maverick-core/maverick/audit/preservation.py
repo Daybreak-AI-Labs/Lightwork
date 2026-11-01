@@ -3,6 +3,11 @@
 The retention stores cannot reliably map every record to a rights-case subject.
 Any active case hold therefore blocks the entire workspace's broad purge.
 External holds still require the records owner's independent confirmation.
+
+Active eDiscovery matters are deliberately absent from this snapshot.  People
+reviewing their own data can read it, and a matter's existence is visible only
+to audit access.  Broad purges check matters themselves (see
+``maverick.ediscovery.assert_no_active_matters``).
 """
 from __future__ import annotations
 

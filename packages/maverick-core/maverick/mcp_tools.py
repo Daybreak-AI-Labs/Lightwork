@@ -113,7 +113,7 @@ def selected_tools_from_mcp(clients, servers, *, authorize=None, binding_guards=
 def tools_from_mcp(client: MCPClient, *, authorize: Callable[[str], bool] | None = None, binding_guards: dict[str, Callable[[], bool]] | None = None, source_guard: Callable[[], bool] | None = None) -> list[Tool]:
     """Return a Tool per MCP-exposed tool, namespaced by server.
 
-    Council finding (Tier 0): MCP tool descriptions and inputSchema
+    MCP tool descriptions and inputSchema
     fields were rendered into the agent's tool catalog verbatim, so a
     hostile MCP server could put attack instructions in a description
     that the LLM would treat as authoritative. Each description is now

@@ -5,7 +5,7 @@ children in parallel via asyncio.gather and returns their findings.
 
 Both respect the swarm's max_depth and the shared budget.
 
-v0.2 (council AI-safety review): added a fan-out anomaly cap. An agent
+v0.2: added a fan-out anomaly cap. An agent
 asking to spawn 50 siblings burns budget before refusal triggers.
 ``MAVERICK_MAX_SWARM_FANOUT`` (default 8) caps the per-call branching
 factor. Excess agents are dropped with a warning posted to the
@@ -248,7 +248,7 @@ def spawn_subagent_tool(parent: Agent) -> Tool:
                 f"ERROR: per-goal spawn cap ({parent.ctx.max_total_spawns}) reached"
             )
 
-        # May 26 council fix (agent-loop audit #3): inherit max_steps
+        # Inherit max_steps
         # from the parent. Without this, sub-agents fall back to env
         # MAVERICK_MAX_STEPS or the 25 default — silently dropping the
         # operator's intent when the parent was constructed with a
@@ -482,7 +482,7 @@ def _format_swarm_results(parent: Agent, children: list, results: list,
     trailing children once spent — every child keeps an identity line, and
     full answers remain in the run record.
 
-    W1-29: ``dropped_specs`` are the tail of a requested fan-out that got cut
+    ``dropped_specs`` are the tail of a requested fan-out that got cut
     by the per-call cap. The cap is also posted to the blackboard, but a
     blackboard post is only ever rendered into the FIRST user turn
     (agent.py's ``bb.render(40)``) -- it never reaches the model again once
@@ -643,7 +643,7 @@ async def _run_swarm(parent: Agent, args: dict) -> str:
                 extra={"name": child.name, "final": res.final or ""},
             )
 
-    # Karpathy SOTA-review item: measure disagreement across the children's
+    # Measure disagreement across the children's
     # FINAL answers, record it on the blackboard, and escalate FINAL
     # verification (Loop 1) when the swarm diverged.
     escalated = _record_swarm_disagreement(parent, children, results)

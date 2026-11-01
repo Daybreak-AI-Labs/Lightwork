@@ -1,6 +1,6 @@
 # RFC 0003: Platform contracts v1
 
-- Status: accepted for local implementation
+- Status: **Implemented.** The contract layer is `maverick.platform_contracts`.
 - Scope: additive transport projections over existing Lightwork authorities
 - First consumer: governed vendor onboarding
 

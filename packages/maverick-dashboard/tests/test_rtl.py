@@ -18,7 +18,7 @@ def test_rtl_lang_set_covers_the_four_scripts():
 
 
 def test_arabic_selection_keeps_the_english_body_left_to_right():
-    """UX-198: the page body is English, so ``<html>`` declares ``en`` and
+    """The page body is English, so ``<html>`` declares ``en`` and
     ``ltr``; only the translated chrome strings carry ``lang="ar"``."""
     r = client.get("/goals", params={"lang": "ar"})
     assert r.status_code == 200

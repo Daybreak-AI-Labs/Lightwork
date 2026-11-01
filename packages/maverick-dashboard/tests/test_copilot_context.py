@@ -22,6 +22,7 @@ CANONICAL_CONTEXTS = {
     "/run-tree": "Branches",
     "/spend": "Spend",
     "/savings": "Savings",
+    "/work-value": "Work value & opportunities",
     "/shoring": "Autonomous shoring",
     "/knowledge-access": "Knowledge",
     "/human-conversations": "Human conversations",

@@ -1,4 +1,4 @@
-"""Workspace snapshot / restore (ROADMAP 2028 H1)."""
+"""Workspace snapshot / restore."""
 from __future__ import annotations
 
 import errno

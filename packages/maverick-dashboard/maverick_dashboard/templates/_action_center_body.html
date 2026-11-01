@@ -32,7 +32,7 @@
   <div id="ac-queue-failed"></div>
   <button class="btn" type="button" id="ac-queue-refresh">Refresh</button>
 </div>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   var counts = document.getElementById('ac-queue-counts'), box = document.getElementById('ac-queue-failed');
   function el(tag, cls, text) { var e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }

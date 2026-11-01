@@ -82,6 +82,8 @@ def test_api_goals_blocks_when_no_provider_key(monkeypatch, tmp_path):
     )
     assert resp.status_code == 400
     assert "maverick init" in resp.json()["detail"]
+    # An existing installation changes keys in Settings: `maverick init` refuses there.
+    assert "Lightwork > Settings" in resp.json()["detail"]
 
 
 def test_api_goals_reports_unavailable_runtime_policy_as_503(

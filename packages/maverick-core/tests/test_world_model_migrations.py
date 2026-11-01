@@ -1,6 +1,6 @@
 """Schema migration tests: forward-only v1 -> v2 -> v3.
 
-Council surfaced that we'd shipped migrations without tests, so a future
+Migrations had shipped without tests, so a future
 breaking change could silently corrupt a user's ~/.maverick/world.db.
 
 These tests build a *legacy* schema on disk (no schema_version row, no
@@ -270,7 +270,7 @@ def test_recent_goal_events_returns_tail_in_chronological_order(tmp_path):
 
 
 def test_failing_migration_rolls_back_atomically(tmp_path, monkeypatch):
-    """W1-56: Python's sqlite3 legacy driver auto-commits DDL/backfill
+    """Python's sqlite3 legacy driver auto-commits DDL/backfill
     statements one at a time outside any transaction. Without an explicit
     wrapping transaction per version, a migration whose SECOND statement
     fails still left its FIRST statement permanently applied while

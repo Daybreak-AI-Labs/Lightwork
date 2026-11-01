@@ -117,3 +117,25 @@ def test_permissions_page_carries_the_switcher(tmp_path, monkeypatch):
     assert "/api/v1/sandbox/status" in t
     assert "/api/v1/sandbox/backend" in t
     assert "acknowledge_local_risk" in t  # local switch is never a bare click
+
+
+@pytest.mark.parametrize(("binary", "query"), [
+    ("docker", ["version", "--format", "{{.Server.Version}}"]),  # skips the CLI plugins' metadata
+    ("podman", ["info", "--format", "{{.ServerVersion}}"]),
+])
+def test_the_daemon_probe_asks_for_the_server_version(monkeypatch, binary, query):
+    import subprocess
+
+    import maverick_dashboard.api as api
+
+    calls, answers = [], iter([
+        subprocess.CompletedProcess([], 0, stdout="27.1.1\n", stderr=""),
+        subprocess.CompletedProcess([], 1, stdout="", stderr="\nfailed to connect to the daemon\n"),
+    ])
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: calls.append((argv, kw)) or next(answers))
+
+    assert api._probe_container_daemon(binary) == {"available": True, "detail": "Ready · version 27.1.1"}
+    assert api._probe_container_daemon(binary) == {"available": False, "detail": "failed to connect to the daemon"}
+    assert [argv for argv, _ in calls] == [[f"/usr/bin/{binary}", *query]] * 2
+    assert all(kw.get("timeout") == 6 and "shell" not in kw for _, kw in calls)

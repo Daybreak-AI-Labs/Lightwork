@@ -1,4 +1,4 @@
-"""Trace pinning to commit (roadmap: 2027 H2 UX).
+"""Trace pinning to commit.
 
 A replayed trace is only meaningful against the code it ran on. This stamps
 each run with the workspace's git state — commit, branch, and whether the

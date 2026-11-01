@@ -1,7 +1,7 @@
 """The full setup guide (``maverick init``) inside the app.
 
 The terminal setup assistant (``apps/installer-cli/maverick_installer/wizard.py``)
-is the source of truth for what setup covers. Its advanced flow walks 42 steps
+is the source of truth for what setup covers. Its advanced flow walks 44 steps
 (``wizard.STEPS``); :data:`STEPS` below names, for each one, where the same
 settings are changed in this app. Most live in All settings (the catalog of
 product settings, which writes the same keys the assistant writes); the rest
@@ -80,9 +80,15 @@ STEPS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ("finance", "Finance", "Finance tools and their limits.", ("finance", "finance_operations"), ""),
     ("value", "Savings assumptions", "Your cost of doing work by hand, for the savings figures.", ("value",),
      "/savings"),
+    ("intent_value", "Work value and opportunities", "Estimated labor value, execution costs and optional workflow suggestions.",
+     ("intent_value",), "/work-value"),
     ("assessments", "Assessments", "Help with assessments and reviews.", ("assessments",), ""),
     ("security_suite", "Security and compliance", "The security and compliance modules.",
      ("governance_agents", "threat_hunt", "env_hunt"), ""),
+    ("monitoring", "Monitoring and key management",
+     "Where timing traces, measurements and the activity record are sent, and the cloud key "
+     "service. In All settings they are under Performance and Security.",
+     ("observability", "kms", "audit"), "/settings/all"),
     ("advanced", "Advanced reasoning", "Planning, checking, showing the plan before acting and other advanced options.",
      ("reflexion", "planning", "verification", "autonomy"), ""),
     ("api_keys", "API access", "Personal and service-account keys for scripts and integrations.",

@@ -215,3 +215,16 @@ def test_descendant_resume_inherits_remaining_handoff_ceiling(offered):
     budget = SimpleNamespace(max_dollars=7.0)
     apply_ceiling(world, child, budget)
     assert budget.max_dollars == 1.6
+
+
+def test_the_inbox_states_each_handoff_from_the_listed_record(offered, monkeypatch):
+    # The inbox used get() per row: another store read and authorization each.
+    _world, _goal, _grants, bundles, row, _, _ = offered
+    recipient = TaskHandoffs(bundles("user:recipient"))
+    assert [(item["id"], item["state"]) for item in recipient.inbox()] == [(row["id"], "offered")]
+    accept(offered)
+    reads = []
+    real_get = recipient.store.get
+    monkeypatch.setattr(recipient.store, "get", lambda identifier: reads.append(identifier) or real_get(identifier))
+    assert [(item["id"], item["state"]) for item in recipient.inbox()] == [(row["id"], "accepted")]
+    assert reads == []

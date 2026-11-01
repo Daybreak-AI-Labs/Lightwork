@@ -229,3 +229,25 @@ def test_queued_inbox_unconfirmed_audit_never_claims_purge(monkeypatch):
     with pytest.raises(ValueError, match="unconfirmed"):
         deletion._erase_target(None, {"id": "PDR-one", "owner": "user:a", "reviewer": "user:b", "channel": "dashboard", "user_id": "a"},
                                {"store": "conversation_inbox", "records": [{"id": "CI-one", "revision": 3}]})
+
+
+def test_diagnostic_report_erasure_includes_reports_archived_when_full(monkeypatch):
+    # A full diagnostics namespace archives its oldest settled reports; they are
+    # still the person's data, so erasure must list and delete them too.
+    import maverick.audit as audit
+    from maverick.governed_records import GovernedRecordStore
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(audit, "record", lambda *_args, **_row: True)
+    store = GovernedRecordStore("owned_task_diagnostics", "OTD", "owned_task_diagnostics")
+    monkeypatch.setattr(deletion, "DIAGNOSTICS", store)
+    store.create({"id": "OTD-ada-old", "owner": "user:ada", "goal_id": 1, "status": "done"},
+                 action="prepare_report", actor="user:ada", max_records=1)
+    store.create({"id": "OTD-bob-new", "owner": "user:bob", "goal_id": 2, "status": "done"},
+                 action="prepare_report", actor="user:bob", max_records=1)
+    assert [row["id"] for row in store.list_archived()] == ["OTD-ada-old"]
+
+    records = deletion._diagnostic_records("user:ada")
+    assert [row["id"] for row in records] == ["OTD-ada-old"]
+    assert store.delete(records[0]["id"], expected_revision=records[0]["revision"]) is True
+    assert store.get("OTD-ada-old") is None

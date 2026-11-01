@@ -1,5 +1,4 @@
-"""Contract tests for the Emacs + Neovim integrations (roadmap 2027-H1
-Ecosystem). Same style as the VS Code extension contract: the artifacts exist,
+"""Contract tests for the Emacs + Neovim integrations. Same style as the VS Code extension contract: the artifacts exist,
 are structurally sound, and only call CLI verbs that actually exist."""
 from __future__ import annotations
 

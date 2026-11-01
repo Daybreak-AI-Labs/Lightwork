@@ -11,7 +11,7 @@ standard envelope pattern:
     Key**, the KEK), under the tenant's own ``keys/dek.wrapped`` (chmod 600);
   - the KEK lives in a :class:`KMS`. The default :class:`LocalKMS` derives the
     KEK from the at-rest key material (or ``MAVERICK_KMS_KEK``); a cloud KMS
-    (AWS/GCP/Vault) is a drop-in that implements ``wrap``/``unwrap`` so the KEK
+    (AWS/GCP/Vault/Azure) is a drop-in that implements ``wrap``/``unwrap`` so the KEK
     never leaves the HSM.
 
 Rotating the KEK (re-wrap the same DEK) is instant and re-encrypts nothing;
@@ -236,7 +236,7 @@ def get_kms(tenant_id: str | None = None) -> KMS:
     cfg = _kms_config_for(tenant_id)
     provider = str(cfg.get("provider") or "local")
     if provider not in ("", "local"):
-        # Cloud KMS (aws/gcp/vault): the KEK stays in the customer's HSM (BYOK).
+        # Cloud KMS (aws/gcp/vault/azure): the KEK stays in the customer's HSM (BYOK).
         # An unknown provider, or a missing SDK, raises EncryptionUnavailable
         # rather than silently falling back to in-process LocalKMS -- a configured
         # HSM-backed provider must never be downgraded to in-process key material

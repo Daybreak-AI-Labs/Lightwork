@@ -103,7 +103,7 @@
     </p>
     <a class="btn" href="/learned">Review learned improvements</a>
   </section>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     (function () {
       var time = document.getElementById('lrn-night-time');
       if (!time) return;
@@ -161,7 +161,7 @@
       <span class="lrn__enable-note" id="lrn-enable-msg" aria-live="polite" style="margin-top:0;"></span>
     </div>
   </div>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     var btn = document.getElementById('lrn-enable');
     if (!btn) return;
@@ -238,7 +238,7 @@
         {% endfor %}
       </ul>
       </details>
-      <script>
+      <script nonce="{{ csp_script_nonce }}">
       (function () {
         var list = document.getElementById('lrn-parts');
         if (!list) return;
@@ -292,8 +292,8 @@
     {% set _sec = c.how.split(']', 1)[0][1:] %}
     {% if _members.update({_sec: _members.get(_sec, []) + [c.label]}) %}{% endif %}
   {% endfor %}
-  <script type="application/json" id="lrn-switch-members">{{ _members | tojson }}</script>
-  <script>
+  <script nonce="{{ csp_script_nonce }}" type="application/json" id="lrn-switch-members">{{ _members | tojson }}</script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     // threat_hunt / env_hunt are switched from the Security page, not here.
     var HIDDEN = { threat_hunt: true, env_hunt: true };
@@ -476,7 +476,7 @@
       <div id="lrn-prove-result" role="status" aria-live="polite"></div>
     </div>
   </section>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     function $(id) { return document.getElementById(id); }
     function show(id, lines) {
@@ -713,7 +713,7 @@
       <button type="button" class="btn btn--primary" id="lrn-flows-on"
               {% if not learning_can_manage %}disabled aria-disabled="true"{% endif %}>Turn on workflows</button>
       <span class="lrn__enable-note" id="lrn-flows-msg" role="status" aria-live="polite"></span>
-      <script>
+      <script nonce="{{ csp_script_nonce }}">
       (function () {
         var btn = document.getElementById('lrn-flows-on');
         if (!btn) return;
@@ -762,7 +762,7 @@
         <span class="lrn__enable-note" style="margin-top:0;">Suggestions wait for complete review. Automatic undo is a separate control.</span>
         <span class="lrn__enable-note" id="lrn-auto-msg" aria-live="polite" style="margin-top:0;"></span>
       </div>
-      <script>
+      <script nonce="{{ csp_script_nonce }}">
       (function () {
         var canManage = {{ 'true' if learning_can_manage else 'false' }};
         function wire(id, field) {
@@ -834,7 +834,7 @@
       <span class="lrn__enable-note">This is set by your IT administrator and cannot be changed here.</span>
       {% endif %}
       <span class="lrn__enable-note" id="lrn-dgm-msg" aria-live="polite"></span>
-      <script>
+      <script nonce="{{ csp_script_nonce }}">
       (function () {
         var btn = document.getElementById('lrn-dgm');
         if (!btn) return;
@@ -879,7 +879,7 @@
 </div>
 
 <script src="/static/board.js"></script>
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   var B = window.LWBoard;
@@ -1013,7 +1013,7 @@
   <script src="/static/lightwork-feature-actions.js" defer></script>
   </div>
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     var tabs = Array.from(document.querySelectorAll('[data-learning-tab]'));
     var names = ['overview', 'controls', 'review'];

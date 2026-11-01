@@ -1225,3 +1225,99 @@ def test_session_quota_bounds_create_stop_churn(store, monkeypatch):
 
     with pytest.raises(WorkDiscoveryStoreError, match="session quota"):
         store.create_session(policy=policy)
+
+
+def _raw_event_rows(store):
+    with sqlite3.connect(store.path) as conn:
+        return conn.execute(
+            "SELECT event_id,event_digest,ingested_at,expires_at,payload FROM ekko_events "
+            "WHERE tenant_key=? AND owner_key=? AND device_key=? ORDER BY event_id",
+            store._scope,
+        ).fetchall()
+
+
+def test_governed_projection_excludes_expired_events_without_deleting_them(store):
+    # A read of the knowledge projection must not write: expired ciphertext is
+    # left for the store's own maintenance paths (append, list, status, prune).
+    policy = _policy()
+    store.enroll(policy)
+    store.create_session(policy=policy, session_id="expired-session")
+    _append(store, _event("expired-session"), policy)
+    stored = _raw_event_rows(store)
+    assert len(stored) == 1
+    # Events keep 14 days; enrollment lasts 30 days. Read 15 days later.
+    later = WorkDiscoveryStore(
+        "alice", "laptop-1", tenant="acme", path=store.path,
+        clock=lambda: NOW + 15 * 86_400.0, authority_check=_no_authority_check,
+    )
+
+    projection = later.governed_candidate_projection()
+
+    assert projection["lineage"]["event_count"] == 0
+    assert projection["candidates"] == []
+    assert _raw_event_rows(later) == stored
+
+
+def test_an_explicit_purge_deletes_only_this_scopes_expired_ciphertext(store):
+    policy = _policy()
+    store.enroll(policy)
+    store.create_session(policy=policy, session_id="expired-session")
+    _append(store, _event("expired-session"), policy)
+    assert len(_raw_event_rows(store)) == 1
+    # Events keep 14 days. Fifteen days later the explicit write path removes the expired row.
+    later = WorkDiscoveryStore(
+        "alice", "laptop-1", tenant="acme", path=store.path,
+        clock=lambda: NOW + 15 * 86_400.0, authority_check=_no_authority_check,
+    )
+    other_device = WorkDiscoveryStore(
+        "alice", "laptop-2", tenant="acme", path=store.path,
+        clock=lambda: NOW + 15 * 86_400.0, authority_check=_no_authority_check,
+    )
+
+    assert other_device.purge_expired() == 0
+    assert _raw_event_rows(later) != []
+    assert later.purge_expired() == 1
+    assert _raw_event_rows(later) == []
+    assert later.purge_expired() == 0
+
+
+def test_an_explicit_purge_queues_its_retention_record_with_the_deletion(store):
+    policy = _policy()
+    store.enroll(policy)
+    store.create_session(policy=policy, session_id="expired-session")
+    _append(store, _event("expired-session"), policy)
+    later = WorkDiscoveryStore(
+        "alice", "laptop-1", tenant="acme", path=store.path,
+        clock=lambda: NOW + 15 * 86_400.0, authority_check=_no_authority_check,
+    )
+    queued_before = later.pending_audit_count()
+
+    assert later.purge_expired() == 1
+    # The deletion and its record commit together: one new outbox row, and the rows are gone.
+    assert later.pending_audit_count() == queued_before + 1
+    assert _raw_event_rows(later) == []
+    delivered = []
+    later.flush_audit_outbox(
+        recorder=lambda kind, **payload: delivered.append((kind, payload["lifecycle"])) or True,
+    )
+    assert ("ekko_retention_purge", {"state": "expired_removed", "removed": 1}) in delivered
+
+
+def test_a_full_audit_outbox_keeps_the_expired_rows_until_a_purge_can_record_them(store, monkeypatch):
+    policy = _policy()
+    store.enroll(policy)
+    store.create_session(policy=policy, session_id="expired-session")
+    _append(store, _event("expired-session"), policy)
+    later = WorkDiscoveryStore(
+        "alice", "laptop-1", tenant="acme", path=store.path,
+        clock=lambda: NOW + 15 * 86_400.0, authority_check=_no_authority_check,
+    )
+
+    monkeypatch.setattr("maverick.work_discovery_store.MAX_AUDIT_OUTBOX", 0)
+    with pytest.raises(WorkDiscoveryStoreError, match="outbox is full"):
+        later.purge_expired()
+    assert _raw_event_rows(later) != []
+
+    monkeypatch.setattr("maverick.work_discovery_store.MAX_AUDIT_OUTBOX", 2_000)
+    assert later.purge_expired() == 1
+    assert _raw_event_rows(later) == []

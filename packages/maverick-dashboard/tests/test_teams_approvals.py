@@ -100,7 +100,7 @@ def test_high_and_critical_need_confirmation_and_acknowledgement(monkeypatch):
     monkeypatch.setattr("maverick.audit.audit_event", spy)
     ack = {"acknowledged": True}
     for risk in ("high", "critical"):
-        aid, binding = _approval(risk)
+        aid, binding = _approval(risk, undoable=True)
         with pytest.raises(ApprovalDecisionRefused, match="Confirm it") as exc:
             _decide(approval_id=aid, status="approved", binding=binding)
         assert exc.value.status_code == 428
@@ -133,7 +133,7 @@ def test_high_and_critical_need_confirmation_and_acknowledgement(monkeypatch):
 def test_undo_from_chat_uses_the_shared_undo_and_audits_it(monkeypatch):
     from maverick import audit
     from maverick_dashboard.approval_decisions import ApprovalDecisionRefused, undo_from_channel
-    aid, binding = _approval()
+    aid, binding = _approval(undoable=True)
     with pytest.raises(ApprovalDecisionRefused, match="no decision to undo"):
         undo_from_channel(approval_id=aid, principal="user:alice", channel="teams")
     first = _decide(approval_id=aid, status="approved", binding=binding)
