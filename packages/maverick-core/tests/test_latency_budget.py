@@ -1,4 +1,4 @@
-"""Per-tool latency budget (ROADMAP 2028 H2)."""
+"""Per-tool latency budget."""
 from __future__ import annotations
 
 import pytest

@@ -391,7 +391,7 @@
         body.classList.add('muted');
         const url = '/api/v1/goals/' + encodeURIComponent(d.dataset.goal) +
                     '/artifacts/history?title=' + encodeURIComponent(d.dataset.title);
-        // W3-75: a non-2xx (auth lapsed, goal gone, server error) used to
+        // A non-2xx (auth lapsed, goal gone, server error) used to
         // render as "No history." or leave "Loading…" forever, and the loaded
         // flag meant re-opening never retried. Check the status, and on any
         // failure show why and clear the flag so the next toggle retries.

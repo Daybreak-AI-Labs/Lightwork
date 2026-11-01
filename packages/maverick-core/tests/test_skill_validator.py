@@ -1,4 +1,4 @@
-"""`maverick skill validate` — pre-publish SKILL.md linter (ROADMAP 2027 H1)."""
+"""`maverick skill validate` — pre-publish SKILL.md linter."""
 from __future__ import annotations
 
 from pathlib import Path

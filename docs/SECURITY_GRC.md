@@ -354,7 +354,7 @@ cd demo/model-risk-ai-assurance-officer && bash run_standalone.sh
 The launchers force `GRC_STANDALONE=1`, `PLATFORM_HUNTER_STANDALONE=1`, and
 `ENV_HUNTER_STANDALONE=1`, respectively. GRC Concierge is deliberately
 local-only; the two hunter backends can use a compatible installed analysis
-engine but retain reduced-SKU storage and authority boundaries. Their backend
+engine but keep the standalone storage and authority boundaries. Their backend
 seams bind application behavior; route handlers and templates do not silently
 claim integrated-platform governance. The Model Risk standalone forces
 `MODEL_RISK_OFFICER_STANDALONE=1`; it can produce a readiness report but has no
@@ -396,8 +396,9 @@ breach-notification regimes. Treat every clock as an aid, never a legal verdict:
 
 ## Evidence and approval boundary
 
-Across all three products, deterministic code creates control and detection
-verdicts from cited inputs. A model may summarize, triage, or draft a report; it
+Across the integrated platform and the standalone products, deterministic code
+creates control and detection verdicts from cited inputs. A model may summarize,
+triage, or draft a report; it
 does not become the deciding control test, threat label, materiality decision, or
 authorization. Human decisions are explicit records. Only the integrated
 platform can place those records on Lightwork's signed audit chain and approval

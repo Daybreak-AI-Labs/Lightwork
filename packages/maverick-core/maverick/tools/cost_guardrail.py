@@ -1,4 +1,4 @@
-"""Long-context cost guardrail (roadmap: 2028 H1 — ">$50/run gate").
+"""Long-context cost guardrail.
 
 Gate a run on its projected dollar cost before it executes. Deterministic and
 offline: given the projected spend and a limit, return ALLOW well under budget,

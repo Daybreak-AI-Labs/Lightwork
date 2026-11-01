@@ -1,8 +1,7 @@
 """`maverick doctor`: end-to-end health check with remediation.
 
 v0.1.6: every red/yellow row now ends with an actionable verb so users
-aren't told "something's wrong" without knowing what to do (council UX
-review).
+aren't told "something's wrong" without knowing what to do.
 """
 from __future__ import annotations
 
@@ -134,8 +133,7 @@ def _check_anthropic() -> None:
         # Not a failure when some OTHER provider is configured (env key,
         # base-url env, or a [providers.<name>] table): a self-hosted
         # Ollama/vLLM deployment is healthy with no Anthropic key at all.
-        # Doctor used to hard-RED here regardless (predicate split-brain,
-        # platform-test finding).
+        # Doctor used to hard-RED here regardless (predicate split-brain).
         try:
             from .config import any_provider_configured
             other = any_provider_configured()

@@ -16,7 +16,7 @@ names are refused.
 | `openrouter`, `gemini`, `moonshot`, `deepseek`, `xai`, `ollama`, `tgi`, `vllm`, `openai_compatible` | `api_key`, `base_url` |
 | `codex_cli` | `api_key`, `binary`, `sandbox_mode`, `timeout_seconds`, `cwd` |
 
-Headers remain supported by the same four adapters. This change does not infer
+Headers remain supported by the same four adapters. Lightwork does not infer
 header, reasoning, tool or streaming support from the phrase "OpenAI compatible"
 or forward policy headers to additional endpoints. `codex_cli` cannot select a
 backend with `base_url`; the external CLI owns that selection.
@@ -68,7 +68,7 @@ freeze externally rotated role credentials, credential files, machine trust
 stores or operating-system DNS. No live AWS/Azure authentication is established
 by constructor tests.
 
-Migration: previously ignored provider fields now fail visibly. For a required
+Upgrading: provider fields that earlier versions ignored now fail visibly. For a required
 residency/retention header, choose a supported adapter and an explicitly reviewed
 endpoint; deleting the field means removing that requested control. Azure
 deployment/API version/region and SDK timeouts retain their documented

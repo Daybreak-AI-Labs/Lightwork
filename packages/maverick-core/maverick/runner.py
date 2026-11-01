@@ -5,7 +5,7 @@ completion." The dashboard's BackgroundTask, the REST API, the MCP
 server's maverick_start tool, and any future channel adapter all funnel
 through here.
 
-Council-flagged: the previous implementation was duplicated across
+The previous implementation was duplicated across
 ``dashboard/app.py``, ``dashboard/api.py``, and ``mcp/server.py`` with
 three different hardcoded budgets and divergent error handling.
 Extracting once means every adapter inherits the same concurrency cap,
@@ -83,7 +83,7 @@ _inflight_lock = threading.Lock()
 _inflight_count = 0
 _accepting_goals = True
 
-# W1-72: run_goal_in_background_async used to hand the ENTIRE goal run (up to
+# Run_goal_in_background_async used to hand the ENTIRE goal run (up to
 # DEFAULT_MAX_WALL_SECONDS, plus up to 2x _ACQUIRE_TIMEOUT of semaphore
 # waiting) to asyncio.to_thread, which uses the event loop's default
 # ThreadPoolExecutor -- sized min(32, cpu_count()+4) by CPython, e.g. 8 on a
@@ -416,8 +416,8 @@ def run_goal_in_thread(
     callers' contract (return a goal id, poll for result) doesn't surface
     mid-run exceptions.
 
-    ``acquire_timeout`` lets a caller that can cheaply retry later (W1-73:
-    the job-queue's run_goal/start_goal handlers, which share a small worker
+    ``acquire_timeout`` lets a caller that can cheaply retry later (for
+    example the job-queue's run_goal/start_goal handlers, which share a small worker
     pool with cron ticks/flow sweeps) use a short timeout instead of blocking
     a whole worker thread for up to ``_ACQUIRE_TIMEOUT`` per semaphore.
 
@@ -722,7 +722,7 @@ async def run_goal_in_background_async(
 
     Dispatcher submission is deliberately synchronous: local execution waits
     for the terminal status, queue submission may perform broker I/O, and gRPC
-    waits for the worker RPC. Runs on the dedicated ``_goal_executor`` (W1-72)
+    waits for the worker RPC. Runs on the dedicated ``_goal_executor``
     rather than ``asyncio.to_thread``'s shared default pool, so a long local
     run can't starve other to_thread callers or get starved by them, and the
     advertised MAX_CONCURRENT_GOALS ceiling is actually reachable regardless

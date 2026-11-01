@@ -1,4 +1,4 @@
-"""CrewAI adapter (roadmap: 2027 H2 — interop with CrewAI).
+"""CrewAI adapter.
 
 Pure, offline translation between a CrewAI ``Task`` and a Lightwork goal. No SDK
 import, no network — just dict/string reshaping so a CrewAI task can drive a

@@ -40,7 +40,7 @@ def _binding(implementation: str, authority: str, active: bool = True) -> dict:
 
 def _integrated_only(path: str) -> dict:
     return _binding(
-        f"Not bound in this reduced SKU; use integrated Lightwork {path}",
+        f"Not available in this standalone app; use integrated Lightwork {path}",
         "integrated-lightwork-only",
         False,
     )

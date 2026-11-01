@@ -72,8 +72,7 @@ class TestGoals:
         assert resp.headers["idempotency-replayed"] == "false"
         assert len(called) == 1
         assert called[0][0] == data["id"]
-        # Verify payload's max_dollars propagated (the fix from the council
-        # security review).
+        # Verify payload's max_dollars propagated.
         assert called[0][1] == 1.0
 
     def test_create_uses_installed_dispatcher_not_local_execution(self, monkeypatch):
@@ -545,7 +544,7 @@ class TestSkills:
         assert resp.status_code == 400
 
     def test_install_blocked_without_opt_in(self):
-        """Without MAVERICK_ALLOW_SKILL_INSTALL=1, endpoint refuses (council fix)."""
+        """Without MAVERICK_ALLOW_SKILL_INSTALL=1, endpoint refuses."""
         resp = client.post("/api/v1/skills", json={"source": "gh:any/repo"})
         assert resp.status_code == 403
         assert "MAVERICK_ALLOW_SKILL_INSTALL" in resp.json()["detail"]
@@ -665,7 +664,7 @@ class TestOpenAPI:
         assert resp.status_code == 200
 
     def test_api_endpoint_requires_bearer_when_token_set(self, monkeypatch):
-        """Council test-coverage finding: /api/v1 was never tested with auth.
+        """/api/v1 was never tested with auth.
 
         Silent auth bypass on the API would be catastrophic; this test
         catches that regression class.
@@ -683,7 +682,7 @@ class TestOpenAPI:
         assert resp.status_code == 200
 
     def test_api_endpoint_with_query_token_rejected(self, monkeypatch):
-        """Council security pass: `?token=...` leaks via Referer/history.
+        """`?token=...` leaks via Referer/history.
 
         Removed; callers must send Authorization: Bearer.
         """
@@ -729,7 +728,7 @@ class TestOpenAPI:
 
 class TestMetrics:
     def test_healthz_redacts_exception_text_when_token_set(self, tmp_path, monkeypatch):
-        """Wave 4 council security finding: on a VPS with
+        """On a VPS with
         MAVERICK_DASHBOARD_TOKEN set, /healthz must NOT leak the
         absolute DB path in error messages (it exposes the OS username).
 

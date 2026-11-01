@@ -85,7 +85,7 @@ class OffHostSigningRequiredError(AuditRefused):
 
     An :class:`~maverick.audit.errors.AuditRefused`, not a bare RuntimeError:
     this is the refusal that fires under the strictest posture the product
-    sells, so a caller hardened against the compliance-floor refusal was
+    supports, so a caller hardened against the compliance-floor refusal was
     missing exactly the case that matters most.
     """
 

@@ -1,4 +1,4 @@
-"""Speculative best-of-N with early pruning (roadmap: 2028 H1 performance).
+"""Speculative best-of-N with early pruning.
 
 Best-of-N runs N attempts and keeps the best — but paying for all N to
 completion is wasteful when several are visibly going nowhere early. This

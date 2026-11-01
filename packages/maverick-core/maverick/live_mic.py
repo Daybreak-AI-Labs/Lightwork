@@ -1,5 +1,4 @@
-"""Speech-to-action live mic (roadmap: 2027 H1 capabilities,
-"speech-to-action live-mic").
+"""Speech-to-action live mic.
 
 A hardware-free loop: an **injected** chunk source (any iterable of audio
 chunks — a mic adapter, a test script, a file splitter) feeds an **injected**

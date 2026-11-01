@@ -1,4 +1,4 @@
-"""Channel auto-routing (roadmap: 2028 H2 UX — "channel auto-routing").
+"""Channel auto-routing.
 
 An inbound message can arrive on one channel but be best *answered* on another:
 a three-paragraph question with a stack-trace attachment wants an email/ticket

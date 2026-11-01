@@ -113,7 +113,7 @@ class TestToOpenAIMessages:
         assert out[1] == {"role": "tool", "tool_call_id": "t1", "content": "line 1\nline 2"}
 
     def test_image_block_becomes_image_url_part_not_stringified_text(self):
-        # W1-7: an image block used to str()-stringify into the joined text
+        # An image block used to str()-stringify into the joined text
         # body -- the base64 payload landed in the prompt as literal text
         # (a Python dict repr), not an actual image the model could see.
         msgs = [{"role": "user", "content": [
@@ -157,7 +157,7 @@ class TestToOpenAIMessages:
         assert out[1] == {"role": "user", "content": "hello"}
 
     def test_document_block_raises_instead_of_stringifying(self):
-        # W1-7: OpenAI-family providers have no equivalent to Anthropic's
+        # OpenAI-family providers have no equivalent to Anthropic's
         # inline document content type -- reject loudly rather than
         # silently stringifying a base64 PDF into the prompt text.
         msgs = [{"role": "user", "content": [

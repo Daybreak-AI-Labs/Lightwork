@@ -1,11 +1,10 @@
-"""Security-backport tooling (roadmap: 2028 H1 safety "backport security
-fixes" + 2028 H2 "LTS safety branch", policy in docs/security-backports.md).
+"""Security-backport tooling (policy in docs/security-backports.md).
 
 Read-only git analysis that makes the backport policy executable:
 
 * :func:`eligible_commits` — commits whose subject carries a security marker
   (``security:`` / ``fix(security)``) or a ``Security-Backport: yes`` trailer.
-* :func:`plan` — eligible commits **not yet** on the LTS branch, matched by
+* :func:`plan` — eligible commits **not yet** on a release branch, matched by
   ``git patch-id`` (a cherry-picked fix with a different SHA is still
   recognized), as an ordered cherry-pick plan.
 * :func:`check` — the SLA gate: eligible fixes older than ``sla_days`` that

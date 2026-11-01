@@ -1,4 +1,4 @@
-"""Wave 11: model routing + cache TTL + thinking-budget switches."""
+"""Model routing + cache TTL + thinking-budget switches."""
 from __future__ import annotations
 
 
@@ -43,7 +43,7 @@ class TestCacheTTL:
 
 class TestThinkingOnOrchestrator:
     def test_orchestrator_role_gets_thinking_budget(self, tmp_path):
-        """Wave 11: orchestrator + revisor get thinking_budget=8000
+        """Orchestrator + revisor get thinking_budget=8000
         (Anthropic effort=medium). Coder/researcher do not."""
         from maverick.agent import Agent
         from maverick.blackboard import Blackboard
@@ -96,7 +96,7 @@ class TestThinkingBudgetWiredThrough:
 
 
 class TestHetBoNLadder:
-    """Wave 11: best-of-N ladder env-configurable, defaults to
+    """Best-of-N ladder env-configurable, defaults to
     configured orchestrator model with temperature diversity."""
 
     def test_default_ladder_parses(self, monkeypatch):

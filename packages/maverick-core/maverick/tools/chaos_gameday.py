@@ -1,4 +1,4 @@
-"""Chaos game-day script generator (roadmap: 2028 H2).
+"""Chaos game-day script generator.
 
 Turn a service dependency graph into an ordered fault-injection plan for a chaos
 game-day. Deterministic and offline: the caller supplies the components (each

@@ -25,11 +25,10 @@
     {% endif %}
   </div>
   <h1>The agent on its own — and what Lightwork adds</h1>
-  <p>PIA Concierge is sold two ways from the same product. The <b>standalone
-     agent</b> takes the intake, scores the risk, files into OneTrust, and lets
-     a human review and approve there. <b>Lightwork</b> wraps that agent in
-     governance, learning, and a program-of-record — the parts a maturing
-     privacy program needs.</p>
+  <p>PIA Concierge runs in two modes from one codebase. In <b>standalone
+     mode</b> the agent takes the intake, scores the risk, files into OneTrust,
+     and lets a human review and approve there. <b>Platform mode</b> adds
+     governance, learning, and a program of record.</p>
 </div>
 
 <div class="card">
@@ -58,15 +57,15 @@
     {% if standalone %}
     You're running the <b>standalone agent</b>. It works end to end with no
     Lightwork platform, no maverick engine, and no audit trail — the scoring
-    is a self-contained privacy engine. Upgrade to Lightwork for the signed
-    audit chain, the governed approval queue and program workspace, the full
+    is a self-contained privacy engine. Run it with the Lightwork platform
+    installed to add the signed audit chain, the governed approval queue and program workspace, the full
     framework catalog with control citations, cross-run learning, and the
     connectors.
     {% else %}
     You're running the <b>full Lightwork build</b>: the agent plus the governed
     engine, the Ed25519 signed audit chain, the approval queue and privacy
     workspace, and the connectors. Set <span class="mono">PIA_STANDALONE=1</span>
-    to preview the standalone agent SKU on this machine.
+    to preview standalone mode on this machine.
     {% endif %}
   </p>
 </div>

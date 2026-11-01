@@ -1,4 +1,4 @@
-"""Reliability harness (roadmap: 2028 H2 "reliability harness 2.0").
+"""Reliability harness.
 
 Summarise repeated test runs into a per-test reliability report and an overall
 reliability score. Deterministic and offline: the caller supplies the test runs

@@ -130,10 +130,10 @@ def stage(runtime: Path, output: Path, endpoint: str, public_key: str,
     if (not isinstance(version, str) or len(version) > 13
             or not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version)
             or any(int(value) > limit for value, limit in zip(version.split("."), (255, 255, 65535), strict=True))):
-        raise ValueError("Windows customer package version must be numeric major.minor.patch within 255.255.65535")
+        raise ValueError("Windows desktop package version must be numeric major.minor.patch within 255.255.65535")
     if fixture_version is None and int(version.rsplit(".", 1)[1]) >= 65535:
         raise ValueError(
-            "Windows customer base package patch must be below 65535 so the acceptance upgrade can be built"
+            "Windows desktop base package patch must be below 65535 so the acceptance upgrade can be built"
         )
     if fault_fragment is not None and fixture_version is None:
         raise ValueError("fault injection is allowed only in a labelled acceptance fixture")
@@ -159,7 +159,7 @@ def stage(runtime: Path, output: Path, endpoint: str, public_key: str,
         "bundle": {
             "targets": ["msi"], "category": "Productivity",
             "shortDescription": "Lightwork workspace and complete local runtime",
-            "longDescription": "Lightwork with its complete runtime. No Python, Git, or source repository access is required on the customer computer.",
+            "longDescription": "Lightwork with its complete runtime. No Python or Git is required on the target computer.",
             "externalBin": [str(output.resolve() / "maverick")],
             "icon": [str(ROOT / "apps/installer-desktop/src-tauri/icons/icon.ico")],
             "createUpdaterArtifacts": False,

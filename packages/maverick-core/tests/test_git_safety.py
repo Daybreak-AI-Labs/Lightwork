@@ -1,4 +1,4 @@
-"""Host-git RCE hardening (PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-2/W2-3/W2-4).
+"""Host-git RCE hardening (see maverick/git_safety.py).
 
 A workdir the agent can write to (write_file / SEARCH-REPLACE) or that came
 from cloning an untrusted repo can carry a `.git/config` `core.fsmonitor`
@@ -89,7 +89,7 @@ class TestGitSafetyShared:
     def test_scrubbed_env_stops_repo_local_hooks(self, tmp_path):
         """`git reset --hard` runs `.git/hooks/reference-transaction` (and
         `post-index-change`); a hook planted by whatever can write `.git` must
-        not run under the scrubbed environment (UX-013)."""
+        not run under the scrubbed environment."""
         from maverick.git_safety import git_env_without_user_config
         repo = _make_git_repo(tmp_path)
         marker = tmp_path / "hook-ran"
@@ -118,7 +118,7 @@ _FILTER_PWN = 'sh -c "id > PWNED; cat"'
 
 class TestGitDirDiscovery:
     """The guard must read the settings git will actually use, not just
-    `<wd>/.git/config` (UX-013 repair): a `.git` pointer file, a symlinked
+    `<wd>/.git/config`: a `.git` pointer file, a symlinked
     `.git`, a linked worktree's common dir, `config.worktree` and a bare layout
     each put the filter somewhere the old check never looked."""
 

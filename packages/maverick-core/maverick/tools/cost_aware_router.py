@@ -1,4 +1,4 @@
-"""Cost-aware router v2, per-role policies (roadmap: 2027 H1 perf).
+"""Cost-aware router v2, per-role policies.
 
 Pick the cheapest model that still clears a role's quality floor and cost
 ceiling. Deterministic and offline: the caller supplies the role, the candidate

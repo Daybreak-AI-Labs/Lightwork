@@ -1,5 +1,5 @@
 """Static concurrency audit: async FastAPI route handlers with no await that
-block the dashboard event loop on synchronous DB/file/config work (W1-69)."""
+block the dashboard event loop on synchronous DB/file/config work."""
 from __future__ import annotations
 
 import json

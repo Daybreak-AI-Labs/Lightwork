@@ -1,4 +1,4 @@
-"""Generic OAuth helper (roadmap: 2027 H2 ecosystem).
+"""Generic OAuth helper.
 
 Every connector that wants OAuth today reinvents the same three steps:
 build the authorize URL, exchange the code, refresh the token. The `oidc`

@@ -34,7 +34,7 @@
       "icons/icon.ico"
     ],
     "category": "DeveloperTool",
-    "shortDescription": "Authenticated Lightwork source bootstrap",
-    "longDescription": "Engineering shell that installs a pinned private Lightwork source commit for authorized Daybreak Labs operators."
+    "shortDescription": "Lightwork source bootstrap",
+    "longDescription": "Engineering shell that installs Lightwork from a pinned commit of its source repository."
   }
 }

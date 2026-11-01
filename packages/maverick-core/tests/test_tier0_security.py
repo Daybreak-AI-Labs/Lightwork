@@ -1,4 +1,4 @@
-"""Tier-0 security fixes from the council of 20 review.
+"""Tier-0 security fixes.
 
 Each test pins a behavior the prior code didn't enforce:
   - tool output goes through Shield.scan_output before reaching the LLM
@@ -208,7 +208,7 @@ async def test_tool_output_wrapped_when_allowed(tmp_path):
     agent.tools = reg
 
     result = await agent._run_tool("benign", {})
-    # Wave 4: wrapper now includes a random nonce so the close tag is
+    # Wrapper now includes a random nonce so the close tag is
     # unforgeable. We can't assert on the exact close-tag string but
     # we CAN verify the open + nonce + matched close pattern.
     import re
@@ -314,7 +314,7 @@ def test_release_processed_message_allows_reclaim(tmp_path):
 def test_reclaim_orphan_goals(tmp_path):
     """Goals in 'active'/'pending' get reset to 'blocked' on startup.
 
-    Wave 4 default is max_age_seconds=60 so live goals in a sibling
+    The default is max_age_seconds=60 so live goals in a sibling
     process aren't yanked out from under it. The test simulates a real
     crashed run by passing max_age_seconds=0 explicitly.
     """

@@ -1,4 +1,4 @@
-"""Containment-mode resolver (roadmap: 2028 H1 safety — "no-network ephemeral fs").
+"""Containment-mode resolver.
 
 Turn a coarse containment *level* into the concrete restrictions an executor
 should apply, and answer whether a specific action is permitted at that level.

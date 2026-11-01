@@ -1,56 +1,82 @@
 # AGENTS.md
 
-Lightwork: proprietary Python 3.10-3.12 uv-workspace monorepo. 8 pip packages
-(`packages/*`, `apps/installer-cli`) + a TypeScript SDK (`sdks/plugin-ts`).
+Instructions for AI coding agents. [CLAUDE.md](CLAUDE.md) is the full version,
+including the numbered kernel rules and the attribution policy; human
+contributors should read [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Setup (verified)
+Lightwork is an Apache-2.0 agent platform: a Python 3.10-3.12 uv-workspace
+monorepo with 8 pip packages (`packages/*`, `apps/installer-cli`) and a
+TypeScript plugin SDK (`sdks/plugin-ts`).
 
-    bash .devcontainer/post-create.sh   # editable-installs all 8 packages under
-                                        # PIP_CONSTRAINT=requirements/ci.txt (CI
-                                        # parity) + the test/lint toolchain
+## Setup
 
-`pip install -e .` at the root FAILS (workspace pyproject has no [project]).
+    bash .devcontainer/post-create.sh   # creates .venv, editable-installs all 8
+                                        # packages under PIP_CONSTRAINT=
+                                        # requirements/ci.txt (CI parity) + dev
+                                        # tools (pytest-xdist, pytest-timeout,
+                                        # sqlalchemy, detect-secrets,
+                                        # pyjwt[crypto], cffi, build)
 
-## Commands (verified)
+`pip install -e .` at the root fails: the workspace `pyproject.toml` has no
+`[project]` table.
 
-- Test: `python3 -m pytest -q` from repo root — NEVER bare `pytest`
-  (PATH pytest may be an isolated uv/pipx shim that can't see the packages).
+## Commands
+
+- Test: `python3 -m pytest -q -n auto --dist loadfile` from the repo root (drop
+  `-n auto --dist loadfile` for a serial run). Never bare `pytest`: the
+  `pytest` on PATH may be an isolated uv or pipx shim that cannot see the
+  packages.
 - Lint: `python -m ruff check .` and `python -m vulture`
-- Build: `python3 -m build --wheel` inside a package dir
+- Build: `python3 -m build --wheel` inside a package directory
 - Smoke: `maverick version`, `maverick doctor`
 - TS SDK: `cd sdks/plugin-ts && npm install && npm test`
+- Before pushing: `bash scripts/pre-push-lint.sh`
 
-## Hard rules (each backed by a real failure or CI gate)
+## Rules
 
-1. Never bare `import tomllib` — use the try/except tomli fallback (3.10; CI greps).
-2. No `shell=True` outside `maverick/sandbox/` — use `sandbox.exec()` (CI greps).
-3. Never hard-code model ids — `maverick.config.get_role_model(role)`.
-4. Never bypass `Budget` — and note `record_tokens` enforces ALL caps
-   (tokens/$/wall/tools) at record time, not just `check()`.
-5. Kernel must run without `agent-shield` installed — fail open with a warning.
-6. New capabilities need a config knob + an installer-wizard step.
-7. PR titles: Conventional Commits prefix and the subject starts with a
+Each rule is backed by a CI gate or a failure seen in practice.
+
+1. Never use a bare `import tomllib`; use the try/except `tomli` fallback
+   (Python 3.10; CI greps for it).
+2. No `shell=True` outside `maverick/sandbox/`; use `sandbox.exec()` (CI greps
+   for it).
+3. Never hard-code model ids; use `maverick.config.get_role_model(role)`.
+4. Never bypass `Budget`. Note that `record_tokens` enforces every cap
+   (tokens, dollars, wall time, tool calls) when usage is recorded, not only at
+   `check()`.
+5. The kernel must run without `agent-shield` installed; fail open with a
+   warning.
+6. New capabilities need a config knob and an installer-wizard step.
+7. PR titles: a Conventional Commits prefix, and the subject starts with a
    letter (`feat: add the 2027 ...`, never `feat: 2027 ...`).
-8. Follow the active Ruff selections in pyproject.toml, including Bugbear (B).
-   Do not suppress enabled rules to clear a failing check.
-9. Don't add `/api/v1/health` — `/healthz`, `/livez`, `/readyz` exist,
-   auth-exempt by design; `/healthz` 503s until a provider key is configured.
-10. Relative imports inside packages, absolute in tests; renames must update
-    `docs/FEATURES.md` too.
+8. Follow the active Ruff selections in `pyproject.toml`, including Bugbear
+   (B). Do not suppress enabled rules to clear a failing check.
+9. Do not add `/api/v1/health`: `/healthz`, `/livez` and `/readyz` exist and
+   are auth-exempt by design; `/healthz` returns 503 until a provider key is
+   configured.
+10. Relative imports inside packages, absolute imports in tests; renames must
+    update `docs/FEATURES.md` too.
 11. Dashboard tests need `TestClient(app, headers={"Origin": "http://testserver"})`
     and the tmp-path world-DB fixture.
-12. pytest aborts everything on one collection error; a pyo3 PanicException
+12. pytest aborts everything on one collection error; a pyo3 `PanicException`
     usually hides a missing import on the stderr line above it.
-13. Customer features require an in-product journey after installation, plain
-    language, the shared Liquid Glass design, and authorized Copilot coverage.
-    Follow `docs/customer-experience-contract.md`; API/CLI implementation alone
-    is not customer completion. Report missing UI/Copilot/recovery coverage
-    explicitly, and preserve the same authority and current-state checks across
-    interfaces.
+13. User-facing features need an in-product journey after installation, plain
+    language, the shared Liquid Glass design (the dashboard design system in
+    `packages/maverick-dashboard/maverick_dashboard/static/lightwork.css`), and
+    coverage through the dashboard Copilot (the in-product assistant panel)
+    under the same authorization as the direct UI. Follow
+    [docs/customer-experience-contract.md](docs/customer-experience-contract.md);
+    an API or CLI implementation alone does not complete a feature. Report
+    missing UI, Copilot or recovery coverage explicitly, and keep the same
+    authority and current-state checks across interfaces.
+14. No AI attribution: no generator footers, AI co-author trailers, assistant
+    session links or assistant author or committer identities in commits, PR
+    titles or PR bodies. The `no-ai-attribution` check (`scripts/check_attribution.py`)
+    enforces this; CLAUDE.md has the details.
 
-The suite size changes frequently; collect and run it from the reviewed checkout.
-The September 12 baseline collected 29,254 tests. An October 15 full run (`-n auto --dist loadfile`,
-then the serial heavy_concurrency phase) collected 47,031 and passed 46,290 with 741 skipped. No type checker is configured;
-Ruff, Vulture and the contract/governance gates in .github/workflows/ci.yml are
-required. Run heavy_concurrency tests serially after the ordinary suite, matching
-.github/actions/test-shard/action.yml. Also validate MAVERICK_TEST_SECURE_DEFAULT=1.
+Collect and run the test suite from the repository root. No type checker is
+configured; Ruff, Vulture and the contract and governance gates in
+`.github/workflows/ci.yml` are required. Run the `heavy_concurrency` tests
+serially after the ordinary suite, as `.github/actions/test-shard/action.yml`
+does. Also validate with `MAVERICK_TEST_SECURE_DEFAULT=1`, the production
+security posture that CI tests.

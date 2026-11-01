@@ -1,4 +1,4 @@
-"""Capability-delegation validator (roadmap: 2027 H1 safety — "capability delegation graph").
+"""Capability-delegation validator.
 
 Checks a set of capability delegations for **privilege escalation**: nobody may
 grant a capability they don't themselves hold. Starting from each principal's

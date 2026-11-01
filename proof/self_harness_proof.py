@@ -484,7 +484,7 @@ def main() -> int:
             proven += 1
             print(f"  [PASS]  {label:26}  {detail}")
     print("=" * 78)
-    print(f"  {proven} guarantees PROVEN, {failed} failed")
+    print(f"  {proven} checks passed, {failed} failed")
     print("=" * 78)
     return 1 if failed else 0
 

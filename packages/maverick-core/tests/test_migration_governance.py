@@ -210,7 +210,7 @@ def test_editing_base_schema_is_caught_by_the_ratchet():
     assert any("checksum changed" in p and "v1" in p for p in probs)
 
 
-# ---- write_lock must not silently re-pin a released version (W1-55) -------
+# ---- write_lock must not silently re-pin a released version -------
 
 def test_write_lock_refuses_to_silently_repin_a_released_version(tmp_path, monkeypatch):
     # regen_blockers() only inspects versions ABSENT from the lock, so an

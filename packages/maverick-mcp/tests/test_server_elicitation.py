@@ -1,4 +1,4 @@
-"""Server-initiated elicitation (ROADMAP B1, Phase 2).
+"""Server-initiated elicitation.
 
 When a swarm run parks an ask_user question and the connected *stdio* client
 advertised the elicitation capability, the server now surfaces that question as

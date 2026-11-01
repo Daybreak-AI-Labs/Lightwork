@@ -1,4 +1,4 @@
-"""Personalized starter templates (roadmap 2028-H1 UX).
+"""Personalized starter templates.
 
 Ranks the goal-template catalog for *this* user: a pure scorer over the
 verb/domain word frequency of their recent goal titles (``world.list_goals``,

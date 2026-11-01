@@ -158,7 +158,7 @@ def test_decode_injected_key_rejects_wrong_length(monkeypatch):
     assert signing._decode_injected_key(raw.hex()) == raw
 
 
-# ----- off-host signing enforcement + KMS-wrapped key source (council H5) -----
+# ----- off-host signing enforcement + KMS-wrapped key source -----
 
 def test_offhost_not_required_by_default(monkeypatch):
     # No enterprise mode, no flag, no off-host key -> on-disk key is allowed.

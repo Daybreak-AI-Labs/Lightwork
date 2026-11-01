@@ -41,7 +41,7 @@ def test_docs_index_landing_exists():
     p = REPO_ROOT / "docs" / "index.md"
     assert p.is_file()
     body = p.read_text()
-    # Landing must mention the project's pitch fields.
+    # The landing page must carry its core sections.
     for keyword in ("Lightwork", "Quick start", "Pricing", "Roadmap"):
         assert keyword in body, f"index.md missing section: {keyword}"
 

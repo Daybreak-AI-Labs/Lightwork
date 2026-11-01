@@ -1,4 +1,4 @@
-"""Offline, deterministic eval-harness regression gate (ROADMAP P3).
+"""Offline, deterministic eval-harness regression gate.
 
 The real evals (`run_eval.py`, `eval_tau2.py`) drive `maverick start` against
 a live provider -- they need models and a network, so they can't run in CI.

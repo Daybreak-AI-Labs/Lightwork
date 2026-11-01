@@ -1,4 +1,4 @@
-"""Persistent task graph (ROADMAP 2027 H2)."""
+"""Persistent task graph."""
 from __future__ import annotations
 
 import pytest

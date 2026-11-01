@@ -457,7 +457,7 @@ def test_a_block_is_audited(guarded, monkeypatch) -> None:
     assert any("api.example.com" in str(kw) for _, kw in seen), seen
 
 
-# -- the tenant egress plane, hooked into this same seam (platform audit W2-69) --
+# -- the tenant egress plane, hooked into this same seam --
 #
 # Before this, maverick.tenant.egress was consulted directly by exactly one
 # tool (http_fetch) despite its own module docstring claiming it "applies to

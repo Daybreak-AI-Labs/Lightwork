@@ -200,7 +200,7 @@ class _UsageAnthropicSplitCache:
 
 
 def test_anthropic_cache_write_split_bills_each_tier(monkeypatch):
-    # W1-6: a single call can write BOTH a 1h (system/tools) and a 5m
+    # A single call can write BOTH a 1h (system/tools) and a 5m
     # (messages) breakpoint at once. The interactive default TTL ("1h")
     # would price the WHOLE cache_creation_tokens total at 2.0x if the split
     # weren't read -- this must bill each tier at its own rate instead.

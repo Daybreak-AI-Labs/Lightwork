@@ -1,9 +1,9 @@
 # Tool inventory — maintenance & risk audit
 
-**Purpose.** Decision-support for the *breadth-vs-depth* question raised in
-[`ROADMAP.md`](../ROADMAP.md) → "Current state & gap analysis" (thesis: "the
-highest-value additions are not more breadth"). This audit buckets the **286** tool modules in
-`packages/maverick-core/maverick/tools/` by **what they cost to maintain** and
+**Purpose.** Decision-support for the *breadth-vs-depth* question (thesis: "the
+highest-value additions are not more breadth"). This audit buckets the **103** tool
+modules that were in `packages/maverick-core/maverick/tools/` when it was written
+(the directory has grown since) by **what they cost to maintain** and
 **how much capability/risk they carry**, so the team can decide what stays in the
 core and what should move to the community **plugin** tier.
 
@@ -92,18 +92,15 @@ configures anything.
    data-backed. This is the one prerequisite.
 2. **Keep buckets 1–6 in core** (56 tools). They're differentiated and cheap.
 3. **Re-home bucket 7 (47 connectors) into the plugin tier**, not delete. Per
-   `CLAUDE.md` rules 5–6, each needs a config knob + wizard entry anyway; the
-   plugin SDK ([`../plugins.md`](../plugins.md)) + MCP **Registry** (roadmap B2)
+   kernel rules 5–6, each needs a config knob + wizard entry anyway; the
+   plugin SDK ([`../plugins.md`](../plugins.md)) + MCP **Registry**
    is the natural home and gives the skill/connector marketplace a discovery
    backbone. Core stays lean; maintenance moves to the ecosystem.
 4. **Tighten the default risk ceiling** for the consumer build using the tiers
    above (high-risk tools off-by-default / consent-gated).
 
-## Questions for the team (tee-up for the breadth-vs-depth discussion)
+## Outcome
 
-- Is "freeze breadth, invest in depth" the actual call, or is wide connector
-  coverage part of the consumer pitch?
-- If we re-home connectors: ship the plugin tier + registry **first** (so nothing
-  regresses), then migrate — what's the deprecation window?
-- Telemetry: acceptable to add opt-in usage counts, or is even that off the table
-  for a privacy-positioned product?
+The open questions this inventory raised (freeze breadth or not, the order of
+re-homing and its deprecation window, and opt-in usage telemetry) are answered in
+[`breadth-vs-depth-decision.md`](./breadth-vs-depth-decision.md).

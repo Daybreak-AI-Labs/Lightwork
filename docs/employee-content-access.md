@@ -1,11 +1,9 @@
 # Employee content and administrator authority
 
-Draft implementation, September 30, 2026, with subsequent local regression
-qualification. Exact source revisions, executed checks and remaining installed
-acceptance boundaries are recorded in
-[local qualification](ux-audit-2026-09-30/local-qualification.md).
+This feature is covered by local regression tests; installed and distributed
+acceptance are not qualified.
 
-Named administrators no longer inherit employee task content through the task
+Named administrators do not inherit employee task content through the task
 authorization helper. Lists remain owner scoped. Existing task ownership is
 preserved; the migration does not guess owners for unowned legacy work. An
 unowned task needs explicit reviewed access. Existing explicitly shared result
@@ -47,11 +45,9 @@ removing that membership immediately invalidates the approval.
 Task/chat exports, attachments, search, audit pages and model-recall paths are
 covered by the integrated authorization helpers and their recorded route and
 store regressions. Direct UI, API and closed Copilot operation contracts share
-the same service; see the adapters described below. The implementation register
-retains remaining installed and distributed acceptance checks. No deployment or
-production migration was performed.
+the same service; see the adapters described below.
 
-Retention now uses explicit indefinite values and a saved effective-policy
+Retention uses explicit indefinite values and a saved effective-policy
 review. A run retains its cutoff, workspace targets and per-store receipts.
 Completed stores are not repeated when retrying unresolved steps. Unknown past
 effects or unconfirmed audit recording remain unresolved after a retry; the

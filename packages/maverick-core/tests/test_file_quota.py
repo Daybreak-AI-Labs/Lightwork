@@ -1,4 +1,4 @@
-"""Per-goal file-write quota (ROADMAP Q4 2026, Safety)."""
+"""Per-goal file-write quota."""
 from __future__ import annotations
 
 from maverick import file_quota

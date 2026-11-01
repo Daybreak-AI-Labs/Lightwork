@@ -1,5 +1,5 @@
 /*
- * Lightwork embeddable widget (roadmap: 2028 H1 distribution — "embeddable widget").
+ * Lightwork embeddable widget.
  *
  * A dependency-free floating chat button for pages served from a Lightwork
  * dashboard's own origin; it talks to that dashboard's chat endpoint.

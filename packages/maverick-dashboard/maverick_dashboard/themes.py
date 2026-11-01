@@ -1,4 +1,4 @@
-"""Pluggable themes (roadmap 2028-H1 UX — "pluggable themes API").
+"""Pluggable themes.
 
 Operators define extra dashboard themes in ``~/.maverick/config.toml``::
 

@@ -1,4 +1,4 @@
-"""Zero-config BYO tool decorator (ROADMAP 2028 H2)."""
+"""Zero-config BYO tool decorator."""
 from __future__ import annotations
 
 import pytest

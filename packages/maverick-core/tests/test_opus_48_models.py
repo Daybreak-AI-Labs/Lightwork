@@ -90,7 +90,7 @@ def test_opus_48_defaults_to_adaptive_without_budget():
 
 
 def test_current_generation_uses_adaptive_thinking_not_enabled():
-    # W1-9: Opus 5 / Sonnet 5 / Fable 5.1 were unknown to _is_opus_adaptive,
+    # Opus 5 / Sonnet 5 / Fable 5.1 were unknown to _is_opus_adaptive,
     # so an explicit thinking_budget took the manual
     # {"type": "enabled", "budget_tokens": ...} path -- which these models
     # reject with a 400, the same way Opus 4.7/4.8 do (all "Adaptive"-only
@@ -124,7 +124,7 @@ def test_current_generation_uses_adaptive_thinking_not_enabled():
 
 
 def test_opus_48_uses_1024_min_cache_threshold():
-    # W1-4: Opus 4.8's documented minimum cacheable prompt length is 1,024
+    # Opus 4.8's documented minimum cacheable prompt length is 1,024
     # tokens, not the 4,096 the table previously (wrongly) used for every
     # 4.5+/4.6+ model -- see
     # https://platform.claude.com/docs/en/build-with-claude/prompt-caching.
@@ -136,7 +136,7 @@ def test_opus_48_uses_1024_min_cache_threshold():
     assert _min_cache_tokens("claude-opus-4-8-fast") == _MIN_CACHE_TOKENS_1024
 
 
-# --- PLATFORM_IMPROVEMENT_AUDIT.md W1-3: "claude-opus-4-8-fast" is a
+# --- "claude-opus-4-8-fast" is a
 # catalog-only id -- the wire shape Anthropic actually requires is
 # model="claude-opus-4-8" + speed="fast" + the fast-mode beta, sent through
 # the beta messages endpoint. The tests above only ever asserted pricing and

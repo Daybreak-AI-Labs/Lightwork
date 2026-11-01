@@ -1,6 +1,6 @@
 """The plugin load gate enforces the signing CA when configured (fail-closed).
 
-Regression for the council finding that ``plugin_ca.verify_artifact`` existed
+Regression: ``plugin_ca.verify_artifact`` existed
 but was wired into no loader, so the CA gated nothing. ``_gate`` now refuses an
 unsigned/invalid plugin when ``[plugins] ca_root_pubkey`` / ``require_signing``
 (or enterprise mode) is on, and stays a no-op in the default config.

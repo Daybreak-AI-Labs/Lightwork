@@ -346,7 +346,7 @@ def main() -> int:
             failed += 0 if r.passed else 1
             print(f"  [{tag}]  {r.label:34}  {r.detail}")
     print("=" * 78)
-    print(f"  {6 - failed} guarantees PROVEN, {failed} failed"
+    print(f"  {6 - failed} checks passed, {failed} failed"
           "   (LLM patch-author + container isolation stubbed, by design)")
     print("=" * 78)
     return 1 if failed else 0

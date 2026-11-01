@@ -885,7 +885,7 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
 
 
 def test_p1_builder_refinements(monkeypatch, tmp_path):
-    # Design-council P1: advanced cron, signed-curl, governance gate color.
+    # P1 design refinements: advanced cron, signed-curl, governance gate color.
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/workflow-builder").text
     # No raw timetable box or shell snippet: days, a day of the month and a
@@ -897,8 +897,8 @@ def test_p1_builder_refinements(monkeypatch, tmp_path):
     assert "mvCopy(" in t                                # shared copy primitive
 
 
-def test_p0_council_fixes_builder(monkeypatch, tmp_path):
-    # Design-council P0 fixes on the builder page.
+def test_p0_design_fixes_builder(monkeypatch, tmp_path):
+    # P0 design fixes on the builder page.
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/workflow-builder").text
     assert 'role="heading" aria-level="3"' in t      # <summary> regained heading semantics

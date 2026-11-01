@@ -1,4 +1,4 @@
-"""3D model inspector tool (roadmap: 2027 H1 capabilities — "3D model viewer").
+"""3D model inspector tool.
 
 A headless "viewer": instead of rendering pixels, it parses a 3D mesh file and
 reports the structural facts an agent actually reasons over — triangle/vertex

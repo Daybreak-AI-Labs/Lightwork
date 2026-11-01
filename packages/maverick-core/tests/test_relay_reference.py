@@ -1,4 +1,4 @@
-"""Self-hosted relay reference (ROADMAP 2027 H2 Distribution).
+"""Self-hosted relay reference.
 
 Pure logic + injected transport: no server, no network, no agent. Fakes stand
 in for the sync handler, the /webhook/start starter, and the outbound delivery

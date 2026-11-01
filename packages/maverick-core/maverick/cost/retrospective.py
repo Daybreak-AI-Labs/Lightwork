@@ -1,4 +1,4 @@
-"""Cost retrospective (roadmap: 2028 H2 UX).
+"""Cost retrospective.
 
 A spend total tells you *how much*; a retrospective tells you *where it went
 and what to do about it*. This reads the world model's per-goal/episode spend
@@ -8,8 +8,8 @@ goals dominating), and rule-based observations an operator can act on.
 
 Deterministic and offline — every number is an aggregation over the recorded
 episodes, so it is tested against a seeded world with no model in the loop.
-``maverick cost-retro`` prints it. (The "AI" upsell — a narrated summary — can
-sit on top of this structured core, but the core is what's trustworthy.)
+``maverick cost-retro`` prints it. (A model-narrated summary can sit on top
+of this structured core, but the core is what's trustworthy.)
 """
 from __future__ import annotations
 

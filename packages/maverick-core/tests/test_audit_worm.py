@@ -451,7 +451,7 @@ def test_worm_enabled_env_and_config(monkeypatch):
 
 
 def test_push_refuses_unsealed_plaintext_when_sealing_active(tmp_path, monkeypatch):
-    # Council H3: WORM must never lock PLAINTEXT audit data under a multi-year
+    # WORM must never lock PLAINTEXT audit data under a multi-year
     # immutable retention. When sealing is active (at-rest on + key present) an
     # unsealed closed day-file is refused until `audit seal` runs.
     ad = _audit_dir(tmp_path, {"2020-01-01.ndjson": "plaintext event\n"})

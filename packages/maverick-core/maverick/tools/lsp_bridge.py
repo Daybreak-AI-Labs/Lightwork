@@ -1,4 +1,4 @@
-"""Cross-language LSP bridge (roadmap: 2027 H1 capabilities).
+"""Cross-language LSP bridge.
 
 Code intelligence beyond Python without writing N parsers: speak the Language
 Server Protocol to operator-configured or built-in language-server binaries (pyright, gopls,

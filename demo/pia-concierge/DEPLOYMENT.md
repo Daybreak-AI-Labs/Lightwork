@@ -1,15 +1,15 @@
 # PIA Concierge — Deployment & Installation Guide
 
-This is the guide for **partners and client IT teams** installing the PIA
-Concierge agent for an organization. It covers the **standalone agent SKU**
-(sold on its own — no Lightwork platform) on every common target: Docker,
+This is the guide for **IT teams** installing the PIA Concierge agent for an
+organization. It covers the **standalone agent** (no Lightwork platform) on
+every common target: Docker,
 AWS, GCP, Azure, a plain Linux VM, Windows, and macOS. The last section
 covers the platform-bundled install.
 
 The standalone agent is a single Python web service. It has **no database
 server, no queue, no external services** — state is a directory of JSON files
 (`PIA_DATA_DIR`), and the only outbound call it makes is the HTTPS POST that
-files completed assessments into the client's OneTrust tenant (or the built-in
+files completed assessments into the organization's OneTrust tenant (or the built-in
 mock while piloting).
 
 ---
@@ -19,10 +19,10 @@ mock while piloting).
 | Component | Standalone agent | With Lightwork |
 |---|---|---|
 | Chat / voice / guided intake, risk scoring, OneTrust filing + in-OneTrust review, document append, vendor memory, speed metrics | ✅ | ✅ |
-| Ed25519 signed audit chain, governed approval queue, privacy workspace, full framework catalog with control citations, cross-run learning, connectors, Art. 28 DPA clause review, model-assisted chat | — (upsell) | ✅ |
+| Ed25519 signed audit chain, governed approval queue, privacy workspace, full framework catalog with control citations, cross-run learning, connectors, Art. 28 DPA clause review, model-assisted chat | — | ✅ |
 
 The running service shows its own capability matrix at **`/about`** — use it
-during handover to show the client exactly what is active.
+to confirm exactly what is active.
 
 **Sizing:** 1 vCPU / 512 MB RAM is comfortable for hundreds of assessments a
 year; disk grows by a few KB per assessment plus uploaded documents. It is a
@@ -38,10 +38,10 @@ instances over one data directory).
 | `WORLD_PORT` | `8890` | HTTP port. |
 | `PIA_DATA_DIR` | `./.pia-standalone` | Persistent state (assessment records). Back this up. |
 | `PIA_BASE_URL` | `http://127.0.0.1:8890` | The public URL the agent puts in intake emails/links. Set to the real HTTPS URL in production. |
-| `ONETRUST_HOSTNAME` | built-in mock | The client's OneTrust API base (e.g. `https://customer.my.onetrust.com`). Leave default to pilot against the built-in mock tenant. |
+| `ONETRUST_HOSTNAME` | built-in mock | The organization's OneTrust API base (e.g. `https://example.my.onetrust.com`). Leave default to pilot against the built-in mock tenant. |
 | `ONETRUST_TOKEN` | demo token | OAuth/bearer token for OneTrust. Store in a secret manager, never in shell history or unit files readable by all. |
-| `EMAIL_USER` / `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` | in-process inbox | Standalone delivers intake mail to the built-in inbox page by default; point at the client's SMTP relay to send real mail. |
-| `PIA_SEED_TENANT` | `0` | `1` seeds a year of demo history (sales demos only — never for a production tenant). |
+| `EMAIL_USER` / `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` | in-process inbox | Standalone delivers intake mail to the built-in inbox page by default; point at your SMTP relay to send real mail. |
+| `PIA_SEED_TENANT` | `0` | `1` seeds a year of demo history (demos only — never for a production tenant). |
 | `PIA_MANUAL_BASELINE_HOURS` | `6` | The stated manual-PIA baseline used by the speed metrics. |
 
 **Health check:** `GET /health` returns `{"ok": true, ...}`. Wire every
@@ -60,8 +60,8 @@ docker build -f Dockerfile.standalone -t pia-concierge:1.0 .
 docker run -d --name pia --restart unless-stopped \
   -p 127.0.0.1:8890:8890 \
   -v pia-data:/data \
-  -e PIA_BASE_URL=https://pia.client.example \
-  -e ONETRUST_HOSTNAME=https://customer.my.onetrust.com \
+  -e PIA_BASE_URL=https://pia.example.com \
+  -e ONETRUST_HOSTNAME=https://example.my.onetrust.com \
   -e ONETRUST_TOKEN=$(cat /run/secrets/onetrust-token) \
   pia-concierge:1.0
 ```
@@ -69,9 +69,9 @@ docker run -d --name pia --restart unless-stopped \
 Verify: `curl -s http://127.0.0.1:8890/health` → `{"ok": true}`, then open
 `/about` for the capability matrix. Only a local reverse proxy should reach the container port; put TLS/auth in front (§8) before exposing it to a network.
 
-To ship the image to a client without a registry:
-`docker save pia-concierge:1.0 | gzip > pia-concierge-1.0.tgz` → they
-`docker load < pia-concierge-1.0.tgz`.
+To move the image to another host without a registry:
+`docker save pia-concierge:1.0 | gzip > pia-concierge-1.0.tgz`, then on the
+target host `docker load < pia-concierge-1.0.tgz`.
 
 ## 4. AWS
 
@@ -81,7 +81,7 @@ To ship the image to a client without a registry:
 2. Create an App Runner service from the ECR image: port **8890**, CPU 0.5 vCPU /
    1 GB, env vars from §2 (put `ONETRUST_TOKEN` in Secrets Manager and reference
    it), health check path `/health`.
-3. App Runner terminates TLS for you; put the client's SSO in front with an
+3. App Runner terminates TLS for you; put your SSO in front with an
    ALB + OIDC or Cloudflare Access if the service must not be public (§8).
 4. **Persistence caveat:** App Runner's filesystem is ephemeral. For a real
    tenant, prefer Option B with an EFS volume; App Runner is fine for pilots.
@@ -92,7 +92,7 @@ To ship the image to a client without a registry:
    `/data`, env from §2, secrets from Secrets Manager, health check
    `CMD-SHELL curl -f http://localhost:8890/health || exit 1`.
 3. Service behind an ALB (HTTPS listener, ACM cert) with target-group health
-   check `/health`; restrict the ALB with the client's SSO (OIDC action) or
+   check `/health`; restrict the ALB with your SSO (OIDC action) or
    security groups + VPN.
 4. Backups: EFS automatic backups on.
 
@@ -110,7 +110,7 @@ Amazon Linux 2023/Ubuntu instance behind an ALB.
      --image REGION-docker.pkg.dev/PROJECT/pia/pia-concierge:1.0 \
      --port 8890 --cpu 1 --memory 512Mi --min-instances 1 --max-instances 1 \
      --no-allow-unauthenticated \
-     --set-env-vars PIA_BASE_URL=https://pia.client.example,ONETRUST_HOSTNAME=... \
+     --set-env-vars PIA_BASE_URL=https://pia.example.com,ONETRUST_HOSTNAME=... \
      --set-secrets ONETRUST_TOKEN=onetrust-token:latest
    ```
 3. `--min/max-instances 1` matters: single-writer state. **Persistence caveat:**
@@ -118,7 +118,7 @@ Amazon Linux 2023/Ubuntu instance behind an ALB.
    volume (`--add-volume name=data,type=cloud-storage,bucket=...` +
    `--add-volume-mount volume=data,mount-path=/data`) or use Option B.
 4. Front with IAP / Identity-Aware Proxy or keep `--no-allow-unauthenticated`
-   and grant run.invoker to the client's workforce identities.
+   and grant run.invoker to your workforce identities.
 
 **Option B — Compute Engine VM:** the Linux VM install (§7) on a `e2-small`,
 behind an HTTPS load balancer with IAP.
@@ -126,21 +126,21 @@ behind an HTTPS load balancer with IAP.
 ## 6. Azure
 
 **Option A — Container Apps (simplest managed):**
-1. Push to ACR: `az acr create -n clientpia --sku Basic`, `az acr login`,
-   `docker tag` + `docker push clientpia.azurecr.io/pia-concierge:1.0`.
+1. Push to ACR: `az acr create -n piaconcierge --sku Basic`, `az acr login`,
+   `docker tag` + `docker push piaconcierge.azurecr.io/pia-concierge:1.0`.
 2. Create an Azure Files share for state, then:
    ```bash
    az containerapp env create -n pia-env -g rg-pia
    az containerapp create -n pia-concierge -g rg-pia --environment pia-env \
-     --image clientpia.azurecr.io/pia-concierge:1.0 \
+     --image piaconcierge.azurecr.io/pia-concierge:1.0 \
      --target-port 8890 --ingress external --min-replicas 1 --max-replicas 1 \
      --cpu 0.5 --memory 1Gi \
-     --env-vars PIA_BASE_URL=https://pia.client.example ONETRUST_HOSTNAME=... \
+     --env-vars PIA_BASE_URL=https://pia.example.com ONETRUST_HOSTNAME=... \
      --secrets onetrust-token=... --env-vars ONETRUST_TOKEN=secretref:onetrust-token
    ```
    Mount the Azure Files share at `/data` (storage mount on the environment).
-3. Turn on Container Apps **built-in authentication** (Entra ID) so only the
-   client's tenant can reach it; health probe `/health`.
+3. Turn on Container Apps **built-in authentication** (Entra ID) so only your
+   tenant can reach it; health probe `/health`.
 
 **Option B — Azure VM:** the Linux VM install (§7) on a `B1ms`, behind
 Application Gateway with Entra ID auth.
@@ -178,8 +178,8 @@ Environment=PIA_STANDALONE=1
 Environment=PIA_HOST=127.0.0.1
 Environment=WORLD_PORT=8890
 Environment=PIA_DATA_DIR=/var/lib/pia-concierge
-Environment=PIA_BASE_URL=https://pia.client.example
-Environment=ONETRUST_HOSTNAME=https://customer.my.onetrust.com
+Environment=PIA_BASE_URL=https://pia.example.com
+Environment=ONETRUST_HOSTNAME=https://example.my.onetrust.com
 # Secrets: use a root-owned 0600 env file, not inline values.
 EnvironmentFile=-/etc/pia-concierge/secrets.env
 ExecStart=/opt/pia-concierge/.venv/bin/python serve_standalone.py
@@ -210,7 +210,7 @@ Keep `PIA_HOST=127.0.0.1` and put nginx/Caddy on the same box in front (§8).
   2. **an authenticating proxy for the operator surfaces** — SSO (IAP, ALB
      OIDC, Entra built-in auth, Cloudflare Access) covering `/`, `/onetrust`,
      `/servicenow`, `/mail`, `/about`, while `/intake/*` and `/health` may stay
-     reachable to requesters if the client wants email-link intake to work
+     reachable to requesters if you want email-link intake to work
      without SSO. Example nginx split:
      ```nginx
      location /intake/ { proxy_pass http://127.0.0.1:8890; }
@@ -220,9 +220,9 @@ Keep `PIA_HOST=127.0.0.1` and put nginx/Caddy on the same box in front (§8).
 - Set `PIA_BASE_URL` to the public HTTPS URL so emailed intake links are right.
 - `ONETRUST_TOKEN` lives in the platform's secret manager (Secrets Manager /
   Secret Manager / Key Vault) — never in images, unit files, or shell history.
-- Standalone keeps **no audit trail** (a Lightwork feature) — set the client's
-  expectation during handover, and point the proxy's access logs at their SIEM
-  if they need request-level logging.
+- Standalone keeps **no audit trail** (a Lightwork platform feature) — make
+  sure the privacy team knows this, and point the proxy's access logs at your
+  SIEM if you need request-level logging.
 
 ## 9. Desktop installs (pilot / single-reviewer)
 
@@ -262,23 +262,22 @@ data dir).
   Restore = put the directory back and start the service.
 - **Upgrade:** replace the image tag (or `git`/archive contents + re-run pip)
   and restart. State is forward-compatible JSON; take a backup first. There is
-  no migration step in the standalone SKU.
+  no migration step in the standalone agent.
 - **Reset a pilot:** stop, delete `PIA_DATA_DIR`, start.
 - **Monitoring:** probe `/health`; alert on non-200. Logs go to stdout —
   journald / CloudWatch / Cloud Logging / Log Analytics pick them up natively.
 - **Go-live checklist:** `PIA_BASE_URL` is the public HTTPS URL · TLS + SSO in
-  front · `ONETRUST_HOSTNAME`/`ONETRUST_TOKEN` point at the client tenant and a
+  front · `ONETRUST_HOSTNAME`/`ONETRUST_TOKEN` point at the production tenant and a
   test filing appears there · SMTP relay configured (or the in-process inbox is
   the accepted workflow) · `PIA_SEED_TENANT` is `0` · `/about` reviewed with
-  the client · backup schedule in place.
+  the privacy team · backup schedule in place.
 
 ## 11. Installing WITH the Lightwork platform
 
-When the client buys Lightwork, the agent runs inside the platform install:
-1. Install the platform per the repo root (`bash .devcontainer/post-create.sh`
-   installs the eight packages; see the top-level README/docs for production
-   layout), configure `~/.maverick/config.toml` via the installer wizard
-   (`apps/installer-cli`).
+With the Lightwork platform installed, the agent runs inside it:
+1. Install the platform from source (see the
+   [source install guide](../../docs/source-install.md)) and configure
+   `~/.maverick/config.toml` via the installer wizard (`apps/installer-cli`).
 2. Launch the bundled demo/product pair with `bash run_demo.sh` (dashboard
    :8765 + agent :8890 in ONE process — the Ed25519 audit chain requires a
    single writing process), or embed the agent app behind the same reverse
@@ -288,15 +287,15 @@ When the client buys Lightwork, the agent runs inside the platform install:
    the signed audit chain and the `/privacy` workspace.
 4. Migrating a standalone pilot into the platform: keep `PIA_DATA_DIR` as the
    historical archive; new assessments are written to the governed platform
-   store. (A one-shot importer is on the roadmap; scope it in the SOW if the
-   client needs pilot history inside the workspace.)
+   store. There is no importer that moves standalone pilot history into the
+   workspace.
 
 ## 12. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
 | `/health` fine locally, unreachable remotely | `PIA_HOST` is loopback (correct!) — reach it through the reverse proxy, or set `PIA_HOST=0.0.0.0` only with TLS+auth in front. |
-| Filing shows `error (401/403)` from OneTrust | Wrong/expired `ONETRUST_TOKEN` or wrong `ONETRUST_HOSTNAME`; test with the client's API credentials directly. |
+| Filing shows `error (401/403)` from OneTrust | Wrong/expired `ONETRUST_TOKEN` or wrong `ONETRUST_HOSTNAME`; test with the same API credentials directly. |
 | Intake email links point at localhost | Set `PIA_BASE_URL` to the public URL and restart. |
 | Two instances corrupting state | Run exactly one instance per data directory (min/max instances = 1). |
 | Port 1025 bind warning at startup | The in-process SMTP capture couldn't bind; harmless unless you rely on the built-in inbox — set `EMAIL_SMTP_PORT` to a free port. |

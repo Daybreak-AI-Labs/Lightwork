@@ -1,6 +1,6 @@
 """Secrets posted to the blackboard must not PERSIST/DISPLAY in cleartext.
 
-Security finding (round 7, adversarial): Blackboard.post() mirrored content
+Previously, Blackboard.post() mirrored content
 verbatim into world.goal_events (persisted to world.db and streamed live to
 the dashboard), the replay trace, and the observation channel -- none
 redacted. An agent that reports a credential it found ("the DB password is X")

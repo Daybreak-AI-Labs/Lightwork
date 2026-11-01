@@ -6,14 +6,14 @@ Jira Task, verifies it, and records a separate customer acceptance decision.
 A renewal creates a linked case, assessment and ticket while retaining the
 previous evidence and decisions. Acceptance never releases a vendor or model.
 
-The implementation was developed against `74366121e4c569a8139de2f039b53717c0471cd3`.
 Offline synthetic tests establish the supported behavior. Google Drive, Jira,
-identity-provider, customer and Kubernetes restore acceptance remain unverified.
+identity-provider and Kubernetes restore behavior have not been verified against
+live services.
 
 ## Run the offline demonstration
 
 Use Python 3.10–3.12 and install the monorepo's eight packages as documented in
-`AGENTS.md` / `.devcontainer/post-create.sh`. The repository root is a workspace,
+`CONTRIBUTING.md` / `.devcontainer/post-create.sh`. The repository root is a workspace,
 not an installable Python package. Verify that `maverick.__file__` resolves to
 this checkout before running tests.
 
@@ -214,9 +214,9 @@ Missing, empty, corrupted and unavailable evidence remain distinct. Collection
 failure does not create an empty successful assessment. Live execution cost is
 unmeasured; fake execution cost is zero. Browser review time is reported elapsed
 time, not a verified measure of a person's active work. Scripted review duration
-is explicitly unmeasured. Customer-specific records and learned behavior remain
-tenant-scoped; reusable evaluation material is internally authored synthetic
-data. This feature does not pool customer data.
+is explicitly unmeasured. Tenant-specific records and learned behavior remain
+tenant-scoped; reusable evaluation material is synthetic data written for the
+project. This feature does not pool data across tenants.
 
 ## Architecture and recovery contract
 
@@ -308,10 +308,10 @@ script; the dashboard does not autonomously train or promote definitions.
 The baseline comparison is an explicitly labeled deterministic stand-in for
 agent/human renewal judgment using the same guards and reviewed bindings. It is
 not an LLM benchmark or proof of an improvement learned from real agent traces.
-The technical contribution is the functioning path from reviewed case evidence
-and explicit bindings to a restricted executable flow, evaluated and promoted
-with immutable provenance and rollback. No patent novelty, production readiness,
-customer savings or model-accuracy improvement is claimed.
+What the script demonstrates is the path from reviewed case evidence and
+explicit bindings to a restricted executable flow, evaluated and promoted with
+immutable provenance and rollback. No production readiness, cost saving or
+model-accuracy improvement is claimed.
 
 ## Migration, persistent deployment and restore
 
@@ -324,13 +324,13 @@ or erase customer decisions. Do not resume a checkpoint under an older writer
 that ignores its settlement metadata without reconciling quota history.
 
 The selected deployment path is the existing **single-replica Helm chart**.
-It now rejects disabled persistence even with PostgreSQL, a state mount other
+It rejects disabled persistence even with PostgreSQL, a state mount other
 than `/home/maverick/.maverick`, a conflicting `env.MAVERICK_HOME`, multiple
 replicas and autoscaling. PostgreSQL centralizes the world model only; approvals,
 credentials, tenant keys, checkpoints, audits and flow definitions still need the
 state volume. Keep externally supplied Secrets free of state-path overrides:
-Helm cannot inspect their contents. The AWS examples were not converted into a
-supported durable path by this change.
+Helm cannot inspect their contents. The AWS examples are not a supported
+durable path for this feature.
 
 ```bash
 helm lint deploy/helm/maverick
@@ -378,8 +378,7 @@ python -m vulture
 ```
 
 On shells that do not expand test globs, pass the explicit test filenames.
-The delivery report records full-suite and repository-gate results, skips,
-baseline exceptions and platform-specific limits. Live acceptance must separately
+Live acceptance must separately
 exercise enrolled Drive/Jira permissions, identity revocation, actual version
 semantics, rate limits, ambiguous provider success and persistent restore before
 any production-readiness claim.

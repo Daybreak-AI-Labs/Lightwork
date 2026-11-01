@@ -1,4 +1,4 @@
-"""Web automation recorder/codegen tool (roadmap: 2027 H1 capabilities).
+"""Web automation recorder/codegen tool.
 
 Turns a high-level list of browser steps into a runnable **Playwright** script
 (sync API). It's the "recorder" half done as codegen: describe the flow once

@@ -12,7 +12,7 @@ blocking with timeout. Writes never block. Audit-logged for the goal so the
 trace shows who-told-what-to-whom.
 
 This is intentionally tiny. Just enough plumbing to enable a few
-roadmap patterns (debate, supervisor-watch, cross-task negotiation)
+coordination patterns (debate, supervisor-watch, cross-task negotiation)
 without committing to a heavier message-passing framework.
 """
 from __future__ import annotations

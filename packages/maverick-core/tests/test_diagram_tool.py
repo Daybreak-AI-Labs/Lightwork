@@ -1,4 +1,4 @@
-"""Diagramming tool (ROADMAP 2027 H2)."""
+"""Diagramming tool."""
 from __future__ import annotations
 
 import shlex

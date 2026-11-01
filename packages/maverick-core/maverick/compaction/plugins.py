@@ -1,4 +1,4 @@
-"""Compaction plug-in API (roadmap: 2028 H2 performance — "compaction v9").
+"""Compaction plug-in API.
 
 Context compaction is currently one built-in algorithm (:func:`maverick.
 compaction.compact_messages`). This is the extension point that lets a
