@@ -1640,7 +1640,7 @@ class PostgresWorldModel:
         project_id: int | None = None,
         connection_references: list | None = None,
     ) -> int:
-        # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-47): `domain` and
+        # Sept 2026 fix (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-47): `domain` and
         # `project_id` mirror the SQLite backend's create_goal signature. Both
         # columns already exist on Postgres (migrations above) and were
         # settable after creation via set_goal_domain/set_goal_project, but a
@@ -3317,7 +3317,7 @@ class PostgresWorldModel:
         the owning goal), matching the SQLite backend's signature; ``None``
         is the deployment-wide admin / auth-off view; ``since`` keeps only runs
         that started at or after that time, as on SQLite. (Sept 2026 fix,
-        PLATFORM_IMPROVEMENT_AUDIT.md W1-48: this backend previously took no
+        docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-48: this backend previously took no
         ``owner`` argument at all, so any owner-scoped caller -- ``/api/v1/spend``,
         external-agent spend records -- raised TypeError on Postgres.)
         """

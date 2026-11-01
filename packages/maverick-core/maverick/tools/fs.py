@@ -122,7 +122,7 @@ def _write_text_contained(sandbox, target: Path, content: str, *, legacy_journal
     ``ValueError`` on escape; ``OSError`` propagates.
     """
     workdir = Path(sandbox.workdir).resolve()
-    # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-3): `.git/` writes
+    # Sept 2026 fix (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-3): `.git/` writes
     # were previously blocked only in opaque benchmark mode (`_is_opaque_blocked`
     # below). In ordinary operation this let write_file/str_replace_editor/
     # ast_edit plant a `.git/config` `core.fsmonitor` hook or filter

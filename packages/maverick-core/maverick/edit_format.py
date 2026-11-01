@@ -432,7 +432,7 @@ def _apply_one(block: SearchReplaceBlock, workdir: Path) -> ApplyResult:  # noqa
                    "traversal; use workspace-relative paths only",
         )
 
-    # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-3): a SEARCH/REPLACE
+    # Sept 2026 fix (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-3): a SEARCH/REPLACE
     # block writing `.git/config` can plant a core.fsmonitor hook or filter
     # smudge/clean command that later host-side git calls (render_diff,
     # reviewer.get_diff, coding_mode) would execute. Refuse unconditionally --
@@ -656,7 +656,7 @@ def render_diff(workdir: Path,
     finds such metadata, and run every git call under
     `git_env_without_user_config` so a false negative there still can't
     reach the caller's environment (provider API keys included). See
-    PLATFORM_IMPROVEMENT_AUDIT.md W2-1 / W2-2.
+    docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-1 / W2-2.
     """
     import subprocess
 

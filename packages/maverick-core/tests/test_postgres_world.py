@@ -478,7 +478,7 @@ def test_list_episodes_and_total_spend(world):
 
 
 def test_total_spend_accepts_owner_kwarg(world):
-    """PLATFORM_IMPROVEMENT_AUDIT.md W1-48: total_spend(owner=...) used to
+    """docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-48: total_spend(owner=...) used to
     raise TypeError on this backend -- it took no owner argument at all,
     while the SQLite backend (and /api/v1/spend, external-agent spend
     records) call it with one."""
@@ -506,7 +506,7 @@ def test_total_spend_accepts_owner_kwarg(world):
 
 
 def test_create_goal_accepts_domain_and_project_id(world):
-    """PLATFORM_IMPROVEMENT_AUDIT.md W1-47: create_goal(domain=..., project_id=...)
+    """docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-47: create_goal(domain=..., project_id=...)
     used to raise TypeError on this backend -- checkpoint sub-goal spawning
     and the finance CLI pass both kwargs, matching the SQLite signature."""
     project_id = world.create_project("Q3 rollout", owner="admin@corp.test")

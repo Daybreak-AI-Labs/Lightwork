@@ -97,6 +97,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   supplied at `terraform init` time from a git-ignored `backend.hcl`. The
   Homebrew README names the same tap as the formula and the logo moved
   under `docs/assets/`.
+- The point-in-time audits, ledgers and reviews that lived at the repository root (`USER_EXPERIENCE_AUDIT.md`, `PLATFORM_IMPROVEMENT_AUDIT.md`, `CODE_QUALITY_AUDIT.md`, `QA_FINDINGS.md`, `ADVERSARY_COUNCIL_REVIEW.md`, `STRESS_TEST.md`, `PUNCHLIST_RESOLUTION.md`, `FIXES.md`, `LAUNCH_AUDIT.md`, `INFRA_AND_POLICY_DECISIONS.md`) moved to `docs/audits/`, indexed by `docs/audits/README.md`. `docs/OPEN_ITEMS.md` is the only live list of findings; code comments and tests cite the archived documents by their new path.
 - **Ordinary tasks have optional limits** — omitted dollar, time, token,
   tool-call and step limits remain unset across customer entrypoints. Existing
   numeric settings stay intact; Settings can reversibly disable saved task

@@ -796,7 +796,7 @@ def _record_provider_call(provider: str) -> None:
         pass
 
 
-# Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-2): mirrors
+# Sept 2026 fix (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W1-2): mirrors
 # failover_policy._DEFAULT_FAILOVER_ON -- the classes a provider-transport
 # problem can actually fall into. Kept as an independent literal (not a
 # cross-module import of a private name) since the two call sites answer

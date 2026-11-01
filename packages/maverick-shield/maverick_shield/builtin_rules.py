@@ -70,7 +70,7 @@ def _compile(p: str) -> re.Pattern:
     return re.compile(p, re.IGNORECASE)
 
 
-# Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W2-33): `rm_rf_root` and
+# Sept 2026 fix (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-33): `rm_rf_root` and
 # `recursive_chmod_chown_root` below used to require their two dangerous
 # flags (recursive + force, or recursive alone) in ONE contiguous token
 # (`-rf`, `-...R...`). Splitting the flags across separate tokens -- `rm -r

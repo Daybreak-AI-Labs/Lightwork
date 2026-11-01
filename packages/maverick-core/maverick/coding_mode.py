@@ -2075,7 +2075,7 @@ async def evaluate_candidate(
                       + ", ".join(guard.blocked_paths))
         return cand
 
-    # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W2-4): `workdir` is the
+    # Sept 2026 fix (docs/audits/PLATFORM_IMPROVEMENT_AUDIT.md W2-4): `workdir` is the
     # agent's own working directory. `git worktree add` / `apply` / `reset
     # --hard` / `clean -fd` below all check out or touch tracked files, so a
     # repo-local `[filter "x"] smudge` command (referenced from
