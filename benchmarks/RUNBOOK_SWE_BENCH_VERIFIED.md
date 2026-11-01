@@ -1,22 +1,20 @@
 # Running SWE-bench Verified end-to-end
 
 Operator's guide for the SWE-bench **Verified** path (500 instances,
-Python-only, curated by Princeton). This is the headline benchmark for
-launch — every comparable agent (Opus 4.7, Sonnet 4.6, GPT 5.5) reports
-a Verified number, and [vals.ai](https://www.vals.ai/benchmarks/swebench)
-publishes cost-per-test for apples-to-apples comparison.
+Python-only, curated by Princeton). Many agent systems report a Verified
+number, and [vals.ai](https://www.vals.ai/benchmarks/swebench) publishes
+cost-per-test figures that make cost comparisons possible.
 
 Use the Pro runbook (`RUNBOOK_SWE_BENCH_PRO.md`) for the multi-language
 1,865-instance follow-up run.
 
-## Verified facts (sourced, May 2026)
+## Reference figures (third-party sources, May 2026)
 
 | Item | Value | Source |
 |------|-------|--------|
 | Dataset size | 500 instances | [HF dataset card](https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified) |
 | Domain | Python-only, real GitHub issues | same |
 | Difficulty mix | 194 (<15min), 261 (15m-1h), 42 (1-4h), 3 (>4h) | [vals.ai](https://www.vals.ai/benchmarks/swebench) |
-| Top score | GPT 5.5 @ 82.60% | [vals.ai](https://www.vals.ai/benchmarks/swebench) (5/16/2026) |
 | Cost reference (Opus 4.7) | $2.42/test = $1,210 full | [vals.ai](https://www.vals.ai/benchmarks/swebench) |
 | Cost reference (Sonnet 4.6) | $1.30/test = $650 full | same |
 | Eval Docker images (Epoch optimized) | 30 GiB | [Epoch AI](https://epoch.ai/blog/swebench-docker) |
@@ -50,7 +48,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ## Step 1: stage instances
 
-Use the included fetcher (Wave 12 hotfix companion) to download the
+Use the included fetcher to download the
 HF dataset, convert to Lightwork manifest format, and (optionally)
 clone each instance's repo:
 
@@ -71,12 +69,15 @@ wc -l ~/.maverick/verified/manifest.jsonl    # should be 500
 ls ~/.maverick/verified/repos | wc -l         # should be 500 with --stage
 ```
 
-The fetcher correctly handles HF's JSON-encoded `FAIL_TO_PASS` /
-`PASS_TO_PASS` fields, prepends `https://github.com/` to the
-`owner/name` `repo`, and excludes `test_patch` (that's the grader's
-holdout — the agent must never see it).
+The fetcher parses HF's JSON-encoded `FAIL_TO_PASS` / `PASS_TO_PASS`
+fields and clones each `owner/name` `repo` from `https://github.com/`. The
+manifest also records `gold_patch` and `test_patch`: `test_patch` is the
+grader's fixture, applied by the trusted scorer before it runs
+`FAIL_TO_PASS`. The agent never reads the manifest, and the anti-cheat
+check refuses any candidate patch that touches tests, but the manifest is
+secret-bearing, so keep it out of the agent's working directory.
 
-## Step 2: configure for single-Opus-brain (the advertised architecture)
+## Step 2: configure a single attempt per instance
 
 The default ROLE_MODELS already wire orchestrator → Opus and coder →
 Sonnet. For Verified we run a SINGLE attempt per instance (no BoN
@@ -84,7 +85,7 @@ override) so the published score reflects the actual multi-agent
 architecture.
 
 ```bash
-# Wave 12 verified env vars (single Opus-brain)
+# Recommended environment (single attempt, Opus orchestrator)
 export MAVERICK_CODING_MODE=1
 export MAVERICK_BENCHMARK_OPAQUE=1
 export MAVERICK_USE_SKILLS=0
@@ -101,9 +102,7 @@ unset MAVERICK_BEST_OF_N
 The harness will:
 1. Read the manifest (one JSONL line per instance)
 2. Set `MAVERICK_GOLD_PATCH` per instance from the manifest's
-   `gold_patch` field (Wave 12 hotfix: this completes the
-   defensive_validate cheating-detector plumbing that was previously
-   half-wired)
+   `gold_patch` field (used by the defensive_validate cheating detector)
 3. Reset the workdir to `base_commit` for each instance
 4. Invoke Lightwork with Opus as the orchestrator role + Sonnet sub-agents
 
@@ -129,8 +128,7 @@ committing the full budget.
 ## Step 4: run full Verified
 
 ```bash
-# 500 instances × $5 cap = $2500 worst-case; expected ~$1000-1500
-# at Opus 4.7 pricing ($5/$25 per MTok).
+# 500 instances × $5 cap = $2500 worst case; estimated ~$1000-1500.
 python benchmarks/swe_bench.py \
     --instances ~/.maverick/verified/manifest.jsonl \
     --pipelines maverick \
@@ -196,15 +194,15 @@ The grader emits `<run_id>.json` with `resolved_instances`,
 
 Save:
 - `predictions.csv` (the producer output)
-- `run_meta.json` (Wave 12 provenance — git SHA, manifest SHA, env)
+- `run_meta.json` (provenance — git SHA, manifest SHA, env)
 - The grader's report JSON
 - `traces/<instance>.jsonl` if `MAVERICK_TRACE_DIR` was set
 
-These together let you reproduce the run and defend the score.
+These together let you reproduce the run and audit the score.
 
 ## What's known to fail
 
-From prior Wave 11/12 council reviews + Princeton's SWE-bench issues:
+From earlier runs and the upstream SWE-bench issue tracker:
 
 1. **Prompt caching no-op on small prompts.** Lightwork's system+tools
    total ~1,800 tokens; the 4,096-token min for Sonnet 4.6 / Opus 4.7
@@ -224,6 +222,5 @@ From prior Wave 11/12 council reviews + Princeton's SWE-bench issues:
    inference, Lightwork reads the workdir as-is.
 
 4. **Defensive validator's cheating detector** requires `gold_patch`
-   in env. The Wave 12 hotfix (commit `305ae5f`) wires this from the
-   manifest. If you're using a custom manifest builder, ensure
-   `gold_patch` field is set.
+   in env. `benchmarks/swe_bench.py` sets it from the manifest. If you
+   use a custom manifest builder, make sure the `gold_patch` field is set.

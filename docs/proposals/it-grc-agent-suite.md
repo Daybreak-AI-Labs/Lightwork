@@ -1,6 +1,7 @@
 # IT / GRC / Privacy / Security / AI-Governance agent suite
 
-**Status:** design / roadmap. Companion to
+**Status:** design reference; the per-agent status tags record what existed when it was
+written. Companion to
 [`finance-agent-suite.md`](finance-agent-suite.md) (same shape: agents, what they
 connect to, controls, customization), [`../enterprise/architecture.md`](../enterprise/architecture.md)
 (the three-layer control plane), and [`agent-factory.md`](agent-factory.md).
@@ -533,7 +534,7 @@ The independent (third-line) tower — **read-only over everything, remediates n
   runtime; trip canaries; filter unicode attacks. The chokepoint on every action.
 - **Connects to:** the agent tool path (in-process), the audit log.
 - **Capability:** the Shield runs as a kernel chokepoint, not a tool (fail-open per
-  CLAUDE.md rule 1).
+  kernel rule 1).
 - **Status:** **Shipped** — `safety/{jailbreak_heuristics,remote_scan,canaries,unicode_filter,secret_detector,pii_detector}.py`.
 
 #### 6.2 SIEM / Detection & Alert-Triage Agent
@@ -729,9 +730,9 @@ The weakest area (per the inventory) — most agents here orchestrate/evidence
 
 ---
 
-### Council-added agents (from the adversarial review)
+### Additional agents
 
-Eight seats the adversarial-council pass surfaced as missing (several were flagged only as
+Eight seats a later review found missing (several were flagged only as
 "gaps" in §1 before); folded into the roster. Full skills in [`agent-skills-catalog.md`](agent-skills-catalog.md).
 
 - **Cloud Security / CSPM-CNAPP Agent** *(Tower 6/8)* — Wiz / Prisma Cloud / Orca / Defender for Cloud `‹build›`; CSPM/CIEM/CWPP, CIS benchmarks, K8s security (OPA/Falco), IaC drift. Read + recommend; remediation gated. **Status: Gap** (the biggest structural hole — no cloud-posture owner).
@@ -814,7 +815,7 @@ assessor via the existing `build_assessment_agent`.
 
 ## 9. Integrations catalog
 
-Per CLAUDE.md rules 5 & 6, every connector ships a config knob + wizard toggle.
+Per kernel rules 5 & 6, every connector ships a config knob + wizard toggle.
 
 | System class | Vendors | Status | Used by |
 |---|---|---|---|

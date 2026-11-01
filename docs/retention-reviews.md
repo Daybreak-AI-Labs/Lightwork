@@ -19,5 +19,5 @@ them separately. The checkbox cannot override a recorded hold.
 Durable receipts retain per-store dispatch and outcomes. Completed steps are not
 repeated, unknown prior outcomes never become proven zero, and missing audit
 acknowledgements remain unresolved. A failed or skipped store does not imply that
-no old records existed. These changes and authored regression tests have received
-static review only; runtime, browser and PostgreSQL acceptance remain deferred.
+no old records existed. Runtime, browser and PostgreSQL acceptance have not
+been qualified.

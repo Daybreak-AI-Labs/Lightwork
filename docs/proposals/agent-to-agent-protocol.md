@@ -1,6 +1,8 @@
 # The agent-to-agent protocol — identity, handoffs, authorization, verification
 
-**Status:** design / roadmap — a load-bearing differentiator. Companion to the
+**Status:** design. The signed handoff envelope and its offline verifier (§7, §9) are
+implemented in `maverick/handoff.py`; wiring them onto the agent bus is a separate step.
+Companion to the
 [self-extending agent factory](self-extending-agent-factory.md) and the eight agent
 suites ([`agent-suites-overview.md`](agent-suites-overview.md)). Builds on
 [`../enterprise/architecture.md`](../enterprise/architecture.md).

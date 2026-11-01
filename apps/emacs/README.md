@@ -36,7 +36,6 @@ The halt acknowledgement still requires exact local scope and checkpoint semanti
 
 The two regression tests in `tests/maverick-control-tests.el` passed in native
 Emacs 30.2 using mocked processes and timers. This does not qualify interactive
-editing or real CLI cancellation; the dated qualification receipt is kept with
-the release evidence outside this tree.
+editing or real CLI cancellation.
 
 See the [client request and acknowledgement contract](../../docs/client-request-lifecycle.md) for replay, deadlines, access errors, and platform qualification limits.

@@ -7,11 +7,11 @@
 > qualification, receipt, and backend-export plumbing while keeping real GPU
 > training demand-driven.
 
-**Status:** Decided — park, don't close, don't prune · **Roadmap ref:** [`ROADMAP.md`](../ROADMAP.md) → "Current state & gap analysis" (C2) · **Date:** June 2026
+**Status:** Decided — park, don't close, don't prune · **Date:** June 2026
 
 ## The question
 
-Roadmap **C2** was an open decision: **close the eval→reward loop** (train on
+The roadmap left an open decision: **close the eval→reward loop** (train on
 donated trajectories; learn the compaction/reflexion gates from outcome reward;
 run RLAIF/DPO on the proposer) — **or prune the scaffolds** (`training/`,
 `prm.py`, the compaction gate) as speculative complexity?
@@ -64,28 +64,27 @@ Concretely:
    fail-open, and carry zero runtime cost when unused; they document the intended
    architecture and the data they consume is already being shaped correctly.
 4. **Label** the offline/experimental pieces as operator-side + experimental
-   (the module docstrings already do — `prm.py` "Wave 7c: scaffold",
-   `training/__init__` "Real training requires GPU + trajectory volume",
-   `compaction.py` "learn the gate … lands when we have outcome reward"). This
+   (the module docstrings already do — `prm.py` "Scaffold. Real RL pipeline …",
+   `compaction` "That second half lands when we have outcome reward"). This
    decision formalizes that status.
 
 ## Why park (not close, not prune)
 
 - **Closing the loop now is speculative complexity.** The training flywheel is,
   per the Karpathy review the code cites, "the only piece that earns ML
-  complexity" — but it earns it **only at trajectory volume**, which a pre-PMF
-  project doesn't have. Building a 6–8-week outcome-reward training loop before
-  there are trajectories to train on violates "simplicity first / nothing
-  speculative" (CLAUDE.md). It's a push where the right move is demand-pull.
+  complexity" — but it earns it **only at trajectory volume**, which the
+  project does not yet have. Building a 6–8-week outcome-reward training loop before
+  there are trajectories to train on goes against the house rule of no
+  speculative abstractions ([CONTRIBUTING.md](../../CONTRIBUTING.md#house-rules)).
+  It's a push where the right move is demand-pull.
 - **Pruning throws away correct, tested, free interface code.** The PRM protocol,
   the donation schema, and ingest are the *data-shaping* half. They make
   `HeuristicPRM` useful now and make a future trained model a drop-in. Deleting
   them would have to be re-written verbatim the day volume arrives. Keeping them
   costs nothing (lazy imports, fail-open, off by default).
-- **It also matches the commercial reality.** The surviving wedge is the
-  self-hostable, provable, regulated agent runtime — not an ML-training product.
-  Founder/eng attention belongs on the Governed-Runtime track, not on a training
-  loop with no data and no GPU operator.
+- **It matches the project's focus.** Lightwork is a self-hostable, provable,
+  regulated agent runtime — not an ML-training product. A training loop with no
+  data and no GPU operator would add complexity without value.
 
 ## The tripwire (when to revisit — close it on demand-pull)
 
@@ -94,8 +93,8 @@ Revisit "close the loop" when **both** hold:
 1. **Volume:** a meaningful corpus of donated trajectories has accumulated from
    real usage (order hundreds+), enough that a learned PRM head or DPO pass could
    plausibly beat `HeuristicPRM`; **and**
-2. **An operator pull:** someone (a design partner, or Lightwork itself with a GPU
-   budget) actually wants to run the offline trainer.
+2. **An operator pull:** an operator with a GPU budget actually wants to run the
+   offline trainer.
 
 At that point, sequence it as the map's "Option A": collect per-episode outcome
 metadata → learn the compaction gate first (smallest, reuses the `LearnedPRM`

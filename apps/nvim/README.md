@@ -42,8 +42,7 @@ its local supervision, not external effects.
 
 The asynchronous job fixture in `../client-contract-tests/nvim-command.test.cjs`
 has passed in Fengari and native Neovim 0.12.5 with mocked job/timer APIs.
-Interactive editing and real CLI cancellation still need installed-host checks;
-the dated qualification receipt is kept with the release evidence outside this tree.
+Interactive editing and real CLI cancellation still need installed-host checks.
 
 Classic Vim (non-Neovim) users: the CLI works in any `:terminal` —
 `maverick monitor` is the same TUI.

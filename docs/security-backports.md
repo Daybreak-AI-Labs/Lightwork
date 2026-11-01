@@ -1,39 +1,30 @@
-# Security backports & the LTS safety branch
+# Security fixes and backports
 
-How security fixes flow to releases that aren't `main`, and what the LTS
-safety branch guarantees. The tooling half lives in
-`maverick/backport_tool.py` (`python -m maverick.backport_tool`).
+How security fixes reach users, and the tooling that is available if a
+release branch is ever maintained alongside `main`.
 
-## Policy
+## Current practice
 
-- **What qualifies.** A commit is backport-eligible when it fixes a
-  vulnerability or hardens a safety boundary (shield chokepoints, sandbox
-  mediation, capability/consent gates, secret scrubbing, audit integrity) —
-  marked by `security:`/`fix(security)` in the subject or a
-  `Security-Backport: yes` trailer.
-- **LTS safety branch.** Each major/LTS-designated release gets a branch
-  `lts/<major.minor>` that receives **safety and security fixes only** (no
-  features, no refactors) for **2 years** from its cut date. Cutting the
-  branch is a maintainer act:
-  `git branch lts/<v> <release-tag> && git push origin lts/<v>`.
-- **Cadence.** Eligible fixes are backported within 7 days of landing on
-  `main`; a critical (actively-exploited) fix immediately.
-- **Verification.** A backport PR must keep the LTS branch's full test suite
-  green and may not bump minimum dependency versions except where the fix
-  requires it (documented in the PR).
+- **Fixes land on `main`.** There are no long-term-support or release
+  branches. A security fix is made on `main` and ships in the next release.
+  [SECURITY.md](../SECURITY.md) describes how to report a vulnerability and
+  which versions receive fixes.
+- **Marking a security fix.** A commit that fixes a vulnerability or hardens a
+  safety boundary (shield chokepoints, sandbox mediation, capability or consent
+  gates, secret scrubbing, audit integrity) carries `security:` or
+  `fix(security)` at the start of its subject, or a `Security-Backport: yes`
+  trailer. The marker lets the backport tool find the fix later.
 
-## Tooling
+## Backport tooling
 
-`python -m maverick.backport_tool`:
+`maverick/backport_tool.py` (`python -m maverick.backport_tool`) is available
+to maintainers if a release branch is cut. It only reads git history and
+prints plans; cherry-picks and pushes stay the maintainer's reviewed acts.
 
-- `scan <since-ref>` — list backport-eligible commits on `main` since a ref
-  (subject markers + trailers), with the files they touch.
-- `plan <lts-branch> <since-ref>` — the eligible commits **not yet** on the
-  LTS branch (by patch-id, so an already-cherry-picked fix isn't re-flagged),
-  as an ordered cherry-pick plan.
-- `check <lts-branch>` — CI-friendly: exit non-zero when an eligible fix older
-  than the 7-day SLA is missing from the branch — the gate that keeps the
-  2-year promise honest.
-
-The tool only **reads** git history and prints plans; the cherry-picks and
-pushes are the maintainer's reviewed acts.
+- `scan <since-ref>` lists the marked security fixes on `main` since a ref.
+- `plan <branch> <since-ref>` lists the marked fixes that are not yet on the
+  branch (matched by patch-id, so a fix cherry-picked under a different SHA is
+  recognised), as an ordered cherry-pick plan.
+- `check <branch> <since-ref>` exits non-zero when a marked fix older than
+  seven days (`SLA_DAYS`) is missing from the branch, so it can run as a CI
+  gate on a maintained branch.

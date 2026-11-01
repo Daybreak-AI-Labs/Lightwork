@@ -1,9 +1,10 @@
 # Operations / Supply Chain agent suite — the COO's office
 
-**Status:** design / roadmap. Companion to the finance, IT-GRC, sales-GTM, HR,
+**Status:** design reference; the per-agent status tags record what existed when it was
+written. Companion to the finance, IT-GRC, sales-GTM, HR,
 product-engineering, strategy/exec, and legal suites; indexed in
 [`agent-suites-overview.md`](agent-suites-overview.md). Builds on
-[`../enterprise/architecture.md`](../enterprise/architecture.md). ~39 agents (33 base + 6 council-added) across eight
+[`../enterprise/architecture.md`](../enterprise/architecture.md). ~39 agents (33 base + 6 added after review) across eight
 towers.
 
 > **Operations is the only suite where agents act on the *physical* world.** Every other
@@ -518,9 +519,9 @@ authoring = "manual"
 
 ---
 
-### Council-added agents (from the adversarial review)
+### Additional agents
 
-Six seats the council flagged — most critically, no one owned **OT/ICS security** over the
+Six seats added after review — most critically, no one owned **OT/ICS security** over the
 SCADA/historians the suite reads. Full skills in [`agent-skills-catalog.md`](agent-skills-catalog.md).
 
 - **OT / ICS-Security Agent** *(Tower 3/8)* — IEC 62443, the Purdue model / IT-OT segmentation, NIST 800-82; historian/SCADA/DCS (OSIsoft PI/AVEVA, Rockwell, Siemens, Honeywell, Emerson). **Status: Gap** (the suite reaches into OPC-UA/historians with no security owner — a critical hole).
@@ -586,7 +587,7 @@ Each becomes a `run_assessment` capability + a conversational assessor via
 
 ## 9. Integrations catalog
 
-Per CLAUDE.md rules 5 & 6, every connector ships a config knob + wizard toggle.
+Per kernel rules 5 & 6, every connector ships a config knob + wizard toggle.
 
 | System class | Vendors | Status | Used by |
 |---|---|---|---|

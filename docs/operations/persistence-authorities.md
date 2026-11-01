@@ -5,12 +5,12 @@ world model or governed records does not make every queue, file, key, approval,
 audit chain and instruction store shared. This inventory does not enable high
 availability or relax deployment guards.
 
-The machine-readable [inventory](persistence-authorities.json) classifies 724
-Python source files from the original persistence-seam scan and subsequent
-production-owner reviews, including the shared A2A store, PostgreSQL primitives,
-learning-key schema helper and signed client-erasure receipts. The learning-key
-helper changes the keys of the four existing learning tables in the owning
-transaction; it creates no separate business namespace. The inventory includes
+The machine-readable [inventory](persistence-authorities.json) classifies each
+Python source file found by the persistence-seam scan and later owner reviews,
+including the shared A2A store, PostgreSQL primitives, learning-key schema helper
+and signed client-erasure receipts. The learning-key helper changes the keys of
+the four existing learning tables in the owning transaction; it creates no
+separate business namespace. The inventory includes
 explicit test/tooling exclusions. Each entry records its purpose, semantic
 contract, owning module or delegated owner, exact source sites, literal path
 hints, observed transaction/schema markers and governed namespace restore policy.
@@ -22,8 +22,8 @@ authority.
 This is a source and contract review. All listed persistence seams and module
 purposes were examined; representative owning implementations and the existing
 recovery registry were read more deeply. It is not a test of every branch or a
-native deployment qualification. Line references describe the local implementation
-after base `ea17dc91f14b984d167dd5768ea7543fbda9278f` and will move with edits.
+native deployment qualification. Line references describe the source at the time
+of review and will move with edits.
 
 ## Store owners and boundaries
 
@@ -40,11 +40,11 @@ after base `ea17dc91f14b984d167dd5768ea7543fbda9278f` and will move with edits.
 | Audit and evidence | Signed bodies, chains, checkpoints, anchors, evidence receipt ledgers and custody state | Transfer signatures, keys, anchors, retention and source coverage together. Indexes can accelerate reads but cannot recreate evidence or erase a reported gap. |
 | Client-erasure receipts | `client_erasure.py`; signed intent, prepared inventory and terminal outcome are retained under the installation home outside the erased tenant root | Preserve the signed chain and public verification key as offboarding evidence. An intent or prepared event is not proof of completion; these receipts cannot restore erased tenant data, and tenant workspace backup does not capture them. |
 | Learning and research | Promotion ledger, evaluator accounting, generated instructions, skill/code artifacts, archives and model pointers | Preserve source/model/evaluator version, confirmation accounting and approval. PostgreSQL's existing four learning tables use the checked [tenant-key migration](learning-store-tenant-keys.md), shared by WorldModel v39 and standalone initialization; table/row and NULL-partition identity are retained, with one caller-owned transaction and refusal on unrecognized constraints. Some logs are explicitly discarded on bootstrap; instruction, routing and promotion state remains protected. Research opt-in does not make authority disposable. |
-| Source documents and customer records | Attachment blobs, knowledge corpus, book of work, assessments and user task data | Preserve source hashes, provenance and record relationships. Migrate canonical source before rebuilding embeddings or projections. Not all persistent data authorizes execution. |
+| Source documents and business records | Attachment blobs, knowledge corpus, book of work, assessments and user task data | Preserve source hashes, provenance and record relationships. Migrate canonical source before rebuilding embeddings or projections. Not all persistent data authorizes execution. |
 | Derived state | Exact-key lookup, flow metadata index, recall markers, model discovery and content-bound caches | Rebuild from current canonical sources; preserve removal/incomplete state until reconciled. A derived label never overrides a stricter registry policy. |
 | Preferences and drafts | Principal-bound read/snooze/pin preferences, saved views, draft and support previews | Restore as private data only. A restored draft or snooze cannot approve a live workflow or grant access. |
-| External and temporary work | User files, customer databases, socket clients, in-memory analytics, private document jobs | External owners control durability. Local backup does not establish provider effects; temporary job completion requires final publication through its owner. |
-| Vendor console and installation | Separate vendor-console SQLite/staff/license/release authority; release artifacts and installation recovery receipts | Vendor console is a separate service/root. Installer acceptance fixtures are test state. Signed release outputs and reviewed installation transactions retain their own admission protocol. |
+| External and temporary work | User files, connected external databases, socket clients, in-memory analytics, private document jobs | External owners control durability. Local backup does not establish provider effects; temporary job completion requires final publication through its owner. |
+| Installation | Release artifacts and installation recovery receipts | Installer acceptance fixtures are test state. Signed release outputs and reviewed installation transactions retain their own admission protocol. |
 
 ## Recovery is a closed disposition, not a filename guess
 
@@ -89,8 +89,8 @@ single-owned service boundary as well as a shared database.
 Before enabling two control planes, qualify competing claims/approvals, process
 death at each commit/publication boundary, lost database/key authority, network
 partition and stale-owner mutations. Recover each to an explicit operator state
-without replaying an uncertain effect. Parent implementation evidence for one
-shared store must not be promoted into system-wide high-availability acceptance.
+without replaying an uncertain effect. Evidence for one shared store must not be
+promoted into system-wide high-availability acceptance.
 
 Local tests: `python -m pytest -q packages/maverick-core/tests/test_persistence_authority_inventory.py packages/maverick-core/tests/test_recovery_authority_registry.py`.
 These check the closed namespace inventory, ownership/disposition fields and

@@ -29,10 +29,10 @@ authority is not implemented by changing the receipt's actor.
 The store uses the existing governed-record backend contract, including its
 multi-replica restrictions and audit outbox. It retains up to 500 compact completed
 receipts and 5,000 provider dispatch entries per current attempt, then refuses new
-dispatch until governed archival is arranged. Native immutable collection receipts
-are unchanged. No credentials or billing settings are modified by this change.
+dispatch until governed archival is arranged. Native collection receipts remain
+immutable, and recovery modifies no credentials or billing settings.
 
 Regression cases cover stale fields/settings, duplicate submissions, partial
 customer/subscription completion, account mismatch, review expiry and expired
-provider retry windows. They were authored but not run. Live Stripe behavior,
-distributed fault injection and browser recovery qualification remain untested.
+provider retry windows. Live Stripe behavior, distributed fault injection and
+browser recovery are not qualified.

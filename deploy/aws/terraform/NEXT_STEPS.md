@@ -6,8 +6,8 @@ your own profile name throughout.
 
 ## Created out of band (before the first apply)
 
-- **AWS account:** the Daybreak Labs production account, reached through the
-  `lightwork` profile.
+- **AWS account:** the target AWS account, reached through the `lightwork`
+  profile.
 - **Region:** `us-east-2` for everything except the CodeBuild-triggering
   commands, which are also `us-east-2` (the stack does not use `us-east-1`
   anywhere).
@@ -44,7 +44,7 @@ export PATH="$HOME/.local/bin:$PATH"
 aws sts get-caller-identity --profile lightwork   # if this already works, skip to step 1
 ```
 
-If it fails (fresh container, no cached login) — install the CLI if needed,
+If it fails (no cached login) — install the CLI if needed,
 then log in:
 
 ```bash
@@ -52,7 +52,7 @@ curl -fsSL 'https://awscli.amazonaws.com/v2/install.sh' | bash
 export PATH="$HOME/.local/bin:$PATH"
 aws configure set region us-east-2 --profile lightwork
 aws login --region us-east-2 --profile lightwork --remote
-# Prints a URL. The human opens it, approves, gets a code back, pastes it here.
+# Prints a URL. Open it in a browser, approve, and paste the returned code.
 aws sts get-caller-identity --profile lightwork   # must show the target account
 ```
 
@@ -234,7 +234,7 @@ The native consent SDK also needs the receipt signing root in the task
 environment (`MAVERICK_CONSENT_RECEIPT_ROOT`, from `secrets.tf`); `terraform
 apply` creates the secret and rolls a task revision that carries it. The
 evidence parsers (pypdf, openpyxl, pillow, xlrd, olefile) come from the
-`evidence-analysis` extra, which `deploy/docker/Dockerfile` now includes in the
+`evidence-analysis` extra, which `deploy/docker/Dockerfile` includes in the
 image build, so rebuild and redeploy (step 3 and step 5) after this change.
 Then `GET /api/v1/features/modules` should report the three modules as
 `configured` instead of `incomplete`.

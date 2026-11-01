@@ -1,6 +1,6 @@
 # GRC Concierge standalone demo
 
-This reduced SKU runs without Lightwork. It includes original-paraphrase starter
+This reduced standalone app runs without Lightwork. It includes original-paraphrase starter
 screens for SOC 2, ISO/IEC 27001:2022, and NIST CSF 2.0; deterministic scoring;
 quoted evidence verdicts; accessible guided assessment, evidence, risk, and
 POA&M forms; bounded vendor posture carry-forward; a local mock tenant review
@@ -19,12 +19,13 @@ The standalone requirements intentionally do not install `maverick`. Core
 analysis availability changes only questionnaire declarations and scoring; it
 does not turn this demo into the governed `/security` product.
 
-Tagged Lightwork releases attach a versioned
-`lightwork-grc-concierge-<version>.zip` with an embedded release manifest,
-file hashes, the proprietary license, an aggregate standalone-SKU CycloneDX
-SBOM, SHA-256 checksums, and Sigstore signature/certificate files. This is a
-licensed **source archive**, not a wheel or PyPI package. The same archive can
-be reproduced from a tagged checkout by running this at the repository root:
+The release workflow attaches a versioned
+`lightwork-grc-concierge-<version>.zip` to each tagged release (none has been
+published yet), with an embedded release manifest, file hashes, the Apache-2.0
+`LICENSE` and `TRADEMARK.md`, an aggregate standalone-SKU CycloneDX SBOM,
+SHA-256 checksums, and Sigstore signature/certificate files. This is a
+**source archive**, not a wheel or PyPI package. The same archive can be
+reproduced from a tagged checkout by running this at the repository root:
 
 ```bash
 python scripts/build_standalone_skus.py --version <version> \

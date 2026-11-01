@@ -1,20 +1,19 @@
 # Lightwork benchmarks
 
-The wedge claim is **long-horizon work + true multi-agent coordination**.
-These benchmarks make that measurable.
+These benchmarks measure long-horizon work, multi-agent coordination, learning
+and governance.
 
-## Why benchmarks exist
+## Benchmark design
 
-Without numbers, "better at long-horizon" is marketing. Each benchmark
-in this directory:
+Each long-horizon benchmark in this directory:
 
 - Has a verifiable success criterion (file produced, tests pass, etc.)
 - Records wall-clock, cost (`$`), tokens, tool calls, and depth.
 - Is reproducible from a single `maverick start` command.
-- Has a baseline number from a single-shot LLM call for comparison.
+- Can be compared with a single-shot LLM baseline row.
 
-Results belong in `RESULTS.md` next to each benchmark, with the run
-metadata (date, model assignments, total cost) checked in.
+Results go in [`RESULTS.md`](RESULTS.md), with the run metadata (date, tag,
+total cost) checked in.
 
 ## How to run a benchmark
 
@@ -24,8 +23,13 @@ maverick start "$(cat benchmarks/longhorizon/research-report.md)" \
   --max-dollars 5 --max-wall-seconds 1800 --workdir bench-workspace
 ```
 
-When done, copy the output (and the budget summary line) into the
-corresponding `RESULTS.md`.
+When done, copy the output (and the budget summary line) into `RESULTS.md`.
+`benchmarks/harness.py` runs the same goal and appends the row for you:
+
+```bash
+python benchmarks/harness.py benchmarks/longhorizon/research-report.md \
+  --max-dollars 2.0 --tag local
+```
 
 ## Suite
 
@@ -39,11 +43,10 @@ All three are designed to **fail** for single-shot prompting (too
 broad, too many steps) and **succeed** for a recursive swarm with
 verify + skill distill enabled.
 
-## Does the learning actually help? (the moat)
+## Does the learning actually help?
 
-The differentiator vs. stateless assistants is that Lightwork *retains and
-recalls* what it learns. These benchmarks make that claim falsifiable
-instead of marketing:
+Unlike a stateless assistant, Lightwork *retains and recalls* what it learns.
+These benchmarks make that claim falsifiable:
 
 | Benchmark | Question | Cost |
 |---|---|---|
@@ -56,17 +59,17 @@ the lexical false-positive rate from **88% → 12%** with Recall@1 held at 100%
 — precision is what matters, because injecting weakly-relevant memory *regresses*
 the agent (hard negatives flip answers; large/noisy memory degrades).
 
-`moat_rigorous.py` is the paid, end-to-end proof. Its headline is the
-**defensible** one: *warm is never worse than cold* (the property the gate
-buys), reported as a not-worse rate + a **median** (outlier-robust) cost delta,
+`moat_rigorous.py` is the paid, end-to-end test. Its primary result is
+whether *warm is never worse than cold* (the property the gate provides),
+reported as a not-worse rate + a **median** (outlier-robust) cost delta,
 with success parity. Pure aggregation is unit-tested offline
 (`test_moat_rigorous.py`); results land in `MOAT_RIGOROUS_RESULTS.md`.
 
 ## Does the governance contain unsafe autonomy? (the control plane)
 
-The other differentiator vs. an ungoverned runtime is that Lightwork **contains**
-what an autonomous agent is allowed to *do*. `eval_governance.py` makes that
-falsifiable instead of marketing -- and, like `eval_smoke.py`, it runs in CI with
+Unlike an ungoverned runtime, Lightwork **contains** what an autonomous agent
+is allowed to *do*. `eval_governance.py` makes that falsifiable -- and, like
+`eval_smoke.py`, it runs in CI with
 **no key**: deterministic, scripted calls into the *real* governance machinery.
 
 | Scenario | Asks | Real control exercised |
@@ -160,7 +163,7 @@ prompt called by **both** arms, so any token or call-count difference is caused
 by governance and nothing else. No key, no network, no LLM: this is an overhead
 measurement, not a capability benchmark.
 
-The headline is a **zero** delta: same model calls, same input/output tokens,
+The main result is a **zero** delta: same model calls, same input/output tokens,
 same task steps and tool calls, and byte-identical answers and external effects
 in every pair. That is a property of *this* control plane, not a truism — a
 governance layer built on an LLM critic or an LLM-as-judge policy would show a
@@ -195,28 +198,24 @@ session kernel, harness self-refinement, and run forking — are documented in
 
 ## Comparing across providers
 
-Re-run the same benchmark with different `[models]` config blocks:
+Re-run the same benchmark with a different `[models]` block in your
+configuration (for example, an Anthropic orchestrator with local Ollama
+workers) and record each configuration as its own row in `RESULTS.md`, so the
+numbers sit side by side.
 
-```toml
-# all-anthropic
-benchmarks/configs/all-anthropic.toml
+## Out of scope
 
-# orchestrator on Anthropic, workers on Ollama (local)
-benchmarks/configs/mixed-local-cloud.toml
-```
-
-The `RESULTS.md` for each benchmark records all configurations tried
-and their numbers side by side.
-
-## What we are NOT measuring (yet)
-
-- Raw LLM accuracy (SWE-bench / MMLU / etc.) -- those measure the
-  model, not the agent system
-- Raw red-team / prompt-injection content scanning -- that's Agent
-  Shield's territory and has its own suite. (The *action-governance*
-  layer -- block/gate/record unsafe actions -- **is** now measured;
-  see "Does the governance contain unsafe autonomy?" above.)
+- Raw LLM accuracy (MMLU etc.) -- that measures the model, not the agent
+  system. SWE-bench runs drive the full agent; the operator runbooks are
+  [`RUNBOOK_SWE_BENCH_VERIFIED.md`](RUNBOOK_SWE_BENCH_VERIFIED.md) and
+  [`RUNBOOK_SWE_BENCH_PRO.md`](RUNBOOK_SWE_BENCH_PRO.md). No SWE-bench result
+  is published in this directory.
+- Raw red-team / prompt-injection content scanning -- that is Agent Shield's
+  territory and has its own suite
+  ([`security/RUNBOOK_SECURITY.md`](security/RUNBOOK_SECURITY.md)). The
+  *action-governance* layer -- block/gate/record unsafe actions -- **is**
+  measured; see "Does the governance contain unsafe autonomy?" above.
 
 Distillation quality (whether auto-generated SKILL.md files actually help
-future runs) **is** now measured — see "Does the learning actually help?"
+future runs) **is** measured — see "Does the learning actually help?"
 above (`recall_precision.py` + `moat_rigorous.py`).

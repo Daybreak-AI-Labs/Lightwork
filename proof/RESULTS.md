@@ -8,7 +8,7 @@
 > platform's *guarantees* and the self-learning loop's *properties* —
 > governance holds, the loop is deterministic, bounded, reversible, and
 > poison-resistant ("it can't quietly get worse" is **provable**). They are
-> **not** a customer ROI figure or a competitive capability benchmark: the
+> **not** an ROI figure or a competitive capability benchmark: the
 > compounding learning curve needs real run history and competitive scores need
 > a model provider key — both are reported honestly as *not yet populated*
 > rather than fabricated (see §3). For Lightwork, that refusal-to-fabricate is
@@ -146,10 +146,17 @@ The load-bearing property is line 3: a candidate that **memorises the seen tests
 without fixing the capability** gains on the held-in split but not the held-out
 split, is flagged `OVERFIT`, and is refused. That is the anti-reward-laundering
 guard — the reason a self-improving loop measured against a held-out yardstick
-cannot quietly launder drift into a "promotion". Two seams are stubbed and
-disclosed: the LLM *proposer* that authors the patch (the harness supplies the
-exact diff a proposer would emit), and container isolation (the eval runs on the
-host and says so; a require-container deployment fails closed instead).
+cannot quietly launder drift into a "promotion". The LLM *proposer* that
+authors the patch is stubbed (the harness supplies the exact diff a proposer
+would emit).
+
+The scoreboard above was recorded when the evaluator still ran on the host.
+The current script no longer stubs isolation or test evidence: it needs a
+sandbox backend that meets the contract in
+[`docs/security/dgm-evaluator-evidence.md`](../docs/security/dgm-evaluator-evidence.md),
+and its footer reads `(LLM proposer stubbed; evaluator evidence is never
+stubbed)`. No bundled backend meets that contract, so on a default install the
+proof exits non-zero and prints the readiness gap instead of a score.
 
 ---
 
@@ -173,8 +180,7 @@ cheats and regressions do not.
 
 The load-bearing property is line 2: the #1 way to inflate a SWE-bench score is
 to **edit the grader's own tests**, and the anti-cheat boundary refuses that
-structurally, before a test is ever run. No other entry on the SWE-bench
-leaderboard reports its result under a signed reference monitor.
+structurally, before a test is ever run.
 
 The **real number** — what % of SWE-bench Verified the agent resolves under this
 chain — comes from `benchmarks/swebench_governed.py --proposer llm` over real
@@ -260,8 +266,8 @@ rendered Ollama `ADAPTER` Modelfile; provider key / GPU required).
 ```bash
 # from a source checkout
 python proof/run_proof.py            # 7 platform guarantees
-python proof/self_harness_proof.py   # 7 self-learning-loop guarantees
-python proof/dgm_code_rung_proof.py  # 6 governed DGM code-rung guarantees
+python proof/self_harness_proof.py   # 11 self-learning-loop guarantees
+python proof/dgm_code_rung_proof.py  # 6 governed DGM code-rung guarantees (needs a conforming evaluator backend)
 python proof/swebench_governed_proof.py       # 4 SWE-bench-under-governance guarantees
 python proof/dgm_uplift_proof.py     # 6 governed self-improvement (DGM uplift) guarantees
 python proof/adapter_rung_proof.py   # 6 governed adapter-rung (in-tenant weights) guarantees
@@ -276,10 +282,10 @@ python -m maverick.proof_pack --verify ./proof/proof_manifest.json --pubkey <pub
 
 ## What we deliberately do **not** claim
 
-- **No competitive capability benchmark.** Lightwork competes on governance and
-  provable learning, not raw agent task-success; a leaderboard would be
-  off-thesis and is intentionally not presented.
-- **No customer ROI figure** until a real deployment produces one — the
+- **No competitive capability benchmark.** These proofs measure governance and
+  learning properties, not agent task success, so no leaderboard result is
+  presented here.
+- **No ROI figure** until a real deployment produces one — the
   `learning_curve` section stays `INSUFFICIENT DATA` rather than estimate.
 - **No fabricated security score.** `shield_asr` measures the *built-in*
   fallback detector; the load-bearing defense is **containment** (least

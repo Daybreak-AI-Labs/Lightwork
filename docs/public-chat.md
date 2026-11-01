@@ -151,12 +151,11 @@ A visitor cannot:
   can outlive its retention by up to an hour. A workspace whose sweep fails is
   logged and skipped for that pass; the other workspaces are still swept, and
   the failed one is tried again at the next pass, an hour later.
-- The answer hold is a fixed 5 cents. A model whose estimated cost for one
-  answer is above that is refused before the call, so a premium model needs a
-  larger hold first. Not built.
+- The answer hold is a fixed 5 cents and is not configurable. A model whose
+  estimated cost for one answer is above that is refused before the call.
 - An answer may use at most 4,000 input tokens, system prompt included. A
   longer specialist prompt is billed and then refused on every visit, so keep
-  the instructions short. Raising the limit is a cost decision for the owner.
+  the instructions short. The limit is not configurable.
 - The widget's stylesheet is an inline `<style>` element inside its shadow
   root. A host page whose content security policy forbids inline styles may
   block it, so the panel would appear unstyled.

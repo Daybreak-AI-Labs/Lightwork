@@ -1,15 +1,15 @@
 # Benchmark Plan — "Governed without being useless"
 
-> The benchmark that turns "we have governance" into a number an investor or a
-> CISO can quote. Goal: measure **unsafe-effect prevention, decision recording,
-> and legitimate-task completion as separate outcomes**, at acceptable
-> overhead. **Status:** the deterministic v1 control-path arm is implemented
+> Goal: measure **unsafe-effect prevention, decision recording, and
+> legitimate-task completion as separate outcomes**, at acceptable overhead. **Status:** the deterministic v1 control-path arm is implemented
 > with 40 definitions × three pinned execution-order seeds, matched governed and
 > controls-disabled arms, a signed manifest, and a manifest-derived report in
 > `benchmarks/GOVERNANCE_FRONTIER_RESULTS.md`. A live-model task arm remains
 > future work.
 
-## The headline we're trying to earn
+## Result statement
+
+The report is written to fill in this statement:
 
 > *"Across **N** fixed enterprise control-path scenarios, Lightwork **prevented
 > X% of scripted unsafe effects** while preserving **Y% benign task admission**,
@@ -18,8 +18,8 @@
 > observation is reported separately for supported called primitives."*
 
 Two outcome numbers that must move together: **safety (prevented)** and **utility
-(completed)**. Anyone can get 100% safety by blocking everything; the story is the
-**frontier** — high safety *with* high completion.
+(completed)**. Blocking everything gives 100% safety, so the result that matters
+is the **frontier**: high safety *with* high completion.
 
 ## Why this benchmark (not an LLM leaderboard)
 
@@ -27,12 +27,11 @@ We are not benchmarking model quality. We are benchmarking the **governance
 layer**: given an agent doing real work (and occasionally being induced to do
 something unsafe), does Lightwork **prevent or gate the unsafe effect**,
 **without** wrecking the legitimate task? Recording is a separate evidence
-question and never counts as prevention. That's the buyer's question, and no
-agent-framework leaderboard answers it.
+question and never counts as prevention.
 
 ## Metrics (the scorecard)
 
-| Metric | Definition | Target to claim |
+| Metric | Definition | Target |
 |---|---|---|
 | **Unsafe-action prevention** | % of injected unsafe actions blocked **or** gated-to-human before execution | high (set after baseline) |
 | **Harness decision-ledger coverage** | % of unsafe decisions appended by the benchmark harness to its signed ledger | ~100% |
@@ -44,7 +43,7 @@ agent-framework leaderboard answers it.
 | **Containment** | % of "destructive" actions that did not execute without approval | high |
 
 Report the **safety–utility frontier** (prevention rate vs. completion rate) as
-the centerpiece chart, plus an honest false-positive number.
+the main chart, alongside the false-positive rate.
 
 ## Scenario suite
 
@@ -106,7 +105,7 @@ are meaningful, not gamed.
 
 V1 ships the harness, open JSONL catalog, focused tests, checked-in signed JSON
 manifest, separate public-key file, and a short generated Markdown report:
-methodology, governed/baseline scorecard, false-positive honesty, overhead
+methodology, governed/baseline scorecard, false-positive results, overhead
 numbers, custody caveat, and reproduction commands. CI validates the tracked
 signature against that external key; current harness, control-implementation,
 and config digests; clean-source commit ancestry when history preserves it (or
@@ -121,14 +120,17 @@ UTF-8 with line endings normalized to LF, making identical Git text portable
 between Windows CRLF and Linux LF checkouts without ignoring substantive
 changes.
 
-## Honesty guardrails (so the number survives scrutiny)
+## Reporting rules
 
-- Publish the **false-positive rate** prominently — a safety number without it is
-  not credible.
-- Don't claim "prevents" for actions we only **record** — separate the two metrics.
-- Show the **baseline** (governance off) so the delta is real, not absolute.
-- Open-source the scenario suite + harness if possible; an auditable benchmark is
-  itself part of the "provable" brand.
+- Publish the **false-positive rate** prominently; a safety number without it
+  cannot be interpreted.
+- Do not claim "prevents" for actions that are only **recorded**; keep the two
+  metrics separate.
+- Show the **baseline** (governance off) so the reported delta is relative, not
+  absolute.
+- Keep the scenario catalog
+  ([`eval_fixtures/governance_control_paths.v1.jsonl`](eval_fixtures/governance_control_paths.v1.jsonl))
+  and the harness in this directory so anyone can rerun and audit the benchmark.
 
 ## Next step
 

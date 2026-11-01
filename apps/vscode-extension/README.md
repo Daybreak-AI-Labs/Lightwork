@@ -76,12 +76,9 @@ require terminal acknowledgement. Streaming is implemented; plan-tree and inline
 approval interfaces remain future work.
 
 Python/TypeScript syntax and static review do not qualify VS Code extension-host
-behavior. Regression tests are authored but intentionally unrun in this audit;
-no package, provider request or release was performed. See the [client lifecycle
-contract](../../docs/client-request-lifecycle.md).
+behavior; the regression tests need a VS Code extension host to run. See the
+[client lifecycle contract](../../docs/client-request-lifecycle.md).
 
 ## License
 
-The current extension follows the root [Lightwork Proprietary License](../../LICENSE).
-Its explicit clause preserves MIT grants for specific previously published MIT
-versions only. The current manifest references that governing license.
+Licensed under the Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE).

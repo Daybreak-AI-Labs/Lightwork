@@ -294,11 +294,11 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # "Finance Team" = ["finance", "tax"]
 
 [license]
-# Signed-license entitlement enforcement (paid tier + add-on suites). Fail-open
-# by default: the kernel runs everything unless you turn enforcement on. Set the
-# trust anchor to the publisher PUBLIC key(s) so a signed license activates paid
-# features; the matching PRIVATE key is a secret supplied only via
-# MAVERICK_LICENSE_PRIVATE_KEY (never here). Issue/inspect with
+# Optional signed-license feature gate for operators (gated tier features and
+# add-on suites). Off by default: every feature runs unless you turn enforcement
+# on. Set the trust anchor to the publisher PUBLIC key(s) so a signed license
+# grants its gated features. The matching PRIVATE key is a secret supplied only
+# via MAVERICK_LICENSE_PRIVATE_KEY (never here). Issue/inspect with
 # `maverick license issue|set|show`; `maverick license keygen` mints a keypair.
 enforce           = false                 # or MAVERICK_LICENSE_ENFORCE=1
 # publisher_pubkeys = ["<publisher public key hex>"]  # or MAVERICK_LICENSE_PUBKEYS
@@ -728,7 +728,7 @@ enable = true              # set false to hide the surface. Env: MAVERICK_SHORIN
 [billing.stripe]           # Platform billing collection (maverick.billing_stripe):
                            #   turn metered-usage invoices into real Stripe charges.
 enable = false             # explicit opt-in; env: MAVERICK_STRIPE_ENABLE
-bill_metered_usage = false # PRICING DECISION PENDING: false bills only the
+bill_metered_usage = false # false bills only the
                            #   recurring platform fee; true also pushes the metered
                            #   model-usage line items (no markup is set here — the
                            #   amounts come from whatever RateCard rated the invoice).
@@ -1099,8 +1099,8 @@ row reads real config/env:
 - a provider credential resolvable (an API key or a `[providers.<name>]` table).
 
 Onboard a tenant and mint its first admin in one step with
-`maverick tenant onboard <id> --admin-email <email> --plan <plan>`; control a
-deployment's paid features with `maverick license issue|set|show`.
+`maverick tenant onboard <id> --admin-email <email> --plan <plan>`; manage the
+optional signed license with `maverick license issue|set|show`.
 
 ## Environment variables
 

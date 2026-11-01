@@ -1,9 +1,10 @@
 # Product & Engineering agent suite
 
-**Status:** design / roadmap. Companion to the finance, IT-GRC, sales-GTM, and HR
+**Status:** design reference; the per-agent status tags record what existed when it was
+written. Companion to the finance, IT-GRC, sales-GTM, and HR
 suites; indexed in [`agent-suites-overview.md`](agent-suites-overview.md). Builds on
 [`../enterprise/architecture.md`](../enterprise/architecture.md) and
-[`agent-factory.md`](agent-factory.md). ~46 agents (40 base + 6 council-added) across eight towers.
+[`agent-factory.md`](agent-factory.md). ~46 agents (40 base + 6 added after review) across eight towers.
 
 > **Product & Engineering is the inverse of every other suite.** Finance and HR are
 > greenfield *workflow*; here, **Lightwork itself is a software-engineering agent**, so
@@ -110,7 +111,7 @@ Two specifics:
 
 ## 3. The control model (cross-cutting)
 
-### 3.1 Sandbox-mediation (CLAUDE.md rule 4)
+### 3.1 Sandbox-mediation (kernel rule 4)
 All execution goes through `sandbox.exec()` — never a raw `subprocess`. The 7 backends
 (local → devcontainer → docker/podman → firecracker/kubernetes → ssh) + `network_policy`
 give the operator the isolation/egress posture they need. **Shipped.**
@@ -523,9 +524,9 @@ authoring = "manual"
 
 ---
 
-### Council-added agents (from the adversarial review)
+### Additional agents
 
-Six seats the council flagged — several with **shipped tooling but no persona** (the exact
+Six seats added after review — several with **shipped tooling but no persona** (the exact
 "tools there, agent missing" gap). Full skills in [`agent-skills-catalog.md`](agent-skills-catalog.md).
 
 - **Mobile Engineering Agent** *(Tower 3)* — `tools/android.py` + `tools/ios_sim.py` already ship. Swift/SwiftUI, Kotlin/Compose, React Native/Flutter; Fastlane/Gradle; mobile security (keychain, cert pinning). App-store release = hard-floor human. **Status: Gap** (tools shipped, agent absent).
@@ -594,7 +595,7 @@ Each becomes a `run_assessment` capability + a conversational assessor via
 
 ## 9. Integrations catalog
 
-Per CLAUDE.md rules 5 & 6, every connector ships a config knob + wizard toggle. **Most of
+Per kernel rules 5 & 6, every connector ships a config knob + wizard toggle. **Most of
 this is already shipped** (§1) — the rare ✅-heavy catalog.
 
 | System class | Vendors | Status | Used by |

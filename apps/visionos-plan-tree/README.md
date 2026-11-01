@@ -1,6 +1,6 @@
 # Lightwork AR plan tree (visionOS scaffold)
 
-**Preview source; no signed customer installer.**
+**Preview source; no signed installer.**
 
 Settings now offers expiring [device pairing](../../docs/device-pairing.md)
 with explicit browser approval and own-work credentials, plus protected renewal.
@@ -32,17 +32,17 @@ linked automatically. No manual target/source assembly is required. See the
 [native companion release matrix](../../docs/native-companion-release.md).
 Settings saves the paired connection in device-only Keychain storage; remote
 dashboards require HTTPS and redirects are refused. Native build and installed
-volume qualification cannot run on the current Windows executor.
+volume qualification require macOS with Xcode and have not been run.
 
-**Honest scope:** this is the scaffold â€” model + fetch + RealityKit
-entity assembly are written; it has not been run on Vision Pro hardware
-(none is available to this repository). The geometry mapping and gesture
+**Scope:** this is the scaffold — model + fetch + RealityKit
+entity assembly are written; it has not been run on Vision Pro hardware.
+The geometry mapping and gesture
 targets are the parts most likely to need on-device tuning, and they are
 marked in the source.
 
 Security model: the app talks only to YOUR dashboard host; include the
 `Authorization: Bearer <MAVERICK_DASHBOARD_TOKEN>` header when the
-dashboard sets one. Read-only â€” the app calls no mutating endpoint.
+dashboard sets one. Read-only — the app calls no mutating endpoint.
 
 Task list provides a searchable, paginated text hierarchy with named statuses,
 parent relationships and task selection without precision gaze. It pages 50
@@ -53,7 +53,7 @@ same-identity transient snapshot is retained; denied access clears the forest.
 The dashboard handoff contains only the task path and requires browser sign-in.
 
 `Tests/PlanTreeModelTests.swift` is included in the generated `MaverickPlanTreeTests`
-Xcode test target and remains unrun on this Windows executor. The source uses a 2 MB streamed-response
+Xcode test target and has not been run yet. The source uses a 2 MB streamed-response
 cap and cancels active refreshes on disposal/background. Signed packaging,
 RealityKit comfort/layout/accessibility and 1/100/1000-node installed acceptance
-are not qualified. No signing or platform account was used.
+are not qualified.

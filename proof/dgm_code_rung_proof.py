@@ -19,7 +19,7 @@ configured. Without that backend it fails and prints the exact readiness gap:
      baseline is measurably beaten (held-out pass-rate rises).
   3. REWARD-LAUNDERING REFUSED  -- a candidate that memorises the seen (held-in)
      tests without fixing the capability gains held-in but NOT held-out, and is
-     flagged OVERFIT and refused. This is the anti-gaming property -- the moat.
+     flagged OVERFIT and refused. This is the anti-gaming property.
   4. CAPABILITY NON-ESCALATION  -- the change is proven to grant no tool the
      prior capability grant did not (before == after over a tool probe).
   5. UNFORGEABLE HUMAN APPROVAL -- the code rung demands a valid Ed25519 operator

@@ -1,7 +1,7 @@
 # RFC 0001: Lightwork 2.0
 
 - Status: **Draft — open for comment**
-- Tracking: roadmap item "2.0 RFC" (2027-H2 Distribution)
+- Tracking: "Lightwork 2.0" under [Packaging and release](../ROADMAP.md#packaging-and-release) in the roadmap
 
 ## Why a 2.0
 
@@ -16,8 +16,9 @@ generations. Nothing is broken, but three kinds of debt now have a cost:
    with async support bolted into the registry, the orchestrator bridges with
    `asyncio.to_thread`. Two execution models, one of them load-bearing by
    accident.
-3. **Breadth tail** — the settled council decision (*freeze breadth, invest in
-   depth*) re-homes the ~47-connector tail to the plugin/registry tier; 2.0 is
+3. **Breadth tail** — the settled
+   [breadth-vs-depth decision](../specs/breadth-vs-depth-decision.md) (*freeze
+   breadth, invest in depth*) re-homes the ~47-connector tail to the plugin/registry tier; 2.0 is
    when the in-tree tail actually moves.
 
 ## What 2.0 changes (proposed)
@@ -50,7 +51,8 @@ generations. Nothing is broken, but three kinds of debt now have a cost:
 ## What 2.0 does NOT change
 
 - The world-model schema (versioned migrations already handle evolution).
-- The shield chokepoints, budget caps, sandbox mediation (CLAUDE.md rules).
+- The shield chokepoints, budget caps, sandbox mediation (the kernel rules in
+  [CONTRIBUTING.md](../../CONTRIBUTING.md#house-rules)).
 - The MCP surface — it is the cross-language contract and stays stable.
 
 ## Migration story

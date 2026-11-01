@@ -2,8 +2,11 @@
 
 ## Terminal install
 
-The Lightwork distribution names are not yet reserved on public PyPI. Do not
-install those names from the public index. Use a reviewed source commit:
+The standard installation path is the
+[source install guide](../../docs/source-install.md). Lightwork is not published
+on PyPI and its distribution names are not reserved there, so do not install
+those names from the public index. These scripts install a pinned source
+commit:
 
 ```bash
 export MAVERICK_REF=<full-40-character-commit-sha>
@@ -21,17 +24,17 @@ install, verify the script, and set `MAVERICK_REF` to that lowercase, full
 40-character commit SHA before running it. Mutable branch/tag refs are always
 rejected.
 
-## Windows customer package candidate
+## Windows desktop package candidate
 
 The implemented Windows x64 path is a Tauri **MSI** containing a PyInstaller
 frozen runtime with all eight Lightwork packages and an offline WebView2
 installer. It opens the local dashboard and has native update, repair and
-guarded recovery controls. The customer machine does not need Python, Git,
+guarded recovery controls. The target machine does not need Python, Git,
 Node or a source checkout for this candidate.
 
 See [`apps/installer-msi/CUSTOMER.md`](../../apps/installer-msi/CUSTOMER.md)
 for the implementation, CI evidence and remaining publisher/clean-machine
-acceptance. A passed synthetic CI installer is not an accepted customer release;
+acceptance. A passed synthetic CI installer is not an accepted release;
 the source-bootstrap scripts above are a separate engineering installation.
 
 The macOS and Linux desktop projects have their own build and device acceptance

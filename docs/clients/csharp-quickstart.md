@@ -120,13 +120,10 @@ used by the runnable TypeScript example.
 
 ## Why no `Lightwork.Core` NuGet package?
 
-See [docs/ROADMAP.md → "Language Bindings — Council Decision"](../ROADMAP.md).
-Short version: thin API clients port well; opinionated frameworks
-don't. We don't intend to port a 1600-test, 7-sandbox, multi-agent
-kernel. We intend to make sure every MCP-speaking language can drive
-that kernel without giving up features. .NET is council target #4
-(Microsoft / Unity / game-dev; .NET Aspire and Semantic Kernel users
-want a turnkey agent backend).
+Thin API clients port well; opinionated frameworks don't. The multi-agent
+kernel stays in Python, and every MCP-speaking language, .NET included, can
+drive it without giving up features. The decision is recorded under
+[Language bindings](../ROADMAP.md#language-bindings) in the roadmap.
 
 ## SDK status
 

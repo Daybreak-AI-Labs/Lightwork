@@ -8,7 +8,7 @@ result outside the candidate process.
 
 This is a local source integration. Passing its unit, ASGI, or browser tests does
 not establish real Docker containment, production qualification, scientific
-improvement, customer acceptance, or benchmark validity.
+improvement, deployment acceptance, or benchmark validity.
 
 ## In-app workflow and installation setup
 
@@ -164,8 +164,8 @@ governed record and audit boundary; it is not an external attestation signature.
 The queue uses the repository's configured governed-record backend. It can use
 the admitted local single-replica backend or the shared Postgres backend and
 inherits that layer's tenant binding, encryption, authoritative-time, and
-compare-and-swap rules. This increment has not run a real shared-Postgres
-end-to-end experiment, and shared-worker execution is not qualified.
+compare-and-swap rules. No real shared-Postgres end-to-end experiment has been
+run, and shared-worker execution is not qualified.
 
 Dispatch currently runs through the dashboard service's bounded worker thread;
 there is no separately deployed least-privilege research worker. The UI accepts

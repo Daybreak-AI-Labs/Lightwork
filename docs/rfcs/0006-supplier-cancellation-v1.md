@@ -2,7 +2,7 @@
 
 - Status: implemented for the existing supplier evidence workflow
 - Scope: local cancellation intent, retained provider state, customer API and controls
-- Acceptance: F04-A4; single persistent application replica
+- Supported deployment: single persistent application replica
 
 ## Decision
 

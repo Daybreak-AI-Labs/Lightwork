@@ -162,7 +162,7 @@ these drive the *platform's own* Stripe account to bill tenants.
 | `MAVERICK_STRIPE_WEBHOOK_SECRET` | — | Webhook signing secret (`whsec_...`) used to verify inbound Stripe events (stdlib HMAC; no SDK needed). A verified `invoice.payment_failed` / past-due subscription downgrades the tenant to the base entitlement tier; a recovered payment restores it. |
 | `MAVERICK_CONTACT_CENTRE_ZENDESK_TOKEN` | — | Zendesk API token for contact-centre handoffs (see `docs/contact-centre-handoff.md` in the repository). Resolved through the secret provider; overrides the sealed value saved in Settings. Never logged. |
 | `MAVERICK_CONTACT_CENTRE_WEBHOOK_SECRET` | — | Signing secret for contact-centre webhook handoffs. Resolved through the secret provider; overrides the sealed value saved in Settings. Without it nothing is sent to the webhook. |
-| `MAVERICK_STRIPE_BILL_METERED` | config `[billing.stripe] bill_metered_usage` (off) | **Pricing decision pending.** Off bills only the recurring platform-fee subscription; on also pushes the metered model-usage line items. No markup is set here — amounts come from whatever `RateCard` rated the invoice. |
+| `MAVERICK_STRIPE_BILL_METERED` | config `[billing.stripe] bill_metered_usage` (off) | Off bills only the recurring platform-fee subscription; on also pushes the metered model-usage line items. No markup is set here — amounts come from whatever `RateCard` rated the invoice. |
 
 ### Fleet queue
 
@@ -206,11 +206,11 @@ Other config-only knobs: `[billing.plans]` (override plan entitlements), `[egres
 
 **Operator lifecycle:** `maverick tenant onboard <id> --admin-email <email>`
 provisions a tenant and mints its first-admin invite in one step;
-`maverick license issue|set|show|keygen` controls the deployment's signed
-feature license (tier + add-on suites); `maverick launch-check` prints PASS/FAIL
-for each go-live switch (cost-cap enforcement, per-user tenancy, a license trust
-anchor, at-rest encryption, and a resolvable provider key) and exits non-zero if
-any is off, so a deploy pipeline can gate on it.
+`maverick license issue|set|show|keygen` manages the deployment's optional
+signed feature license (enforcement is off by default); `maverick launch-check`
+prints PASS/FAIL for each go-live switch (cost-cap enforcement, per-user
+tenancy, a license trust anchor, at-rest encryption, and a resolvable provider
+key) and exits non-zero if any is off, so a deploy pipeline can gate on it.
 
 ## LLM cost & latency
 

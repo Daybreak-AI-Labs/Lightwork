@@ -1,36 +1,46 @@
 # Reference architectures
 
 Self-hostable deployment blueprints for the governed Lightwork runtime. Every
-one runs the dashboard + control plane from the licensed container image and
+one runs the dashboard + control plane from the Lightwork container image and
 keeps state on a persistent volume; secrets come from the platform's secret
 store, never the image. Pick the one that matches where you already run things.
+The manifests are in this repository under `deploy/reference-architectures/`.
 
-> All four target the same container (`deploy/docker/Dockerfile` /
-> `ghcr.io/daybreak-ai-labs/lightwork`), expose the dashboard on port **8765**, and
-> use auth-exempt **`/readyz`** readiness and **`/livez`** liveness probes where
-> the platform supports both. Keep exactly **one** dashboard/control-plane
-> instance, including with `[world_model] backend = "postgres"`; Postgres and
-> the queue let you scale the separate `maverick worker` tier, not the web tier.
+> All four use the image built from `deploy/docker/Dockerfile`. No prebuilt
+> image is published yet: Fly.io and Railway build it from the repository, and
+> for Kubernetes and ECS you build it and push it to your own registry. All four
+> expose the dashboard on port **8765** and use auth-exempt **`/readyz`**
+> readiness and **`/livez`** liveness probes where the platform supports both.
+> Keep exactly **one** dashboard/control-plane instance, including with
+> `[world_model] backend = "postgres"`; Postgres and the queue let you scale the
+> separate `maverick worker` tier, not the web tier.
 
 | Platform | Manifest | State | Secrets |
 |---|---|---|---|
-| Kubernetes | `kubernetes/maverick.yaml` in the licensed package | PVC (`ReadWriteOnce`) | `Secret` → `envFrom` |
-| AWS ECS (Fargate) | `ecs/task-definition.json` in the licensed package | EFS volume | Secrets Manager → `secrets` |
-| Fly.io | `flyio/fly.toml` in the licensed package | Fly volume at `/state` | `fly secrets set` |
-| Railway | `railway/railway.json` in the licensed package | Railway volume at `/state` | service variables |
+| Kubernetes | `kubernetes/maverick.yaml` | PVC (`ReadWriteOnce`) | `Secret` → `envFrom` |
+| AWS ECS (Fargate) | `ecs/task-definition.json` | EFS volume | Secrets Manager → `secrets` |
+| Fly.io | `flyio/fly.toml` | Fly volume at `/state` | `fly secrets set` |
+| Railway | `railway/railway.json` | Railway volume at `/state` | service variables |
 
 ## Kubernetes
 
+Replace `REGISTRY/maverick:0.1.7` in the manifest with your built image, pinned
+to an immutable tag or digest. Create the `maverick-secrets` Secret first; the
+manifest's header comment shows the commands. The dashboard binds `0.0.0.0` in
+this blueprint, so the Secret must include `MAVERICK_DASHBOARD_TOKEN`. Then:
+
 ```bash
 kubectl apply -f deploy/reference-architectures/kubernetes/maverick.yaml
-kubectl -n maverick port-forward svc/maverick 8765:80
+kubectl port-forward svc/maverick 8765:80
 ```
 
-Namespaced, runs as non-root, readiness-gated on `/readyz` and liveness-gated
-on `/livez`, with state on a 10Gi PVC. Put real values into the
-`maverick-secrets` Secret from your secret manager (External Secrets Operator /
-Sealed Secrets) — the checked-in manifest ships placeholders. Add an
-Ingress/Gateway for TLS termination.
+The manifest creates a PersistentVolumeClaim, a single-replica Deployment and a
+ClusterIP Service in the current namespace (pass `-n <namespace>` to every
+command, including the Secret creation, to use another). The pod runs as
+non-root, is readiness-gated on `/readyz` and liveness-gated on `/livez`, and
+keeps state on a 10Gi PVC. Source the Secret's values from your secret manager
+(External Secrets Operator / Sealed Secrets), and add an Ingress/Gateway for TLS
+termination.
 
 ## AWS ECS (Fargate)
 

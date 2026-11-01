@@ -21,9 +21,8 @@ All endpoints mount on the dashboard server (`maverick dashboard`, default
 
 ## Enabling
 
-Off by default; requires the `external_agents` entitlement (Gold tier). Turn
-it on in the installer wizard (the **External-agent gateway** question in the
-advanced flow) or directly:
+Off by default. Turn it on in the installer wizard (the **External-agent
+gateway** question in the advanced flow) or directly:
 
 ```toml
 # ~/.maverick/config.toml
@@ -32,8 +31,10 @@ enable = true
 ```
 
 or `MAVERICK_EXTERNAL_AGENTS=1`. While off, the `/api/v1/external/*` routes
-**404** (they don't exist for this deployment); enabled but unlicensed, they
-**403** with a paid-add-on message.
+**404** (they don't exist for this deployment). The gateway is also one of the
+features covered by the optional signed-license gate: if an operator turns
+license enforcement on (`[license] enforce = true`, off by default), the routes
+**403** unless the installed license grants the `external_agents` entitlement.
 
 ## Enrolling an agent
 
@@ -290,7 +291,7 @@ TypeScript helpers for the screen-then-act, report-after loop.
    `/api/v1/external/execute` for a Lightwork-enforced connector effect.
 
 Paste-in packaging (deployable Apex invocable classes and Setup instructions)
-is in `examples/external-agents/agentforce/` in the licensed package.
+is in `examples/external-agents/agentforce/` in the repository.
 
 ### AWS Bedrock Agents
 
@@ -307,7 +308,7 @@ is in `examples/external-agents/agentforce/` in the licensed package.
 4. Rotation = mint a new rest token and update the Secrets Manager value.
 
 Paste-in packaging (SAM template, forwarder Lambda, and action-group schema)
-is in `examples/external-agents/bedrock/` in the licensed package.
+is in `examples/external-agents/bedrock/` in the repository.
 
 ### OpenAI / LangChain
 
@@ -660,7 +661,7 @@ The external boundary fails closed throughout:
 | Symptom | Meaning | Fix |
 | --- | --- | --- |
 | `404` on `/api/v1/external/*` | Plane is off | Enable `[external_agents]` and restart the dashboard |
-| `403` | License lacks the `external_agents` (Gold) entitlement | Install a Gold-tier license |
+| `403` | License enforcement is on and the installed license does not grant the `external_agents` entitlement | Install a license that grants it, or turn enforcement off |
 | `401` | Missing, wrong, rotated, or revoked rest token (the reply never says which) | Mint a new rest credential; minting replaces the old token immediately |
 | `401` with a native credential | Generic by design — the server log names the rule: `external gateway: <scheme> auth refused (<rule>)` | Match the log rule against the rows below |
 | log rule `stale` / `future_ts` | Timestamp outside the freshness window (300 s age, 60 s forward skew) | Sync clocks (NTP) and sign at send time, not enqueue time |

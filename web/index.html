@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Lightwork — the governed AI workforce platform for regulated enterprises</title>
-<meta name="description" content="Lightwork is a governed, self-improving AI workforce platform for regulated enterprises: specialist agents across 53 business suites, a closed learning lifecycle that proves each improvement before it ships, and an Operating Record built to survive an audit. Self-hosted, on your models, under a hard budget cap." />
+<title>Lightwork — open-source, self-hosted runtime for governed AI agents</title>
+<meta name="description" content="Lightwork is an open-source (Apache-2.0) multi-agent runtime that runs on your own infrastructure: an orchestrator splits a goal across specialist sub-agents on the models you choose, inside permission controls, spending limits and a signed audit log." />
 <meta property="og:title" content="Lightwork" />
-<meta property="og:description" content="The governed AI workforce platform for regulated enterprises — provable learning, an audit-grade Operating Record, self-hosted, your models, a hard budget cap." />
+<meta property="og:description" content="Open-source, self-hosted multi-agent runtime with permission controls, spending limits and a signed audit log." />
 <meta property="og:type" content="website" />
 <link rel="icon" href="daybreak-logo.jpg" />
 <link rel="apple-touch-icon" href="daybreak-logo.jpg" />
@@ -107,6 +107,9 @@
   .audience h3 { margin: 0 0 0.5rem; font-weight: 600; }
   .audience ul { margin: 0.5rem 0 0; padding-left: 1.25rem; color: var(--muted); }
 
+  pre { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; overflow-x: auto; font-size: 0.9rem; line-height: 1.5; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
   footer { border-top: 1px solid var(--border); padding: 2rem; text-align: center; color: var(--muted); font-size: 0.9rem; max-width: 1100px; margin: 2rem auto 0; }
   footer a { color: var(--muted); }
 
@@ -124,94 +127,105 @@
   <span class="brand">Lightwork</span>
   <nav>
     <a href="#what">What</a>
+    <a href="#install">Install</a>
     <a href="#deploy">Deploy</a>
-    <a href="#audience">Who</a>
-    <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/getting-started.md">Docs</a>
+    <a href="#project">Project</a>
+    <a href="https://daybreak-ai-labs.github.io/Lightwork/">Docs</a>
+    <a href="https://github.com/Daybreak-AI-Labs/Lightwork">GitHub</a>
   </nav>
 </header>
 
 <main id="content">
   <section class="hero">
-    <h1>The governed AI workforce platform for regulated enterprises.</h1>
-    <p class="lead">Lightwork gives your organization a workforce of specialist AI agents that plan, act and verify inside your governance: every action authorized, every step on an audit-grade Operating Record, and a learning lifecycle that proves each improvement before it ships. Self-hosted, on your models, under a hard budget cap.</p>
+    <h1>Self-hosted AI agents with governance built in.</h1>
+    <p class="lead">Lightwork is an open-source multi-agent runtime. Give it a goal: an orchestrator splits the work across specialist sub-agents on the models you choose, checks their output, and records each step in a signed audit log. Permission controls and the spending limits you set bound what the agents can do.</p>
     <div class="cta-row">
-      <!-- Commercial product: access is granted per engagement. Point this at
-           the access-request / demo form when one exists. -->
-      <a class="btn primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">Request access</a>
-      <a class="btn secondary" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/getting-started.md">Read the docs</a>
+      <a class="btn primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">View on GitHub</a>
+      <a class="btn secondary" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a>
+      <a class="btn secondary" href="https://daybreak-ai-labs.github.io/Lightwork/">Read the docs</a>
     </div>
-    <p class="note">Licensed per organization. Delivered from a reviewed, signed release — never a public package index.</p>
+    <p class="note">Apache License 2.0. No prebuilt binaries, PyPI packages or container images are published yet; install from source.</p>
   </section>
 
   <section id="what">
     <h2>What it does</h2>
     <div class="feature-grid">
       <div class="feature">
-        <h3>A workforce, not a chatbot</h3>
-        <p>2,031 specialist agent packs across 53 business suites — finance, legal, privacy, security, GRC and more — each sealed in its own compartment with an explicit tool and knowledge envelope. A breach in one domain never reaches another.</p>
+        <h3>Multi-agent orchestration</h3>
+        <p>An orchestrator decomposes a goal, runs specialist sub-agents such as a researcher, coder, writer and verifier in parallel, and checks their output before returning a result.</p>
       </div>
       <div class="feature">
-        <h3>Governed by default</h3>
-        <p>RBAC, capability tokens, per-tool ACLs, consent gates, human review checkpoints and an emergency stop bound every action. Agent Shield screens every prompt, tool call and output; enterprise mode adds an egress lock so even a successful prompt injection cannot move data out.</p>
+        <h3>Permission controls</h3>
+        <p>Role-based access, capability tokens, per-tool access lists, consent gates and a kill switch bound every agent action. Agent Shield screens prompts, tool calls and outputs, and enterprise mode adds an egress lock on the agent's outbound network paths.</p>
       </div>
       <div class="feature">
-        <h3>Learning you can prove</h3>
-        <p>A closed learning lifecycle — dreaming, hindsight and proof — with snapshot and rollback and a signed learning audit. Every improvement is evidenced before it ships and reversible after, so the workforce gets better without drifting out of policy.</p>
+        <h3>Signed audit log</h3>
+        <p>A signed, hash-chained, append-only audit log that you can verify with <code>lightwork audit verify</code> and export to a SIEM.</p>
       </div>
       <div class="feature">
-        <h3>The Operating Record</h3>
-        <p>A signed, hash-chained, append-only record of what every agent did, with SIEM export, encryption at rest and DSAR support: SOC 2-aligned evidence built to survive a security review, not a log you hope nobody reads.</p>
+        <h3>Your choice of models</h3>
+        <p>Per-role model routing across Anthropic, OpenAI, Gemini, Amazon Bedrock, Azure OpenAI, OpenRouter, Ollama, vLLM and other providers, including self-hosted models.</p>
       </div>
       <div class="feature">
-        <h3>Your models, your budget</h3>
-        <p>Twelve providers — Anthropic, OpenAI, Gemini, Bedrock, Azure, self-hosted and more — routed per role. Per-run dollar, wall-clock and tool-call caps the kernel refuses to bust. No surprise bills.</p>
+        <h3>Spending limits</h3>
+        <p>Administrators can set per-task dollar, wall-clock and tool-call limits, and separate organization allowances.</p>
       </div>
       <div class="feature">
-        <h3>Fleet memory for the agents you already run</h3>
-        <p>Agents built on Agentforce, Bedrock Agents, Copilot Studio or LangGraph plug into the same memory, governance and Operating Record, so one platform governs the whole fleet.</p>
+        <h3>Reviewable learning</h3>
+        <p>Lightwork captures experience and proposes new skills and workflow changes. Human review, activation and rollback of each change are recorded.</p>
       </div>
     </div>
+  </section>
+
+  <section id="install">
+    <h2>Install</h2>
+    <p>Python 3.10 to 3.12 and Git. On macOS or Linux:</p>
+<pre><code>git clone https://github.com/Daybreak-AI-Labs/Lightwork
+cd Lightwork
+python3 -m venv .venv
+. .venv/bin/activate            # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
+lightwork doctor
+lightwork dashboard             # opens the local dashboard at http://127.0.0.1:8765</code></pre>
+    <p>The <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">source install guide</a> covers Windows, configuration and troubleshooting.</p>
   </section>
 
   <section id="deploy">
-    <h2>Deploy where you must</h2>
+    <h2>Deploy</h2>
     <div class="deploy">
-      <div><h3>Desktop</h3><p>Native installers for Windows, macOS and Linux; a guided setup in the app.</p></div>
-      <div><h3>Container</h3><p>A single image for Docker or your existing orchestration.</p></div>
-      <div><h3>Always-on server</h3><p>A VPS bootstrap that installs, configures and runs it as a service.</p></div>
-      <div><h3>Kubernetes</h3><p>A Helm chart, with Postgres and single sign-on for managed, high-availability estates.</p></div>
-      <div><h3>Air-gapped</h3><p>Runs with no required data egress; your data never leaves your environment.</p></div>
+      <div><h3>Workstation</h3><p>The local dashboard and CLI, installed from source.</p></div>
+      <div><h3>Container</h3><p>A Dockerfile and Compose recipe in <code>deploy/docker</code>.</p></div>
+      <div><h3>Server</h3><p>A VPS install script and systemd unit in <code>deploy/vps</code>.</p></div>
+      <div><h3>Kubernetes</h3><p>A Helm chart in <code>deploy/helm</code>, with an optional Postgres backend.</p></div>
     </div>
   </section>
 
-  <section id="audience">
-    <h2>Who it's for</h2>
+  <section id="project">
+    <h2>Project</h2>
     <div class="audience">
       <div>
-        <h3>Compliance &amp; security leaders</h3>
-        <p>Governance on by default and evidence that stands up to an audit.</p>
+        <h3>Use it</h3>
         <ul>
-          <li>RBAC, capability scoping, consent gates and an emergency stop</li>
-          <li>Signed, verifiable Operating Record with SIEM export</li>
-          <li>SOC 2-aligned evidence, encryption at rest, DSAR built in</li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a></li>
+          <li><a href="https://daybreak-ai-labs.github.io/Lightwork/">Documentation</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/issues">Issues</a></li>
         </ul>
       </div>
       <div>
-        <h3>Operations &amp; finance leaders</h3>
-        <p>Specialist agents for the work your departments already do, under budgets you set.</p>
+        <h3>Contribute</h3>
         <ul>
-          <li>Ready-made agent packs per department and function</li>
-          <li>Spend, savings and workforce boards for oversight</li>
-          <li>Hard per-run caps and per-workspace daily allowances</li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CONTRIBUTING.md">Contributing guide</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CODE_OF_CONDUCT.md">Code of conduct</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/GOVERNANCE.md">Governance</a></li>
         </ul>
       </div>
       <div>
-        <h3>Platform teams</h3>
-        <p>One governed platform for the agents you build and the ones you buy.</p>
+        <h3>Security and licensing</h3>
         <ul>
-          <li>REST API, MCP in both directions, plugin SDK</li>
-          <li>Per-role model routing across twelve providers</li>
-          <li>Fleet memory for external agent runtimes</li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md">Security policy</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE">Apache License 2.0</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/TRADEMARK.md">Trademark policy</a></li>
         </ul>
       </div>
     </div>
@@ -220,8 +234,9 @@
 
 <footer>
   <p>
-    Lightwork by Daybreak AI Labs · Proprietary — commercially licensed.
-    <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/getting-started.md">Docs</a>
+    Lightwork is developed by Daybreak Labs and released under the Apache License 2.0.
+    <a href="https://github.com/Daybreak-AI-Labs/Lightwork">Source</a> ·
+    <a href="https://daybreak-ai-labs.github.io/Lightwork/">Docs</a>
   </p>
 </footer>
 </body>

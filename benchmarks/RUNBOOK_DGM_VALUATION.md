@@ -1,29 +1,27 @@
-# Runbook: the two governed-DGM evidence runs
+# Runbook: governed SWE-bench and governed DGM runs
 
-Operator's guide to producing the two pieces of REAL evidence the pitch rests
-on, in order. Everything below is already built and proven offline (see
-`proof/RESULTS.md` §5–§7); these are the paid runs that turn the proven
-machinery into externally-comparable numbers.
+Operator's guide to the two paid runs of the governed Darwin-Gödel machinery,
+in order. The machinery itself is exercised offline by the proofs in
+[`proof/RESULTS.md`](../proof/RESULTS.md) (sections 5-7); these runs produce
+externally comparable numbers.
 
-| Rung | Claim it buys | Needs | Cost | Time |
-|------|---------------|-------|------|------|
-| 1. SWE-bench under governance | "Resolves X% of SWE-bench Verified — every fix signed, audited, cheat-proof" | API key (+ Docker only for full-500 grading) | ~$65–120 (50-slice) / ~$650–1,210 (full 500) | hours / a day |
-| 2. Governed DGM uplift | "The agent improved its own solver: X% → X+Δ% held-out, every step signed + reversible" | API key + rung-1 harness | ~$2–5k across cycles | days |
+| Run | Needs | Estimated cost | Time |
+|-----|-------|----------------|------|
+| 1. SWE-bench Verified under governance | API key (+ Docker only for full-500 grading) | ~$65–120 (50-slice) / ~$650–1,210 (full 500) | hours / a day |
+| 2. Governed DGM uplift | API key + run-1 harness | ~$2–5k across cycles | days |
 
-Honesty rule: publish whatever number comes out, with the ledger. A modest
-number under a signed reference monitor beats an inflated naked one — the
-governance wrapper (un-inflatable score, §6 proof) IS the differentiator.
+Publish whatever number comes out, together with the signed ledger.
 
 ---
 
-## Rung 1 — SWE-bench Verified under governance
+## Run 1 — SWE-bench Verified under governance
 
-### 0. One-time setup (any Linux/macOS box, ~15 min)
+### 0. One-time setup (any Linux/macOS machine, ~15 min)
 
 ```bash
-git clone <this-repo> && cd Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork && cd Lightwork
 bash .devcontainer/post-create.sh          # editable-installs all packages
-pip install datasets                        # HF fetcher dep
+pip install datasets                        # HF fetcher dependency
 export ANTHROPIC_API_KEY=sk-ant-...         # scoped key, workspace spend cap set
 
 # Operator signing keypair (the human-approval key; keep .priv OFFLINE)
@@ -42,44 +40,47 @@ print("keys written to", d)
 PY
 ```
 
-### 1. Validate the pipeline keylessly (no cost)
+### 1. Validate the pipeline without a key (no cost)
 
 ```bash
-python proof/swebench_governed_proof.py     # must print 4/4 PROVEN
-python proof/dgm_uplift_proof.py            # must print 6/6 PROVEN
+python proof/swebench_governed_proof.py     # every guarantee must report PROVEN
+python proof/dgm_uplift_proof.py            # every guarantee must report PROVEN
 ```
 
 ### 2. Stage instances (manifest + per-instance repo checkouts)
 
 ```bash
 # 50-instance smoke slice, repos cloned at base_commit
-python benchmarks/fetch_swe_bench_verified.py --limit 50 --clone \
-    --out ./swebench_verified
+python benchmarks/fetch_swe_bench_verified.py --limit 50 --stage \
+    --out-manifest ./swebench_verified/instances.jsonl \
+    --repos-dir ./swebench_verified/repos
 ```
 
-### 3. Dry-run the harness end-to-end (no cost)
+### 3. Dry-run the harness end to end (no cost)
 
 ```bash
 MAVERICK_BENCH_DRY_RUN=1 python benchmarks/swebench_governed.py \
     --manifest ./swebench_verified/instances.jsonl \
     --proposer llm --keys ~/dgm-keys --limit 3
-# Add --allow-host-exec only for a trusted local smoke corpus; external
-# instances should use an explicit container sandbox.
 ```
+
+External instances run model-generated shell commands and their own tests, so
+configure an isolated `[sandbox] backend` (for example `docker`) before running
+them. `--allow-host-exec` is only for a trusted local smoke corpus.
 
 ### 4. The paid run
 
 ```bash
-# 50-instance slice first (~$65–120): sanity-check the resolved-rate + ledger
+# 50-instance slice first (~$65–120): sanity-check the resolved rate + ledger
 MAVERICK_INSTANCE_HARD_CAP=3.0 python benchmarks/swebench_governed.py \
     --manifest ./swebench_verified/instances.jsonl \
     --proposer llm --keys ~/dgm-keys \
     --ledger ./swebench_ledger.json --limit 50
 
-# then the full 500 (~$650–1,210). Use an explicit container sandbox here; do
-# not pass --allow-host-exec for untrusted external instances. Docker + ~80GB
-# disk recommended so grading runs in the reproducible per-instance envs (see
-# RUNBOOK_SWE_BENCH_VERIFIED.md for the Epoch-optimized images).
+# then the full 500 (~$650–1,210) with an isolated sandbox backend; do not
+# pass --allow-host-exec for untrusted external instances. Docker + ~80 GB
+# disk recommended so grading runs in the reproducible per-instance
+# environments (see RUNBOOK_SWE_BENCH_VERIFIED.md and RUNBOOK_MODAL_GRADING.md).
 ```
 
 **Deliverables:** the scoreboard line
@@ -88,19 +89,16 @@ promotion ledger — one Ed25519-signed entry per resolved instance), and the
 per-instance JSONL. Verify any ledger entry offline against
 `~/dgm-keys/operator.pub`.
 
-### No-Docker caveat (the fast first number)
+### Grading without Docker
 
 Patch *generation* never needs Docker. *Grading* runs each instance's tests via
-`sandbox.exec` in an isolated copy — which is honest only if the instance's
-dependencies are importable on the host. For a first number on just a key,
-grade a curated pure-Python slice (pip-install each instance repo's deps into a
-venv first); move to Docker for the full 500 so the number is
-leaderboard-comparable.
+`sandbox.exec` in an isolated copy, which gives a valid result only if the
+instance's dependencies are importable there. For a first number with just a
+key, grade a curated pure-Python slice (install each instance repo's
+dependencies into a venv first); move to Docker for the full 500 so the number
+is comparable with published SWE-bench results.
 
-Verified live on a real instance (July 2026): `pylint-dev__pylint-8898` resolves
-under governance end-to-end with the oracle proposer — the whole chain works on
-real external data with zero LLM cost. Three grading realities the harness now
-handles, learned from that run:
+Three grading behaviours the harness handles:
 
 - **`test_patch` is applied to BOTH arms** before scoring (SWE-bench semantics:
   the graded tests usually don't exist at `base_commit`). The manifest carries
@@ -115,11 +113,11 @@ handles, learned from that run:
 
 ---
 
-## Rung 2 — the governed uplift (the agent improves its own solver)
+## Run 2 — governed uplift (the agent improves its own solver)
 
 The harness is `benchmarks/dgm_uplift.py`; the offline proof
-(`proof/dgm_uplift_proof.py`, 6/6) already demonstrates every gate on fixture
-instances. The real run swaps in Verified instances and the LLM patch-author.
+(`proof/dgm_uplift_proof.py`) exercises every gate on fixture instances. The
+real run swaps in Verified instances and the LLM patch-author.
 
 One cycle:
 
@@ -153,20 +151,3 @@ Practical notes for the real run:
 **Deliverable:** the uplift curve (`v0: X% → v1: X+Δ% → ...` held-out), the
 signed ledger with one entry per promoted solver version, the archive of every
 prior version (rollback demonstrated), and the refusal log.
-
----
-
-## What goes on the deck (only after the runs)
-
-> Rung 1: "Our governed agent resolves **X%** of SWE-bench Verified — and
-> uniquely, every accepted fix passed a reference monitor: cheats structurally
-> blocked, regressions caught, each promotion human-signed, reversible, and in
-> an auditable ledger."
->
-> Rung 2: "Under the same governance, the agent improved **its own solver**:
-> **X% → X+Δ%** on held-out tasks, with memorisation and test-tampering refused
-> by the gate, and one-step rollback for every promoted version — a governed
-> Darwin-Gödel loop with receipts."
-
-Numbers left as placeholders on purpose — they get filled by the runs, never
-estimated.

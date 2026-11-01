@@ -1,7 +1,6 @@
 # RFC 0002: Plugin API v3 — not warranted (triggers recorded)
 
-**Status:** Closed — not warranted at this time · **Roadmap ref:** 2028-H2
-Ecosystem "plugin API v3 RFC (if warranted)" · **Date:** June 2026
+**Status:** Closed — not warranted at this time · **Date:** June 2026
 
 ## Verdict
 
