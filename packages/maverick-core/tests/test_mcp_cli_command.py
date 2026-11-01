@@ -23,7 +23,7 @@ def test_maverick_mcp_launches_stdio_server(monkeypatch):
 
 
 def test_maverick_mcp_help_still_advertises_cross_language():
-    # The council surface contract: --help must not regress when we add options.
+    # Surface contract: --help must not regress when we add options.
     from maverick.cli import main
     result = CliRunner().invoke(main, ["mcp", "--help"])
     assert result.exit_code == 0

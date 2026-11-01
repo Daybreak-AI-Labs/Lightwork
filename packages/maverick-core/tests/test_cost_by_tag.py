@@ -1,4 +1,4 @@
-"""Cost split by tag (ROADMAP 2028 H1)."""
+"""Cost split by tag."""
 from __future__ import annotations
 
 from maverick.cost.by_tag import gather, render, split_by_tag

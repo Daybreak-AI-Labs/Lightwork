@@ -1,4 +1,4 @@
-"""Reproducible benchmark harness v2 (ROADMAP 2027 H1 Distribution).
+"""Reproducible benchmark harness v2.
 
 The repo-root ``benchmarks/`` harnesses answer "how well did we score?".
 This answers a different question that matters for a *published* number:

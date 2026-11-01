@@ -1,4 +1,4 @@
-"""Provider-failover policy engine (roadmap: 2027 H1 performance).
+"""Provider-failover policy engine.
 
 Layered on :mod:`maverick.provider_failover` (the simple "try each in order"
 chain). The policy engine adds the decisions a chain alone can't express:

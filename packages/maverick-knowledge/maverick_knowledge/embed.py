@@ -139,7 +139,7 @@ class HostedEmbedder:
 
 
 class CohereEmbedder:
-    """Cohere embeddings (roadmap: 2027 H1 ecosystem — "Cohere embeddings").
+    """Cohere embeddings.
 
     Cohere's ``/v2/embed`` differs from the OpenAI/Voyage shape: it takes
     ``texts`` (not ``input``), requires an ``input_type``

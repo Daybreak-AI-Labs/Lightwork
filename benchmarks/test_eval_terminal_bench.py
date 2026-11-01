@@ -1,4 +1,4 @@
-"""terminal-bench-style stateful shell-agent harness (ROADMAP C1).
+"""terminal-bench-style stateful shell-agent harness.
 
 Drives eval_terminal_bench with deterministic solvers (no LLM / no Docker): an
 oracle that performs the right shell actions, a no-op, and partial/wrong solvers

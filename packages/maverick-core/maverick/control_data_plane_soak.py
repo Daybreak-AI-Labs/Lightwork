@@ -1,5 +1,5 @@
 """Control/data-plane soak: prove the dispatch substrate holds under concurrent
-load (roadmap follow-through on the e2e harness).
+load.
 
 ``control_data_plane_e2e`` proves one goal runs out-of-process. This drives
 *many* goals through the real control plane (``QueueDispatcher`` -> SQLite

@@ -106,7 +106,8 @@ def _readiness() -> list[dict[str, Any]]:
         keys = _trusted_pubkeys()
         rows.append(_row("license", "License can be checked", bool(keys),
                          "Lightwork can confirm your license is genuine." if keys
-                         else "Lightwork has no way to confirm a license yet. Your Lightwork contact can set this up.",
+                         else "No trusted license keys are set, so a license cannot be confirmed. They are "
+                              "needed only when “Limit features to the license” is on.",
                          "See license", "#maintenance-license"))
     except Exception:  # noqa: BLE001
         rows.append(_row("license", "License can be checked", False,
@@ -273,10 +274,14 @@ async def settings_check(request: Request) -> dict:
 _LICENSE_STATUS = {
     "licensed": ("Active", "Your license is active."),
     "grace": ("Renewal due", "Your license has expired but still works for a short time. Renew it soon."),
-    "expired": ("Expired", "Your license has expired. Paid features are off; everything else still works."),
-    "invalid": ("Not accepted", "The license file could not be confirmed. Paid features are off."),
-    "unverified": ("Not confirmed", "The license could not be confirmed yet. Paid features are off."),
-    "unlicensed": ("No license", "No license is installed. Lightwork's standard features all work."),
+    "expired": ("Expired", "Your license has expired. While “Limit features to the license” is on, "
+                           "the features it grants are off; everything else still works."),
+    "invalid": ("Not accepted", "The license file could not be confirmed. While “Limit features to the "
+                                "license” is on, the features a license controls are off."),
+    "unverified": ("Not confirmed", "The license could not be confirmed yet. While “Limit features to "
+                                    "the license” is on, the features a license controls are off."),
+    "unlicensed": ("No license", "No license is installed. Every feature works unless “Limit features "
+                                 "to the license” is on."),
 }
 _FEATURE_NAMES = {
     "external_agents": "Outside agents",

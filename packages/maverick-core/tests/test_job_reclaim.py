@@ -242,7 +242,7 @@ def test_live_worker_heartbeat_prevents_lease_steal(tmp_path):
 
 
 def test_transient_complete_failure_does_not_re_run_the_handler(tmp_path):
-    """W1-70: complete() sharing the handler's try/except meant a transient
+    """Complete() sharing the handler's try/except meant a transient
     terminal-write failure (e.g. sqlite 'database is locked' past
     busy_timeout) was routed through fail() -- requeuing a job whose handler
     had ALREADY run to completion, so the next claim re-ran it. A duplicate

@@ -1,4 +1,4 @@
-"""Latency-budget propagation across spans (ROADMAP 2028 H2)."""
+"""Latency-budget propagation across spans."""
 from __future__ import annotations
 
 from maverick.latency_span_budget import SpanBudget

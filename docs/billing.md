@@ -1,10 +1,10 @@
 # Billing & collection model
 
-Lightwork meters provider usage and produces rated invoices. Your commercial
-agreement determines platform fees, support fees and whether metered usage is
-charged separately. Collection uses your accounts-receivable process or an
-operator-configured processor. These billing primitives do not enforce a
-particular license price or contract term.
+Lightwork meters provider usage and produces rated invoices for the tenants an
+operator hosts. The operator's own agreements with those tenants determine fees
+and whether metered usage is charged separately. Collection uses the operator's
+accounts-receivable process or an operator-configured processor. These billing
+primitives do not enforce a particular price or contract term.
 
 ## What the product does
 
@@ -41,10 +41,9 @@ particular license price or contract term.
 
 Pick one:
 
-1. **Contract + AR (default).** Close on an order form; invoice on your finance
-   system's cadence. Use `maverick billing invoice --json` to export the rated
-   line items (and `invoice_id`) into your AR/ERP. This is the expected path for
-   the enterprise tiers.
+1. **Contract + AR (default).** Invoice on your finance system's cadence. Use
+   `maverick billing invoice --json` to export the rated line items (and
+   `invoice_id`) into your AR/ERP.
 2. **Bring your own processor.** If you want programmatic collection (e.g. usage
    billing inside a contract), push the exported invoice to your processor keyed
    on `invoice_id` for idempotency. The bundled Stripe tool
@@ -75,7 +74,7 @@ uses the same provider idempotency key only within its conservative 23-hour
 retry window. Beyond that window it stops for operator reconciliation with
 Stripe. Do not delete the receipt or use a new invoice identity to force a
 retry. Historical collections made before these receipts existed also require
-reconciliation; this change does not retroactively discover old charges.
+reconciliation; the collector does not retroactively discover old charges.
 
 Subscription lookup excludes terminal subscriptions, refuses ambiguous or
 unresolved current subscriptions, and preserves a pending cancellation. It

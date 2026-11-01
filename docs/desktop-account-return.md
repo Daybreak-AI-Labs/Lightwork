@@ -13,7 +13,7 @@ receiver uses exactly `http://127.0.0.1:8766/connections`. An installation
 administrator must enable account connections and desktop returns in
 Connections, then register and explicitly confirm this additional address on
 each provider application. Registration credentials remain sealed within the
-selected workspace; customers do not receive the application's secret or
+selected workspace; other users do not receive the application's secret or
 registration-management authority.
 
 The installer offers desktop returns as a separate default-off choice after
@@ -107,15 +107,13 @@ outbound provider requests. Those tests do not run native code.
 `apps/desktop-oauth-return` is a dependency-free Rust broker. Its checked tests
 include HMAC/SHA-256 vectors, ticket tamper/instance/expiry rejection, real TCP
 one-shot return, URL/state/client/PKCE/scope binding, cancellation confirmation,
-and a late callback against a new attempt. On the implementation host,
-`cargo check --tests --offline` passes, but the MSVC linker is unavailable, so these
-Rust tests have not executed and the full Tauri application has not been
-compiled or launched. Native command capability evaluation, OS browser launch,
-WebView2 IPC and the installed callback listener still require qualification
-on a Windows development/install host. The live provider consent/renewal and
-revocation matrix also remains external qualification.
+and a late callback against a new attempt; CI runs them with `cargo test`.
+Native command capability evaluation, OS browser launch, WebView2 IPC and the
+installed callback listener still require qualification on a Windows host. The
+live provider consent/renewal and revocation matrix also remains external
+qualification.
 
-Before saving, Lightwork now validates the provider-reported granted scopes,
+Before saving, Lightwork validates the provider-reported granted scopes,
 retrieves the account identity from the provider's fixed identity endpoint and,
 for Jira, validates the selected cloud resource. It stores the stable provider
 subject, display name/email, requested and granted scopes, and the selected Jira
@@ -142,6 +140,6 @@ skips identity, scope or Jira-site verification.
 Provider prerequisites: [Google native application OAuth](https://developers.google.com/identity/protocols/oauth2/native-app),
 [Google web application redirect requirements](https://developers.google.com/identity/protocols/oauth2/web-server),
 and [Atlassian OAuth application setup](https://developer.atlassian.com/cloud/oauth/getting-started/enabling-oauth-3lo/).
-Production Atlassian deployments use a Daybreak-owned distributable 3LO
-application; customer-created OAuth applications or personal API tokens are not
-the normal customer path.
+Atlassian connections use the OAuth 2.0 (3LO) application that the
+installation administrator registers in Connections; personal API tokens are
+not used for this flow.

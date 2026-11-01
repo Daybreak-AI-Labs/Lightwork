@@ -1,4 +1,4 @@
-# Self-Harness frontier roadmap — what's built, and the live-model seams that remain
+# Self-Harness implementation notes — what's built, and the live-model seams that remain
 
 **Status:** living design note · **Module:** `maverick.self_harness` (+
 `self_harness_eval`, `self_improvement_runner`, `cli`, `agent`) · companion to
@@ -12,7 +12,7 @@ deterministic offline default — exactly how the existing A/B scorer,
 tested offline with stubs. This note records the shape and the remaining live
 wiring.
 
-## Shipped (waves 5–19)
+## Shipped
 
 | Stage | What shipped | Key knob / seam |
 |-------|--------------|-----------------|
@@ -33,7 +33,7 @@ wiring.
 | Observe | governance-readiness (frozen / gate-off) on report + CLI | `SelfHarnessReport.frozen` / `.gate_enabled` |
 | Conflicts | semantic-judge seam over the lexical heuristic | `find_conflicts(classifier_fn=)` |
 
-Every wave is opt-in, leaves default behavior **byte-identical**, keeps the
+Every item is opt-in, leaves default behavior **byte-identical**, keeps the
 determinism proof at **11/11**, and routes any promotion through the one governed
 gate. Backlog item map: #1 driver (`run_self_harness_cycle`), #2/#4 reference-free
 evaluator (`self_harness_eval`), #3 eval corpus (`load_eval_corpus`/`corpus_split`),
@@ -88,10 +88,10 @@ Two later additions harden the evaluation without touching the gate:
   **majority** yes/no vote wins; a tie or all-indeterminate samples fall open to
   the deterministic heuristic. Default 1 = the single call, unchanged.
 
-## Reachability wave (2026-07) — the built lifecycle, operable end-to-end
+## Reachability (2026-07) — the built lifecycle, operable end-to-end
 
 Three shipped mechanisms were built but not reachable from the surfaces that
-drive them; this wave wires them, changing no default behavior:
+drive them; these changes wire them, changing no default behavior:
 
 - **`judge_samples` now reaches the auto-built judge**: `run_self_harness_cycle`
   forwards the config knob to `_auto_evaluator`, so self-consistency judging
@@ -201,10 +201,10 @@ drive them; this wave wires them, changing no default behavior:
   the general pool — and a domain-keyed-only corpus now promotes its
   departments' lines even when the model-wide A/B can't build.
 
-## Wave: adversarial review hardening (2026-07-05)
+## Review hardening (2026-07-05)
 
-A 10-angle / 11-verifier adversarial review of the transfer + corpus-harvest
-wave confirmed and fixed a cluster of lifecycle-integrity defects:
+A review of the transfer + corpus-harvest changes found and fixed a cluster of
+lifecycle-integrity defects:
 
 - **Merits-only tried-memory**: `run_transfer` no longer records pairs whose
   evaluation was indeterminate (budget-dead arm — `validate_proposal`'s
@@ -236,9 +236,9 @@ wave confirmed and fixed a cluster of lifecycle-integrity defects:
   owner-scoped goals, matching the reflexion side's unscoped-only filter --
   one tenant's goal text is never mined into the shared eval corpus.
 
-## Wave: gap closure (2026-07-05, "do it all")
+## Gap closure (2026-07-05)
 
-Every remaining tractable gap from the post-merge assessment, in one wave:
+Every remaining tractable gap from the post-merge assessment:
 
 - **Statistics**: the memoized baseline moved into `_auto_evaluator` /
   `_context_evaluator` (cycle, rotation folds, efficacy review, and transfer
@@ -273,7 +273,7 @@ Every remaining tractable gap from the post-merge assessment, in one wave:
   deploy-night checklist in that proposal, not something a keyless CI can
   fake.
 
-## Wave: fleet learning store, phase 1 (2026-07-05)
+## Fleet learning store, phase 1 (2026-07-05)
 
 `docs/proposals/fleet-learning-state.md` moved from design to code for the
 three LEARNING stores: `[self_harness] store = "world"` (default `"files"`,
@@ -300,7 +300,7 @@ import [--replace]` keep hand-editing first-class (every operator field
 survives the round trip). Battery guarantee 11, *fleet corpus store*. The
 proposal is COMPLETE.
 
-## Principle (unchanged across every wave)
+## Principle (unchanged throughout)
 
 **Off-by-default / byte-identical default**, **determinism proof 11/11**, and **the
 governed gate decides promotion** (demotion uses the reversible audited `forget`

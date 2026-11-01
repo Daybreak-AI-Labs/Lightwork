@@ -1,4 +1,4 @@
-"""Cross-run anomaly detection (roadmap: 2027 H2 safety).
+"""Cross-run anomaly detection.
 
 A single run's spend outlier is caught by the cost-anomaly endpoint; this
 watches *behavior* across runs: a goal that suddenly exercises tools its

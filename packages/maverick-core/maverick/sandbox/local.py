@@ -20,9 +20,8 @@ from pathlib import Path
 # strings that embed creds (DATABASE_URL, SENTRY_DSN, MONGO_URI,
 # REDIS_URL, *_OAUTH, *_BEARER). KEK/DEK: the tenant envelope-encryption key
 # material read by tenant/kms.py (MAVERICK_KMS_KEK) -- neither substring is
-# covered by KEY/SECRET/CREDENTIAL above (Sept 2026 fix,
-# PLATFORM_IMPROVEMENT_AUDIT.md W2-45; this key wraps every tenant's DEK, so
-# leaking it into a sandboxed shell is a full data-at-rest compromise).
+# covered by KEY/SECRET/CREDENTIAL above (this key wraps every tenant's DEK,
+# so leaking it into a sandboxed shell is a full data-at-rest compromise).
 _SECRET_ENV_RE = re.compile(
     r"(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|APIKEY|DSN|URI|URL|CONN"
     r"|OAUTH|BEARER|HEADER|NETRC|COOKIE|AUTH|KEK|DEK)",
@@ -299,11 +298,11 @@ class LocalBackend:
         self, cmd: str | list[str], timeout: float | None = None,
         stdin: str | None = None,
     ) -> ExecResult:
-        # Wave 10: per-call `timeout` kwarg lets the test runner override
+        # Per-call `timeout` kwarg lets the test runner override
         # the default 60s (too short for real pytest on SWE-bench
         # instances). Falls back to self.timeout when unset, preserving
         # behaviour for shell-tool callers that pass no timeout.
-        # May 26 council fix (long-tail audit): `text=True` returns str
+        # `text=True` returns str
         # on success but TimeoutExpired.stdout is bytes — without
         # explicit decode the result.stdout types diverge. Pin both
         # branches to str.

@@ -251,7 +251,7 @@ class TestEndToEndSmoke:
         )
         assert row.outcome == "no-diff", (
             f"empty patch must be reported as no-diff; got {row.outcome!r}. "
-            "Earlier hotfix forced no-diff when extracted diff is empty."
+            "The harness forces no-diff when the extracted diff is empty."
         )
 
 
@@ -284,7 +284,7 @@ class TestCsvRoundTrip:
             rows = list(csv.DictReader(f))
         assert len(rows) == 1
         recovered = rows[0]["predicted_patch"]
-        # CR/BOM are stripped (Wave 12 hardening); the diff body survives.
+        # CR/BOM are stripped; the diff body survives.
         assert "\r" not in recovered
         assert "﻿" not in recovered
         assert "diff --git" in recovered

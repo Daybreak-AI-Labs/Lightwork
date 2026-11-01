@@ -1,4 +1,4 @@
-"""Capability negotiation at swarm boot (roadmap: 2028 H2 ecosystem).
+"""Capability negotiation at swarm boot.
 
 When the swarm spawns a child agent, the child today simply *inherits* the
 parent's grant attenuated to its principal — it can't ask for a *narrower,

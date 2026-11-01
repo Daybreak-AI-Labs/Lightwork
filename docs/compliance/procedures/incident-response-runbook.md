@@ -1,356 +1,339 @@
-# Incident Response Runbook
+# Incident response guide for Lightwork deployments
 
-| Field | Value |
-| --- | --- |
-| Document ID | PROC-01 |
-| Owner | Christopher Day |
-| Approver | Christopher Day |
-| Version | 1.0 |
-| Status | Approved — effective 2026-06-24 (Christopher Day) |
-| Review cycle | Annual + after every SEV1/SEV2 |
-| Frameworks | SOC 2 CC7.3, CC7.4; ISO/IEC 27001:2022 A.5.24, A.5.25, A.5.26, A.5.27, A.5.28; ISO/IEC 42001:2023 A.10 (AI incidents) |
+This guide is for operators who run Lightwork. It shows how to use Lightwork's
+built-in controls to contain an incident, collect evidence and recover. It is
+not a complete incident-response programme: roles, escalation, response
+targets and notification duties belong to your organization's own incident
+policy. The controls described here support SOC 2 CC7.3/CC7.4, ISO/IEC
+27001:2022 A.5.24–A.5.28 and ISO/IEC 42001:2023 A.10 (AI incidents).
 
-This runbook operationalizes the Incident Response Policy (POL-07). Use the
-incident report template (TPL-01) for every declared incident. Paths below are
-relative to `packages/maverick-core/` unless absolute.
+To report a vulnerability **in Lightwork itself**, do not open a public issue;
+follow the [security policy](../../../SECURITY.md).
+
+Code paths below are relative to `packages/maverick-core/`. Data paths assume
+the default data directory `~/.maverick` (`MAVERICK_HOME` overrides it).
 
 ---
 
-## 1. Purpose & scope
+## 1. Scope
 
-**Purpose.** Provide on-call responders with concrete, ready-to-run procedures
-to detect, classify, contain, eradicate, recover from, and review incidents
-affecting Lightwork.
-
-**Scope — covers both:**
-
-- **Security incidents** — confidentiality / integrity / availability events:
-  data breach or exfiltration, credential or key compromise, unauthorized
-  access, malware, denial of service, externally reported vulnerabilities.
+- **Security incidents** — confidentiality, integrity or availability events:
+  data exposure or exfiltration, credential or key compromise, unauthorized
+  access, malware, denial of service.
 - **AI / agent incidents** (ISO 42001 A.10) — a model or agent behaving
-  unsafely, exceeding authorized scope, taking an unsafe autonomous action,
-  prompt-injection compromise, a governance/guardrail bypass, a fairness
-  alert, or runaway/uncontrolled learning.
+  unsafely, exceeding its authorized scope, taking an unsafe autonomous action,
+  prompt-injection compromise, a governance or guardrail bypass, a fairness
+  alert, or runaway learning.
 
-**Out of scope:** routine bugs with no safety/security/data impact (handle via
-normal engineering triage); provider control-plane outages (coordinate here,
-but provider response is an inherited control).
-
----
-
-## 2. Severity classification matrix
-
-Classify at triage; re-classify as facts change (always escalate on doubt).
-Response-time targets are measured from declaration.
-
-| Sev | Definition | Examples | Ack / response target | Who is paged |
-| --- | --- | --- | --- | --- |
-| **SEV1 — Critical** | Confirmed or highly likely breach, irreversible data loss, or an unsafe autonomous action with real-world impact. Active, spreading, or customer-facing harm. | Confirmed PII/customer-data exfiltration; audit-signing key compromise; an agent executed a destructive/irreversible real-world action; prompt-injection that bypassed the shield and reached a high-privilege tool; ransomware. | Ack **15 min**, IC engaged **30 min**, containment underway **1 h** | IC + Security Lead + Comms Lead + Eng on-call + Management. Page immediately. |
-| **SEV2 — High** | Serious incident, contained or containable, with significant but bounded impact; or a near-miss that only governance/killswitch stopped. | Killswitch fired on an agent attempting an out-of-scope action; single-tenant data exposure; repeated `shield_block` / `governance_denied` indicating an active attack; capability misconfiguration granting excess privilege; confirmed exploitable vuln in production. | Ack **30 min**, IC engaged **1 h**, containment **4 h** | IC + Security Lead + Eng on-call. Comms Lead + Management notified (not necessarily paged). |
-| **SEV3 — Medium** | Limited-impact incident, no confirmed data exposure, system functioning within guardrails. | Single fairness alert needing review; circuit breaker repeatedly tripping on a non-critical dependency; isolated capability-denied anomaly; low-severity reported vuln. | Ack **4 h** (business hours), resolve **3 business days** | Security Lead + owning Eng team. |
-| **SEV4 — Low** | Minor / informational; policy or hygiene issue, no operational impact. | Single anomalous audit event explained on review; cosmetic guardrail false positive; low-risk dependency advisory. | Ack **1 business day**, resolve **10 business days** | Owning team via ticket. No page. |
-
-**Auto-escalation triggers (treat as ≥ SEV2 until disproved):** any HALT fired
-in production; any `verify_chain` / `verify_anchors` failure (possible audit
-tampering); any confirmed access to customer data by an unauthorized party;
-any agent action outside its approved capability set.
+Routine bugs with no safety, security or data impact belong in normal
+engineering triage. Outages of a model provider's own service are handled by
+that provider; coordinate around them, but their response is an inherited
+control.
 
 ---
 
-## 3. Roles & responsibilities
+## 2. Severity levels (example)
 
-Roles are assigned at declaration. One person may hold two roles in SEV3/SEV4;
-SEV1/SEV2 require distinct IC and Scribe at minimum.
+Adapt these levels and set response targets in your own incident policy.
+Classify at triage, re-classify as facts change, and escalate when in doubt.
+
+| Level | Definition | Examples |
+| --- | --- | --- |
+| **SEV1 — Critical** | Confirmed or highly likely breach, irreversible data loss, or an unsafe autonomous action with real-world impact. | Personal-data exfiltration; audit-signing key compromise; an agent executed a destructive or irreversible real-world action; prompt injection that bypassed the shield and reached a high-privilege tool. |
+| **SEV2 — High** | Serious incident, contained or containable, with significant but bounded impact; or a near-miss that only governance or the killswitch stopped. | Killswitch fired on an agent attempting an out-of-scope action; single-tenant data exposure; repeated `shield_block` / `governance_denied` events indicating an active attack; a capability misconfiguration granting excess privilege. |
+| **SEV3 — Medium** | Limited impact, no confirmed data exposure, system working within its guardrails. | A single fairness alert needing review; a circuit breaker repeatedly tripping on a non-critical dependency; an isolated `capability_denied` anomaly. |
+| **SEV4 — Low** | Informational; a policy or hygiene issue with no operational impact. | A single anomalous audit event explained on review; a guardrail false positive. |
+
+**Treat as SEV2 or higher until disproved:** any halt fired in production; any
+audit-chain or anchor verification failure (possible tampering); any confirmed
+access to data by an unauthorized party; any agent action outside its approved
+capability set.
+
+---
+
+## 3. Roles (example)
 
 | Role | Responsibilities |
 | --- | --- |
-| **Incident Commander (IC)** | Owns the incident end to end. Declares severity, runs the bridge, assigns roles, decides on containment actions (including authorizing HALT), tracks the timeline, declares resolution. Single decision-maker — does not do hands-on remediation. |
-| **Security Lead** | Technical lead for investigation, forensics, and containment. Pulls and verifies audit evidence, executes/oversees killswitch, circuit-breaker, and capability-revocation actions, drives root-cause analysis. |
-| **Comms Lead** | Owns all communication: internal status updates (cadence below), and **[Org action]** drafting customer / regulator notifications for legal & management sign-off. Single source of external truth — no one else communicates externally. |
-| **Scribe** | Maintains the contemporaneous timeline in the TPL-01 report: every action, decision, time (UTC), and who did it. Captures evidence references (audit day-files, event kinds, command output). Keeps the report current in real time. |
+| **Incident commander** | Owns the incident end to end: sets severity, assigns roles, authorizes containment (including a halt), keeps the timeline, declares resolution. |
+| **Technical lead** | Investigates, collects and verifies audit evidence, runs the halt, circuit-breaker and revocation actions in §4, and drives root-cause analysis. |
+| **Communications** | Internal status updates and any external notices, under your organization's approval process. |
+| **Scribe** | Keeps the timeline in your incident record: every action, decision and time (UTC), with evidence references (audit day-files, event kinds, command output). |
 
-**Status update cadence:** SEV1 every 30 min; SEV2 every 2 h; SEV3 daily.
+In a small team one person may hold several roles; for the most serious
+incidents keep the incident commander and the scribe separate.
 
 ---
 
-## 4. Lifecycle phase checklists
+## 4. Lifecycle checklist
 
-### Phase 1 — Detect
+### Detect
 
-- [ ] Capture the trigger: alert, killswitch/HALT event, `shield_block` spike,
-      `fairness_alert`, customer report, or `SECURITY.md` vulnerability report.
-- [ ] Record first-detected timestamp (UTC) and source in TPL-01.
-- [ ] Preserve volatile evidence **before** changing anything (note current
-      audit day-file, snapshot relevant logs).
-- [ ] Declare an incident and assign IC. Do not investigate informally.
+- [ ] Capture the trigger: alert, halt event, `shield_block` spike,
+      `fairness_alert`, user report.
+- [ ] Record the first-detected time (UTC) and source.
+- [ ] Preserve evidence **before** changing anything (note the current audit
+      day-file; snapshot relevant logs).
+- [ ] Declare an incident and assign an incident commander.
 
-### Phase 2 — Triage / Assess
+### Triage
 
-- [ ] IC assigns Security Lead, Comms Lead, Scribe; opens the bridge.
-- [ ] Assign provisional severity from the §2 matrix (escalate on doubt).
-- [ ] Determine type: security, AI/agent, or both → pick the §7 playbook.
-- [ ] Scope it: which agents, tenants, capabilities, data subjects, systems.
-- [ ] Decide whether immediate containment (HALT) is needed **now** — if a SEV1
-      autonomous-action or active-exfiltration is plausible, HALT first, ask later.
+- [ ] Assign a provisional severity (§2).
+- [ ] Decide the type: security, AI/agent, or both, and pick the §7 playbook.
+- [ ] Scope it: which agents, tenants, principals, data subjects and systems.
+- [ ] Decide whether to halt **now**. If an unsafe autonomous action or active
+      exfiltration is plausible, halt first and investigate after.
 
-### Phase 3 — Contain (see §5 for exact commands)
+### Contain (§5)
 
-- [ ] Stop the harm: HALT the affected agent/cluster, trip circuit breakers,
-      and/or revoke the offending capability.
-- [ ] Isolate compromised credentials/keys; rotate as needed.
-- [ ] Confirm containment held (re-check killswitch state; watch audit stream).
-- [ ] Record every containment action + timestamp in TPL-01.
+- [ ] Stop the harm: halt the deployment, revoke the offending principal,
+      and/or leave a failing dependency's breaker open.
+- [ ] Rotate exposed credentials and keys.
+- [ ] Confirm containment held (re-check halt state; watch the audit log).
+- [ ] Record every containment action with its time.
 
-### Phase 4 — Eradicate
+### Eradicate
 
-- [ ] Identify and remove root cause (bad config, vuln, poisoned learning
-      state, malicious input pattern).
-- [ ] For AI incidents: roll back the learned state to a known-good snapshot
-      (§7) before re-enabling learning.
-- [ ] Patch/deploy fix; add a guardrail or shield rule if the attack bypassed
+- [ ] Remove the root cause (bad configuration, vulnerability, poisoned
+      learned state, malicious input pattern).
+- [ ] For AI incidents, roll learned state back to a known-good snapshot (§7)
+      before re-enabling learning.
+- [ ] Deploy the fix; add a guardrail or shield rule if the attack bypassed
       existing controls.
-- [ ] Re-run `verify_chain` / `verify_anchors` to confirm the audit log is intact.
+- [ ] Verify the audit log again (§6).
 
-### Phase 5 — Recover
+### Recover
 
-- [ ] Restore service in a controlled, observable way (canary/single tenant first).
-- [ ] Clear the killswitch only when IC authorizes (file + in-process + shared,
-      §5). Confirm no HALT remains active.
-- [ ] Reset tripped circuit breakers; re-grant capabilities deliberately.
-- [ ] Monitor for recurrence for a defined watch period before declaring
-      resolution. IC declares resolved; record resolution timestamp.
+- [ ] Restore service in a controlled way (one tenant or a canary first).
+- [ ] Clear the halt only when the incident commander authorizes it (§5.1),
+      and confirm no halt remains active.
+- [ ] Restore revoked principals deliberately, one at a time.
+- [ ] Watch for recurrence for a defined period, then declare resolution.
 
-### Phase 6 — Post-incident review
+### Review
 
-- [ ] See §9. Schedule within 5 business days; blameless.
+- [ ] Hold a post-incident review (§9).
 
 ---
 
-## 5. Technical containment controls (exist in Lightwork)
+## 5. Containment controls
 
-All operator actions below are **[Org action]** in that a human must authorize
-them, but the mechanism is pre-built. Commands assume a shell on a host with
-the Lightwork environment and `MAVERICK_DATA_DIR` / `MAVERICK_HALT_FILE` set as
-in production.
+### 5.1 Killswitch (halt)
 
-### 5.1 Killswitch — global halt
+Implementation: `maverick/killswitch.py`. Agents call `killswitch.check()` at
+tool-call boundaries and at each turn; once a halt is active it raises
+`Halted`, so agents stop at their next tool call. Ways to halt:
 
-Implementation: `maverick/killswitch.py`. The halt is checked at tool-call
-boundaries via `killswitch.check()` (raises `Halted`), so a halt stops agents
-at the next tool invocation. Three independent triggers:
-
-1. **File trigger (fastest, no Python needed):** create the HALT file. Default
-   path is `~/.maverick/HALT` (i.e. `<data_dir>/HALT`); override via the
-   `MAVERICK_HALT_FILE` env var.
+1. **Halt file** (fastest; works from any shell on the host):
 
    ```bash
-   # Halt this host immediately
    touch "${MAVERICK_HALT_FILE:-$HOME/.maverick/HALT}"
    ```
 
-   Polled cheaply (throttled ~1/s) at every tool boundary.
+   The default path is `<data dir>/HALT`; `MAVERICK_HALT_FILE` overrides it.
+   The file is checked at most about once a second, at tool boundaries. One
+   halt file covers every tenant in the process.
 
-2. **In-process trigger (records a reason + audit event):**
+2. **Dashboard emergency stop** (`POST /api/v1/halt`, with an optional
+   `reason`). It arms the local halt and, when the deployment shares a Postgres
+   world store, the shared halt that every host consults. In shared mode it
+   requires a dashboard admin; in local mode, the `operate` permission. The
+   action is recorded in the audit log.
+
+3. **CLI**, through the Agent Control Plane (needs
+   `[control_plane] enable = true` or `MAVERICK_CONTROL_PLANE=1`):
+
+   ```bash
+   maverick control-plane halt --reason "SEV1: unsafe action by agent X"
+   maverick control-plane status      # shows the observed halt state
+   ```
+
+4. **In-process**, for code embedding Lightwork. It records a `halt` audit
+   event with the reason:
 
    ```python
    from maverick import killswitch
    killswitch.halt("SEV1: unsafe autonomous action by agent X", source="manual")
-   # records EventKind.HALT to the audit log
    ```
 
-3. **Cluster-wide trigger (all hosts sharing the world DB):** when a Postgres
-   world store is configured, arm the shared halt so every host stops, not just
-   the local one. Consulted via the shared world store (`world.active_halt()`,
-   throttled, fail-open):
-
-   ```python
-   from maverick.world_model import open_world
-   w = open_world()
-   w.arm_halt(reason="SEV1: cluster-wide halt", source="incident-PROC-01")
-   ```
-
-**Verify the halt took effect:**
+**Verify the halt took effect** (in the process concerned, or via
+`maverick control-plane status`):
 
 ```python
 from maverick import killswitch
-killswitch.is_active()   # True when any trigger is live
-killswitch.check()       # raises Halted(...) if halted
+killswitch.is_active()   # True while any halt is live
+killswitch.check()       # raises Halted(...) while halted
 ```
 
-**Clearing (Recovery only, IC-authorized):** use the authenticated dashboard
-**Resume** action (`DELETE /api/v1/halt`) for the configured scope. Do **not**
-manually sequence `rm`, `killswitch.clear()`, and `world.disarm_halt()`: that
-creates a window in which one authority is clear while another operation is
-still unresolved.
+**Clearing (recovery only, authorized by the incident commander).** Use the
+dashboard's **Resume** action (`DELETE /api/v1/halt`). It may ask for a recent
+second-factor confirmation. Do **not** clear by hand by deleting the file and
+calling `killswitch.clear()` or `world.disarm_halt()` in sequence: that leaves
+a window in which one halt authority is clear while another is still armed.
 
-The coordinated recovery action:
+The Resume action:
 
-1. snapshots the exact local file, in-process, and shared generations;
+1. records the exact local file, in-process and shared halt generations;
 2. takes a temporary process stop;
-3. locks the observed shared row and invokes the exact local deletion inside
-   that database transaction;
+3. locks the observed shared row and deletes the local halt inside that
+   database transaction;
 4. rolls the shared clear back if the local deletion fails; and
-5. releases only its own process hold after commit and verification.
+5. releases its own process hold only after commit and verification.
 
-`world.disarm_halt(expected_generation=..., durable_clear=...)` is therefore a
-low-level transactional primitive, not a standalone recovery command. A
-concurrent arm rotates its generation and wins; an unavailable authority or
-indeterminate commit leaves or restores a local fail-safe and returns an error.
-For a deliberately local-only deployment, use the Agent Control Plane's
-`clear_halt` action, which applies the same exact-generation file/process CAS.
+A concurrent new halt changes the generation and wins; an unavailable authority
+or an uncertain commit leaves the local halt in place and returns an error. For
+a local-only deployment, `maverick control-plane clear-halt` applies the same
+exact-generation clear to the halt file and the process.
 
-### 5.2 Circuit breakers
+### 5.2 Revoking a principal
 
-Implementation: `maverick/circuit_breaker.py`. Classic three-state breaker
-(CLOSED → OPEN → HALF_OPEN), thread-safe, used to fail fast on a misbehaving
-dependency or tool. Operator actions:
+Revoke the principal that misbehaved instead of halting everything when the
+blast radius is one agent or one user's runs:
+
+```bash
+maverick capability revoke "user:<id>" --reason "SEV2: out-of-scope tool use"
+maverick capability revocations          # list revoked principals
+maverick capability unrevoke "user:<id>" # restore, during recovery
+```
+
+The revocation list (`maverick/revocation.py`) is re-read when it changes, so
+a revoked principal's **next** tool call is denied even mid-run, including the
+calls of agents it spawned. It is consulted only when capability enforcement is
+on (`[capabilities] enforce = true`); without enforcement there is no principal
+to revoke against, so halt instead.
+
+The Agent Control Plane offers the same action for native runs and external
+agents (an external agent's trust entry is revoked as well, so the gateway
+refuses it too):
+
+```bash
+maverick control-plane list                                  # governed principals
+maverick control-plane suspend "<principal>" --reason "..."  # revoke; reversible with resume
+maverick control-plane contain "<principal>" --reason "..."  # revoke the subtree and record a security incident
+maverick control-plane release "<principal>"                 # undo a containment
+```
+
+Confirm the revocation held by watching for `capability_denied` audit events on
+the next attempt (§6).
+
+### 5.3 Circuit breakers
+
+Implementation: `maverick/circuit_breaker.py`, a three-state breaker
+(closed → open → half-open) that fails fast on a misbehaving dependency.
+Breakers live in memory in each process: the dashboard's live diagnostics show
+the dashboard process's breakers, and the Python calls below act on the process
+that runs them.
 
 ```python
 from maverick import circuit_breaker
-circuit_breaker.snapshot()     # list all breakers + state/stats — triage view
-cb = circuit_breaker.get("name-of-breaker")
-cb.state                       # CircuitState: closed/open/half_open
-cb.reset()                     # force CLOSED (Recovery)
-circuit_breaker.reset_all()    # reset every breaker (use with care)
+circuit_breaker.snapshot()       # every breaker with its state and counters
+cb = circuit_breaker.get("<key from snapshot>")
+cb.state                         # CircuitState.CLOSED / OPEN / HALF_OPEN
+cb.reset()                       # force closed (recovery)
+circuit_breaker.reset_all()      # drop every breaker (use with care)
 ```
 
-To force-isolate a failing dependency during containment, leave its breaker
-OPEN (do not reset) until the dependency is confirmed healthy.
-
-### 5.3 Capability revocation
-
-Revoke the specific capability the agent abused rather than halting everything
-when the blast radius is one capability. Confirm revocation took effect by
-watching for `capability_denied` audit events on the next attempt (§6). Record
-the capability, principal, and channel revoked in TPL-01.
+To keep a failing dependency isolated during containment, leave its breaker
+open until the dependency is confirmed healthy.
 
 ---
 
-## 6. Evidence collection (forensic record)
+## 6. Evidence collection
 
-The **tamper-evident signed audit log** is the system of record for forensics.
-Do not reconstruct events from memory when the audit log can prove them.
+The signed, hash-chained audit log is the record for forensics. Audit signing
+is on by default; if it has been turned off, the log is append-only but not
+tamper-evident.
 
-- **Location:** `maverick/audit/` — append-only, hash-chained, Ed25519-signed
-  day-files (one file per UTC day) plus periodic anchors.
-- **Chain verification:** `maverick/audit/signing.py`
-  - `verify_chain(path)` — walks a single day-file, confirms every signature
-    and the hash chain; returns a list of `ChainBreak` (empty = intact).
-  - `verify_anchors(audit_dir)` — confirms day-file tips against the anchor
-    ledger (detects deletion/replacement of whole day-files).
+- **Location:** `~/.maverick/audit/YYYY-MM-DD.ndjson` (one file per UTC day)
+  plus the `anchors.ndjson` tip ledger. With tenant isolation on, each tenant
+  has its own audit directory.
+- **Verify the chain** (exits 1 on any break, so it can gate automation):
+
+  ```bash
+  maverick audit verify --all                    # every day-file plus the anchor ledger
+  maverick audit verify --all --pubkey <hex>     # trust a specific Ed25519 key
+  ```
+
+  The same checks from Python (`maverick/audit/signing.py`):
 
   ```python
-  from pathlib import Path
-  from maverick.audit import signing, reader
-  audit_dir = reader.resolve_audit_dir(None)     # resolves the live audit dir (tenant=None)
+  from maverick.audit import reader, signing
+  audit_dir = reader.resolve_audit_dir(None)
   for day in signing.day_files(audit_dir):
       breaks = signing.verify_chain(day)
       if breaks:
-          print("CHAIN BREAK", day, breaks)      # evidence of tampering — escalate
+          print("CHAIN BREAK", day, breaks)       # possible tampering: escalate
   print("anchors:", signing.verify_anchors(audit_dir))
   ```
 
-  Any non-empty result from `verify_chain` / `verify_anchors` is itself an
-  auto-escalation trigger (possible tampering) — preserve the file, snapshot
-  the host, and treat as ≥ SEV2.
+  Any break is itself an escalation trigger: preserve the files, snapshot the
+  host and treat the incident as SEV2 or higher.
 
-- **Relevant audit event kinds to pull** (`maverick/audit/events.py`):
+- **Find events:** `maverick audit grep <regex> --day YYYY-MM-DD` and
+  `maverick audit tail -n 200`. `maverick audit export` writes JSON or CEF for a
+  date range (`--since` / `--until` or `--all`), and `--verify` checks
+  signatures first.
+
+- **Event kinds to pull** (`maverick/audit/events.py`):
 
   | Event kind | Pull it for |
   | --- | --- |
-  | `shield_block` | Input/tool/output blocked by the shield (stage, reason, score) — prompt-injection, exfil attempts. |
-  | `capability_denied` | Agent tried to use a capability it lacked (tool, principal, channel). |
-  | `consent_result` | Human approve/deny/timeout on a gated action. |
-  | `governance_denied` | Governance/policy guardrail blocked an action. |
-  | `fairness_alert` | Fairness/bias threshold breached. |
-  | `ai_system_retired` | An AI system/agent was retired/decommissioned. |
-  | `halt` | Killswitch fired (source, reason). |
+  | `shield_block` | Input, tool call or output blocked by the shield (stage, reason, score): prompt injection, exfiltration attempts. |
+  | `capability_denied` | An agent tried to use a capability it lacked (tool, principal, channel). |
+  | `consent_result` | Human approval, denial or timeout on a gated action. |
+  | `governance_denied` | A governance or policy guardrail blocked an action. |
+  | `fairness_alert` | A fairness or bias threshold was breached. |
+  | `ai_system_retired` | An AI system or agent was retired. |
+  | `halt` | The killswitch fired (source, reason). |
 
-- **Preserve, don't alter.** Copy the relevant day-file(s) to evidence storage;
-  never edit in place. Record the exact day-file names and event kinds pulled
-  in the TPL-01 "evidence references" section. The audit log is append-only —
-  the act of collecting evidence must not write to it.
+- **Preserve, don't alter.** Copy the relevant day-files to evidence storage and
+  never edit them in place. Record the day-file names and event kinds you pulled
+  in your incident record.
 
 ---
 
 ## 7. AI-incident playbook (ISO 42001 A.10)
 
-General pattern for any AI/agent-safety incident: **Halt → Snapshot → Roll back
-→ Review → Re-enable**. Pick the row matching the symptom.
+The general pattern is **halt → snapshot → roll back → review → re-enable**.
 
 | Symptom | Steps |
 | --- | --- |
-| **Agent behaving unsafely / out of scope / unsafe autonomous action** | 1. **HALT** the agent (§5.1) — file trigger first for speed, then in-process for the audit reason; cluster-wide if multi-host. 2. Pull `governance_denied`, `capability_denied`, `consent_result`, `halt` events (§6) to reconstruct what it attempted. 3. If it abused one capability, **revoke that capability** (§5.3) and keep others up; otherwise leave halted. 4. Determine reversibility of any action taken; engage owners to undo real-world effects. **[Org action]** 5. Eradicate root cause; re-enable only after IC sign-off. |
-| **Prompt-injection compromise** | 1. HALT if a high-privilege tool was reached; else trip the relevant capability. 2. Pull `shield_block` events (stage = input/tool/output) to see what the shield caught vs. missed. 3. Capture the malicious input as evidence; add a shield/guardrail rule to block the pattern (eradication). 4. Verify no learned state was poisoned (§ runaway-learning row). 5. Re-enable after the new rule is confirmed effective. |
-| **Fairness alert** | 1. Triage severity from §2 (usually SEV3 unless customer-impacting). 2. Pull `fairness_alert` events for the metric, threshold, and affected cohort. 3. If actively producing biased outputs at scale, HALT or revoke the capability; otherwise pause the affected workflow. 4. Root-cause (data, prompt, learned drift); fix and document. 5. **[Org action]** assess any required customer/regulator disclosure (§8). |
-| **Runaway / uncontrolled learning** | 1. HALT learning-driven agents. 2. **Snapshot** current learned state for evidence: `from maverick import dreaming; dreaming.snapshot_learning_state()`. 3. **Roll back** to the last known-good snapshot: `dreaming.rollback_learning_state("latest")` (whole-store rollback). 4. Promotions go through the staged rollout (`maverick/learning_rollout.py`) whose `promote_skill_live` snapshots first and auto-rolls-back on any failed constraint — confirm the failed rollout rolled back, and re-run with tightened constraints. 5. Record the signed learning-audit row; verify the audit chain (§6) before re-enabling learning. |
+| **Agent behaving unsafely, out of scope, or taking an unsafe autonomous action** | 1. Halt (§5.1): the halt file first for speed; the dashboard emergency stop for a shared, multi-host deployment. 2. Pull `governance_denied`, `capability_denied`, `consent_result` and `halt` events (§6) to reconstruct what it attempted. 3. If one principal is responsible, revoke it (§5.2) and keep the rest running; otherwise stay halted. 4. Establish whether any action taken is reversible, and work with the owners of the affected systems to undo real-world effects. 5. Remove the root cause; re-enable only with the incident commander's approval. |
+| **Prompt-injection compromise** | 1. Halt if a high-privilege tool was reached; otherwise revoke the affected principal. 2. Pull `shield_block` events (stage = input, tool or output) to see what the shield caught and what it missed. 3. Keep the malicious input as evidence and add a shield or guardrail rule for the pattern. 4. Check that no learned state was poisoned (next row). 5. Re-enable once the new rule is shown to work. |
+| **Runaway or poisoned learning** | 1. Halt learning-driven agents. 2. Snapshot the current learned state for evidence: `from maverick import dreaming; dreaming.snapshot_learning_state()`. 3. Roll back to the last known-good snapshot: `maverick dream --list-snapshots`, then `maverick dream --rollback <snapshot>` (or `latest`). 4. Live promotions go through the staged rollout in `maverick/learning_rollout.py`, whose `promote_skill_live` snapshots first and rolls back on a failed constraint; confirm the failed rollout rolled back, then re-run with tighter constraints. 5. Verify the audit log (§6) before re-enabling learning. |
+| **Fairness alert** | 1. Set severity (usually SEV3 unless people are affected at scale). 2. Pull `fairness_alert` events for the metric, threshold and affected group. 3. If biased outputs are being produced at scale, halt or revoke; otherwise pause the affected workflow. 4. Find the root cause (data, prompt or learned drift), fix it and document it. 5. Assess under your own policy whether any disclosure is required. |
 
-In all AI-incident cases, an `ai_system_retired` event should be recorded if an
-agent/model is permanently decommissioned as the resolution.
-
----
-
-## 8. External communication & breach notification
-
-**[Org action] for all external comms.** Only the Comms Lead communicates
-externally, and only after legal & management sign-off. Use the decision tree,
-then the timelines.
-
-### Notification decision tree
-
-```
-Is the incident a confirmed/likely PERSONAL DATA breach?
-├── No  → No GDPR obligation. Still: notify customers if a DPA/SLA term is
-│         triggered (see below). Coordinate any vuln disclosure per SECURITY.md.
-└── Yes → Does it risk the rights/freedoms of data subjects?
-          ├── Unlikely (e.g. data was encrypted/unintelligible)
-          │     → Document the assessment & reasoning; no Art.33 notice required,
-          │       but RECORD the decision. Re-evaluate as facts develop.
-          └── Likely
-                ├── GDPR Art. 33: notify the supervisory authority WITHOUT UNDUE
-                │   DELAY and where feasible within **72 hours** of becoming aware.
-                │   If > 72h, include reasons for the delay.   [Org action]
-                └── HIGH risk to data subjects?
-                      ├── Yes → GDPR Art. 34: notify affected DATA SUBJECTS without
-                      │         undue delay, in clear plain language.   [Org action]
-                      └── No  → Art. 34 not required; document why.
-```
-
-### Timelines & obligations checklist
-
-- [ ] **GDPR Art. 33 — supervisory authority:** within **72 hours** of awareness
-      when a personal-data breach is likely to risk individuals' rights.
-      **[Org action]** Comms Lead drafts; legal approves; DPO/management submits.
-- [ ] **GDPR Art. 34 — data subjects:** without undue delay when there is a
-      **high** risk to individuals. **[Org action]** legal-approved wording.
-- [ ] **Customer notification per DPA:** notify affected customers within the
-      window in their Data Processing Agreement / contract (often 24–72 h).
-      **[Org action]** Comms Lead checks each affected customer's DPA term.
-- [ ] **Vulnerability disclosure:** for externally reported vulns, coordinate via
-      `SECURITY.md` — the Organization follows a **90-day coordinated
-      disclosure window** from initial report; public advisory/CVE only after a
-      patched release. Keep the reporter updated. **[Org action]**
-- [ ] Record every notification made (who, when, channel) in TPL-01.
+If an agent or model is permanently decommissioned as the resolution, record an
+`ai_system_retired` event (`maverick/retirement.py`).
 
 ---
 
-## 9. Post-incident review (PIR)
+## 8. Notifications
 
-- **When:** within **5 business days** of resolution. Mandatory for SEV1/SEV2;
-  recommended for SEV3.
-- **How:** **blameless** — focus on systems and process, not individuals.
-- **Inputs:** the completed TPL-01 report, the contemporaneous timeline, and the
-  verified audit evidence.
-- **Agenda checklist:**
-  - [ ] Confirm timeline (detection → resolution) is complete and accurate.
-  - [ ] Identify root cause(s) and contributing factors.
-  - [ ] What detected it? What delayed detection/containment? What went well?
-  - [ ] Did containment controls (killswitch, breakers, capability revocation,
-        shield/governance) work as intended? Any gaps?
-  - [ ] Was the audit evidence sufficient and intact (`verify_chain`/`verify_anchors`)?
-- **Outputs (with owners + due dates):**
-  - [ ] Corrective actions logged in the **corrective-action log**.
-  - [ ] New/updated risks recorded in the **risk register**.
-  - [ ] Runbook/guardrail/control improvements filed.
-  - [ ] Trigger an out-of-cycle review of this runbook (review cycle = annual +
-        after every SEV1/SEV2).
+Lightwork does not send incident notifications. Duties to notify regulators,
+affected individuals or contractual counterparties are your organization's,
+under its own policy and the law that applies to it. For example, GDPR
+Article 33 requires notifying the supervisory authority without undue delay,
+and where feasible within 72 hours of becoming aware of a personal-data breach
+that is likely to result in a risk to individuals; Article 34 requires telling
+the individuals when that risk is high. The verified audit evidence (§6) and
+your incident timeline are the inputs for those decisions. Record every
+notification made (who, when, through which channel).
+
+---
+
+## 9. Post-incident review
+
+- **When:** soon after resolution; for SEV1 and SEV2 always.
+- **How:** blameless; focus on systems and process, not individuals.
+- **Inputs:** the incident record and timeline, and the verified audit evidence.
+- **Questions:**
+  - [ ] Is the timeline from detection to resolution complete and accurate?
+  - [ ] What were the root cause and contributing factors?
+  - [ ] What detected it, what delayed detection or containment, and what went well?
+  - [ ] Did the controls (halt, revocation, circuit breakers, shield and
+        governance) work as intended? Any gaps?
+  - [ ] Was the audit evidence complete and did it verify?
+- **Outputs:** corrective actions with owners and dates in your tracking
+  system, new or updated risks in your risk register, and any changes to this
+  guide or to your configuration.

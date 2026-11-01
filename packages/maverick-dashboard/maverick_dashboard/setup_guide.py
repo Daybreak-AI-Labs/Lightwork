@@ -1,6 +1,6 @@
 """The full setup guide (``maverick init``) inside the app.
 
-The terminal setup assistant (``apps/installer-cli/maverick_installer/wizard.py``)
+The terminal setup assistant (``apps/installer-cli/maverick_installer/wizard/``)
 is the source of truth for what setup covers. Its advanced flow walks 44 steps
 (``wizard.STEPS``); :data:`STEPS` below names, for each one, where the same
 settings are changed in this app. Most live in All settings (the catalog of

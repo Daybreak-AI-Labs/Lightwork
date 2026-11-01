@@ -1,5 +1,5 @@
 """Multi-monitor computer-use: virtual-desktop geometry over a faked mss
-(ROADMAP 2028 H1). Offline; no display needed."""
+. Offline; no display needed."""
 from __future__ import annotations
 
 import sys

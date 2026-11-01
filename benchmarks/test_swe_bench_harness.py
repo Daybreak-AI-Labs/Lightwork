@@ -55,7 +55,7 @@ def test_load_instances_json_per_line(swebench, tmp_path):
 
 
 def test_load_instances_carries_test_sets(swebench, tmp_path):
-    """Wave 9 fix: fail_to_pass/pass_to_pass/language must round-trip."""
+    """fail_to_pass/pass_to_pass/language must round-trip."""
     manifest = tmp_path / "smoke.jsonl"
     manifest.write_text(
         '{"instance_id": "a", "brief": "fix", '
@@ -69,7 +69,7 @@ def test_load_instances_carries_test_sets(swebench, tmp_path):
 
 
 def test_already_done_skips_resumed(swebench, tmp_path):
-    """Wave 9: re-run skips (instance_id, pipeline) pairs already in CSV."""
+    """Re-run skips (instance_id, pipeline) pairs already in CSV."""
     csv_path = tmp_path / "r.csv"
     rows = [
         swebench.Row(instance_id="a", pipeline="maverick", model_id="x"),

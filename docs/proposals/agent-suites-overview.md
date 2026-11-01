@@ -2,7 +2,7 @@
 
 At-a-glance index of the business-function agent suites designed for the platform.
 Full detail lives in the per-suite docs below; this is the summary to skim later.
-**Fifty-three suites, 2,020 shipped agents** — the original eight functional
+**The shipped roster** covers the original eight functional
 suites below plus customer experience, marketing, procurement, data &
 analytics, security ops, executive office, facilities/EHS, tax preparation
 (CPA firms), and ten industry verticals (healthcare, insurance, banking,
@@ -10,8 +10,8 @@ retail, manufacturing, construction, logistics, professional services,
 government contracting, education/nonprofit), with jurisdiction packs in
 HR/legal/finance. Run
 `maverick domains-lint` for the live count and quality gate. Historical
-note — the original plan was eight suites, ~346 agents (301 base + 45 added in
-the adversarial-council review; counts below are base **+ council-added**).
+note — the original plan was eight suites, ~346 agents (301 base + 45 added after
+review; counts below are base **+ added**).
 
 - **Finance** → [`finance-agent-suite.md`](finance-agent-suite.md) — 38 + 5 = **43** agents, 7 towers (+ vertical packs)
 - **IT / GRC / Privacy / Security / AI-Governance** → [`it-grc-agent-suite.md`](it-grc-agent-suite.md) — 47 + 8 = **55** agents, 10 towers
@@ -26,7 +26,7 @@ the adversarial-council review; counts below are base **+ council-added**).
 (from Word/Excel to "query an Oracle DB for the trial balance", "stand up Oracle 23ai",
 "fix data/automation errors in Salesforce", "the finer points of litigation procedure") —
 are catalogued in [`agent-skills-catalog.md`](agent-skills-catalog.md). *(All eight suites
-catalogued; the seven non-finance suites' council-added seats now carry full profiles.)*
+catalogued; the seven non-finance suites' added seats now carry full profiles.)*
 
 **Platform architecture** — how the roster comes alive and adapts:
 - [`self-extending-agent-factory.md`](self-extending-agent-factory.md) — the platform
@@ -37,7 +37,7 @@ catalogued; the seven non-finance suites' council-added seats now carry full pro
 
 All build on [`../enterprise/architecture.md`](../enterprise/architecture.md)
 (the three-layer control plane) and [`agent-factory.md`](agent-factory.md)
-(domain packs). Status: draft design, on branch `claude/amazing-davinci-4Gw6P`.
+(domain packs).
 
 ---
 
@@ -48,7 +48,9 @@ All build on [`../enterprise/architecture.md`](../enterprise/architecture.md)
   `mcp_servers` + `knowledge_sources`, plus the consumption + governance surface:
   an `[output]` contract (deliverable/consumers/cadence/gate), an editable
   `[[workflow]]` playbook, an `effort` tier (right-sized reasoning), and a
-  `refuse` list of hard, no-approval-path prohibitions. All 2,020 carry these.
+  `refuse` list of hard, no-approval-path prohibitions. Every shipped pack has an
+  `[output]` contract and a `[[workflow]]` playbook, and the universal hard
+  refusals in `domain_refusals.py` apply to all of them.
 - **Tooling over the roster** — `maverick domains-lint` (well-formedness +
   envelope/gate/effort/deny-floor rules), `domains-audit` (governance-posture
   inventory: what's reachable, what's denied, refusals, sign-off — `--json` for

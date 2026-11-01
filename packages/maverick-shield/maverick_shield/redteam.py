@@ -1,4 +1,4 @@
-"""Red-team CI runner + shield calibration (roadmap: 2027 H1 safety).
+"""Red-team CI runner + shield calibration.
 
 Two halves, one scan loop:
 

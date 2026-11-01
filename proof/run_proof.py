@@ -8,9 +8,9 @@ and prints a scoreboard of the product's core promises.
 
     python proof/run_proof.py        # exits 0 iff every guarantee holds
 
-The "control plane is the product" claim, made checkable. Five guarantees run
-anywhere; two cryptographic ones (Ed25519) need ``cryptography`` and otherwise
-report ``CI`` (they run in the test matrix).
+The governance guarantees, made checkable. Five guarantees run anywhere; two
+cryptographic ones (Ed25519) need ``cryptography`` and otherwise report ``CI``
+(they run in the test matrix).
 
 The guarantees themselves live in :mod:`maverick.proof_guarantees` (the single
 source of truth shared with ``maverick.proof_pack``); this file is the
@@ -53,8 +53,8 @@ def main() -> int:
             failed += 1
             print(f"  [FAIL]  {r.label:32}  {r.detail}")
     print("=" * 78)
-    crypto_note = "" if crypto else "  (+2 cryptographic guarantees verified in CI)"
-    print(f"  {ran} guarantees PROVEN, {failed} failed{crypto_note}")
+    crypto_note = "" if crypto else "  (+2 cryptographic checks verified in CI)"
+    print(f"  {ran} checks passed, {failed} failed{crypto_note}")
     print("=" * 78)
     return 1 if failed else 0
 

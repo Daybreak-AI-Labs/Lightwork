@@ -1,173 +1,181 @@
-# Lightwork for Enterprise — the governed agent control plane
+# Governed agent control plane
 
-> Status: architecture + roadmap (the blueprint for the enterprise pivot). This
-> is the master plan the layered build follows; it doubles as the technical
-> narrative for enterprise buyers (CISO / Head of Compliance / COO).
+This page describes how Lightwork governs fleets of agents: the oversight
+control plane every consequential action passes through, the compliance
+profiles that tighten it, the fleet model, and the tenancy and scaling
+substrate underneath. Module paths are relative to
+`packages/maverick-core/maverick/` unless noted.
 
-## 1. The thesis
+## 1. Why a single control plane
 
-Enterprises want **fleets of agents doing real work** — every employee backed by
-5–10 specialist agents — but they cannot deploy them without two things:
+Organizations that run many agents need two things before they can deploy
+them:
 
-1. **Oversight.** A way to see, govern, and intervene in what the agents do — a
-   supervisor over the swarm, not a black box.
-2. **Provable compliance.** Evidence that the agents operate within the law —
-   the EU AI Act *and* the US patchwork (NIST AI RMF, Colorado, NYC LL144,
-   sectoral HIPAA/GLBA/FCRA), across jurisdictions, simultaneously.
+1. **Oversight.** A way to see, govern, and intervene in what the agents do.
+2. **Evidence of compliance.** Records showing that the agents operate within
+   the obligations that apply to the deployment, such as the EU AI Act, the
+   NIST AI RMF, US state laws, and sectoral rules like HIPAA, GLBA and FCRA.
 
-Lightwork's wedge is the **control plane** that makes agent fleets *governable and
-audit-ready by construction*. We already own the hardest primitives — a signed,
-tamper-evident audit chain, attenuating capabilities, sandboxed execution,
-human-in-the-loop consent, tenancy, and egress control. The pivot turns those
-from features into the product.
+Implementing logging, access control and human oversight separately for each
+framework produces redundant controls and gaps where they meet. Lightwork
+routes every agent action through **one control plane** and expresses each
+regime as a **profile** that compiles onto the same set of enforceable
+primitives.
 
-The recurring failure mode in 2026 enterprise AI (per practitioner guidance):
-teams implement logging, access control, and human oversight **separately for
-each framework**, producing redundant controls and *gaps at the intersections*.
-Lightwork's answer is a **single control plane** every agent action flows through,
-with each legal regime expressed as a **pluggable policy pack** mapped onto one
-set of enforceable primitives.
-
-## 2. The product in one picture
+## 2. Overview
 
 ```
-  Employee
-    └─ Fleet (5–10 named, role-scoped agents: researcher, coder, ops, analyst…)
+  Owner (a human principal)
+    └─ Fleet (named, role-scoped agents: researcher, coder, ops, analyst…)
          every action ─▶ ┌──────────────────────────────────────────────┐
                          │        OVERSIGHT CONTROL PLANE                │
                          │  policy engine: allow / deny / require-human  │
-                         │  + supervisor (agent + human operator)        │
+                         │  + operator console (/oversight)              │
                          │  + signed record of every decision (Art 12)   │
                          └──────────────────────────────────────────────┘
-                                        ▲ policy = union of
+                                        ▲ policy = strictest-wins union of
                          ┌──────────────┴───────────────┐
-                    Compliance regime packs (pluggable):
-                    EU AI Act · NIST AI RMF · Colorado ADMT ·
-                    NYC LL144 · HIPAA/GLBA/FCRA · GDPR residency
+                    Compliance profiles and finance regime packs:
+                    HIPAA · GDPR · EU AI Act · NIST AI RMF ·
+                    ISO/IEC 42001 · SOC 2 · SR 11-7
 ```
 
-## 3. Architecture — three layers
+## 3. Three layers
 
-### Layer A — Oversight control plane (the keystone / "hive mind")
+### Layer A — Oversight control plane
 
-A **persistent supervisor + org-policy engine** that every agent action consults
-before it executes: returns **allow / deny / require-human / log**, and records
-the decision to the audit chain. This is the hive-mind: one governing layer with
-authority over the whole fleet, plus a human operator who can monitor and
-intervene live.
+`governance.py` is the policy decision point. Each consequential action is
+evaluated against the principal's capability and the organization's policy and
+yields one decision: **`allow`**, **`deny`**, or **`require_human`** (pause for
+human sign-off, the EU AI Act Art 14 gate). Decisions are strictest-wins
+(`deny` > `require_human` > `allow`) and carry a machine-readable rule and a
+human-readable reason, so the choice lands in the signed audit record.
 
-- **Builds on (already shipped):** attenuating capabilities (`capability.py`),
-  consent/HITL (`safety/consent.py`), signed audit (`audit/signing.py`),
-  blackboard + agent-bus coordination, the recursive swarm.
-- **The gap:** today governance is *per-goal and in-process*. We need to elevate
-  it to a **persistent, cross-fleet control plane** — a policy engine consulted
-  on every action, a supervisor role with read/intervene authority over many
-  running agents, and live operator controls (approve / deny / pause / kill).
+With no `[governance]` policy configured, the engine allows whatever the
+capability already permits, so a deployment that does not use it behaves as
+before. Policies are set directly in `[governance]` (`deny_actions`,
+`require_human_actions`, risk floors and per-action amount thresholds) or come
+from the compliance profiles in Layer B.
 
-### Layer B — Compliance-regime engine (EU + US, pluggable)
+The control plane builds on attenuating capabilities (`capability.py`),
+consent and human-in-the-loop approval (`safety/consent.py`), and the signed
+audit chain (`audit/signing.py`). The dashboard's **`/oversight`** page is the
+operator console: org-policy denials and human-approval holds, shield blocks,
+capability denials, egress-lock and consent denials, and killswitch halts in
+one view, next to the live halt state and the pending approval queue.
 
-The unifying insight: **don't implement controls per-law.** Define one set of
-enforceable primitives and map every framework onto them. Each regime is a
-**policy pack** an operator turns on per deployment; the active policy is their
-union (strictest-wins).
+### Layer B — Compliance profiles
 
-This is also the hedge against a volatile landscape (the Dec 2025 federal
-preemption EO vs. still-enforceable state laws): regimes are configuration, so a
-deployment enables exactly the packs its jurisdiction + sector require.
+Controls are not implemented per law. Each regime is a **profile** an operator
+turns on per deployment (`[compliance] profiles` or
+`MAVERICK_COMPLIANCE_PROFILES`); `compliance_profiles.py` compiles each one to
+a governance policy and names the protection floors it requires (PII
+redaction, encryption at rest, egress lock, audit log). Selecting several
+profiles unions them strictest-wins, together with any finance regime packs
+(`[finance] regimes`, `finance/regimes.py`).
 
-### Layer C — Per-employee agent fleets
+The shipped profiles are `hipaa`, `gdpr`, `eu_ai_act`, `nist_ai_rmf`,
+`iso_42001`, `soc2` and `sr_11_7`. HIPAA is a PHI-handling posture; GDPR and
+the EU AI Act supply legal-runtime overlays. The NIST AI RMF, ISO/IEC 42001,
+SOC 2 and SR 11-7 profiles are bounded compatibility postures: they enforce
+only the tool-gate controls they name and do not assert full framework
+coverage, certification or attestation.
 
-The unit of sale: a user **owns N persistent, named, role-scoped agents** running
-ongoing and scheduled work, governed by the supervisor and bounded by their
-role's capability.
+Because regimes are configuration, a deployment enables exactly the profiles
+its jurisdiction and sector require.
 
-- **Builds on (already shipped):** tenancy (`paths.py`), per-principal
-  capabilities + RBAC roles, the scheduler/worker, `maverick ps`.
-- **The gap:** a first-class `Fleet` abstraction (owner + roster + role bindings
-  + policy binding), agent lifecycle (create / pause / retire), and the
-  per-employee operator UX.
+### Layer C — Agent fleets
 
-## 4. Compliance mapping — frameworks → primitives we already own
+`fleet.py` defines a **fleet**: an owner (a human principal) plus a roster of
+named, role-scoped agents that do ongoing and scheduled work. Each agent's role
+drives its capability through `[roles.<role>]` RBAC, and the whole fleet runs
+under the Layer A control plane. Fleets are stored per tenant
+(`~/.maverick/fleets/<name>.json` under the tenant's data directory), so one
+tenant's roster never reaches another. `maverick fleet` manages them from the
+command line; the dashboard's `/fleets` page shows them.
 
-Each obligation below maps to a Lightwork control. **Bold** = already shipped and,
-in several cases, exceeding the baseline; *italic* = the gap this roadmap closes.
+## 4. Compliance mapping
+
+Each obligation below maps to a Lightwork control. The controls supply
+technical evidence; they do not determine whether a deployment is compliant.
 
 | Regime | Key obligation | Lightwork control |
 |---|---|---|
-| **EU AI Act Art 12** (record-keeping) | append-only logs, hash-chained, ≥6-month retention | **Ed25519 *Merkle*-chained audit (`audit/signing.py`) — exceeds the SHA-256 append-only baseline**; *+ retention policy enforcement* |
-| **EU AI Act Art 14** (human oversight) | monitor / intervene / override; explicit automation boundary | **consent/HITL + capability risk-ceilings**; *+ control-plane `require-human` gate + operator console* |
-| **EU AI Act Art 50** (transparency, due Dec 2026) | disclose AI; mark AI-generated content | *agent-identity disclosure + output marking pack* |
-| **EU AI Act risk-tiering** | classify the system's risk tier | *per-fleet/agent risk classification on the policy pack* |
-| **NIST AI RMF** (US de-facto anchor) | Govern / Map / Measure / Manage | **audit + capabilities + budget/quotas + eval harness** map to all four; *+ RMF evidence report* |
-| **Colorado SB 26-189 / NYC LL144 / EEOC** | consequential-decision logging, human review, bias audit | *employment/consequential-decision pack: decision records + mandatory human review + bias-audit export* |
-| **HIPAA / GLBA / FCRA** (sectoral) | restrict + log sensitive-data handling | **capability path/host scopes + egress lock + tenancy**; *+ sector data-class tags* |
-| **GDPR** | data residency + erasure (Art 17) | **egress lock to EU/local providers + DSAR erasure (`audit/erase.py`) + tenancy** |
+| **EU AI Act Art 12** (record-keeping) | append-only logs, hash-chained, retention | Ed25519-signed, hash-chained audit (`audit/signing.py`), offline verification, and retention enforcement (`maverick retention enforce`) |
+| **EU AI Act Art 14** (human oversight) | monitor / intervene / override; explicit automation boundary | consent/HITL, capability risk ceilings, the `require_human` governance gate, and the `/oversight` operator console |
+| **EU AI Act Art 50** (transparency) | disclose AI; mark AI-generated content | first-turn AI disclosure on channels and an AI-written label on every agent answer sent to a chat app or by email (`compliance.py`) |
+| **EU AI Act** conformity readiness | risk classification and technical documentation | a default-off conformity-readiness workflow (`ai_conformity_workflow.py`) that tracks evidence; it does not classify a system as a matter of law or perform a conformity assessment |
+| **NIST AI RMF** | Govern / Map / Measure / Manage | audit, capabilities, budgets and quotas, the evaluation harness, and the bounded `nist_ai_rmf` profile |
+| **NYC Local Law 144** and similar employment rules | consequential-decision logging, human review, bias audit | decision records in the audit chain, `require_human` gates, and a default-off audit/notice readiness package (`ai_regulated_verticals.py`); it does not perform an independent bias audit |
+| **HIPAA / GLBA / FCRA** (sectoral) | restrict and log sensitive-data handling | capability path/host scopes, the egress lock, tenancy, and the `hipaa` profile's required protection floors |
+| **GDPR** | data residency and erasure (Art 17) | egress lock to EU or local providers, DSAR erasure (`audit/erase.py`), tenancy, and the `gdpr` profile |
 
-**Honest read on timing.** EU high-risk (Annex III) duties were deferred to **Dec
-2027** by the May 2026 Digital Omnibus, but **transparency (Dec 2026)** and
-**GPAI rules (live since Aug 2025)** bite sooner — and US state laws are
-enforceable now. The control plane should ship before the obligations land so
-customers adopt ahead of the deadline, not under it.
+**Compliant is not certified.** "Compliant" here means "provides the technical
+controls and evidence that compliance requires", not legal certification.
+Mapping your obligations to your risk tier needs counsel; Lightwork supplies
+the enforceable controls and the audit evidence, and makes the posture
+auditable.
 
-## 5. What we already own (the moat)
+## 5. Primitives the control plane builds on
 
-- **Signed, tamper-evident audit** (Ed25519 Merkle chain + offline verify) —
-  stronger than the Art 12 standard, and the evidentiary backbone for *every*
-  regime.
-- **Attenuating capabilities** — least privilege that can only narrow as it
-  propagates to sub-agents; the access-control primitive every framework wants.
-- **Consent / HITL** — the Art 14 intervention substrate.
-- **Seven execution sandboxes, egress lock, tenancy, quotas, OIDC/proxy SSO,
-  RBAC, SIEM export** — the enterprise-ops surface.
-- **The recursive swarm** — the multi-agent substrate the fleet and supervisor
-- **Roster-wide governance invariant suite** — six governance invariants
+- **Signed, tamper-evident audit** (Ed25519-signed hash chain with offline
+  verification): the evidentiary backbone for every regime above.
+- **Attenuating capabilities**: least privilege that can only narrow as it
+  propagates to sub-agents.
+- **Consent / human-in-the-loop**: the Art 14 intervention substrate.
+- **Execution sandboxes, egress lock, tenancy, quotas, OIDC/proxy SSO, RBAC
+  and SIEM export**: the operational surface. The sandbox backends are local,
+  Docker, Podman, gVisor, devcontainer, Kubernetes, SSH, Modal, and a
+  Firecracker scaffold.
+- **Roster-wide governance invariant suite**: six governance invariants
   (tool-reachability, autonomy dial, capability attenuation, compartment
-  isolation, unstrippable hard refusals, budget caps) verified across ALL 2,031
-  specialist packs, each with a
-  fault-injection control (property-fuzzed up to 5,000 iterations) proving the test is non-vacuous, plus hostile-argument
-  fuzzing of every connector and tool. This is the machine-checkable evidence
-  under the Art 14 oversight / NIST *Measure* obligations: the controls aren't
-  asserted, they're proven to hold fleet-wide.
-- **Primary-source data grounding** — analyst packs are auto-granted 37
-  read-only, GET-only public-data connectors (SEC EDGAR, FRED, Treasury, World
-  Bank, FDIC, Census, BLS, EIA, openFDA, NPPES, CourtListener, Federal Register,
-  GLEIF, OpenCorporates, NWS/NOAA, EPA, …) by suite, so consequential analysis is
-  grounded in authoritative sources rather than model memory. On by default;
-  kill-switch `[workforce] data_grounding = false` / `MAVERICK_WORKFORCE_DATA_GROUNDING=off`.
-  are built from.
+  isolation, unstrippable hard refusals, budget caps) verified across all
+  2,031 built-in specialist packs, each with a fault-injection control proving
+  the test is non-vacuous, plus hostile-argument fuzzing of every connector
+  and tool.
+- **Primary-source data grounding**: analyst packs are granted their suite's
+  subset of 37 read-only, GET-only public-data connectors (SEC EDGAR, FRED,
+  Treasury, World Bank, FDIC, Census, BLS, EIA, openFDA, NPPES, CourtListener,
+  Federal Register, GLEIF, OpenCorporates, NWS/NOAA, EPA, …), so consequential analysis
+  is grounded in authoritative sources rather than model memory. On by default;
+  kill-switch `[workforce] data_grounding = false` /
+  `MAVERICK_WORKFORCE_DATA_GROUNDING=off`.
+- **The recursive swarm**: the multi-agent substrate that fleets are built
+  from.
 
-The pivot is not a rebuild; it is **promoting these from per-run features to a
-persistent, multi-tenant control plane**, plus the regime packs and the fleet
-model on top.
+## 6. Workspaces, tenancy and scaling
 
-## 6. Build sequence
+- **Workspaces.** `workspace.py` gives each business (tenant) its own home
+  under `~/.maverick/tenants/<tenant>/`: its domain packs, its document
+  knowledge store and its world database. Selecting a tenant is explicit
+  (`MAVERICK_TENANT` or the dashboard's workspace selection); with no tenant,
+  paths fall back to the single-tenant `~/.maverick/` layout.
+- **Postgres world model.** `[world_model] backend = "postgres"` moves the world
+  model to Postgres, tenant-stamped on every root table. `[world_model] rls =
+  true` (or `MAVERICK_PG_RLS=1`) adds database-native row-level security keyed
+  on the session's tenant; only the table owner can install the policy, and
+  `maverick tenant rls-preflight` checks the setup.
+- **Per-tenant keys.** `tenant/kms.py` gives each tenant its own data
+  encryption key, stored only wrapped by a key-encryption key held in a KMS
+  (a local KMS by default; cloud KMS backends implement the same interface).
+- **Per-tenant egress.** `tenant/egress.py` applies a host allow/deny plane per
+  tenant (`[tenancy.egress.<tenant>]`, falling back to `[egress]`) to every tool
+  the tenant's agents run, composed with the per-tool network policy.
+- **Out-of-process workers.** The `QueueDispatcher` sends goals to a job queue
+  that separate `maverick worker` processes drain, so processing capacity
+  scales independently of the dashboard.
+- **One control-plane replica.** Postgres centralizes the world model, but other
+  durable control-plane stores are still file-backed. Run one
+  dashboard/control-plane replica and scale only the worker tier; see
+  [Operations](../operations.md) and the
+  [deployment playbook](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/enterprise/deployment-playbook.md)
+  for the runtime lock and
+  Helm guard that enforce this.
 
-1. **Keystone — oversight control plane.** A `governance` policy engine:
-   org policy → per-action decision (`allow` / `deny` / `require_human` / `log`),
-   consulted by the agent on every tool call, recording each decision to the
-   audit chain. A supervisor read/intervene API. Offline-unit-testable on the
-   decision logic. *(This PR's successor.)*
-2. **Compliance-regime packs.** A `ComplianceRegime` abstraction + the first
-   packs (EU AI Act, NIST AI RMF) as policy + evidence mappings; a
-   `maverick compliance status --regime <id>` posture report (generalizes the
-   existing `soc2` command).
-3. **Fleet model.** A `Fleet` / roster abstraction + lifecycle + supervisor
-   binding + the per-employee unit.
-4. **Operator console.** A dashboard view of the fleet with **live human
-   oversight** — approve / deny / pause / kill — the Art 14 UI surface.
+## 7. Caveats
 
-## 7. Honest caveats
-
-- **"Compliant" = "provides the technical controls and evidence that compliance
-  requires" — not legal certification.** The mapping of *your* obligations to
-  *your* risk tier needs counsel; Lightwork supplies the enforceable controls and
-  the audit evidence, and makes the posture auditable.
-- **The US federal picture is volatile.** The pluggable-pack design is the hedge:
-  enable the regimes a deployment is actually subject to; the strictest-wins
+- The controls above are technical. Legal classification, conformity
+  assessment and certification remain the operator's responsibility.
+- Regulatory timelines change. Because regimes are configuration, a deployment
+  can enable or disable profiles as its obligations change; the strictest-wins
   union keeps multi-jurisdiction deployments safe by default.
-
-## 8. Sources (legal grounding, June 2026)
-
-- EU AI Act timeline & Digital Omnibus deferral — [EU AI Act implementation timeline](https://artificialintelligenceact.eu/implementation-timeline/); [Digital Omnibus update](https://www.insideprivacy.com/artificial-intelligence/eu-ai-act-update-timeline-relief-targeted-simplification-and-new-prohibitions/)
-- Art 12 logging & Art 14 oversight for agents — [Help Net Security: EU AI Act agent logging](https://www.helpnetsecurity.com/2026/04/16/eu-ai-act-logging-requirements/); [AI-agent EU AI Act checklist](https://thebrightbyte.com/playbook/expertise/eu-ai-act-compliance-ai-agents)
-- US landscape (NIST RMF anchor, state patchwork, Dec 2025 EO) — [Baker Botts US AI Law Update](https://www.bakerbotts.com/thought-leadership/publications/2026/january/us-ai-law-update); [US state AI laws tracker](https://www.glacis.io/guide-state-ai-laws)

@@ -1,6 +1,6 @@
 """Kubernetes sandbox: allow_network=false runs under a deny-all NetworkPolicy.
 
-Platform audit W1-104: the backend refused EVERY command when
+The backend used to refuse EVERY command when
 allow_network=false (the default the wizard writes), so a config produced by
 the UX source of truth could not run anything. It now verifies the namespace
 carries a deny-all NetworkPolicy and runs under it, and only fails closed --

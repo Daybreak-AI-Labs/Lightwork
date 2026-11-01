@@ -19,9 +19,9 @@ Local web dashboard for Lightwork. Reads `~/.maverick/world.db` and
 - FastAPI + Jinja2. No React, no build step.
 - Server binds to `127.0.0.1` by default.
 - To bind publicly (`--host 0.0.0.0`), set `MAVERICK_DASHBOARD_TOKEN`
-  and send `Authorization: Bearer <token>`. Query-token auth was
-  removed in the council security pass because it leaks via Referer
-  and access logs.
+  and send `Authorization: Bearer <token>`. Query-string tokens are
+  not accepted because they leak through the Referer header and access
+  logs.
 - Baseline browser security headers (X-Frame-Options DENY,
   X-Content-Type-Options nosniff, Referrer-Policy same-origin,
   Cross-Origin-Opener-Policy same-origin) are applied to every response.
@@ -30,13 +30,15 @@ Local web dashboard for Lightwork. Reads `~/.maverick/world.db` and
 
 ## Run
 
+The dashboard is installed by
+[Install from source](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md).
+
 ```bash
-pip install -e ./packages/maverick-dashboard
 maverick-dashboard          # listens on http://127.0.0.1:8765
 ```
 
 Or via the core CLI:
 
 ```bash
-maverick dashboard
+lightwork dashboard
 ```

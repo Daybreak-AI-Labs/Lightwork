@@ -10,9 +10,8 @@ that look recorded when none are.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -23,13 +22,13 @@ def _read(relpath: str) -> str:
 
 def test_security_policy_does_not_claim_an_unreleased_supported_line():
     """SECURITY.md named v0.2.x as the supported line. No release is published
-    (the releases API is empty; the latest git tag is v0.1.6; main is 0.1.7 in
-    release-cohort.toml), so the supported-versions section must say so."""
+    (main is 0.1.7 in release-cohort.toml), so the supported-versions section
+    must say so and name `main` as the line that receives fixes."""
     text = _read("SECURITY.md")
     assert "v0.2.x" not in text
     section = text.split("## Supported versions", 1)[1].split("\n## ", 1)[0]
-    assert "No release has been published" in section
-    assert "v0.1.6" in section
+    assert "No release is currently published" in section
+    assert "`main`" in section
     cohort = re.search(r'^version = "([^"]+)"', _read("release-cohort.toml"), re.MULTILINE)
     assert cohort is not None
     assert cohort.group(1) in section
@@ -53,7 +52,7 @@ def test_public_material_names_only_a_registered_proof_pack_command():
     module = _read("packages/maverick-core/maverick/proof_pack.py")
     assert 'if __name__ == "__main__"' in module
     paths = ["README.md"]
-    for root in ("pitch", "docs"):
+    for root in ("docs",):
         for path in sorted((REPO_ROOT / root).rglob("*")):
             if path.suffix in {".md", ".html"}:
                 paths.append(path.relative_to(REPO_ROOT).as_posix())
@@ -69,12 +68,10 @@ def test_firecracker_is_described_as_a_scaffold_not_a_deploy_target():
     checked = {
         "README.md": None,
         "SECURITY.md": None,
-        "pitch/SECURITY-QUESTIONNAIRE.md": "deploy targets",
         "docs/architecture.md": None,
         "docs/handbook.md": None,
         "docs/configuration.md": None,
         "docs/env-vars.md": None,
-        "docs/programs/press-and-case-studies.md": None,
     }
     enterprise = sorted(
         path.relative_to(REPO_ROOT).as_posix()
@@ -111,8 +108,6 @@ def test_queue_delivery_is_not_described_as_exactly_once():
             "**exactly-once** — the contention",
         "docs/evidence/README.md":
             "**exactly-once** execution",
-        "STRESS_TEST.md":
-            "**JobQueue exactly-once**",
     }
     for relpath, phrase in stale.items():
         assert phrase not in _read(relpath), f"{relpath} still says {phrase!r}"
@@ -132,67 +127,109 @@ def test_benchmark_results_say_when_no_live_run_is_recorded():
     assert '"--max-dollars"' in harness and '"--tag"' in harness
 
 
-AUDIT_DOCS = (
-    "PLATFORM_IMPROVEMENT_AUDIT.md",
-    "USER_EXPERIENCE_AUDIT.md",
-    "CODE_QUALITY_AUDIT.md",
-)
+def _features_toc():
+    import importlib.util
+    import sys
+
+    path = REPO_ROOT / "scripts" / "features_toc.py"
+    spec = importlib.util.spec_from_file_location("features_toc", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses resolve annotations via sys.modules
+    spec.loader.exec_module(module)
+    return module
 
 
-@pytest.mark.parametrize("name", AUDIT_DOCS)
-def test_audit_documents_carry_a_point_in_time_status_note(name):
-    """The three audits list findings with no per-item status. Each must say it is
-    a point-in-time record and point readers at docs/OPEN_ITEMS.md."""
-    head = "\n".join(_read(name).splitlines()[:25])
-    assert "point-in-time" in head.lower()
-    assert "docs/OPEN_ITEMS.md" in head
+def test_features_catalogue_has_a_current_table_of_contents():
+    """docs/FEATURES.md is 6,000+ lines of `- **Name** -- ...` entries in `##`
+    sections; its generated contents block (section, entry count, anchor) must
+    match the sections it describes, every entry must sit under a section, and
+    section headings must slug the same way on GitHub and MkDocs (no `&`)."""
+    toc = _features_toc()
+    text = _read("docs/FEATURES.md")
+    assert toc.apply(text) == text, "run python scripts/features_toc.py --write"
+    found = toc.sections(text)
+    assert len(found) >= 19 and sum(s.entries for s in found) >= 480
+    assert toc.entries_before_first_section(text) == 0
+    for section in found:
+        assert "&" not in section.title, section.title
+        assert f"](#{toc.anchor(section.title)})" in text, section.title
 
 
-def test_open_items_lists_the_items_still_open():
-    """docs/OPEN_ITEMS.md must carry the candidate items that were verified as
-    open, and list the three fixed by the follow-up change (the RLS login
-    check, CSP script nonces, SAML signatures) as fixed, not open."""
-    text = _read("docs/OPEN_ITEMS.md")
-    for phrase in (
-        "unsafe-inline", "oidc.auto.tfvars",
-        "deployer.tf", "image_tag", "recovery_window_in_days", "sslmode",
-        "automountServiceAccountToken", "ingress", "use_lockfile",
-        "app.py", "prompt_dsl", "REWRITES", "DigestIndex", "at-least-once",
-    ):
-        assert phrase in text, phrase
-    assert "In progress in a separate change" not in text
-    fixed = text.split("## Checked and already fixed (not open)", 1)[1]
-    for phrase in ("row-level security", "rolbypassrls", "nonce", "want_response_signed"):
-        assert phrase in fixed, phrase
+#: The documents a reader needs today. Point-in-time material (audits, ledgers,
+#: reviews, status boards, launch checklists) does not belong at the root.
+ROOT_DOCUMENTS = {
+    "README.md", "ARCHITECTURE.md", "CHANGELOG.md", "CLAUDE.md", "AGENTS.md",
+    "CONTRIBUTING.md", "SECURITY.md", "CLA.md", "CODE_OF_CONDUCT.md", "MAINTAINERS.md",
+    "GOVERNANCE.md", "SUPPORT.md", "RELEASING.md", "TRADEMARK.md", "THIRD-PARTY-NOTICES.md",
+}
 
 
-def test_docs_schema_version_matches_the_world_model():
-    """README, ARCHITECTURE.md and docs/architecture.md each named a schema version
-    (v36, v36 and v23) while the code was at v51. The three must say what
-    ``world_model.SCHEMA_VERSION`` says."""
-    from maverick.world_model import SCHEMA_VERSION
+def test_the_root_holds_only_the_live_documents():
+    """The repository root holds only the documents a reader needs today: the
+    overview, architecture, changelog, agent instructions and the community and
+    policy files. A new audit, ledger or launch checklist at the root fails here."""
+    root_docs = {p.name for p in REPO_ROOT.glob("*.md")}
+    assert root_docs <= ROOT_DOCUMENTS, sorted(root_docs - ROOT_DOCUMENTS)
 
-    for relpath, pattern in (
-        ("README.md", r"schema v(\d+)"),
-        ("ARCHITECTURE.md", r"\(v1 → v(\d+)\)"),
-        ("docs/architecture.md", r"schema v(\d+)"),
-    ):
-        found = re.findall(pattern, _read(relpath))
-        assert found, (relpath, pattern)
-        assert {int(v) for v in found} == {SCHEMA_VERSION}, (relpath, found)
+
+def test_business_material_stays_out_of_the_product_repository():
+    """Fundraising, strategy, competitor teardowns, patent material and company
+    administration are kept outside this repository, not beside the product. A
+    clone of this tree must not carry an investor deck, a data room, pricing
+    research, an invention disclosure or the company's own records."""
+    removed_directories = (
+        "pitch",
+        "docs/patents",
+        "docs/strategy",
+        "docs/research/commercialization",
+        "docs/research/competitive",
+    )
+    present = [d for d in removed_directories if (REPO_ROOT / d).exists()]
+    assert present == [], f"business material directories back in the product tree: {present}"
+    # Company administration removed for the open-source release: the vendor
+    # licensing console, the company website, point-in-time audits, community
+    # programme plans, contract templates and the company's ISMS records.
+    administration = (
+        "apps/vendor-console",
+        "website",
+        "docs/audits",
+        "docs/programs",
+        "docs/enterprise/legal",
+        "docs/compliance/evidence",
+        "docs/compliance/policies",
+        "docs/compliance/registers",
+    )
+    returned = subprocess.run(
+        ["git", "ls-files", "--", *administration],
+        capture_output=True, text=True, cwd=REPO_ROOT, check=True,
+    ).stdout.split()
+    assert returned == [], f"company administration back in the product tree: {returned}"
+    # Documentation and root files only: product skill packs legitimately carry
+    # names such as investor-update-author.md and due-diligence-data-room.md.
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "docs", "*.md", "*.pdf", "*.pptx"],
+        capture_output=True, text=True, cwd=REPO_ROOT, check=True,
+    ).stdout.split("\n")
+    tracked = [path for path in tracked if path and (path.startswith("docs/") or "/" not in path)]
+    telltale = re.compile(
+        r"(investor|pitch[-_ ]?deck|fundrais|patent|seed[-_ ]deck|gtm[-_ ]outreach|"
+        r"purchase[-_ ]blockers|invention[-_ ](register|disclosure|implementation))",
+        re.IGNORECASE,
+    )
+    suspicious = sorted(path for path in tracked if telltale.search(path.rsplit("/", 1)[-1]))
+    assert suspicious == [], f"file names that look like business material: {suspicious}"
 
 
 def test_docs_provider_counts_match_the_registry():
-    """The README said 14 providers, docs/architecture.md 12 and the handbook 13
-    while ``providers.KNOWN_PROVIDERS`` held 15. Each count must equal the
-    registry's length."""
+    """docs/architecture.md, the handbook and the feature catalogue each quote a
+    provider count; each must equal the length of ``providers.KNOWN_PROVIDERS``."""
     from maverick.providers import KNOWN_PROVIDERS
 
     expected = {len(KNOWN_PROVIDERS)}
     for relpath, pattern in (
-        ("README.md", r"(\d+) LLM provider adapters"),
-        ("docs/architecture.md", r"(\d+) LLM providers"),
+        ("docs/architecture.md", r"(\d+) LLM provider backends"),
         ("docs/handbook.md", r"from (\d+) providers"),
+        ("docs/FEATURES.md", r"(\d+) providers, routable per role"),
     ):
         found = re.findall(pattern, _read(relpath))
         assert found, (relpath, pattern)
@@ -200,10 +237,9 @@ def test_docs_provider_counts_match_the_registry():
 
 
 def test_channel_docs_name_every_server_wired_adapter():
-    """The channels README listed 10 adapters with stale readiness labels and
-    the package docstring counted 17 while ``server._WIRES`` wires 18. Every
-    wired adapter must appear, by its config table name, in the package README
-    and docstring, and the counts the README and handbook quote must match."""
+    """Every adapter ``server._WIRES`` wires must appear, by its config table
+    name, in the channels package README and docstring, and the counts the
+    docstring, the handbook and the feature catalogue quote must match."""
     from maverick.server import _WIRES
 
     wired = sorted(_WIRES)
@@ -213,42 +249,24 @@ def test_channel_docs_name_every_server_wired_adapter():
         assert f"`{name}`" in channels_readme, name
         assert name in docstring, name
     assert f"Server-wired adapters ({len(wired)};" in docstring
-    assert f"{len(wired)} channel adapters" in _read("README.md")
-    assert f"| Channels | {len(wired)} wired into" in _read("README.md")
-    assert f"Phone ({len(wired)} channels)" in _read("README.md")
     assert f"{len(wired)} wired adapters" in _read("docs/handbook.md")
+    assert f"{len(wired)} wired channels" in _read("docs/FEATURES.md")
 
 
-PACK_COUNT_DOCS = (
-    "README.md", "docs/index.md", "docs/handbook.md", "CLAUDE.md",
-    "packages/maverick-shield/README.md", "docs/enterprise/architecture.md",
-    "docs/product-portfolio.md",
-)
+PACK_COUNT_DOCS = ("README.md", "docs/index.md", "docs/handbook.md", "docs/FEATURES.md")
 
 
 def test_docs_pack_counts_match_the_shipped_domains():
-    """Six documents still said 2,020 packs after the roster reached 2,031. Every
-    "N packs" / "N specialists" / "N agents" count in the public claims must equal
-    the number of domain TOML files that ship in ``maverick/domains``."""
+    """Every "N packs" / "N specialists" / "N agents" count in the public claims
+    must equal the number of domain TOML files that ship in ``maverick/domains``."""
     shipped = len(list((REPO_ROOT / "packages" / "maverick-core" / "maverick" / "domains").glob("*.toml")))
     pattern = re.compile(
-        r"(\d),(\d{3})(?:-pack)?\s+(?:lint-clean\s+)?(?:specialist\s+)?(?:prebuilt\s+)?(?:specialists|packs|agents)\b"
+        r"(\d),(\d{3})(?:-pack)?\s+(?:lint-clean\s+)?(?:built-in\s+)?(?:domain\s+)?(?:specialist\s+)?(?:prebuilt\s+)?(?:specialists|packs|agents)\b"
     )
     for relpath in PACK_COUNT_DOCS:
         found = [int(a + b) for a, b in pattern.findall(_read(relpath))]
         assert found, (relpath, "no pack count found")
         assert set(found) == {shipped}, (relpath, found, shipped)
-
-
-def test_docs_tool_module_counts_match_the_tools_package():
-    """The docs said 286 built-in tool modules while ``maverick/tools`` holds 293
-    (every ``.py`` there except ``__init__`` and the ``_``-prefixed helpers)."""
-    tools = REPO_ROOT / "packages" / "maverick-core" / "maverick" / "tools"
-    shipped = len([p for p in tools.glob("*.py") if not p.name.startswith("_")])
-    for relpath in ("docs/architecture.md", "docs/FEATURES.md", "docs/comparison.md", "docs/press-kit.md"):
-        found = re.findall(r"(\d+) (?:built-in )?tool modules", _read(relpath))
-        assert found, relpath
-        assert {int(v) for v in found} == {shipped}, (relpath, found, shipped)
 
 
 def test_docs_connector_counts_match_the_specs():
@@ -258,32 +276,20 @@ def test_docs_connector_counts_match_the_specs():
 
     write_capable = len(_connector_specs._SPECS) + len(_connector_specs._GRAPHQL_SPECS)
     public_data = len(enterprise_connectors._PUBLIC_DATA_SPECS)
-    for relpath in ("README.md", "docs/architecture.md", "docs/index.md", "docs/handbook.md"):
+    for relpath in ("README.md", "docs/architecture.md", "docs/handbook.md"):
         text = _read(relpath)
         found = [int(v.replace(",", "")) for v in re.findall(r"([\d,]+) write-capable", text)]
         assert found and set(found) == {write_capable}, (relpath, found, write_capable)
-    for relpath in ("README.md", "docs/architecture.md", "docs/handbook.md"):
+    for relpath in ("docs/architecture.md", "docs/handbook.md", "docs/enterprise/architecture.md"):
         found = [int(v) for v in re.findall(r"(\d+) read-only", _read(relpath))]
         assert found and set(found) == {public_data}, (relpath, found, public_data)
-
-
-def test_press_kit_and_comparison_counts_match_the_code():
-    """The press kit and comparison page quote channel and provider counts too."""
-    from maverick.providers import KNOWN_PROVIDERS
-    from maverick.server import _WIRES
-
-    for relpath in ("docs/comparison.md", "docs/press-kit.md"):
-        found = re.findall(r"(\d+) channels\b", _read(relpath))
-        assert found and {int(v) for v in found} == {len(_WIRES)}, (relpath, found)
-    found = re.findall(r"(\d+) LLM providers", _read("docs/press-kit.md"))
-    assert found and {int(v) for v in found} == {len(KNOWN_PROVIDERS)}, found
 
 
 # The number of non-test functions carrying a complexity waiver. CLAUDE.md and
 # pyproject.toml quote it, and the house rule is that new code stays under the
 # cap, so this may only go down. Lower it when you remove a waiver; never raise
 # it without an explicit review of why a new function needs one.
-COMPLEXITY_WAIVER_CEILING = 170
+COMPLEXITY_WAIVER_CEILING = 167
 
 
 def test_complexity_waivers_do_not_grow():
@@ -301,4 +307,3 @@ def test_complexity_waivers_do_not_grow():
     )
     assert f"{COMPLEXITY_WAIVER_CEILING} grandfathered" in _read("CLAUDE.md")
     assert f"the {COMPLEXITY_WAIVER_CEILING} functions already over it" in _read("pyproject.toml")
-

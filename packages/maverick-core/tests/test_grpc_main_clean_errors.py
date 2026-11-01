@@ -1,6 +1,6 @@
 """`python -m maverick.grpc_api` must fail cleanly on operator-config errors.
 
-Platform-test finding (round 4): the gRPC entrypoint's main() called serve()
+Previously, the gRPC entrypoint's main() called serve()
 with no error handling, so the two expected, actionable startup errors --
 a missing bearer token (ValueError, the fail-closed auth default) and a
 missing grpcio extra (ImportError) -- each dumped a full traceback instead of

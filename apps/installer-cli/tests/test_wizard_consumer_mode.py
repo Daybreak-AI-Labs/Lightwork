@@ -1,4 +1,4 @@
-"""Council round-2: consumer-mode flow + first-screen picker."""
+"""Consumer-mode flow + first-screen picker."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -196,7 +196,7 @@ def test_run_consumer_writes_safe_defaults(monkeypatch, tmp_path: Path):
     assert rc == 0
 
     config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
-    # Safe defaults per the safety seat.
+    # Safe defaults.
     assert config["safety"]["profile"] == "strict"
     assert config["safety"]["block_threshold"] == "medium"
     assert config["sandbox"]["backend"] == "local"          # no docker

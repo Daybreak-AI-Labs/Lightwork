@@ -1,4 +1,4 @@
-"""Multi-agent observation channel (roadmap: 2027 H2 capabilities).
+"""Multi-agent observation channel.
 
 A shared, time-ordered feed where every agent in a swarm posts what it sees.
 ``merge`` collapses each agent's observation list into one chronologically

@@ -172,35 +172,37 @@ async def test_workdir_lock_serializes_holders(tmp_path, fake_llm):
 
 
 def test_coding_branch_wraps_critical_section_in_lock():
-    """The apply/test/reset section in the coding-mode verifier must run
-    under ``async with self.ctx.workdir_lock`` -- otherwise two coder
-    children sharing one workdir race on the git tree."""
-    # The loop body lives in _run_inner (run wraps it in the semconv span).
-    src = inspect.getsource(Agent._run_inner)
-    assert "async with self.ctx.workdir_lock:" in src
-    # The lock must enclose the apply/reset calls, not sit beside them.
-    # (Those calls are now off-loaded via asyncio.to_thread, so they read
-    # `to_thread(self._git_apply,` -- match the method name without "(".)
-    lock_at = src.index("async with self.ctx.workdir_lock:")
-    apply_at = src.index("self._git_apply", lock_at)
-    reset_at = src.rindex("self._reset_workdir")
-    assert lock_at < apply_at
-    assert lock_at < reset_at
-    # BOTH workdir-mutating sites must be locked: the require_apply_check
-    # apply (which runs for every coding-mode agent, incl. concurrent coder
-    # children) AND the verifier apply. The first lock must enclose the
-    # require_apply_check _extract_and_apply_patch call.
-    assert src.count("async with self.ctx.workdir_lock:") >= 2
-    extract_at = src.index("self._extract_and_apply_patch", lock_at)
-    assert lock_at < extract_at < src.index(
-        "async with self.ctx.workdir_lock:", lock_at + 1,
-    )
+    """The apply/test/reset sections of the coding-mode loop must run under
+    ``async with self.ctx.workdir_lock`` -- otherwise two coder children
+    sharing one workdir race on the git tree."""
+    # The two loop phases that touch the workdir: the apply check
+    # (_validate_final_patch) and the test-driven verifier
+    # (_verify_against_tests); _run_inner delegates to them.
+    validate_src = inspect.getsource(Agent._validate_final_patch)
+    verify_src = inspect.getsource(Agent._verify_against_tests)
+    assert validate_src.count("async with self.ctx.workdir_lock:") == 1
+    assert verify_src.count("async with self.ctx.workdir_lock:") == 1
+    # The apply-check lock must enclose the extract/reset calls, not sit
+    # beside them. (Those calls are off-loaded via asyncio.to_thread, so they
+    # read `to_thread(self._extract_and_apply_patch,` -- match the method
+    # name without "(".)
+    lock_at = validate_src.index("async with self.ctx.workdir_lock:")
+    extract_at = validate_src.index("self._extract_and_apply_patch", lock_at)
+    reset_at = validate_src.index("self._reset_workdir", lock_at)
+    assert lock_at < extract_at < reset_at
+    # The verifier's lock encloses its own extract, apply, test run and reset.
+    lock_at = verify_src.index("async with self.ctx.workdir_lock:")
+    assert lock_at < verify_src.index("self._extract_and_apply_patch", lock_at)
+    assert lock_at < verify_src.index("self._git_apply", lock_at)
+    assert lock_at < verify_src.rindex("self._reset_workdir")
     # The blocking git/pytest work must be off-loaded with asyncio.to_thread so
     # it doesn't freeze the event loop (and every other concurrent agent, the
     # channel server, and the dashboard) while the lock is held.
-    assert "asyncio.to_thread(self._git_apply" in src
-    assert "asyncio.to_thread(self._reset_workdir)" in src
-    assert "run_failing_tests," in src and "asyncio.to_thread(" in src
+    assert "asyncio.to_thread(self._extract_and_apply_patch" in validate_src
+    assert "asyncio.to_thread(self._reset_workdir)" in validate_src
+    assert "asyncio.to_thread(self._git_apply" in verify_src
+    assert "asyncio.to_thread(self._reset_workdir)" in verify_src
+    assert "run_failing_tests," in verify_src and "asyncio.to_thread(" in verify_src
 
 
 def test_search_replace_exec_sandbox_uses_disposable_worktree(tmp_path, fake_llm):

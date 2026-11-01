@@ -1,5 +1,5 @@
 """Crash-only logging: a sink that is safe to ``kill -9`` at any byte
-(roadmap: 2027 H2 safety).
+.
 
 Post-incident forensics are only as good as the last record that actually
 reached disk. A buffered logger loses its tail on SIGKILL/OOM — exactly the

@@ -230,8 +230,9 @@ python -m build
 python -m twine upload dist/*
 ```
 
-Then open a PR against the awesome-maverick-{kind}s index so users can
-discover your plugin from the dashboard's catalog tab.
+Then publish it to a catalog index (any static host serving index.json) and
+add that index under `[catalogs] indexes` so users can discover your plugin
+from the dashboard's catalog tab.
 '''
 
 

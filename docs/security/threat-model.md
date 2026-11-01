@@ -104,35 +104,33 @@ or unknown caller is refused before any work is done.
 
 ## Threats by category
 
-> The `(Qxx)` markers below are historical roadmap dates from when this
-> section was written. Several have since shipped — audit-log Ed25519
-> signing, webhook HMAC with replay-bound timestamps, capability tokens,
-> and at-rest encryption are all live; see the networked/multi-principal
-> section for the implemented enforcement points.
+> See the networked/multi-principal section below for the enforcement points
+> added for enterprise and federated deployments.
 
 ### Spoofing
 
 | Threat                                   | Mitigation                                                                  |
 |------------------------------------------|------------------------------------------------------------------------------|
-| Attacker impersonates the user to a channel adapter (Discord etc.) | Channel auth tokens stored chmod 600; webhook receivers HMAC-signed (Q2 26). |
-| Prompt injection from a fetched URL makes the agent issue tools as the user | Shield scan of inputs; injected-content detection (Q3 26). Tool ACLs limit blast radius. |
-| Subagent claims a capability it doesn't have | Capability tokens (Q4 26) make declared capabilities unforgeable.            |
+| Attacker impersonates the user to a channel adapter (Discord etc.) | Channel auth tokens stored chmod 600; webhook receivers HMAC-signed with replay-bound timestamps. |
+| Prompt injection from a fetched URL makes the agent issue tools as the user | Shield scan of inputs and of every tool output. Tool ACLs limit blast radius. |
+| Subagent claims a capability it doesn't have | Signed capability tokens make declared capabilities unforgeable.            |
 | Webhook receiver believes a forged event | `X-Maverick-Signature` HMAC; `verify_signature()` helper.                    |
 
 ### Tampering
 
 | Threat                                       | Mitigation                                                              |
 |----------------------------------------------|--------------------------------------------------------------------------|
-| Audit log entries get edited or deleted after the fact | Daily-rotated NDJSON, chmod 600. Audit-log signing (Q3 26) adds an Ed25519 chain. |
-| Skill/plugin code is modified on disk between installs | Hash-pinned via `maverick skills install`. Signed skills (Q2 26).        |
-| Browser session cookie is replayed by a third process | chmod 600 + 0o700 parent dir. Encrypted at rest (Q1 27).                 |
+| Audit log entries get edited or deleted after the fact | Daily-rotated NDJSON, chmod 600, with an Ed25519 hash-chain (audit signing, on by default). |
+| Skill/plugin code is modified on disk between installs | Hash-verified on install (`maverick skill add`); signed skills verified against `[skills] trusted_pubkeys`, required with `[skills] require_signed = true`. |
+| Browser session cookie is replayed by a third process | Session state is written only when `MAVERICK_BROWSER_STATE` is set (mode 0600); the browser auth vault stores sessions encrypted at rest. |
 | World model gets corrupted mid-write       | SQLite WAL mode + autocheckpoint + `PRAGMA wal_checkpoint(TRUNCATE)` on close. |
 
 ### Repudiation
 
-> **Tamper-evidence is opt-in.** The audit log is plain NDJSON by default;
-> the rows below are only *tamper-evident* with `[audit] sign = true`
-> (Ed25519 hash-chain). Even then, third-party attribution requires
+> **Tamper-evidence depends on signing.** Audit signing (Ed25519 hash-chain)
+> is on by default; with `[audit] sign = false` or `MAVERICK_SECURE_DEFAULT=0`
+> the log is plain NDJSON and the rows below are not tamper-evident. Even with
+> signing on, third-party attribution requires
 > verifying with an **externally-held** pubkey — a key co-located with the
 > log only detects accidental/non-privileged edits. Run `maverick audit
 > verify --pubkey <hex>` to check the chain.
@@ -149,7 +147,7 @@ or unknown caller is refused before any work is done.
 |------------------------------------------------------------------|-----------------------------------------------------------------------------------|
 | Tool output leaks API keys to logs                              | `secret_detector` scrubs Anthropic/OpenAI/AWS/GCP/Azure/GitHub/JWT before logging. |
 | Browser tool leaks session cookies to external sites             | Cookies sent only to the origin they were captured from.                          |
-| Telemetry phones home with prompt content                       | Telemetry is opt-in (Q3 26); anonymous-mode strips goal text from logs.           |
+| Telemetry phones home with prompt content                       | Telemetry is opt-in (trajectory donation is off by default; plugin usage counts stay local); anonymous mode (`MAVERICK_ANON=1`) strips user-identifying content from logs. |
 | Webhook payload leaks PII                                       | Outbound webhooks send only minimal payload; users control which events fire.     |
 | Audit log readable by other local users                         | chmod 600 enforced; load refuses if perms relax.                                  |
 
@@ -161,7 +159,7 @@ or unknown caller is refused before any work is done.
 | Agent gets stuck retrying a 401 forever                      | retry_classifier marks auth errors terminal.                                  |
 | Webhook receiver hangs the run                               | Webhook dispatch is async via a daemon ThreadPoolExecutor; failures logged.   |
 | Tool blocks the agent (e.g. shell command hangs)             | Sandbox timeouts; killswitch file (`~/.maverick/HALT`) aborts cleanly.        |
-| Compaction balloons memory on long traces                    | Hierarchical compaction (Q2 26) + retrieval-augmented compaction (Q4 26).     |
+| Compaction balloons memory on long traces                    | Compaction drops old tool output to digests under a total-size ceiling; optional retrieval of older digests. |
 
 ### Elevation of privilege
 
@@ -169,7 +167,7 @@ or unknown caller is refused before any work is done.
 |---------------------------------------------------------|----------------------------------------------------------------------------------------|
 | Plugin escapes its declared capabilities               | Manifest permissions enforced by default (ungranted → plugin skipped); tool ACLs filter at registry time; optional out-of-process isolation. |
 | Browser tool reaches private/loopback addresses        | `http_fetch` refuses private IPs by default; `MAVERICK_FETCH_ALLOW_PRIVATE=1` opt-in.  |
-| Computer-use tool drives mouse/keyboard outside scope  | Kill switch `MAVERICK_COMPUTER_DISABLE=1`; consent prompt for first session (Q2 26).   |
+| Computer-use tool drives mouse/keyboard outside scope  | Kill switch `MAVERICK_COMPUTER_DISABLE=1`; per-action approval for every input action.   |
 | Shell tool reads sensitive files (gold patches, etc.)  | Opaque-mode blocklists for benchmark contexts; tool ACLs.                              |
 | Subagent gains tools the parent doesn't have           | Spawn-tools layer; tool ACLs apply at every level.                                     |
 
@@ -244,4 +242,6 @@ point.
 
 - Reviewed at every minor release.
 - Reviewed when a new tool, provider, sandbox, or channel ships.
-- External penetration tests planned for Q3 2027 and Q3 2028.
+- No external penetration test has been published yet;
+  [`audit-readiness.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/security/audit-readiness.md)
+  defines the scope for one.

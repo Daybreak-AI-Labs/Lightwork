@@ -246,7 +246,7 @@ def _purge_table_by_time(
     try:
         # The agent may be writing concurrently; wait rather than fail fast.
         conn.execute("PRAGMA busy_timeout=5000")
-        # W1-50: the canonical (--db-path-less) path opens with foreign_keys
+        # The canonical (--db-path-less) path opens with foreign_keys
         # ON, so this raw connection must too or the two routes silently
         # disagree -- without it, deleting an episode any fact still cites
         # leaves a dangling facts.source_episode_id/fact_history.source_episode_id

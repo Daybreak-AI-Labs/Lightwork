@@ -24,11 +24,11 @@ remain subject to both deployment and workspace egress policy. Omitting an
 identity or site-discovery host makes connection completion fail closed rather
 than saving an account whose identity or Jira site was not verified.
 
-Daybreak or the installation operator creates the provider application in the
-provider's administration console, using the return addresses displayed by
-Lightwork, then enters its client ID and secret in Connections. Production
-Atlassian deployments use one Daybreak-owned distributable 3LO application.
-Customers see which providers are configured and review their own consent;
+The installation operator creates the provider application in the provider's
+administration console, using the return addresses displayed by Lightwork, then
+enters its client ID and secret in Connections. Lightwork does not include a
+preregistered application for Google or Atlassian. Workspace members see which
+providers are configured and review their own consent;
 normal account setup does not require them to visit a developer console, create
 an OAuth application, or handle registration secrets.
 Only an installation administrator who can administer the current workspace
@@ -36,7 +36,7 @@ can inspect or edit its shared registration metadata. No listing returns the
 client secret. Application registration, provider approval requirements and the
 account holder's consent screen remain external provider steps. Lightwork does
 not create a provider application or claim that a locally saved token has passed
-a live customer acceptance test. Google scopes are documented in Google's
+a live acceptance test. Google scopes are documented in Google's
 [OAuth scope catalog](https://developers.google.com/identity/protocols/oauth2/scopes).
 Jira's site-bound API and rotating refresh tokens follow Atlassian's
 [OAuth 2.0 application contract](https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/).
@@ -110,4 +110,4 @@ Synthetic tests cover app registration sealing, consent return, role/workspace/
 origin/version mismatches, actual saved-reference consumption, token renewal,
 single-flight refresh and lost-response refusal. They make no provider calls.
 Live provider registration, consent interoperability, account/scope verification
-and customer acceptance remain deployment-specific work.
+and acceptance testing remain deployment-specific work.

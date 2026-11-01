@@ -1,4 +1,4 @@
-"""Plan-execute-reflect loop tool (roadmap: 2027 H1 — "plan-execute-reflect").
+"""Plan-execute-reflect loop tool.
 
 A deterministic control-flow helper (no model) for an agent's outer loop. It
 scaffolds a plan and, given the outcome of a step, recommends the next control

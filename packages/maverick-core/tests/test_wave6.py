@@ -1,4 +1,4 @@
-"""Wave 6 — May 2026 council intel: cross-family verifier, MCP STDIO
+"""Cross-family verifier, MCP STDIO
 hardening, EU AI Act Article 50 disclosure, hooks lifecycle."""
 from __future__ import annotations
 
@@ -386,7 +386,7 @@ class TestHooks:
     async def test_shell_hook_blocks_on_nonzero_exit(self, tmp_path):
         """A shell command exiting non-zero blocks PreToolUse.
 
-        Wave 11: portable across Unix + Windows. Uses a python -c
+        Portable across Unix + Windows. Uses a python -c
         one-liner instead of a #!/bin/sh script (Windows has no
         /bin/sh interpreter).
         """

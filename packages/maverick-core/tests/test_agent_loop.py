@@ -144,7 +144,7 @@ class TestAgentLoop:
     async def test_marker_less_response_is_nudged_then_verified(
         self, ctx, fake_llm, make_llm_response,
     ):
-        # W1-25: a text-only response with no FINAL: marker used to skip the
+        # A text-only response with no FINAL: marker used to skip the
         # ENTIRE verify/patch-check/hook pipeline (it only runs inside the
         # FINAL-marker branch) and return immediately with the default
         # verifier_confidence=1.0 -- a false "fully verified" signal. Give
@@ -297,7 +297,7 @@ class TestAgentLoop:
         """POST /goals/{id}/cancel sets world status to 'cancelled'. Its
         docstring claims the agent loop checks status at each tool-call
         boundary, but before this fix nothing in the loop ever read goal
-        status (W1-23): a goal cancelled before/between turns must stop the
+        status: a goal cancelled before/between turns must stop the
         run before the next LLM call, exactly like the global killswitch."""
         fake_llm.scripted = [
             make_llm_response(

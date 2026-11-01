@@ -1,4 +1,4 @@
-"""DOM accessibility-tree extractor (roadmap: 2027 H1 — "5-10x token cut").
+"""DOM accessibility-tree extractor.
 
 Distills raw HTML into the compact **accessibility tree** an agent actually
 needs to reason about a page: landmarks, headings, links, buttons, form

@@ -1,4 +1,4 @@
-"""Knowledge-graph builder tool (roadmap: 2028 H1 capabilities).
+"""Knowledge-graph builder tool.
 
 Turns text or explicit triples into a small entity/relation graph the agent
 can query without an external graph DB. Stateless like every tool: the caller

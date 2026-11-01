@@ -6,33 +6,35 @@ Lightwork is a recursive multi-agent swarm with a safety layer at every chokepoi
 
 ```
                           ┌────────────────┐
-  user message  ──────────▶ │  shield.scan   │ ──block──▶ reject
+  user message  ─────────▶│  shield.scan   │──block──▶ reject
                           └───────┬────────┘
                                   │ pass
                                   ▼
-                  ┌────────────────────────────────┐
-                  │    Orchestrator agent (Opus)        │
-                  │  plans → spawns → verifies → final  │
-                  └─┬────────────────────────────────┘
-                    │ spawn_swarm / spawn_subagent
-      ┌──────────┼──────────┐
-      ▼           ▼           ▼
-  researcher    coder       writer       (parallel Sonnet workers)
-      │           │           │
-      └────────────────────────────┘
+                ┌─────────────────────────────────────┐
+                │      Orchestrator agent (Opus)      │
+                │  plans → spawns → verifies → final  │
+                └─────────────────┬───────────────────┘
+                                  │ spawn_swarm / spawn_subagent
+                     ┌────────────┼────────────┐
+                     ▼            ▼            ▼
+                 researcher     coder        writer     (parallel Sonnet workers)
+                     │            │            │
+                     └────────────┴────────────┘
             shared state via SwarmContext:
               • Blackboard (per run, in-memory)
               • WorldModel (SQLite + FTS5, persistent)
               • Budget (global token/$/wall/tool caps)
-              • Sandbox (local / docker / ssh)
+              • Sandbox (local / docker / ssh / ...)
               • Shield (input / tool / output scans)
+
+  Models shown are the default role routing; every role is configurable.
 ```
 
 ## Components
 
 ### `packages/maverick-core/`
 
-The agent kernel. Ported from `cdayAI/research/maverick/` and evolved here.
+The agent kernel.
 
 | Module | Role |
 |---|---|
@@ -40,18 +42,18 @@ The agent kernel. Ported from `cdayAI/research/maverick/` and evolved here.
 | `orchestrator.py` | Entry point `run_goal()` — wires SwarmContext, spawns external MCP clients, runs the root agent, distills the trajectory into a skill. |
 | `swarm.py` | `SwarmContext` shared by all agents in a run. |
 | `blackboard.py` | Append-only shared workspace for one run. Mirrors entries into `world.goal_events` when `attach_world()` is called so the dashboard can stream live progress. |
-| `world_model.py` | SQLite + FTS5: goals, episodes, facts, questions, messages, goal_events. WAL mode + `busy_timeout=5000` for safe concurrent dashboard+agent access. Forward-only, checksum-locked schema migrations (v1 → v51). |
+| `world_model.py` | SQLite + FTS5: goals, episodes, facts, questions, messages, goal_events. WAL mode + `busy_timeout=5000` for safe concurrent dashboard+agent access. Forward-only, checksum-locked schema migrations (`world_model.MIGRATIONS`). |
 | `budget.py` | Hard caps on tokens, $, wall-clock, tool calls. Raises `BudgetExceeded`. |
-| `llm.py` | Multi-provider adapter: Anthropic, OpenAI, Azure, Bedrock, Gemini, xAI, DeepSeek, Moonshot, OpenRouter, Ollama, TGI, vLLM (+ OpenAI-compatible). Per-role model routing via config. |
+| `llm.py` | Multi-provider adapter: Anthropic, OpenAI, Azure, Bedrock, Vertex AI, Gemini, xAI, DeepSeek, Moonshot, OpenRouter, Ollama, TGI, vLLM, any OpenAI-compatible endpoint and the Codex CLI (`providers.KNOWN_PROVIDERS`). Per-role model routing via config. |
 | `providers/` | One adapter file per provider; OpenAI ↔ Anthropic message translation lives in `openai_provider.py`. |
 | `config.py` | TOML config loader. Per-role model choice + persona + MCP server table. |
-| `skills.py` | Auto-distill successful trajectories into reusable SKILL.md files. Strict skill source validation (`gh:`, `https:`, `mvk:`); rejects bare paths, `file://`, etc. |
-| `skill_embeddings.py` | Optional ONNX embeddings via fastembed; falls back to lexical match if unavailable. |
+| `skills.py` | Auto-distill successful trajectories into reusable SKILL.md files. Strict skill source validation: `https://` and `gh:org/repo[:path]`, plus local paths from the CLI only (the REST API rejects bare paths); `http://`, `file://`, `ftp://`, `gopher://`, `data:` and `javascript:` sources are refused. |
+| `skill/embeddings.py` | Optional ONNX embeddings via fastembed; falls back to lexical match if unavailable. |
 | `persona.py` | `[persona]` config block renders a name/style/addendum into every agent's system prompt. |
 | `mcp_client.py` | Spawns external MCP servers as subprocesses, drains their stderr, registers their tools. |
 | `runner.py` | `run_goal_in_thread(...)` — process-wide BoundedSemaphore-capped background runner shared by the dashboard, REST API, and MCP server. |
 | `health.py` | `maverick doctor` — every red/yellow row carries an actionable `fix=...` remediation. |
-| `cli/` | The `maverick` / `lightwork` command tree (161 top-level commands; `cli/__init__.py` plus `_*_groups.py` modules). |
+| `cli/` | The `maverick` / `lightwork` command tree (`cli/__init__.py` plus `_*_groups.py` modules); `lightwork --help` lists the commands. |
 | `sandbox/` | Execution backends: `local.py` (subprocess), `docker.py` (`--network=none` default), gVisor (`runsc` runtime), `podman.py`, `devcontainer.py`, `kubernetes.py`, `firecracker.py`, `ssh.py` (uses user's `ssh` binary + keys), `modal_backend.py` — nine selectable. |
 | `tools/` | `read_file`, `write_file`, `list_dir`, `shell`, `ask_user`, `spawn_subagent`, `spawn_swarm`. |
 
@@ -94,16 +96,16 @@ This is how phone-companion mode works: the swarm lives on Desktop or VPS, the u
 
 Writes `~/.maverick/config.toml`, then runs a smoke test.
 
-### `apps/installer-desktop/` (scaffold)
+### `apps/installer-desktop/`
 
-Tauri-based GUI installer for users who would never open a terminal. Cargo + tauri.conf.json + Svelte UI + Python sidecar bridge in place. Notarized DMG / signed `.exe` / AppImage targets defined; CI build deferred until signing certs are wired up.
+Tauri source-bootstrap app (Cargo + tauri.conf.json + Svelte UI + Python sidecar bridge): one window that runs the same bootstrap as the command-line installers (`deploy/desktop/install.{ps1,sh}`) behind a progress screen. It is not a self-contained installer; `.github/workflows/desktop.yml` builds it as an unsigned engineering artifact that is not attached to releases.
 
 ## Governance, learning & enterprise layers
 
 Beyond the swarm kernel, `maverick-core` carries the subsystems that make
 Lightwork a *governed, self-improving* platform rather than a bare runtime. All
-are opt-in and additive (kernel rule 1 — the kernel runs unchanged with them
-off). See `docs/FEATURES.md` for depth.
+are opt-in and additive (kernel rule 1 in `CONTRIBUTING.md` — the kernel runs
+unchanged with them off). See `docs/FEATURES.md` for depth.
 
 | Subsystem | Modules | Role |
 |---|---|---|
@@ -118,7 +120,7 @@ off). See `docs/FEATURES.md` for depth.
 
 ## Long-horizon properties
 
-What makes Lightwork different from OpenClaw / Hermes on the long-horizon axis:
+What supports long-running work:
 
 1. **Persistent typed world model.** Goals, facts, episodes, and questions survive restarts. The agent can pause overnight and resume.
 2. **Recursive spawning with depth + budget caps.** Sub-agents can spawn sub-sub-agents until depth or budget runs out, never longer. Both `spawn_subagent` (blocking) and `spawn_swarm` (parallel) tools.
@@ -128,7 +130,7 @@ What makes Lightwork different from OpenClaw / Hermes on the long-horizon axis:
 
 ## Multi-agent properties
 
-What makes Lightwork a real multi-agent system, not just N parallel instances:
+How the agents in one run share state and check each other:
 
 1. **Shared blackboard.** Specialists post observations and findings to a single board the orchestrator reads; they can also message peers directly (`send_to_agent` / `recv_from_agent`), which no pack allowlist removes.
 2. **Shared world model.** Facts written by one agent are visible to siblings.
@@ -138,24 +140,26 @@ What makes Lightwork a real multi-agent system, not just N parallel instances:
 
 ## Deployment targets
 
-| Target | How it runs | Status |
-|---|---|---|
-| **Desktop** | Reviewed source checkout or signed release binary; runs in user's home dir. | v0.1.1 |
-| **Docker** | `docker run -v ~/.maverick:/root/.maverick ghcr.io/daybreak-ai-labs/lightwork:<tag>`. Isolated sandbox. | v0.1.1 |
-| **VPS** | `deploy/vps/install.sh` provisions a systemd unit. `MAVERICK_VERSION=v0.1.0 deploy/vps/install.sh` pins the release. | v0.1.1 |
-| **Phone (companion)** | Swarm runs on Desktop or VPS; phone talks via Telegram / iMessage / WhatsApp / Signal / Discord / Slack / SMS / Matrix / email. Native iOS/Android later. | v0.1.1 |
+| Target | How it runs |
+|---|---|
+| **Desktop** | Source checkout installed into a virtual environment ([docs/source-install.md](docs/source-install.md)); state lives in `~/.maverick`. |
+| **Docker** | Built from `deploy/docker/Dockerfile` (or `deploy/docker/docker-compose.yml`); runs as an unprivileged user with `~/.maverick` mounted at `/home/maverick/.maverick`. |
+| **VPS** | `deploy/vps/install.sh` installs the release cohort with pipx and provisions a systemd unit. `MAVERICK_REF`, a full 40-character commit SHA, is required and pins the exact source commit it installs. |
+| **Phone (companion)** | Swarm runs on Desktop or VPS; phone talks via Telegram / iMessage / WhatsApp / Signal / Discord / Slack / SMS / Matrix / email. A native mobile companion is in preview in `apps/mobile-companion/`. |
+
+No prebuilt binaries, container images or PyPI packages have been published yet.
 
 ## Distribution channels
 
-`.github/workflows/release.yml` triggers on `git tag v*`:
+`.github/workflows/release.yml` runs when a `v*` tag is pushed, and `.github/workflows/publish.yml` runs after it; `RELEASING.md` describes the procedure.
 
-- **PyPI**: `maverick-agent` (squatted, so we ship under this name; the Python import name + CLI name remain `maverick`), `maverick-shield`, `maverick-dashboard`, `maverick-mcp-server`, `maverick-channels`, `maverick-installer`. Gated on `PYPI_API_TOKEN`.
-- **GHCR**: multi-tag Docker image — `:latest`, `:vX.Y.Z`, `:vX.Y`.
-- **GitHub Releases**: PyInstaller single-file binaries for Linux x86_64, macOS arm64, Windows x86_64, each **Sigstore-signed keyless** (cosign via GitHub OIDC — `.sig` + `.pem` per artifact, logged to Rekor; verify with `deploy/verify-release.sh`), plus a per-release CycloneDX SBOM.
+- **GitHub Releases**: PyInstaller single-file binaries for Linux x86_64, macOS arm64 and Windows x86_64, source archives of four demo applications, and CycloneDX SBOMs, each **Sigstore-signed keyless** (cosign via GitHub OIDC — `.sig` + `.pem` per artifact, logged to Rekor; verify with `deploy/verify-release.sh`); plus the Python wheels and sdists with their Sigstore bundles.
+- **GHCR**: one container image tag per release, `ghcr.io/daybreak-ai-labs/lightwork:<version>`, promoted from a signed staging digest.
+- **PyPI**: the eight distributions in `release-cohort.toml` (`maverick-agent` for the core package, whose import and CLI name remain `maverick`, plus `maverick-shield`, `maverick-channels`, `maverick-evolve`, `maverick-dashboard`, `maverick-mcp-server`, `maverick-knowledge` and `maverick-installer`) through PyPI trusted publishing. Publishing to PyPI is switched off until the repository variable `MAVERICK_PUBLIC_PYPI_ENABLED` is set to `true`.
 
 ## Adding a new feature
 
-The rule of thumb (see CLAUDE.md):
+The rule of thumb (see the house rules in `CONTRIBUTING.md`):
 
 - Capability code goes in a package under `packages/`.
 - Entry points / UX go under `apps/`.

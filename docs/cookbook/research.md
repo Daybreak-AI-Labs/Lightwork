@@ -35,8 +35,8 @@ doesn't index, like blog posts / benchmarks), `recall_past_goals`
 
 ## Tips
 
-- This is a great use case for `claude-session` or
-  `chatgpt-session` providers if you're trying to keep API spend
-  down — research is mostly text reasoning, no tool-heavy work.
+- Research is mostly text reasoning with little tool use, so a smaller
+  model, or a self-hosted one through Ollama, keeps spend down (see
+  [Configuration](../configuration.md)).
 - After the brief, refine: *"Now write three concrete experiment
   designs based on the follow-up questions."*

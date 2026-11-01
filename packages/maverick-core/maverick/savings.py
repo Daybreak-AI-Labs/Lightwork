@@ -1,11 +1,12 @@
 """Assumption-based savings estimates from completed task counts.
 
-The number a buyer asks for first: "what did this save me?" The platform
-records completed episodes (with recorded runtime pricing)
-in the world model, attributed to departments -- but the human side of the
-comparison is the CLIENT's number, not ours. This module joins the two:
+The question this answers is "what did this save?" The platform records
+completed episodes (with recorded runtime pricing) in the world model,
+attributed to departments -- but the human side of the comparison comes from
+the operator's own assumptions, not from the platform. This module joins the
+two:
 
-  * The client's own assumptions (``[value]`` in config, editable from the
+  * The operator's own assumptions (``[value]`` in config, editable from the
     dashboard Savings page or the installer wizard): fully-loaded human
     hourly rate, human hours one comparable deliverable takes, with optional
     per-department overrides (legal != support).
@@ -75,7 +76,7 @@ class SavingsReport:
 
 
 def assumptions_for(dept: str, cfg: dict | None = None) -> tuple[float, float]:
-    """The (hourly_rate, hours_per_task) that price ``dept``: the client's
+    """The (hourly_rate, hours_per_task) that price ``dept``: the operator's
     per-department override when one exists, else their global assumption."""
     v = cfg if cfg is not None else get_value()
     ov = (v.get("departments") or {}).get(dept)
@@ -90,7 +91,7 @@ def compute(world: Any, *, window_days: int = 90,
     """Assemble the savings report from real completed work (read-only).
 
     ``cfg`` is a pre-loaded ``get_value()`` dict (tests inject one); omitted,
-    the client's live config is read. An unreadable world produces an explicit
+    the operator's live config is read. An unreadable world produces an explicit
     unavailable report, without claiming zero activity or savings.
     """
     v = cfg if cfg is not None else get_value()

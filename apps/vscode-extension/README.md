@@ -6,7 +6,7 @@ connection. A local task ID is not assumed to identify the same remote task.
 
 ## Setup
 
-1. Install Lightwork from a reviewed checkout with `pip install -e ./packages/maverick-core`, then `maverick init`. Do not install an unreserved public distribution name.
+1. Install Lightwork from source as described in [Install from source](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md) (no PyPI package is published), then run `lightwork dashboard` to finish setup, or `lightwork init` for the terminal wizard.
 2. In `apps/vscode-extension`, run `npm install` and `npm run compile` using the manifest's declared TypeScript and VS Code API versions. Launch an extension development host (F5), or use your reviewed `vsce` packaging tool.
 3. Choose **Lightwork: Select local workspace** for a multi-root window. Every start reviews its exact folder and requested cost/time caps. Executable configuration remains machine-scoped; local execution requires workspace trust.
 4. Use **Configure or rotate dashboard connection**, then **Test dashboard connection**. Credentials live in VS Code SecretStorage, bound to the exact dashboard base address. Remote bearer transport requires HTTPS; destination consent cannot override it.
@@ -76,12 +76,9 @@ require terminal acknowledgement. Streaming is implemented; plan-tree and inline
 approval interfaces remain future work.
 
 Python/TypeScript syntax and static review do not qualify VS Code extension-host
-behavior. Regression tests are authored but intentionally unrun in this audit;
-no package, provider request or release was performed. See the [client lifecycle
-contract](../../docs/client-request-lifecycle.md).
+behavior; the regression tests need a VS Code extension host to run. See the
+[client lifecycle contract](../../docs/client-request-lifecycle.md).
 
 ## License
 
-The current extension follows the root [Lightwork Proprietary License](../../LICENSE).
-Its explicit clause preserves MIT grants for specific previously published MIT
-versions only. The current manifest references that governing license.
+Licensed under the Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE).

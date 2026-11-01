@@ -1,4 +1,4 @@
-# Operations / Supply Chain — council-added — Industrial / Production Engineering.
+# Operations / Supply Chain — Industrial / Production Engineering.
 name = "ops_industrial_eng"
 compartment = "ops_manufacturing"
 description = "Industrial engineering — time studies, line/takt design, capacity, ergonomics."

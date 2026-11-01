@@ -1,4 +1,4 @@
-"""Cost-aware routing v3 — contextual bandit (roadmap: 2028 H1 performance).
+"""Cost-aware routing v3 — contextual bandit.
 
 v2 (``cost_router``) picks the cheapest *viable* provider by a static tier +
 health table. v3 *learns*: which provider actually delivers the best

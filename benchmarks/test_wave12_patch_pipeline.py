@@ -1,4 +1,4 @@
-"""Wave 12 fixes: render_diff includes new files, predicted_patch sanitizer."""
+"""render_diff includes new files; predicted_patch sanitizer."""
 from __future__ import annotations
 
 import importlib.util
@@ -90,7 +90,7 @@ class TestSanitizePatchForCSV:
     def test_no_truncation(self):
         sb = _load_sb()
         # ~76KB patch — must NOT be truncated. SWE-bench Pro has no cap;
-        # Wave 12 removed the legacy [:50_000] slice.
+        # the legacy [:50_000] slice is gone.
         big = "diff --git a/x b/x\n" + "+long line content\n" * 4000
         assert len(big) > 50_000  # sanity: bigger than the old cap
         out = sb._sanitize_patch_for_csv(big)

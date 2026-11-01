@@ -237,7 +237,7 @@ def test_unchanged_instructions_new_agents_and_the_switched_off_gate_are_not_blo
         "expected_generation": view["generation"], "persona": view["persona"], "description": "Chases late POs"})
     assert same.status_code == 200 and not same.json()["blocked"], same.text
     # ...but publishing any change to a live specialist's complete definition
-    # needs current acceptance or a separately recorded reason (UX-368/369/370).
+    # needs current acceptance or a separately recorded reason.
     entered = {"persona": view["persona"], "description": "Chases late POs"}
     assert _publish(app, PACK, entered).status_code == 409
     described = _publish(app, PACK, entered, reason="Description wording approved by procurement")

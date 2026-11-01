@@ -1,4 +1,4 @@
-"""Process introspection tool (roadmap: 2028 H1 — "process introspection").
+"""Process introspection tool.
 
 PURE / OFFLINE: it analyzes a *caller-supplied* process snapshot. It never
 reads the live OS — no ``psutil``, no ``/proc``. The caller passes a list of

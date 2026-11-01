@@ -1,8 +1,8 @@
 # Evidence verification and run-event reliability
 
 The vendor workflow relies on distinguishing an observed outcome from a failed
-check. These changes repair existing boundaries and retain their domain stores.
-No database migration is required for these repairs.
+check. The rules below keep those outcomes distinct within the existing domain
+stores; no database migration is involved.
 
 ## Scanner policy
 
@@ -80,5 +80,4 @@ their corresponding package test directories. They inject real detector/read
 failures, use tenant-separated temporary knowledge stores and durable world
 events, and cover missing/corrupt evidence, >500-event WebSocket replay,
 reconnect after a terminal control frame, SSE reconnect and terminal paging.
-Broader package and compatibility tests are recorded in the final implementation
-report. These tests do not establish live remote-vector, SDK or proxy acceptance.
+These tests do not establish live remote-vector, SDK or proxy acceptance.

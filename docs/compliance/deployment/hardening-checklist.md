@@ -1,20 +1,15 @@
 # Compliant Deployment — Hardening Checklist
 
-| Field | Value |
-| --- | --- |
-| Document ID | DEP-CHK-01 |
-| Owner | Christopher Day |
-| Approver | Christopher Day |
-| Version | 1.0 |
-| Status | Approved — effective 2026-06-24 (Christopher Day) |
-| Review cycle | Per release + annual |
-| Frameworks | SOC 2 CC5/CC6/CC7; ISO 27001 A.8.*; ISO 42001 A.6/A.9 |
+Frameworks: SOC 2 CC5/CC6/CC7; ISO 27001 A.8.*; ISO 42001 A.6/A.9.
 
-This operationalizes the "enable the opt-in controls" step of the
-[compliance program](../README.md). Lightwork ships several strong controls
+This checklist covers the "enable the opt-in controls" step described in the
+[compliance documentation](../README.md). Lightwork ships several controls
 **off-by-default** so single-tenant local use is unchanged; a SOC 2 / ISO 27001
-deployment must turn them **on and show them on**. Apply
-[`compliant-config.toml`](compliant-config.toml), then verify.
+deployment must turn them **on and show them on**. Encryption at rest and audit
+signing are on by default; the configuration sets them explicitly so the
+posture does not depend on defaults. Apply
+[`compliant-config.toml`](compliant-config.toml), then verify. Review the
+checklist on every Lightwork upgrade.
 
 ## 1. Controls to enable
 
@@ -41,7 +36,7 @@ deployment must turn them **on and show them on**. Apply
 - [ ] A provider API key is present (so `/healthz` is not degraded), or self-hosted inference configured.
 - [ ] Postgres backend + `maverick tenant rls-preflight` + `backfill` run if using DB-enforced isolation (`[world_model] rls = true`).
 - [ ] Cloud provider attestations (SOC 2 / ISO) collected for inherited physical controls (A.7).
-- [ ] Sub-processor register reviewed and current ([REG-01](../registers/subprocessor-register.md)).
+- [ ] Your sub-processor register reviewed and current (LLM providers, hosting, KMS).
 
 ## 3. Verify posture
 
@@ -62,7 +57,7 @@ signing key is present. Wire it into your deploy pipeline.
 
 - [ ] Capture a `maverick soc2 --json` snapshot as dated evidence (repeat on a schedule through the SOC 2 Type II observation window).
 - [ ] Confirm `audit_log = ok` on a periodic job (chain + anchors verify).
-- [ ] Record the deployment in the change log per [PROC-03](../procedures/change-management-procedure.md).
+- [ ] Record the deployment in your change log, under your change-management process.
 
 ## 5. Evidence to retain
 

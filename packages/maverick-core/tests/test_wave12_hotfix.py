@@ -1,4 +1,4 @@
-"""Wave 12 hotfix tests: corrected Opus pricing, adaptive-thinking
+"""Corrected Opus pricing, adaptive-thinking
 gating per model family, low-cache-prompt observability, and the
 harness side of the MAVERICK_GOLD_PATCH plumbing.
 """
@@ -12,8 +12,8 @@ from maverick.llm import MODEL_OPUS
 
 class TestOpusPricingHotfix:
     """Opus 4.7 is $5/$25 per Mtok — NOT $15/$75 (those were legacy
-    Opus 4.0/4.1 rates). Wave 12 commit bfae341 incorrectly raised
-    Lightwork to $15/$75; this hotfix reverts to the correct value.
+    Opus 4.0/4.1 rates). An earlier commit incorrectly raised
+    Lightwork to $15/$75; this restores the correct value.
     Cross-check: vals.ai measures Opus 4.7 at $2.42/test on SWE-bench
     Verified, which reconciles ONLY with $5/$25 pricing.
     """
@@ -92,7 +92,7 @@ class TestLowCacheWarning:
     defaults Sonnet 4.6 and Opus 4.8), so a small enough system+tools block
     won't actually cache. Operators need to see this in logs.
 
-    W1-4: the table used to put Sonnet 4.6/4.5 and Opus 4.7/4.8 at the 4096
+    The table used to put Sonnet 4.6/4.5 and Opus 4.7/4.8 at the 4096
     minimum too (verified wrong against
     https://platform.claude.com/docs/en/build-with-claude/prompt-caching:
     Opus 4.7 is 2048, the rest are 1024)."""
@@ -159,7 +159,7 @@ class TestLowCacheWarning:
 
 
 class TestHarnessSetsGoldPatch:
-    """Wave 12 hotfix: complete the env plumbing the agent side already
+    """Complete the env plumbing the agent side already
     expects. Without this, defensive_validate's cheating detector never
     has a gold to compare against and silently never fires."""
 

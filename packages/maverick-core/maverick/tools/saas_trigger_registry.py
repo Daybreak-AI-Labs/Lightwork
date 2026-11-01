@@ -1,4 +1,4 @@
-"""Generic SaaS-trigger registry helper (roadmap: 2028 H1).
+"""Generic SaaS-trigger registry helper.
 
 Complements the existing ``saas_trigger`` tool (which verifies a single webhook
 and routes one event). This one manages the *registry* of triggers: it validates

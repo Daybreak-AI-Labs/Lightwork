@@ -456,7 +456,7 @@ def test_fleet_recall_unregistered_agent_denied_when_engaged(monkeypatch):
 
 def test_fleet_recall_unscoped_denied_when_engaged(monkeypatch):
     # domain=None must NOT read across all departments (the permits_scope(None)
-    # bypass the council flagged).
+    # bypass).
     reg = _reg(TrustedAgent(id="bot", data_scopes=frozenset({"support"})))
     fleet_memory = _fleet(monkeypatch, registry=reg)
     ctx, reason = fleet_memory.recall("q", agent_id="bot", vendor="acme",
