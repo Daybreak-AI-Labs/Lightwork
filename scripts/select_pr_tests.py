@@ -33,15 +33,21 @@ this; they run every job.
 Usage::
 
     python scripts/select_pr_tests.py --git BASE HEAD --github-output "$GITHUB_OUTPUT"
+    python scripts/select_pr_tests.py --full "push: everything runs" --github-output "$GITHUB_OUTPUT"
     python scripts/select_pr_tests.py --files-from changed.txt --output selection.json
     git diff --name-only BASE HEAD | python scripts/select_pr_tests.py --stdin
 
 ``--git`` diffs HEAD against its merge base with BASE (what the pull request
 itself changes, even after the base branch moved) and selects the full suite
-when git cannot answer, so a selection failure never skips tests. The output
-JSON is ``{"mode": "full" | "paths" | "none", "paths": [...], "reasons":
-[...]}``; ``paths`` are repository-relative pytest targets. ``--github-output``
-appends ``mode=`` and ``paths=`` (the JSON array) lines for a workflow step.
+when git cannot answer, so a selection failure never skips tests. ``--full``
+is what the other events (pushes, the merge queue, workflow_dispatch) run: the
+whole suite and every gated job. The output JSON is ``{"mode": "full" |
+"paths" | "none", "paths": [...], "reasons": [...], "jobs": {...}}``;
+``paths`` are repository-relative pytest targets. ``--github-output`` appends
+``mode=``, ``paths=`` (the JSON array) and ``jobs=`` (the JSON map, one entry
+per gated job) lines for a workflow step. ci.yml skips a gated job only on the
+literal ``"<job>": false`` in that map, so the map is always complete and a
+missing map or entry runs the job.
 """
 from __future__ import annotations
 
@@ -247,6 +253,10 @@ def select(changed: list[str], root: Path = REPO_ROOT) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--full", metavar="REASON",
+        help="select the whole suite and every gated job (pushes, the merge queue, workflow_dispatch)",
+    )
     source.add_argument("--files-from", metavar="FILE", help="newline-separated changed paths")
     source.add_argument("--stdin", action="store_true", help="read changed paths from stdin")
     source.add_argument("--files", nargs="+", metavar="PATH", help="changed paths")
@@ -265,7 +275,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     result: dict | None = None
-    if args.files_from:
+    if args.full:
+        result = {"mode": "full", "paths": [], "reasons": [args.full],
+                  "jobs": dict.fromkeys(JOB_PREFIXES, True)}
+    elif args.files_from:
         changed = Path(args.files_from).read_text(encoding="utf-8").splitlines()
     elif args.stdin:
         changed = sys.stdin.read().splitlines()

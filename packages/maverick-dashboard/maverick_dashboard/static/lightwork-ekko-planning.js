@@ -11,7 +11,7 @@
   const device = () => window.LightworkEkkoDevice();
   const stamp = () => ({generation, device: device()});
   const current = value => value.generation === generation && value.device === device() && root.isConnected && location.pathname === '/ekko';
-  const say = (id, value) => { $(id).textContent = value; };
+  const say = (id, value) => { const line = $(id); if (typeof window.mvStatus === 'function') window.mvStatus(line, value); else line.textContent = value; };
   const text = (tag, style, value) => window.mvEl(tag, style, String(value));
   const getPlan = id => plans.find(plan => plan.opportunity_id === id);
   const stageName = stage => ({shortlisted: 'Shortlisted', pilot: 'In pilot', parked: 'Parked for later'}[stage] || 'Saved');
@@ -114,15 +114,15 @@
     $('ekko-pilot').hidden = false;
     $('ekko-pilot-form').reset();
     say('ekko-pilot-message', '');
-    say('ekko-pilot-title', plan.review.goal + ' · ' + stageName(plan.stage));
+    $('ekko-pilot-title').textContent = plan.review.goal + ' · ' + stageName(plan.stage);
     const details = $('ekko-plan-details'); details.textContent = '';
     [['Inputs', plan.review.inputs], ['Expected result', plan.review.output], ['Human review', plan.review.approval]].forEach(([label, value]) => {
       details.appendChild(text('p', 'ekko-note', label + ': ' + value));
     });
     const p = plan.pilot;
-    say('ekko-pilot-summary', p.runs ? 'Owner-reported pilot: ' + p.accepted + '/' + p.runs + ' results accepted. Net time saved: ' +
+    $('ekko-pilot-summary').textContent = p.runs ? 'Owner-reported pilot: ' + p.accepted + '/' + p.runs + ' results accepted. Net time saved: ' +
       p.total_minutes_saved + ' minutes; median ' + p.median_minutes_saved + ' minutes per run. This is not verified platform evidence.'
-      : 'No pilot runs yet. Record real observations after testing the draft.');
+      : 'No pilot runs yet. Record real observations after testing the draft.';
     details.appendChild(text('p', 'ekko-note', 'Saved plan expires ' + new Date(plan.expires_at * 1000).toLocaleString() + '.'));
     $('ekko-pilot-before').value = plan.assumptions.manual_minutes || '';
     lock(busy);
@@ -130,7 +130,8 @@
 
   function clearPilot() {
     selected = pendingSample = null; $('ekko-pilot').hidden = true; $('ekko-pilot-form').reset();
-    ['ekko-plan-details', 'ekko-pilot-title', 'ekko-pilot-summary', 'ekko-pilot-message'].forEach(id => say(id, ''));
+    ['ekko-plan-details', 'ekko-pilot-title', 'ekko-pilot-summary'].forEach(id => { $(id).textContent = ''; });
+    say('ekko-pilot-message', '');
   }
 
   async function load() {
@@ -204,21 +205,28 @@
     finally { if (current(scope)) lock(false); }
   }
 
-  async function removePlan() {
+  function removePlan() {
     if (busy || !selected) return;
     const scope = stamp(), plan = selected;
-    if (!(await window.mvConfirm('Remove this saved task plan, assumptions and pilot results? Recorded activity and any saved workflows are kept.', {okText: 'Remove plan'})) || !current(scope)) return;
-    lock(true);
-    try {
-      const result = await request('/plans/' + plan.opportunity_id, {method: 'DELETE', body: {device_id: scope.device, context: workspaceContext, expected_revision: plan.revision}});
-      if (!current(scope)) return;
-      if (!result || typeof result.removed !== 'boolean') throw new Error('Removal could not be confirmed. Refresh saved plans before trying again.');
-      plans = plans.filter(item => item.opportunity_id !== plan.opportunity_id); selected = null; pendingSample = null;
-      if (editing && editing.opportunity_id === plan.opportunity_id) editing = null;
-      if (discovery.candidate() && discovery.candidate().opportunity_id === plan.opportunity_id) discovery.close();
-      clearPilot(); render(); $('ekko-planning-heading').focus();
-    } catch (error) { if (current(scope)) say('ekko-pilot-message', error.message); }
-    finally { if (current(scope)) lock(false); }
+    // The plan leaves the page at once and the shared toast offers Undo; the
+    // removal itself is sent when the Undo time is up or the person leaves.
+    plans = plans.filter(item => item.opportunity_id !== plan.opportunity_id); selected = null; pendingSample = null;
+    if (editing && editing.opportunity_id === plan.opportunity_id) editing = null;
+    if (discovery.candidate() && discovery.candidate().opportunity_id === plan.opportunity_id) discovery.close();
+    clearPilot(); render(); $('ekko-planning-heading').focus();
+    window.mvUndo('Saved task plan removed, with its assumptions and pilot results. Recorded activity and any saved workflows are kept.', {
+      action: 'remove the plan',
+      run: async keepalive => {
+        const result = await request('/plans/' + plan.opportunity_id, {method: 'DELETE', keepalive, body: {device_id: scope.device, context: workspaceContext, expected_revision: plan.revision}});
+        if (!result || typeof result.removed !== 'boolean') throw new Error('Removal could not be confirmed. Refresh saved plans before trying again.');
+        return {ok: true};
+      },
+      undo: () => {
+        if (!current(scope) || getPlan(plan.opportunity_id)) return;
+        plans = plans.concat(plan); render();
+        if (!selected) { showPilot(plan); $('ekko-pilot-heading').focus(); }
+      }
+    });
   }
 
   $('ekko-plan-save').addEventListener('click', savePlan);

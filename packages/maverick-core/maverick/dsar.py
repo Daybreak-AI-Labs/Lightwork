@@ -37,6 +37,16 @@ from urllib.parse import quote
 log = logging.getLogger(__name__)
 
 
+class SubjectAmbiguousError(RuntimeError):
+    """The subject id is on more than one channel and the request names none.
+
+    Raised only under ``strict=True``; nothing is read for the subject then. A
+    ``RuntimeError`` so a caller that treats every strict failure as "could not
+    be verified" keeps doing so, and a subclass so a caller that can say why
+    (the DSAR estate worksheet) tells it from unreadable storage.
+    """
+
+
 def _fact_subject_token(channel: str, user_id: str) -> str:
     """Stable, delimiter-safe token for explicitly user-scoped facts.
 
@@ -395,7 +405,7 @@ def _resolve_subject_channel(
         return next(iter(channels))
     if len(channels) > 1:
         if strict:
-            raise RuntimeError("subject identity is ambiguous across channels")
+            raise SubjectAmbiguousError("subject identity is ambiguous across channels")
         log.warning(
             "dsar: refusing ambiguous export for user_id %r across channels %s",
             user_id,
