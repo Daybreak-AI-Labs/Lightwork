@@ -1,4 +1,4 @@
-"""Cache-aware prompt assembly DSL (roadmap: 2028 H1 performance).
+"""Cache-aware prompt assembly DSL.
 
 Prompt caching (Anthropic ephemeral cache_control, OpenAI automatic prefix
 caching) only pays off when the **stable** parts of a prompt sit *before* the

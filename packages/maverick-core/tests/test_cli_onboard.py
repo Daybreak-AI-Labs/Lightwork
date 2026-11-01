@@ -85,7 +85,7 @@ def test_onboard_respects_disabled_knowledge_without_importing(tmp_path, monkeyp
 
     assert result.exit_code == 0, result.output
     # The warning must be actionable: name that the attached doc was NOT
-    # loaded and how to enable knowledge (client-journey finding).
+    # loaded and how to enable knowledge.
     assert "knowledge is disabled" in result.output
     assert "were NOT loaded" in result.output
     assert "[knowledge] enable = true" in result.output

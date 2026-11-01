@@ -1,4 +1,4 @@
-"""Streaming reasoning-trace channel formatter (roadmap: 2028 H1 UX).
+"""Streaming reasoning-trace channel formatter.
 
 Render a stream of reasoning-trace events (each a phase, a chunk of text, and a
 timestamp) into a single ordered, redaction-aware view, or summarise the stream

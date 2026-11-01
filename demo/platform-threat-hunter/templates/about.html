@@ -7,7 +7,7 @@
 <section class="hero">
   <h1>{{ caps.mode }}</h1>
   <p><strong>Analysis backend:</strong> <code>{{ caps.analysis_backend }}</code>. {% if caps.forced_standalone %}<code>PLATFORM_HUNTER_STANDALONE=1</code> forced the vendored detector and prevented all <code>maverick</code> imports.{% elif caps.core_analysis %}Auto mode found and reuses only the Lightwork core detector library.{% else %}Auto mode did not find that library, so the vendored detector is active.{% endif %}</p>
-  <p><strong>Governance authority:</strong> unsigned local only. This web SKU does not claim submitted input was signed, its store is tamper-evident, or a response is governed. Finding a core detector does not enable integrated governance. Use <code>/security/threats</code> for the signed-input and governed-response trust boundary.</p>
+  <p><strong>Governance authority:</strong> unsigned local only. This standalone web app does not claim submitted input was signed, its store is tamper-evident, or a response is governed. Finding a core detector does not enable integrated governance. Use <code>/security/threats</code> for the signed-input and governed-response trust boundary.</p>
 </section>
 <section class="card" aria-labelledby="capability-matrix-heading">
   <h2 id="capability-matrix-heading">Capability and authority matrix</h2>

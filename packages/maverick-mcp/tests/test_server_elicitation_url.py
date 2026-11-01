@@ -1,4 +1,4 @@
-"""URL-mode elicitation (ROADMAP B1, Phase 3 — secrets never transit the model).
+"""URL-mode elicitation.
 
 A sensitive flow (OAuth / API key / payment) points the user at an https URL to
 hand the credential straight to the service; only the action (accept/decline/

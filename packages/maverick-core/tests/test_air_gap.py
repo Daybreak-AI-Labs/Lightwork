@@ -186,7 +186,7 @@ def test_off_sentry_dsn_stays_clean(value):
 
 
 def test_deny_all_egress_without_enterprise_mode_is_flagged():
-    # W2-90: the runtime egress guard (egress_guard.py, wrapping httpx/requests
+    # The runtime egress guard (egress_guard.py, wrapping httpx/requests
     # across ~80 connectors and every provider SDK) only enforces default-deny
     # when enterprise mode is on -- enterprise.egress_permitted() returns True
     # unconditionally otherwise, whatever [egress] says. A config with

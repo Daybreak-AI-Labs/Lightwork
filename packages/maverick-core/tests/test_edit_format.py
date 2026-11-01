@@ -1,4 +1,4 @@
-"""Tests for the SEARCH/REPLACE edit format module (Wave 11)."""
+"""Tests for the SEARCH/REPLACE edit format module."""
 from __future__ import annotations
 
 import os

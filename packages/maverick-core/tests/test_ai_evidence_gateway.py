@@ -257,7 +257,7 @@ def test_conversation_order_idempotency_and_changed_risk_inputs_fail(monkeypatch
 
 
 def test_failed_signing_does_not_permanently_poison_conversation(monkeypatch):
-    # W4-29: _conversation_reservation reserves the conversation and only
+    # _conversation_reservation reserves the conversation and only
     # _complete_conversation ever clears it. If rendering or signing raised
     # after the reservation (signer refusal, segment/capacity error, disk
     # full), nothing released it -- every later delivery for this
@@ -1998,7 +1998,7 @@ def test_segment_byte_bound_rolls_before_oversized_append(monkeypatch):
 def test_append_verifies_a_bounded_number_of_rows_regardless_of_segment_size(
     monkeypatch,
 ):
-    # W4-28: append() used to re-verify every row in the active segment (via
+    # Append() used to re-verify every row in the active segment (via
     # _verify_file -> _iter_verified_rows) on EVERY call, so one delivery's
     # cost grew with the whole segment instead of staying bounded -- measured
     # 64ms -> 237ms across a 4,096-row segment, under a lock that serializes

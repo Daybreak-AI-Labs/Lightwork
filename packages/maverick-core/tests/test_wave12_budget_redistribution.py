@@ -1,4 +1,4 @@
-"""Wave 12 (council F10c): best-of-N budget redistribution.
+"""Best-of-N budget redistribution.
 
 When an early attempt crashes (or finishes cheaply), the remaining
 attempts get bigger per-attempt caps instead of leaving budget unused.

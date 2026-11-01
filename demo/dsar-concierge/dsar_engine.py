@@ -183,7 +183,7 @@ def list_requests() -> list[dict]:
 
 def aging() -> dict:
     """SLA aging bands over the open clocks — the same band vocabulary the
-    Lightwork privacy workspace uses, so the numbers line up on upsell."""
+    Lightwork privacy workspace uses, so the numbers line up on the platform."""
     bands = {"overdue": 0, "d0_7": 0, "d8_14": 0, "d15_30": 0, "d30_plus": 0}
     open_rows = [r for r in list_requests() if r["status"] in OPEN_STATUSES]
     for r in open_rows:

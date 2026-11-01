@@ -1,4 +1,4 @@
-"""Smart natural-language filters (roadmap: 2028 H2 UX).
+"""Smart natural-language filters.
 
 Translate a small natural-language filter query into a structured predicate and
 apply it to rows. Pure parsing — no LLM. A query is one or more comparison

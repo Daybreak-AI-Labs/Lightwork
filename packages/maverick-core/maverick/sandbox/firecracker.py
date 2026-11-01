@@ -120,7 +120,7 @@ class FirecrackerBackend:
             )
 
     def exec(self, cmd: str, timeout: float | None = None) -> ExecResult:
-        # Wave 11: per-call timeout propagated to underlying providers
+        # Per-call timeout propagated to underlying providers
         # via a temporary self.timeout swap. Both _exec_e2b and
         # _exec_local read self.timeout; restore on exit.
         prior = self.timeout

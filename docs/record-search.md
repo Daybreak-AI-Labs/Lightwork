@@ -42,10 +42,10 @@ links are rendered as text with an allowlist of in-app review destinations.
 
 Automated checks use isolated local stores and synthetic records. Node DOM
 tests cover keyboard behavior, asynchronous interruption, stale paging, and
-workspace binding; they do not substitute for browser rendering or customer
-acceptance.
+workspace binding; they do not substitute for browser rendering or acceptance
+testing.
 
-## Historical metadata (audit LW-114)
+## Historical metadata
 
 Choose **Historical metadata** in the finder, then a source and optional UTC
 calendar dates. Blank queries browse the chosen source; named queries match

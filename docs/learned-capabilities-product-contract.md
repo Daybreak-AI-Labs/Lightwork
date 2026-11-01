@@ -1,10 +1,10 @@
 # Learned capabilities: customer experience acceptance
 
 This is the acceptance contract for the governed learning features described in
-[Learned action recipes](./learned-action-recipes.md). It records the September
-27, 2026 product requirement: an ordinary business user must be able to set up,
-teach, use, review and manage a capability through the application. An engine,
-CLI or authenticated API alone is not a completed customer feature.
+[Learned action recipes](./learned-action-recipes.md). It records the product
+requirement: an ordinary business user must be able to set up, teach, use,
+review and manage a capability through the application. An engine, CLI or
+authenticated API alone is not a completed customer feature.
 
 The [platform customer experience contract](./customer-experience-contract.md)
 also requires a consistent Liquid Glass interface, plain language, complete

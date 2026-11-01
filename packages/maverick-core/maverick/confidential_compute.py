@@ -1,4 +1,4 @@
-"""Confidential-compute detection (roadmap: 2028 H2 safety — SEV-SNP/TDX).
+"""Confidential-compute detection.
 
 Full confidential-compute *support* (remote attestation, memory-encryption
 integration) needs the hardware and a deep platform integration. This is the

@@ -251,12 +251,13 @@ def record_run(
 
 def governance_enabled() -> bool:
     """Fleet governance — running an agent *under the oversight control plane*
-    (its own audit principal + RBAC capability) — is a paid (Gold) capability.
+    (its own audit principal + RBAC capability) — is a tier-gated (Gold)
+    capability.
 
     Fail-open: only bites when a deployment has turned license enforcement on and
     the license doesn't grant it. Base is ``True`` (fleets are a core capability
     that already works; the license gates the governed *run*, not the registry),
-    so this is a no-op on every dev/community/self-host box. Registry reads
+    so this is a no-op on a default install. Registry reads
     (list/show/status) and CRUD are intentionally NOT gated — only the run is."""
     try:
         from .entitlements import require

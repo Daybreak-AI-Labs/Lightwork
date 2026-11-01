@@ -1,4 +1,4 @@
-"""GUI element memory (roadmap: 2027 H1 capabilities — "GUI element memory").
+"""GUI element memory.
 
 Computer-use and browser automation waste turns re-finding the same controls.
 This is the bookkeeping half: a deterministic store of element locators keyed

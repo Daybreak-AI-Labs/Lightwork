@@ -2,12 +2,26 @@
 
 Production-oriented chart for the Lightwork dashboard (web UI + API + webhooks).
 
+No container image is published yet. Build one from a clone of the repository
+and make it available to your cluster:
+
+```bash
+docker build -f deploy/docker/Dockerfile -t <registry>/lightwork:<tag> .
+docker push <registry>/lightwork:<tag>
+# For a local cluster, load the image instead of pushing it:
+#   kind load docker-image <registry>/lightwork:<tag>
+#   minikube image load <registry>/lightwork:<tag>
+```
+
+Then install the chart with that image:
+
 ```bash
 # Hosted-provider pilot (SQLite, single replica, standard profile).
 # Use enterprise profile with an explicitly allowed/self-hosted provider instead
 # when the enterprise data boundary is required.
 helm install maverick ./deploy/helm/maverick \
-  --set image.tag=0.1.7 \
+  --set image.repository=<registry>/lightwork \
+  --set image.tag=<tag> \
   --set enterprise.profile=standard \
   --set-string secret.data.ANTHROPIC_API_KEY=sk-ant-... \
   --set-string secret.data.MAVERICK_DASHBOARD_TOKEN=$(openssl rand -hex 32)
@@ -25,6 +39,8 @@ tenant isolation:
 
 ```bash
 helm install maverick ./deploy/helm/maverick \
+  --set image.repository=<registry>/lightwork \
+  --set image.tag=<tag> \
   --set enterprise.profile=standard \
   --set worldModel.backend=postgres \
   --set worldModel.postgres.rls=true \

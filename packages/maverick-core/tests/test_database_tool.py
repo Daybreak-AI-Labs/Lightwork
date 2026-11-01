@@ -326,7 +326,7 @@ def test_database_url_host_scope_applies_to_env_url(monkeypatch):
 
 
 def test_model_supplied_url_denied_without_allow_hosts_or_knob(monkeypatch):
-    # W1-111: with no allow_hosts grant and the opt-in knob off (default), a
+    # With no allow_hosts grant and the opt-in knob off (default), a
     # model-supplied url must be refused outright -- not merely capability
     # scoped -- so an agent cannot pick an arbitrary reachable DB server.
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -344,7 +344,7 @@ def test_model_supplied_url_denied_without_allow_hosts_or_knob(monkeypatch):
 
 
 def test_model_supplied_sqlite_url_denied_even_with_allow_hosts(monkeypatch):
-    # W1-111: sqlite: has no host for allow_hosts to scope, so it is refused
+    # Sqlite: has no host for allow_hosts to scope, so it is refused
     # unconditionally -- granting allow_hosts must not open this back up,
     # since it would let an agent read/write this deployment's own world.db.
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -383,7 +383,7 @@ def test_model_supplied_url_allowed_when_opt_in_knob_set(monkeypatch):
 
 
 def test_model_supplied_sqlite_reproduction_now_denied(monkeypatch, tmp_path):
-    # Direct reproduction of the original W1-111 vulnerability: a
+    # Direct reproduction of the original vulnerability: a
     # model-supplied sqlite: url pointing at a file containing secret data,
     # with no allow_hosts grant and the opt-in knob off (default). Before the
     # fix this read the row straight back to the model; now it must deny.

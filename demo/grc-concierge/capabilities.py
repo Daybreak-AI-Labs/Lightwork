@@ -1,4 +1,4 @@
-"""Runtime capability matrix for the sellable GRC Concierge SKU."""
+"""Runtime capability matrix for the standalone GRC Concierge build."""
 from __future__ import annotations
 
 import importlib.util

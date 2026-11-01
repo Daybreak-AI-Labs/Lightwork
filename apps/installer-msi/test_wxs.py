@@ -97,7 +97,7 @@ def test_engineering_only_scope_and_actual_install_path_are_explicit():
     assert r"%LOCALAPPDATA%\Programs\Lightwork" not in readme
     assert "not a complete Lightwork platform installer" in readme
     assert "live PyPI" in readme
-    assert "not a customer release artifact" in readme
+    assert "not a release artifact" in readme
 
     workflow = _WORKFLOW.read_text(encoding="utf-8")
     assert "build-msi-engineering-bootstrap" in workflow

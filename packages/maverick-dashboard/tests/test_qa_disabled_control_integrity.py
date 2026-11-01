@@ -1,4 +1,4 @@
-"""QA-050 rendered control-integrity contracts across disabled workbenches."""
+"""Rendered control-integrity contracts across disabled workbenches."""
 from __future__ import annotations
 
 from html.parser import HTMLParser

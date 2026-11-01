@@ -1,5 +1,5 @@
 """Right-to-rectification (GDPR Art. 16) over the world model
-(roadmap: 2027 H2 safety).
+.
 
 The GDPR surface so far covers access/portability (Art. 15/20,
 ``maverick.dsar``) and erasure (Art. 17, ``maverick erase`` +

@@ -143,8 +143,8 @@ def test_templates_automate_cta_hidden_when_automation_off(monkeypatch, tmp_path
     assert "/workflow-builder?template=" not in _client().get("/templates").text
 
 
-def test_p0_council_fixes_automations(monkeypatch, tmp_path):
-    # Design-council P0 fixes visible on this page + via base.html.
+def test_p0_design_fixes_automations(monkeypatch, tmp_path):
+    # P0 design fixes visible on this page + via base.html.
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/automations").text
     assert "#d92d20" not in t                          # failed runs use --danger, not raw hex

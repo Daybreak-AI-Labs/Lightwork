@@ -29,7 +29,6 @@ DOCS_STATING_THE_COUNT = (
     "docs/FEATURES.md",
     "docs/handbook.md",
     "docs/index.md",
-    "docs/press-kit.md",
     "docs/enterprise/diligence.md",
 )
 

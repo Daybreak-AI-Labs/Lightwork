@@ -1,4 +1,4 @@
-"""Apple Shortcuts integration (roadmap: 2028 H1).
+"""Apple Shortcuts integration.
 
 Build the ``shortcuts://`` URLs that launch an Apple Shortcut from Lightwork on
 macOS/iOS — both the plain ``run-shortcut`` form and the ``x-callback-url`` form

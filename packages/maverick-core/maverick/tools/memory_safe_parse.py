@@ -1,4 +1,4 @@
-"""Memory-safe parsers (roadmap: 2027 H2 safety — "memory-safe parsers").
+"""Memory-safe parsers.
 
 Parse untrusted text (JSON or CSV) under hard resource bounds so a hostile
 input can't exhaust memory or blow the stack: cap raw byte size, nesting depth,

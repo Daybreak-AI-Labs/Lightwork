@@ -53,7 +53,7 @@ runs:
         # All local distributions are direct requirements in one resolver
         # transaction, so no sibling can fall back to a public lookalike and
         # every declared base dependency is present.
-        # OIDC (P4) verifier ships as the optional [oidc] extra (PyJWT);
+        # The OIDC verifier ships as the optional [oidc] extra (PyJWT);
         # install it here so the adversarial security matrix in test_oidc.py
         # actually RUNS in CI instead of self-skipping when PyJWT is absent.
         # The OpenAI extra is installed in this existing required matrix so

@@ -2,8 +2,8 @@
 #
 # One container = one agent tenant. Persistent state (the request store)
 # lives under /data — mount a volume there. TLS/auth guidance, per-cloud run
-# commands, and the environment reference are in DEPLOYMENT.md (this SKU
-# follows the PIA Concierge deployment kit).
+# commands, and the environment reference are in DEPLOYMENT.md (standalone
+# mode follows the PIA Concierge deployment kit).
 #
 #   docker build -f Dockerfile.standalone -t dsar-concierge:latest .
 #   docker run -d -p 8891:8891 -v dsar-data:/data \

@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Release/client-readiness reviews can exercise the full interpreter and
+  # Release-readiness reviews can exercise the full interpreter and
   # security-posture matrix on a branch without merging it into main.
   workflow_dispatch: {}
   # The merge queue builds a temporary branch per entry and gates the merge on
@@ -73,10 +73,8 @@ jobs:
 
   lint:
     runs-on: ubuntu-24.04
-    # The secret scan alone is ~18 CPU-minutes (two recorded-evidence files
-    # under docs/ux-audit-2026-09-30 carry a ~970 KB single line each and take
-    # ~4.3 minutes apiece on one core), which two hosted cores did not finish
-    # in the former 15.
+    # The secret scan is the slow step; 30 minutes gives two hosted cores room
+    # for it plus the custom gates.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -114,10 +112,10 @@ jobs:
           if grep -rn --include='*.py' -E '^import[[:space:]]+tomllib([[:space:]]|$)' apps packages benchmarks; then
             echo ""
             echo "ERROR: bare 'import tomllib' found above. tomllib is 3.11+ stdlib."
-            echo "Use the try/except fallback documented in CLAUDE.md."
+            echo "Use the try/except fallback documented in CONTRIBUTING.md."
             exit 1
           fi
-      - name: Confine `shell=True` to the sandbox backends (CLAUDE.md rule 4)
+      - name: Confine `shell=True` to the sandbox backends (kernel rule 4)
         # Security boundary: tools must never call subprocess with shell=True
         # directly -- model-generated input goes through sandbox.exec(), the
         # single chokepoint that applies the configured backend AND the
@@ -131,7 +129,7 @@ jobs:
             echo "$hits"
             echo ""
             echo "ERROR: shell=True outside maverick/sandbox/. Route shell through"
-            echo "sandbox.exec() (CLAUDE.md rule 4), or move the call into a sandbox"
+            echo "sandbox.exec() (kernel rule 4), or move the call into a sandbox"
             echo "backend. If genuinely required, add it to this grep's allowlist"
             echo "with a justification."
             exit 1
@@ -186,19 +184,17 @@ jobs:
         run: |
           pip install -e ./packages/maverick-core -q
           python -m maverick.plugin_matrix --ci
-      - name: Specialist catalog gate (1,000 packs, zero envelope errors)
-        # Every domain pack must keep a non-empty tool allowlist, a valid
-        # risk ceiling, a working persona, and its deny list -- the honest-
-        # counting receipt behind the catalog claim. Errors fail the build.
+      - name: Specialist catalog gate (zero envelope errors)
+        # Every domain pack, built-in or operator-supplied, must keep a
+        # non-empty tool allowlist, a valid risk ceiling and effort level, and
+        # pass the prose lint (text defects, duplicate personas, unknown
+        # tools). Errors fail the build.
         run: maverick domains-lint --ci
       - name: Reachability ledger (nothing goes dark unnoticed)
-        # Two defect classes shared one root cause: nobody could answer "does
-        # production reach this?", so everyone guessed, and the guesses went
-        # both ways. A strategy review cited sigstore_signing.py as shipped
-        # capability (roadmap-tagged, no production importer) and in the same
-        # pass skipped erasure_verify.py as unbuilt (also roadmap-tagged, but
-        # it backs a shipping CLI command). The roadmap header was the only
-        # signal and it is wrong ~80% of the time in both directions.
+        # Answers "does production code reach this module?" mechanically
+        # instead of relying on module header comments, which drift in both
+        # directions: a module can look shipped with no production importer,
+        # or look unbuilt while it backs a shipping CLI command.
         #
         # This walks the import graph from real entry points and fails when a
         # module loses its last caller, or when a new one arrives that nothing
@@ -219,7 +215,7 @@ jobs:
         # rather than trusting a comment.
         run: python -m maverick.dispatch_contract --ci
       - name: Egress contract (no outbound path outside the guarded libraries)
-        # enterprise.py sells one property -- "sensitive data physically cannot
+        # enterprise.py promises one property -- "sensitive data physically cannot
         # reach a third-party API" -- and documented it as enforced "at each
         # tool's request". The check existed at 11 call sites; 87 of the 94
         # modules that make outbound HTTP had none, including gmail,
@@ -504,9 +500,10 @@ jobs:
           python -m bandit -q -r packages apps -lll -ii \
             -x '*/tests/*,*/test_*.py'
       - name: License policy (no strong-copyleft — GPL / AGPL / SSPL)
-        # BLOCKING: a strong-copyleft dependency creates distribution
-        # obligations incompatible with the proprietary license. Runs the
-        # shipped scanner over the installed tree (the same env pip-audit saw).
+        # BLOCKING: a strong-copyleft dependency would impose copyleft terms
+        # on distributions of Lightwork, which is licensed under Apache-2.0.
+        # Runs the shipped scanner over the installed tree (the same env
+        # pip-audit saw).
         run: |
           python - <<'PY'
           import sys
@@ -532,7 +529,7 @@ jobs:
         # Build the same isolated release-runtime profile shipped in frozen
         # binaries/containers, then describe that target environment. CI tools
         # (bandit, pip-audit, CycloneDX itself) are deliberately excluded from
-        # the buyer-facing runtime inventory.
+        # the release-runtime inventory.
         run: |
           set -euo pipefail
           python -I -m pip install 'cyclonedx-bom==7.5.0'
@@ -664,8 +661,8 @@ jobs:
     # (~24,700 when this job was first sliced). Each leg runs one of four
     # disjoint file-level slices (--shard, root conftest.py) under pytest-xdist
     # (one worker per core, tests grouped by file so module-scoped fixtures
-    # and module-level TestClients stay per-worker). GitHub's hosted runners
-    # for private repositories have two cores, so in-job parallelism alone
+    # and module-level TestClients stay per-worker). On the two-core hosted
+    # runners the suite was first sliced on, in-job parallelism alone
     # measured ~17 minutes at ~24,700 tests; at ~39,000 three slices ran out
     # the 20-minute bound, so four slices keep a leg inside it for one
     # extra install each. At ~45,000 tests the slowest hosted slice needs more
@@ -832,7 +829,7 @@ jobs:
     # control's explicit on/off mechanics under test; this job runs the same
     # maverick-core tree under the PRODUCTION posture (audit signing,
     # at-rest encryption, fail-closed consent for high-risk actions, the
-    # tool-risk ceiling) -- the configuration customers actually run.
+    # tool-risk ceiling) -- the configuration a production deployment runs.
     #
     # The debt register started at 91 tests and has been driven to zero, so
     # this job is fully blocking: any posture failure is new by definition.
@@ -949,7 +946,7 @@ jobs:
     needs: select-tests
     # Skipped on a pull request whose change set cannot affect this job (select-tests).
     if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['redteam'] != false }}
-    # Red-team CI (ROADMAP 2027-H1 safety): run the labelled adversarial
+    # Red-team CI: run the labelled adversarial
     # corpus through the shield's built-in detector and fail the build on any
     # missed attack or over-blocked benign case. A named job (not buried in
     # the test matrix) so the gate is visible in the checks list. The corpus
@@ -974,7 +971,7 @@ jobs:
     needs: select-tests
     # Skipped on a pull request whose change set cannot affect this job (select-tests).
     if: ${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')['eval-smoke'] != false }}
-    # Eval-gated-release foundation (ROADMAP P3). Real evals drive `maverick
+    # Eval-gated-release foundation. Real evals drive `maverick
     # start` against a live provider -- no models/network in CI -- so this gate
     # runs the eval harness machinery (registry + scorers + tau2 verifier +
     # pass@1 aggregation) against scripted solvers and asserts grading still

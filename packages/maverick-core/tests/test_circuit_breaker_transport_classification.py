@@ -1,6 +1,6 @@
 """Circuit breaker must only trip on genuine provider-transport failures.
 
-PLATFORM_IMPROVEMENT_AUDIT.md W1-2: every exception escaping ``client.complete``
+Every exception escaping ``client.complete``
 used to count as a provider failure, including ``BudgetExceeded`` raised
 *after* a successful API call, ``UnpricedModelError``, and ordinary 4xx client
 errors. A single fan-out goal that hits its dollar cap (N parallel sub-agents

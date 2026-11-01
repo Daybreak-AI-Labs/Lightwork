@@ -7,7 +7,7 @@ a *department review* from evidence that already exists:
 * **delivery** — what it got done (:mod:`maverick.outcomes`),
 * **authority** — exactly what the team may and may not do, read off the
   capability envelopes of its packs (the documented "capabilities and
-  limitations" a buyer asks for), and
+  limitations" a reviewer asks for), and
 * **learning** — how much of its recent work the learned state already covers
   (:func:`maverick.hindsight.coverage_under`), so "it improves with use" is a
   number, not a claim.

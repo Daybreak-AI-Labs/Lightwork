@@ -1,4 +1,4 @@
-"""Network egress accounting (ROADMAP 2028 H1)."""
+"""Network egress accounting."""
 from __future__ import annotations
 
 import pytest

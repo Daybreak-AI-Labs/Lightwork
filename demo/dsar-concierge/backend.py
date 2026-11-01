@@ -1,8 +1,8 @@
 """The seam between the DSAR Concierge agent and the Lightwork platform.
 
 The agent's record of truth is always the vendored ``dsar_engine`` store —
-the same files whether standalone or platform-bundled, so an upsell never
-migrates data. What the platform ADDS is mirrored through here: the request
+the same files whether standalone or platform-bundled, so moving to the
+platform never migrates data. What the platform ADDS is mirrored through here: the request
 also lands in the governed privacy workspace registers, every step hits the
 signed audit chain, and fulfillment can use the platform's real
 subject-data export machinery. Standalone, those calls are silent no-ops

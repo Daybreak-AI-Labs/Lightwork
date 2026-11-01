@@ -1,6 +1,6 @@
 """Static concurrency audit: FastAPI ``async def`` route handlers that never
 ``await`` anything, despite calling synchronous SQLite/world/file/config work
-in their body (platform audit **W1-69**).
+in their body.
 
 FastAPI runs a plain ``def`` route in a worker thread pool automatically, but
 an ``async def`` route runs directly on the single event loop thread that

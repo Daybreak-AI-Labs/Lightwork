@@ -1,4 +1,4 @@
-"""Channel auto-routing (roadmap: 2028 H2 UX/ecosystem — channel auto-routing).
+"""Channel auto-routing.
 
 Pick the best outbound channel for a message from a set of candidate channels,
 by simple, explainable rules. Pure and deterministic — no network, no model

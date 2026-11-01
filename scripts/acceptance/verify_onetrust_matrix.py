@@ -274,9 +274,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "matrix",
-        nargs="?",
         type=Path,
-        default=Path("docs/ONETRUST_FULL_PLATFORM_CAPABILITY_MATRIX_2026-08-30.md"),
+        help="path to the OneTrust capability matrix (held with the business material)",
     )
     args = parser.parse_args()
     try:

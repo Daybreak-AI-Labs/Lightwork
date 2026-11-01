@@ -47,7 +47,7 @@ def test_overview_board_payload(monkeypatch, tmp_path):
 
 
 def test_overview_board_reports_every_status_not_just_the_headline_four(monkeypatch, tmp_path):
-    """UX-208: "Queued" used to be total - done - active - blocked, so failed,
+    """"Queued" used to be total - done - active - blocked, so failed,
     cancelled and draft goals were counted as queued. The payload now carries
     the real count per status so the page can show each one on its own."""
     _isolate(monkeypatch, tmp_path)

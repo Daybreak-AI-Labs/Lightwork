@@ -1,4 +1,4 @@
-"""Memory-safe parsing of untrusted bytes (roadmap: 2027 H2 safety).
+"""Memory-safe parsing of untrusted bytes.
 
 The parsers that touch **attacker-controllable bytes** — PDFs from
 attachments, images from channels, HTML from fetched pages — are largely

@@ -1,18 +1,21 @@
 # Control Crosswalk: SOC 2 ↔ ISO 27001 ↔ ISO 42001
 
-This is the master mapping for Lightwork's compliance program. Each row is a
-control theme mapped across the three frameworks, to the concrete Lightwork
-control(s) that satisfy it, and to the codebase evidence. It lets one body of
-work serve all three audits and lets an auditor cross-reference frameworks.
+This document maps Lightwork's technical controls to SOC 2, ISO/IEC 27001 and
+ISO/IEC 42001. Each row is a control theme mapped across the three frameworks,
+to the concrete Lightwork control(s) that address it, and to the codebase
+evidence. An organization deploying Lightwork can use it to show its auditor
+which requirements the software covers and which it must meet with its own
+processes.
 
 **Status legend** (same as [`soc2-controls.md`](soc2-controls.md)):
 
 | Status | Meaning |
 | --- | --- |
 | **Implemented** | A concrete, enforced technical control exists in code. |
+| **Implemented (on by default)** | Exists and enforced in a default install; an operator can turn it off explicitly (for example `MAVERICK_SECURE_DEFAULT=0`). |
 | **Implemented (opt-in)** | Exists and enforced, but off-by-default — must be enabled for a compliant deployment. |
 | **Partial** | A control exists but is scoped or incomplete. |
-| **Process** | Satisfied by an organizational process outside the repo (company-owned). |
+| **Process** | Satisfied by an organizational process that the organization deploying Lightwork operates; not provided by the code. |
 | **Gap** | No control today; to be built or established. |
 
 Framework references: SOC 2 = AICPA Trust Services Criteria (2017, rev. 2022).
@@ -26,8 +29,8 @@ Annex A (AI controls A.2–A.10).
 
 | Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| Security/AI policy mandate | CC1.1, CC2.2 | A.5.1, Cl.5.2 | A.2.2, A.2.3, Cl.5.2 | Documented policy set (POL-01, POL-12) | Process (docs drafted) | [`policies/`](policies/) |
-| Org structure, roles, accountability | CC1.2–1.5 | A.5.2, A.5.3, A.5.4 | A.3.2, A.3.3 | Role definitions, governance bodies | Process | `MAINTAINERS.md`; company org chart |
+| Security/AI policy mandate | CC1.1, CC2.2 | A.5.1, Cl.5.2 | A.2.2, A.2.3, Cl.5.2 | Documented security and AI policies | Process | Operator's policy set |
+| Org structure, roles, accountability | CC1.2–1.5 | A.5.2, A.5.3, A.5.4 | A.3.2, A.3.3 | Role definitions, governance bodies | Process | Operator's organization chart and role definitions |
 | Integrity & ethics | CC1.1 | A.5.1 | A.2.x | Anti-test-cheating verifier; conduct standard | Partial | `maverick/verifier.py`; `CODE_OF_CONDUCT.md` |
 | Internal/external communication | CC2.2, CC2.3 | A.5.1, A.6.8 | A.8.x | Art.50 AI disclosure; public docs; disclosure channel | Partial | `maverick/compliance.py`; `SECURITY.md`; `docs/` |
 
@@ -35,7 +38,7 @@ Annex A (AI controls A.2–A.10).
 
 | Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| Risk assessment process | CC3.1–3.4 | Cl.6.1, 8.2; A.5.x | Cl.6.1; A.5.2 | Methodology + register; structured assessment engine | Process + Implemented | [`risk-management-methodology.md`](risk-management-methodology.md); `maverick/assessment.py` |
+| Risk assessment process | CC3.1–3.4 | Cl.6.1, 8.2; A.5.x | Cl.6.1; A.5.2 | Operator's risk methodology and register; structured assessment engine | Process + Implemented | `maverick/assessment.py` |
 | AI risk & impact assessment | — | — | A.5.2, A.5.3, A.5.4, A.5.5 | EU AI Act classifier; AIRA persona | Implemented | `maverick/ai_act.py`; `maverick/tools/ai_act_classifier.py`; `maverick/domains/itgrc_aira.toml` |
 | Risk → control mapping | CC3.2 | Cl.6.1.3 | A.5.4 | Control-lookup tool maps risks to frameworks | Implemented | `maverick/tools/control_tools.py` (`find_controls_tool`) |
 | Tool/action risk classification | CC3.1 | A.8.x | A.6.2, A.9.x | Tool risk model; capability `max_risk` ceilings | Implemented | `maverick/safety/tool_risk.py`; `maverick/capability.py` |
@@ -55,9 +58,9 @@ Annex A (AI controls A.2–A.10).
 
 | Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| Encryption at rest | CC6.7, C1.1 | A.8.24 | A.7.x | AES-256-GCM on world DB + memory stores | Implemented (opt-in) | `maverick/crypto_at_rest.py` |
+| Encryption at rest | CC6.7, C1.1 | A.8.24 | A.7.x | AES-256-GCM on world DB + memory stores | Implemented (on by default) | `maverick/crypto_at_rest.py` |
 | Key management / KMS | CC6.1 | A.8.24 | — | Per-tenant envelope encryption (DEK+KEK); AWS/GCP/Vault wrapper | Implemented | `maverick/tenant/kms.py` |
-| Tamper-evidence (integrity) | CC2.1, PI1.5 | A.8.24, A.5.33 | A.6.2, A.8.x | Ed25519 Merkle hash-chain + cross-file anchors | Implemented (opt-in) | `maverick/audit/signing.py` |
+| Tamper-evidence (integrity) | CC2.1, PI1.5 | A.8.24, A.5.33 | A.6.2, A.8.x | Ed25519 Merkle hash-chain + cross-file anchors | Implemented (on by default) | `maverick/audit/signing.py` |
 | Confidentiality of stored records | C1.1 | A.5.33, A.8.24 | A.7.x | AES-256-GCM sealing of closed audit days | Implemented (opt-in) | `maverick/audit/sealing.py` |
 | Secret protection / leakage prevention | CC6.7 | A.8.12 | A.7.x | Secret scrubber; detect-secrets CI gate | Implemented | `maverick/secrets.py`; `.secrets.baseline` |
 
@@ -98,7 +101,7 @@ Annex A (AI controls A.2–A.10).
 | --- | --- | --- | --- | --- | --- | --- |
 | Change authorization & testing | CC8.1 | A.8.32 | A.6.2 | Eval-gated CI; PR review; conventional-commits gate; custom CI gates | Partial | `.github/workflows/` (`ci.yml`, `conventional-commits.yml`) |
 | Config change/vuln detection | CC7.1 | A.8.9, A.8.8 | — | Preflight checks; eval-gated CI | Partial | `maverick/preflight.py` |
-| Change-management *process* | CC8.1 | A.8.32 | A.6.2 | Documented approvals, prod sign-off, SoD | Process | [`policies/change-management-policy.md`](policies/change-management-policy.md) |
+| Change-management *process* | CC8.1 | A.8.32 | A.6.2 | Documented approvals, prod sign-off, SoD | Process | Operator's change-management policy |
 
 ## 9. Incident management & resilience
 
@@ -107,15 +110,15 @@ Annex A (AI controls A.2–A.10).
 | Incident containment | CC7.4 | A.5.26 | A.10.x | Killswitch (file + in-process, cluster-wide); circuit breakers | Implemented | `maverick/killswitch.py`; `maverick/circuit_breaker.py` |
 | Evidence collection / forensics | CC7.3 | A.5.28 | A.10.x | Tamper-evident audit log; chain verification | Implemented | `maverick/audit/` |
 | Incident recovery | CC7.5 | A.5.29 | — | Durable checkpoint/resume; job queue | Implemented | `maverick/checkpoint.py` |
-| Incident-response *program* | CC7.4 | A.5.24–A.5.27, A.6.8 | A.10.x | Runbooks, on-call, escalation, notification SLAs | Process | [`policies/incident-response-policy.md`](policies/incident-response-policy.md) |
+| Incident-response *program* | CC7.4 | A.5.24–A.5.27, A.6.8 | A.10.x | Runbooks, on-call, escalation, notification SLAs | Process | Operator's incident-response policy |
 | Vulnerability disclosure | CC7.4 | A.5.5, A.6.8 | — | 90-day coordinated disclosure; reward tiers | Implemented (Process) | `SECURITY.md` |
 
 ## 10. Supplier & people controls (predominantly Process)
 
 | Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| Supplier/sub-processor management | CC9.2 | A.5.19–A.5.23 | A.10.2, A.10.3 | Vendor reviews, DPAs, sub-processor inventory | Process | `docs/enterprise/legal/`; [`policies/supplier-security-policy.md`](policies/supplier-security-policy.md) |
-| HR security (screening, training, NDAs) | CC1.4 | A.6.1–A.6.6 | A.3.2, A.4.6 | Background checks, training, offboarding | Process | [`policies/human-resources-security-policy.md`](policies/human-resources-security-policy.md) |
+| Supplier/sub-processor management | CC9.2 | A.5.19–A.5.23 | A.10.2, A.10.3 | Vendor reviews, DPAs, sub-processor inventory | Process | Operator's supplier-security policy |
+| HR security (screening, training, NDAs) | CC1.4 | A.6.1–A.6.6 | A.3.2, A.4.6 | Background checks, training, offboarding | Process | Operator's HR security policy |
 | Physical & environmental security | CC6.4, A1.2 | A.7.1–A.7.14 | — | Inherited from cloud provider (document via their SOC 2/ISO) | Process | Cloud provider attestations |
 
 ## 11. AI-specific governance (ISO 42001 / EU AI Act)
@@ -136,20 +139,19 @@ Annex A (AI controls A.2–A.10).
 
 ## Cross-framework gap summary
 
-The work that remains is concentrated, not scattered:
+What a deploying organization has to supply or switch on:
 
-**Process gaps (shared across SOC 2 / ISO 27001 / ISO 42001):**
+**Process controls the deploying organization operates (shared across SOC 2 / ISO 27001 / ISO 42001):**
 change-management process · vendor/sub-processor management · incident-response
 program · HR security · documented risk-assessment program · vulnerability
 management & pen-test cadence · physical security (cloud-inherited).
 
-**Engineering gaps (enable, don't build):** flip on the opt-in controls —
-capabilities, tenant isolation, quotas, OIDC, encryption at rest, audit signing
-— for any compliant deployment. See [`soc2/README.md`](soc2/README.md).
+**Opt-in controls to enable:** capabilities, tenant isolation, quotas and OIDC
+(encryption at rest and audit signing are on by default unless disabled) — for
+any compliant deployment. See [`soc2/README.md`](soc2/README.md).
 
 **ISO 42001-specific build gaps:** *all closed.* (1) operator-declared model-card
 metadata export, (2) governed AI-system retirement with a signed audit record
 (incl. concrete subject-scoped `erase`), and (3) continuous rolling-window
 fairness monitoring with four-fifths/drift alerts are now implemented
 (`maverick/model_cards.py`, `maverick/retirement.py`, `maverick/fairness_monitor.py`).
-See [`iso-42001/README.md`](iso-42001/README.md).

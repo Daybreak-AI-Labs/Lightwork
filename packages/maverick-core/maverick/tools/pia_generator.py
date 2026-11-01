@@ -1,4 +1,4 @@
-"""Privacy Impact Assessment generator (roadmap: 2028 H2 — privacy tooling).
+"""Privacy Impact Assessment generator.
 
 Render a structured Privacy Impact Assessment (PIA / DPIA) as a markdown
 document from structured inputs, and surface the obvious risk flags a reviewer

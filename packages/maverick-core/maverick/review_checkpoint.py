@@ -1,4 +1,4 @@
-"""Long-horizon goal review checkpoint (roadmap: 2028 H1 safety).
+"""Long-horizon goal review checkpoint.
 
 A budget cap stops a runaway; a *checkpoint* does something subtler — it
 pauses a long, expensive, still-progressing run at intervals so a human can

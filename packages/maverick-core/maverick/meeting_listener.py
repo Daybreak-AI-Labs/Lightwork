@@ -1,5 +1,4 @@
-"""ASR meeting listener (roadmap: 2027 H1 capabilities, "ASR meeting
-listener").
+"""ASR meeting listener.
 
 A long-running session that consumes an **injected** stream of transcript
 segments (whatever ASR produced them — tools/voice.py, live captions, a bot

@@ -193,7 +193,7 @@ def test_ci_gate_fails_on_hard_failure(monkeypatch, tmp_path):
 
 
 class TestVerify:
-    """Council H6: the proof manifest must have a shipped, fail-closed verifier."""
+    """The proof manifest must have a shipped, fail-closed verifier."""
 
     def _signed(self):
         m = {"kind": "maverick-proof-pack", "version": 1, "issued_at": 1.0,

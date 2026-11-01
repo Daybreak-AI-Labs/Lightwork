@@ -438,7 +438,7 @@ class KubernetesBackend:
             # each command; otherwise fail closed (never
             # silently run with network) and print the manifest to apply.
             # Previously this branch refused EVERY command, so the wizard's
-            # default config could not run anything (platform audit W1-104).
+            # default config could not run anything.
             if not self._deny_all_policy_present():
                 manifest = self.deny_all_networkpolicy_manifest()
                 log.warning(

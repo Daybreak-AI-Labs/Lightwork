@@ -1,4 +1,4 @@
-"""Plugin compatibility matrix (roadmap: 2028 H1 ecosystem).
+"""Plugin compatibility matrix.
 
 One table answering, for every installed Lightwork plugin entry point: which
 distribution provides it, which plugin-API major it declares, whether the

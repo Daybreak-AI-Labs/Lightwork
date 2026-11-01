@@ -53,7 +53,7 @@ def test_write_config_emits_billing_stripe(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={"stripe_billing": True})
     stripe = parsed["billing"]["stripe"]
     assert stripe["enable"] is True
-    # The pricing-decision flag ships OFF (platform fee only until markup set).
+    # bill_metered_usage ships OFF (platform fee only until an operator turns it on).
     assert stripe["bill_metered_usage"] is False
     assert stripe["currency"] == "usd"
     # The prices sub-table exists (commented example ids -> empty table).
