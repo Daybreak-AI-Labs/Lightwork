@@ -3,8 +3,24 @@
 # the same way CI does, so tests and the CLI work out of the box.
 set -euo pipefail
 
-python3 -m venv .venv
+# Stay inside the interpreter window CI tests (3.10-3.12). A newer host
+# interpreter (3.13) cannot install the cohort, so prefer a supported one.
+python_bin=python3
+for candidate in python3.12 python3.11 python3.10; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    python_bin="$candidate"
+    break
+  fi
+done
+
+"$python_bin" -m venv .venv
 export PATH="$PWD/.venv/bin:$PATH"
+
+# Resolve every dependency from the reviewed CI set, exactly as the test and
+# posture jobs do (ci.yml sets the same PIP_CONSTRAINT). An unconstrained
+# install drifts from the gate: two dashboard streaming tests encode Starlette
+# 1.7.0 behaviour and fail on 1.8.0.
+export PIP_CONSTRAINT="$PWD/requirements/ci.txt"
 
 pip install -e ./packages/maverick-core
 pip install --no-deps -e ./packages/maverick-shield
@@ -24,10 +40,13 @@ pip install 'questionary>=2.0' 'rich>=13.7' \
 # _cffi_backend for this interpreter and crash pytest collection with a
 # pyo3 PanicException; pip can't replace the distro package, but installing
 # cffi fixes the import. build: so `python3 -m build --wheel` works per-package.
-# pytest-xdist: the documented `python3 -m pytest -n auto --dist loadfile`
-# invocation (the one CI uses) needs it.
-pip install pytest pytest-asyncio pytest-xdist 'ruff>=0.5' 'vulture>=2.11' \
-            'pyjwt[crypto]' cffi build 'pyyaml>=6.0.3'
+# pytest-xdist + pytest-timeout: the CI invocation (-n auto --dist loadfile,
+# --timeout) and the CLAUDE.md test command need them. sqlalchemy: the
+# database tool imports it; .github/actions/test-shard installs it and three
+# governed-tools / query-execution tests fail without it. detect-secrets: the
+# scripts/pre-push-lint.sh baseline gate silently skips without it.
+pip install pytest pytest-asyncio pytest-xdist pytest-timeout 'ruff>=0.5' 'vulture>=2.11' \
+            'pyjwt[crypto]' cffi build 'pyyaml>=6.0.3' sqlalchemy detect-secrets
 # AI-evidence local parsers: Pillow mirrors the CI environment
 # (requirements/ci.txt pins it); xlrd + olefile power the legacy-XLS worker.
 # Their tests self-skip without these (test_oidc pattern), so this install is
@@ -40,4 +59,4 @@ pip install 'openai>=1.30'
 echo
 echo "Lightwork devcontainer ready."
 echo "  try:  maverick --help"
-echo "  test: python3 -m pytest packages/maverick-core/tests -q"
+echo "  test: python3 -m pytest -q -n auto --dist loadfile"

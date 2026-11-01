@@ -11,7 +11,10 @@ TypeScript plugin SDK (`sdks/plugin-ts`).
 ## Setup
 
     bash .devcontainer/post-create.sh   # creates .venv, editable-installs all 8
-                                        # packages + dev tools (pytest-xdist,
+                                        # packages under PIP_CONSTRAINT=
+                                        # requirements/ci.txt (CI parity) + dev
+                                        # tools (pytest-xdist, pytest-timeout,
+                                        # sqlalchemy, detect-secrets,
                                         # pyjwt[crypto], cffi, build)
 
 `pip install -e .` at the root fails: the workspace `pyproject.toml` has no

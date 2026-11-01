@@ -32,7 +32,11 @@ controls; the other packages build on it.
   dependency from PyPI. It then installs the runtime dependencies the
   `--no-deps` installs skip, plus the dev tools, including `pytest-xdist`,
   `pyjwt[crypto]` (CI parity; `test_oidc` skips itself without it), `cffi` and
-  `build`.
+  `build`. Everything resolves under `PIP_CONSTRAINT=requirements/ci.txt`, as
+  the CI jobs do, and the script also installs `pytest-timeout`, `sqlalchemy`
+  (the database tool imports it; three tests fail without it) and
+  `detect-secrets` (the pre-push lint's baseline gate skips silently without
+  it).
 - **Test:** `python3 -m pytest -q -n auto --dist loadfile` from the repo root
   (pytest-xdist, one worker per core, grouped by file), not bare `pytest`. CI
   runs this with `-m "not heavy_concurrency"` and then runs the
@@ -71,6 +75,13 @@ controls; the other packages build on it.
   design (its deep check treats a missing provider key as degraded).
   `post-create.sh` does not install mkdocs; the docs toolchain is pinned in
   `requirements/docs.txt`.
+- A provider variable set by the host makes the kernel believe a provider is
+  configured: `config.any_provider_configured()` reads every `*_API_KEY` and
+  `*_BASE_URL` name (a cloud container's agent proxy sets `ANTHROPIC_BASE_URL`
+  with no key), which flipped six doctor, healthz and settings tests. The root
+  `conftest.py` scrubs `test_support/provider_env.HOST_PROVIDER_ENV_VARS` at
+  session start; a new provider variable goes in that tuple (a test pins it
+  against `config.py`).
 
 ### Testing
 
