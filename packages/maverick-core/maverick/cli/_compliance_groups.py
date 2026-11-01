@@ -545,14 +545,19 @@ def dsar_export(user_id: str, tenant: str | None, output, compact: bool) -> None
 
     Serializes ``export_subject_data()`` -- the subject's conversations, the
     turns/goals/episodes those reference, and their audit rows -- for the
-    right of access / portability. The exporter is fail-soft (an unknown
-    subject or empty install yields a structured, empty bundle), so this
-    command always emits a JSON object and exits 0.
+    right of access / portability. An unknown subject yields a structured,
+    empty bundle; a store read failure cannot be presented as a complete
+    export.
     """
     import json as _json
 
     from ..dsar import export_subject_data
-    bundle = export_subject_data(user_id, tenant=tenant)
+    try:
+        bundle = export_subject_data(user_id, tenant=tenant, strict=True)
+    except RuntimeError as exc:
+        raise click.ClickException(
+            "Subject data could not be read completely. No export was created."
+        ) from exc
     payload = (
         _json.dumps(bundle, default=str)
         if compact

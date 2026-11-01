@@ -7421,11 +7421,10 @@ def _invoice_workspaces(current: str, current_label: str) -> list[dict]:
     return rows or [{"id": current, "name": current_label}]
 
 
-def _provider_integration_inventory() -> list[dict]:
+def _provider_integration_inventory(workspace: dict) -> list[dict]:
     from maverick_dashboard import settings_store
     from maverick_dashboard.integration_readiness import (
         IntegrationConfigurationUnavailable,
-        provider_readiness,
         require_readable_config,
     )
 
@@ -7435,35 +7434,38 @@ def _provider_integration_inventory() -> list[dict]:
         raise IntegrationConfigurationUnavailable(
             "provider configuration source changed while it was read"
         )
-    for row in rows:
-        row["readiness"] = provider_readiness(
-            row["name"], configured=row["configured"]
-        )
+    # A fail-soft workspace verdict may have no provider rows. A partial row
+    # lacks status/receipt fields the page and API promise, so fail closed.
+    present = {row["name"] for row in workspace.get("providers") or []}
+    if any(row["name"] not in present for row in rows):
+        raise IntegrationConfigurationUnavailable("provider readiness is unavailable")
     # The one truth (configured, last test, status words) overrides the raw
     # store view so this page can never disagree with Settings, Chat or /start.
-    from maverick_dashboard.provider_readiness import apply_to_rows, workspace_readiness
+    from maverick_dashboard.provider_readiness import apply_to_rows
 
-    return apply_to_rows(rows, workspace_readiness())
+    return apply_to_rows(rows, workspace)
 
 
 @app.get("/providers", response_class=HTMLResponse)
 async def providers_page(request: Request) -> HTMLResponse:
     from maverick.provider_health import get as _health
 
+    from .provider_readiness import workspace_readiness
+
     try:
-        inventory = _provider_integration_inventory()
+        workspace = workspace_readiness()
+        inventory = _provider_integration_inventory(workspace)
     except Exception as exc:
         raise HTTPException(
             status_code=503,
             detail="provider inventory is unavailable",
         ) from exc
     from .auth import has_global_permission
-    from .provider_readiness import workspace_readiness
     return templates.TemplateResponse(
         request,
         "providers.html",
         {"inventory": inventory, "rows": _health().snapshot(),
-         "workspace": workspace_readiness(),
+         "workspace": workspace,
          "is_admin": has_global_permission(request, "admin"),
          "tested": request.query_params.get("tested") == "1"},
     )
@@ -10774,20 +10776,21 @@ async def providers_api(request: Request) -> JSONResponse:
     require_global_permission(request, "admin")
     from maverick.provider_health import get as _health
 
+    from .provider_readiness import public_verdict, workspace_readiness
+
     try:
-        inventory = _provider_integration_inventory()
+        workspace = workspace_readiness()
+        inventory = _provider_integration_inventory(workspace)
     except Exception as exc:
         raise HTTPException(
             status_code=503,
             detail="provider inventory is unavailable",
         ) from exc
-    from .provider_readiness import public_verdict, workspace_readiness
-
     return JSONResponse(
         {
             "providers": inventory,
             "health": _health().snapshot(),
-            "workspace": public_verdict(workspace_readiness()),
+            "workspace": public_verdict(workspace),
         }
     )
 

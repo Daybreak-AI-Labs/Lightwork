@@ -865,6 +865,51 @@ def test_task_detail_uses_current_authorized_record_without_model_or_history(cli
     assert "Private planning task’ has status: failed" in body["reply"]
     assert "The AI service is busy" in body["reply"]
     assert "conversation_token" not in body
+    limit_question = client.post("/api/v1/copilot", json={
+        "page": page, "message": "Why did this task hit its time limit?",
+    }).json()
+    assert limit_question.get("action_link", {}).get("href") != "/settings"
+    assert "conversation_token" not in limit_question
+
+
+@pytest.mark.parametrize(("question", "target"), [
+    ("Where do I change task limits?", "/settings"),
+    ("How do I change the task limits?", "/settings"),
+    ("Set a spending limit", "/settings"),
+    ("How do I set a spending limit?", "/settings"),
+    ("Invite a colleague", "/users"),
+    ("Where can I invite a colleague?", "/users"),
+    ("See decisions on my requests", "/approvals"),
+    ("Where can I see decisions on my requests?", "/approvals"),
+])
+def test_task_detail_opens_reviewed_control_without_leaking_record(
+    client, monkeypatch, question, target,
+):
+    from maverick_dashboard import api, auth
+    from maverick_dashboard import app as dashboard_app
+
+    task = SimpleNamespace(id=7, title="Private acquisition", status="failed",
+                           result="provider_error:rate_limit", owner="alice")
+    monkeypatch.setattr(dashboard_app, "_world", lambda: SimpleNamespace(
+        get_goal=lambda identifier: task if identifier == 7 else None,
+    ))
+    monkeypatch.setattr(auth, "assert_goal_access", lambda _request, _goal: None)
+    monkeypatch.setattr(api, "_copilot_permissions", lambda _request: frozenset({"view", "admin"}))
+    monkeypatch.setattr(api, "_copilot_model_route_status", lambda: pytest.fail("detail reached model route"))
+
+    response = client.post("/api/v1/copilot", json={"page": "/chat/goal/7", "message": question})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "built_in"
+    assert body["action_link"]["href"] == target
+    assert "Private acquisition" not in body["reply"]
+    assert "conversation_token" not in body
+    if target in {"/settings", "/users"}:
+        monkeypatch.setattr(api, "_copilot_permissions", lambda _request: frozenset({"view"}))
+        denied = client.post("/api/v1/copilot", json={"page": "/chat/goal/7", "message": question})
+        assert denied.status_code == 200
+        assert denied.json().get("action_link", {}).get("href") != target
+        assert "conversation_token" not in denied.json()
 
 
 def test_task_detail_denial_matches_missing_record(client, monkeypatch):

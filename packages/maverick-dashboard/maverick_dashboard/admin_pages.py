@@ -188,7 +188,6 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
     from maverick_dashboard import settings_store
     from maverick_dashboard.integration_readiness import (
         IntegrationConfigurationUnavailable,
-        provider_readiness,
         require_readable_config,
     )
 
@@ -205,10 +204,6 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
             detail="integration configuration is unavailable",
         ) from exc
 
-    for provider in cfg_state["providers"]:
-        provider["readiness"] = provider_readiness(
-            provider["name"], configured=provider["configured"]
-        )
     # The one truth about whether an AI service is connected: the header,
     # each provider row and every other page read the same verdict.
     from maverick_dashboard.provider_readiness import (
@@ -218,6 +213,9 @@ def _settings_response(request: Request, saved: str = "", *, notice: str = "",
     )
 
     workspace = workspace_readiness()
+    present = {row["name"] for row in workspace.get("providers") or []}
+    if any(provider["name"] not in present for provider in cfg_state["providers"]):
+        raise HTTPException(status_code=503, detail="provider readiness is unavailable")
     apply_to_rows(cfg_state["providers"], workspace)
     # Grouped pickers: every model the configured keys can reach (cached live
     # discovery) plus the shipped catalog, capped by the allow-list.
