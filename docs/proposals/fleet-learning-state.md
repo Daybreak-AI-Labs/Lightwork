@@ -111,8 +111,8 @@ for that night (goes in the runbook when this lands):
 4. Day-after checks: `corpus quality` report, `/learned` transfer-memory
    line advancing, calibration freeze NOT armed.
 
-## Effort
+## Scope of the change
 
-Roughly one wave: migrations + governance regen, the store seam, the two lock
-adapters, the migrate command, battery parametrization over both stores, and
-wizard/docs parity.
+Migrations + governance regen, the store seam, the two lock adapters, the
+migrate command, battery parametrization over both stores, and wizard/docs
+parity.

@@ -209,7 +209,7 @@
 
 {% include "_assessment_review.html" %}
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
   // Assessment-backed approvals: the detail collapses to one readable line
   // (complete text behind a toggle — the real review home is the shared
   // pop-out), and Review leads the decision row.
@@ -747,7 +747,7 @@
   })();
 </script>
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
   // Reject or send back many requests at once (ADM-7). Approving stays one
   // request at a time: each approval needs its own reading of what it does.
   (function wireBulk() {

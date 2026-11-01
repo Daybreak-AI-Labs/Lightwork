@@ -149,7 +149,7 @@
   </section>
 </div>
 <script src="/static/lightwork-consent-workbench.js"></script>
-<script{% if csp_script_nonce is defined %} nonce="{{ csp_script_nonce }}"{% endif %}>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   "use strict";
   var API = "/api/v1/consent/delivery";

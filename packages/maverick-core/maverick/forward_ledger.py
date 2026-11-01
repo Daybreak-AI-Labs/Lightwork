@@ -29,7 +29,12 @@ def upcoming(world, *, days: float = 30, now: float | None = None,
     horizon = now + days * 86400.0
     rows: list[Obligation] = []
     kwargs = {"limit": limit} if owner is None else {"limit": limit, "owner": owner}
-    for g in world.list_goals(**kwargs):
+    # A SQLite world filters on status and deadline before decrypting, so only
+    # the due goals are decoded (the same window of 2,000 oldest goals).
+    due = getattr(world, "goals_due_by", None)
+    goals = (due(horizon, owner=owner, limit=limit) if callable(due)
+             else world.list_goals(**kwargs))
+    for g in goals:
         if g.status not in ("pending", "active"):
             continue
         if not g.deadline or g.deadline > horizon:

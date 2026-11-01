@@ -12,6 +12,7 @@ def bridge(world, records, report):
     goal_ids = {gid for row in records if row["id"] in selected for gid in row["source"]["goal_ids"]}
     cfg = get_value()
     attempts, gross, cost, missing = 0, 0.0, 0.0, 0
+    done = []
     for episode in iter_episodes(world, since=report["start"], until=report["end"], finished_only=True):
         if episode.goal_id not in goal_ids:
             continue
@@ -19,10 +20,13 @@ def bridge(world, records, report):
         cost += dollars or 0
         missing += int(dollars is None)
         if _is_done(episode.outcome):
-            goal = world.get_goal(episode.goal_id)
-            assumed = cfg["departments"].get(goal.domain, cfg)
-            attempts += 1
-            gross += assumed["hourly_rate"] * assumed["hours_per_task"]
+            done.append(episode.goal_id)
+    # One batched goal read for the completed attempts, summed in episode order.
+    goals = world.get_goals(done) if done else {}
+    for goal_id in done:
+        assumed = cfg["departments"].get(goals.get(goal_id).domain, cfg)
+        attempts += 1
+        gross += assumed["hourly_rate"] * assumed["hours_per_task"]
     total = report["totals"]
     new_gross = total["gross_estimated_labor_value"]
     return {"scope": "The same contributing goals and UTC window, using the existing Savings completed-episode rule and configured hours/rates.",

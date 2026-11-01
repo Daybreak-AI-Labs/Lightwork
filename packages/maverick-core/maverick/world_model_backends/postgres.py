@@ -1282,7 +1282,9 @@ class PostgresWorldModel:
         # point there but harmless.
         self._lock = threading.RLock()
         self._tx_depth = threading.local()
+        self.rls_bypass_reason: str | None = None
         try:
+            self._check_database_role()
             self._migrate()
             if self._rls:
                 self._preflight_rls_or_die()
@@ -1291,6 +1293,51 @@ class PostgresWorldModel:
             self.close()
             raise
 
+    def _check_database_role(self) -> None:
+        """Note, once per open, whether this login bypasses row-level security.
+
+        A superuser or BYPASSRLS role skips every RLS policy, FORCE included.
+        With RLS in use, enterprise mode refuses to open; otherwise the problem
+        is logged once and reported by the deep health check. With RLS off no
+        policy is bypassed, so it is only logged. A failed lookup is only
+        logged, so an unreadable catalog never blocks boot.
+        """
+        try:
+            with self._tx() as cur:
+                cur.execute(
+                    "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user"
+                )
+                superuser, bypass = cur.fetchone()
+        except Exception as e:
+            log.warning(
+                "Could not check whether the Postgres login bypasses row-level security "
+                "(%s); tenant row policies are not verified at this start.", e,
+            )
+            return
+        if not (superuser or bypass):
+            return
+        problem = (
+            "the Postgres login is a superuser, which bypasses row-level security"
+            if superuser
+            else "the Postgres login has BYPASSRLS, which bypasses row-level security"
+        )
+        fix = (
+            "connect with a dedicated login that is neither a superuser nor BYPASSRLS "
+            "(for example CREATE ROLE maverick_app LOGIN NOSUPERUSER NOBYPASSRLS)"
+        )
+        if not self._rls:
+            # No row policy is in use, so nothing is bypassed yet: a hint only.
+            log.warning("%s. Turning on [world_model] rls would not protect tenants "
+                        "for this login. Fix: %s.", problem, fix)
+            return
+        self.rls_bypass_reason = f"{problem}; {fix}"
+        if _enterprise_default():
+            raise RuntimeError(
+                "Enterprise mode relies on Postgres row-level security for tenant "
+                f"isolation, but {problem}. Fix: {fix}."
+            )
+        log.warning("%s. Tenant row policies do not apply to this login. Fix: %s.", problem, fix)
+
     def __enter__(self) -> PostgresWorldModel:
         return self
 
@@ -1298,7 +1345,7 @@ class PostgresWorldModel:
         self.close()
 
     def _reconnect_if_broken(self) -> None:
-        """W1-54: reopen the single shared connection (non-pooled mode) after
+        """Reopen the single shared connection (non-pooled mode) after
         it's been killed out from under us.
 
         Managed Postgres (RDS/CloudSQL multi-AZ) fails over and resets idle
@@ -1329,7 +1376,7 @@ class PostgresWorldModel:
         InFailedSqlTransaction until the process restarts. Rolling back
         keeps the connection usable.
 
-        W1-54: a rollback can't save a connection the SERVER killed (a
+        A rollback can't save a connection the SERVER killed (a
         managed-Postgres failover, or an idle-connection reset) -- the
         rollback itself fails too. In that case, close and drop the
         connection instead of leaving a dead one in ``self.conn``, so
@@ -1593,13 +1640,12 @@ class PostgresWorldModel:
         project_id: int | None = None,
         connection_references: list | None = None,
     ) -> int:
-        # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-47): `domain` and
-        # `project_id` mirror the SQLite backend's create_goal signature. Both
-        # columns already exist on Postgres (migrations above) and were
-        # settable after creation via set_goal_domain/set_goal_project, but a
-        # caller that passes them AT creation (checkpoint sub-goal spawning,
-        # the finance CLI) got a TypeError on this backend instead of a
-        # created goal.
+        # `domain` and `project_id` mirror the SQLite backend's create_goal
+        # signature. Both columns already exist on Postgres (migrations above)
+        # and were settable after creation via set_goal_domain/set_goal_project,
+        # but a caller that passes them AT creation (checkpoint sub-goal
+        # spawning, the finance CLI) got a TypeError on this backend instead of
+        # a created goal.
         if execution_principal is None:
             execution_principal = ""
         if not isinstance(execution_principal, str):
@@ -2078,6 +2124,27 @@ class PostgresWorldModel:
             sql += " WHERE " + frag
         sql += " ORDER BY requested_at DESC, id DESC LIMIT %s"
         p.append(max(1, int(limit)))
+        with self._tx() as cur:
+            cur.execute(sql, tuple(p))
+            rows = cur.fetchall()
+        return [_dec_approval_row(r) for r in rows]
+
+    def approvals_requested_between(self, since: float, until: float) -> list:
+        """The SQLite twin's window read: same bounds, same order, same
+        tenant scope as :meth:`list_approvals`."""
+        frag, params = _tenant_scope()
+        where = ["requested_at >= %s", "requested_at <= %s"]
+        p: list = [float(since), float(until)]
+        if frag:
+            where.insert(0, frag)
+            p = list(params) + p
+        sql = (
+            "SELECT id, action, risk, scope, detail, provenance, status, "
+            "requested_at, decided_at, claimed_by, claimed_at, decided_by, "
+            "approvals_required, requested_by, goal_id, department, undo_hold "
+            "FROM approvals WHERE " + " AND ".join(where)
+            + " ORDER BY requested_at DESC, id DESC"
+        )
         with self._tx() as cur:
             cur.execute(sql, tuple(p))
             rows = cur.fetchall()
@@ -2702,7 +2769,7 @@ class PostgresWorldModel:
     ) -> list[PGGoal]:
         """List goals, optionally filtered by status + paginated (mirrors SQLite).
 
-        W1-49: ``domain``/``project_id`` were missing here (unlike SQLite's
+        ``domain``/``project_id`` were missing here (unlike SQLite's
         ``list_goals``), so the dashboard's project-detail page and
         domain-scoped inbox both 500 on this backend --
         ``list_goals(project_id=...)`` / ``list_goals(domain=...)`` raised
@@ -3248,10 +3315,10 @@ class PostgresWorldModel:
         """Aggregate spend. ``owner`` scopes to one principal's runs (join to
         the owning goal), matching the SQLite backend's signature; ``None``
         is the deployment-wide admin / auth-off view; ``since`` keeps only runs
-        that started at or after that time, as on SQLite. (Sept 2026 fix,
-        PLATFORM_IMPROVEMENT_AUDIT.md W1-48: this backend previously took no
-        ``owner`` argument at all, so any owner-scoped caller -- ``/api/v1/spend``,
-        external-agent spend records -- raised TypeError on Postgres.)
+        that started at or after that time, as on SQLite. (This backend
+        previously took no ``owner`` argument at all, so any owner-scoped
+        caller -- ``/api/v1/spend``, external-agent spend records -- raised
+        TypeError on Postgres.)
         """
         frag, params = _tenant_scope("g.tenant_id")
         table = "episodes e"
@@ -4697,10 +4764,10 @@ class PostgresWorldModel:
         with self._tx() as cur:
             cur.execute(
                 "SELECT approver, decision FROM approval_signoffs "
-                "WHERE approval_id = %s ORDER BY decided_at", (approval_id,),
+                "WHERE approval_id = %s ORDER BY decided_at, approver", (approval_id,),
             )
             rows = cur.fetchall()
-        from ..world_model import _single_approver
+        from ..world_model import _approval_state_view, _single_approver
 
         approvers = _single_approver(appr, [r[0] for r in rows if r[1] == "approved"])
         scope, params = _approval_outbox_scope()
@@ -4711,14 +4778,43 @@ class PostgresWorldModel:
                 tuple([approval_id, *params]),
             )
             audit_pending = int(cur.fetchone()[0])
+        return _approval_state_view(appr, approvers, audit_pending)
+
+    def approval_states(self, approvals) -> dict[int, dict]:
+        """Batched :meth:`approval_state` for approvals the caller has already
+        listed (tenant-scoped): two queries for the set, each value equal to
+        ``approval_state(id)``."""
+        from ..world_model import _approval_state_view, _single_approver
+
+        listed = {int(a.id): a for a in approvals}
+        if not listed:
+            return {}
+        ids = list(listed)
+        signoffs: dict[int, list[str]] = {approval_id: [] for approval_id in ids}
+        pending: dict[int, int] = dict.fromkeys(ids, 0)
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT approval_id, approver, decision FROM approval_signoffs "
+                "WHERE approval_id = ANY(%s) ORDER BY decided_at, approver", (ids,),
+            )
+            for approval_id, approver, decision in cur.fetchall():
+                if decision == "approved":
+                    signoffs[int(approval_id)].append(approver)
+        scope, params = _approval_outbox_scope()
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT approval_id, COUNT(*) FROM approval_audit_outbox "
+                f"WHERE approval_id = ANY(%s) AND delivered_at IS NULL AND {scope} "
+                "GROUP BY approval_id",
+                tuple([ids, *params]),
+            )
+            for approval_id, count in cur.fetchall():
+                pending[int(approval_id)] = int(count)
         return {
-            "status": appr.status,
-            "approvals_required": max(1, int(appr.approvals_required or 1)),
-            "approved_count": len(approvers),
-            "approvers": approvers,
-            "requested_by": appr.requested_by,
-            "audit_pending_count": audit_pending,
-            "effective": appr.status != "pending",
+            approval_id: _approval_state_view(
+                appr, _single_approver(appr, signoffs[approval_id]), pending[approval_id]
+            )
+            for approval_id, appr in listed.items()
         }
 
     def claim_approval(self, approval_id: int, principal: str) -> bool:
@@ -5894,7 +5990,7 @@ class PostgresWorldModel:
     ) -> int:
         """Count or delete old conversation messages in the active tenant.
 
-        W1-57: nothing references ``messages.id`` via foreign key, so this
+        Nothing references ``messages.id`` via foreign key, so this
         is a plain age-based delete scoped through the owning goal's tenant.
         """
         tenant = _required_retention_tenant("message retention")

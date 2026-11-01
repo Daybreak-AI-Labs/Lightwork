@@ -1,4 +1,4 @@
-"""Out-of-process model proxy (roadmap: 2027 H2 safety).
+"""Out-of-process model proxy.
 
 The agent process holds the provider API keys it uses to call models. If that
 process is prompt-injected or otherwise compromised, those keys are in reach.

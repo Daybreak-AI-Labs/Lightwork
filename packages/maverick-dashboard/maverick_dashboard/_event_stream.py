@@ -153,21 +153,64 @@ def sse_event(event) -> str:
     return f"id: {event.id}\nevent: {kind}\ndata: {json.dumps(event_payload(event))}\n\n"
 
 
+# After a wake-up, let the writes that land together (the result, the status
+# and the closing event of a finished task) all commit before re-reading.
+_WAKE_SETTLE_SECONDS = 0.02
+
+
+def _not_watching():
+    return None
+
+
+def _woken_sleep(world, goal_id):
+    """A sleep that also ends when this process commits a change to the goal.
+
+    The poll alone backed off to two seconds while a model call ran, so a
+    finished answer reached the page about 1.2 s after it was saved. A wake-up
+    only shortens the wait; the database read after it decides what is sent,
+    and writes from elsewhere still arrive on the timer. Returns the sleep and
+    a function that stops watching.
+    """
+    from maverick.goal_wakeup import unwatch, watch, world_key
+
+    path = getattr(world, "path", None)
+    if path is None or str(path) == ":memory:":
+        return asyncio.sleep, _not_watching
+    loop = asyncio.get_running_loop()
+    woken = asyncio.Event()
+    key = world_key(path)
+    token = watch(key, goal_id, lambda: loop.call_soon_threadsafe(woken.set))
+
+    async def sleep(delay):
+        try:
+            await asyncio.wait_for(woken.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            return
+        woken.clear()
+        await asyncio.sleep(_WAKE_SETTLE_SECONDS)
+
+    return sleep, lambda: unwatch(key, goal_id, token)
+
+
 async def goal_stream(request, world, goal_id, *, since, lease, visible,
                       legacy=False, limit=0, max_batch=200, poll=0.5,
                       max_poll=5.0, heartbeat=30.0, lifetime=300.0,
-                      clock=None, sleep=asyncio.sleep):
+                      clock=None, sleep=None):
     """One bounded pull/replay machine; transport adapters retain their frames.
 
     No prefetch queue: backpressure suspends the generator before another read.
-    Durable IDs, not an in-process broadcaster, remain the reconnect authority.
+    Durable IDs, not an in-process broadcaster, remain the reconnect authority:
+    an in-process wake-up (:func:`_woken_sleep`) only ends a wait early.
     """
+    stop_watching = _not_watching
     clock = clock or asyncio.get_running_loop().time
     now = clock()
     cadence = StreamCadence(now, now, poll, max_poll, heartbeat, lifetime, poll)
     last, sent = since, 0
     last_result: str | None = None
     try:
+        if sleep is None:
+            sleep, stop_watching = _woken_sleep(world, goal_id)
         yield "retry: 3000\n\n" if legacy else ": connected\n\n"
         cadence.sent(clock())
         while True:
@@ -223,4 +266,5 @@ async def goal_stream(request, world, goal_id, *, since, lease, visible,
     except asyncio.CancelledError:
         return
     finally:
+        stop_watching()
         lease.release()

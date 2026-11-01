@@ -3,7 +3,7 @@ const test=require('node:test'), assert=require('node:assert/strict'), fs=requir
 const {JSDOM}=require('jsdom');
 const {shell} = require('./_shell');
 const base=path.resolve(__dirname,'../../maverick_dashboard');
-const html=fs.readFileSync(path.join(base,'templates/_task_saved_views.html'),'utf8');
+const html=fs.readFileSync(path.join(base,'templates/_task_saved_views.html'),'utf8').replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
 const source=fs.readFileSync(path.join(base,'static/lightwork-task-views.js'),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const response=(data,status=200)=>({ok:status>=200&&status<300,status,json:async()=>data});
@@ -64,7 +64,7 @@ test('stored names render as text and destination is rebuilt from typed filters'
 });
 
 test('task page restores typed URL filters and binds real filter selection to Copilot',async()=>{
-  const template=fs.readFileSync(path.join(base,'templates/goals.html'),'utf8');
+  const template=fs.readFileSync(path.join(base,'templates/goals.html'),'utf8').replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
   const script=template.slice(template.indexOf('<script>')+8,template.indexOf('</script>'));
   const dom=new JSDOM('<input id="run-search-q"><div id="run-list"><div class="g-row" data-status="done"></div><div class="g-row" data-status="failed"></div></div><p id="run-search-status"></p><button id="run-search-retry"></button><button id="run-search-older" hidden></button><button id="run-more" data-next-offset="" hidden></button><button data-g-filter=""></button><button data-g-filter="failed"></button>',
     {url:'https://local.test/goals?status=failed',runScripts:'outside-only'});
@@ -76,7 +76,7 @@ test('task page restores typed URL filters and binds real filter selection to Co
 });
 
 test('choosing a filter or typing a search updates the address without adding history',async()=>{
-  const template=fs.readFileSync(path.join(base,'templates/goals.html'),'utf8');
+  const template=fs.readFileSync(path.join(base,'templates/goals.html'),'utf8').replace(/<script nonce="\{\{ csp_script_nonce \}\}">/g, "<script>");
   const script=template.slice(template.indexOf('<script>')+8,template.indexOf('</script>'));
   const dom=new JSDOM('<input id="run-search-q"><div id="run-list"><div class="g-row" data-status="done"></div><div class="g-row" data-status="failed"></div></div><p id="run-search-status"></p><button id="run-search-retry"></button><button id="run-search-older" hidden></button><button id="run-more" data-next-offset="" hidden></button><button data-g-filter=""></button><button data-g-filter="failed"></button><button data-g-filter="done"></button>',
     {url:'https://local.test/goals?status=done&view=mine#top',runScripts:'outside-only'});

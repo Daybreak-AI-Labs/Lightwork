@@ -1,4 +1,4 @@
-"""Voice biometric unlock — companion factor ONLY (roadmap: 2028 H2 UX).
+"""Voice biometric unlock — companion factor ONLY.
 
 Speaker verification for voice channels: enroll a speaker's voice profile,
 then score later utterances against it and gate *convenience* actions on a

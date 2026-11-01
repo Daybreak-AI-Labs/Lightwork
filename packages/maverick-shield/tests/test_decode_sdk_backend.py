@@ -1,4 +1,4 @@
-"""The decode pre-pass runs under the SDK backend too (council finding H2).
+"""The decode pre-pass runs under the SDK backend too.
 
 Previously the pre-pass was gated on the builtin backend, so any deployment that
 actually installed the agent-shield SDK got ZERO encoding-evasion coverage -- an

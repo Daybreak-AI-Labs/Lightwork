@@ -528,4 +528,5 @@ def read(request: Request, identifier: str):
 
 @router.get("/static/lightwork-local-flow-comparisons.js")
 def asset():
-    return FileResponse(Path(__file__).parent / "static" / "lightwork-local-flow-comparisons.js", media_type="application/javascript")
+    return FileResponse(Path(__file__).parent / "static" / "lightwork-local-flow-comparisons.js",
+                        media_type="application/javascript", headers={"Cache-Control": "public, max-age=300"})

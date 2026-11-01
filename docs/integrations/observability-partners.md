@@ -1,7 +1,7 @@
 # Observability and provider integrations
 
 How to wire Lightwork into OpenRouter, LangSmith, and Helicone using the
-surfaces that already ship: the OpenRouter provider in the 12-provider router
+surfaces that already ship: the OpenRouter provider in the 15-provider router
 (`llm.py`), the opt-in OpenTelemetry / Prometheus / Sentry observability layer
 (`observability.py`), and the `base_url` mechanism on OpenAI-compatible
 providers. Everything here is self-serve configuration — see the
@@ -11,7 +11,7 @@ Substrate, per the [platform overview](../index.md):
 
 - **OpenTelemetry traces, Prometheus `/metrics`, Sentry** — all opt-in,
   off by default (`observability.py`).
-- **OpenRouter** is one of 12 routable providers, with cost-aware routing
+- **OpenRouter** is one of 15 routable providers, with cost-aware routing
   (`cost_router.py`) and provider failover (`provider_failover.py`,
   `failover_policy.py`) layered on top, all opt-in.
 - **Generic OpenAI-compatible endpoints via `base_url`** — the mechanism
@@ -104,6 +104,21 @@ curl -s http://127.0.0.1:9100/metrics | grep maverick_llm
 # maverick_llm_cache_tokens_total, maverick_budget_dollars_spent, ...
 ```
 
+### OTLP metrics and request spans
+
+`MAVERICK_OTEL_METRICS=1` (or `[observability] otlp_metrics`) also sends the
+series that `/metrics` serves over OTLP, to the same collector and under the
+same names and labels. The metrics URL is the trace endpoint with `/v1/traces`
+replaced by `/v1/metrics`, so the endpoint must end in `/v1/traces`.
+
+With the OTLP exporter on, each dashboard HTTP request is also one server span,
+named by its route template, for example `HTTP GET /goals/{goal_id}`. Raw paths,
+query strings, headers and identities are not recorded on it. The W3C
+`traceparent` and `tracestate` headers, when a caller sends them, are read so the
+span joins the caller's trace; no other header is read. A request that matches no
+route is named `HTTP GET`. An unhandled error marks the span failed,
+but the error's message and stack trace are not recorded on it either.
+
 ## Helicone as a gateway
 
 Lightwork has **no bespoke Helicone integration** either. LLM gateways like
@@ -157,7 +172,5 @@ increments.
 
 These are **self-serve integration paths** built on generic protocols — an
 OpenRouter provider client, OTLP trace export, and OpenAI-compatible
-`base_url` overrides. No formal partnership, co-marketing arrangement, or
-endorsement with LangSmith, Helicone, OpenRouter, or any other vendor is
-implied; establishing those is maintainer/business work tracked in product
-planning, not an engineering artifact in this repo.
+`base_url` overrides. No formal partnership or endorsement with LangSmith,
+Helicone, OpenRouter, or any other vendor is implied.

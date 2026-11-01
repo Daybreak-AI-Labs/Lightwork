@@ -1407,6 +1407,38 @@ class AgentResult:
     tool_execution_unknown: bool = False
 
 
+class _NextTurn:
+    """Outcome of a turn phase: the model must answer again before the loop
+    can go on (a critique or nudge was appended to the history)."""
+
+
+_NEXT_TURN = _NextTurn()
+
+
+@dataclass
+class _RunState:
+    """Loop state one agent run carries from turn to turn."""
+
+    messages: list[dict]
+    bb: Any
+    ep_id: int
+    ckpt: Any
+    start_step: int
+    truncated_responses: int = 0
+
+
+@dataclass
+class _FinalVerification:
+    """What the verifier did with a FINAL answer: ``verdict`` when the LLM
+    judge ran to completion, ``attempted`` when it started (so a budget stop
+    mid-check reads as "did not complete", never as "checked"), ``skipped``
+    when the answer was handed over without the judge."""
+
+    verdict: Any = None
+    attempted: bool = False
+    skipped: bool = False
+    skip_reason: str = ""
+
 def _final_uncertainty_reasons(
     *,
     verifier_rejected: bool,
@@ -4502,8 +4534,14 @@ class Agent:
             # than let the AI keep acting in a conversation it may not own.
             log.warning("human-handoff check unreadable; stopping goal %s: %s", goal_id, e)
             return True
+        world = self.ctx.world
         try:
-            goal = self.ctx.world.get_goal(goal_id)
+            # The status column alone, not the whole row with its sealed fields
+            # (about 0.9 ms against 0.005, several times per model call).
+            if callable(getattr(type(world), "goal_stream_state", None)):
+                goal = world.goal_stream_state(goal_id)
+            else:
+                goal = world.get_goal(goal_id)
         except Exception as e:  # pragma: no cover -- a stop check must not crash the run
             log.debug("goal-cancelled check skipped: %s", e)
             return False
@@ -4794,50 +4832,66 @@ class Agent:
             except Exception as e:  # pragma: no cover
                 log.debug("checkpoint save skipped: %s", e)
 
-    async def _run_inner(self) -> AgentResult:  # noqa: C901  -- core agent turn loop; decompose only under dedicated review (see below)
+    async def _run_inner(self) -> AgentResult:
+        """The agent turn loop.
+
+        Each turn: the turn gate (checkpoints, halt, budget, cancellation,
+        review checkpoint, synthesis reserve), one model call over the
+        compacted history, then exactly one of: a truncated answer is asked
+        again, a FINAL answer is validated, verified and returned, a reply
+        without tools is nudged toward FINAL or returned, or the tool calls are
+        dispatched and their results appended. Running out of steps salvages
+        whatever edits reached the workdir.
+        """
+        st = self._open_run()
+        steps = (range(st.start_step, self.max_steps) if self.max_steps is not None
+                 else itertools.count(st.start_step))
+        for step in steps:
+            stopped = self._turn_gate(st, step)
+            if stopped is not None:
+                return stopped
+            resp = await self._complete_turn(st, step)
+            if isinstance(resp, AgentResult):
+                return resp
+            outcome = self._truncated_turn(st, resp)
+            if outcome is _NEXT_TURN:
+                continue
+            if outcome is not None:
+                return outcome
+            final = self._record_assistant_turn(st, resp)
+            if final is not None:
+                outcome = await self._handle_final(st, step, final)
+                if outcome is _NEXT_TURN:
+                    continue
+                return outcome
+            if resp.text:
+                st.bb.post(self.name, "observation", resp.text[:1000])
+            if not resp.tool_calls:
+                outcome = self._turn_without_tools(st, resp)
+                if outcome is _NEXT_TURN:
+                    continue
+                return outcome
+            stopped = await self._dispatch_tools(st, step, resp)
+            if stopped is not None:
+                return stopped
+        return self._exhausted_result()
+
+    # ---- run setup ----------------------------------------------------------
+
+    def _open_run(self) -> _RunState:
+        """Post the plan, build the first user turn (attachments + brief) and
+        resume durable loop state when a checkpoint exists."""
         bb = self.ctx.blackboard
         bb.post(self.name, "plan", f"role={self.role} depth={self.depth} brief={self.brief}")
-
-        # Opt-in prompt-cache pre-warm (default OFF). Warm only the orchestrator
-        # -- the first, largest, user-facing prompt -- once before its loop, so
-        # the first real turn reads the system+tools cache instead of paying the
-        # cold-write latency. Subagents are skipped (each has a distinct prompt;
-        # warming them would be a wasted write). Never blocks the run.
-        if self.role == "orchestrator" or getattr(self, "_is_goal_root", False):
-            try:
-                from .llm import cache_prewarm_enabled
-                if cache_prewarm_enabled():
-                    self.ctx.budget.check()
-                    self.ctx.llm.prewarm(
-                        self.system, self._tool_catalog_for_model(self.model), self.model,
-                        budget=self.ctx.budget)
-            except Exception:  # pragma: no cover -- prewarm never blocks a run
-                pass
-
-        # If the goal has image/PDF attachments, embed them as vision /
-        # document content blocks on the first user message so the agent can
-        # see them (PDFs are budgeted against the driving model's context
-        # window). Everything else (audio, video, Office docs, text) is
-        # reachable via `list_attachments` + `read_file` / `transcribe_audio`
-        # (opt-in so we don't blow token budget on huge media).
-        image_blocks: list[dict] = []
-        if self.depth == 0 and self.ctx.goal_id is not None:
-            try:
-                from .attachments import content_blocks_for_goal
-                image_blocks = content_blocks_for_goal(
-                    self.ctx.world, self.ctx.goal_id, model=self.model,
-                    shield=self.ctx.shield,
-                )
-            except Exception:
-                image_blocks = []
-
+        self._prewarm_prompt_cache()
+        image_blocks = self._goal_attachment_blocks()
         brief_text = (
             f"Sub-goal: {self.brief}\n\n"
             f"Recent swarm activity:\n{bb.render(40) or '(empty)'}\n\n"
             "Plan briefly, then act. End with FINAL: <answer> when done."
         )
         # Everything up to here is in the brief; later posts reach this agent
-        # as per-turn deltas (see the tool_results assembly below).
+        # as per-turn deltas (see _append_turn_trailers).
         if (tracker := getattr(self.ctx, "ifc", None)) is not None:
             tracker.read_blackboard(self.name, bb.posters_since(0))
         self._bb_cursor = bb.cursor()
@@ -4847,1254 +4901,1154 @@ class Agent:
         else:
             first_content = brief_text
         messages: list[dict] = [{"role": "user", "content": first_content}]
-
-        # Durable execution (Phase 1): resume a crashed single-agent run from its
-        # last committed step. Extracted to _resume_from_checkpoint; off by
-        # default, fail-open (leaves messages/start_step untouched on any error).
+        # Durable execution: resume a crashed single-agent run from its last
+        # committed step. Off by default; fail-open.
         ep_id = getattr(self.ctx, "episode_id", 0) or 0
         ckpt, start_step, messages = self._resume_from_checkpoint(messages, bb, ep_id)
+        return _RunState(messages=messages, bb=bb, ep_id=ep_id, ckpt=ckpt, start_step=start_step)
 
-        truncated_responses = 0
-        steps = (range(start_step, self.max_steps) if self.max_steps is not None
-                 else itertools.count(start_step))
-        for step in steps:
-            if self.depth == 0 and self.ctx.goal_id is not None:
-                from .conversation_inbox import checkpoint as conversation_checkpoint
-                try:
-                    conversation_checkpoint(self.ctx.world, self.ctx.goal_id,
-                                            checkpoint_id=f"{ep_id}:{self.checkpoint_id}:{step}", messages=messages)
-                except Exception as exc:
-                    # Pending guidance is never silently skipped before further
-                    # paid work. A fresh authorized retry replays its receipt.
-                    bb.post(self.name, "error", "Conversation guidance could not be verified at this checkpoint")
-                    return AgentResult(error="Conversation guidance is unavailable; review the pending message before resuming",
-                                       role=self.role, name=self.name, stop_kind="review_checkpoint", stop_detail=type(exc).__name__)
-            # Durable checkpoint at the turn boundary: commit the resumable loop
-            # state BEFORE the next LLM call, so a crash mid-step loses at most
-            # one step's work. Extracted to _save_checkpoint; fail-open.
-            self._save_checkpoint(ckpt, step=step, messages=messages, ep_id=ep_id)
+    def _prewarm_prompt_cache(self) -> None:
+        """Opt-in prompt-cache pre-warm (default OFF) for the goal root only:
+        its first, largest prompt then reads the system+tools cache instead of
+        paying the cold-write latency. Subagents each have a distinct prompt,
+        so warming them would be a wasted write. Never blocks the run."""
+        if not (self.role == "orchestrator" or getattr(self, "_is_goal_root", False)):
+            return
+        try:
+            from .llm import cache_prewarm_enabled
+            if cache_prewarm_enabled():
+                self.ctx.budget.check()
+                self.ctx.llm.prewarm(
+                    self.system, self._tool_catalog_for_model(self.model), self.model,
+                    budget=self.ctx.budget)
+        except Exception:  # pragma: no cover -- prewarm never blocks a run
+            pass
 
-            # Turn-boundary safety gate. Evaluate the global killswitch
-            # (`maverick halt`, the dashboard Halt button, or the HALT
-            # file) and the wall-clock/token/tool caps BEFORE the next LLM
-            # call, so a runaway or over-budget swarm stops promptly
-            # instead of only after the next record_* call. killswitch and
-            # budget.check() are cheap and side-effect-free.
+    def _goal_attachment_blocks(self) -> list[dict]:
+        """Image/PDF attachments of the goal as vision/document content blocks
+        for the first user message (PDFs are budgeted against the driving
+        model's context window). Other media stay reachable through
+        `list_attachments` + `read_file` / `transcribe_audio`."""
+        if self.depth != 0 or self.ctx.goal_id is None:
+            return []
+        try:
+            from .attachments import content_blocks_for_goal
+            return content_blocks_for_goal(
+                self.ctx.world, self.ctx.goal_id, model=self.model,
+                shield=self.ctx.shield,
+            )
+        except Exception:
+            return []
+
+    # ---- turn gate ----------------------------------------------------------
+
+    def _turn_gate(self, st: _RunState, step: int) -> AgentResult | None:
+        """Everything that must hold BEFORE the next paid model call: pending
+        conversation guidance is delivered, the durable checkpoint is saved,
+        the killswitch and every budget cap are evaluated, the goal is not
+        cancelled, the review checkpoint has not voted to halt, and a worker
+        has not eaten into the goal's synthesis reserve. Returns the stop
+        result when the run must end here."""
+        bb = st.bb
+        if self.depth == 0 and self.ctx.goal_id is not None:
+            from .conversation_inbox import checkpoint as conversation_checkpoint
             try:
-                killswitch.check()
-                self.ctx.budget.check()
-            except killswitch.Halted as e:
-                bb.post(self.name, "error", f"halted: {e}")
-                return AgentResult(error=f"halted: {e}", role=self.role, name=self.name,
-                                   stop_kind="killswitch", stop_detail=str(e))
-            except BudgetExceeded as e:
-                label = _budget_error_label(e)
-                bb.post(self.name, "error", f"{label}: {e}")
-                return AgentResult(error=f"{label}: {e}", role=self.role, name=self.name,
-                                   stop_kind=_budget_stop_kind(e), stop_detail=str(e))
-            if self._goal_cancelled():
-                bb.post(self.name, "error", "cancelled via dashboard")
-                return AgentResult(error="cancelled via dashboard", role=self.role, name=self.name)
+                conversation_checkpoint(self.ctx.world, self.ctx.goal_id,
+                                        checkpoint_id=f"{st.ep_id}:{self.checkpoint_id}:{step}",
+                                        messages=st.messages)
+            except Exception as exc:
+                # Pending guidance is never silently skipped before further
+                # paid work. A fresh authorized retry replays its receipt.
+                bb.post(self.name, "error", "Conversation guidance could not be verified at this checkpoint")
+                return AgentResult(error="Conversation guidance is unavailable; review the pending message before resuming",
+                                   role=self.role, name=self.name, stop_kind="review_checkpoint", stop_detail=type(exc).__name__)
+        # Commit the resumable loop state BEFORE the next LLM call, so a crash
+        # mid-step loses at most one step's work.
+        self._save_checkpoint(st.ckpt, step=step, messages=st.messages, ep_id=st.ep_id)
 
-            # Long-horizon review checkpoint (opt-in [safety] review_checkpoint):
-            # at the root, fire a human-review heartbeat every N dollars / M tool
-            # calls / T seconds. A reviewer vote to halt stops the run cleanly,
-            # like the killswitch. Inert (no checkpoint object) when unconfigured.
-            if (
-                (self.role == "orchestrator" or getattr(self, "_is_goal_root", False))
-                and self._review_checkpoint is not None
-            ):
-                _cp_event = self._review_checkpoint.check(self.ctx.budget)
-                if _cp_event is not None:
-                    _cp_detail = f"{_cp_event.reason}={_cp_event.value:g}"
-                    bb.post(self.name, "note",
-                            f"review checkpoint stopped the run at {_cp_detail}")
-                    # Tagged so the orchestrator reports a reviewer decision
-                    # (not "a HALT file is present" -- there is none, and
-                    # `maverick unhalt` would do nothing).
-                    return AgentResult(
-                        error=f"stopped at review checkpoint ({_cp_detail})",
-                        role=self.role, name=self.name,
-                        stop_kind="review_checkpoint", stop_detail=_cp_detail)
+        # The global killswitch (`maverick halt`, the dashboard Halt button or
+        # the HALT file) and the wall-clock/token/tool caps, checked before the
+        # call so a runaway or over-budget swarm stops promptly instead of only
+        # after the next record_* call. Both checks are cheap and side-effect-free.
+        try:
+            killswitch.check()
+            self.ctx.budget.check()
+        except killswitch.Halted as e:
+            bb.post(self.name, "error", f"halted: {e}")
+            return AgentResult(error=f"halted: {e}", role=self.role, name=self.name,
+                               stop_kind="killswitch", stop_detail=str(e))
+        except BudgetExceeded as e:
+            label = _budget_error_label(e)
+            bb.post(self.name, "error", f"{label}: {e}")
+            return AgentResult(error=f"{label}: {e}", role=self.role, name=self.name,
+                               stop_kind=_budget_stop_kind(e), stop_detail=str(e))
+        if self._goal_cancelled():
+            bb.post(self.name, "error", "cancelled via dashboard")
+            return AgentResult(error="cancelled via dashboard", role=self.role, name=self.name)
 
-            # #614 live-spend mirror: at the turn boundary, the root agent
-            # writes the budget's running totals onto its open episode row
-            # (throttled) so `maverick runs` / `maverick budget` reflect
-            # accruing spend mid-run instead of $0.00 until end_episode.
-            # Read-side only; never blocks the run.
-            self._mirror_live_spend(ep_id)
-
-            # #611 synthesis reserve: a deeper worker yields before it eats the
-            # budget the top-level goal needs to write its answer. Only workers
-            # (depth > 0) stop here; the orchestrator (depth 0) keeps the reserve
-            # to synthesize. Return whatever partial findings we have rather than
-            # spending into the reserve, so the run delivers SOMETHING instead of
-            # paying in full for nothing.
-            if self.depth > 0 and _SYNTHESIS_RESERVE > 0:
-                _b = self.ctx.budget
-                if (_b.max_dollars is not None
-                        and _b.dollars >= _b.max_dollars * (1.0 - _SYNTHESIS_RESERVE)):
-                    bb.post(
-                        self.name, "note",
-                        f"stopping at ${_b.dollars:.2f}/${_b.max_dollars:.2f} to "
-                        f"reserve the final {_SYNTHESIS_RESERVE:.0%} for synthesis",
-                    )
-                    partial = _last_assistant_text(messages)
-                    return AgentResult(
-                        final=partial or "(stopped early to reserve synthesis budget)",
-                        role=self.role, name=self.name,
-                    )
-
-            # Karpathy SOTA-review item: long-context compaction. Drop
-            # raw tool_result content >2KiB once it's behind the recent
-            # window, and hold the whole window under a total ceiling
-            # (MAVERICK_COMPACT_MAX_TOTAL_BYTES) by shrinking into the
-            # recent window oldest-first when a few results at the
-            # per-result cap add up. The first message (user brief) and
-            # the newest message are always kept.
-            # The compaction cost is O(len(messages)) per turn -- cheap
-            # vs. paying full-price input tokens for a 100k history.
-            # Default path is the heuristic shrink; an operator can opt into a
-            # richer strategy via [context] compaction_strategy (heuristic /
-            # learned / multimodal / streaming / graph) — all registered in the
-            # one compaction.plugins dispatcher, which fails safe to heuristic
-            # on an unknown name — or into the ledger-learned v6 picker via
-            # [compaction] hybrid (an explicit strategy name always wins). The
-            # agent's llm seam + conversation id reach the strategies that use
-            # them.
-            # Process-reward guidance (governed default-on): if the PRM has
-            # judged the last few steps unpromising, nudge a course-change. A
-            # no-op unless [self_improvement] prm_guidance is on AND a PRM is
-            # configured; an explicit sub-knob or env opt-out pauses it.
-            from .prm_guidance import maybe_nudge
-            _prm_note = maybe_nudge(self._promise_window.values())
-            if _prm_note and step - self._last_prm_nudge_step >= 3:
-                messages.append({"role": "user", "content": _prm_note})
-                self._last_prm_nudge_step = step
-
-            from .compaction.plugins import compact_with_async
-            try:
-                # Optional strategy I/O shares the same wall/halt guard and
-                # caller budget as the primary completion. No detached calls.
-                self.ctx.budget.check()
-                messages = await self._await_wall_clock_guarded(
-                    lambda messages=messages: compact_with_async(
-                        messages, llm=getattr(self, "_compaction_completion", None) or self.ctx.llm,
-                        conversation_id=str(getattr(self.ctx, "goal_id", "") or ""),
-                        budget=self.ctx.budget, scope=self.domain,
-                        run_state=getattr(self, "_learned_compaction_state", None),
-                    ),
-                    in_flight_note="compacting context",
-                )
-                # Check even when compaction finished in the same poll as a
-                # halt: a completed optional request cannot authorize another.
-                killswitch.check()
-                # Stop BEFORE spending another call when the cap is already
-                # hit. record_tokens() only checks AFTER the response lands,
-                # so a goal at 99% of budget would otherwise still fire one
-                # more (potentially expensive) call.
-                self.ctx.budget.check()
-                # Pass effort only when configured (None by default) so the call
-                # signature is unchanged when the feature is off. Likewise the
-                # answer preview: the chat's root turn streams, nothing else does.
-                _turn_kw = {"effort": self.effort} if self.effort else {}
-                _preview = self._answer_stream_for_turn()
-                if _preview is not None:
-                    _turn_kw["on_delta"] = _preview
-                _turn_model = self._speculative_turn_model()
-                resp = await self._complete_guarded(
-                    system=self.system,
-                    messages=messages,
-                    tools=self._tool_catalog_for_model(_turn_model),
-                    budget=self.ctx.budget,
-                    max_tokens=self._turn_max_tokens(),
-                    thinking_budget=self._thinking_budget(),
-                    model=_turn_model,
-                    **_turn_kw,
-                )
-                if _preview is not None:
-                    # Only a normal completion shows its tail: any other stop
-                    # (token or context limit, refusal, unknown) may cut mid-secret.
-                    _preview.finish(complete=getattr(resp, "stop_reason", None)
-                                    in {"end_turn", "stop_sequence", "tool_use", "stop",
-                                        "eos_token"})
-            except BudgetExceeded as e:
-                label = _budget_error_label(e)
-                bb.post(self.name, "error", f"{label}: {e}")
-                return AgentResult(error=f"{label}: {e}", role=self.role, name=self.name,
-                                   stop_kind=_budget_stop_kind(e), stop_detail=str(e))
-            except UsageAccountingError as e:
-                # The provider (or a gateway in front of it) returned usage the
-                # kernel cannot bill against the cap. Stop -- the call was
-                # already paid for -- but report a provider fault, not a cap
-                # breach: raising max_dollars cannot fix this (W1-17).
-                bb.post(self.name, "error", f"provider usage accounting: {e}")
-                return AgentResult(error=f"provider usage accounting: {e}",
-                                   role=self.role, name=self.name,
-                                   stop_kind="usage_accounting", stop_detail=str(e))
-            except killswitch.Halted as e:
-                # The killswitch tripped MID-generation; the in-flight call was
-                # cancelled by _complete_guarded. Stop like a turn-boundary halt.
-                bb.post(self.name, "error", f"halted: {e}")
-                return AgentResult(error=f"halted: {e}", role=self.role, name=self.name,
-                                   stop_kind="killswitch", stop_detail=str(e))
-            self._note_model_fallback(resp)
-            if (compaction_state := getattr(self, "_learned_compaction_state", None)) is not None:
-                compaction_state.note_turn()
-
-            # A provider token cutoff is not a completed answer, even if its
-            # partial text already contains FINAL. Incomplete tool arguments
-            # cannot be dispatched or installed as orphan tool-use history.
-            if resp.stop_reason in {"max_tokens", "length"}:
-                truncated_responses += 1
-                if truncated_responses >= 3:
-                    return AgentResult(
-                        error="model response remained incomplete after token cutoffs",
-                        role=self.role, name=self.name, stop_kind="incomplete",
-                        stop_detail="provider output token limit",
-                        verifier_confidence=0.0,
-                    )
-                if resp.text:
-                    messages.append({"role": "assistant", "content": resp.text})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "Your previous response was cut off by the provider's output limit. "
-                        "No tool calls from that response ran. Produce a complete, concise "
-                        "answer using FINAL: <answer>, or issue complete tool calls."
-                    ),
-                })
-                continue
-
-            truncated_responses = 0
-
-            # May 26 smoke fix: when the response contains BOTH a FINAL:
-            # marker AND tool_use blocks, the model is confused. If
-            # FINAL validation fails and we `continue`, the tool_use
-            # blocks get appended to assistant message history with NO
-            # matching tool_result — Anthropic returns HTTP 400 on the
-            # next turn:
-            #   messages.N: tool_use ids were found without tool_result
-            #   blocks immediately after
-            # Drop the tool_use blocks before assembling the assistant
-            # message; the FINAL critique is what we want the model to
-            # respond to, not the orphan tools.
-            final_dropped_tools = False
-            if resp.text and resp.tool_calls:
-                from .coding_mode import has_final_marker as _has_final
-                if _has_final(resp.text):
-                    resp.tool_calls = []
-                    final_dropped_tools = True
-
-            assistant_content = _assemble_assistant_content(resp, final_dropped_tools)
-            messages.append({"role": "assistant", "content": assistant_content})
-
-            if resp.text:
-                # Wave 12 hotfix: the prompt instructs the model to "End
-                # your turn with `FINAL:`" — many models emit a brief
-                # reasoning line BEFORE FINAL: (e.g. "Target: foo.py:bar
-                # — fix is X. FINAL: ..."). The prior `startswith` check
-                # missed those entirely; the SR block went to the
-                # blackboard as a plain observation, was never applied,
-                # and the orchestrator returned the raw SR text as
-                # `final` with `final_patch=None` — silent score loss.
-                # Use the LAST line-anchored FINAL: marker OUTSIDE any
-                # fenced code block. Skipping code-block markers
-                # prevents attacker-controlled quoted content (file
-                # bodies, tool output) from redefining the final
-                # answer mid-response.
-                from .coding_mode import find_final_marker_end as _final_end
-                _fe = _final_end(resp.text)
-                if _fe is not None:
-                    final = resp.text[_fe:].strip()
-                    # May 26 council fix: clear any stale `_final_patch`
-                    # from a previous FINAL attempt. If a prior FINAL was
-                    # rejected (defensive/validate) and the revised
-                    # FINAL has no apply-check (because _patch_validated
-                    # was True), the verifier/return branches would read
-                    # the STALE patch from the earlier FINAL and submit
-                    # it — wrong patch attribution.
-                    self._final_patch = None
-                    # May 26 council fix (agent-loop audit #4): also
-                    # clear `_already_verified` so the revised FINAL
-                    # gets verified afresh. Without this, a rejected
-                    # FINAL's `_already_verified=True` flag would skip
-                    # the verifier on the revised FINAL — and the
-                    # revised version would return with
-                    # `verifier_confidence=1.0` (the fallback when
-                    # verdict is None) regardless of actual quality.
-                    self._already_verified = False
-                    # #612: `_patch_validated` was sticky for the whole run
-                    # (only ever set True), so after one rejected patch a
-                    # later genuinely-different FINAL would skip its own
-                    # apply-check / diff extraction. Reset it alongside
-                    # `_already_verified` so each new FINAL re-validates the
-                    # patch it actually carries.
-                    #
-                    # W1-27: that reset also broke the "one retry max" this
-                    # flag was doing double duty for -- every "ask for
-                    # revision" branch below reads `_patch_validated` to
-                    # decide whether THIS is already a retry, but by the
-                    # time the model's revised FINAL arrives here, the reset
-                    # above has already flipped it back to False, so every
-                    # branch thinks it's seeing a first attempt again. The
-                    # reject/test-driven revision loop is bounded only by
-                    # `_patch_revision_attempts` below, which is deliberately
-                    # NOT reset per FINAL.
-                    self._patch_validated = False
-
-                    # Wave 8: coding-mode patch self-validation. If the
-                    # workdir is a git repo AND the FINAL contains a
-                    # unified diff, run `git apply --check` BEFORE
-                    # declaring FINAL. A rejected patch loops back with
-                    # the git error as critique -- catches the
-                    # ~30% of SWE-bench failures that are unapplyable
-                    # patches without burning a verifier round.
-                    coding_cfg = None
-                    try:
-                        from .coding_mode import (
-                            from_env as _cm_from_env,
-                        )
-                        from .coding_mode import (
-                            validate_patch,
-                        )
-                        coding_cfg = _cm_from_env()
-                    except Exception:
-                        pass
-
-                    if (coding_cfg is not None and coding_cfg.enabled
-                            and coding_cfg.require_apply_check
-                            and not getattr(self, "_patch_validated", False)
-                            and getattr(self, "_patch_revision_attempts", 0)
-                                < _MAX_PATCH_REVISION_ATTEMPTS):
-                        from pathlib import Path as _Path
-                        workdir = _Path(getattr(self.ctx.sandbox, "workdir", "."))
-                        # Wave 11: prefer SEARCH/REPLACE over unified-diff.
-                        from .edit_format import repair_prompt_for_failure
-                        # Serialize the apply->reset on the SHARED sandbox.workdir
-                        # with the same lock the verifier branch below uses.
-                        # require_apply_check runs for every coding-mode agent
-                        # regardless of depth/role, so concurrent coder children
-                        # under spawn_swarm would otherwise interleave apply +
-                        # `git reset --hard` on one git tree and corrupt each
-                        # other's edits. (Sequential with the verifier branch's
-                        # own `async with`, so no nested/reentrant acquire.)
-                        async with self.ctx.workdir_lock:
-                            # Offload blocking git/subprocess work to a thread so
-                            # it doesn't stall the event loop (freezing every other
-                            # concurrent sub-agent, the channel server, and the
-                            # dashboard) while the lock is held. Mirrors the
-                            # asyncio.to_thread wrap in tools/agent_bus_tool.py.
-                            patch, sr_summary = await asyncio.to_thread(
-                                self._extract_and_apply_patch, final)
-                            # Reset workdir AFTER capturing the diff so the
-                            # verifier branch (and downstream evaluators) see
-                            # HEAD when they re-apply.
-                            if sr_summary is not None:
-                                await asyncio.to_thread(self._reset_workdir)
-                                try:
-                                    self.ctx.blackboard.post(
-                                        self.name, "tool_signal",
-                                        "search_replace_used=1",
-                                    )
-                                except Exception:
-                                    pass
-                        if patch is None and sr_summary is not None:
-                            self._patch_validated = True
-                            self._patch_revision_attempts = (
-                                getattr(self, "_patch_revision_attempts", 0) + 1)
-                            bb.post(
-                                self.name, "verify",
-                                f"SEARCH/REPLACE apply failed: "
-                                f"{sr_summary.summary_text()}",
-                            )
-                            first_fail = next(
-                                (r for r in sr_summary.results if not r.ok),
-                                None,
-                            )
-                            critique = (
-                                "Your FINAL SEARCH/REPLACE block(s) did "
-                                "not apply.\n\n" + sr_summary.summary_text()
-                            )
-                            if first_fail is not None:
-                                critique += "\n\n" + repair_prompt_for_failure(
-                                    first_fail,
-                                )
-                            messages.append({"role": "user", "content": critique})
-                            continue
-                        if patch is None:
-                            self._patch_validated = True
-                            self._patch_revision_attempts = (
-                                getattr(self, "_patch_revision_attempts", 0) + 1)
-                            bb.post(
-                                self.name, "verify",
-                                "no valid SEARCH/REPLACE or unified diff in "
-                                "FINAL; asking for revision",
-                            )
-                            messages.append({
-                                "role": "user",
-                                "content": (
-                                    "Your FINAL did not contain valid edits. "
-                                    "Use SEARCH/REPLACE format (preferred):\n\n"
-                                    "path/to/file.py\n"
-                                    "<<<<<<< SEARCH\n"
-                                    "<exact existing lines>\n"
-                                    "=======\n"
-                                    "<new lines>\n"
-                                    ">>>>>>> REPLACE\n\n"
-                                    "Multiple blocks allowed, each can target "
-                                    "a different file. Or as a fallback, a "
-                                    "unified diff in ```diff fences."
-                                ),
-                            })
-                            continue
-                        # Stash the rendered patch so the verifier branch
-                        # doesn't have to re-parse.
-                        self._final_patch = patch
-                        # Wave 11: defensive validation BEFORE git apply
-                        # --check. Catches grader-fatal patches (test
-                        # files, dep pins, cheating-detector overlap)
-                        # so we ask for revision instead of submitting
-                        # something the grader will silently zero out.
-                        try:
-                            from .coding_mode import (
-                                defensive_validate,
-                                get_gold_patch,
-                            )
-                            def_check = defensive_validate(
-                                patch,
-                                fail_to_pass=coding_cfg.fail_to_pass,
-                                pass_to_pass=coding_cfg.pass_to_pass,
-                                gold_patch=get_gold_patch(),
-                                opaque=(os.environ.get(
-                                    "MAVERICK_BENCHMARK_OPAQUE", "1",
-                                ) != "0"),
-                            )
-                        except Exception:
-                            def_check = None
-                        if def_check is not None and not def_check.ok:
-                            # May 26 smoke fix: DO NOT set
-                            # `_patch_validated = True` here. The flag
-                            # short-circuits the entire SR-extract-apply
-                            # block on the next iteration, so when the
-                            # agent revises in response to the critique,
-                            # the new SR blocks are silently ignored
-                            # (workdir untouched, no patch produced).
-                            # Fired on pallets/flask-5014 — agent
-                            # produced correct fix, cheating detector
-                            # false-positive rejected it, then the
-                            # agent's revision attempt was no-op'd.
-                            bb.post(
-                                self.name, "verify",
-                                f"patch rejected by defensive validator: "
-                                f"{def_check.blocked_paths or def_check.warnings}",
-                            )
-                            messages.append({
-                                "role": "user",
-                                "content": def_check.critique(),
-                            })
-                            continue
-                        # Wave 12 hardening: when defensive validate
-                        # passes (ok=True) but emitted warnings (WARN
-                        # path — conftest.py / pyproject.toml etc.),
-                        # post the advisory to the blackboard so it
-                        # shows up in trace; we still ACCEPT the patch.
-                        if def_check is not None and def_check.warnings:
-                            bb.post(
-                                self.name, "verify",
-                                f"defensive warnings (accepted anyway): "
-                                f"{def_check.warnings}",
-                            )
-                        validation = validate_patch(
-                            patch, workdir,
-                            allow_checkout_eol=(
-                                sr_summary is not None
-                                and bool(getattr(self.ctx.sandbox, "host_visible_fs", False))
-                            ),
-                        )
-                        if not validation.valid:
-                            self._patch_validated = True  # one retry max
-                            self._patch_revision_attempts = (
-                                getattr(self, "_patch_revision_attempts", 0) + 1)
-                            bb.post(
-                                self.name, "verify",
-                                f"patch rejected: {validation.reason}",
-                            )
-                            messages.append({
-                                "role": "user",
-                                "content": (
-                                    "Your FINAL patch did not pass "
-                                    "`git apply --check`.\n\n"
-                                    f"Reason: {validation.reason}\n\n"
-                                    f"git stderr:\n{validation.git_apply_stderr}\n\n"
-                                    "Re-examine the exact line content via "
-                                    "`read_file`, fix the edits, and respond "
-                                    "with a new FINAL using SEARCH/REPLACE "
-                                    "blocks (preferred) or a unified diff."
-                                ),
-                            })
-                            continue
-
-                    # Karpathy SOTA-review item: verifier role exists in
-                    # prompt strings only -- no code actually runs a
-                    # second-pass check. Now we do, but only on the
-                    # orchestrator's FINAL (depth=0) and only once per
-                    # goal. Sub-agents skip verification (their parent
-                    # is the verifier of last resort).
-                    verdict = None
-                    # Set True once verify_final actually runs, so a verifier
-                    # that hits the budget (verdict stays None) is distinguished
-                    # from a role that never verifies -- see the FINAL return.
-                    verifier_attempted = False
-                    # Risk-proportional verification (opt-in): set True when the
-                    # orchestrator deems the FINAL low-risk and skips the LLM
-                    # verifier. Distinct from "attempted but did not complete".
-                    verification_skipped = False
-                    _skip_reason = ""
-                    # Only the orchestrator's FINAL is verified. Sub-agents
-                    # answer to their parent; the parent is their verifier.
-                    if (
-                        (self.role == "orchestrator" or getattr(self, "_is_goal_root", False))
-                        and self.depth == 0
-                        and not getattr(self, "_already_verified", False)
-                        and self.ctx.goal_id is not None
-                    ):
-                        # Wave 8: when SWE-bench-style ground-truth tests
-                        # are provided, run them as the verifier instead
-                        # of (or alongside) the LLM judge. Ground truth
-                        # >> opinion; this is how OpenHands gets to 72%.
-                        if (coding_cfg is not None and coding_cfg.enabled
-                                and (coding_cfg.fail_to_pass or coding_cfg.pass_to_pass)):
-                            async with self.ctx.workdir_lock:
-                                from pathlib import Path as _Path
-
-                                from .coding_mode import run_failing_tests
-                                workdir = _Path(getattr(self.ctx.sandbox, "workdir", "."))
-                                # Wave 11: reuse the patch produced by the
-                                # validate branch above (SEARCH/REPLACE or
-                                # unified-diff). If the validate branch was
-                                # skipped (e.g. require_apply_check=False),
-                                # extract here.
-                                patch = getattr(self, "_final_patch", None)
-                                if patch is None:
-                                    patch, _ = await asyncio.to_thread(
-                                        self._extract_and_apply_patch, final)
-                                    if patch is not None:
-                                        # We applied to disk; reset for the
-                                        # verifier's own apply.
-                                        await asyncio.to_thread(self._reset_workdir)
-                                if patch is None:
-                                    if (not getattr(self, "_patch_validated", False)
-                                            and getattr(self, "_patch_revision_attempts", 0)
-                                                < _MAX_PATCH_REVISION_ATTEMPTS):
-                                        self._patch_validated = True
-                                        self._patch_revision_attempts = (
-                                            getattr(self, "_patch_revision_attempts", 0) + 1)
-                                        bb.post(
-                                            self.name, "verify",
-                                            "no valid diff in FINAL; asking for revision",
-                                        )
-                                        messages.append({
-                                            "role": "user",
-                                            "content": (
-                                                "Your FINAL did not contain valid "
-                                                "edits. Use SEARCH/REPLACE blocks "
-                                                "(preferred) or a unified diff in "
-                                                "```diff fences."
-                                            ),
-                                        })
-                                        continue
-                                    # Already revised, or out of revision
-                                    # attempts (W1-27): surface and exit.
-                                    return AgentResult(
-                                        final=final, role=self.role, name=self.name,
-                                        verifier_confidence=0.0,
-                                        verifier_critique="no valid diff in FINAL",
-                                    )
-
-                                apply_ok = await asyncio.to_thread(self._git_apply, patch)
-
-                                # Wave 10 (D10): only run tests when apply
-                                # succeeded. Running tests on HEAD when apply
-                                # failed wastes a full test run (minutes on
-                                # SWE-bench), reports all FAIL_TO_PASS as
-                                # failing for the wrong reason, then misleads
-                                # the revision pass.
-                                if not apply_ok:
-                                    test_result = None  # type: ignore[assignment]
-                                else:
-                                    try:
-                                        # run_failing_tests shells out to pytest --
-                                        # minutes on SWE-bench. Off-load it so the
-                                        # whole event loop isn't frozen for the
-                                        # duration.
-                                        test_result = await asyncio.to_thread(
-                                            run_failing_tests,
-                                            workdir,
-                                            coding_cfg.fail_to_pass,
-                                            coding_cfg.pass_to_pass,
-                                            self.ctx.sandbox,
-                                            language=coding_cfg.language,
-                                        )
-                                    finally:
-                                        # Always revert the workdir so the next
-                                        # attempt reads HEAD, not the post-patch
-                                        # tree. Without this, successive
-                                        # revisions see corrupted state and
-                                        # compound the error.
-                                        await asyncio.to_thread(self._reset_workdir)
-
-                                if not apply_ok:
-                                    # Wave 10 (D10): tests were skipped because
-                                    # the patch wouldn't apply. Tell the agent
-                                    # so it doesn't 'fix' a working patch into
-                                    # a broken one based on apply-fail noise.
-                                    if (not getattr(self, "_patch_validated", False)
-                                            and getattr(self, "_patch_revision_attempts", 0)
-                                                < _MAX_PATCH_REVISION_ATTEMPTS):
-                                        self._patch_validated = True
-                                        self._patch_revision_attempts = (
-                                            getattr(self, "_patch_revision_attempts", 0) + 1)
-                                        bb.post(
-                                            self.name, "verify",
-                                            "patch failed to apply pre-test; "
-                                            "asking proposer to revise",
-                                        )
-                                        messages.append({
-                                            "role": "user",
-                                            "content": (
-                                                "Your patch could not be applied "
-                                                "via `git apply`. Re-examine the "
-                                                "current file contents with "
-                                                "`read_file` and produce a fresh "
-                                                "unified diff against HEAD."
-                                            ),
-                                        })
-                                        continue
-                                    # Already retried, or out of revision
-                                    # attempts (W1-27): surface and exit.
-                                    return AgentResult(
-                                        final=final, role=self.role, name=self.name,
-                                        verifier_confidence=0.0,
-                                        verifier_critique="patch did not apply",
-                                    )
-
-                                bb.post(
-                                    self.name, "verify",
-                                    f"test-driven verifier: {test_result.summary()}",
-                                )
-                                # Calibration auto-collection: tests are GROUND
-                                # TRUTH here, so also ask the LLM verifier and
-                                # record (confidence, correct) -- this is how the
-                                # calibration interlock learns whether the judge
-                                # still tracks reality. Opt-in (one extra verifier
-                                # call) + fail-open.
-                                try:
-                                    from . import calibration
-                                    if calibration.collect_from_coding_enabled():
-                                        from .verifier import verify_proposal
-                                        _cv = await verify_proposal(
-                                            self.brief, final, self.ctx.llm,
-                                            self.ctx.budget, proposer_model=self.model,
-                                        )
-                                        calibration.record_sample(
-                                            _cv.confidence, test_result.all_pass,
-                                            source="coding",
-                                        )
-                                except Exception:  # pragma: no cover -- never break the loop
-                                    pass
-                                if test_result.all_pass:
-                                    # Tests pass → accept FINAL. Skip LLM verifier.
-                                    self._already_verified = True
-                                    return AgentResult(
-                                        final=final, role=self.role, name=self.name,
-                                        verifier_confidence=test_result.score,
-                                        verifier_critique=test_result.summary(),
-                                        final_patch=getattr(self, "_final_patch", None),
-                                    )
-                                # Tests failed → revise. Wave 9 (council H2):
-                                # do NOT leak raw assertion bodies to the
-                                # agent in benchmark mode -- that's a recipe
-                                # for hardcoding to the test's expected value.
-                                # Wave 11 (PROBE-lite): classify the failure
-                                # type and surface a targeted hint without
-                                # leaking expected values.
-                                opaque = os.environ.get("MAVERICK_BENCHMARK_OPAQUE", "1") != "0"
-                                from .coding_mode import classify_failure
-                                fail_class, fail_hint = classify_failure(
-                                    test_result.raw_output,
-                                )
-                                class_line = (
-                                    f"Dominant failure class: {fail_class}.\n{fail_hint}"
-                                    if fail_class != "other" else ""
-                                )
-                                if opaque:
-                                    critique = (
-                                        "Your patch did not pass the required tests.\n\n"
-                                        f"{test_result.summary()}\n\n"
-                                        f"{class_line}\n\n"
-                                        "Revise based on your understanding of the "
-                                        "code, not from inspecting the failing "
-                                        "tests' expected values. Respond with a "
-                                        "new FINAL using SEARCH/REPLACE blocks."
-                                    ).strip()
-                                else:
-                                    critique = (
-                                        "Your patch did not pass the required tests.\n\n"
-                                        f"{test_result.summary()}\n\n"
-                                        f"{class_line}\n\n"
-                                        f"Recent test output:\n{test_result.raw_output}\n\n"
-                                        "Inspect the failing tests, revise your patch, "
-                                        "and respond with a new FINAL using "
-                                        "SEARCH/REPLACE blocks."
-                                    ).strip()
-                                # Wave 9 fix (#2): one retry max so a flaky
-                                # verifier or unfixable instance doesn't loop
-                                # forever. The retry IS re-verified. W1-27:
-                                # `_patch_validated` alone under-counts once a
-                                # new FINAL resets it, so also stop once the
-                                # (never-reset) revision-attempt cap is hit.
-                                if (getattr(self, "_patch_validated", False)
-                                        or getattr(self, "_patch_revision_attempts", 0)
-                                            >= _MAX_PATCH_REVISION_ATTEMPTS):
-                                    # Already revised, or out of revision
-                                    # attempts; accept whatever this is.
-                                    self._already_verified = True
-                                    return AgentResult(
-                                        final=final, role=self.role, name=self.name,
-                                        verifier_confidence=test_result.score,
-                                        verifier_critique=test_result.summary(),
-                                        final_patch=getattr(self, "_final_patch", None),
-                                    )
-                                self._patch_validated = True
-                                self._patch_revision_attempts = (
-                                    getattr(self, "_patch_revision_attempts", 0) + 1)
-                                messages.append({"role": "user", "content": critique})
-                                continue
-
-                        _coding_on = bool(coding_cfg and coding_cfg.enabled)
-                        _tool_calls = self.ctx.budget.tool_calls
-                        if (
-                            _risk_proportional_verify_enabled()
-                            and _final_is_low_risk(
-                                final, coding=_coding_on, tool_calls=_tool_calls,
-                            )
-                        ):
-                            verification_skipped = True
-                            _skip_reason = "risk-proportional: low-risk answer"
-                            bb.post(
-                                self.name, "verify",
-                                "verification skipped (risk-proportional: "
-                                "low-risk answer, no tools/code)",
-                            )
-                        elif self._conversational_answer_skips_verification(
-                            final, coding=_coding_on, tool_calls=_tool_calls,
-                        ):
-                            verification_skipped = True
-                            _skip_reason = "conversational answer, no tools or code"
-                            bb.post(
-                                self.name, "verify",
-                                "verification skipped (conversational answer: "
-                                "no tools, no code)",
-                            )
-                        else:
-                            try:
-                                from .verifier import verify_final
-                                verifier_attempted = True
-                                # Loop 1: a high-disagreement swarm fan-out asks
-                                # FINAL to face the cross-family ensemble.
-                                verdict = await verify_final(
-                                    self.brief, final, self.ctx.llm, self.ctx.budget,
-                                    proposer_model=self.model,
-                                    force_ensemble=bool(
-                                        getattr(self.ctx, "escalate_verification", False)
-                                    ),
-                                )
-                                # Stamp the verdict so the autonomy servo (Loop 2)
-                                # can tighten the leash on low-confidence runs.
-                                self.ctx.last_verifier_confidence = verdict.confidence
-                            except BudgetExceeded:
-                                verdict = None
-                                # Say so in the record: a check that started but
-                                # did not finish must never read as "checked".
-                                bb.post(self.name, "verify",
-                                        "verifier did not complete (budget)")
-                            except Exception as e:  # pragma: no cover
-                                bb.post(self.name, "error", f"verifier failed: {e}")
-                                verdict = None
-
-                        if verdict is not None and not verdict.accepts:
-                            if getattr(self, "_verifier_revision_used", False):
-                                self._already_verified = True
-                                bb.post(
-                                    self.name, "verify",
-                                    "verifier rejected after retry; accepting "
-                                    "second attempt per one-revision cap",
-                                )
-                                _reasons = _final_uncertainty_reasons(
-                                    verifier_rejected=True,
-                                    verifier_incomplete=False,
-                                    disagreement=float(
-                                        getattr(self.ctx, "last_disagreement", 0.0) or 0.0
-                                    ),
-                                    coding=bool(coding_cfg and coding_cfg.enabled),
-                                )
-                                return AgentResult(
-                                    final=_final_with_uncertainty_note(final, _reasons),
-                                    role=self.role, name=self.name,
-                                    verifier_confidence=verdict.confidence,
-                                    verifier_critique=verdict.critique,
-                                    final_patch=getattr(self, "_final_patch", None),
-                                )
-                            self._already_verified = True
-                            self._verifier_revision_used = True
-                            bb.post(
-                                self.name, "verify",
-                                f"verifier rejected (conf={verdict.confidence:.2f}): "
-                                f"{verdict.critique}",
-                            )
-                            # Capture the rejected draft as the "rejected" half of
-                            # a DPO preference pair: the agent revises until the
-                            # verifier accepts, so the accepted FINAL (high score)
-                            # vs THIS rejected draft (low score) is the genuine
-                            # quality gradient this architecture produces -- the
-                            # only one it produces, since every shipped answer is
-                            # driven to "good". Stashed on ctx (the same channel
-                            # donation reads last_disagreement/credit from); a bug
-                            # here must never break the run loop.
-                            try:
-                                self.ctx.last_rejected_attempts = (
-                                    getattr(self.ctx, "last_rejected_attempts", []) or []
-                                ) + [{
-                                    "text": final,
-                                    "confidence": float(verdict.confidence),
-                                    "critique": verdict.critique or "",
-                                }]
-                            except Exception:  # pragma: no cover -- never block
-                                pass
-                            # Hand the critique to the proposer as a
-                            # revision brief. One revision pass max --
-                            # the second attempt is accepted regardless.
-                            issues_block = (
-                                "\n".join(f"  - {i}" for i in verdict.issues)
-                                if verdict.issues else "  (no specific issues listed)"
-                            )
-                            messages.append({
-                                "role": "user",
-                                "content": (
-                                    "A verifier rejected your FINAL answer. "
-                                    "Revise and try again.\n\n"
-                                    f"Verifier confidence: {verdict.confidence:.2f}\n"
-                                    f"Critique: {verdict.critique}\n"
-                                    f"Specific issues:\n{issues_block}\n\n"
-                                    "Address each issue and respond with a "
-                                    "new FINAL: <revised answer>."
-                                ),
-                            })
-                            continue
-                        if verdict is not None:
-                            bb.post(
-                                self.name, "verify",
-                                f"verifier accepted (conf={verdict.confidence:.2f})",
-                            )
-
-                    bb.post(self.name, "finding", _finding_excerpt(final))
-                    self.ctx.world.append_message(
-                        self.ctx.goal_id, f"agent:{self.name}", final
-                    )
-                    # Stop hooks: the agent has decided on FINAL. Post-style
-                    # (non-blocking) -- observers/loggers, cannot veto.
-                    from .hooks import HookEvent
-                    from .hooks import emit as _emit_hook
-                    await _emit_hook(
-                        HookEvent.STOP,
-                        goal_id=self.ctx.goal_id, agent_role=self.role,
-                        extra={"name": self.name, "final": final},
-                    )
-                    self._score_step(step_index=step, is_final=True)
-                    if verification_skipped:
-                        _vconf, _vcrit = 0.9, (
-                            "verification skipped ("
-                            + (_skip_reason or "risk-proportional: low-risk answer")
-                            + ")"
-                        )
-                    elif verdict is not None:
-                        _vconf, _vcrit = verdict.confidence, verdict.critique
-                    elif verifier_attempted:
-                        # Attempted but hit budget/error (verdict is None) must
-                        # NOT report high confidence: a budget-starved run would
-                        # otherwise be donated as a "high-confidence" trajectory
-                        # it never verified (#612).
-                        _vconf, _vcrit = 0.0, "verifier did not complete (budget)"
-                    else:
-                        # Roles that never verify keep the 1.0 default.
-                        _vconf, _vcrit = 1.0, ""
-                    _reasons = _final_uncertainty_reasons(
-                        verifier_rejected=False,
-                        verifier_incomplete=(verdict is None and verifier_attempted),
-                        disagreement=float(
-                            getattr(self.ctx, "last_disagreement", 0.0) or 0.0
-                        ),
-                        coding=bool(coding_cfg and coding_cfg.enabled),
-                    )
-                    return AgentResult(
-                        final=_final_with_uncertainty_note(final, _reasons),
-                        role=self.role, name=self.name,
-                        verifier_confidence=_vconf,
-                        verifier_critique=_vcrit,
-                        final_patch=getattr(self, "_final_patch", None),
-                    )
-                bb.post(self.name, "observation", resp.text[:1000])
-
-            if not resp.tool_calls:
-                if resp.text:
-                    # W1-25: reaching here means resp.text carried no FINAL:
-                    # marker (find_final_marker_end returned None above) --
-                    # the entire verify/patch-validation/STOP-hook pipeline
-                    # only runs inside that branch. Give the model ONE
-                    # chance to comply before accepting an un-verified
-                    # answer as if it were fully confident.
-                    if not self._final_marker_nudge_used:
-                        self._final_marker_nudge_used = True
-                        messages.append({
-                            "role": "user",
-                            "content": (
-                                "Your response must end your turn with a line "
-                                "starting `FINAL:` followed by your complete "
-                                "answer -- required so it can be verified. "
-                                "Please restate your answer now, ending with "
-                                "`FINAL: <answer>`."
-                            ),
-                        })
-                        continue
-                    # Nudged once and still no marker: accept the text as
-                    # final, but report honestly that verification never
-                    # ran -- never the default verifier_confidence=1.0,
-                    # which would claim a confidence no verifier produced.
-                    from .coding_mode import from_env as _cm_from_env
-                    try:
-                        _coding_cfg = _cm_from_env()
-                    except Exception:
-                        _coding_cfg = None
-                    _reasons = _final_uncertainty_reasons(
-                        verifier_rejected=False, verifier_incomplete=False,
-                        disagreement=0.0,
-                        coding=bool(_coding_cfg and _coding_cfg.enabled),
-                        no_final_marker=True,
-                    )
-                    return AgentResult(
-                        final=_final_with_uncertainty_note(resp.text, _reasons),
-                        role=self.role, name=self.name,
-                        verifier_confidence=0.0,
-                        verifier_critique="no FINAL: marker; verification did not run",
-                    )
+        # Long-horizon review checkpoint (opt-in [safety] review_checkpoint): at
+        # the root, a human-review heartbeat every N dollars / M tool calls /
+        # T seconds. A reviewer vote to halt stops the run cleanly, like the
+        # killswitch. Inert (no checkpoint object) when unconfigured.
+        if (
+            (self.role == "orchestrator" or getattr(self, "_is_goal_root", False))
+            and self._review_checkpoint is not None
+        ):
+            _cp_event = self._review_checkpoint.check(self.ctx.budget)
+            if _cp_event is not None:
+                _cp_detail = f"{_cp_event.reason}={_cp_event.value:g}"
+                bb.post(self.name, "note",
+                        f"review checkpoint stopped the run at {_cp_detail}")
+                # Tagged so the orchestrator reports a reviewer decision, not
+                # "a HALT file is present" (there is none).
                 return AgentResult(
-                    error="empty response with no tools", role=self.role, name=self.name
+                    error=f"stopped at review checkpoint ({_cp_detail})",
+                    role=self.role, name=self.name,
+                    stop_kind="review_checkpoint", stop_detail=_cp_detail)
+
+        # The root agent mirrors the budget's running totals onto its open
+        # episode row (throttled) so `maverick runs` / `maverick budget` show
+        # accruing spend mid-run. Read-side only; never blocks the run.
+        self._mirror_live_spend(st.ep_id)
+
+        # Synthesis reserve: a deeper worker yields before it eats the budget
+        # the top-level goal needs to write its answer. Only workers (depth >
+        # 0) stop here; the orchestrator keeps the reserve to synthesize. The
+        # partial findings are returned so the run delivers something.
+        if self.depth > 0 and _SYNTHESIS_RESERVE > 0:
+            _b = self.ctx.budget
+            if (_b.max_dollars is not None
+                    and _b.dollars >= _b.max_dollars * (1.0 - _SYNTHESIS_RESERVE)):
+                bb.post(
+                    self.name, "note",
+                    f"stopping at ${_b.dollars:.2f}/${_b.max_dollars:.2f} to "
+                    f"reserve the final {_SYNTHESIS_RESERVE:.0%} for synthesis",
+                )
+                partial = _last_assistant_text(st.messages)
+                return AgentResult(
+                    final=partial or "(stopped early to reserve synthesis budget)",
+                    role=self.role, name=self.name,
+                )
+        return None
+
+    # ---- model call ---------------------------------------------------------
+
+    async def _complete_turn(self, st: _RunState, step: int):
+        """Compact the history and make this turn's model call.
+
+        Returns the LLM response, or the stop result when the budget, the
+        provider's usage accounting or the killswitch ended the run during the
+        call. Compaction may hand back a new history list; the run state is
+        rebound to it so every later append goes to the list the model saw.
+        """
+        bb = st.bb
+        messages = st.messages
+        # Process-reward guidance (governed default-on): when the PRM has
+        # judged the last few steps unpromising, nudge a course change, at
+        # most once every three steps. A no-op unless [self_improvement]
+        # prm_guidance is on AND a PRM is configured.
+        from .prm_guidance import maybe_nudge
+        _prm_note = maybe_nudge(self._promise_window.values())
+        if _prm_note and step - self._last_prm_nudge_step >= 3:
+            messages.append({"role": "user", "content": _prm_note})
+            self._last_prm_nudge_step = step
+
+        # Long-context compaction: drop raw tool_result content once it is
+        # behind the recent window and hold the window under a total ceiling.
+        # The first message (the brief) and the newest are always kept. The
+        # heuristic is the default; [context] compaction_strategy picks a
+        # richer plugin and [compaction] hybrid the ledger-learned picker.
+        from .compaction.plugins import compact_with_async
+        try:
+            # Optional strategy I/O shares the same wall/halt guard and caller
+            # budget as the primary completion. No detached calls.
+            self.ctx.budget.check()
+            messages = await self._await_wall_clock_guarded(
+                lambda messages=messages: compact_with_async(
+                    messages, llm=getattr(self, "_compaction_completion", None) or self.ctx.llm,
+                    conversation_id=str(getattr(self.ctx, "goal_id", "") or ""),
+                    budget=self.ctx.budget, scope=self.domain,
+                    run_state=getattr(self, "_learned_compaction_state", None),
+                ),
+                in_flight_note="compacting context",
+            )
+            st.messages = messages
+            # Check even when compaction finished in the same poll as a halt:
+            # a completed optional request cannot authorize another.
+            killswitch.check()
+            # Stop BEFORE spending another call when the cap is already hit:
+            # record_tokens() only checks AFTER the response lands.
+            self.ctx.budget.check()
+            # Effort only when configured (None by default) so the call
+            # signature is unchanged when the feature is off. Likewise the
+            # answer preview: the chat's root turn streams, nothing else does.
+            _turn_kw = {"effort": self.effort} if self.effort else {}
+            _preview = self._answer_stream_for_turn()
+            if _preview is not None:
+                _turn_kw["on_delta"] = _preview
+            _turn_model = self._speculative_turn_model()
+            resp = await self._complete_guarded(
+                system=self.system,
+                messages=messages,
+                tools=self._tool_catalog_for_model(_turn_model),
+                budget=self.ctx.budget,
+                max_tokens=self._turn_max_tokens(),
+                thinking_budget=self._thinking_budget(),
+                model=_turn_model,
+                **_turn_kw,
+            )
+            if _preview is not None:
+                # Only a normal completion shows its tail: any other stop
+                # (token or context limit, refusal, unknown) may cut mid-secret.
+                _preview.finish(complete=getattr(resp, "stop_reason", None)
+                                in {"end_turn", "stop_sequence", "tool_use", "stop",
+                                    "eos_token"})
+        except BudgetExceeded as e:
+            label = _budget_error_label(e)
+            bb.post(self.name, "error", f"{label}: {e}")
+            return AgentResult(error=f"{label}: {e}", role=self.role, name=self.name,
+                               stop_kind=_budget_stop_kind(e), stop_detail=str(e))
+        except UsageAccountingError as e:
+            # The provider (or a gateway in front of it) returned usage the
+            # kernel cannot bill against the cap. Stop -- the call was already
+            # paid for -- but report a provider fault, not a cap breach:
+            # raising max_dollars cannot fix this.
+            bb.post(self.name, "error", f"provider usage accounting: {e}")
+            return AgentResult(error=f"provider usage accounting: {e}",
+                               role=self.role, name=self.name,
+                               stop_kind="usage_accounting", stop_detail=str(e))
+        except killswitch.Halted as e:
+            # The killswitch tripped MID-generation; the in-flight call was
+            # cancelled by _complete_guarded. Stop like a turn-boundary halt.
+            bb.post(self.name, "error", f"halted: {e}")
+            return AgentResult(error=f"halted: {e}", role=self.role, name=self.name,
+                               stop_kind="killswitch", stop_detail=str(e))
+        self._note_model_fallback(resp)
+        if (compaction_state := getattr(self, "_learned_compaction_state", None)) is not None:
+            compaction_state.note_turn()
+        return resp
+
+    def _truncated_turn(self, st: _RunState, resp):
+        """A provider token cutoff is not a completed answer, even if its
+        partial text already contains FINAL, and its incomplete tool arguments
+        cannot be dispatched or kept as orphan tool-use history. Ask again;
+        three cutoffs in a row end the run as incomplete."""
+        if resp.stop_reason not in {"max_tokens", "length"}:
+            st.truncated_responses = 0
+            return None
+        st.truncated_responses += 1
+        if st.truncated_responses >= 3:
+            return AgentResult(
+                error="model response remained incomplete after token cutoffs",
+                role=self.role, name=self.name, stop_kind="incomplete",
+                stop_detail="provider output token limit",
+                verifier_confidence=0.0,
+            )
+        if resp.text:
+            st.messages.append({"role": "assistant", "content": resp.text})
+        st.messages.append({
+            "role": "user",
+            "content": (
+                "Your previous response was cut off by the provider's output limit. "
+                "No tool calls from that response ran. Produce a complete, concise "
+                "answer using FINAL: <answer>, or issue complete tool calls."
+            ),
+        })
+        return _NEXT_TURN
+
+    def _record_assistant_turn(self, st: _RunState, resp) -> str | None:
+        """Append the assistant turn to the history and return the FINAL
+        answer it carries, or None.
+
+        A response with BOTH a FINAL marker and tool_use blocks is a confused
+        model; the tool_use blocks are dropped before the message is stored,
+        because a tool_use with no tool_result right after it makes the next
+        provider call fail (HTTP 400). The answer starts at the LAST
+        line-anchored FINAL: marker outside any fenced code block, so quoted
+        content (file bodies, tool output) cannot redefine the answer, and a
+        reasoning line before the marker does not hide it.
+        """
+        final_dropped_tools = False
+        if resp.text and resp.tool_calls:
+            from .coding_mode import has_final_marker as _has_final
+            if _has_final(resp.text):
+                resp.tool_calls = []
+                final_dropped_tools = True
+        assistant_content = _assemble_assistant_content(resp, final_dropped_tools)
+        st.messages.append({"role": "assistant", "content": assistant_content})
+        if not resp.text:
+            return None
+        from .coding_mode import find_final_marker_end as _final_end
+        _fe = _final_end(resp.text)
+        if _fe is None:
+            return None
+        return resp.text[_fe:].strip()
+
+    # ---- FINAL handling -----------------------------------------------------
+
+    async def _handle_final(self, st: _RunState, step: int, final: str):
+        """Validate, verify and complete a FINAL answer. Returns the run's
+        result, or ``_NEXT_TURN`` when a critique was appended and the model
+        must revise."""
+        self._begin_final()
+        coding_cfg = self._coding_config()
+        if await self._validate_final_patch(st, final, coding_cfg) is _NEXT_TURN:
+            return _NEXT_TURN
+        verification = _FinalVerification()
+        if self._verifies_final():
+            if (coding_cfg is not None and coding_cfg.enabled
+                    and (coding_cfg.fail_to_pass or coding_cfg.pass_to_pass)):
+                return await self._verify_against_tests(st, final, coding_cfg)
+            judged = await self._judge_final(st, final, coding_cfg)
+            if not isinstance(judged, _FinalVerification):
+                return judged
+            verification = judged
+        return await self._finish_final(st, step, final, coding_cfg, verification)
+
+    def _begin_final(self) -> None:
+        """Forget the previous FINAL attempt's patch and verdict so a revised
+        FINAL is validated and verified afresh, with the patch it actually
+        carries. `_patch_revision_attempts` is deliberately NOT reset: it is
+        the run-wide bound on the revision loop."""
+        self._final_patch = None
+        self._already_verified = False
+        self._patch_validated = False
+
+    def _coding_config(self):
+        """The coding-mode configuration, or None when it cannot be read."""
+        try:
+            from .coding_mode import from_env as _cm_from_env
+            return _cm_from_env()
+        except Exception:
+            return None
+
+    def _verifies_final(self) -> bool:
+        """Only the goal root's FINAL is verified, once per goal. Sub-agents
+        answer to their parent; the parent is their verifier."""
+        return (
+            (self.role == "orchestrator" or getattr(self, "_is_goal_root", False))
+            and self.depth == 0
+            and not getattr(self, "_already_verified", False)
+            and self.ctx.goal_id is not None
+        )
+
+    def _request_patch_revision(self, st: _RunState, note: str | None, prompt: str) -> bool:
+        """Ask the model to revise its patch while the run's revision budget
+        allows: marks this FINAL as validated, counts the attempt, posts
+        ``note`` (when given) and appends ``prompt``. Returns False, changing
+        nothing, when the budget is spent and the caller must return what it
+        has."""
+        if (getattr(self, "_patch_validated", False)
+                or getattr(self, "_patch_revision_attempts", 0) >= _MAX_PATCH_REVISION_ATTEMPTS):
+            return False
+        self._patch_validated = True
+        self._patch_revision_attempts = getattr(self, "_patch_revision_attempts", 0) + 1
+        if note is not None:
+            st.bb.post(self.name, "verify", note)
+        st.messages.append({"role": "user", "content": prompt})
+        return True
+
+    # ---- coding-mode patch validation ----------------------------------------
+
+    async def _validate_final_patch(self, st: _RunState, final: str, coding_cfg):
+        """Coding-mode patch self-validation: when the workdir is a git repo
+        and the FINAL carries edits, extract the patch, run the defensive
+        validator and `git apply --check` BEFORE declaring FINAL. A rejected
+        patch goes back to the model with the failure as critique, bounded by
+        the run's revision budget, so an unapplyable patch never costs a
+        verifier round. Returns ``_NEXT_TURN`` when a critique was appended.
+
+        The apply and reset run under the shared workdir lock (concurrent
+        coder children under spawn_swarm share one git tree) and off the event
+        loop (blocking git work would freeze every other agent, the channel
+        server and the dashboard while the lock is held).
+        """
+        if not (coding_cfg is not None and coding_cfg.enabled
+                and coding_cfg.require_apply_check
+                and not getattr(self, "_patch_validated", False)
+                and getattr(self, "_patch_revision_attempts", 0) < _MAX_PATCH_REVISION_ATTEMPTS):
+            return None
+        from pathlib import Path as _Path
+
+        from .coding_mode import validate_patch
+        from .edit_format import repair_prompt_for_failure
+        bb = st.bb
+        workdir = _Path(getattr(self.ctx.sandbox, "workdir", "."))
+        async with self.ctx.workdir_lock:
+            patch, sr_summary = await asyncio.to_thread(self._extract_and_apply_patch, final)
+            # Reset AFTER capturing the diff so the verifier (and downstream
+            # evaluators) see HEAD when they re-apply.
+            if sr_summary is not None:
+                await asyncio.to_thread(self._reset_workdir)
+                try:
+                    self.ctx.blackboard.post(self.name, "tool_signal", "search_replace_used=1")
+                except Exception:
+                    pass
+        if patch is None and sr_summary is not None:
+            first_fail = next((r for r in sr_summary.results if not r.ok), None)
+            critique = (
+                "Your FINAL SEARCH/REPLACE block(s) did "
+                "not apply.\n\n" + sr_summary.summary_text()
+            )
+            if first_fail is not None:
+                critique += "\n\n" + repair_prompt_for_failure(first_fail)
+            self._request_patch_revision(
+                st, f"SEARCH/REPLACE apply failed: {sr_summary.summary_text()}", critique)
+            return _NEXT_TURN
+        if patch is None:
+            self._request_patch_revision(
+                st, "no valid SEARCH/REPLACE or unified diff in FINAL; asking for revision",
+                (
+                    "Your FINAL did not contain valid edits. "
+                    "Use SEARCH/REPLACE format (preferred):\n\n"
+                    "path/to/file.py\n"
+                    "<<<<<<< SEARCH\n"
+                    "<exact existing lines>\n"
+                    "=======\n"
+                    "<new lines>\n"
+                    ">>>>>>> REPLACE\n\n"
+                    "Multiple blocks allowed, each can target "
+                    "a different file. Or as a fallback, a "
+                    "unified diff in ```diff fences."
+                ),
+            )
+            return _NEXT_TURN
+        # Stash the rendered patch so the verifier does not re-parse it.
+        self._final_patch = patch
+        # Grader-fatal patches (test files, dependency pins, overlap with the
+        # gold patch) are sent back for revision instead of being submitted
+        # for the grader to zero out. A warning-only result is accepted; the
+        # advisory goes to the blackboard so it shows in the trace. The flags
+        # are left alone here: the revised edits must be extracted again.
+        def_check = self._defensive_check(patch, coding_cfg)
+        if def_check is not None and not def_check.ok:
+            bb.post(
+                self.name, "verify",
+                f"patch rejected by defensive validator: "
+                f"{def_check.blocked_paths or def_check.warnings}",
+            )
+            st.messages.append({"role": "user", "content": def_check.critique()})
+            return _NEXT_TURN
+        if def_check is not None and def_check.warnings:
+            bb.post(
+                self.name, "verify",
+                f"defensive warnings (accepted anyway): "
+                f"{def_check.warnings}",
+            )
+        validation = validate_patch(
+            patch, workdir,
+            allow_checkout_eol=(
+                sr_summary is not None
+                and bool(getattr(self.ctx.sandbox, "host_visible_fs", False))
+            ),
+        )
+        if not validation.valid:
+            self._request_patch_revision(
+                st, f"patch rejected: {validation.reason}",
+                (
+                    "Your FINAL patch did not pass "
+                    "`git apply --check`.\n\n"
+                    f"Reason: {validation.reason}\n\n"
+                    f"git stderr:\n{validation.git_apply_stderr}\n\n"
+                    "Re-examine the exact line content via "
+                    "`read_file`, fix the edits, and respond "
+                    "with a new FINAL using SEARCH/REPLACE "
+                    "blocks (preferred) or a unified diff."
+                ),
+            )
+            return _NEXT_TURN
+        return None
+
+    def _defensive_check(self, patch: str, coding_cfg):
+        """The defensive validator's verdict on ``patch``, or None when it
+        cannot run (never blocks the loop)."""
+        try:
+            from .coding_mode import defensive_validate, get_gold_patch
+            return defensive_validate(
+                patch,
+                fail_to_pass=coding_cfg.fail_to_pass,
+                pass_to_pass=coding_cfg.pass_to_pass,
+                gold_patch=get_gold_patch(),
+                opaque=(os.environ.get("MAVERICK_BENCHMARK_OPAQUE", "1") != "0"),
+            )
+        except Exception:
+            return None
+
+    # ---- verification -------------------------------------------------------
+
+    async def _verify_against_tests(self, st: _RunState, final: str, coding_cfg):
+        """Ground-truth verification for coding tasks: the configured
+        FAIL_TO_PASS / PASS_TO_PASS tests judge the patch instead of the LLM
+        verifier. Tests run only when the patch applies (testing HEAD after a
+        failed apply reports every test as failing for the wrong reason);
+        failing tests ask for one revision within the run's revision budget,
+        after which the answer is accepted with the tests' score. Every path
+        here ends the FINAL: a result or ``_NEXT_TURN``."""
+        from pathlib import Path as _Path
+
+        from .coding_mode import run_failing_tests
+        bb = st.bb
+        async with self.ctx.workdir_lock:
+            workdir = _Path(getattr(self.ctx.sandbox, "workdir", "."))
+            # Reuse the patch the apply check produced; extract here when
+            # that check was skipped (require_apply_check=False).
+            patch = getattr(self, "_final_patch", None)
+            if patch is None:
+                patch, _ = await asyncio.to_thread(self._extract_and_apply_patch, final)
+                if patch is not None:
+                    # Applied to disk; reset for the verifier's own apply.
+                    await asyncio.to_thread(self._reset_workdir)
+            if patch is None:
+                if self._request_patch_revision(
+                    st, "no valid diff in FINAL; asking for revision",
+                    (
+                        "Your FINAL did not contain valid "
+                        "edits. Use SEARCH/REPLACE blocks "
+                        "(preferred) or a unified diff in "
+                        "```diff fences."
+                    ),
+                ):
+                    return _NEXT_TURN
+                return AgentResult(
+                    final=final, role=self.role, name=self.name,
+                    verifier_confidence=0.0,
+                    verifier_critique="no valid diff in FINAL",
                 )
 
-            # Tool-call boundary: honour a halt that arrived while the
-            # model was producing this turn (e.g. the user hit Halt
-            # during a long think) before executing any tool.
+            apply_ok = await asyncio.to_thread(self._git_apply, patch)
+            test_result = None
+            if apply_ok:
+                try:
+                    # Minutes on SWE-bench: off the event loop.
+                    test_result = await asyncio.to_thread(
+                        run_failing_tests,
+                        workdir,
+                        coding_cfg.fail_to_pass,
+                        coding_cfg.pass_to_pass,
+                        self.ctx.sandbox,
+                        language=coding_cfg.language,
+                    )
+                finally:
+                    # Always revert so the next attempt reads HEAD, not the
+                    # post-patch tree.
+                    await asyncio.to_thread(self._reset_workdir)
+
+            if not apply_ok:
+                if self._request_patch_revision(
+                    st, "patch failed to apply pre-test; asking proposer to revise",
+                    (
+                        "Your patch could not be applied "
+                        "via `git apply`. Re-examine the "
+                        "current file contents with "
+                        "`read_file` and produce a fresh "
+                        "unified diff against HEAD."
+                    ),
+                ):
+                    return _NEXT_TURN
+                return AgentResult(
+                    final=final, role=self.role, name=self.name,
+                    verifier_confidence=0.0,
+                    verifier_critique="patch did not apply",
+                )
+
+            bb.post(
+                self.name, "verify",
+                f"test-driven verifier: {test_result.summary()}",
+            )
+            await self._record_calibration_sample(final, test_result)
+            if test_result.all_pass:
+                # Tests pass: accept FINAL without the LLM verifier.
+                self._already_verified = True
+                return AgentResult(
+                    final=final, role=self.role, name=self.name,
+                    verifier_confidence=test_result.score,
+                    verifier_critique=test_result.summary(),
+                    final_patch=getattr(self, "_final_patch", None),
+                )
+            if self._request_patch_revision(st, None, self._failed_tests_critique(test_result)):
+                return _NEXT_TURN
+            # Revision budget spent: accept what this is, with the tests' score.
+            self._already_verified = True
+            return AgentResult(
+                final=final, role=self.role, name=self.name,
+                verifier_confidence=test_result.score,
+                verifier_critique=test_result.summary(),
+                final_patch=getattr(self, "_final_patch", None),
+            )
+
+    async def _record_calibration_sample(self, final: str, test_result) -> None:
+        """Calibration auto-collection: with ground truth in hand, also ask the
+        LLM verifier and record (confidence, correct) so the calibration
+        interlock learns whether the judge still tracks reality. Opt-in (one
+        extra verifier call) and fail-open."""
+        try:
+            from . import calibration
+            if calibration.collect_from_coding_enabled():
+                from .verifier import verify_proposal
+                _cv = await verify_proposal(
+                    self.brief, final, self.ctx.llm,
+                    self.ctx.budget, proposer_model=self.model,
+                )
+                calibration.record_sample(
+                    _cv.confidence, test_result.all_pass,
+                    source="coding",
+                )
+        except Exception:  # pragma: no cover -- never break the loop
+            pass
+
+    @staticmethod
+    def _failed_tests_critique(test_result) -> str:
+        """The revision brief after failing tests. In benchmark-opaque mode
+        (the default) the raw test output is withheld so a revision cannot
+        hard-code the tests' expected values; the failure class and a
+        targeted hint are surfaced instead."""
+        opaque = os.environ.get("MAVERICK_BENCHMARK_OPAQUE", "1") != "0"
+        from .coding_mode import classify_failure
+        fail_class, fail_hint = classify_failure(
+            test_result.raw_output,
+        )
+        class_line = (
+            f"Dominant failure class: {fail_class}.\n{fail_hint}"
+            if fail_class != "other" else ""
+        )
+        if opaque:
+            return (
+                "Your patch did not pass the required tests.\n\n"
+                f"{test_result.summary()}\n\n"
+                f"{class_line}\n\n"
+                "Revise based on your understanding of the "
+                "code, not from inspecting the failing "
+                "tests' expected values. Respond with a "
+                "new FINAL using SEARCH/REPLACE blocks."
+            ).strip()
+        return (
+            "Your patch did not pass the required tests.\n\n"
+            f"{test_result.summary()}\n\n"
+            f"{class_line}\n\n"
+            f"Recent test output:\n{test_result.raw_output}\n\n"
+            "Inspect the failing tests, revise your patch, "
+            "and respond with a new FINAL using "
+            "SEARCH/REPLACE blocks."
+        ).strip()
+
+    async def _judge_final(self, st: _RunState, final: str, coding_cfg):
+        """The LLM verifier's pass over the goal root's FINAL. Low-risk answers
+        (risk-proportional verification, opt-in) and conversational answers
+        with no tools or code skip the judge. A rejection sends the critique
+        back as a revision brief once; the second attempt is accepted. Returns
+        the ``_FinalVerification`` to complete with, ``_NEXT_TURN`` for a
+        revision, or the result when the rejected retry is accepted."""
+        bb = st.bb
+        verification = _FinalVerification()
+        _coding_on = bool(coding_cfg and coding_cfg.enabled)
+        _tool_calls = self.ctx.budget.tool_calls
+        if (
+            _risk_proportional_verify_enabled()
+            and _final_is_low_risk(
+                final, coding=_coding_on, tool_calls=_tool_calls,
+            )
+        ):
+            verification.skipped = True
+            verification.skip_reason = "risk-proportional: low-risk answer"
+            bb.post(
+                self.name, "verify",
+                "verification skipped (risk-proportional: "
+                "low-risk answer, no tools/code)",
+            )
+            return verification
+        if self._conversational_answer_skips_verification(
+            final, coding=_coding_on, tool_calls=_tool_calls,
+        ):
+            verification.skipped = True
+            verification.skip_reason = "conversational answer, no tools or code"
+            bb.post(
+                self.name, "verify",
+                "verification skipped (conversational answer: "
+                "no tools, no code)",
+            )
+            return verification
+        verdict = None
+        try:
+            from .verifier import verify_final
+            verification.attempted = True
+            # A high-disagreement swarm fan-out asks FINAL to face the
+            # cross-family ensemble.
+            verdict = await verify_final(
+                self.brief, final, self.ctx.llm, self.ctx.budget,
+                proposer_model=self.model,
+                force_ensemble=bool(
+                    getattr(self.ctx, "escalate_verification", False)
+                ),
+            )
+            # Stamp the verdict so the autonomy servo can tighten the leash
+            # on low-confidence runs.
+            self.ctx.last_verifier_confidence = verdict.confidence
+        except BudgetExceeded:
+            verdict = None
+            # Say so in the record: a check that started but did not finish
+            # must never read as "checked".
+            bb.post(self.name, "verify",
+                    "verifier did not complete (budget)")
+        except Exception as e:  # pragma: no cover
+            bb.post(self.name, "error", f"verifier failed: {e}")
+            verdict = None
+        verification.verdict = verdict
+        if verdict is not None and not verdict.accepts:
+            return self._verifier_rejection(st, final, verdict, coding_cfg)
+        if verdict is not None:
+            bb.post(
+                self.name, "verify",
+                f"verifier accepted (conf={verdict.confidence:.2f})",
+            )
+        return verification
+
+    def _verifier_rejection(self, st: _RunState, final: str, verdict, coding_cfg):
+        """Hand the verifier's critique to the proposer as a revision brief,
+        once per run; a rejected retry is accepted with an uncertainty note.
+        The rejected draft is stashed on the context as the "rejected" half of
+        a preference pair (the accepted FINAL against this draft is the
+        quality gradient this architecture produces)."""
+        bb = st.bb
+        if getattr(self, "_verifier_revision_used", False):
+            self._already_verified = True
+            bb.post(
+                self.name, "verify",
+                "verifier rejected after retry; accepting "
+                "second attempt per one-revision cap",
+            )
+            _reasons = _final_uncertainty_reasons(
+                verifier_rejected=True,
+                verifier_incomplete=False,
+                disagreement=float(
+                    getattr(self.ctx, "last_disagreement", 0.0) or 0.0
+                ),
+                coding=bool(coding_cfg and coding_cfg.enabled),
+            )
+            return AgentResult(
+                final=_final_with_uncertainty_note(final, _reasons),
+                role=self.role, name=self.name,
+                verifier_confidence=verdict.confidence,
+                verifier_critique=verdict.critique,
+                final_patch=getattr(self, "_final_patch", None),
+            )
+        self._already_verified = True
+        self._verifier_revision_used = True
+        bb.post(
+            self.name, "verify",
+            f"verifier rejected (conf={verdict.confidence:.2f}): "
+            f"{verdict.critique}",
+        )
+        try:
+            self.ctx.last_rejected_attempts = (
+                getattr(self.ctx, "last_rejected_attempts", []) or []
+            ) + [{
+                "text": final,
+                "confidence": float(verdict.confidence),
+                "critique": verdict.critique or "",
+            }]
+        except Exception:  # pragma: no cover -- never block
+            pass
+        issues_block = (
+            "\n".join(f"  - {i}" for i in verdict.issues)
+            if verdict.issues else "  (no specific issues listed)"
+        )
+        st.messages.append({
+            "role": "user",
+            "content": (
+                "A verifier rejected your FINAL answer. "
+                "Revise and try again.\n\n"
+                f"Verifier confidence: {verdict.confidence:.2f}\n"
+                f"Critique: {verdict.critique}\n"
+                f"Specific issues:\n{issues_block}\n\n"
+                "Address each issue and respond with a "
+                "new FINAL: <revised answer>."
+            ),
+        })
+        return _NEXT_TURN
+
+    async def _finish_final(self, st: _RunState, step: int, final: str, coding_cfg,
+                            verification: _FinalVerification) -> AgentResult:
+        """Record the accepted FINAL (finding, goal message, STOP hooks, step
+        score) and build the result. The reported confidence is the verdict's,
+        0.9 for a skipped check, 0.0 for a check that started but did not
+        complete (a budget-starved run must never be donated as a
+        high-confidence trajectory it never verified) and the 1.0 default for
+        roles that never verify."""
+        bb = st.bb
+        bb.post(self.name, "finding", _finding_excerpt(final))
+        self.ctx.world.append_message(
+            self.ctx.goal_id, f"agent:{self.name}", final
+        )
+        # Stop hooks: post-style, non-blocking observers; cannot veto.
+        from .hooks import HookEvent
+        from .hooks import emit as _emit_hook
+        await _emit_hook(
+            HookEvent.STOP,
+            goal_id=self.ctx.goal_id, agent_role=self.role,
+            extra={"name": self.name, "final": final},
+        )
+        self._score_step(step_index=step, is_final=True)
+        verdict = verification.verdict
+        if verification.skipped:
+            _vconf, _vcrit = 0.9, (
+                "verification skipped ("
+                + (verification.skip_reason or "risk-proportional: low-risk answer")
+                + ")"
+            )
+        elif verdict is not None:
+            _vconf, _vcrit = verdict.confidence, verdict.critique
+        elif verification.attempted:
+            _vconf, _vcrit = 0.0, "verifier did not complete (budget)"
+        else:
+            _vconf, _vcrit = 1.0, ""
+        _reasons = _final_uncertainty_reasons(
+            verifier_rejected=False,
+            verifier_incomplete=(verdict is None and verification.attempted),
+            disagreement=float(
+                getattr(self.ctx, "last_disagreement", 0.0) or 0.0
+            ),
+            coding=bool(coding_cfg and coding_cfg.enabled),
+        )
+        return AgentResult(
+            final=_final_with_uncertainty_note(final, _reasons),
+            role=self.role, name=self.name,
+            verifier_confidence=_vconf,
+            verifier_critique=_vcrit,
+            final_patch=getattr(self, "_final_patch", None),
+        )
+
+    def _turn_without_tools(self, st: _RunState, resp):
+        """A reply with text but no FINAL marker and no tool calls: nudge the
+        model ONCE to restate its answer with the marker; a second marker-less
+        reply is accepted as the answer but reports that verification never
+        ran, never the default confidence of 1.0. An empty reply is an error."""
+        if not resp.text:
+            return AgentResult(
+                error="empty response with no tools", role=self.role, name=self.name
+            )
+        if not self._final_marker_nudge_used:
+            self._final_marker_nudge_used = True
+            st.messages.append({
+                "role": "user",
+                "content": (
+                    "Your response must end your turn with a line "
+                    "starting `FINAL:` followed by your complete "
+                    "answer -- required so it can be verified. "
+                    "Please restate your answer now, ending with "
+                    "`FINAL: <answer>`."
+                ),
+            })
+            return _NEXT_TURN
+        _coding_cfg = self._coding_config()
+        _reasons = _final_uncertainty_reasons(
+            verifier_rejected=False, verifier_incomplete=False,
+            disagreement=0.0,
+            coding=bool(_coding_cfg and _coding_cfg.enabled),
+            no_final_marker=True,
+        )
+        return AgentResult(
+            final=_final_with_uncertainty_note(resp.text, _reasons),
+            role=self.role, name=self.name,
+            verifier_confidence=0.0,
+            verifier_critique="no FINAL: marker; verification did not run",
+        )
+
+    # ---- tool dispatch ------------------------------------------------------
+
+    async def _dispatch_tools(self, st: _RunState, step: int, resp) -> AgentResult | None:
+        """Run this turn's tool calls and append their results as the next
+        user turn. Two or more calls that are all parallel-safe (pure,
+        idempotent reads) run concurrently; a turn with any stateful tool
+        (shell, write, spawn, ask_user, a rate-limited network tool) runs
+        serially so side-effect ordering and ask_user's block-on-user
+        semantics are unchanged (MAVERICK_PARALLEL_TOOLS=0 forces serial).
+        Returns the stop result for a halt, a cancellation or a question the
+        user must answer; None when the loop goes on."""
+        bb = st.bb
+        # Honour a halt that arrived while the model was producing this turn
+        # (the user hit Halt during a long think) before executing any tool.
+        try:
+            killswitch.check()
+        except killswitch.Halted as e:
+            bb.post(self.name, "error", f"halted: {e}")
+            return AgentResult(
+                error=f"halted: {e}", role=self.role, name=self.name,
+                stop_kind="killswitch", stop_detail=str(e),
+            )
+        if self._goal_cancelled():
+            bb.post(self.name, "error", "cancelled via dashboard")
+            return AgentResult(
+                error="cancelled via dashboard", role=self.role, name=self.name,
+            )
+
+        run_parallel = (
+            len(resp.tool_calls) > 1
+            and _env_or_config("MAVERICK_PARALLEL_TOOLS", "agent", "parallel_tools", "1") != "0"
+            and all(self._is_parallel_safe(tc.name) for tc in resp.tool_calls)
+        )
+        tool_results: list[dict] = []
+        blocked = False
+        if run_parallel:
+            await self._dispatch_parallel(st, step, resp, tool_results)
+        else:
+            stopped, blocked = await self._dispatch_serial(st, step, resp, tool_results)
+            if stopped is not None:
+                return stopped
+        self._append_turn_trailers(st, step, tool_results)
+        st.messages.append({"role": "user", "content": tool_results})
+        # Speculative tool execution (opt-in via [tools] speculative): while
+        # the model reads these results, re-run the side-effect-free reads
+        # this agent keeps repeating so the next ask is a cache hit.
+        self._maybe_speculate_reads()
+        if blocked:
+            return AgentResult(blocked_on_user=True, role=self.role, name=self.name)
+        return None
+
+    def _answer_pending_tool_uses(self, resp, messages: list[dict],
+                                  tool_results: list[dict], reason: str) -> None:
+        """Answer every still-unanswered tool_use of this turn with an error
+        tool_result before a control-flow stop (budget, halt, audit refusal)
+        unwinds the loop. The stop can fire mid-dispatch -- most often from
+        budget.record_tool_call() -- after the assistant turn's tool_use
+        blocks are already in the history; a saved/resumed history (or a
+        parent that keeps these messages) with a tool_use and no matching
+        tool_result fails the next provider call (HTTP 400). The caller still
+        re-raises or returns, so the stop is never swallowed."""
+        answered = {tr["tool_use_id"] for tr in tool_results}
+        pending = [tc for tc in resp.tool_calls if tc.id not in answered]
+        if not pending:
+            return
+        for tc in pending:
+            tool_results.append(self._make_tool_result(tc.id, reason))
+        messages.append({"role": "user", "content": tool_results})
+
+    async def _dispatch_parallel(self, st: _RunState, step: int, resp,
+                                 tool_results: list[dict]) -> None:
+        """Run parallel-safe reads concurrently. Every call is accounted up
+        front (one record_tool_call per tool, as on the serial path); a
+        budget trip there answers every tool_use before re-raising. A stop
+        raised by one sibling (budget, halt, audit refusal) is re-raised
+        after every tool_use is answered, preserving the siblings' actual
+        results; any other exception becomes an error tool_result."""
+        bb = st.bb
+        messages = st.messages
+        try:
+            for _tc in resp.tool_calls:
+                self.ctx.budget.record_tool_call()
+        except BudgetExceeded:
+            self._answer_pending_tool_uses(
+                resp, messages, tool_results, "ERROR: tool not executed (budget exceeded)"
+            )
+            raise
+
+        # Same-host network reads in this turn are throttled by a semaphore
+        # so a fan-out of reads to one host cannot trip its rate limit; local
+        # and cross-host calls stay fully concurrent (no-op context).
+        from . import net_concurrency as _netcc
+
+        async def _run_capped(tc):
+            async with _netcc.limit(tc.name, tc.input):
+                return await self._run_tool(tc.name, tc.input)
+
+        # return_exceptions=True: tools.run swallows its own errors, but the
+        # shield scan / PreToolUse hooks inside _run_tool can still raise, and
+        # one raise out of gather would discard the sibling results.
+        outputs = await asyncio.gather(
+            *(_run_capped(tc) for tc in resp.tool_calls),
+            return_exceptions=True,
+        )
+        _norm: list[str] = []
+        _tool_stop: Exception | None = None
+        for o in outputs:
+            if isinstance(o, (BudgetExceeded, killswitch.Halted, AuditRefused)):
+                # Keep budget/halt precedence over an audit refusal, but finish
+                # normalizing: every sibling already ran under gather.
+                if _tool_stop is None or (
+                    isinstance(_tool_stop, AuditRefused)
+                    and not isinstance(o, AuditRefused)
+                ):
+                    _tool_stop = o
+                _stop_reason = "audit refused" if isinstance(o, AuditRefused) else type(o).__name__
+                _norm.append(
+                    f"ERROR: tool interrupted ({_stop_reason}); "
+                    "reconcile state before retrying"
+                )
+                continue
+            _norm.append(
+                o if isinstance(o, str)
+                else f"ERROR: tool raised {type(o).__name__}: {o}"
+            )
+        outputs = _norm
+        if _tool_stop is not None:
+            # Concurrent siblings may already have completed. Preserve their
+            # actual results, answer every tool_use, and stop before another
+            # model turn; never label them unexecuted.
+            tool_results.extend(
+                self._make_tool_result(tc.id, output)
+                for tc, output in zip(resp.tool_calls, outputs, strict=False)
+            )
+            messages.append({"role": "user", "content": tool_results})
+            raise _tool_stop
+        # Original call order in the results keeps traces readable.
+        for tc, output in zip(resp.tool_calls, outputs, strict=False):
+            bb.post(
+                self.name, "observation",
+                f"tool={tc.name} -> {output[:500]}",
+            )
+            if not isinstance(output, _NotExecutedToolResult):
+                self._score_step(
+                    step_index=step,
+                    tool_name=tc.name,
+                    tool_succeeded=not _tool_call_failed(output),
+                )
+            tool_results.append(self._make_tool_result(tc.id, output))
+
+    async def _dispatch_serial(self, st: _RunState, step: int, resp,
+                               tool_results: list[dict]) -> tuple[AgentResult | None, bool]:
+        """Run the turn's tool calls one by one, honouring a halt or a
+        cancellation between tools and answering every pending tool_use
+        before any stop unwinds. Returns ``(stop_result, blocked)``: the
+        result when the run must end here, and whether an `ask_user` call is
+        waiting on a human."""
+        bb = st.bb
+        messages = st.messages
+        blocked = False
+        for tc in resp.tool_calls:
+            # A serial turn may run a long shell command; honour a halt that
+            # lands mid-turn.
             try:
                 killswitch.check()
             except killswitch.Halted as e:
+                self._answer_pending_tool_uses(
+                    resp, messages, tool_results, "ERROR: tool not executed (halted)")
                 bb.post(self.name, "error", f"halted: {e}")
                 return AgentResult(
                     error=f"halted: {e}", role=self.role, name=self.name,
-                    stop_kind="killswitch", stop_detail=str(e),
-                )
+                ), blocked
             if self._goal_cancelled():
+                self._answer_pending_tool_uses(
+                    resp, messages, tool_results, "ERROR: tool not executed (goal cancelled)"
+                )
                 bb.post(self.name, "error", "cancelled via dashboard")
                 return AgentResult(
                     error="cancelled via dashboard", role=self.role, name=self.name,
+                ), blocked
+            # record_tool_call() calls check() and can raise mid-turn.
+            try:
+                self.ctx.budget.record_tool_call()
+            except BudgetExceeded:
+                self._answer_pending_tool_uses(
+                    resp, messages, tool_results, "ERROR: tool not executed (budget exceeded)"
                 )
-
-            # Frontier-loop optimization: when the model emits 2+ tool
-            # calls in one turn and EVERY one is parallel-safe (pure,
-            # idempotent reads — read_file / list_dir / repo_map /
-            # dep_graph), run them concurrently with asyncio.gather. This
-            # is the dominant localization pattern ("read these 5 files")
-            # and collapses N serial awaits into one round-trip's worth of
-            # latency. A turn containing ANY stateful tool (shell, write,
-            # spawn, ask_user, a rate-limited network tool) falls through
-            # to the serial path below, so side-effect ordering and the
-            # ask_user block-on-user semantics are unchanged. Disable with
-            # MAVERICK_PARALLEL_TOOLS=0.
-            run_parallel = (
-                len(resp.tool_calls) > 1
-                and _env_or_config("MAVERICK_PARALLEL_TOOLS", "agent", "parallel_tools", "1") != "0"
-                and all(self._is_parallel_safe(tc.name) for tc in resp.tool_calls)
+                raise
+            # A stateful serial tool (notably `spawn_subagent`, whose child
+            # shares this Budget) can trip BudgetExceeded -- or a halt can land
+            # -- DURING execution.
+            try:
+                output = await self._run_tool(tc.name, tc.input)
+            except (AuditRefused, BudgetExceeded, killswitch.Halted) as exc:
+                _stop_reason = "audit refused" if isinstance(exc, AuditRefused) else type(exc).__name__
+                self._answer_pending_tool_uses(
+                    resp, messages, tool_results,
+                    f"ERROR: tool interrupted ({_stop_reason}); "
+                    "reconcile state before retrying",
+                )
+                raise
+            if tc.name == "ask_user" and not isinstance(output, _NotExecutedToolResult):
+                from .autonomy import assume_when_headless
+                if assume_when_headless():
+                    # No human is available (headless / autonomous run, off by
+                    # default). Blocking forever on a question nobody will
+                    # answer is worse than proceeding, and a blocked run never
+                    # reaches FINAL; the assumption must be stated so the
+                    # choice stays auditable.
+                    output = (
+                        "AUTONOMOUS MODE: no human is available to "
+                        "answer questions. Do not wait. Choose the most "
+                        "reasonable assumption, state it explicitly in "
+                        "your FINAL answer, and continue."
+                    )
+                else:
+                    blocked = True
+            bb.post(
+                self.name, "observation",
+                f"tool={tc.name} -> {output[:500]}",
             )
-
-            tool_results: list[dict] = []
-            blocked = False
-
-            def _answer_pending_tool_uses(
-                reason: str,
-                *,
-                resp=resp,
-                messages=messages,
-                tool_results=tool_results,
-            ) -> None:
-                # #612: a control-flow stop (BudgetExceeded / Halted) can fire
-                # mid-dispatch -- most often from budget.record_tool_call(),
-                # which calls check() and can raise AFTER the assistant turn's
-                # tool_use blocks are already in `messages`. If we unwind now,
-                # the saved/resumed history (or a parent that keeps these
-                # messages) has tool_use ids with no matching tool_result ->
-                # Anthropic 400 on the next call. Append an error tool_result
-                # for every still-unanswered tool_use, then let the caller
-                # re-raise/return so the stop is NOT swallowed.
-                answered = {tr["tool_use_id"] for tr in tool_results}
-                pending = [tc for tc in resp.tool_calls if tc.id not in answered]
-                if not pending:
-                    return
-                for tc in pending:
-                    tool_results.append(self._make_tool_result(tc.id, reason))
-                messages.append({"role": "user", "content": tool_results})
-
-            if run_parallel:
-                import asyncio as _asyncio
-                # Account every call up front; record_tool_call mirrors
-                # the serial path (one per tool, same count). A budget trip
-                # here raises BEFORE any tool ran -- answer every pending
-                # tool_use so the turn isn't left with orphan tool_use blocks.
-                try:
-                    for _tc in resp.tool_calls:
-                        self.ctx.budget.record_tool_call()
-                except BudgetExceeded:
-                    _answer_pending_tool_uses(
-                        "ERROR: tool not executed (budget exceeded)"
-                    )
-                    raise
-
-                # Per-host concurrency cap (#434): same-host network reads in
-                # this turn are throttled by a semaphore so a fan-out of reads
-                # to one host can't hammer it / trip its rate limit; local and
-                # cross-host calls stay fully concurrent (no-op context).
-                from . import net_concurrency as _netcc
-
-                async def _run_capped(tc):
-                    async with _netcc.limit(tc.name, tc.input):
-                        return await self._run_tool(tc.name, tc.input)
-
-                # return_exceptions=True: tools.run swallows its own errors, but
-                # the shield scan / PreToolUse hooks inside _run_tool can still
-                # raise. Without this, one such raise propagates out of gather,
-                # discards the sibling results, and leaves the assistant turn's
-                # tool_use blocks with no matching tool_results -> the next API
-                # call 400s. Convert a raised exception into an error
-                # tool_result so every tool_use is still answered -- but
-                # re-raise control-flow signals (budget/halt) so a stop isn't
-                # silently downgraded to a tool error.
-                outputs = await _asyncio.gather(
-                    *(_run_capped(tc) for tc in resp.tool_calls),
-                    return_exceptions=True,
+            if not isinstance(output, _NotExecutedToolResult):
+                self._score_step(
+                    step_index=step,
+                    tool_name=tc.name,
+                    tool_succeeded=not _tool_call_failed(output),
                 )
-                from . import killswitch as _ks
-                from .budget import BudgetExceeded as _BE
-                _norm: list[str] = []
-                _tool_stop: Exception | None = None
-                for o in outputs:
-                    if isinstance(o, (_BE, _ks.Halted, AuditRefused)):
-                        # Keep budget/halt precedence, but finish normalizing:
-                        # every sibling already ran under gather, and a stop
-                        # may have occurred after its own dispatch began.
-                        if _tool_stop is None or (
-                            isinstance(_tool_stop, AuditRefused)
-                            and not isinstance(o, AuditRefused)
-                        ):
-                            _tool_stop = o
-                        _stop_reason = "audit refused" if isinstance(o, AuditRefused) else type(o).__name__
-                        _norm.append(
-                            f"ERROR: tool interrupted ({_stop_reason}); "
-                            "reconcile state before retrying"
-                        )
-                        continue
-                    _norm.append(
-                        o if isinstance(o, str)
-                        else f"ERROR: tool raised {type(o).__name__}: {o}"
-                    )
-                outputs = _norm
-                if _tool_stop is not None:
-                    # Concurrent siblings may already have completed. Preserve
-                    # their actual results, answer every tool_use, and stop
-                    # before another model turn; never label them unexecuted.
-                    tool_results.extend(
-                        self._make_tool_result(tc.id, output)
-                        for tc, output in zip(resp.tool_calls, outputs, strict=False)
-                    )
-                    messages.append({"role": "user", "content": tool_results})
-                    raise _tool_stop
-                # Preserve original call order in the results (matched by
-                # tool_use_id, but ordering keeps traces readable).
-                for tc, output in zip(resp.tool_calls, outputs, strict=False):
-                    bb.post(
-                        self.name, "observation",
-                        f"tool={tc.name} -> {output[:500]}",
-                    )
-                    if not isinstance(output, _NotExecutedToolResult):
-                        self._score_step(
-                            step_index=step,
-                            tool_name=tc.name,
-                            tool_succeeded=not _tool_call_failed(output),
-                        )
-                    tool_results.append(self._make_tool_result(tc.id, output))
-            else:
-                for tc in resp.tool_calls:
-                    # Per-tool halt check: a serial turn may run a long
-                    # shell command; honour a halt that lands mid-turn.
-                    try:
-                        killswitch.check()
-                    except killswitch.Halted as e:
-                        # #612: answer any tool_use we've already passed (and
-                        # this + remaining ones) so the assistant turn isn't
-                        # left with orphan tool_use blocks before we unwind.
-                        _answer_pending_tool_uses("ERROR: tool not executed (halted)")
-                        bb.post(self.name, "error", f"halted: {e}")
-                        return AgentResult(
-                            error=f"halted: {e}", role=self.role, name=self.name,
-                        )
-                    if self._goal_cancelled():
-                        _answer_pending_tool_uses(
-                            "ERROR: tool not executed (goal cancelled)"
-                        )
-                        bb.post(self.name, "error", "cancelled via dashboard")
-                        return AgentResult(
-                            error="cancelled via dashboard", role=self.role, name=self.name,
-                        )
-                    # #612: record_tool_call() calls check() and can raise
-                    # mid-turn; answer pending tool_use blocks, then re-raise
-                    # so the budget trip still stops the run cleanly.
-                    try:
-                        self.ctx.budget.record_tool_call()
-                    except BudgetExceeded:
-                        _answer_pending_tool_uses(
-                            "ERROR: tool not executed (budget exceeded)"
-                        )
-                        raise
-                    # #612: a stateful serial tool (notably `spawn_subagent`,
-                    # whose child shares this Budget) can trip BudgetExceeded
-                    # — or a halt can land — DURING execution. That raise would
-                    # leave this tool_use + any siblings already dispatched this
-                    # turn without matching tool_results -> Anthropic 400 on a
-                    # resume/parent. Answer every pending tool_use, then re-raise
-                    # so the stop still halts the run cleanly.
-                    try:
-                        output = await self._run_tool(tc.name, tc.input)
-                    except (AuditRefused, BudgetExceeded, killswitch.Halted) as exc:
-                        _stop_reason = "audit refused" if isinstance(exc, AuditRefused) else type(exc).__name__
-                        _answer_pending_tool_uses(
-                            f"ERROR: tool interrupted ({_stop_reason}); "
-                            "reconcile state before retrying"
-                        )
-                        raise
-                    if tc.name == "ask_user" and not isinstance(output, _NotExecutedToolResult):
-                        from .autonomy import assume_when_headless
-                        if assume_when_headless():
-                            # No human is available to answer (headless /
-                            # autonomous run). Blocking forever on a question
-                            # nobody will answer is worse than proceeding -- and
-                            # a blocked run never reaches FINAL, so it also never
-                            # distills what it learned. Turn the question into a
-                            # directive to assume and continue, and require the
-                            # assumption be stated so the choice stays auditable.
-                            # Off by default (MAVERICK_AUTONOMOUS / [autonomy]
-                            # headless_assume); unchanged blocking otherwise.
-                            output = (
-                                "AUTONOMOUS MODE: no human is available to "
-                                "answer questions. Do not wait. Choose the most "
-                                "reasonable assumption, state it explicitly in "
-                                "your FINAL answer, and continue."
-                            )
-                        else:
-                            blocked = True
-                    bb.post(
-                        self.name, "observation",
-                        f"tool={tc.name} -> {output[:500]}",
-                    )
-                    if not isinstance(output, _NotExecutedToolResult):
-                        self._score_step(
-                            step_index=step,
-                            tool_name=tc.name,
-                            tool_succeeded=not _tool_call_failed(output),
-                        )
-                    tool_results.append(self._make_tool_result(tc.id, output))
-                    # Governed-action lineage (opt-in via [actions] enable /
-                    # MAVERICK_GOVERNED_ACTIONS; off by default). Record a
-                    # tamper-evident link for each CONSEQUENTIAL tool call so a
-                    # run's actions are traceable. Fail-open: never breaks a run.
-                    try:
-                        from . import governed_actions as _gov
-                        if getattr(self, "_lineage_on", None) is None:
-                            self._lineage_on = _gov.enabled()
-                        if self._lineage_on and not isinstance(output, _NotExecutedToolResult):
-                            _gov.record_tool_lineage(
-                                self.ctx.goal_id, tc.name, tc.input,
-                                skills=tuple(sorted(self.ctx.skills_used or ())),
-                                actor=self.name)
-                    except Exception:
-                        pass
+            tool_results.append(self._make_tool_result(tc.id, output))
+            self._record_tool_lineage(tc, output)
+        return None, blocked
 
-            # Step-budget awareness: when only a few tool-using turns remain
-            # before max_steps force-stops the run, tell the model so it
-            # synthesizes a FINAL now instead of starting new work and getting
-            # cut off with no answer. Appended after the tool_results (text
-            # after tool_result blocks is a valid user turn); only on turns that
-            # ran tools, which is exactly when a working agent risks the cutoff.
-            # W1-44: what other agents posted to the blackboard since this
-            # agent's last tool-running turn, as a trailing text block (same
-            # slot as the step-budget warning). Own posts and sealed agents
-            # are excluded; the block is bounded. Best-effort: never let a
-            # render problem break the turn.
-            if tool_results and _BB_TURN_DELTA_ENTRIES:
-                try:
-                    if (tracker := getattr(self.ctx, "ifc", None)) is not None:
-                        tracker.read_blackboard(
-                            self.name, bb.posters_since(getattr(self, "_bb_cursor", 0)))
-                    _bb_delta, self._bb_cursor = bb.render_since(
-                        getattr(self, "_bb_cursor", 0), exclude_agent=self.name,
-                        max_entries=_BB_TURN_DELTA_ENTRIES,
-                    )
-                except Exception:  # pragma: no cover -- coordination hint only
-                    _bb_delta = ""
-                if _bb_delta:
-                    tool_results.append({
-                        "type": "text",
-                        "text": (
-                            "New on the swarm blackboard since your last turn "
-                            "(other agents' posts; use them to adjust your plan):\n"
-                            + _bb_delta
-                        ),
-                    })
-            remaining = self.max_steps - 1 - step if self.max_steps is not None else 0
-            if tool_results and _STEP_BUDGET_WARNING and 0 < remaining <= _STEP_BUDGET_WARNING:
+    def _record_tool_lineage(self, tc, output) -> None:
+        """Governed-action lineage (opt-in via [actions] enable /
+        MAVERICK_GOVERNED_ACTIONS; off by default): a tamper-evident link for
+        each consequential tool call so a run's actions are traceable.
+        Fail-open: never breaks a run."""
+        try:
+            from . import governed_actions as _gov
+            if getattr(self, "_lineage_on", None) is None:
+                self._lineage_on = _gov.enabled()
+            if self._lineage_on and not isinstance(output, _NotExecutedToolResult):
+                _gov.record_tool_lineage(
+                    self.ctx.goal_id, tc.name, tc.input,
+                    skills=tuple(sorted(self.ctx.skills_used or ())),
+                    actor=self.name)
+        except Exception:
+            pass
+
+    def _append_turn_trailers(self, st: _RunState, step: int, tool_results: list[dict]) -> None:
+        """Trailing text blocks after a turn's tool results (text after
+        tool_result blocks is a valid user turn): what other agents posted to
+        the blackboard since this agent's last tool-running turn (own posts
+        and sealed agents excluded, bounded), and a step-budget warning when
+        only a few tool-using turns remain before max_steps force-stops the
+        run, so the model synthesizes a FINAL instead of starting new work.
+        Best-effort: a render problem never breaks the turn."""
+        bb = st.bb
+        if tool_results and _BB_TURN_DELTA_ENTRIES:
+            try:
+                if (tracker := getattr(self.ctx, "ifc", None)) is not None:
+                    tracker.read_blackboard(
+                        self.name, bb.posters_since(getattr(self, "_bb_cursor", 0)))
+                _bb_delta, self._bb_cursor = bb.render_since(
+                    getattr(self, "_bb_cursor", 0), exclude_agent=self.name,
+                    max_entries=_BB_TURN_DELTA_ENTRIES,
+                )
+            except Exception:  # pragma: no cover -- coordination hint only
+                _bb_delta = ""
+            if _bb_delta:
                 tool_results.append({
                     "type": "text",
                     "text": (
-                        f"⚠ Step budget almost exhausted: about {remaining} more "
-                        "tool-using turn(s) remain before this run is force-stopped. "
-                        "Prioritize giving your FINAL: answer now with the best "
-                        "result you have rather than starting new work."
+                        "New on the swarm blackboard since your last turn "
+                        "(other agents' posts; use them to adjust your plan):\n"
+                        + _bb_delta
                     ),
                 })
-            messages.append({"role": "user", "content": tool_results})
-            # Speculative tool execution (opt-in via [tools] speculative):
-            # while the model reads these results, re-run the side-effect-free
-            # reads this agent keeps repeating so the next ask is a cache hit.
-            self._maybe_speculate_reads()
+        remaining = self.max_steps - 1 - step if self.max_steps is not None else 0
+        if tool_results and _STEP_BUDGET_WARNING and 0 < remaining <= _STEP_BUDGET_WARNING:
+            tool_results.append({
+                "type": "text",
+                "text": (
+                    f"⚠ Step budget almost exhausted: about {remaining} more "
+                    "tool-using turn(s) remain before this run is force-stopped. "
+                    "Prioritize giving your FINAL: answer now with the best "
+                    "result you have rather than starting new work."
+                ),
+            })
 
-            if blocked:
-                return AgentResult(blocked_on_user=True, role=self.role, name=self.name)
+    # ---- loop exhaustion ----------------------------------------------------
 
-        # Wave 12 hotfix: when the agent loop exhausts max_steps without
-        # emitting FINAL, the workdir may STILL contain edits made via
-        # `str_replace_editor` (the secondary tool channel). The May 26
-        # smoke surfaced 3/6 instances where the agent edited via the
-        # tool but never produced a FINAL — those instances reported
-        # `no-diff` even though the patch was already on disk.
-        # Salvage that work by rendering the workdir as the final_patch
-        # if there are uncommitted changes.
+    def _exhausted_result(self) -> AgentResult:
+        """The loop ran out of steps without a FINAL. Edits made through the
+        secondary edit tool may still be on disk; when the workdir is a git
+        repository with uncommitted changes, its diff is salvaged as the
+        final_patch instead of reporting no diff at all."""
         try:
             from pathlib import Path as _Path
 

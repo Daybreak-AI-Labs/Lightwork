@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-hosted Lightwork relay (roadmap: 2027 H2 distribution — "self-hosted relay reference").
+"""Self-hosted Lightwork relay.
 
 A thin, dependency-free edge service that accepts a simple inbound POST and
 forwards it as a properly HMAC-signed request to a Lightwork dashboard's

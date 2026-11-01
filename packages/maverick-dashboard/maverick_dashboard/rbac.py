@@ -165,6 +165,10 @@ def permissions_for(role: str | None) -> frozenset[str]:
     except RbacStoreError:
         # A corrupt custom-role store must DENY, not crash every request or --
         # worse -- broaden access through some fallback.
+        from . import strict_reads
+
+        if strict_reads.active():
+            raise
         return frozenset()
     if rec is None:
         return frozenset()

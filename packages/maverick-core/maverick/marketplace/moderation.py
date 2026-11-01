@@ -1,7 +1,5 @@
 """Automated pre-publication moderation for marketplace submissions.
 
-(ROADMAP 2027 H2 + 2028 H1 Ecosystem -- "marketplace moderation tooling".)
-
 Before a community skill or plugin lands in the marketplace, it runs this
 gauntlet of static, deterministic, offline checks so a human moderator reviews
 a triaged verdict instead of a raw upload. It covers a submitted **skill**

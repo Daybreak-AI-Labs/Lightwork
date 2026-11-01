@@ -1,4 +1,4 @@
-"""Tail-latency hunting (roadmap: 2027 H2 performance).
+"""Tail-latency hunting.
 
 :mod:`maverick.tool_latency` already computes per-tool p50/p95/p99. The slowest
 tool by p95 isn't necessarily the one to *hunt*, though — the interesting bug

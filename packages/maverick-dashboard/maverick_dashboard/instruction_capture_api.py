@@ -219,4 +219,5 @@ def instruction_page(request: Request):
 @page_router.get("/static/lightwork-instruction-capture.js")
 def instruction_asset():
     from .app import _STATIC_DIR
-    return FileResponse(_STATIC_DIR / "lightwork-instruction-capture.js", media_type="application/javascript")
+    return FileResponse(_STATIC_DIR / "lightwork-instruction-capture.js", media_type="application/javascript",
+                        headers={"Cache-Control": "public, max-age=300"})

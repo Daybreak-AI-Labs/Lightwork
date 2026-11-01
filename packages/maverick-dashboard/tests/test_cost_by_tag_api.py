@@ -112,3 +112,29 @@ def test_cost_by_tag_scopes_authenticated_owner(monkeypatch):
     assert by_goal.status_code == 200, by_goal.text
     assert {b["tag"] for b in by_goal.json()["buckets"]} == {"1"}
     assert world.calls == [(500, 1), (500, 1)]
+
+
+def test_cost_by_tag_owner_scope_matches_the_per_goal_path(tmp_path, monkeypatch):
+    from maverick.cost.by_tag import gather, split_by_tag
+    from maverick.world_model import WorldModel
+
+    world = WorldModel(tmp_path / "w.db")
+    alice = world.create_goal("alice run", owner="user:alice")
+    bob = world.create_goal("bob run", owner="user:bob")
+    with world._writing() as conn:
+        for goal, started, cost in ((alice, 1.0, 0.5), (alice, 2.0, 0.25), (bob, 3.0, 9.0)):
+            conn.execute(
+                "INSERT INTO episodes(goal_id, started_at, cost_dollars, input_tokens, "
+                "output_tokens) VALUES (?, ?, ?, ?, ?)",
+                (goal, started, cost, 10, 5),
+            )
+    monkeypatch.setattr(app_mod, "_world", lambda: world)
+    monkeypatch.setattr(app_mod, "goal_owner_filter", lambda request: "user:alice")
+
+    body = client.get("/api/v1/cost/by-tag").json()
+    ids = [g.id for g in world.list_goals(owner="user:alice", limit=10_000, order="desc")]
+    assert body["buckets"] == split_by_tag(gather(world, limit=500, goal_ids=ids))
+    assert body["buckets"] == [
+        {"tag": "(untagged)", "cost": 0.75, "in_tok": 20, "out_tok": 10, "runs": 2}
+    ]
+

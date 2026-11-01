@@ -1,4 +1,4 @@
-"""Learned LLM summarizer for context compaction (roadmap: 2027 H1 perf, v3).
+"""Learned LLM summarizer for context compaction.
 
 ``compaction.compact_messages`` shrinks blocks structurally; this strategy
 folds the old middle of a trajectory into one LLM-written digest — and it

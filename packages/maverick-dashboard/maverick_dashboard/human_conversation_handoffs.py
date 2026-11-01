@@ -9,7 +9,7 @@ import time
 from types import SimpleNamespace
 
 from fastapi import HTTPException
-from maverick import config, conversation_inbox, crypto_at_rest
+from maverick import config, contact_centre, conversation_inbox, crypto_at_rest
 from maverick.authority_effects import authority_effect_fence
 from maverick.budget import Budget
 from maverick.governed_operations import digest
@@ -19,9 +19,17 @@ from . import auth, tools_ops_api
 from .draft_api import context_for
 
 API, PAGE = '/api/v1/human-conversations', '/human-conversations'
+_EXCLUDED = 'Earlier conversation messages, files, connections and learned information are excluded.'
+_OUTSIDE_EXCLUDED = ('Inside Lightwork, earlier conversation messages, files, connections and learned information are excluded. '
+                     'The outside contact centre listed below also receives the recent messages shown there, a link back and your name and email when known.')
 NOTICE = ('This transfers this web conversation to one named person inside Lightwork. Only the reviewed task brief, saved reply and this human exchange are shared. '
-          'Earlier conversation messages, files, connections and learned information are excluded. AI work must settle before a person can claim the conversation. '
+          + _EXCLUDED + ' AI work must settle before a person can claim the conversation. '
           'Stop does not reverse external actions. Hand-back releases only this AI hold. Future intentional messages still need their usual current permissions; it never restarts old attempts or sends human replies to AI automatically.')
+
+
+def _notice(outside=None):
+    """The limits text. With an outside contact centre, it says what that destination receives too."""
+    return NOTICE.replace(_EXCLUDED, _OUTSIDE_EXCLUDED) if outside else NOTICE
 LABELS = {'request':'Ask a person to take over', 'claim':'Take this conversation', 'reply':'Send a human reply', 'message':'Send your reply to the person',
           'handback':'Hand back future work to AI', 'finish_pause':'Finish pausing current AI work'}
 
@@ -127,7 +135,7 @@ def inventory(request, goal_id=None):
     duty_record, duty_value = source.duty()
     value = {'context':context, 'enabled':config.get_features().get('human_conversation_handoffs') is True,
              'duty':{'revision':(duty_record or {}).get('revision',0), 'label':duty_value['label'], 'until':duty_value['until'],
-                     'audit_pending':bool(duty_record and duty_record.get('_audit_pending'))}, 'history':_history(request), 'notice':NOTICE}
+                     'audit_pending':bool(duty_record and duty_record.get('_audit_pending'))}, 'history':_history(request), 'notice':_notice(contact_centre.enabled())}
     if goal_id is not None:
         try:
             value.update(conversation=source.state(goal_id))
@@ -166,6 +174,8 @@ def _guard(request, prepared, budget=None, operation=None):
     now=time.time()
     if actor!=prepared['actor'] or not math.isfinite(prepared['review_expires']) or now>=prepared['review_expires']:
         raise HTTPException(409,'This full review expired. Earlier submitted decisions are retained; review a new intent.')
+    if prepared['action']=='request' and prepared.get('outside')!=contact_centre.disclosure():
+        raise HTTPException(409,'The outside contact centre settings changed after this review. Nothing was sent; review the handoff again.')
     source=service(request,write=True,metadata_only=prepared.get('metadata_only',False))
     goal,root,_binding,record,_value,human=source._load(prepared['goal_id'])
     source._authorized(goal,root,human,write=True)
@@ -202,9 +212,16 @@ def prepare(request, goal_id, action, *, recipient='', purpose='', hours=1, mess
     duty=next((row for row in roster(request,goal_id) if row['owner']==recipient),None) if action=='request' else None
     prepared=source.review(goal_id,action,recipient=recipient,purpose=purpose,expires_at=time.time()+hours*3600 if action=='request' else 0,message=message,duty=duty)
     prepared.update(actor=actor,context=context)
+    prepared['outside']=contact_centre.disclosure() if prepared['action']=='request' else None
     prepared['binding']=digest({key:value for key,value in prepared.items() if key!='binding'})
     _guard(request,prepared)
     return prepared
+
+
+def _outside_change(outside):
+    return {'label':'Outside contact centre','after':{'Destination':outside['where'],
+            'Sent':f"Ticket subject or message title, the reason, your name and email when known, the latest {outside['messages']} messages of this web conversation (each shortened to 2,000 characters, personal data removed where it can be detected, and Lightwork's replies can be among them), and a link back to this conversation.",
+            'If settings change':'Nothing is sent to a different destination or provider. If Settings change before the send, the handoff is refused or recorded as not sent.'}}
 
 
 def changes(prepared):
@@ -214,7 +231,8 @@ def changes(prepared):
                  'Reason':prepared['purpose'] or 'Existing reviewed sharing purpose','Access ends':'With this decision' if prepared['action']=='handback' else time.strftime('%b %d, %Y %H:%M',time.localtime(prepared['expires_at'])) if prepared['expires_at'] else 'Existing sharing deadline remains'}},
             {'label':'Exact reply','after':prepared['message'] or 'No reply is sent by this decision.'},
             {'label':'Related AI work','after':[{'Task':name,'Reviewed state':row[3]} for name,row in zip(prepared['task_names'],prepared['tasks'],strict=True)]},
-            {'label':'Limits and consequences','after':NOTICE},
+            *([_outside_change(prepared['outside'])] if prepared.get('outside') else []),
+            {'label':'Limits and consequences','after':_notice(prepared.get('outside'))},
             {'label':'If the response is lost','after':'Read the exact original decision. Unknown means unknown; no request, stop or reply is automatically repeated. Separately review Finish pausing or Hand back for a new intentional decision.'}]
 
 
@@ -321,7 +339,7 @@ def open_review(token):
 def review_response(prepared):
     operation=secrets.token_hex(16)
     rows=changes(prepared) if 'action' in prepared else duty_changes(prepared)
-    return {'context':prepared['context'],'record':prepared.get('record','duty'),'operation':operation,'token':seal(prepared,operation),'changes':rows,'notice':NOTICE}
+    return {'context':prepared['context'],'record':prepared.get('record','duty'),'operation':operation,'token':seal(prepared,operation),'changes':rows,'notice':_notice(prepared.get('outside'))}
 
 
 def duty_changes(prepared):

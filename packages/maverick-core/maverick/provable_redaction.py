@@ -1,4 +1,4 @@
-"""Provable redaction (roadmap: 2028 H2 safety).
+"""Provable redaction.
 
 The secret/PII redactors (:mod:`maverick.safety.secret_detector` /
 :mod:`maverick.safety.pii_detector`) replace what they find in a single pass.

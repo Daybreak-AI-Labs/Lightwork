@@ -145,7 +145,11 @@ def renew_session(request: Request) -> JSONResponse:
     principal = local_session_principal(request)
     if principal is None:
         raise HTTPException(401, "Your sign-in has ended. Sign in again to continue.")
-    token = mint_local_session(principal.sub, request=request)
+    # The replacement keeps the second factor, and when it was given, if this sign-in had one.
+    from .mfa_policy import principal_mfa
+    proved, proved_at = principal_mfa(principal)
+    token = mint_local_session(principal.sub, request=request, mfa=proved,
+                               mfa_at=proved_at if proved else None)
     from maverick.web_session import verify_session
 
     from .invites import local_session_secret

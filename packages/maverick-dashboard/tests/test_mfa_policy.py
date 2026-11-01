@@ -59,6 +59,21 @@ def test_malformed_require_fails_closed(tmp_path):
     assert mfa_policy.step_up_seconds() == 15 * 60
 
 
+def test_require_stays_on_when_the_source_breaks_during_the_load(tmp_path, monkeypatch):
+    # The check before the load sees a clean file; the file breaks just before
+    # the load reads it. Falling back to "off" here would drop the second factor.
+    _write_config(tmp_path, "[auth.mfa]\nrequire = false\n")
+    assert mfa_policy.require_mfa() is False
+    real_get = config.get_auth_mfa
+
+    def get_after_the_file_breaks():
+        (tmp_path / "home" / "config.toml").write_text("[auth.mfa\n", encoding="utf-8")
+        return real_get()
+
+    monkeypatch.setattr(config, "get_auth_mfa", get_after_the_file_breaks)
+    assert mfa_policy.require_mfa() is True
+
+
 # ---- what proves a second factor ------------------------------------------------
 
 

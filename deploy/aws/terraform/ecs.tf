@@ -24,7 +24,12 @@ resource "aws_ecs_task_definition" "app" {
   container_definitions = jsonencode([
     {
       name      = "app"
-      image     = "${aws_ecr_repository.app.repository_url}:${var.image_tag}"
+      # A digest pins the exact image; a tag follows re-pushes (variables.tf).
+      image = (
+        var.image_digest != ""
+        ? "${aws_ecr_repository.app.repository_url}@${var.image_digest}"
+        : "${aws_ecr_repository.app.repository_url}:${var.image_tag}"
+      )
       essential = true
 
       # ENTRYPOINT is `maverick`; run the dashboard bound to all interfaces

@@ -1,4 +1,4 @@
-"""Capability negotiation protocol (roadmap: 2028 H1 — agent-to-agent capability negotiation).
+"""Capability negotiation protocol.
 
 A requester asks for a set of capabilities; an offerer publishes the set it is
 willing to grant plus optional constraints (which requested items are

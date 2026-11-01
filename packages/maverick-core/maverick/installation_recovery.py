@@ -400,7 +400,7 @@ def _repair_anchor(
             InstallerVerificationError, MaintenanceError) as exc:
         if not (reviewed_release and allow_verified_candidate_installer):
             raise MaintenanceError(
-                "The retained install-time recovery source is unavailable. Use the signed customer installer to restore Lightwork."
+                "The retained install-time recovery source is unavailable. Use the signed Lightwork installer to restore Lightwork."
             ) from exc
         properties = None
     if executing_pair_only:
@@ -449,7 +449,7 @@ def _repair_anchor(
             continue
     if selected is None:
         raise MaintenanceError(
-            "Neither installed application copy matches the signed current release. Use the signed customer installer to restore Lightwork."
+            "Neither installed application copy matches the signed current release. Use the signed Lightwork installer to restore Lightwork."
         )
     selected_runtime, selected_native, runtime_sha256, native = selected
     return {

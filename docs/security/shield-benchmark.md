@@ -8,7 +8,7 @@ Every number below is produced by `benchmarks/security/detector_score.py`
 
 ## Defense in depth, not one detector
 
-A prompt-injection classifier alone is a brittle moat: novel phrasings evade
+A prompt-injection classifier alone is a brittle defense: novel phrasings evade
 any fixed ruleset, and a single miss can be catastrophic if the agent acts on
 it. Lightwork layers detection *and* containment so a miss at one layer is
 caught at the next:
@@ -22,8 +22,10 @@ caught at the next:
    misses.
 3. **Optional LLM cascade** (`MAVERICK_CASCADE_SHIELD=1`) — a model judge for
    ambiguous cases. Higher recall, costs a call; off by default.
-4. **Full agent-shield SDK** — the separate private/unpublished ~115-pattern
-   ruleset. Referenced here, not measured, and not available from public PyPI.
+4. **Full agent-shield SDK** — a separate, larger rule set that is not
+   published (it is not on PyPI and not vendored in this repository). The
+   shield uses it only when it is installed, so the built-in rules above are
+   what ships and what runs. It is not measured here.
 5. **Action-layer containment** — the part most "AI safety" layers lack. Even
    when text detection misses, the *action* is bounded:
    - writes through connectors and the `database` tool are **confirm-gated**
@@ -33,7 +35,7 @@ caught at the next:
      `subprocess` from a tool;
    - agents run under **scoped capabilities** (sub-agents can only narrow, never
      widen) and a hard **budget cap** (`budget.check()`);
-   - the audit log is **hash-chained and optionally Ed25519-signed** for
+   - the audit log is **hash-chained and Ed25519-signed** (on by default) for
      tamper-evident evidence.
 
    In the held-out benchmark below, the action-abuse misses
@@ -58,7 +60,7 @@ Methodology (baked into the harness so it can't drift):
 - **Leakage guard** (`detector_score.train_overlap`): any external prompt that
   normalizes to a trained-on phrase is dropped before scoring.
 
-The table below is the 2026-07-29 snapshot generated into the internal
+The table below is the 2026-07-29 snapshot generated into
 `benchmarks/security/RESULTS.md`
 artifact from the current corpus (53 train / 31 held-out / 32 benign):
 
@@ -79,14 +81,14 @@ homoglyph 71.0%, base64 100% (the base64 path de-obfuscates and re-scans).
 The offline fallback is a **tripwire, not the primary defense**. This small,
 repository-authored held-out set currently measures 71.0% for `builtin@high`
 and 83.9% for the combined posture, but five held-out cases still miss and the
-confidence intervals are wide. These values are an internal reproducible
-diagnostic, not a generalized public recall claim. Real deployment safety also
+confidence intervals are wide. These values are a reproducible
+diagnostic, not a generalized recall claim. Real deployment safety also
 depends on confirmation gates, capabilities, sandbox isolation, budget limits,
 and egress controls. A credible headline efficacy number requires pinned
 external held-out sets plus end-to-end attack-success-rate measurement.
 
-Current held-out misses and false positives are listed in the licensed
-package's `benchmarks/security/RESULTS.md`
+Current held-out misses and false positives are listed in
+`benchmarks/security/RESULTS.md`
 (regenerated with each run) so the gaps are tracked, not forgotten.
 
 ## Latency & ReDoS are a hard CI gate
@@ -106,10 +108,10 @@ python benchmarks/security/latency_bench.py        # latency distribution
 No API key, no SDK, no network. The corpus (`benchmarks/security/corpus.py`)
 carries no encoded blobs — obfuscated variants are built at runtime.
 
-## Roadmap to a published recall number
+## What a published recall number needs
 
 The credible public recall figure comes from scale and end-to-end measurement,
-documented in the licensed package's `benchmarks/security/RUNBOOK_SECURITY.md`:
+documented in `benchmarks/security/RUNBOOK_SECURITY.md`:
 external held-out sets (AgentDojo, JailbreakBench) run through the leakage
 guard, and an end-to-end AgentDojo run measuring attack-success-rate reduction
 with the shield **on vs. off** (the number that actually matters: not "did we

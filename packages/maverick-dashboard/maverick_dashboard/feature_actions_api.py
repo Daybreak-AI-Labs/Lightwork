@@ -201,7 +201,9 @@ async def account(request: Request) -> dict:
 def account_page(request: Request) -> HTMLResponse:
     require_permission(request, "view")
     from .app import templates
-    return templates.TemplateResponse(request, "account.html", {},
+    from .local_owner_mfa_routes import owner_link_visible
+    return templates.TemplateResponse(request, "account.html",
+                                      {"owner_authenticator": owner_link_visible(request)},
                                       headers={"Cache-Control": "private, no-store"})
 
 

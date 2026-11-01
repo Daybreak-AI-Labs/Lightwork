@@ -424,6 +424,38 @@ def test_graduation_candidates_sorted():
     assert [c.name for c in cands] == ["a"]
 
 
+def test_graduation_candidates_match_each_agents_own_verdict(monkeypatch):
+    # Candidates come from one pass over the history; every agent used to
+    # re-read all of it and the canary ledger (2,031 agents by 500 decisions
+    # took 1.1 s). Each verdict must be the agent's own graduation_status.
+    from maverick.agent_autonomy import graduation_candidates, graduation_status
+    from maverick.immune import oversight
+
+    hist = ([_approval("a", "approved") for _ in range(10)]
+            + [{"requested_by": "agent:b", "status": "approved"} for _ in range(9)]
+            + [{"agent": "c", "status": "approved"} for _ in range(8)]
+            + [_approval("c", "denied")]                                  # 8/9 < 90%
+            + [{"requested_by": "agent:data_analyst-3", "status": "approved"} for _ in range(12)]
+            + [{"role": "analyst", "decision": "granted"} for _ in range(8)]
+            + [{"status": "approved"} for _ in range(9)]                  # names no agent
+            + [_approval("d", "pending") for _ in range(20)]
+            + [{"id": 7000 + i, "requested_by": "agent:e-0", "status": "approved"}
+               for i in range(8)])                                        # canaries
+    names = ["a", "b", "c", "d", "e", "analyst", "data_analyst", "missing", ""]
+    reads = {"n": 0}
+
+    def canary_ids():
+        reads["n"] += 1
+        return {7000 + i for i in range(8)}
+
+    monkeypatch.setattr(oversight, "canary_ids", canary_ids)
+    cands = graduation_candidates(hist, names)
+    assert reads["n"] == 1
+    alone = [graduation_status(n, hist) for n in names]
+    assert cands == sorted((v for v in alone if v.graduated), key=lambda v: (-v.confidence, v.name))
+    assert {c.name for c in cands} == {"a", "b", "analyst", "data_analyst", ""}
+
+
 def test_effective_profile_graduated_lifts_onboarding():
     from maverick.agent_autonomy import effective_profile
 

@@ -98,3 +98,35 @@ class TestExportEdges:
     def test_export_empty_workspace(self, tmp_path, monkeypatch):
         _use_workspace(monkeypatch, tmp_path / "ws")
         assert export_overrides(tmp_path / "bundle") == {"domains": 0, "roles": 0}
+
+
+class TestNewSpecialistSwitch:
+    def test_a_new_specialist_in_a_bundle_waits_while_the_switch_is_on(self, tmp_path, monkeypatch):
+        from maverick import config
+
+        _use_workspace(monkeypatch, tmp_path / "ws")
+        monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+        (tmp_path / "config.toml").write_text("[agent_tests]\nrequire_for_new_specialists = true\n", encoding="utf-8")
+        config.reset_config_cache()
+        bundle = tmp_path / "bundle"
+        (bundle / "domains").mkdir(parents=True)
+        (bundle / "domains" / "client_fin.toml").write_text(VALID_PACK)
+        try:
+            held = load_overrides(bundle)
+            assert held["domains"] == 0
+            assert any(item.startswith("domains/client_fin.toml") and "saved check" in item for item in held["skipped"])
+            assert "client_fin" not in available_domains()
+            assert not (tmp_path / "ws" / "domains" / "client_fin.toml").exists()
+
+            # With the switch off the same bundle loads, and a changed specialist that already exists loads with it on.
+            (tmp_path / "config.toml").write_text("", encoding="utf-8")
+            config.reset_config_cache()
+            assert load_overrides(bundle)["domains"] == 1
+            assert "client_fin" in available_domains()
+            (tmp_path / "config.toml").write_text("[agent_tests]\nrequire_for_new_specialists = true\n", encoding="utf-8")
+            config.reset_config_cache()
+            (bundle / "domains" / "client_fin.toml").write_text(VALID_PACK.replace("tuned for this client", "tuned for a client"))
+            changed = load_overrides(bundle)
+            assert changed["domains"] == 1 and changed["skipped"] == []
+        finally:
+            config.reset_config_cache()

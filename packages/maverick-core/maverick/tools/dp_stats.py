@@ -1,4 +1,4 @@
-"""Differential privacy on usage stats (roadmap: 2027 H1 safety).
+"""Differential privacy on usage stats.
 
 Release aggregate counts/sums with calibrated Laplace noise so an individual's
 presence can't be inferred from a published statistic. Pure stdlib (no numpy):

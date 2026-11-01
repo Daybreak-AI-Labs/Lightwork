@@ -1,4 +1,4 @@
-"""Capability revocation list (roadmap: 2028 H2 safety).
+"""Capability revocation list.
 
 A :class:`maverick.capability.Capability` is valid until it *expires*. But a
 grant sometimes has to be killed **now** — a leaked key, an agent gone rogue,

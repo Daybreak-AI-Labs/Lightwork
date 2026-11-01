@@ -1,4 +1,4 @@
-"""Generic OIDC tool (ROADMAP 2028 H2)."""
+"""Generic OIDC tool."""
 from __future__ import annotations
 
 from urllib.parse import parse_qs, urlparse

@@ -3,19 +3,18 @@ requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-# PyPI distribution name, reserved for when this ships publicly -- nothing is
-# published under it today (pypi.org/project/maverick-agent 404s as of July
-# 2026), so read this as the intended name, not a live one. The bare 'maverick'
-# name was squatted on PyPI, hence the suffix. The Python *import* name stays as
-# `maverick` (see [tool.setuptools.packages.find]) and the CLI is
+# PyPI distribution name. Nothing is published to PyPI under it yet. The bare
+# 'maverick' name is taken on PyPI, hence the suffix. The Python *import* name
+# stays `maverick` (see [tool.setuptools.packages.find]) and the CLI is
 # installed under both names -- `maverick` and its Lightwork-brand
 # alias `lightwork` (see [project.scripts]).
 name = "maverick-agent"
 version = "0.1.7"
 description = "Recursive multi-agent swarm for long-horizon work"
 requires-python = ">=3.10"
-license = "LicenseRef-Proprietary"
-authors = [{ name = "cdayAI" }]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "The Lightwork Authors" }]
 readme = "README.md"
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -55,7 +54,7 @@ openai     = ["openai>=1.30,<4"]
 release-runtime = [
     "openai>=1.30,<4",
     "openpyxl>=3.1", "lxml>=5.0", "pypdf>=6.14.2", "pdfplumber>=0.10",
-    # Frozen customers cannot add Python packages to the executable. Include
+    # A frozen executable cannot add Python packages after it is built. Include
     # the supported SQL driver, local MathML conversion and metrics collector.
     "sqlalchemy>=2.0,<3", "psycopg[binary,pool]>=3.3.5,<4",
     "latex2mathml>=3.77", "prometheus-client>=0.20",
@@ -124,6 +123,12 @@ voice-unlock    = ["speechbrain>=1.0", "torch>=2.2", "torchaudio>=2.2"]
 clap            = ["transformers>=4.40", "torch>=2.2"]
 notifications   = ["httpx>=0.27"]
 audit-signing   = ["cryptography>=48.0.1"]
+# Azure Key Vault / Managed HSM BYOK ([kms] provider = "azure"); imported lazily by
+# maverick.kms_backends. Floors are the 4.10.0 and 1.25.3 releases, checked on the
+# package index: they export CryptographyClient.wrap_key/unwrap_key with key_id on
+# the results, CryptographyClient.sign/verify (SignResult.signature,
+# VerifyResult.is_valid), and DefaultAzureCredential.
+azure-kms       = ["azure-keyvault-keys>=4.10.0,<5", "azure-identity>=1.25.3,<2"]
 sigstore        = ["sigstore>=3.0"]
 oidc            = ["pyjwt[crypto]>=2.13.0"]
 training        = ["torch>=2.2", "transformers>=4.40", "peft>=0.10",
@@ -140,6 +145,10 @@ s3              = ["boto3>=1.34"]
 # Native Bedrock with AWS IAM (SigV4) auth: the Anthropic SDK signs requests
 # through boto3/botocore. The bearer-token path needs no extra.
 bedrock         = ["anthropic[bedrock]>=0.40.0,<2"]
+# Claude on Google Cloud Vertex AI: the Anthropic SDK's Vertex client, plus
+# google-auth (with requests) for Google Application Default Credentials.
+# Checked at client construction; the extra is never required by the kernel.
+vertex          = ["anthropic[vertex]>=0.40.0,<2", "google-auth[requests]>=2,<3"]
 # Optional only because every non-AWS inventory adapter uses the core HTTP
 # transport. Bedrock imports boto3 lazily and remains injectable in tests.
 ai-inventory    = ["boto3>=1.34"]
@@ -154,7 +163,7 @@ sentry          = ["sentry-sdk>=2.0"]
 # used only when [billing.stripe] enable is on. Lazily imported inside the
 # functions that touch Stripe, so the module imports and reports "disabled"
 # cleanly without it; webhook signature verification is stdlib HMAC and needs
-# no SDK. Kept OPTIONAL (kernel rule 5) so a fresh install pulls nothing extra.
+# no SDK. Kept OPTIONAL so a fresh install pulls nothing extra.
 stripe          = ["stripe>=9.0"]
 shield          = ["maverick-shield>=0.1.7"]
 installer  = ["maverick-installer>=0.1.7"]

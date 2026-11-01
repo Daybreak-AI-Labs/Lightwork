@@ -78,7 +78,7 @@
   </noscript>
 </div>
 
-<script>
+<script nonce="{{ csp_script_nonce }}">
 // Obsidian-style goal graph. The server returns the forest
 // (GET /api/v1/goal-tree -> {nodes, edges}); this script runs a small
 // dependency-free force simulation (charge + link springs + centre gravity),

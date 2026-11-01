@@ -96,3 +96,32 @@ def test_cli_cost_retro_json(tmp_path):
     assert res.exit_code == 0
     import json
     assert json.loads(res.output)["total_spend"] == 1.0
+
+
+class _GoalByGoal:
+    """A world without the batch reader: the pre-change per-goal reads."""
+
+    def __init__(self, world):
+        self._world = world
+
+    def list_goals(self, **kwargs):
+        return self._world.list_goals(**kwargs)
+
+    def list_episodes(self, **kwargs):
+        return self._world.list_episodes(**kwargs)
+
+
+def test_goal_rows_match_goal_by_goal_reads(tmp_path):
+    world = WorldModel(tmp_path / "w.db")
+    goals = [world.create_goal(f"task {i}", owner="user:alice") for i in range(5)]
+    with world._writing() as conn:
+        for index in range(120):
+            conn.execute(
+                "INSERT INTO episodes(goal_id, started_at, cost_dollars, outcome) VALUES (?, ?, ?, ?)",
+                (goals[index % 5], 3_000.0 + index, 0.0 if index % 4 == 0 else 0.03 * (index % 6),
+                 "failed" if index % 7 == 0 else "succeeded"),
+            )
+    for limit in (2000, 10):
+        assert cr._goal_rows(world, limit=limit) == cr._goal_rows(_GoalByGoal(world), limit=limit)
+    assert cr.retrospective(world) == cr.retrospective(_GoalByGoal(world))
+    assert len(cr._goal_rows(world, limit=10)) == 5

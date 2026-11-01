@@ -1,4 +1,4 @@
-"""Earned Autonomy -- consequence-proven trust (moonshot Bet 5).
+"""Earned Autonomy -- consequence-proven trust.
 
 The biggest blocker to enterprise agents isn't quality, it's trust to take
 irreversible action. Everyone ships agents that draft; almost no one ships

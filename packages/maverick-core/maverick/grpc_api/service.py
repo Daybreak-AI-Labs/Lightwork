@@ -4,7 +4,7 @@ The gRPC server (``server.py``) is a thin protobuf shim over this class; all the
 behaviour lives here so it is unit-tested without grpc installed and could back
 a second transport (REST, a queue worker) unchanged.
 
-Three operations, mirroring the roadmap's gRPC surface:
+Three operations make up the gRPC surface:
   - ``start_goal``   -> create a goal and dispatch it for background execution.
   - ``stream_episode`` -> yield the goal's events as they land, until terminal.
   - ``cancel``       -> mark a goal cancelled (honoured at the next dispatch /

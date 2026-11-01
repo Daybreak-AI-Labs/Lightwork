@@ -40,6 +40,18 @@ resource "aws_security_group" "efs" {
   tags = { Name = "${local.name}-efs" }
 }
 
+# Daily AWS Backup copies of the state volume under the account's default EFS
+# backup plan (daily, 35-day retention, default vault). The world model, the
+# audit chain and uploaded files live on this volume: prevent_destroy keeps
+# the filesystem, this keeps its contents recoverable.
+resource "aws_efs_backup_policy" "state" {
+  file_system_id = aws_efs_file_system.state.id
+
+  backup_policy {
+    status = "ENABLED"
+  }
+}
+
 # One mount target per AZ the tasks run in (they run in the public subnets).
 resource "aws_efs_mount_target" "state" {
   count           = 2

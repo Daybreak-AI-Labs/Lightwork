@@ -1,8 +1,9 @@
 ;;; maverick.el --- Drive the Lightwork agent runtime from Emacs -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2027 Day AI Labs
+;; Copyright (C) 2026 Christopher Day
+;; SPDX-License-Identifier: Apache-2.0
 
-;; Author: Day AI Labs
+;; Author: The Lightwork Authors
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "27.1"))
 ;; Keywords: tools, processes

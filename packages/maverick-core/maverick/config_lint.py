@@ -177,7 +177,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         # Governance knobs the runtime reads (capability.py / agent.py) that
         # were missing here -- so a client configuring the flagship
         # capability-enforcement feature, or the deferred-tools knob, got a
-        # false "unknown key" warning (client-journey finding).
+        # false "unknown key" warning.
         "enforce",
         "per_call_tokens",
         "deferred_tools",
@@ -191,10 +191,14 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # Tamper-evident audit log. The runtime reads [audit] sign (audit/writer.py)
     # and migrate.py already lists it; config-lint flagged the whole section as
     # unknown ("did you mean auth?"), telling a regulated client their flagship
-    # signed-audit config looked like a typo (client-journey finding).
+    # signed-audit config looked like a typo.
     "audit": {"sign", "worm", "unified",
               # Off-host key and SIEM forwarding (audit/writer.py, audit_siem.py).
-              "require_offhost_key", "siem_dest", "siem_token", "siem_allow_insecure"},
+              "require_offhost_key", "siem_dest", "siem_token", "siem_allow_insecure",
+              # Vendor SIEM credential fallbacks (audit/forwarder.py); the env vars
+              # MAVERICK_DATADOG_API_KEY and MAVERICK_SENTINEL_* are the preferred home.
+              "datadog_api_key", "sentinel_tenant_id", "sentinel_client_id",
+              "sentinel_client_secret"},
     "entity_graph": {"enable", "staleness_seconds"},
     # Commerce suite caps are money/quantity limits, so the schema is closed: a
     # misspelled cap must not silently fall back to the default.
@@ -276,6 +280,9 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # Agent Factory: JD hiring (maverick.jd_hiring) and the publish gate
     # (maverick.agent_publish_policy).
     "agent_factory": {"jd_hiring", "require_passing_tests"},
+    # Saved answer checks (maverick.agent_tests_policy).
+    "agent_tests": {"max_cases_per_specialist", "require_for_new_specialists",
+                    "bypass_requires_second_person", "tool_checks", "canary_percent", "canary_auto_rollback"},
     "practice": {"enable", "daily_spend_cap"},
     "collaboration": {"comments", "suggestions", "ai_suggestions"},
     "first_outcome": {"department", "sample_workspace_created"},
@@ -389,6 +396,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     },
     "data_map": {"enable", "graph_token_env", "graph_token"},
     "breach_notification": {"enable"},
+    "ediscovery": {"enable"},
     "dsar_fulfillment": {"enable"},
     "grc_sync": {"enable", "connector", "findings_path", "acceptances_path",
                  "incidents_path", "backlink_base", "response_field_params"},
@@ -629,7 +637,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
 # section the runtime actually reads as a typo. The two had drifted by ~59
 # sections -- a client configuring documented features like [provider_failover],
 # [enterprise], [egress], [governance], [encryption] got told they were
-# typos (client-journey finding). Sections with an explicit key schema above
+# typos. Sections with an explicit key schema above
 # keep it (setdefault won't overwrite); the rest accept any subkey (None),
 # exactly as migrate treats them.
 from .migrate import KNOWN_SECTIONS as _RUNTIME_SECTIONS  # noqa: E402
@@ -678,7 +686,15 @@ _INTEGER_KEYS: dict[str, set[str]] = {
         "minimum_train_families",
         "minimum_holdout_families",
     },
+    "knowledge_sources": {
+        "max_items",
+        "max_pages",
+        "max_download_mib",
+        "max_text_kib",
+        "max_refresh_minutes",
+    },
     "customer_sandbox_lifecycle": {"source_revision"},
+    "agent_tests": {"max_cases_per_specialist", "canary_percent"},
     "ai_entity_tasks": {
         "max_tasks",
         "retention_seconds",
@@ -764,6 +780,8 @@ _BOOL_KEYS: dict[str, set[str]] = {
     },
     "analytics": {"mcp_client_language", "task_questions", "usability_survey", "usage_measures", "web_vitals"},
     "agent_factory": {"jd_hiring", "require_passing_tests"},
+    "agent_tests": {"require_for_new_specialists", "bypass_requires_second_person", "tool_checks",
+                    "canary_auto_rollback"},
     "practice": {"enable"},
     "collaboration": {"comments", "suggestions", "ai_suggestions"},
     "self_learning": {
@@ -1500,6 +1518,8 @@ for _provider in (
     ] = {"enable"}
 
 _NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
+    (("agent_tests",), "max_cases_per_specialist"): (1, 200),
+    (("agent_tests",), "canary_percent"): (0, 50),
     (("governance_inventory",), "retention_seconds"): (86_400, 315_360_000),
     (("governance_inventory",), "max_source_records"): (1, 100_000),
     (("governance_inventory",), "max_entities"): (1, 100_000),
@@ -2441,6 +2461,28 @@ def _lint_trust_root_keys(value: dict) -> list[Finding]:
                     )
                 )
     return findings
+
+
+def _lint_local_owner_totp(cfg: dict) -> list[Finding]:
+    """``[auth.local_owner] totp`` must be one of the three modes; anything else reads as optional."""
+    from .config import LOCAL_OWNER_TOTP_MODES
+
+    value = _at_path(cfg, ("auth", "local_owner", "totp"))
+    if value is _MISSING:
+        return []
+    if isinstance(value, str) and value.strip().lower() in LOCAL_OWNER_TOTP_MODES:
+        return []
+    # As in the runtime, only a short plain word is written out; never a pasted secret.
+    shown = f"{value!r}" if isinstance(value, str) and re.fullmatch(r"[a-z]{1,20}", value) else "a value"
+    return [
+        _nested_error(
+            "auth.local_owner",
+            "totp",
+            f"auth.local_owner.totp must be one of {', '.join(LOCAL_OWNER_TOTP_MODES)}, got {shown}; "
+            "until it is fixed the owner's authenticator app is read as optional",
+            severity="warning",
+        )
+    ]
 
 
 def _lint_identity_controls(cfg: dict) -> list[Finding]:
@@ -4780,6 +4822,7 @@ def _lint_governance_nested_tables(cfg: dict) -> list[Finding]:
             )
 
     findings.extend(_lint_identity_controls(cfg))
+    findings.extend(_lint_local_owner_totp(cfg))
     trust_roots = _at_path(cfg, ("ai_benchmark_exchange", "trust_roots"))
     if isinstance(trust_roots, dict):
         findings.extend(_lint_trust_root_keys(trust_roots))

@@ -104,10 +104,9 @@ used by the runnable TypeScript example.
 
 ## Why no `maverick-rs` crate?
 
-Same reason there's no `maverick-go` or `maverick-ts`: porting a
-1600-test, 7-sandbox, multi-agent kernel to Rust is a permanent
-team-headcount tax with no consumer-reach payoff. See
-[docs/ROADMAP.md → Language Bindings — Council Decision](../ROADMAP.md).
+Same reason there's no `maverick-go` or `maverick-ts`: the multi-agent kernel
+stays in Python, and a port would duplicate it without adding reach. See
+[Language bindings](../ROADMAP.md#language-bindings) in the roadmap.
 
 Rust is the natural language for *embedders* — CLI tools and
 infrastructure agents that need a small binary footprint and don't
@@ -130,4 +129,4 @@ drifts across releases, the wire protocol it speaks does not.
 - [Go client quickstart](./go-quickstart.md)
 - [C# / .NET client quickstart](./csharp-quickstart.md)
 - [Java / JVM client quickstart](./java-quickstart.md)
-- [docs/ROADMAP.md → Language Bindings — Council Decision](../ROADMAP.md)
+- [Roadmap: language bindings](../ROADMAP.md#language-bindings)

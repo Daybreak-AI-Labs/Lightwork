@@ -1,4 +1,4 @@
-"""EU AI Act conformance package generator (roadmap: 2028 H2 safety).
+"""EU AI Act conformance package generator.
 
 Article 11 / Annex IV require a provider's **technical documentation**: the
 system's description, risk classification, human-oversight measures,

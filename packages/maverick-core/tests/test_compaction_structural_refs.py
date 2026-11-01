@@ -1,6 +1,6 @@
 """Structural compaction: a shrunk tool_result keeps a content-addressed ref
 (source tool + path/url + sha256 + size) instead of an opaque 'output dropped'
-(ROADMAP 'Structural compaction'). Complements test_compaction_regression.py,
+. Complements test_compaction_regression.py,
 which guards the count/pairing/idempotence invariants."""
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Plugin telemetry, opt-in (roadmap: 2027 H2 ecosystem).
+"""Plugin telemetry, opt-in.
 
 Local-only usage counts for third-party plugin tools: which plugin tools
 actually get called, how often, and when last — the data an operator needs to

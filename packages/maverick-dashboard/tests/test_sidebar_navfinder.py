@@ -96,7 +96,7 @@ def test_page_finder_has_an_accessible_dialog_and_combobox_contract(monkeypatch,
     assert search["aria-expanded"] == "false"
     assert markup.ids["navfinder-results"]["role"] == "listbox"
     assert markup.ids["navfinder-count"]["role"] == "status"
-    # Shell assets carry a content-hash query (W3-77); compare the path.
+    # Shell assets carry a content-hash query; compare the path.
     assert "/static/lightwork-navfinder.js" in {src.split("?")[0] for src in markup.scripts}
 
 

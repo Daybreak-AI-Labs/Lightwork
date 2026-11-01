@@ -1,6 +1,6 @@
 """Deferred tool loading is wired on by default for the connector long tail.
 
-Platform-test finding: every model turn carried 601 tool schemas at consumer
+Previously, every model turn carried 601 tool schemas at consumer
 defaults (capabilities off, tools denied) -- the deferred-loading mechanism
 (``ToolRegistry.enable_deferred`` + ``find_tools``) existed and was tested,
 but nothing in the production path called it. ``base_registry`` now marks the

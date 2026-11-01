@@ -9,13 +9,14 @@ import time
 from dataclasses import asdict
 
 from fastapi import HTTPException
-from maverick import config, crypto_at_rest, domain, domain_edit
+from maverick import agent_tests_policy, config, crypto_at_rest, domain, domain_edit
+from maverick import specialist_canary as canary
 from maverick.authority_effects import authority_effect_fence
 from maverick.file_lock import cross_process_lock
 from maverick.governed_operations import digest
 from maverick.governed_records import GovernedRecordStore
 
-from . import auth, tools_ops_api
+from . import agent_changelog, auth, tools_ops_api
 from .agent_override_changes import PROFILE_LABELS, _readable
 from .draft_api import context_for
 
@@ -23,11 +24,15 @@ API, PAGE = "/api/v1/specialist-drafts", "/agents#specialist-drafts"
 STORE = GovernedRecordStore("specialist-drafts", "SPD", "specialist_draft")
 TTL, MAX_RECORDS = 600, 10000
 NOTICE = ("Saving a draft does not change the specialist people use. Preview checks its entered setup. "
-          "Try and saved answer checks use the exact draft with no tools, files, company knowledge or shared learning. "
+          "Try and saved answer checks use the exact draft with no real tools, files, company knowledge or shared learning. "
+          "Checks that test tool use get recording test stubs instead; they answer with fixed results and run nothing real. "
           "Its complete instructions and fictional requests are sent to the configured AI service for those answer checks. "
           "They do not establish that connected actions work or that an answer is correct. Publishing or restoring changes new work; work already running can retain earlier instructions.")
 ACTIONS = {"save": "Saved a draft", "try": "Tried a draft answer", "check": "Checked the draft's saved questions",
-           "publish": "Published a saved draft", "restore": "Restored an earlier definition"}
+           "publish": "Published a saved draft", "restore": "Restored an earlier definition",
+           "promote": "Promoted a trial version", "rollback": "Rolled back a trial version"}
+TRIAL_LIVE = ("A trial version of this specialist is live. Promote it or roll it back in Workforce before "
+              "publishing another change. Nothing was changed.")
 
 
 def authority(request, context=None, *, write=False):
@@ -198,6 +203,34 @@ def original_history(request):
     return {"context": context, "originals": choices}
 
 
+def unpublished_profiles(request, *, name=None) -> dict:
+    """The newest confirmed saved draft, per specialist this person has not published yet.
+
+    Saved answer checks can be kept for these before the first publication; they
+    are read against the draft. ``name`` limits the answer to one specialist.
+    Nothing is returned to a person without admin access or for an unreadable history.
+    """
+    from maverick import domain
+
+    try:
+        actor, context = authority(request)
+        rows = STORE.list(limit=MAX_RECORDS + 1)
+    except HTTPException:
+        return {}
+    if len(rows) > MAX_RECORDS:
+        return {}
+    published = domain.available_domains()
+    found: dict = {}
+    for row in sorted(rows, key=lambda item: (item["created_at"], item["id"]), reverse=True):
+        if (row.get("actor") != actor or row.get("context") != context or row.get("action") != "save"
+                or row.get("state") != "confirmed" or row.get("_audit_pending")):
+            continue
+        if row["name"] in published or row["name"] in found or (name is not None and row["name"] != name):
+            continue
+        found[row["name"]] = domain._coerce(row["name"], row["profile"])
+    return found
+
+
 def inventory(request, name):
     actor, context = authority(request)
     source = _source(request, name)
@@ -215,6 +248,33 @@ def inventory(request, name):
     return {"context": context, "binding": digest(source), "name": name, "editor": source["raw"],
             "current": source["profile"], "generation": source["generation"], "drafts": versions,
             "earlier": earlier, "originals": originals, "notice": NOTICE, "actor": actor, "tool_services": services}
+
+
+def trials(request) -> dict:
+    """Every live trial this person may read, with each version's goal counts (no content)."""
+    from ._shared import _world
+
+    actor, context = authority(request)
+    world = _world()
+    found = []
+    for row in canary.TRIALS.list(limit=canary.MAX_ROWS + 1):
+        trial = row.get("live")
+        if trial is None:
+            continue
+        name = row["name"]
+        try:
+            _source(request, name)  # the same department access as the editor
+        except HTTPException:
+            continue
+        try:
+            versions = canary.version_stats(name, world, candidate_id=trial["candidate_id"])
+        except RuntimeError:
+            versions = None
+        found.append({"name": name, "candidate_id": trial["candidate_id"], "percent": trial["percent"],
+                      "started_at": trial["started_at"], "title": trial.get("title") or "", "versions": versions,
+                      "auto_rollback": agent_tests_policy.canary_auto_rollback(), "min_finished": canary.MIN_FINISHED_GOALS})
+    authority(request, context)
+    return {"context": context, "trials": sorted(found, key=lambda item: item["name"])}
 
 
 def saved_draft(request, identifier):
@@ -266,8 +326,16 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
         raise HTTPException(422, "Choose Save draft, Try, Check saved questions, Publish or Restore.")
     source = _source(request, name)
     selected_revision = None
+    trial = canary.live(name)
+    candidate_id = None
+    if action in {"publish", "restore"} and trial is not None:
+        raise HTTPException(409, TRIAL_LIVE)
     if action == "save" or (entered is not None and action in {"try", "check"}):
         patch, profile = _draft(request, name, entered, source)
+    elif action in {"promote", "rollback"}:
+        if trial is None:
+            raise HTTPException(409, "There is no trial version of this specialist to promote or roll back.")
+        patch, profile, candidate_id = copy.deepcopy(trial["patch"]), copy.deepcopy(trial["profile"]), trial["candidate_id"]
     else:
         row, patch, profile = _target(request, action, selected, source)
         if row["name"] != name:
@@ -279,7 +347,7 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
         raise HTTPException(422, "Enter a fictional sample request of between 8 and 4,000 characters.")
     from . import specialist_test_sets as tests
     cases = tests.cases_for(name) if action == "check" else []
-    if action == "check" and not 1 <= len(cases) <= tests.MAX_CASES_PER_SPECIALIST:
+    if action == "check" and not 1 <= len(cases) <= tests.max_cases_per_specialist():
         raise HTTPException(409, "Add at least one saved answer check before checking this draft.")
     connection = _connection(name, models=profile["models"])
     if action in {"try", "check"}:
@@ -295,19 +363,31 @@ def prepare(request, name, action, *, entered=None, selected=None, task="", titl
                 "before": source, "patch": patch, "profile": profile, "selected": selected,
                 "selected_revision": selected_revision, "task": task, "title": title,
                 "reason": reason, "cases": cases, "connection": connection, "expires": time.time() + TTL,
-                "uncertain": uncertain, "acknowledge_previous": acknowledge_previous}
+                "uncertain": uncertain, "acknowledge_previous": acknowledge_previous,
+                "candidate_id": candidate_id, "trial_percent": agent_tests_policy.canary_percent()}
     prepared["tool_services"] = _server_state(profile["mcp_servers"])
-    if action in {"publish", "restore"} and _publication_verdict(prepared)["blocked"] and len(reason.strip()) < 8:
-        raise HTTPException(409, "This complete draft needs a finished passing check of every current saved question, or a reason of at least eight characters for proceeding without one.")
+    if action in {"publish", "restore", "promote"}:
+        verdict = _publication_verdict(prepared)
+        if verdict["blocked"] and verdict.get("hard"):
+            raise HTTPException(409, verdict["message"])
+        if verdict["blocked"] and len(reason.strip()) < 8:
+            raise HTTPException(409, "This complete draft needs a finished passing check of every current saved question, or a reason of at least eight characters for proceeding without one.")
     _bounded(prepared)
     authority(request, current, write=True)
     return prepared
 
 
 def changes(request, prepared):
+    from . import specialist_test_sets as tests
     from .plain_labels import model_label
     _guard(request, prepared)
-    rows = [{"label": "Decision", "after": ACTIONS[prepared["action"]]},
+    from maverick.agent_tests_policy import tool_checks_enabled
+
+    from .specialist_tool_checks import budget_questions
+    limits = tests.draft_answer_limits(budget_questions(prepared["cases"], enabled=tool_checks_enabled())
+                                       if prepared["action"] == "check" else 1)
+    decision = ACTIONS[prepared["action"]] + (f" as a trial on {prepared['trial_percent']}% of new goals" if _starts_trial(prepared) else "")
+    rows = [{"label": "Decision", "after": decision},
             {"label": "Complete draft", "after": _readable(prepared["profile"], "definition")},
             {"label": "Currently used definition", "after": _readable(prepared["before"]["profile"], "definition") if prepared["before"]["profile"] else "No active custom agent"},
             {"label": "AI used for answer checks", "after": model_label(prepared["connection"]["model"])}]
@@ -320,7 +400,12 @@ def changes(request, prepared):
     if prepared["action"] == "check":
         rows.append({"label": "Every saved question and passing condition", "after": [{"Question": row["task"], "Must mention": row["includes"],
             "Must never say": row["excludes"], "Should refuse": "Yes" if row["refusal"] else "No", "Needs a source reference": "Yes" if row["citation"] else "No"} for row in prepared["cases"]]})
-    if prepared["action"] in {"publish", "restore"}:
+    if prepared["action"] in {"promote", "rollback"}:
+        trial = canary.live(prepared["name"]) or {}
+        rows.append({"label": "Trial being decided", "after": f"{trial.get('percent', 0)}% of new goals used it. "
+                     + ("Promoting makes it the current version for everyone." if prepared["action"] == "promote"
+                        else "Rolling back discards it; the current version stays as it is.")})
+    if prepared["action"] in {"publish", "restore", "promote"}:
         rows.append({"label": "Publication tests", "after": _publication_verdict(prepared)["message"]})
         if prepared["reason"]:
             rows.append({"label": "Reason for publishing without a complete passing check", "after": prepared["reason"]})
@@ -328,30 +413,63 @@ def changes(request, prepared):
         rows.append({"label": "Earlier unconfirmed decisions", "after": {
             "Earlier work may already exist": [{"Decision": item["action"], "Recorded": time.strftime("%b %d, %Y %H:%M", time.localtime(item["recorded_at"]))} for item in prepared["uncertain"]],
             "Separate new intent": "I acknowledged the earlier unknown outcomes. This new full review does not confirm or repeat those originals."}})
-    rows.extend([{"label": "Limits and consequences", "after": NOTICE + (" One shared answer-check limit: $0.25, 10,000 input tokens, 640 output tokens and two minutes. A partial or stopped check is not a passing publication check." if prepared["action"] in {"try", "check"} else "")},
+    rows.extend([{"label": "Limits and consequences", "after": NOTICE + (
+                     f" One shared answer-check limit: ${limits['max_dollars']:.2f}, {limits['max_input_tokens']:,} input tokens, "
+                     f"{limits['max_output_tokens']:,} output tokens and {limits['max_wall_seconds']:,} seconds. "
+                     "A partial or stopped check is not a passing publication check." if prepared["action"] in {"try", "check"} else "")},
                  {"label": "If the response is lost", "after": "Read this original decision. An unconfirmed original is not automatically repeated, and a matching current definition does not prove its outcome."}])
     return rows
 
 
+NEW_SPECIALIST_NEEDS_CHECK = ("A new specialist needs at least one saved check before it can be published. "
+                              "Add a check in Workforce, run every saved check on this draft in Agent Factory, "
+                              "then publish it again. A reason cannot skip this.")
+NEW_SPECIALIST_NEEDS_RUN = ("A new specialist can be published only after a full run of every saved check on this "
+                            "exact draft has passed. Run the checks on this draft in Agent Factory, then publish it "
+                            "again. A reason cannot skip this.")
+
+
+def _complete_check(prepared) -> bool:
+    """Whether the latest full run of every current saved check, on exactly this complete draft, passed.
+
+    An older passing run never counts once a newer full run on the same draft has failed or stopped.
+    """
+    from . import specialist_test_sets as tests
+    current = {case["id"]: case["revision"] for case in tests.cases_for(prepared["name"])}
+    if not current:
+        return False
+    full = [run for run in tests.all_runs_for(prepared["name"])  # newest first
+            if run["model"] == prepared["connection"]["model"]
+            and run.get("comparison", {}).get("draft_profile") == prepared["profile"]
+            and run.get("comparison", {}).get("connection") == prepared["connection"]
+            and {case["id"]: case["revision"] for case in run["case_revisions"]} == current]
+    if not full:
+        return False
+    latest = full[0]
+    return (latest["state"] == "done" and len(latest["results"]) == len(current)
+            and all(result["passed"] for result in latest["results"]))
+
+
 def _publication_verdict(prepared):
     from maverick.agent_publish_policy import require_passing_tests
+    from maverick.agent_tests_policy import require_for_new_specialists
 
     from . import agent_publish_gate
     before = prepared["before"]["profile"] or {}
     verdict = agent_publish_gate.check(prepared["name"], model=prepared["connection"]["model"], current_instructions=before.get("persona", ""),
         new_instructions=prepared["profile"]["persona"], creating=not before, required=require_passing_tests())
-    if before and before != prepared["profile"] and require_passing_tests():
-        from . import specialist_test_sets as tests
-        current = {case["id"]: case["revision"] for case in tests.cases_for(prepared["name"])}
-        complete = any(run["state"] == "done" and run["model"] == prepared["connection"]["model"]
-            and run.get("comparison", {}).get("draft_profile") == prepared["profile"]
-            and run.get("comparison", {}).get("connection") == prepared["connection"]
-            and {case["id"]: case["revision"] for case in run["case_revisions"]} == current
-            and bool(current) and len(run["results"]) == len(current)
-            and all(result["passed"] for result in run["results"]) for run in tests.runs_for(prepared["name"]))
-        verdict.update(required=True, passing=complete, blocked=not complete,
-            message="Every current saved question passed on this complete draft." if complete else
-            "This complete draft has no finished passing check of every current saved question. Publishing needs a new complete check or an explicit recorded reason.")
+    # A specialist never published before is "hard": no reason publishes it without this proof.
+    new = not before and require_for_new_specialists()
+    if new or (before and before != prepared["profile"] and require_passing_tests()):
+        complete = _complete_check(prepared)
+        if complete:
+            message = "Every current saved question passed on this complete draft."
+        elif new:
+            from . import specialist_test_sets as tests
+            message = NEW_SPECIALIST_NEEDS_RUN if tests.cases_for(prepared["name"]) else NEW_SPECIALIST_NEEDS_CHECK
+        else:
+            message = "This complete draft has no finished passing check of every current saved question. Publishing needs a new complete check or an explicit recorded reason."
+        verdict.update(required=True, passing=complete, blocked=not complete, hard=new, message=message)
     return verdict
 
 
@@ -407,9 +525,10 @@ def original(request, operation, *, prepared=None):
               "recorded_at": row["updated_at"], "notice": NOTICE}
     try:
         source = _source(request, row["name"])
-        if source["profile"] is None:
-            return result
     except HTTPException:
+        return result
+    # A specialist not yet published has no live profile, but its own check outcome is still read here.
+    if source["profile"] is None and not row.get("run"):
         return result
     result.update(name=row["name"], draft=row["id"] if row["action"] == "save" and confirmed else None)
     if row.get("run"):
@@ -447,6 +566,8 @@ def apply(request, prepared, operation):
                 return _start_answers(request, prepared, row, began)
             if prepared["action"] in {"publish", "restore"}:
                 return _publish(request, prepared, row, began)
+            if prepared["action"] in {"promote", "rollback"}:
+                return _settle_trial(request, prepared, row, began)
             STORE.update(row["id"], lambda current: current.update(state="confirmed"), expected_revision=row["revision"],
                 action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared))
         except HTTPException:
@@ -474,12 +595,25 @@ def _mark_not_started(prepared, row):
         return False
 
 
-def _publish(request, prepared, row, began):
+def _starts_trial(prepared) -> bool:
+    """A changed existing specialist is published as a trial while ``canary_percent`` is above 0."""
+    before = prepared["before"]["profile"]
+    return (prepared["action"] in {"publish", "restore"} and prepared.get("trial_percent", 0) > 0
+            and bool(before) and before != prepared["profile"])
+
+
+def _payload(prepared):
     from .api import AgentOverrideIn
-    payload = AgentOverrideIn.model_validate({**prepared["patch"], "publish_without_passing_tests": bool(prepared["reason"]),
+    return AgentOverrideIn.model_validate({**prepared["patch"], "publish_without_passing_tests": bool(prepared["reason"]),
         "override_reason": prepared["reason"], "expected_generation": prepared["before"]["generation"]})
 
-    _publication_admission(request, prepared, payload)
+
+def _publish(request, prepared, row, began):
+    payload = _payload(prepared)
+
+    second_person = _publication_admission(request, prepared, payload)
+    if _starts_trial(prepared):
+        return _start_trial(request, prepared, row, began, payload, second_person)
 
     def guard():
         _guard(request, prepared)
@@ -489,12 +623,86 @@ def _publish(request, prepared, row, began):
 
     domain_edit.write_override(prepared["name"], prepared["patch"], expected_generation=prepared["before"]["generation"], effect_guard=guard)
     published = digest(_source(request, prepared["name"]))
-    STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published), expected_revision=row["revision"],
+    STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published,
+        bypass_approval=(second_person or {}).get("approval")), expected_revision=row["revision"],
         action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared, published=published))
     # The agent's own plain-words history (who, when, what) records every
     # published or restored definition, as the retired direct save did.
     from .api import _record_agent_change
     _record_agent_change(request, prepared["name"], prepared["before"]["profile"], prepared["profile"])
+    return original(request, row["id"], prepared=prepared)
+
+
+def _start_trial(request, prepared, row, began, payload, second_person):
+    """Keep the current definition and make the changed one a trial on a share of new goals."""
+    from .api import caller_principal
+
+    name = prepared["name"]
+
+    def guard():
+        _guard(request, prepared)
+        _publication_current(request, prepared, payload)
+        began.append(True)
+
+    try:
+        trial = canary.start(name, patch=prepared["patch"], profile=prepared["profile"], percent=prepared["trial_percent"],
+                             actor=prepared["actor"], title=prepared["title"], reason=prepared["reason"], effect_guard=guard)
+    except canary.TrialAlreadyLive as exc:
+        raise HTTPException(409, TRIAL_LIVE) from exc
+    published = digest(_source(request, name))
+    STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published, trial=trial["candidate_id"],
+        bypass_approval=(second_person or {}).get("approval")), expected_revision=row["revision"],
+        action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared, published=published))
+    agent_changelog.record(name, [f"Started a trial of changed instructions on {trial['percent']}% of new goals; "
+                                  "the current version keeps the rest"], by=caller_principal(request) or "")
+    return original(request, row["id"], prepared=prepared)
+
+
+def _settle_trial(request, prepared, row, began):
+    """Promote the live trial to everyone, or roll it back. Both are reviewed and audited like a publication."""
+
+    name = prepared["name"]
+    before = prepared["before"]["profile"]
+    live_trial = canary.live(name)
+    if live_trial is None or live_trial["candidate_id"] != prepared["candidate_id"]:
+        raise HTTPException(409, "The trial version changed. Review it again.")
+    if prepared["action"] == "promote":
+        payload = _payload(prepared)
+        second_person = _publication_admission(request, prepared, payload)
+
+        def guard():
+            _guard(request, prepared)
+            _publication_current(request, prepared, payload)
+            began.append(True)
+
+        domain_edit.write_override(name, prepared["patch"], expected_generation=prepared["before"]["generation"], effect_guard=guard)
+        canary.finish(name, candidate_id=prepared["candidate_id"], outcome=canary.PROMOTED, actor=prepared["actor"])
+        published = digest(_source(request, name))
+        STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published,
+            bypass_approval=(second_person or {}).get("approval")), expected_revision=row["revision"],
+            action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared, published=published))
+        from .api import _record_agent_change
+        _record_agent_change(request, name, before, prepared["profile"])
+    else:
+        _roll_back_trial(request, prepared, row, began)
+    return original(request, row["id"], prepared=prepared)
+
+
+def _roll_back_trial(request, prepared, row, began):
+    from .api import caller_principal
+
+    name = prepared["name"]
+
+    def guard():
+        _guard(request, prepared)
+        began.append(True)
+
+    canary.finish(name, candidate_id=prepared["candidate_id"], outcome=canary.ROLLED_BACK, actor=prepared["actor"], effect_guard=guard)
+    published = digest(_source(request, name))
+    STORE.update(row["id"], lambda current: current.update(state="confirmed", published=published), expected_revision=row["revision"],
+        action="specialist_draft.completed", actor=prepared["actor"], effect_guard=lambda: _guard(request, prepared, published=published))
+    agent_changelog.record(name, ["Rolled back the trial version; the current instructions stay as they were"],
+                           by=caller_principal(request) or "")
     return original(request, row["id"], prepared=prepared)
 
 
@@ -508,22 +716,48 @@ def _publication_current(request, prepared, payload):
         raise HTTPException(409, "Current passing tests no longer support this complete publication. Review a new check or an explicit reason.")
 
 
-def _publication_admission(request, prepared, payload):
+def bypass_used(name: str, approval_id: int) -> bool:
+    """Whether a publication of this specialist already spent this second-person approval."""
+    rows = STORE.list(limit=MAX_RECORDS + 1)
+    return len(rows) > MAX_RECORDS or any(row.get("name") == name and row.get("bypass_approval") == approval_id for row in rows)
+
+
+def _publication_admission(request, prepared, payload) -> dict | None:
+    """Admit a publication. Returns the second person's approval that a reasoned bypass used, if any."""
+    from maverick.agent_tests_policy import bypass_requires_second_person
     from maverick.audit import EventKind, audit_event
 
-    from .api import _record_agent_autonomy_intent, _require_tested_instructions
+    from . import agent_publish_bypass
+    from .api import _publish_check, _record_agent_autonomy_intent, _require_tested_instructions
     _guard(request, prepared)
+    verdict = _publication_verdict(prepared)
+    if verdict["blocked"] and verdict.get("hard"):
+        # A brand-new specialist is refused before any reasoned bypass is considered or recorded.
+        raise HTTPException(409, verdict["message"])
     _publication_current(request, prepared, payload)
-    _require_tested_instructions(request, prepared["name"], payload, prepared["before"]["profile"])
-    if _publication_verdict(prepared)["blocked"]:
+    reason = " ".join((payload.override_reason or "").split())
+    second_person = None
+    if payload.publish_without_passing_tests and len(reason) >= 8 and bypass_requires_second_person():
+        try:
+            plain_blocked = _publish_check(prepared["name"], payload, prepared["before"]["profile"])["blocked"]
+        except Exception as exc:
+            raise HTTPException(503, "The saved test results could not be read. Nothing was changed.") from exc
+        if plain_blocked or verdict["blocked"]:
+            second_person = agent_publish_bypass.second_person_approval(
+                request, prepared["name"], prepared["profile"], reason,
+                used=lambda approval_id: bypass_used(prepared["name"], approval_id))
+    _require_tested_instructions(request, prepared["name"], payload, prepared["before"]["profile"], second_person=second_person)
+    if verdict["blocked"]:
         accepted = audit_event(EventKind.CONTROL_PLANE_ACTION, agent="dashboard", verb="agent_draft_published_without_complete_check",
-            actor=prepared["actor"], specialist=prepared["name"], reason=prepared["reason"])
+            actor=prepared["actor"], specialist=prepared["name"], reason=prepared["reason"], **(second_person or {}))
         if not accepted:
             raise HTTPException(503, "The reason could not be recorded. Read the original decision before another publication intent.")
     before = (prepared["before"]["profile"] or {}).get("autonomy") or {}
     after = prepared["profile"].get("autonomy") or {}
-    if before != after and after:
+    # A trial is only a candidate until it is promoted; its independence change is recorded then.
+    if before != after and after and not _starts_trial(prepared):
         _record_agent_autonomy_intent(request, prepared["name"], before, after)
+    return second_person
 
 
 def _start_answers(request, prepared, row, began):

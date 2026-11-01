@@ -1,4 +1,4 @@
-"""Watch-glance payload (roadmap: 2027 H1 UX — "Apple Watch glance").
+"""Watch-glance payload.
 
 The data half of a watch complication/glance: one **tiny, fixed-shape**
 payload sized for a watch face — active/today counts, today's spend, and the
@@ -32,14 +32,21 @@ def build_glance(world, *, now: float | None = None, owner: str | None = None) -
     ts = float(now if now is not None else time.time())
     day_start, day_end = _today_bounds(ts)
     active = done_today = failed_today = 0
-    last: tuple[float, str] | None = None
+    # The newest terminal goal: (updated_at, goal). A world that can read the
+    # status columns alone is asked for those, so only the chosen goal is
+    # decrypted for its result or title.
+    last: tuple[float, object] | None = None
+    states = getattr(world, "goal_states", None)
     try:
-        goals = world.list_goals(owner=owner, limit=10_000)
+        if callable(states):
+            rows = [(gid, status, float(updated or 0))
+                    for gid, status, updated in states(owner=owner, limit=10_000)]
+        else:
+            rows = [(g, getattr(g, "status", ""), float(getattr(g, "updated_at", 0) or 0))
+                    for g in world.list_goals(owner=owner, limit=10_000)]
     except Exception:
-        goals = []
-    for g in goals:
-        status = getattr(g, "status", "")
-        updated = float(getattr(g, "updated_at", 0) or 0)
+        rows = []
+    for ref, status, updated in rows:
         if status in ("active", "pending", "running"):
             active += 1
         if day_start <= updated < day_end:
@@ -49,9 +56,14 @@ def build_glance(world, *, now: float | None = None, owner: str | None = None) -
                 failed_today += 1
         if status in ("done", "succeeded", "completed", "failed", "blocked"):
             if last is None or updated > last[0]:
-                result = (getattr(g, "result", "") or
-                          getattr(g, "title", "") or "")
-                last = (updated, result)
+                last = (updated, ref)
+    last_text = ""
+    if last is not None:
+        try:
+            goal = world.get_goal(last[1]) if isinstance(last[1], int) else last[1]
+            last_text = (getattr(goal, "result", "") or getattr(goal, "title", "") or "")
+        except Exception as e:
+            log.debug("glance: last result lookup failed (%s); reporting no result", e)
     spend = 0.0
     try:
         from .quotas import UsageLedger, _today
@@ -70,7 +82,7 @@ def build_glance(world, *, now: float | None = None, owner: str | None = None) -
         "done_today": done_today,
         "failed_today": failed_today,
         "spend_today": round(spend, 2),
-        "last_result": (last[1][:60] if last else ""),
+        "last_result": last_text[:60],
         "as_of": int(ts),
     }
 

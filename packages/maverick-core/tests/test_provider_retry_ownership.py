@@ -70,17 +70,17 @@ _RETRY_OWNERSHIP = {
         "AsyncAzureOpenAI",
     ): _OUTER_BOUNDED_RETRY,
     (
-        "apps/installer-cli/maverick_installer/wizard.py",
+        "apps/installer-cli/maverick_installer/wizard/__init__.py",
         "_validate_anthropic_key",
         "Anthropic",
     ): _INTENTIONAL_ONE_SHOT,
     (
-        "apps/installer-cli/maverick_installer/wizard.py",
+        "apps/installer-cli/maverick_installer/wizard/__init__.py",
         "_validate_openai_key",
         "OpenAI",
     ): _INTENTIONAL_ONE_SHOT,
     (
-        "apps/installer-cli/maverick_installer/wizard.py",
+        "apps/installer-cli/maverick_installer/wizard/__init__.py",
         "_validate_openai_compat_key",
         "OpenAI",
     ): _INTENTIONAL_ONE_SHOT,

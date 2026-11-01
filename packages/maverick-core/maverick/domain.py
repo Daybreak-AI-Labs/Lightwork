@@ -522,7 +522,7 @@ SUITE_PREFIXES: dict[str, str] = {
     "gov_": "government_contracting",
     "edu_": "education_nonprofit",
     "tax_": "tax",
-    # Council-expansion verticals (2026): new business suites the factory can
+    # 2026 expansion verticals: new business suites the factory can
     # spawn from. Each maps to a SUITE_DISCIPLINE block (domain_discipline) and
     # a wizard AGENT_SUITES entry, so a Rung-2 seal + the [suites] toggle reach
     # the whole vertical at once.
@@ -561,8 +561,13 @@ SUITE_PREFIXES: dict[str, str] = {
 }
 
 
+@functools.lru_cache(maxsize=8192)
 def suite_for(name: str) -> str | None:
-    """The business suite a domain pack belongs to, or ``None`` (legacy/generic)."""
+    """The business suite a domain pack belongs to, or ``None`` (legacy/generic).
+
+    Memoised: the roster pages ask it about 6,000 times per render and
+    ``SUITE_PREFIXES`` is fixed at import (clear the cache after changing it).
+    """
     for prefix, suite in SUITE_PREFIXES.items():
         if name.startswith(prefix):
             return suite
@@ -1104,7 +1109,7 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
         domain_effort=profile.effort,
         domain_models=profile.models,
         autonomy=profile.autonomy or default_profile_for(profile.name),
-        # W1-24: the depth-0 call (parent is None -- run_goal's domain-routed
+        # The depth-0 call (parent is None -- run_goal's domain-routed
         # root) owns this goal's FINAL just like the plain "orchestrator"
         # role does; a nested domain spawn (depth > 0, from spawn.py) does
         # not. role stays profile.name either way -- this only affects the

@@ -1,6 +1,6 @@
 # Platform Threat Hunter standalone demo
 
-This reduced defensive SKU applies deterministic MITRE ATT&CK-tagged rules to
+This reduced defensive app applies deterministic MITRE ATT&CK-tagged rules to
 ephemeral platform-event JSON. It persists only minimized derived findings and
 investigations; it does not persist raw events and makes no tamper-evidence claim.
 Lightwork adds signed-chain input, continuous monitoring, governed containment,
@@ -16,13 +16,13 @@ The standalone requirements intentionally do not install `maverick`. Finding
 the core detector changes only analysis; signed-chain input, monitoring, audit,
 and response authority remain in `/security/threats`.
 
-Tagged Lightwork releases attach a versioned
-`lightwork-platform-threat-hunter-<version>.zip` with an embedded release
-manifest, file hashes, the proprietary license, an aggregate standalone-SKU
-CycloneDX SBOM, SHA-256 checksums, and Sigstore signature/certificate files.
-This is a licensed **source archive**, not a wheel or PyPI package. The same
-archive can be reproduced from a tagged checkout by running this at the
-repository root:
+The release workflow attaches a versioned
+`lightwork-platform-threat-hunter-<version>.zip` to each tagged release (none
+has been published yet), with an embedded release manifest, file hashes, the
+Apache-2.0 `LICENSE`, `NOTICE` and `TRADEMARK.md`, an aggregate CycloneDX SBOM of the
+standalone demo archives, SHA-256 checksums, and Sigstore signature/certificate files. This is a
+**source archive**, not a wheel or PyPI package. The same archive can be
+reproduced from a tagged checkout by running this at the repository root:
 
 ```bash
 python scripts/build_standalone_skus.py --version <version> \

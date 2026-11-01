@@ -7,10 +7,8 @@ counts come from [`FEATURES.md`](./FEATURES.md), the catalogue of shipped
 features. When this page and the code disagree, the code wins and this
 page is the bug.
 
-Lightwork is **proprietary, commercially licensed software**
-([`LICENSE`](../LICENSE)) — self-hosted in your environment, but use
-requires a license. A stripped-down open-source "lite" edition is a stated
-possibility on the [roadmap](./ROADMAP.md), not a commitment.
+Lightwork is open-source software under the Apache License 2.0
+([`LICENSE`](../LICENSE)), self-hosted in your environment.
 
 ---
 
@@ -91,36 +89,35 @@ All shell execution is mediated — no tool calls `subprocess.run` directly;
 everything routes through `sandbox.exec()` (also a house rule). Nine
 selectable backends (`sandbox/`, `[sandbox] backend`): local subprocess,
 Docker, Podman, gVisor (Docker with the `runsc` userspace kernel),
-devcontainer, Kubernetes, Firecracker microVMs, SSH, and Modal cloud
+devcontainer, Kubernetes, Firecracker microVMs (experimental scaffold), SSH, and Modal cloud
 sandboxes. Third parties ship backends without forking via the Sandbox SDK
 v2 entry-point contract (`sandbox/sdk.py`). The interface itself is
 formally modeled and TLC-verified in TLA+
 ([`docs/specs/tla/`](./specs/tla/README.md)).
 
 Two more threads run through all five: **per-role model choice** — you
-pick the models, per role, from 12 providers (`llm.py`; Anthropic, OpenAI,
-OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI,
-vLLM), configured in `~/.maverick/config.toml`, never hard-coded — and the
+pick the models, per role, from 15 providers (`providers.KNOWN_PROVIDERS`;
+Anthropic, OpenAI, OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Vertex AI,
+Azure, xAI, Moonshot, TGI, vLLM, any OpenAI-compatible endpoint and the Codex
+CLI), configured in `~/.maverick/config.toml`, never hard-coded — and the
 **audit log**, a signed, hash-chained, append-only record of every action
 (`audit/`), verifiable offline.
 
 ## 3. A guided tour
 
-Obtain the signed binary for your platform from an
-[asset-bearing release](https://github.com/Daybreak-AI-Labs/Lightwork/releases),
-verify its checksum and exact-tag signature, and run its `dashboard` command.
-Finish owner and provider setup in the application before starting work. See
-[Getting started](getting-started.md) for the customer route and the separate
-[engineering source-install procedure](internal/source-install.md) if you
-already have approved repository access. A full clone carries internal research,
-audit and patent documents.
+Install from a clone of the repository with the
+[source installation guide](source-install.md), then run `lightwork dashboard`
+and finish owner and provider setup before starting work. No prebuilt binary,
+PyPI package or container image is currently published, so install from
+`main`; published releases will be listed on the
+[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+[Getting started](getting-started.md) walks through the first run.
 
-The dashboard is the customer entry point for starting and supervising work.
-The commands below are maintainer-facing CLI equivalents; their presence does
-not establish that every customer operation has an accepted in-product journey.
-See the [coverage register](post-install-operation-coverage.md) for that status.
+The dashboard is the main entry point for starting and supervising work. The
+commands below are CLI equivalents; a CLI command does not imply that the same
+operation is available in the dashboard.
 
-For maintainers, watch work from a second terminal:
+Watch work from a second terminal:
 
 ```bash
 maverick monitor       # live Rich plan-tree TUI of the swarm
@@ -311,7 +308,11 @@ screened by the same shield/budget/sandbox machinery:
   (`sdks/plugin-ts/`, `@maverick/plugin-sdk`) and a **gRPC plugin host**
   for any language. Single Python tools need only the `@tool` decorator
   (`tools/decorator.py`).
-- **Channels** — 17 wired adapters (`packages/maverick-channels/`):
+- **Channels** — 18 wired adapters (`packages/maverick-channels/`):
+  Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon,
+  Voice, WhatsApp (Twilio + Cloud API), SMS, iMessage, IRC, Threads, RCS,
+  and a glasses/wearable bridge. New ones subclass `Channel` in `base.py`;
+  the steps are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - **Connectors & primary-source grounding** — 2,877 write-capable enterprise
   REST/GraphQL connectors plus 37 read-only primary-source / public-data
   connectors (SEC EDGAR, FRED, Treasury, World Bank, FDIC, Census, BLS, EIA,
@@ -322,10 +323,6 @@ screened by the same shield/budget/sandbox machinery:
   grounding (GET-only, low-risk, deferred); on by default, kill-switch
   `[workforce] data_grounding = false` (or `MAVERICK_WORKFORCE_DATA_GROUNDING=off`),
   with an installer wizard step.
-  Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon,
-  Voice, WhatsApp (Twilio + Cloud API), SMS, iMessage, IRC, Threads, RCS,
-  and a glasses/wearable bridge. New ones subclass `Channel` in `base.py`
-  — four steps, documented in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - **MCP, both directions** — `maverick mcp` exposes the swarm to any MCP
   client (stdio + Streamable HTTP); `[mcp_servers]` makes Lightwork
   *consume* external MCP servers as tools, which still pass through the
@@ -335,15 +332,15 @@ screened by the same shield/budget/sandbox machinery:
   ([`grpc.md`](./grpc.md)), A2A Agent Card interop ([`a2a.md`](./a2a.md)),
   LangChain/AutoGen/CrewAI adapters, and quickstarts for TypeScript, Go,
   Rust, C#, and Java (`docs/clients/`). Deliberately *not* a port: other
-  languages drive Lightwork over the wire; the kernel stays Python (the
-  council decision in [`ROADMAP.md`](./ROADMAP.md)).
+  languages drive Lightwork over the wire; the kernel stays Python (see the
+  language-bindings decision in [`ROADMAP.md`](./ROADMAP.md#decisions)).
 - **Sandbox backends** — the entry-point contract from primitive #5;
   conformance-checked, refused if non-conformant.
 
 Providers get added in three files plus tests (CONTRIBUTING "Adding a
 provider"). Whatever you extend: shield wired or it doesn't count, budget
 respected, sandbox-mediated, config knob + wizard step — the house rules
-in [`CLAUDE.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CLAUDE.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md)
+in [`CONTRIBUTING.md`](CONTRIBUTING.md)
 are short and enforced.
 
 ## 7. Where everything lives
@@ -353,30 +350,28 @@ haven't installed yet.
 
 | You want | Go to |
 |---|---|
-| Install + first run | [`getting-started.md`](./getting-started.md), README |
+| Install + first run | [`source-install.md`](./source-install.md), [`getting-started.md`](./getting-started.md), README |
 | Every shipped feature | [`FEATURES.md`](./FEATURES.md) |
-| What's *not* built yet | [`ROADMAP.md`](./ROADMAP.md) (+ [`ROADMAP-2029-2031.md`](./ROADMAP-2029-2031.md)) |
+| What's *not* built yet | [`ROADMAP.md`](./ROADMAP.md) |
 | The architecture argument | [`architecture.md`](./architecture.md), [`docs/specs/`](./specs/) decision memos |
 | Config schema | [`configuration.md`](./configuration.md), [`env-vars.md`](./env-vars.md) |
 | Deploy targets | [`deployment.md`](./deployment.md), [`reference-architectures.md`](./reference-architectures.md), [`github-action.md`](./github-action.md) |
 | Run it day-2 | [`operations.md`](./operations.md), [`perf-sla.md`](./perf-sla.md) |
 | Safety & security | [`safety.md`](./safety.md), [`security-hardening.md`](./security-hardening.md), [`security/`](./security/), [`SECURITY.md`](SECURITY.md), [`threat-hunting.md`](./threat-hunting.md) |
-| Enterprise & compliance | [`enterprise/`](./enterprise/) (editions, security overview, diligence), [`regulated-deployment.md`](./regulated-deployment.md), [`compliance/`](./compliance/), [`encryption.md`](./encryption.md) |
+| Enterprise & compliance | [`enterprise/`](./enterprise/) (security overview, architecture, deployment playbook, evidence map), [`regulated-deployment.md`](./regulated-deployment.md), [`compliance/`](./compliance/), [`encryption.md`](./encryption.md) |
 | Extend it | [`plugins.md`](./plugins.md), [`plugin-api-v2.md`](./plugin-api-v2.md), [`self-learning.md`](./self-learning.md), [`embedding.md`](./embedding.md), [`connectors.md`](./connectors.md) |
 | Drive it from outside | [`api.md`](./api.md), [`grpc.md`](./grpc.md), [`a2a.md`](./a2a.md), [`clients/`](./clients/), [`integrations/`](./integrations/) |
 | Task recipes | [`cookbook/`](./cookbook/) (30 recipes), [`starter-goals.md`](./starter-goals.md) |
-| How it compares | [`comparison.md`](./comparison.md), [`benchmarks/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/) (`EVAL.md`, `RESULTS.md`) |
-| Community & programs | [`showcase.md`](./showcase.md), [`programs/`](./programs/) (summit, office hours, grants, awards, partnerships…) |
-| Press & naming | [`press-kit.md`](./press-kit.md), [`TRADEMARK.md`](TRADEMARK.md) |
+| Benchmarks | [`benchmarks/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/) (`EVAL.md`, `RESULTS.md`) |
+| Naming | [`TRADEMARK.md`](TRADEMARK.md) |
 | Contribute | [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CLA.md`](CLA.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md), [`MAINTAINERS.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/MAINTAINERS.md) |
-| Licensing | [`LICENSE`](../LICENSE), [`enterprise/editions.md`](./enterprise/editions.md) |
+| Licensing | [`LICENSE`](../LICENSE) |
 
 ### The honest closing note
 
-Lightwork is alpha. It is installable today, carries 2000+ tests in CI, and
-the features in this handbook ship and run — and parts of the frontier are
-explicitly unfinished, which the roadmap states plainly, including the
-things that were considered and declined. That discipline — shipped vs.
-planned vs. declined, never blurred — is the most load-bearing convention
-in this repository. Hold this handbook to it: if you find a claim here the
+Lightwork is alpha. It installs from source today, runs its test suite in CI
+on Python 3.10–3.12, and the features in this handbook ship and run. Parts of
+the frontier are explicitly unfinished, and the roadmap and the decision memos
+in [`docs/specs/`](./specs/) say so, including the things that were considered
+and declined. Shipped, planned and declined are kept separate. Hold this handbook to it: if you find a claim here the
 code can't back, that's a bug; file it.

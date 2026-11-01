@@ -1,9 +1,0 @@
-[
-  {
-    "id": "LW-148",
-    "status": "implemented-test-needed",
-    "implementation_evidence": "Global-admin isolated recovery source lookup uses configured exact-bound iMessage and Mastodon read adapters for dated numeric checkpoints, bounded explicit older pages and metadata-only evidence preview. Selection fills the existing review without resolving it. Disabled, changed, unauthorized or unavailable sources produce no guessed checkpoint. Current context and global permission rechecked after lookup; channel polling/admission/send/checkpoint/delivery receipt mutation never called. Existing human-date and delivery-receipt forms remain; source content is not exposed.",
-    "validation": "7 new local mocked/source-fixture tests passed; 25 existing channel recovery control/record tests passed; 26 workspace recovery API tests passed after updating exact-release review fixtures, including new current-permission recheck. Ruff F checks, Python3.10 AST and JS syntax passed. No live source/provider calls.",
-    "remaining": "Installed macOS Messages permissions, configured Mastodon access and browser/native customer qualification remain to run in a controlled test environment; no live source/provider calls made during implementation."
-  }
-]

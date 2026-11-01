@@ -1,4 +1,4 @@
-"""\"What changed\" digest tool (roadmap: 2027 H1 UX — "what changed" digest).
+"""\"What changed\" digest tool.
 
 Turn a before/after snapshot into the human-readable summary a reviewer wants:
 which keys were added, removed, or changed (with old->new values), or — for two

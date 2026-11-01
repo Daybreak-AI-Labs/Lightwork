@@ -1,4 +1,4 @@
-"""Image EDIT tool (roadmap: 2027 H1 capabilities, "image gen + edit tools").
+"""Image EDIT tool.
 
 Generation already ships via tools/replicate_tool.py (generic ``run`` of any
 hosted model, e.g. SDXL/FLUX). What was missing is the *edit* verbs; this

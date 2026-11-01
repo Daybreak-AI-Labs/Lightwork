@@ -27,4 +27,4 @@ transition within the receipt retention window.
 The existing Copilot catalog does not yet expose these operations. The direct
 UI and API are implemented; shared Copilot status/test/retry registration,
 recipient preferences/digests and end-to-end delivery qualification remain
-separate incomplete work. Authored regression tests have not been run.
+separate incomplete work.

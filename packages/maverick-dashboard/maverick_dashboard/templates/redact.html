@@ -11,7 +11,7 @@
     <div class="section-head"><h2>Cleaned text <span id="proof-badge" class="muted"></span></h2><button id="redact-copy" type="button" class="btn btn--ghost" hidden>Copy cleaned text</button></div>
     <pre id="redact-output" style="white-space:pre-wrap"></pre>
   </div>
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
     const input = document.getElementById("redact-input");
     const toggles = document.getElementById("kind-toggles");
     const output = document.getElementById("redact-output");

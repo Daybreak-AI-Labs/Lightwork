@@ -7,12 +7,13 @@ the agent loop wraps around:
 - `Shield.scan_tool_call(name, args)` — before any tool executes
 - `Shield.scan_output(text)` — before the final answer reaches the user
 
-See [`../../docs/safety.md`](../../docs/safety.md) for profiles and
+See [docs/safety.md](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/safety.md)
+for profiles and threat coverage.
 
 ## Roster-wide governance invariants
 
 Beyond the three runtime chokepoints, the platform enforces six governance
-invariants verified across all 2,020 specialist packs with a non-vacuous
+invariants verified across every built-in specialist pack with a non-vacuous
 fault-injection control (property-fuzzed up to 5,000 iterations):
 
 1. **Tool-reachability** — no drafting/non-builder agent can reach a
@@ -28,9 +29,3 @@ fault-injection control (property-fuzzed up to 5,000 iterations):
 
 The suite also hostile-argument fuzzes every connector and tool, and each
 invariant ships a fault-injection control proving it is non-vacuous.
-Robustness hardening from the stress sweep: connectors return an ERROR string
-(rather than raising) on a non-string op/path/query, `Skill.parse` raises
-`ValueError` (not `AttributeError`) on malformed/untrusted frontmatter, and
-`format_money` degrades gracefully on a None/empty currency.
-
-threat coverage.

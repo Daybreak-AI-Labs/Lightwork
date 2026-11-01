@@ -67,7 +67,7 @@ def _plain_card(action: str, detail: str, requested_by: str | None) -> str:
 def seed_canary(world, *, action: str, detail: str, decision_class: str, flaw: str,
                 risk: str = "medium", requested_by: str | None = None,
                 scope: str | None = None, approvals_required: int = 1,
-                undoable: bool = False) -> int:
+                undoable: bool = True) -> int:
     """Park a known-flawed approval in the real queue and remember it privately.
 
     ``detail`` is either an encoded approval card or plain text, which is
@@ -83,9 +83,10 @@ def seed_canary(world, *, action: str, detail: str, decision_class: str, flaw: s
         decoy = _decoy(card)
         decoy["binding_sha256"] = digest(decoy)
         detail = encode_approval_detail(decoy)
-    # ``undoable`` matches the request a canary imitates (held for undo by the
-    # consent wait, or acted on at once), so its Undo and reminders do not
-    # tell a reviewer it is a canary.
+    # ``undoable`` matches the request a canary imitates: held for undo, like
+    # a task's step the consent wait parks (the default, as a written reviewer
+    # test or the CLI plants), or acted on at once (a generated canary copies
+    # its model). So its Undo and reminders do not tell a reviewer it is one.
     approval_id = world.create_approval(action, risk=risk, detail=detail, scope=scope,
                                         approvals_required=approvals_required,
                                         requested_by=requested_by, undoable=undoable)

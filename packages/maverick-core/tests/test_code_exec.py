@@ -1,4 +1,4 @@
-"""Programmatic tool calling: the code_exec tool (ROADMAP A3, feasible slice).
+"""Programmatic tool calling: the code_exec tool.
 
 The model declares tool calls + a Python script; the host runs the calls through
 the agent's shielded path, injects their (unframed) outputs as a `tools` dict,

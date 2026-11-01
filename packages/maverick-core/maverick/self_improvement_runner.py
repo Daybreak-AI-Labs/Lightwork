@@ -1679,7 +1679,7 @@ def _memo_scorer(fn, *, draws: int = 2, by_line: bool = False,
     degradation -- an outage 0.0 is indistinguishable from a real 0.0 after
     the fact); (2) average ``draws`` clean draws before freezing, halving the
     variance of the one realization every candidate is compared against
-    (the correlated-draw tradeoff the adversarial review flagged)."""
+    (the correlated-draw tradeoff)."""
     cache: dict[tuple, object] = {}
 
     def _clean() -> bool:

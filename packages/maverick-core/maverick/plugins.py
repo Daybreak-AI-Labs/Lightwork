@@ -18,7 +18,7 @@ declaring entry_points in their ``pyproject.toml``::
 Each loader is forgiving: a plugin that raises at load time logs the
 error and is skipped -- one broken plugin can't take the swarm down.
 
-Council finding (Tier 0): the loader used to execute every installed
+The loader used to execute every installed
 entry_point on first agent run. Anyone who `pip install`-ed a package
 declaring `[project.entry-points."maverick.tools"]` got arbitrary
 in-process code execution before any shield was built. Plugins now
@@ -106,7 +106,7 @@ def _config_allowed_plugin_names() -> set[str] | None:
     if raw is not None and not raw.strip():
         raw = None
     if raw is None:
-        # Council finding: a bare except here used to swallow TOML parse errors,
+        # A bare except here used to swallow TOML parse errors,
         # silently disabling every plugin with no diagnostic. _plugins_config
         # logs + returns {} on failure, so a misconfigured user has something
         # to grep and we fall through to the empty (no-plugins) default.
@@ -1091,7 +1091,7 @@ def install_plugin(name: str, *, timeout: float = 300.0) -> dict[str, list[str]]
     return installed_plugins()
 
 
-# ---- hot plugin reload (roadmap 2027-H1 ecosystem) --------------------------
+# ---- hot plugin reload --------------------------
 
 _PLUGIN_GROUPS = ("maverick.tools", "maverick.channels", "maverick.skills",
                   "maverick.personas")

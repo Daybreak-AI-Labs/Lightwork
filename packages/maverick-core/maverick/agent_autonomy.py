@@ -480,8 +480,20 @@ def graduation_status(
     ``min_sample`` decided actions and the approval share is at/above
     ``dominance``. Never raises.
     """
+    return _graduation_verdict(name, _coerce_approvals(history),
+                               min_sample=min_sample, dominance=dominance)
+
+
+def _graduation_verdict(
+    name: str,
+    rows: list[dict],
+    *,
+    min_sample: int = _GRAD_MIN_SAMPLE,
+    dominance: float = _GRAD_DOMINANCE,
+) -> GraduationVerdict:
+    """:func:`graduation_status` over records already passed through
+    :func:`_coerce_approvals`."""
     from . import predictive_approvals as _pa
-    rows = _coerce_approvals(history)
     approvals = denials = 0
     for rec in rows:
         if not isinstance(rec, dict) or _principal_name(_agent_of(rec)) != name:
@@ -562,7 +574,13 @@ def graduation_candidates(history, names: list[str]) -> list[GraduationVerdict]:
     """The agents in ``names`` that have earned graduation, most-confident
     first -- the advisory list a CLI / dashboard surfaces to the client."""
     rows = _coerce_approvals(history)
-    out = [graduation_status(n, rows) for n in names]
+    # One pass over the history: each verdict reads only its own agent's
+    # records. Every agent used to re-read all of them and the canary ledger
+    # (2,031 agents by 500 decisions took 1.1 s).
+    by_agent: dict[str, list[dict]] = {}
+    for rec in rows:
+        by_agent.setdefault(_principal_name(_agent_of(rec)), []).append(rec)
+    out = [_graduation_verdict(n, by_agent.get(n, [])) for n in names]
     return sorted(
         (v for v in out if v.graduated),
         key=lambda v: (-v.confidence, v.name),

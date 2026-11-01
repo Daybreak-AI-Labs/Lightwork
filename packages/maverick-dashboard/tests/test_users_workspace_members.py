@@ -44,7 +44,7 @@ def test_members_section_points_at_the_workspaces_page_when_none_exist(monkeypat
 
 
 def test_people_who_accepted_an_invite_are_shown_by_email(monkeypatch, tmp_path):
-    """A federated subject like ``google-oauth2|1056...`` means nothing to the
+    """A federated subject like ``google-oauth2|1000...`` means nothing to the
     owner; the invite they accepted knows their email, so the roster, the
     member list labels and the colleague picker show that email first."""
     c = _client(monkeypatch, tmp_path)
@@ -52,7 +52,7 @@ def test_people_who_accepted_an_invite_are_shown_by_email(monkeypatch, tmp_path)
     tr.create_tenant("acme", display_name="Acme Inc")  # so the colleague picker renders
     from maverick_dashboard import invites, rbac
     _inv, token = invites.create_invite("dab@example.com", "admin", created_by="user:owner")
-    sub = "user:google-oauth2|105693517179064336026"
+    sub = "user:google-oauth2|100000000000000424242"
     assert invites.consume_invite(token, used_by=sub) is not None
     rbac.set_role(sub, "admin")
     rbac.set_role("user:plain@example.com", "viewer")
@@ -62,10 +62,10 @@ def test_people_who_accepted_an_invite_are_shown_by_email(monkeypatch, tmp_path)
     visible = text.split('<main id="content"', 1)[1]
     import re
     visible = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)\b.*?</\1>", " ", visible, flags=re.DOTALL))
-    assert "336026" not in visible and "google-oauth2" not in visible
+    assert "424242" not in visible and "google-oauth2" not in visible
     # Labels reach the member script (data attribute) and the colleague picker.
-    assert '"user:google-oauth2|105693517179064336026": "dab@example.com"' in text
-    assert '<option value="user:google-oauth2|105693517179064336026">dab@example.com</option>' in text
+    assert '"user:google-oauth2|100000000000000424242": "dab@example.com"' in text
+    assert '<option value="user:google-oauth2|100000000000000424242">dab@example.com</option>' in text
     # Someone with no accepted invite renders exactly as before.
     assert "plain@example.com" in text
 

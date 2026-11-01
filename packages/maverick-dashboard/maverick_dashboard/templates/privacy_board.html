@@ -336,7 +336,7 @@
 <div id="pb-tip" hidden></div>
 
 {% include "_assessment_review.html" %}
-<script>
+<script nonce="{{ csp_script_nonce }}">
 (function () {
   'use strict';
   var API = '/api/v1/privacy/board';

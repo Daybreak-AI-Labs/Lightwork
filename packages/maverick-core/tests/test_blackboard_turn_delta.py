@@ -1,4 +1,4 @@
-"""W1-44: a running agent sees what other agents posted since its last turn.
+"""A running agent sees what other agents posted since its last turn.
 
 The orchestrator used to read the blackboard only once (its first-turn
 brief), so everything posted afterwards -- fan-out cap notices, quarantine

@@ -1,4 +1,4 @@
-"""Universal share link + cross-device handoff (roadmap: 2028 H2 UX).
+"""Universal share link + cross-device handoff.
 
 Two token mechanisms over one HMAC core (the webhooks signing pattern):
 

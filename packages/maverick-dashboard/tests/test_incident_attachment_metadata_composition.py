@@ -353,3 +353,12 @@ def test_readiness_opens_incident_authorities_and_fails_on_unreadable_store(
     )
 
     assert composition.incident_attachment_metadata_readiness(app, "alpha") is False
+
+
+def test_uploader_reference_is_the_one_a_legal_matter_names() -> None:
+    from maverick import incident_attachment_metadata as iam
+
+    request = SimpleNamespace(state=SimpleNamespace(principal=SimpleNamespace(principal="user:alice")))
+    uploader = composition.principal_ref_from_request(request, "alpha")
+    assert uploader == iam.principal_ref_for_subject("alpha", "user:alice")
+    assert uploader != composition.principal_ref_from_request(request, "beta")

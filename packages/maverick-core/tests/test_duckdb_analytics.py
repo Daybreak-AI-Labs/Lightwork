@@ -161,3 +161,36 @@ def test_cli_analytics_sql(tmp_path):
     import json
 
     assert json.loads(res.output) == [{"n": 1}]
+
+
+class _GoalByGoal:
+    """A world without the batch reader: the pre-change per-goal reads."""
+
+    def __init__(self, world):
+        self._world = world
+
+    def list_goals(self, **kwargs):
+        return self._world.list_goals(**kwargs)
+
+    def list_episodes(self, **kwargs):
+        return self._world.list_episodes(**kwargs)
+
+
+def test_loaded_episode_rows_match_goal_by_goal_reads(tmp_path):
+    world = WorldModel(tmp_path / "w.db")
+    goals = [world.create_goal(f"task {i}", owner="user:alice") for i in range(4)]
+    with world._writing() as conn:
+        for index in range(150):
+            conn.execute(
+                "INSERT INTO episodes(goal_id, started_at, ended_at, cost_dollars, input_tokens, "
+                "output_tokens, outcome) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (goals[index % 4], 4_000.0 + index, 4_000.5 + index, 0.01 * (index % 5), index, 2,
+                 "failed" if index % 6 == 0 else "done"),
+            )
+    query = ("SELECT goal_id, cost, in_tok, out_tok, outcome, ended_at FROM episodes "
+             "ORDER BY goal_id, ended_at")
+    for limit in (100000, 10):
+        batched = WorldAnalytics(world, limit=limit).query(query)
+        by_goal = WorldAnalytics(_GoalByGoal(world), limit=limit).query(query)
+        assert batched == by_goal
+    assert len(WorldAnalytics(world, limit=10).query(query)) == 40

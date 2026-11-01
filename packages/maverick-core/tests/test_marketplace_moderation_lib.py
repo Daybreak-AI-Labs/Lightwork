@@ -1,4 +1,4 @@
-"""Marketplace moderation tooling (ROADMAP 2027 H2 + 2028 H1 Ecosystem).
+"""Marketplace moderation tooling.
 
 Offline + deterministic: builds skill / plugin packages on disk under tmp_path
 and asserts the verdict + findings. No network, no install, no code execution.

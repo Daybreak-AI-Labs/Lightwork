@@ -189,7 +189,7 @@
     {% endif %}
   </div>
 
-  <script>
+  <script nonce="{{ csp_script_nonce }}">
   (function () {
     'use strict';
     var GUARD = {{ guard_labels | tojson }};

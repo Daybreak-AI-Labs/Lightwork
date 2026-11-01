@@ -1,203 +1,189 @@
 <p align="center">
-  <img src="Daybreak%20Labs%20Logo.jpg" alt="Daybreak Labs" width="360">
+  <img src="docs/assets/daybreak-labs-logo.jpg" alt="Daybreak Labs" width="360">
 </p>
 
 # Lightwork
 
-> Lightwork — by **Daybreak Labs**.
-
 [![CI](https://github.com/Daybreak-AI-Labs/Lightwork/actions/workflows/ci.yml/badge.svg)](https://github.com/Daybreak-AI-Labs/Lightwork/actions/workflows/ci.yml)
-[![License: Proprietary](https://img.shields.io/badge/license-Proprietary-red.svg)](./LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python 3.10 | 3.11 | 3.12](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](docs/source-install.md)
 
-**The governed, auditable AI agent runtime for regulated enterprises — a long-horizon multi-agent swarm that runs on your data, in your environment, with explicit operating and spending controls.**
+Lightwork is a self-hosted runtime for multi-agent AI work. You give it a goal,
+and an orchestrator agent plans the work, hands parts of it to specialist
+sub-agents running on the models you choose, checks their results and returns
+an answer. Inputs, tool calls and answers are screened by a safety layer,
+commands run in a configurable sandbox, per-run spending and time limits are
+enforced, activity is recorded in a signed audit log, and state persists
+between runs in a world-model database.
 
-Hand Lightwork a goal. Its orchestrator decomposes it, spawns specialist sub-agents — researcher, coder, writer, verifier — that work in parallel, checks their output, and returns a result. Work passes through a safety layer on the models *you* choose. Ordinary tasks have no generated task cap; you can set explicit limits and separate organization allowances. [Task limits and spend accounting](docs/task-limits.md) explains how existing settings and interrupted work behave.
+## Status
 
-- 🛡️ **Governed & contained by default.** RBAC, capability tokens, per-tool ACLs, consent gates, and a kill switch bound every agent action — and in Enterprise mode an **egress lock** blocks the agent's outbound network paths (LLM calls and the built-in HTTP tools/connectors), so a prompt-injected agent can't exfiltrate through them (pair it with a network-level egress firewall to also cover raw-shell egress). Agent Shield also screens every prompt, tool call, and output; detector strength depends on the configured backend (see [`docs/safety.md`](./docs/safety.md)).
-- 🧾 **Tamper-evident & audit-ready.** A signed, hash-chained, append-only audit log (`lightwork audit verify`) with SIEM export, encryption-at-rest, DSAR, and SOC2-aligned evidence — built to survive a security review.
-- 🔒 **Self-host & air-gap.** Runs entirely in your environment — laptop, VPC, Kubernetes, or a disconnected network with no required data egress. No hyperscaler dependency, no telemetry.
-- 📈 **Reviewable improvement.** Lightwork captures experience, proposes skills and workflow changes, and records human review, activation, and rollback. Hindsight and proof reports help inspect outcomes; they do not by themselves establish customer savings or that a change caused improvement.
-- 🔬 **Outcome analysis.** The flywheel and Consequence Engine can connect selected work to reported downstream outcomes and propose changes for evaluation. Causal estimates and simulated results are exploratory until their data, assumptions, and independent comparisons have been checked. Each learning loop can be stopped independently.
-- 🏢 **2,031 prebuilt specialists across business suites.** Customer support, finance, legal, HR, operations, marketing, procurement, data, security, and industry packs each declare a workflow and permission envelope. The Agent Factory shows which specialists have their required actions available and what setup remains. Availability of a live connection and permission to use it are checked when work starts.
-- 🏭 **An agent factory that builds agents — and itself.** Describe a job, or demonstrate it: `lightwork learn-demo` consumes a reviewed action transcript and synthesizes the agent that does it through the same intake pipeline — identical envelope clamp and persona shield-scan, with a human review gate always appended. Default-on `lightwork factory-learn` closes the loop onto generation quality, mining provisioning/approval gaps into proposer guidance that improves future pack generation. It remains independently stoppable and never widens any pack's envelope.
-- 👁️ **Ekko work discovery.** An independently opt-in, local-first observer learns the structure of repeated work from allowlisted application transitions or explicitly guided semantic actions — never keystrokes, clipboard, screenshots, window titles, URLs, or document content — and turns the evidence into reviewable first-pass Flow and Agent Factory drafts. Capture is visibly start/pause/stop controlled, tenant/owner/device scoped, encrypted at rest, time-bounded, and cannot save, schedule, activate, or run its own recommendations. See [`docs/ekko-work-discovery.md`](./docs/ekko-work-discovery.md).
-- 📚 **Primary-source data grounding.** Every analyst pack is auto-granted (by suite) a set of 37 read-only, GET-only public-data connectors — SEC EDGAR, FRED, Treasury, World Bank, FDIC, Census, BLS, EIA, openFDA, NPPES, ClinicalTrials, USAspending, SAM.gov, CourtListener, Federal Register, GLEIF, OpenCorporates, NWS/NOAA weather, EPA, Climatiq, and more — so the workforce grounds its work in authoritative primary sources, not model recall. On by default (low-risk, deferred), with a kill switch (`[workforce] data_grounding = false` / `LIGHTWORK_WORKFORCE_DATA_GROUNDING=off`) and an installer wizard step. These sit alongside 2,877 write-capable long-tail enterprise REST/GraphQL connectors and dedicated modules (Salesforce, HubSpot, Stripe, ServiceNow, Snowflake, …).
-- 🧪 **Governance proven across the whole roster.** A roster-wide invariant test suite verifies six governance invariants across all 2,031 packs — tool-reachability (no drafting agent can reach a state-mutating tool), the autonomy dial (onboarding and high-risk actions are never autonomous), capability attenuation (a spawned child can never exceed its parent grant), compartment isolation (a quarantine seal never bleeds across suites), unstrippable hard refusals, and never-silently-exceeded budget caps — each fault-injected with a non-vacuous control across the full roster, plus hostile-argument fuzzing of every connector and tool.
-- 🧠 **Long-horizon multi-agent depth.** A recursive orchestrator spawns specialist sub-agents on the models *you* choose. Administrators can set per-task dollar, time, and tool-call limits in Settings; omitted limits are not automatic caps. [Task limits and spend accounting](docs/task-limits.md) explains the controls.
-- 🔀 **Visual workflow automation.** A flow engine supports branches, loops, parallel work, approvals, delays, sub-flows, fixed tool calls, and agentic goals in a visual designer. It can propose changes from observed runs and automatically revert a regression when enabled. Hardening an agent step into a fixed action remains a review-only suggestion until the required parameters and effects can be verified; it is not applied automatically. Flows are off by default and can be enabled in Settings.
+Lightwork is alpha software. The eight Python packages on `main` are version
+0.1.7 in [`release-cohort.toml`](release-cohort.toml), which is unreleased. No
+GitHub release, PyPI package or container image is currently published, so
+installing from source is the supported path. Published releases will be
+listed on the
+[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+Configuration and APIs can change between versions; [CHANGELOG.md](CHANGELOG.md)
+records notable changes. Supported Python versions are 3.10, 3.11 and 3.12, the
+versions tested in CI.
 
-> **Proprietary software — not open source.** Lightwork is enterprise software; use, redistribution, and derivative works require a license. [Contact us](https://github.com/Daybreak-AI-Labs/Lightwork) for evaluation or commercial access. See [`LICENSE`](./LICENSE) and [`TRADEMARK.md`](./TRADEMARK.md).
+## Quickstart
 
-For a customer installation, obtain the signed binary for your operating
-system from an [asset-bearing GitHub Release](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
-Verify the exact tag and attached signature, then open the local dashboard to
-complete setup in Lightwork. If the release has no binary for your platform,
-request a customer package. Repository access is an engineering arrangement:
-cloning the repository also copies internal research, audit and patent files.
+Requires Git and Python 3.10, 3.11 or 3.12.
 
-After connecting an AI service, a first task can be run in Chat or from the
-terminal without file or program access:
+```bash
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
+cd Lightwork
+python3 -m venv .venv
+. .venv/bin/activate            # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
+lightwork doctor
+lightwork dashboard             # serves the dashboard at http://127.0.0.1:8765
+```
+
+`install_release_cohort.py` installs the eight Lightwork packages together, in
+one pip transaction, against the pinned constraints in `requirements/ci.txt`
+(the repository root is not itself a pip project). `lightwork doctor` checks
+the installation and configuration and suggests a fix for anything it flags.
+The dashboard at <http://127.0.0.1:8765> guides first-owner sign-in and
+provider setup; `lightwork init` runs the setup wizard in the terminal
+instead. Windows PowerShell commands and the post-install checks are in
+[Install from source](docs/source-install.md).
+
+Once a provider is connected, run a first task from the dashboard's chat or
+the terminal. This one needs no file or program access:
 
 ```bash
 lightwork start "Draft a one-page plan to reduce our customer support response time without adding headcount. State your assumptions and the facts you need from me."
 ```
 
-If Docker or Podman was not running at setup, file changes and program
-execution remain off. Start a container service, then use **Permissions → Where
-work runs → Allow file work** in Lightwork before asking it to create files or
-run programs. `lightwork doctor` shows the current limitation.
+> **Where commands run.** Agents can run model-generated shell commands. With
+> the `local` sandbox backend, the configuration default, those commands run
+> directly on your machine, so a successful prompt injection would be code
+> execution on the host. Use a container backend (`docker` or `podman`) for
+> any goal you would not run yourself. The quick setup in `lightwork init`
+> selects Docker when it is running. Without Docker, and in the dashboard's
+> initial settings, file changes and program execution start switched off; to
+> turn them on, start Docker or Podman, choose its container under
+> **Permissions → Where work runs** in the dashboard, then choose **Allow file
+> work**. Read the
+> [execution posture](SECURITY.md#execution-posture) before running untrusted
+> goals.
 
-## Status
+The command-line tool is installed under two names, `lightwork` and
+`maverick`, which run the same program. Python distributions, modules,
+environment variables and the config directory use the original codename
+(`maverick-agent`, `MAVERICK_*`, `~/.maverick/`).
 
-Alpha with an engineering source-install path. Release automation
-builds an eight-package Python cohort, container, single-file binaries, four
-standalone source archives, and evidence artifacts. A downloadable artifact is
-available to users only after it appears on the
-[GitHub Releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
-PyPI publishing remains disabled until all eight namespaces and trusted
-publishers are verified. See [`docs/getting-started.md`](./docs/getting-started.md).
+## Architecture at a glance
 
-## What works today vs. planned
+```
+  goal  (CLI, dashboard, REST API, MCP, messaging channel)
+    │
+    ▼
+  Shield: input scan ─────────────── block ──▶ refused
+    │
+    ▼
+  Orchestrator agent: plans, delegates, verifies, answers
+    │  spawn_subagent / spawn_swarm
+    ├──────────────┬──────────────┐
+    ▼              ▼              ▼
+  researcher     coder          writer     specialist sub-agents, model chosen per role
+    │              │              │
+    └── tool call ─┴─▶ Shield: tool-call scan ─▶ tools; shell runs in the sandbox
+    │
+    ▼
+  Shield: output scan ─▶ answer
 
-| Component | v0.1 (today) | Planned (v0.2+) |
+  Shared by every agent in a run:
+    World model   SQLite + FTS5, or Postgres: goals, runs, facts, conversations, approvals
+    Budget        dollar, wall-clock, token and tool-call caps
+    Audit log     append-only NDJSON, hash-chained and Ed25519-signed
+```
+
+Lightwork ships as eight Python distributions, installed and versioned
+together as one cohort:
+
+| Distribution | Path | What it contains |
 |---|---|---|
-| Install | Signed release binary when the operating-system asset is published; reviewed source checkout for internal engineering | Complete published package cohort; code-signed bundles + auto-update |
-| GUI | Local web dashboard (`lightwork dashboard`) + chat at `/chat`; authenticated source-bootstrap shell is an internal engineering artifact | Self-contained, signed native installer + iOS/Android |
-| Sandbox | Local subprocess, Docker, gVisor, Podman, devcontainer, Kubernetes, SSH, Modal | Firecracker microVM (scaffold — exec path does not yet mount the workspace), Daytona |
-| AI providers | Anthropic (full), OpenAI, OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI, vLLM (per-role routable) | Cohere |
-| Channels | 16 wired into `lightwork serve` — Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon, Voice, IRC, Threads, RCS; WhatsApp (Cloud API + Twilio)/SMS (need Twilio), iMessage (macOS-only) | Glasses (adapter is a stub), push notifications |
-| Safety | Shield wired at 3 chokepoints; agent-shield SDK if installed, else a built-in rule set | Agent-shield full ~115 patterns |
-| Distribution | Release workflow for GHCR image, binaries, four reduced demo source archives, checksums, and SBOMs | PyPI (8-package lockstep cohort, gated pending namespace verification); self-contained code-signed installer; Homebrew tap |
-| Tests | Ruff, security gates, posture ratchet, and pytest on Python 3.10/3.11/3.12 | Broader deployment and browser journey coverage |
+| `maverick-agent` | [`packages/maverick-core`](packages/maverick-core) | The kernel: orchestrator, tools, sandbox backends, world model, budget, audit log, CLI |
+| `maverick-shield` | [`packages/maverick-shield`](packages/maverick-shield) | Agent Shield integration and the built-in rule set |
+| `maverick-channels` | [`packages/maverick-channels`](packages/maverick-channels) | Messaging adapters used by `lightwork serve` |
+| `maverick-dashboard` | [`packages/maverick-dashboard`](packages/maverick-dashboard) | FastAPI web dashboard and REST API at `/api/v1` |
+| `maverick-mcp-server` | [`packages/maverick-mcp`](packages/maverick-mcp) | Model Context Protocol server that exposes Lightwork as a tool |
+| `maverick-evolve` | [`packages/maverick-evolve`](packages/maverick-evolve) | Config-only evolutionary search with an evaluation harness |
+| `maverick-knowledge` | [`packages/maverick-knowledge`](packages/maverick-knowledge) | Per-domain document knowledge (vector retrieval) |
+| `maverick-installer` | [`apps/installer-cli`](apps/installer-cli) | The interactive setup wizard behind `lightwork init` |
 
-**Full list of shipped features → [`docs/FEATURES.md`](./docs/FEATURES.md).** The forward backlog (what isn't built yet) lives in [`docs/ROADMAP.md`](./docs/ROADMAP.md).
+[ARCHITECTURE.md](ARCHITECTURE.md) describes the components and how a goal
+moves through them; [docs/architecture.md](docs/architecture.md) covers the
+runtime primitives in more depth.
 
-## Install
+## Key capabilities
 
-### Download a published single-file binary
+- **Orchestration with per-role models.** The orchestrator spawns specialist sub-agents (researcher, coder, writer, verifier and others) that work in parallel. Each role's model is set independently as `provider:model-id`; `lightwork version` prints the registered providers: `anthropic`, `openai`, `azure`, `bedrock`, `vertex`, `gemini`, `deepseek`, `xai`, `moonshot`, `openrouter`, `ollama`, `tgi`, `vllm`, `openai_compatible` and `codex_cli`.
+- **Agent Shield at three chokepoints.** User input, every tool call and every final answer are scanned, together with decoded variants that unpack base64, hex and percent-encoding and fold look-alike Unicode characters. Profiles range from `strict` to `permissive`. The built-in rule set is what ships; the full agent-shield SDK is not published. See [docs/safety.md](docs/safety.md).
+- **Sandboxed execution.** Commands run through a configurable backend: `local`, `docker`, `podman`, `gvisor`, `devcontainer`, `kubernetes`, `ssh` or `modal`. Docker and Podman run each command in a throwaway container with all Linux capabilities dropped, a process limit and, by default, no network. The `firecracker` backend is an experimental scaffold, not a supported isolation backend.
+- **Spending and time limits.** A budget tracker enforces dollar, wall-clock, token and tool-call caps each time it records usage, not only at explicit checks, so a run stops at the first call that crosses a cap. The installer offers a $2 and 30-minute task limit by default, which you can change or turn off. See [docs/task-limits.md](docs/task-limits.md).
+- **Tamper-evident audit log, with a stated key-custody limit.** Audit events are hash-chained and Ed25519-signed by default, and `lightwork audit verify` exits non-zero on any break; by default the signing key lives on the same host, which catches accidental or unprivileged edits but not an actor running as the service account, so supply the key from outside the host (`MAVERICK_AUDIT_SIGNING_KEY`, or a KMS-wrapped `MAVERICK_AUDIT_SIGNING_KEY_WRAPPED`) and keep audit checkpoints off-host to narrow that gap.
+- **Independent audit verification.** [`rust/maverick-verify-audit`](rust/maverick-verify-audit/README.md) is a standalone binary that checks the same chain without Python, `lightwork audit checkpoint` publishes the signed audit tip to an independent location and later verifies the log against it, and `lightwork audit export` writes the log as JSONL or ArcSight CEF for a SIEM. See [docs/audit-checkpoints.md](docs/audit-checkpoints.md).
+- **Approvals and capabilities.** A connector change to an external system appears on the dashboard's Approvals page with every request field and a digest of the exact request, and is sent only after a person approves it; the agent cannot approve its own request. Other high- and critical-risk actions require confirmation by default. An agent can stop and ask the person who started a goal a question (`lightwork answer`, `lightwork resume`). With capability enforcement on (`MAVERICK_ENFORCE_CAPABILITIES=1`, or enterprise mode), a spawned sub-agent's grant is attenuated from its parent's and can never exceed it; `lightwork whoami` shows a principal's effective grant, and `lightwork halt` requests a halt at upcoming execution checkpoints.
+- **Enterprise mode.** `MAVERICK_ENTERPRISE=1` (or `[enterprise] mode = true`) pins model calls to local or self-hosted providers, refusing a cloud call before any prompt is sent, checks each outbound request made through the supported Python HTTP clients, turns on capability enforcement, and makes every consent-gated action require a person's decision (a headless run is refused). It is an application-layer control, so pair it with sandbox network isolation and a network egress policy; `lightwork airgap` checks the configuration for outbound paths. See [docs/security-hardening.md](docs/security-hardening.md).
+- **Keys and data at rest.** Sensitive local stores are encrypted with AES-256-GCM by default ([docs/encryption.md](docs/encryption.md)). An optional out-of-process model proxy (`python -m maverick.model_proxy`, with a Go port in [`go/model-proxy`](go/model-proxy/README.md)) holds provider API keys so they never enter the agent's process.
+- **Persistent world model.** Goals, runs, facts, conversations and approvals persist in SQLite with full-text search, or in Postgres, and carry over between runs.
+- **Specialist packs.** 2,031 built-in domain packs, each a TOML file that declares a persona, the tools it may and may not use, a maximum risk level, the compartment it is sealed into and a step-by-step workflow. Invariant tests run across the whole roster: no drafting pack can reach a state-mutating tool, a pack still in onboarding never acts autonomously and no high-risk action ever does, a spawned agent never exceeds its parent's grant, a compartment seal never reaches another compartment, and the hard-refusal floor cannot be removed.
+- **Connectors and MCP.** A registry of 2,877 write-capable REST and GraphQL connectors, plus dedicated modules for common business systems; each needs its own credentials. The kernel also consumes external MCP servers as tools (`lightwork mcp-registry`). See [docs/connectors.md](docs/connectors.md).
+- **Messaging channels.** `lightwork serve` connects agents to Telegram, Discord, Slack, Microsoft Teams, Mattermost, Signal, email, Matrix, Bluesky, Mastodon, Threads, IRC, RCS, WhatsApp (Meta Cloud API or Twilio), SMS (Twilio), iMessage (macOS only) and voice.
+- **Workflows.** An optional flow engine runs graphs of agent steps, fixed actions, branches, loops, parallel steps, approvals and delays, with a visual designer in the dashboard. It is off by default (`[flows] enable`).
+- **Reviewable learning.** By default Lightwork distills successful runs into proposed skills without widening any agent's permissions; a proposed skill is used in later runs only after a person reviews and admits it on the dashboard's Skills page (`[self_learning]`, `lightwork skills`). Proposed changes to the agents' own prompts, skills and memory (`lightwork refine`, off by default) never apply themselves: each waits for approval and is snapshotted so it can be reverted. Code self-modification (`lightwork self-modify`) is off by default and research-only; it can propose and test a patch but never applies one. See [docs/self-learning.md](docs/self-learning.md).
 
-Check the **[Releases page ›](https://github.com/Daybreak-AI-Labs/Lightwork/releases)**.
-Use this route only when a release includes the binary for your operating
-system; a tag alone is not a downloadable build:
+The catalogue of shipped features is in [docs/FEATURES.md](docs/FEATURES.md).
 
-| OS | File on the release |
+## CLI essentials
+
+| Command | What it does |
 |---|---|
-| **Windows** | `maverick-windows-x86_64.exe` |
-| **macOS** | `maverick-macos-arm64` |
-| **Linux** | `maverick-linux-x86_64` |
+| `lightwork init` | Interactive setup wizard (`--fast` for recommended defaults, `--from-file` for headless provisioning) |
+| `lightwork doctor` | Diagnose the installation and configuration, with remediation hints |
+| `lightwork preflight` | Offline install-readiness check; exits non-zero on a blocker |
+| `lightwork version` | Installed package versions, schema, shield backend and registered providers |
+| `lightwork dashboard [--host --port --token]` | Local web dashboard and REST API (default `127.0.0.1:8765`; a non-loopback host requires a token) |
+| `lightwork start "GOAL" [--max-dollars --max-wall-seconds --sandbox --template]` | Run a goal once |
+| `lightwork chat` | Interactive REPL; each turn becomes a goal |
+| `lightwork status` / `logs` / `answer` / `resume` | Inspect recent goals, read recent audit entries, answer an agent's question, resume a blocked goal |
+| `lightwork schedule goal / add / list / rm` | Schedule recurring goals and jobs with cron expressions |
+| `lightwork worker [--once]` | Run the background job worker that executes scheduled jobs |
+| `lightwork serve` | Start the channel server for configured messaging channels |
+| `lightwork mcp [--http]` | Start the MCP server on stdio, or over Streamable HTTP |
+| `lightwork config show / path / edit` | Show, locate or edit `~/.maverick/config.toml` |
+| `lightwork safety [--json]` | Print the safety posture: shield, sandbox backend, egress policy |
+| `lightwork airgap` | Check the configuration for any outbound path; exits non-zero on a finding |
+| `lightwork audit verify / export / checkpoint` | Verify, export and checkpoint the signed audit log |
+| `lightwork whoami` / `capability` | Show a principal's effective grant; revoke or restore grants |
+| `lightwork spend` / `budget` | Spend by goal and tag; run cost history |
+| `lightwork refine` | Propose, apply and revert changes to the agents' prompts, skills and memory; applying needs an approved proposal |
+| `lightwork halt` / `unhalt` | Request a halt at upcoming execution checkpoints; clear it again |
 
-Verify the release tag, checksums, and attached Sigstore material before
-running a binary; then run its `dashboard` command and open the local address it
-prints. The dashboard guides first-owner setup. The separate Tauri workflow
-currently produces an unsigned
-authenticated source-bootstrap artifact for authorized repository users. It
-clones readable source from a pinned private commit and is not advertised as a
-self-contained product installer.
+`lightwork --help` lists the other commands.
 
-### Terminal install with pipx (planned)
+## Use Lightwork from other tools
 
-The complete eight-package cohort has not been published to PyPI. Do not use
-public package names as an installation substitute. The signed release binary
-is the customer download path when an asset exists for your operating system.
+**Any MCP client.** `lightwork mcp` is the cross-language interface: spawn it,
+list its tools and call one. Short client programs:
 
-The intended PyPI distribution name is `maverick-agent`. A complete cohort
-publication must precede any pipx customer guidance. For maintainers with
-existing repository access, see the [engineering source-install procedure](docs/internal/source-install.md).
+- TypeScript / JavaScript: [docs/clients/typescript-quickstart.md](docs/clients/typescript-quickstart.md)
+- Go: [docs/clients/go-quickstart.md](docs/clients/go-quickstart.md)
+- Rust: [docs/clients/rust-quickstart.md](docs/clients/rust-quickstart.md)
+- C# / .NET: [docs/clients/csharp-quickstart.md](docs/clients/csharp-quickstart.md)
+- Java / JVM: [docs/clients/java-quickstart.md](docs/clients/java-quickstart.md)
 
-## CLI reference
+**REST.** The dashboard serves a REST API at `/api/v1`, documented in
+[docs/api.md](docs/api.md) and browsable at `/docs` on a running dashboard.
 
-The CLI installs under two interchangeable names — `lightwork` (shown below) and `maverick` (the original codename).
-
-| Command | What |
-|---|---|
-| `lightwork init` | Interactive setup wizard with preflight + API-key validation |
-| `lightwork doctor` | Green / yellow / red health check + remediation hints |
-| `lightwork version` | Installed package versions + runtime info |
-| `lightwork config show / path / edit` | Show / locate / edit `~/.maverick/config.toml` |
-| `lightwork start TITLE [--template NAME --param k=v]` | Run a goal once |
-| `lightwork chat` | Interactive REPL (each line = a goal) |
-| `lightwork serve` | Channel server (reads `[channels.*]` from config) |
-| `lightwork dashboard [--host --port --token]` | Local web UI + REST API |
-| `lightwork mcp` | MCP server on stdio for Claude Code / Cursor / etc. |
-| `lightwork logs / status / answer / resume` | Inspect + control running goals |
-| `lightwork schedule goal / add / list / rm` | Schedule recurring autonomous goals via cron |
-| `lightwork worker` | Drain the scheduled-job queue (runs the recurring tasks) |
-| `lightwork fact / facts` | Get / set persistent facts |
-| `lightwork skills` | List built-in and installed skills available for recall; review distilled suggestions on the Skills page |
-| `lightwork skill install / remove / info` | Manage the skill marketplace |
-| `lightwork template list / show` | Goal templates with `{{ var }}` substitution |
-| `lightwork learn-demo FILE [--name --no-llm --source --industry --yes]` | Build an agent from a recorded demonstration (parse → induce → approve → save → provision) |
-| `lightwork ekko enroll / run / status / pause / resume / stop / discover / erase / forget` | Explicitly control local work discovery and review evidence-backed automation opportunities |
-| `lightwork factory-learn [--min-support N] [--dry-run]` | Default-on governed factory learning: mine provisioning/approval gaps into proposer guidance |
-| `lightwork self-modify status / archive` | Inspect the off-by-default, research-only DGM gate, readiness blockers, and candidate lineage |
-| `lightwork self-modify run --objective TEXT [--cycles N]` | Operator-run DGM research cycle; proposes/evaluates/archives only and never adopts code |
-| `lightwork budget` | Total + per-run cost history |
-| `lightwork spend [--json --tag-field --top]` | FinOps export: total + per-goal + per-tag run cost (CLI face of `/spend`) |
-| `lightwork safety [--json]` | Safety posture: shield / sandbox backend / egress policy (assert in CI) |
-| `lightwork flywheel` | Review outcome patterns, candidate guardrails, and learned habits; observed patterns do not prove causation |
-| `lightwork record-outcome GOAL EP VALUE` | Feed a real downstream outcome to a past episode (Consequence Engine) |
-| `lightwork codebook / codec-learn` | Learn the swarm's auditable coordination shorthand from real messages |
-| `lightwork codec-probe` | Measure the codec's real token (not just byte) savings with the target tokenizer |
-
-## Repository layout
-
-```
-packages/
-  maverick-core/       Python agent kernel: recursive swarm, persistent world
-                       model (SQLite + FTS5, or Postgres; schema v36), 14 LLM provider adapters, 9
-                       sandboxes, MCP client, skills, templates, persona,
-                       background runner, budget tracking
-  maverick-shield/     Agent Shield integration + built-in fallback rule set
-  maverick-channels/   17 channel adapters: Telegram, Discord, Slack, Signal,
-                       Email, Matrix, Bluesky, Mastodon, Voice, WhatsApp, WhatsApp
-                       Cloud, SMS, iMessage, IRC, Threads, RCS, Glasses
-                       (WhatsApp/SMS need Twilio; iMessage is macOS-only)
-  maverick-dashboard/  Local FastAPI web UI + REST API at /api/v1 + OpenAPI
-                       docs at /docs. Live progress streaming via short-poll.
-  maverick-mcp/        MCP server (stdio JSON-RPC) -- exposes Lightwork to Claude
-                       Code, Cursor, Claude Desktop as a tool. The agent kernel
-                       can also CONSUME external MCP servers as its own tools.
-apps/
-  installer-cli/       Interactive Python TUI wizard (`lightwork init`)
-  installer-desktop/   Tauri authenticated source-bootstrap engineering shell;
-                       not a self-contained product installer
-deploy/
-  docker/ vps/ desktop/  Dockerfile, install.sh, systemd unit, Caddyfile
-docs/
-  getting-started.md     Install + first run
-  architecture.md        The governed agent runtime (OS-style primitives)
-  configuration.md       Full config schema reference
-  deployment.md          Desktop / Docker / VPS / Phone-companion targets
-  safety.md              Shield chokepoints and built-in rule set
-  security-hardening.md  Enterprise opt-in controls + compliance commands
-  api.md                 REST API reference + curl examples
-benchmarks/
-  longhorizon/           Reproducible long-horizon evaluation tasks
-  example-skills/        Curated SKILL.md files for the marketplace
-  example-templates/     Reusable goal-template files
-```
-
-## Drive Lightwork from another language
-
-Lightwork's kernel is Python, but its **wire surface** is the
-[Model Context Protocol](https://modelcontextprotocol.io/). Any
-MCP-speaking language can drive the swarm from outside Python:
-
-- **TypeScript / JavaScript** → [docs/clients/typescript-quickstart.md](./docs/clients/typescript-quickstart.md)
-- **Go** → [docs/clients/go-quickstart.md](./docs/clients/go-quickstart.md)
-- **Rust** → [docs/clients/rust-quickstart.md](./docs/clients/rust-quickstart.md)
-- **C# / .NET** → [docs/clients/csharp-quickstart.md](./docs/clients/csharp-quickstart.md)
-- **Java / JVM** → [docs/clients/java-quickstart.md](./docs/clients/java-quickstart.md)
-
-Each is a 20-line program: spawn `lightwork mcp`, list tools, call one.
-Why this and not a separate `@lightwork/core` port?
-[Language Bindings — Council Decision](./docs/ROADMAP.md#language-bindings--council-decision-may-2026).
-
-## Run Lightwork in CI
-
-Run the swarm inside any repo's GitHub Actions — on a PR, a schedule, or on
-demand — under a hard spend cap:
+**CI.** Run a goal in GitHub Actions under a hard spend cap with the composite
+action in `deploy/github-action`. Pin it to a reviewed full commit SHA:
 
 ```yaml
 - uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<reviewed-full-40-character-commit-sha>
@@ -207,21 +193,87 @@ demand — under a hard spend cap:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-See [docs/github-action.md](./docs/github-action.md).
+[docs/github-action.md](docs/github-action.md) covers setup and
+[deploy/github-action](deploy/github-action/README.md) has the full input and
+output reference. A GitLab CI template is in
+[deploy/gitlab-ci](deploy/gitlab-ci/README.md).
 
-## Vision
+**Plugins.** Extend Lightwork with Python packages that declare entry points
+(see [docs/plugins.md](docs/plugins.md)), or write agent tools in TypeScript
+with the SDK in [`sdks/plugin-ts`](sdks/plugin-ts).
 
-| Axis | Lightwork |
+## Repository layout
+
+```
+packages/        The eight Python distributions (see the table above)
+apps/            Setup wizard, desktop shells, editor extensions and companion apps
+sdks/            TypeScript plugin SDK, Python REST client, native consent SDK
+extensions/      Browser extension, embeddable widget and WebGPU vision helper
+rust/            Native scanning core and a standalone audit-log verifier
+go/              Out-of-process model proxy that keeps provider keys out of the agent
+deploy/          Docker, Helm, VPS and cloud recipes; GitHub Actions and GitLab CI integrations
+docs/            User, operator and contributor documentation
+benchmarks/      Long-horizon, governance and evaluation benchmarks with their harness
+proof/           Scripts that reproduce the governance and learning results
+demo/            Example applications built on Lightwork
+examples/        Client and external-agent examples
+web/             Static project landing page
+scripts/         Install, release and CI helper scripts
+requirements/    Pinned constraint files used by the install and CI
+build/           PyInstaller spec for the single-file binaries
+test_support/    Shared test helpers
+```
+
+## Documentation
+
+| Topic | Where |
 |---|---|
-| **Target user** | Enterprise & technical teams -- self-hosted, governed, auditable |
-| **Wedge** | Long-horizon depth + true multi-agent coordination |
-| **Safety** | First-class. Every input, tool call, and output passes through Agent Shield. |
-| **Control** | You pick the models. Per-role. Multi-provider. |
-| **Deploy** | Desktop / Docker / VPS / Phone (16 channels) |
-| **Privacy** | All detection runs locally. Your data never leaves your machine unless you choose a cloud LLM. |
+| Install from source | [docs/source-install.md](docs/source-install.md) |
+| First run and first task | [docs/getting-started.md](docs/getting-started.md) |
+| Configuration reference | [docs/configuration.md](docs/configuration.md), [docs/env-vars.md](docs/env-vars.md) |
+| Deployment (desktop, Docker, VPS, Helm) | [docs/deployment.md](docs/deployment.md), [docs/reference-architectures.md](docs/reference-architectures.md), [deploy/helm/README.md](deploy/helm/README.md) |
+| Architecture | [ARCHITECTURE.md](ARCHITECTURE.md), [docs/architecture.md](docs/architecture.md) |
+| Safety and security hardening | [docs/safety.md](docs/safety.md), [docs/security-hardening.md](docs/security-hardening.md), [SECURITY.md](SECURITY.md) |
+| Threat model | [docs/security/threat-model.md](docs/security/threat-model.md) |
+| REST API | [docs/api.md](docs/api.md) |
+| Connectors and plugins | [docs/connectors.md](docs/connectors.md), [docs/plugins.md](docs/plugins.md) |
+| Features and roadmap | [docs/FEATURES.md](docs/FEATURES.md), [docs/ROADMAP.md](docs/ROADMAP.md) |
+| Design proposals | [docs/rfcs/README.md](docs/rfcs/README.md) |
+| Benchmarks | [benchmarks/README.md](benchmarks/README.md) |
+| Changes | [CHANGELOG.md](CHANGELOG.md) |
+
+## Contributing
+
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the
+development setup, tests, lint and CI gates, and how changes reach `main`. In
+short:
+
+```bash
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
+cd Lightwork
+bash .devcontainer/post-create.sh       # editable installs plus dev tools in .venv
+. .venv/bin/activate
+python -m pytest -q -n auto --dist loadfile
+python -m ruff check .
+```
+
+`make help` lists shortcuts for these steps (`make dev`, `make test`,
+`make lint`).
+
+Pull request titles follow Conventional Commits, and your first pull request
+signs the [Contributor License Agreement](CLA.md) with one line in its
+description. Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
+[GOVERNANCE.md](GOVERNANCE.md) explains how decisions are made,
+[MAINTAINERS.md](MAINTAINERS.md) lists the maintainers, and
+[RELEASING.md](RELEASING.md) describes how releases are made. For questions and
+bug reports, see [SUPPORT.md](SUPPORT.md). Report security vulnerabilities
+privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
 ## License
 
-Proprietary — commercially licensed. Use, redistribution, and derivative works
-require a license. See [`LICENSE`](./LICENSE) and [`TRADEMARK.md`](./TRADEMARK.md);
-[contact us](https://github.com/Daybreak-AI-Labs/Lightwork) for access.
+Lightwork is licensed under the [Apache License 2.0](LICENSE); see also
+[NOTICE](NOTICE) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). The
+Lightwork name and logo are trademarks and are not covered by the license; see
+[TRADEMARK.md](TRADEMARK.md).
+
+Lightwork is developed by Daybreak Labs.

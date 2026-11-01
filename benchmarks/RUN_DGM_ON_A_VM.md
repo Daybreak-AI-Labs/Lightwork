@@ -1,7 +1,7 @@
 # Running the full SWE-bench DGM uplift on a persistent VM
 
-The DGM cycle needs a host that stays up for a few hours. This session's container
-recycles mid-solve, which is why it can't finish here. A plain cloud VM fixes that.
+The DGM cycle needs a host that stays up for a few hours. An ephemeral sandbox
+container recycles mid-solve and cannot finish it. A plain cloud VM fixes that.
 The VM only *conducts* — the LLM solve is an API call and grading runs on Modal —
 so a small, cheap box is plenty. **Do not** use serverless / spot / preemptible
 instances (they recycle). No GPU needed.

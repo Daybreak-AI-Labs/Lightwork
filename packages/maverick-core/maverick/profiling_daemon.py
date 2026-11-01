@@ -1,4 +1,4 @@
-"""Continuous profiling daemon (roadmap: 2028 H1 performance).
+"""Continuous profiling daemon.
 
 A long-running agent process is a black box once it's deployed: when a run
 goes slow, you want a flame graph of where the time actually went, not a guess.

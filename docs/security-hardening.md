@@ -30,6 +30,7 @@ and how to confirm it's actually on.
 - [Role-based access control (RBAC)](#role-based-access-control-rbac)
 - [Multi-tenancy (per-user isolation)](#multi-tenancy-per-user-isolation)
 - [Usage quotas](#usage-quotas)
+- [Owner sign-in: authenticator app and recovery codes](#owner-sign-in-authenticator-app-and-recovery-codes)
 - [OIDC SSO authentication](#oidc-sso-authentication)
 - [OIDC browser login (built-in)](#oidc-browser-login-built-in)
 - [Reverse-proxy SSO](#reverse-proxy-sso)
@@ -410,6 +411,105 @@ writes starter caps of `25.0` dollars and `5000000` tokens).
 
 ---
 
+## Owner sign-in: authenticator app and recovery codes
+
+Without company sign-in, the owner signs in on this computer with an email and
+passphrase. An authenticator app can add a six-digit code to that sign-in.
+Invited colleagues sign in with their passphrase only. Company sign-in keeps
+its own second factor (`[auth.mfa]`, described in the enterprise security overview).
+
+```toml
+[auth.local_owner]
+totp = "optional"   # "optional" (default) | "required" | "off"
+```
+
+| Value | What the owner sees |
+|---|---|
+| `optional` | Account > Authenticator app offers set-up. Nothing changes until the owner turns it on. |
+| `required` | The owner must set up the app before reaching anything else: at first owner set-up, and at the next passphrase sign-in for an owner who has none. |
+| `off` | The option is hidden and changes are refused. An owner who already has the app on is still asked for a code. |
+
+The rule, in full: an owner who already has the app on is asked for a code at
+every sign-in, whatever `totp` says, so an unreadable or invalid value never
+turns that second factor off. An unreadable or unrecognised `totp` value reads
+as `optional`; the log warns about it, and `maverick config-lint` reports it.
+`required` only forces set-up on an owner who has not set one up, and `required`
+refuses turning the app off.
+
+How it works:
+
+- **Set-up** re-asks for the passphrase, then shows a new secret as text and as
+  an `otpauth://` address for manual entry. The app turns on only after a valid
+  code from it. Codes are RFC 6238 (HMAC-SHA1, six digits, 30-second steps). A
+  code from the current or the neighbouring step is accepted, and each step opens
+  a sign-in once.
+- **Recovery codes**: ten, shown once, from an alphabet without look-alike
+  characters. Each works once. Only salted scrypt digests are stored. Making new
+  codes needs a valid code and stops the old ones working.
+- **Turning off** needs the passphrase and a current code or a recovery code.
+- **Storage**: the secret is sealed with the deployment at-rest key (see
+  [Encryption at rest](#encryption-at-rest)). The owner record never holds it in
+  plain text.
+- **Sign-in throttling**: the code step is limited per client address, like the
+  passphrase step. A code step token lasts five minutes and takes five wrong codes
+  before it is discarded. Wrong codes count toward the same one-minute lock as
+  five wrong passphrases.
+- **Sessions**: a session finished with a code records a second factor at that
+  time, so the step-up checks for `[auth.mfa]` accept it. A session opened with
+  the passphrase alone does not count.
+- **Activity log**: set-up, turning off, new recovery codes and each use of a
+  recovery code are recorded as control-plane actions. If the log refuses a
+  record, the change is not made.
+
+Lost your phone? Sign in with a recovery code, then make new codes on the
+Authenticator app page. The page is `/account/owner-authenticator`.
+
+Making new recovery codes, and turning the app off, are refused while `totp` is
+`off`. To make new codes in that case, an administrator sets `totp = "optional"`,
+the owner signs in with a code from the app (or a recovery code) and makes new
+codes, and the administrator then sets `off` again. Keep the recovery codes
+somewhere safe while the phone is still at hand.
+
+If the phone is lost and every recovery code has been used, someone at this
+computer can reset the app from its command line:
+
+```
+maverick owner reset-authenticator
+```
+
+The command asks for the owner's email to confirm. It then turns the app off,
+deletes its recovery codes, and removes any set-up under way and any pending
+sign-in or recovery steps. The change is recorded in the activity log first; if
+the log refuses it, nothing changes. The command prints that the owner must set
+the app up again. With `totp = "required"`, the owner's next passphrase sign-in
+forces that set-up before anything else. No dashboard route can do this, and it
+does not change the passphrase. Until the owner sets the app up again, the
+passphrase alone opens the restricted company sign-in and single sign-on steps
+below, as it does for any owner without the app. Under `totp = "required"` the
+window lasts until the owner's next passphrase sign-in completes set-up. While
+company sign-in is on, local sign-in is off, so set-up waits until it is off.
+
+Company sign-in changes and their recovery also check the owner's passphrase.
+An owner with an authenticator app must give a current code, or an unused
+recovery code, on the first step of each restricted flow: the company sign-in
+activation review, the company sign-in recovery form, the single-sign-on
+activation review and the single-sign-on recovery form. The code issues a
+recovery proof for that flow only. The proof is a random token, valid for ten
+minutes. The owner record keeps only a SHA-256 digest of it, bound to the owner
+and the flow name, and the browser receives it as an HttpOnly, SameSite=Strict
+cookie on that flow's own path. Later steps of the same flow accept the proof
+instead of a code, still check the passphrase, and refuse a proof issued to any
+other flow. The proof is spent when the flow completes, or when the owner
+cancels the flow from the same browser; a cancel from any other request changes
+nothing. A wrong code counts toward the same one-minute lock as a wrong
+passphrase. A step sent with no code is refused and counts nothing. A correct
+passphrase does not clear that lock while a code is due. Issuing, using and
+ending a proof are recorded in the activity log without any code or token. If
+the log refuses the record of an ending, the proof is still ended. The recovery
+routes are reachable only from this computer's loopback address and carry no
+session; the activation reviews need the owner's session. An owner without an
+authenticator app sees no change.
+
 ## OIDC SSO authentication
 
 **What it does.** Verifies an OpenID-Connect **ID token** (a JWT) for the
@@ -682,6 +782,8 @@ want_assertions_signed = true
 [auth.oidc]
 session_secret = "<32+ random bytes>"   # SAML reuses the browser-login session secret
 ```
+
+Setting `want_assertions_signed = false` still refuses any sign-in whose response is unsigned: the SP then requires a signed response instead. An assertion without its own signature is accepted only inside a signed response.
 
 **Needs the extra:** from the reviewed Lightwork checkout, run
 `python -m pip install -e './packages/maverick-core[saml]'` (pysaml2). The

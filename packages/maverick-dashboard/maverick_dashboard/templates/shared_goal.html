@@ -120,6 +120,6 @@
 
   <p class="foot">Shared securely · Lightwork by Daybreak Labs</p>
   <script src="{{ asset('lightwork-markdown.js') }}"></script>
-  <script>if (window.lwMarkdown) window.lwMarkdown.upgrade(document);</script>
+  <script nonce="{{ csp_script_nonce }}">if (window.lwMarkdown) window.lwMarkdown.upgrade(document);</script>
 </body>
 </html>

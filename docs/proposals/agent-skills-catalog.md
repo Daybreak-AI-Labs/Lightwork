@@ -1,14 +1,15 @@
 # Agent skills catalog
 
-> **Status (June 2026):** counts and plans in this document are historical. The shipped catalog is 2,020 lint-clean agents across 53 suites with a full learning lifecycle — see [`docs/FEATURES.md`](../FEATURES.md).
+> **Status:** historical design reference. The counts and plans below describe the
+> catalog when it was written; run `maverick domains-lint` for the current roster, and see
+> [`docs/FEATURES.md`](../FEATURES.md) for what ships.
 
-
-**Status:** in progress — the per-agent skill profiles for the eight agent suites
+The per-agent skill profiles for the eight agent suites
 ([overview](agent-suites-overview.md)). For **each agent**: a one-line job description and
 the **skills it should have** — from baseline (Word/Excel/email) to deep, named competencies
 (query an Oracle DB for the trial balance, stand up Oracle 23ai, the finer points of
-litigation procedure, fix data/automation errors in Salesforce). This installment covers the
-**Finance** suite; the remaining seven follow (§ Remaining suites).
+litigation procedure, fix data/automation errors in Salesforce). All eight suites are
+covered (see § Coverage).
 
 > **How a "skill" is delivered in Lightwork.** Each skill below maps to one (or more) of three
 > real mechanisms the platform already has:
@@ -38,13 +39,13 @@ JD: <one-line job description>
 Not every line applies to every agent. **Baseline bundles** (below) are assumed and not
 repeated per agent — an entry lists only what it *adds* on top.
 
-**Skill dimensions (added in council review).** Deep skills may carry a **delivery tag** —
+**Skill dimensions.** Deep skills may carry a **delivery tag** —
 `[S]` an installable SKILL.md, `[C]` an MCP connector/tool, `[K]` a knowledge source + persona
 — and a **proficiency** `{working | strong | expert}`. An entry may add: **Prereq:** (skills
 this seat presupposes), **Verified:** (how competence is checked — `assessment.py` / the eval
 harness / `continuous_benchmark`), **Judgment:** (the professional-judgment skills the seat
 can't be without), and **Cert:** (the human-credential-equivalent knowledge). These are
-applied to the council-added and updated entries below and roll out to the rest incrementally.
+applied to the added and updated entries below and roll out to the rest incrementally.
 
 ---
 
@@ -78,11 +79,10 @@ evidence-cited findings + risk rating · the **"unknown is the honest answer"** 
 
 ---
 
-## Adversarial council review (applied)
+## Review corrections (applied)
 
-This catalog was put through a **five-member adversarial council** (ex-CFO/CPA/CIA · ex-CISO/DPO/GRC ·
-RevOps/CHRO/GC · ex-CTO/COO · a cross-cutting honesty/platform auditor). Their findings are
-applied throughout; the headline changes:
+A domain review of every suite, with an accuracy check against the source, led to these
+changes, applied throughout:
 
 - **Accuracy fixes (verified against source).** Sandbox count is **7 backends + a `network_policy`
   egress layer** (not 8). Capability **expiry is enforced at `permits()`** — the real gap is a
@@ -99,13 +99,12 @@ applied throughout; the headline changes:
   (ex-"FASB 116/117"); **FCCS** + **ASC 805/323/VIE** (HFM legacy); **SOFR / post-LIBOR**;
   **NIST CSF 2.0 · ISO 27001:2022 · PCI-DSS v4.0.1 · IIA Global Internal Audit Standards 2024 ·
   Colorado AI Act SB 24-205 · MECM (ex-SCCM)**.
-- **~45 council-recommended agents added** — each suite gains a **"Council-added agents"** block
-  for seats the reviewers found missing. Roster grows **301 → ~346**.
+- **~45 agents added** — each suite gains an **"Additional agents"** block
+  for seats the review found missing. Roster grows **301 → ~346**.
 - **New skill dimensions** (delivery `[S]/[C]/[K]`, proficiency, Prereq, Verified, Judgment, Cert)
-  per the "How to read" legend, applied to the council-added/updated entries.
+  per the "How to read" legend, applied to the added/updated entries.
 
-The full per-reviewer findings (every CRITICAL/IMPORTANT item) drove the edits below; remaining
-MINOR depth items are tracked for the incremental rollout.
+Remaining minor depth items are tracked for the incremental rollout.
 
 ---
 
@@ -424,8 +423,8 @@ JD: Per-jurisdiction statutory statements, GAAP-to-local adjustments, local fili
 
 ---
 
-### Council-added agents
-*(Finance seats the council flagged as missing; full profiles below, matching the base roster's depth.)*
+### Additional agents
+*(Finance seats added after review; full profiles below, matching the base roster's depth.)*
 
 #### C1 Treasury Payments / Disbursements Agent — the custody node  [UB +Data] {expert}
 JD: Executes/releases *approved* payments and runs payment-rail operations — the custody node of the finance SoD.
@@ -809,8 +808,8 @@ JD: Ticketing, request fulfillment, KB, SLA — the employee IT front door.
 - Domain: **ITIL service management** `[K]`.
 - Lightwork: AI disclosure; escalate sensitive.
 
-### Council-added agents
-*(GRC/security seats the council flagged as missing. Full profiles below.)*
+### Additional agents
+*(GRC/security seats added after review. Full profiles below.)*
 
 #### C1 Cloud Security / CSPM-CNAPP Agent  [UB +Build]
 JD: Owns cloud and Kubernetes security posture — assesses misconfiguration, drift, and attack paths across clouds and recommends remediation to the owner.
@@ -1051,7 +1050,7 @@ JD: Calculate commissions/attainment against the comp plan; disputes.
 #### 4.4 CRM Data Hygiene & Governance Agent  [UB +Data]
 JD: Dedup, enrich, validate, and govern CRM fields & data quality — **fix Salesforce errors**.
 - Systems: **Salesforce** (Admin) · HubSpot · enrichment · `pii_detector` `[C]`.
-- Technical: **fixing Salesforce errors — Flow (record-triggered/scheduled/screen) + fault paths & Process-Builder→Flow migration, SOQL/SOSL, governor limits (CPU/SOQL-101/DML), Apex triggers & async (Batch/Queueable/Future), debug logs + Developer Console, validation & duplicate rules + dedup, Data Loader, deployment (change sets/SFDX/unlocked packages/Gearset), sharing model (OWD/roles/FLS), Optimizer/Health Check** · CRM data modeling. *(Admin + Developer depth; see also the council-added Salesforce Admin/Dev agent.)* `[S]`
+- Technical: **fixing Salesforce errors — Flow (record-triggered/scheduled/screen) + fault paths & Process-Builder→Flow migration, SOQL/SOSL, governor limits (CPU/SOQL-101/DML), Apex triggers & async (Batch/Queueable/Future), debug logs + Developer Console, validation & duplicate rules + dedup, Data Loader, deployment (change sets/SFDX/unlocked packages/Gearset), sharing model (OWD/roles/FLS), Optimizer/Health Check** · CRM data modeling. *(Admin + Developer depth; see also the Salesforce Admin/Dev agent under Additional agents.)* `[S]`
 - Domain: CRM data governance · field/object model `[K]`.
 - Lightwork: bulk writes gated; privacy; change audit.
 
@@ -1186,8 +1185,8 @@ JD: GTM planning, segmentation, ICP, pricing/packaging analytics.
 - Technical: GTM modeling · segmentation · pricing analytics `[S]`.
 - Domain: GTM strategy · ICP definition `[K]`.
 
-### Council-added agents
-*(the three the brief named — Salesforce-dev, deliverability, RevOps-data — were under-built. Full profiles below.)*
+### Additional agents
+*(Salesforce-dev, deliverability and RevOps-data were under-built in the base roster. Full profiles below.)*
 
 #### C1 Salesforce Admin / Developer Agent  [UB +Build] {expert}
 JD: The seat that can actually "fix Salesforce errors" — diagnoses and repairs Flow/Apex/data issues and ships configuration safely.
@@ -1206,7 +1205,7 @@ JD: Builds and maintains the marketing-automation and measurement plumbing — p
 - Lightwork: builds in the sandbox; **sends and ad-spend changes are gated**; consent/suppression is wired in by construction, never bypassed.
 
 #### C3 Deliverability / Email-Infrastructure Agent  [UB]
-JD: Protects sender reputation and inbox placement — the owner the brief named that was smeared across other seats.
+JD: Protects sender reputation and inbox placement — a responsibility previously spread across other seats.
 - Systems: DNS / email-auth records · **Google Postmaster Tools / Microsoft SNDS** · seed-list/inbox-placement tools (GlockApps/Litmus) · the ESP.
 - Technical: **SPF/DKIM/DMARC enforcement (p=reject) · BIMI/VMC · Google/Yahoo 2024 bulk-sender rules (one-click unsub RFC 8058, <0.3% complaint rate) · IP warmup · seed-list/inbox-placement testing** · bounce/complaint analysis.
 - Domain: deliverability engineering · reputation management · list hygiene.
@@ -1524,8 +1523,8 @@ JD: Employee communications, announcements, change comms.
 - Technical: comms drafting · audience targeting `[S]`.
 - Lightwork: sensitive comms (layoffs, policy) human-approved.
 
-### Council-added agents
-*(seats the council flagged as missing; full profiles below.)*
+### Additional agents
+*(seats added after review; full profiles below.)*
 
 #### C1 Background-Check / FCRA Adverse-Action Agent  [UB]
 JD: Runs the background-check process and the FCRA adverse-action sequence — drafts notices, never makes the decision.
@@ -1820,7 +1819,7 @@ JD: Library/framework/vendor evaluation, build-vs-buy, license screening.
 - Systems: `web_search` · `license_scan.py` · `dep_graph` `[C]`.
 - Technical: tech evaluation · build-vs-buy analysis · license/maintenance-health screening `[S]`.
 
-### Council-added agents
+### Additional agents
 *(shipped tooling, no persona — the "tools there, agent missing" gap. Full profiles below.)*
 
 #### C1 Mobile Engineering Agent  [UB +Build]
@@ -2060,7 +2059,7 @@ JD: CSR programs, philanthropy, community impact, volunteering.
 - Systems: `knowledge_search` `[C]` · channels `[C]` · grants/giving platforms `[C]`.
 - Technical: CSR-program drafting `[S]` · impact tracking `[S]`.
 
-### Council-added agents
+### Additional agents
 *(the deal-defining seats that fell between suites; full profiles below.)*
 
 #### C1 M&A Financial-Modeling Agent  [UB +Data] {expert}
@@ -2328,8 +2327,8 @@ JD: Run conflicts checks before matter intake; set up ethical walls.
 - Domain: conflicts of interest · ethical-wall practice `[K]`.
 - Lightwork: clearing a conflict is human; the ethical-wall setup point.
 
-### Council-added agents
-*(seats the council flagged as missing; full profiles below.)*
+### Additional agents
+*(seats added after review; full profiles below.)*
 
 #### C1 AI & Emerging-Tech Counsel Agent  [UB]
 JD: The legal owner of AI/emerging-tech matters, complementing the GRC AI-governance seats.
@@ -2598,8 +2597,8 @@ JD: Operational sustainability — carbon (Scope 1&2), waste/circularity, effici
 
 ---
 
-### Council-added agents
-*(seats the council flagged as missing; full profiles below.)*
+### Additional agents
+*(seats added after review; full profiles below.)*
 
 #### C1 OT / ICS-Security Agent  [UB +Build]
 JD: Owns security over the SCADA/historian/DCS the rest of the suite only reads — the IT-OT seam.
@@ -2654,22 +2653,22 @@ JD: Regulated-vertical traceability depth beyond generic lot tracking (pharma/fo
 ## Coverage
 
 Every agent has a per-agent skill profile. Base roster (38 · 47 · 45 · 41 · 40 · 26 · 31 ·
-33) = **301**, plus **45 council-added agents** (Finance +5 · IT-GRC +8 · GTM +5 · HR +5 ·
+33) = **301**, plus **45 added agents** (Finance +5 · IT-GRC +8 · GTM +5 · HR +5 ·
 Product & Engineering +6 · Strategy +5 · Legal +5 · Operations +6) = **~346 agents**.
 
-**Full profiles for the council-added seats (45/45).** Every suite's council-added agents have been
+**Full profiles for the added seats (45/45).** Every suite's added agents have been
 promoted from one-line bullets to **full profiles** (JD + Systems/Technical/Domain/Regulatory/
-Lightwork), numbered `C1…Cn` under each "Council-added agents" block — so every one of those seats
+Lightwork), numbered `C1…Cn` under each "Additional agents" block — so every one of those seats
 has the same depth as the base roster and can actually execute its JD (Finance's 5 included).
 
-**Council pass: complete.** A five-member adversarial council reviewed every suite; their
-CRITICAL/IMPORTANT findings are applied (accuracy fixes, the staleness sweep, the 45 added
-agents, and the new skill dimensions) — see "Adversarial council review (applied)" at the top.
+**Review pass: complete.** The review findings are applied (accuracy fixes, the staleness
+sweep, the 45 added agents, and the new skill dimensions); see "Review corrections (applied)"
+at the top.
 
 **Dimension rollout.** The delivery tags (`[S]` installable SKILL.md / `[C]` connector·tool /
 `[K]` knowledge source) now annotate the **base entries of all eight suites** — every Systems
 line is a `[C]`, every Technical line an `[S]`, every Domain/Regulatory line a `[K]` (the
-catalog's own legend) — on top of the council-added seats, which already carry them. **Strategy**
+catalog's own legend) — on top of the added seats, which already carry them. **Strategy**
 is the fuller exemplar (per-item tags + `{proficiency}` + `Verified`/`Judgment` on its marquee
 seats).
 

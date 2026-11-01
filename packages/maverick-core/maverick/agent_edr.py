@@ -1,4 +1,4 @@
-"""The Agent Security Plane: detect, respond, prove (moonshot Bet 4).
+"""The Agent Security Plane: detect, respond, prove.
 
 Lightwork already carries most of an agent-runtime defense stack -- the shield's
 chokepoints, capability attenuation and revocation, honeytokens and canaries,

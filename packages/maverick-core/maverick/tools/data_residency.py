@@ -1,4 +1,4 @@
-"""Per-jurisdiction data residency routing (roadmap: 2028 H2 — data residency).
+"""Per-jurisdiction data residency routing.
 
 Decide where a data subject's data may be stored. The caller supplies the
 subject's region and a policy mapping each region to its allowed storage

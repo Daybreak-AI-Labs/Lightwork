@@ -33,6 +33,21 @@ def _known(tenant: str | None, roles: dict[str, str]) -> list[str]:
     return known
 
 
+def _known_all(tenant: str | None, roles: dict[str, str]) -> set[str]:
+    """Everyone :func:`_known` lists, without the 200-person cap on people
+    who signed in (mapped as ``admin_pages._signed_in_principals`` does).
+    Raises when the sign-in record cannot be read."""
+    from maverick.suite_grants import admin_principals
+
+    known = {*roles, *admin_principals()}
+    if not tenant:
+        from . import subject_directory
+
+        subs = {str(entry.get("sub") or "").strip() for entry in subject_directory.load_index().values()}
+        known |= {sub if sub.startswith("user:") else f"user:{sub}" for sub in subs if sub}
+    return known
+
+
 def _active_check():
     """``check(principal) -> bool``: not turned off in the company directory
     (SCIM), where such an account can no longer sign in. Unknown to the
@@ -53,19 +68,46 @@ def _roster():
     return tenant, (rbac.list_tenant_roles(tenant) if tenant else rbac.list_users())
 
 
-def allowed(principals, permission: str) -> set[str]:
+def signed_in(principals) -> set[str]:
+    """Those of ``principals`` the company directory has not turned off (see
+    :func:`_active_check`). Not read for no principals; raises when it cannot
+    be read."""
+    principals = set(principals)
+    if not principals:
+        return set()
+    active = _active_check()
+    return {principal for principal in principals if active(principal)}
+
+
+def allowed(principals, permission: str, *, known_only: bool = False) -> set[str]:
     """Those of ``principals`` who currently hold ``permission`` in this
-    workspace (see :func:`may`), reading the roster and directory once."""
+    workspace (see :func:`may`). The roster is read once, and the company
+    directory once and only if anyone holds the permission. ``known_only``:
+    only people :func:`candidates` could list (on the roster, an
+    administrator, or signed in before), not anyone a default role would
+    cover. An unreadable source allows nobody (it raises inside
+    ``strict_reads.strict()``)."""
     from . import rbac
 
+    principals = {principal for principal in (str(p or "").strip() for p in principals)
+                  if principal.startswith("user:")}
+    if not principals:
+        return set()
     try:
         tenant, roles = _roster()
+        if known_only:
+            principals &= _known_all(tenant, roles)
+        holders = {principal for principal in principals
+                   if permission in rbac.permissions_for(_role(principal, tenant, roles))}
+        if not holders:
+            return set()
         active = _active_check()
-        return {principal for principal in (str(p or "").strip() for p in principals)
-                if principal.startswith("user:")
-                and permission in rbac.permissions_for(_role(principal, tenant, roles))
-                and active(principal)}
+        return {principal for principal in holders if active(principal)}
     except Exception:  # noqa: BLE001 -- an unreadable roster offers nobody
+        from . import strict_reads
+
+        if strict_reads.active():
+            raise
         log.warning("people directory unavailable", exc_info=True)
         return set()
 
