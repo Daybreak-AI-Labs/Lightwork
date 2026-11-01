@@ -957,11 +957,11 @@ def test_native_source_bootstrap_is_not_advertised_as_a_product_installer():
     assert "authenticated source-bootstrap" not in desktop
     # Guard the installation boundary, independently of the button's label.
     app_text = " ".join(app.split())
-    # The same disclosures, in plain words: it installs from Lightwork's
-    # private GitHub access and the installed program stays readable.
+    # The same disclosures, in plain words: it downloads Lightwork from the
+    # public GitHub repository and the installed program stays readable.
     assert "installs Lightwork on this computer" in app_text
     assert "internet connection" in app_text
-    assert "A GitHub account that Daybreak AI Labs has given access to Lightwork" in app_text
+    assert "public GitHub repository; no GitHub account is needed" in app_text
     assert "program files are kept on this computer in a readable form" in app_text
     assert "not a self-contained native installer" in bootstrap_readme
     assert "| **Native installer**" not in distribution
