@@ -18,16 +18,18 @@ One tagged `release.yml` run produces the artifacts below for
 |---|---|---|---|
 | **Single-file binary** | `maverick-macos-arm64`, `maverick-windows-x86_64.exe`, `maverick-linux-x86_64` | technical users / CI / servers | No — PyInstaller bundles Python bytecode |
 | **Container image** | `ghcr.io/daybreak-ai-labs/lightwork:<ver>` | **Azure / AWS / GCP**, k8s, on-prem Docker | **Yes** — installed Python remains readable |
-| **Reduced standalone SKU** | `lightwork-<sku>-<ver>.zip` | local evaluation of GRC / platform hunt / environment hunt / model-risk assurance | **Yes** — versioned source archive |
+| **Standalone demo archive** | `lightwork-<demo>-<ver>.zip` | local evaluation of the GRC, platform threat hunter, environment threat hunter and model-risk assurance demos | **Yes** — versioned source archive |
 | Supply-chain | Sigstore material for `release.yml` binaries, standalone archives, manifests, SBOMs, and the immutable container digest; `publish.yml` separately signs Python distributions/manifests | security review | n/a |
 
-The four reduced standalone SKUs are source archives of four demo
+The four standalone demo archives are source archives of four demo
 applications (`demo/grc-concierge`, `demo/platform-threat-hunter`,
 `demo/environment-threat-hunter` and `demo/model-risk-ai-assurance-officer`).
 They are **not PyPI packages** and not a full-platform source distribution.
 Their release manifests drive deterministic ZIP builds, and each release
 carries SHA-256 checksums, a CycloneDX SBOM, and Sigstore signature and
-certificate files for them. `publish.yml` separately contains an opt-in,
+certificate files for them. Their combined checksum and SBOM files are
+named `lightwork-standalone-skus-<ver>.sha256` and
+`lightwork-standalone-skus-<ver>.cdx.json`. `publish.yml` separately contains an opt-in,
 allowlisted Trusted Publishing path for the eight workspace Python
 distributions; the standalone archives never enter it.
 
@@ -86,7 +88,7 @@ release attachment, platform signing, and real-machine tests exist.
 
 To build locally on either OS, the recipe is identical to the Mac script:
 install the packages non-editable, then `pyinstaller --clean --noconfirm
---distpath ../dist build/maverick.spec` (run from `build/`). PyInstaller must
+--distpath ../dist maverick.spec` (run from `build/`). PyInstaller must
 run **on the target OS** — a Windows exe builds on Windows, a Linux binary on
 Linux. CI's `release.yml` does all three on hosted runners.
 
@@ -102,14 +104,15 @@ The container image is the universal cloud artifact. It needs only a mounted
 config directory and a model key (or a private model endpoint your cloud
 already offers, e.g. Azure OpenAI / Bedrock).
 
-The examples use the image name that `release.yml` publishes. Until a release
-image exists, build the image yourself
+The examples use the image name that `release.yml` publishes. Releases publish
+exact-version tags only; there is no `latest` tag. Until a release image
+exists, build the image yourself
 (`docker build -f deploy/docker/Dockerfile -t <registry>/lightwork:<tag> .`),
 push it to a registry your cloud can pull from, and substitute that name.
 
 ```bash
-# the image (built + pushed by release.yml)
-docker pull ghcr.io/daybreak-ai-labs/lightwork:latest
+# the release image (staged by release.yml, promoted to :<version> by publish.yml)
+docker pull ghcr.io/daybreak-ai-labs/lightwork:<version>
 ```
 
 **AWS** — ECS/Fargate task, or plain EC2:
@@ -118,7 +121,7 @@ docker run -d -p 8765:8765 \
   -e MAVERICK_DASHBOARD_TOKEN=... \
   -e ANTHROPIC_API_KEY=...            # or point at Bedrock via the provider config
   -v /srv/maverick:/home/maverick/.maverick \
-  ghcr.io/daybreak-ai-labs/lightwork:latest \
+  ghcr.io/daybreak-ai-labs/lightwork:<version> \
   dashboard --host 0.0.0.0 --port 8765
 # Fargate: same image in a task definition.
 ```
@@ -126,7 +129,7 @@ docker run -d -p 8765:8765 \
 **Azure** — Container Apps (serverless) or AKS:
 ```bash
 az containerapp create -n lightwork -g <rg> --environment <env> \
-  --image ghcr.io/daybreak-ai-labs/lightwork:latest \
+  --image ghcr.io/daybreak-ai-labs/lightwork:<version> \
   --target-port 8765 --ingress internal \
   --command maverick \
   --args dashboard --host 0.0.0.0 --port 8765 \
@@ -140,7 +143,7 @@ az containerapp create -n lightwork -g <rg> --environment <env> \
 **GCP** — Cloud Run:
 ```bash
 gcloud run deploy lightwork \
-  --image ghcr.io/daybreak-ai-labs/lightwork:latest \
+  --image ghcr.io/daybreak-ai-labs/lightwork:<version> \
   --port 8765 --cpu 1 --memory 2Gi --no-allow-unauthenticated \
   --command=maverick \
   --args=dashboard,--host,0.0.0.0,--port,8765 \
@@ -173,18 +176,21 @@ Downloads exist only once a release is cut. The pipeline runs on a tag:
 gh workflow run release.yml --ref v0.1.7 -f tag=v0.1.7
 ```
 
-`release.yml` then: builds the 3-OS binaries → stages the GHCR image by immutable
-commit → builds the four versioned standalone source archives → generates
-checksums and SBOMs → keyless-signs the immutable container digest and release
-artifacts → creates a draft GitHub Release → promotes and verifies the intended
-GHCR tags → publishes that verified draft last. It does not dispatch or attach
-the engineering Tauri source-bootstrap bundles.
+`release.yml` then builds the 3-OS binaries, stages the GHCR image by immutable
+commit, builds the four versioned standalone source archives, generates
+checksums and SBOMs, keyless-signs the container digest and release artifacts,
+and creates a draft GitHub Release. It does not dispatch or attach the
+engineering Tauri source-bootstrap bundles. `publish.yml` starts when Release
+completes. It builds and signs the Python distributions, publishes them to PyPI
+only when enabled, promotes and verifies the exact-version GHCR tag, and then
+publishes the verified draft (see
+[RELEASING.md](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/RELEASING.md)).
 
 The Release includes `maverick-container-v<version>.json`, which binds the
 image, immutable digest, source revision, staging tag, and target-tag promotion
-plan. The signed plan is created before mutable tags move; the workflow verifies
-that every target tag resolves to the signed digest before it publishes the
-draft Release.
+plan. The signed plan is created before mutable tags move; `publish.yml`
+verifies that the target tag resolves to the signed digest before it publishes
+the draft Release.
 Verify that digest without trusting a mutable tag:
 
 ```bash

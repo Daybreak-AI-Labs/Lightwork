@@ -1,8 +1,8 @@
 """world_model compression helper.
 
 Estimate how much a world-model payload shrinks under compression, and verify
-that compression is lossless before relying on it. The roadmap calls for zstd;
-since the zstd binding may be absent, this uses stdlib ``zlib`` (deflate) so the
+that compression is lossless before relying on it. zstd would compress better,
+but its binding may be absent, so this uses stdlib ``zlib`` (deflate) and the
 helper is always available offline. ``stats`` reports original/compressed bytes
 and the ratio; ``roundtrip`` checks that decompress(compress(text)) == text.
 Deterministic and offline.

@@ -116,7 +116,7 @@ used by the runnable TypeScript example.
   not part of the wire protocol.
 - **The MCP server is for cross-language clients, not for tunneling
   Lightwork over the public internet.** Pair with your own auth +
-  TLS layer if you go remote (see `packages/maverick-mcp/http_transport.py`).
+  TLS layer if you go remote (see `packages/maverick-mcp/maverick_mcp/http_transport.py`).
 
 ## Why no `Lightwork.Core` NuGet package?
 

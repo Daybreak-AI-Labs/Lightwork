@@ -1,7 +1,7 @@
-"""Regression tests for the review round-1 fixes.
+"""Regression tests for a first batch of reliability and security fixes.
 
-Each test pins a specific finding so a future refactor can't silently
-reintroduce the bug. Findings are referenced by their seat tag.
+Each test pins a specific bug so a future refactor can't silently
+reintroduce it. Each bug is referenced by a short tag such as REL-1.
 """
 from __future__ import annotations
 

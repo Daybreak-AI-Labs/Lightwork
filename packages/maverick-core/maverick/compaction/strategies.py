@@ -1,7 +1,7 @@
 """Opt-in compaction strategy selection.
 
 The always-on path is :func:`maverick.compaction.compact_messages`. This
-module layers the roadmap strategies on top of it, selected the same way
+module layers additional opt-in strategies on top of it, selected the same way
 ``context_compactor`` selects its behavior: an env var override, then the
 ``[context]`` config section, fail-open to the default.
 

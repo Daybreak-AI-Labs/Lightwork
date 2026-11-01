@@ -151,7 +151,9 @@ explicit limits, retry behavior and unknown provider charges.
 
 Turn the metered-usage invoices (`maverick.billing`) into real charges
 (`maverick.billing_stripe`). Off by default; the `stripe` SDK is an optional
-extra (`pip install 'maverick-core[stripe]'`). Distinct from the agent-facing
+extra (`python -m pip install -e './packages/maverick-core[stripe]'` from the
+repository root, or add `stripe` to `--core-extra` in
+`scripts/install_release_cohort.py`). Distinct from the agent-facing
 `stripe` **tool** (which uses `STRIPE_SECRET_KEY` to read a customer's account) —
 these drive the *platform's own* Stripe account to bill tenants.
 
@@ -384,7 +386,7 @@ system-specific shapes (e.g. `SERVICENOW_INSTANCE_URL`, `SNOWFLAKE_ACCOUNT`,
 | `<SYSTEM>_BASE_URL` / `<SYSTEM>_TOKEN` | unset | Per-connector endpoint + credential; see [connectors.md](connectors.md). Writes stay confirm-gated regardless. |
 | `DATABASE_URL` | unset | SQLAlchemy URL for the `database` tool (Postgres / MySQL / SQL Server / Oracle / Redshift / ...). |
 | `MAVERICK_ENABLE_CRED_TOOLS` | unset (off) | `1`/`true` registers connectors that can use ambient host credentials (AWS Lambda/DynamoDB, Google Drive, Airtable, Asana, ClickUp, Vercel). Off by default. |
-| `MAVERICK_WORKFORCE_DATA_GROUNDING` | config `[workforce] data_grounding` (on) | Kill-switch for primary-source data grounding. When on, each analyst pack is auto-granted its suite's 37 read-only public-data connectors (SEC EDGAR, FRED, openFDA, USAspending, NWS/NOAA weather, ...) — GET-only, low-risk, deferred. Set `off`/`0` to withhold them. See [connectors.md](connectors.md). |
+| `MAVERICK_WORKFORCE_DATA_GROUNDING` | config `[workforce] data_grounding` (on) | Kill-switch for primary-source data grounding. When on, each analyst pack is granted its suite's read-only public-data connectors (37 in total across suites: SEC EDGAR, FRED, openFDA, USAspending, NWS/NOAA weather, ...) — GET-only, low-risk, deferred. Set `off`/`0` to withhold them. See [connectors.md](connectors.md). |
 | `MAVERICK_WORKFORCE_LEVELS` | config `[workforce] levels` (off) | Enable per-agent autonomy levels (observe/suggest/request/auto). Off = every agent stages actions for human execution. |
 
 ## Agent-to-agent (A2A)

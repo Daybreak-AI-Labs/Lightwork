@@ -70,10 +70,9 @@ Concretely:
 
 ## Why park (not close, not prune)
 
-- **Closing the loop now is speculative complexity.** The training flywheel is,
-  per the Karpathy review the code cites, "the only piece that earns ML
-  complexity" — but it earns it **only at trajectory volume**, which the
-  project does not yet have. Building a 6–8-week outcome-reward training loop before
+- **Closing the loop now is speculative complexity.** The training flywheel is
+  the only piece that earns ML complexity, but it earns it **only at trajectory
+  volume**, which the project does not yet have. Building a 6–8-week outcome-reward training loop before
   there are trajectories to train on goes against the house rule of no
   speculative abstractions ([CONTRIBUTING.md](../../CONTRIBUTING.md#house-rules)).
   It's a push where the right move is demand-pull.

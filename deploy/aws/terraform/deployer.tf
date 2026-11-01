@@ -1,6 +1,6 @@
-# Deploy identity for the owner's Claude Code sessions and CI: an IAM user whose
-# access key lives in the tooling's environment settings, so routine deploys stop
-# running as the account root through browser logins that expire every few hours.
+# Deploy identity for routine deploys and CI: an IAM user whose access key lives
+# in the deploying tool's environment settings, so routine deploys do not run as
+# the account root through browser logins that expire every few hours.
 #
 # This credential deploys the already bootstrapped stack. IAM identities and
 # policies, including this user's boundary, are changed only by a separate

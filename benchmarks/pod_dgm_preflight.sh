@@ -74,7 +74,7 @@ fi
 
 # 5. Offline proof must be 6/6 (the free capability self-test the paid run gates on).
 echo "[5/5] offline DGM proof 6/6 ..."
-python3 "$REPO/proof/dgm_uplift_proof.py" 2>&1 | grep -q "6 guarantees PROVEN" \
+python3 "$REPO/proof/dgm_uplift_proof.py" 2>&1 | grep -q "6 checks passed, 0 failed" \
     && ok "DGM proof 6/6" || bad "DGM proof NOT 6/6 -- do not spend"
 
 echo "======================================================================"

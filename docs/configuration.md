@@ -743,7 +743,9 @@ currency = "usd"
 # Operator surface: `maverick billing stripe-status`, `stripe-preview <tenant>`
 # (dry-run), `stripe-sync <tenant>`. A failed-payment webhook downgrades a tenant
 # to the base entitlement tier; a recovered payment restores it. The `stripe` SDK
-# is an OPTIONAL extra: `pip install 'maverick-core[stripe]'`.
+# is an OPTIONAL extra: `python -m pip install -e './packages/maverick-core[stripe]'`
+# from the repository root (or add `stripe` to `--core-extra` when running
+# `scripts/install_release_cohort.py`).
 
 [suites]                   # disable whole suites (all on by default)
 # healthcare = false

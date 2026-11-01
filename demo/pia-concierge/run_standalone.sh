@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PIA Concierge — STANDALONE agent launcher (sold without the platform).
+# PIA Concierge — standalone mode launcher (runs without the platform).
 #
 # One process on :8890: the ticketing intake, requester inbox + chat/voice
 # questionnaire, and the OneTrust tenant where a human reviews & approves.

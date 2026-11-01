@@ -197,7 +197,7 @@ def preflight(
     into ``LLM.complete`` / ``LLM.complete_async`` via ``llm._run_preflight``;
     the mode is chosen by the ``MAVERICK_PREFLIGHT`` env var and defaults to
     ``warn`` (log only) so the live path can't false-refuse a borderline
-    request. Set ``MAVERICK_PREFLIGHT=strict`` for the roadmap hard-refuse.
+    request. Set ``MAVERICK_PREFLIGHT=strict`` for a hard refuse.
     """
     limit = context_limit(model)
     budget = limit - max_tokens - safety_margin

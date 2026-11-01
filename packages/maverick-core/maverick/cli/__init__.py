@@ -1214,8 +1214,8 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
             # The client explicitly attached docs AND the generated persona
             # tells the agent to answer from them -- so a quiet "skipping"
             # aside under-sells that the domain agent ends up with NO document
-            # memory. Make it a clear, actionable warning (client-journey
-            # finding): name the count and the exact remediation.
+            # memory. Make it a clear, actionable warning: name the count
+            # and the exact remediation.
             click.echo(
                 f"WARNING: knowledge is disabled, so the {len(doc_paths)} "
                 "document(s) you attached were NOT loaded; this domain agent "
@@ -2473,9 +2473,8 @@ def fleet_run(ctx, fleet_name: str, agent_name: str, prompt: str,
         click.echo(f"no such fleet: {fleet_name}", err=True)
         sys.exit(1)
     if not governance_enabled():
-        click.echo("fleet governance needs the Gold tier (or a fleet_governance "
-                   "grant) while license enforcement is on; this deployment's "
-                   "license does not include it", err=True)
+        click.echo("license enforcement is on and this deployment's license "
+                   "does not grant the fleet_governance entitlement", err=True)
         sys.exit(2)
     agent = next((a for a in f.agents if a.name == agent_name), None)
     if agent is None:
@@ -4015,7 +4014,7 @@ def start(
 
     # Refuse BEFORE creating the goal row -- both of these used to surface
     # after `goal #N created`, leaving an orphan blocked/failed row per
-    # attempt (platform-test finding).
+    # attempt.
     from .. import killswitch as _ks
     try:
         _ks.check()
@@ -4455,8 +4454,8 @@ def debate(ctx, question: str, rounds: int, max_dollars: float | None,
     from ..debate import DebateParticipant, run_debate
     from ..llm import model_for_role
 
-    # Friendly preflight (round-3 platform-test finding: an unconfigured
-    # install got a raw anthropic-SDK TypeError traceback here), and route
+    # Friendly preflight (an unconfigured install would otherwise get a raw
+    # anthropic-SDK TypeError traceback here), and route
     # through the configured role models instead of hard DEFAULT_MODEL
     # (kernel rule 2) -- debaters argue at the analyst tier.
     selected_model = ctx.obj["model"] or model_for_role("analyst")
@@ -4516,7 +4515,7 @@ def config_lint_cmd() -> None:
     # load_config() is deliberately fail-soft: a corrupt config.toml yields {}
     # with only a warning, so linting it would find nothing and print
     # "config OK" -- the one tool meant to catch a broken config blessing a
-    # file in which every setting is being dropped (round-4 finding; mirrors
+    # file in which every setting is being dropped (mirrors
     # health._check_config). Parse the raw file FIRST so a syntax error is a
     # hard lint failure, not invisible.
     p = config_path()
@@ -4614,7 +4613,7 @@ def plan_reflect(ctx, goal: str, max_iterations: int, max_dollars: float | None)
     from ..llm import model_for_role
     from ..plan_execute_reflect import run_plan_execute_reflect
 
-    # Same preflight + role routing as `debate` (round-3 finding): planning
+    # Same preflight + role routing as `debate`: planning
     # belongs to the orchestrator tier, and a missing provider must refuse
     # cleanly, not traceback inside the anthropic client constructor.
     selected_model = ctx.obj["model"] or model_for_role("orchestrator")

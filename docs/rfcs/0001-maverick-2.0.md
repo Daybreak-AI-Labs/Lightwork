@@ -5,7 +5,7 @@
 
 ## Why a 2.0
 
-1.x grew by accretion: ~170 tools, 15 channels, 12 providers, three config
+The 0.1.x line grew by accretion: tools, channels, providers and three config
 generations. Nothing is broken, but three kinds of debt now have a cost:
 
 1. **Config drift** — knobs that mean almost the same thing live in different
@@ -27,13 +27,13 @@ generations. Nothing is broken, but three kinds of debt now have a cost:
 - One `[cache]` section absorbs `output_cache*`, snapshot, and the Redis tier.
 - `[memory]` keeps recall/vector-store only.
 - Every rename lands in `maverick.migrate.REWRITES` (the table shipped empty
-  in 1.x precisely so `maverick migrate --apply` is the upgrade path; backups
+  in 0.1.x precisely so `maverick migrate --apply` is the upgrade path; backups
   + atomic writes already in place).
 
 ### C2. Async-only channel SDK (channel SDK v2)
 - `Channel.send/send_threaded/start/stop` stay; the *handler* contract gains
   a structured reply object (text + attachments + thread ref) instead of bare
-  `str`. The 14 in-tree adapters migrate in-tree; plugin adapters get a
+  `str`. The in-tree adapters migrate in-tree; plugin adapters get a
   deprecation window (one minor release) via a shim that wraps `str` returns.
 
 ### C3. Connector re-homing
@@ -44,7 +44,7 @@ generations. Nothing is broken, but three kinds of debt now have a cost:
 
 ### C4. Tool contract
 - `Tool.fn` officially supports the streaming contract (generator/async
-  generator chunks — shipped in 1.x as `set_chunk_listener`) and documents
+  generator chunks — shipped in 0.1.x as `set_chunk_listener`) and documents
   `parallel_safe` as part of the public plugin API (it already gates caching,
   parallelism, and speculation).
 
@@ -58,7 +58,7 @@ generations. Nothing is broken, but three kinds of debt now have a cost:
 ## Migration story
 
 `maverick migrate` (shipped) carries every mechanical rename; advisories
-cover the judgment calls. A 1.x config must run unmodified under 2.0 with at
+cover the judgment calls. A 0.1.x config must run unmodified under 2.0 with at
 most WARN-level notices for one minor release before any removal.
 
 ## Open questions

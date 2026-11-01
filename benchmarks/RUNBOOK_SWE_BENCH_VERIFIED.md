@@ -6,7 +6,7 @@ number, and [vals.ai](https://www.vals.ai/benchmarks/swebench) publishes
 cost-per-test figures that make cost comparisons possible.
 
 Use the Pro runbook (`RUNBOOK_SWE_BENCH_PRO.md`) for the multi-language
-1,865-instance follow-up run.
+follow-up run.
 
 ## Reference figures (third-party sources, May 2026)
 

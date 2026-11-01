@@ -11,9 +11,10 @@ release branch is ever maintained alongside `main`.
   which versions receive fixes.
 - **Marking a security fix.** A commit that fixes a vulnerability or hardens a
   safety boundary (shield chokepoints, sandbox mediation, capability or consent
-  gates, secret scrubbing, audit integrity) carries `security:` or
-  `fix(security)` at the start of its subject, or a `Security-Backport: yes`
-  trailer. The marker lets the backport tool find the fix later.
+  gates, secret scrubbing, audit integrity) carries `fix(security):` at the
+  start of its subject (the pull request title, since pull requests are
+  squash-merged), or a `Security-Backport: yes` trailer in the squash commit
+  message. The marker lets the backport tool find the fix later.
 
 ## Backport tooling
 

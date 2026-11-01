@@ -2,21 +2,26 @@
 
 This is the operator's guide for `benchmarks/swe_bench.py`. The harness
 is a **producer**: it generates patches. Scoring is delegated to the
-upstream `swebench` evaluator, so the harness never grades its own output.
+official SWE-bench Pro evaluator, so the harness never grades its own output.
 
 All costs below are estimates for planning a budget, not measurements.
 
 ## Prerequisites
 
 ```bash
-# Disk: ~150 GB free for the Docker images SWE-bench Pro builds
+# Disk: ~150 GB free for the SWE-bench Pro Docker images
 df -h .
 
 # Docker 24+
 docker --version
 
 # Python deps (in the same venv as Lightwork)
-pip install datasets "swebench>=2.0"
+pip install datasets
+
+# The official SWE-bench Pro evaluator (step 3), in its own virtual environment
+git clone https://github.com/scaleapi/SWE-bench_Pro-os ~/SWE-bench_Pro-os
+python3 -m venv ~/SWE-bench_Pro-os/.venv
+~/SWE-bench_Pro-os/.venv/bin/pip install -r ~/SWE-bench_Pro-os/requirements.txt
 ```
 
 API keys in `~/.maverick/.env` (loaded automatically at startup):
@@ -28,41 +33,56 @@ OPENAI_API_KEY=sk-proj-...        # optional: cross-family verifier
 
 ## Step 1: download the dataset
 
-SWE-bench Pro is published on Hugging Face as `Scale/swe-bench-pro`.
-Convert it into Lightwork's manifest format:
+SWE-bench Pro is published on Hugging Face as `ScaleAI/SWE-bench_Pro`, with
+three configs: `default` (V2, 642 tasks), `hard` (51 tasks) and `v1` (the
+original 731 tasks). This runbook uses `v1`, because the official evaluator
+that scores a file of precomputed patches (`swe_bench_pro_eval.py`, step 3)
+belongs to the v1 pipeline. V2 is scored with Harbor under its own locked
+protocol, which runs the agent inside Harbor.
+
+Export the split for the evaluator and convert it into Lightwork's manifest
+format:
 
 ```bash
 mkdir -p ~/.maverick/swebench-pro
 python -c "
 from datasets import load_dataset
-import json, pathlib
-ds = load_dataset('Scale/swe-bench-pro', split='test')
-out = pathlib.Path.home() / '.maverick' / 'swebench-pro' / 'manifest.jsonl'
+import ast, json, pathlib
+ds = load_dataset('ScaleAI/SWE-bench_Pro', 'v1', split='test')
+home = pathlib.Path.home() / '.maverick' / 'swebench-pro'
+ds.to_json(str(home / 'swe_bench_pro_v1.jsonl'))  # evaluator input, step 3
+def tests(value):
+    # fail_to_pass / pass_to_pass are list literals stored as strings.
+    return list(ast.literal_eval(value)) if value else []
+out = home / 'manifest.jsonl'
 with open(out, 'w') as f:
     for ex in ds:
         f.write(json.dumps({
             'instance_id': ex['instance_id'],
             'brief': ex['problem_statement'],
             'gold_patch': ex['patch'],
-            'fail_to_pass': ex.get('FAIL_TO_PASS', []),
-            'pass_to_pass': ex.get('PASS_TO_PASS', []),
-            'language': ex.get('language', ''),
+            'fail_to_pass': tests(ex['fail_to_pass']),
+            'pass_to_pass': tests(ex['pass_to_pass']),
+            'language': ex['repo_language'],
+            'base_commit': ex['base_commit'],
+            'requirements': ex['requirements'],
+            'interface': ex['interface'],
         }) + chr(10))
-print(f'wrote {out}')
+print(f'wrote {len(ds)} instances to {out}')
 "
 ```
 
-Sanity check: `wc -l ~/.maverick/swebench-pro/manifest.jsonl` should
-report 1865.
+Sanity check: `wc -l ~/.maverick/swebench-pro/manifest.jsonl` should equal
+the number of rows in the split (731 for `v1`).
 
-The harness also reads the optional manifest fields `base_commit`,
-`requirements` and `interface` when present; `fail_to_pass` enables the
-test-driven verifier and `language` is a runner hint for monorepos.
+`fail_to_pass` enables the test-driven verifier, `requirements` and
+`interface` are added to the brief, `base_commit` pins the checkout, and
+`language` is a runner hint for monorepos.
 
 ## Step 2: smoke 10 instances first
 
-Do **not** run the full 1865 instances until the smoke run is clean; a
-full run on a broken pipeline can cost several thousand dollars.
+Do **not** run the full test split until the smoke run is clean; a full
+run on a broken pipeline can cost thousands of dollars.
 
 ```bash
 # Slice the manifest to the first 10 lines. ~/.maverick/ works on
@@ -79,8 +99,8 @@ python benchmarks/swe_bench.py \
     --out ~/.maverick/swebench-pro/smoke_predictions.csv
 ```
 
-`benchmarks/run_swebench_pro_smoke.sh` wraps steps 2 and 3 for a
-5-instance smoke.
+`benchmarks/run_swebench_pro_smoke.sh` wraps step 2 for a 5-instance
+smoke and writes the patch files that step 3 scores.
 
 The harness streams progress lines per (instance, pipeline) and appends
 one CSV row each. After the smoke completes, inspect the patches:
@@ -100,49 +120,67 @@ If `outcome` is mostly `success` and `predicted_patch` starts with
 
 ## Step 3: score the smoke
 
-Convert the CSV into the `predictions.jsonl` format that SWE-bench
-expects, then run the official evaluator in Docker:
+The original SWE-bench evaluator (`swebench.harness.run_evaluation`) does
+not support the SWE-bench Pro repositories. Score with the official
+evaluator, `swe_bench_pro_eval.py` in
+[scaleapi/SWE-bench_Pro-os](https://github.com/scaleapi/SWE-bench_Pro-os),
+cloned in the prerequisites. It reads a JSON list of
+`{"instance_id", "patch", "prefix"}` objects, so first write one patch file
+per pipeline next to the predictions CSV:
 
 ```bash
 # csv.DictWriter quotes newlines, so `predicted_patch` reads back with real
 # line breaks; do not post-process `\n` sequences.
-python -c "
-import csv, json, pathlib
-home = pathlib.Path.home() / '.maverick' / 'swebench-pro'
-with open(home / 'smoke_predictions.csv') as f, \
-     open(home / 'preds.jsonl', 'w') as out:
-    r = csv.DictReader(f)
-    for row in r:
-        if row['pipeline'] != 'maverick':
-            continue
-        out.write(json.dumps({
+python - ~/.maverick/swebench-pro/smoke_predictions.csv <<'PY'
+import collections, csv, json, pathlib, sys
+csv_path = pathlib.Path(sys.argv[1])
+by_pipeline = collections.defaultdict(list)
+with open(csv_path, newline='', encoding='utf-8') as f:
+    for row in csv.DictReader(f):
+        by_pipeline[row['pipeline']].append({
             'instance_id': row['instance_id'],
-            'model_patch': row['predicted_patch'],
-            'model_name_or_path': row['model_id'],
-        }) + chr(10))
-"
-
-# Run the official evaluator (builds Docker images per instance; first
-# run is slow, subsequent runs reuse cache).
-python -m swebench.harness.run_evaluation \
-    --predictions_path ~/.maverick/swebench-pro/preds.jsonl \
-    --dataset_name Scale/swe-bench-pro \
-    --split test \
-    --max_workers 4 \
-    --run_id maverick-smoke
+            'patch': row['predicted_patch'],
+            'prefix': row['pipeline'],
+        })
+for pipeline, patches in by_pipeline.items():
+    out = csv_path.with_name(f'{csv_path.stem}_{pipeline}_patches.json')
+    out.write_text(json.dumps(patches), encoding='utf-8')
+    print(f'wrote {out}')
+PY
 ```
 
-The evaluator writes `evaluation_results/maverick-smoke/results.json`
-with per-instance `passed` booleans. The score is the share where
-`resolved == true`.
+Then run the evaluator from its clone; it reads `run_scripts/` and
+`dockerfiles/` relative to the working directory. `--use_local_docker` runs
+the prebuilt instance images from Docker Hub on this machine; without it the
+evaluator runs on Modal.
+
+```bash
+cd ~/SWE-bench_Pro-os
+PREDICTIONS=~/.maverick/swebench-pro/smoke_predictions  # the CSV path without .csv
+EVAL_DIR=~/.maverick/swebench-pro/eval-smoke
+for pipeline in maverick sonnet_single; do
+    .venv/bin/python swe_bench_pro_eval.py \
+        --raw_sample_path ~/.maverick/swebench-pro/swe_bench_pro_v1.jsonl \
+        --patch_path "${PREDICTIONS}_${pipeline}_patches.json" \
+        --output_dir "${EVAL_DIR}/${pipeline}" \
+        --scripts_dir run_scripts \
+        --dockerhub_username jefzda \
+        --use_local_docker \
+        --num_workers 4
+done
+```
+
+For each pipeline the evaluator writes `eval_results.json` to its output
+directory, mapping each instance id to `true` when every `fail_to_pass` and
+`pass_to_pass` test passes. The score is the share of `true` values.
 
 ## Step 4: real run
 
 Run the pre-flight checks below first. Then:
 
 ```bash
-# Lightwork + 3 baselines x 1865 instances. See the cost estimates below
-# before choosing pipelines. The per-instance cap (MAVERICK_INSTANCE_HARD_CAP,
+# Lightwork + 3 baselines over the full test split. See the cost estimates
+# below before choosing pipelines. The per-instance cap (MAVERICK_INSTANCE_HARD_CAP,
 # default $3, or --instance-hard-cap) stops a runaway instance.
 python benchmarks/swe_bench.py \
     --instances ~/.maverick/swebench-pro/manifest.jsonl \
@@ -153,11 +191,16 @@ python benchmarks/swe_bench.py \
 Run it in `tmux` or with `nohup`; expect 12-48 hours depending on
 provider capacity and how many retries the verifier triggers.
 
+Score it with step 3: pass the new CSV to the converter, then run the
+evaluator loop with `PREDICTIONS` set to the CSV path without `.csv`,
+`EVAL_DIR=~/.maverick/swebench-pro/eval` and all four pipelines.
+
 ## Step 5: aggregate into RESULTS.md
 
 After both producer and scorer finish, render the per-pipeline table:
 
 ```bash
+# Run from the Lightwork repository root.
 python -c "
 import csv, json, pathlib
 from collections import defaultdict
@@ -165,13 +208,12 @@ csv_candidates = sorted(pathlib.Path('benchmarks').glob('RESULTS_SWE_*.csv'))
 if not csv_candidates:
     raise SystemExit('No RESULTS_SWE_*.csv found in benchmarks/')
 csv_path = csv_candidates[-1]
-score_paths = pathlib.Path('evaluation_results').rglob('results.json')
+eval_root = pathlib.Path.home() / '.maverick' / 'swebench-pro' / 'eval'
 scores = {}
-for p in score_paths:
-    d = json.loads(p.read_text())
-    pipeline = p.parent.name.replace('maverick-', '')
-    for iid, info in d.items():
-        scores[(iid, pipeline)] = info.get('resolved', False)
+for p in eval_root.glob('*/eval_results.json'):
+    pipeline = p.parent.name
+    for iid, resolved in json.loads(p.read_text()).items():
+        scores[(iid, pipeline)] = bool(resolved)
 agg = defaultdict(lambda: {'n': 0, 'pass': 0, 'cost': 0.0, 'wall': 0.0})
 with open(csv_path) as f:
     for row in csv.DictReader(f):
@@ -229,20 +271,20 @@ export MAVERICK_TRACE_DIR=~/.maverick/swebench-pro-traces
 
 The model IDs above are examples; `python benchmarks/preflight.py`
 rejects a ladder or override that names an unknown model.
-`FAIL_TO_PASS` / `PASS_TO_PASS` are loaded per instance from the manifest.
+`fail_to_pass` / `pass_to_pass` are loaded per instance from the manifest.
 
 ## Cost estimates
 
 Per-task cost depends on routing and caching. Rough estimates at May 2026
 list prices:
 
-| pipeline                       | model | $/task | total / 1865 |
-|--------------------------------|-------|--------|---------------|
-| sonnet_single (no tools)       | Sonnet 4.6  | $0.05  | ~$95          |
-| sonnet_tools                   | Sonnet 4.6  | $0.40  | ~$750         |
-| sonnet_self_consistency_n8     | Sonnet 4.6  | $0.40  | ~$750         |
-| maverick (cascade ON)          | Haiku→Sonnet→Opus | $0.80 | ~$1,500 |
-| maverick (cascade OFF, Opus)   | Opus 4.7    | $4.50  | ~$8,400       |
+| pipeline                       | model | $/task | total / 731 tasks |
+|--------------------------------|-------|--------|-------------------|
+| sonnet_single (no tools)       | Sonnet 4.6  | $0.05  | ~$37          |
+| sonnet_tools                   | Sonnet 4.6  | $0.40  | ~$290         |
+| sonnet_self_consistency_n8     | Sonnet 4.6  | $0.40  | ~$290         |
+| maverick (cascade ON)          | Haiku→Sonnet→Opus | $0.80 | ~$585 |
+| maverick (cascade OFF, Opus)   | Opus 4.7    | $4.50  | ~$3,300       |
 
 ## Pre-flight: environment checker
 
@@ -334,9 +376,9 @@ Investigate prompt drift or model availability first.
 - **`gh: not found`** during PR fallback: not needed for SWE-bench.
 - **Lightwork produces no patch**: check that the agent's `FINAL` is a
   unified diff. If it is prose, confirm `MAVERICK_CODING_MODE=1` is set.
-- **Evaluator hangs on Docker build**: SWE-bench Pro images are ~5 GB
-  each the first time. Run with `--max_workers 1` for the first build
-  pass, then raise it.
+- **Evaluator is slow on the first pass**: it pulls a large prebuilt
+  image per instance the first time. Run with `--num_workers 1` for the
+  first pass, then raise it.
 
 ## What the harness provides vs. what you bring
 

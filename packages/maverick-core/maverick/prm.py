@@ -1,6 +1,6 @@
 """Process Reward Model (PRM) interface for agent step scoring.
 
-Karpathy SOTA-review prescription + AgentPRM (arxiv:2511.08325):
+Follows AgentPRM (arxiv:2511.08325):
 the verifier today scores the FINAL answer; a real PRM scores EVERY
 STEP for "promise" (P[reach goal]) and "progress" (Δ toward goal).
 AgentPRM reports 8× more compute-efficient than outcome-only baselines.
@@ -552,7 +552,8 @@ def build_from_env(*, recovery_controller=None) -> ProcessRewardModel:
     ``prm_endpoint`` / ``prm_api_key`` / ``prm_path`` (Settings > All
     settings); a set environment variable wins over its config value.
 
-    Default: NullPRM (preserves pre-Wave-7c behavior).
+    Default: NullPRM (a neutral step score with no signal; the verifier
+    still runs at FINAL).
     """
     kind = str(_prm_setting("MAVERICK_PRM", "prm_backend") or "null").strip().lower()
     if kind == "heuristic":

@@ -967,7 +967,7 @@ def test_native_source_bootstrap_is_not_advertised_as_a_product_installer():
     assert "| **Native installer**" not in distribution
     assert "| **Container image**" in distribution
     assert "**Yes** — installed Python remains readable" in distribution
-    assert "four reduced standalone SKUs" in distribution
+    assert "four standalone demo archives" in distribution
     assert "native installers, GHCR" not in readme
     assert "Tauri-based GUI installer for users" not in deployment
     assert "not attached to product releases" in deployment

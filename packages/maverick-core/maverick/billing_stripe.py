@@ -206,7 +206,7 @@ def status() -> StripeStatus:
         reason = f"enabled but no secret key ({_SECRET_KEY_ENV} is unset)"
     elif not sdk:
         reason = "enabled with a key but the 'stripe' extra is not installed " \
-                 "(pip install 'maverick-core[stripe]')"
+                 "(python -m pip install -e './packages/maverick-core[stripe]')"
     else:
         reason = "ready"
     return StripeStatus(
@@ -399,7 +399,7 @@ def _client(client: StripeClient | None = None) -> StripeClient:
     except ImportError as exc:  # optional extra absent
         raise StripeNotConfigured(
             "Stripe billing is enabled but the 'stripe' extra is not installed. "
-            "Run: pip install 'maverick-core[stripe]'."
+            "Run: python -m pip install -e './packages/maverick-core[stripe]'."
         ) from exc
 
 

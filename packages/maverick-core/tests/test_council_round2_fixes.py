@@ -1,4 +1,4 @@
-"""Regression tests for the review round-2 fixes."""
+"""Regression tests for a second batch of security, privacy and reliability fixes."""
 from __future__ import annotations
 
 import os

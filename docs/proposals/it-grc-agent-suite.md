@@ -29,7 +29,7 @@ agents both **operate** those controls and **emit their evidence** — and Tower
 ## Contents
 
 1. [What's already shipped — the reuse map](#1-whats-already-shipped--the-reuse-map)
-2. [How an IT/GRC agent maps onto Lightwork](#2-how-an-itgrc-agent-maps-onto-maverick)
+2. [How an IT/GRC agent maps onto Lightwork](#2-how-an-itgrc-agent-maps-onto-lightwork)
 3. [The control model (cross-cutting)](#3-the-control-model-cross-cutting)
 4. [Per-client customization — the dials](#4-per-client-customization--the-dials)
 5. [The roster — ten towers](#5-the-roster--ten-towers)

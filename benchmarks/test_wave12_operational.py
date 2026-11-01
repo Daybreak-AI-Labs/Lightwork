@@ -1,9 +1,9 @@
 """Operational hardening tests.
 
 Covers:
-  - F11a: SIGTERM handler installed + flag plumbing
-  - F11b: error rows in CSV are NOT marked done; resume retries them
-  - F11e: consecutive-failure circuit breaker
+  - SIGTERM handler installed + flag plumbing
+  - error rows in CSV are NOT marked done; resume retries them
+  - consecutive-failure circuit breaker
 """
 from __future__ import annotations
 

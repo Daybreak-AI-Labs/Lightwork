@@ -4,6 +4,10 @@ All notable changes to Lightwork. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+The 0.1.0 to 0.1.6 entries describe earlier releases made before this
+repository was published. Their tags, release binaries and package uploads are
+not available from this repository.
+
 ## [Unreleased]
 
 ### Added
@@ -82,7 +86,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   verbatim Apache License, Version 2.0, a new `NOTICE` carries the copyright
   line and the bundled swagger-ui attribution, and every package manifest
   declares `Apache-2.0`. Versions previously published under the MIT License
-  remain available under that licence. Contributions are accepted under the
+  remain licensed under it. Contributions are accepted under the
   contributor licence agreement in `CLA.md`.
 - **Documentation for an open-source project.** New `GOVERNANCE.md`,
   `SUPPORT.md`, `RELEASING.md` and an RFC process index (`docs/rfcs/README.md`);
@@ -91,11 +95,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   install is the documented install path (`docs/source-install.md`), one public
   roadmap (`docs/ROADMAP.md`) replaces the internal ones, and an
   `.editorconfig` and a `Makefile` cover common contributor tasks.
-- **No personal identifiers or session narration in the tracked tree.**
-  Personal workstation paths and the AWS account id became placeholders, the
-  Terraform state bucket is supplied at `terraform init` time from a
-  git-ignored `backend.hcl`, the logo moved under `docs/assets/`, and code
-  comments describe behaviour instead of the review round that produced it.
+- **Workstation- and account-specific values became placeholders.** Personal
+  workstation paths and the AWS account id became placeholders, the Terraform
+  state bucket is supplied at `terraform init` time from a git-ignored
+  `backend.hcl`, and the logo moved under `docs/assets/`.
 - **Ordinary tasks have optional limits** — omitted dollar, time, token,
   tool-call and step limits remain unset across customer entrypoints. Existing
   numeric settings stay intact; Settings can reversibly disable saved task
@@ -161,17 +164,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/tools`, instead of one multi-megabyte page.
 
 ### Removed
-- **Company administration and business material.** The company's fundraising,
-  go-to-market, patent, strategy, pricing and competitor material; its own
-  ISMS/AIMS records (policies, procedures, registers, statements of
-  applicability, management review and internal audit); dated internal audits,
-  readiness reviews, launch checklists and the open-items tracker; community
-  marketing programme plans and unstaffed governance charters; the long-range
-  roadmap, press kit, comparison and editions pages, contract templates and the
-  user-story backlog; the company marketing website and its deploy workflow;
-  the licence-issuing vendor console; and dated machine-specific evidence files
-  moved to a private company repository. A claims-docs test keeps the business
-  material from returning.
+- **Internal project-administration documents.** Company records, dated
+  internal audits and readiness reviews, the long-range roadmap, marketing
+  pages and the website, contract templates, the licence-issuing vendor console
+  and dated machine-specific evidence files were removed; they are not part of
+  the software. A test keeps such material out of the tree.
 
 ### Fixed
 - **Client and consent state stays attached to the current action** — stale
@@ -701,7 +698,7 @@ The launch-hardening pass that landed just after the 0.1.3 tag was cut.
   in the spec.
 
 ### Changed
-- The MCP server is published to PyPI as `maverick-mcp-server` (the
+- The MCP server's PyPI distribution name is `maverick-mcp-server` (the
   `maverick-mcp` name is taken by an unrelated project). The import
   package (`maverick_mcp`) and the `maverick-mcp` command are unchanged.
 - PyPI publishing runs one job per package (`fail-fast: false`), so a
@@ -735,10 +732,9 @@ The launch-hardening pass that landed just after the 0.1.3 tag was cut.
 
 ## [0.1.0-alpha]
 
-First public release. Lightwork combines [Lightwork Agent](https://github.com/cdayAI/research/tree/main/maverick) (recursive multi-agent swarm)
-and [Agent Shield](https://github.com/cdayAI/agent-shield) (safety detection)
-into a single safest-by-default agent that anyone can install in one
-command.
+First public release. It combined the recursive multi-agent kernel
+(`maverick-core`) and the Agent Shield safety integration (`maverick-shield`)
+into one installable project.
 
 ### Added
 

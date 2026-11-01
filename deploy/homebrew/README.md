@@ -34,13 +34,18 @@ to the tap repo on release:
    formula to the tap repo (or point the action at the tap repo once it
    exists).
 
+The workflow runs only when the repository variable
+`MAVERICK_PUBLIC_PYPI_ENABLED` is `true`, the same switch that enables PyPI
+publishing (see [RELEASING.md](../../RELEASING.md#pypi-publishing)). While it is
+unset, the bump is skipped and the formula keeps its placeholder checksum.
+
 The committed `sha256` is a zeroed placeholder until the first
 `homebrew-bump` run fills it in — the formula is intentionally not
 installable against a hand-typed checksum.
 
 ## Notes
 
-- This is a **personal tap**, not homebrew-core, so the formula keeps the
+- This is a third-party tap, not homebrew-core, so the formula keeps the
   dependency list in an embedded, hash-locked `requirements.txt` section
   rather than vendoring every transitive `resource` block by hand. The
   formula installs the Homebrew-downloaded, checksum-verified sdist with

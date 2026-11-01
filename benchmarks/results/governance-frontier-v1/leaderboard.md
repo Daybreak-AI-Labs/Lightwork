@@ -6,7 +6,7 @@
 
 ## Admission policy
 
-- Suite contract SHA-256: `04308272e621d5482eee2eaf5c6d2e00da4d750b3e533333a1fb06db9345bdec`
+- Suite contract SHA-256: `a24e24a608eb26c94b33eff7687b7b8cd341ce3ceafb88eecad3a133f7964425`
 - Every entry names explicit, digest-bound contribution-consent and
   inclusion decisions; those decisions are never inferred from delivery.
 - Anonymity and differential privacy must be explicitly

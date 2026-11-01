@@ -1,13 +1,12 @@
 # Lightwork
 
-> AI workers, company knowledge and repeatable workflows — under your control.
-
-Lightwork brings AI workers, company knowledge, repeatable workflows and
-governed learning together, with operating controls for your team —
-deployed in your own environment. It supports
-configured model providers including Claude, GPT, Gemini, DeepSeek, Ollama, and OpenRouter, and
-ships a governed, auditable safety surface built for regulated teams.
-Lightwork is open source under the Apache License 2.0.
+Lightwork is a self-hosted runtime for multi-agent AI work. You give it a goal,
+and an orchestrator agent plans the work, hands parts of it to specialist
+sub-agents running on the models you choose, checks their results and returns
+an answer. Inputs, tool calls and answers are screened by a safety layer,
+commands run in a configurable sandbox, per-run spending and time limits are
+enforced, activity is recorded in a signed audit log, and state persists
+between runs in a world-model database. Lightwork is open source under the Apache License 2.0.
 
 ## What you can do with it
 
@@ -23,28 +22,28 @@ Lightwork is open source under the Apache License 2.0.
 - **Messaging channels**: connect supported services such as Telegram,
   Discord, Slack, Signal, and email in the Channels page, then send a test
   message to confirm delivery.
-- **Primary-source data grounding**: analyst packs are auto-granted 37
-  read-only public-data connectors (SEC EDGAR, FRED, Treasury, World Bank,
+- **Primary-source data grounding**: analyst packs are granted their suite's
+  read-only public-data connectors (up to 16 per suite, 37 in total: SEC
+  EDGAR, FRED, Treasury, World Bank,
   FDIC, Census, BLS, EIA, openFDA, NPPES, ClinicalTrials, USAspending,
   SAM.gov, CourtListener, Federal Register, GLEIF, OpenCorporates,
   NWS/NOAA, EPA, Climatiq, …) so they cite authoritative sources instead of
   model recall. On by default; kill-switch via `[workforce] data_grounding
-  = false`. Alongside 2,877 write-capable enterprise REST/GraphQL connectors
-  and dedicated modules (Salesforce, HubSpot, Stripe, ServiceNow,
-  Snowflake, …).
-- **Proven governance**: a roster-wide invariant test suite checks six
+  = false`. These read-only connectors are separate from the 2,877
+  write-capable REST and GraphQL connectors and the dedicated modules for
+  systems such as Salesforce, HubSpot, Stripe, ServiceNow and Snowflake.
+- **Governance invariant tests**: a roster-wide invariant test suite checks six
   governance invariants (tool-reachability, autonomy dial, capability
   attenuation, compartment isolation, unstrippable hard refusals, budget
   caps) across all 2,031 packs with a non-vacuous fault-injection control,
   plus hostile-argument fuzzing of every connector and tool.
 - **Build an agent from a demonstration**: record a reviewed example of the job,
-  then synthesize the agent that does it — `maverick learn-demo <file>`
+  then synthesize the agent that does it — `lightwork learn-demo <file>`
   ingests that transcript, induces a profile through the same
   intake clamp + review gate, and provisions the skills/tools it needs.
-  The factory also improves itself: `maverick factory-learn` mines
-  provisioning/approval gaps back into future pack generation
-  (on by default, stops when the self-improvement switch is off, and never
-  widens an envelope).
+  `lightwork factory-learn` feeds provisioning and approval gaps back into
+  future pack generation (on by default, stops when the self-improvement
+  switch is off, and never widens an envelope).
 
 ## Quick start
 
@@ -56,11 +55,11 @@ which installs the eight Lightwork packages together. Then run
 and provider setup. [Install from source](source-install.md) has the exact
 commands for macOS, Linux and Windows.
 
-No prebuilt binary, PyPI package or container image is published yet. Tagged
-releases are listed on the
+No prebuilt binary, PyPI package or container image is currently published,
+so install from `main`. Published releases will be listed on the
 [releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
 
-When setup finds no running Docker or Podman, it switches off file changes and
+When setup finds no running Docker daemon, it switches off file changes and
 program execution, because the fallback `local` backend runs commands directly
 on the host without isolation. Lightwork can still answer questions and draft
 documents. [Getting started](getting-started.md) shows how to turn file work on
@@ -69,7 +68,7 @@ once a container service is running, and walks through a first task.
 ## Watch it work
 
 Open the dashboard to review running work, its activity log and cost, or run
-`maverick monitor` in a terminal to follow the orchestrator's plan as agents
+`lightwork monitor` in a terminal to follow the orchestrator's plan as agents
 work through it.
 
 ## Pricing and cost controls
@@ -100,7 +99,7 @@ not by the Apache License.
 
 - [Getting started](getting-started.md) — install + first goal
 - [Install from source](source-install.md) — commands for macOS, Linux and Windows
-- [Architecture](enterprise/architecture.md) — the governed agent runtime (OS-style primitives)
+- [Governed agent control plane](enterprise/architecture.md) — oversight, compliance profiles, fleets and tenancy
 - [Configuration](configuration.md) — providers, channels, budgets
 - [Deployment](deployment.md) — desktop / docker / VPS / phone modes
 - [Safety](safety.md) — shield, audit log, kill switches, consent

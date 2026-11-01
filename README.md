@@ -19,10 +19,10 @@ between runs in a world-model database.
 ## Status
 
 Lightwork is alpha software. The eight Python packages on `main` are version
-0.1.7 in [`release-cohort.toml`](release-cohort.toml) and have not been
-released: no GitHub release, PyPI package or container image has been
-published, so installing from source is the supported path. Published releases
-will be listed on the
+0.1.7 in [`release-cohort.toml`](release-cohort.toml), which is unreleased. No
+GitHub release, PyPI package or container image is currently published, so
+installing from source is the supported path. Published releases will be
+listed on the
 [releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
 Configuration and APIs can change between versions; [CHANGELOG.md](CHANGELOG.md)
 records notable changes. Supported Python versions are 3.10, 3.11 and 3.12, the
@@ -49,8 +49,8 @@ one pip transaction, against the pinned constraints in `requirements/ci.txt`
 the installation and configuration and suggests a fix for anything it flags.
 The dashboard at <http://127.0.0.1:8765> guides first-owner sign-in and
 provider setup; `lightwork init` runs the setup wizard in the terminal
-instead. Windows PowerShell commands, installing a tagged version and the
-post-install checks are in [Install from source](docs/source-install.md).
+instead. Windows PowerShell commands and the post-install checks are in
+[Install from source](docs/source-install.md).
 
 Once a provider is connected, run a first task from the dashboard's chat or
 the terminal. This one needs no file or program access:
@@ -208,13 +208,20 @@ with the SDK in [`sdks/plugin-ts`](sdks/plugin-ts).
 packages/        The eight Python distributions (see the table above)
 apps/            Setup wizard, desktop shells, editor extensions and companion apps
 sdks/            TypeScript plugin SDK, Python REST client, native consent SDK
+extensions/      Browser extension, embeddable widget and WebGPU vision helper
 rust/            Native scanning core and a standalone audit-log verifier
 go/              Out-of-process model proxy that keeps provider keys out of the agent
 deploy/          Docker, Helm, VPS and cloud recipes; GitHub Actions and GitLab CI integrations
 docs/            User, operator and contributor documentation
 benchmarks/      Long-horizon, governance and evaluation benchmarks with their harness
+proof/           Scripts that reproduce the governance and learning results
+demo/            Example applications built on Lightwork
 examples/        Client and external-agent examples
+web/             Static project landing page
 scripts/         Install, release and CI helper scripts
+requirements/    Pinned constraint files used by the install and CI
+build/           PyInstaller spec for the single-file binaries
+test_support/    Shared test helpers
 ```
 
 ## Documentation
@@ -256,17 +263,17 @@ python -m ruff check .
 Pull request titles follow Conventional Commits, and your first pull request
 signs the [Contributor License Agreement](CLA.md) with one line in its
 description. Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
-[GOVERNANCE.md](GOVERNANCE.md) explains how decisions are made, and
+[GOVERNANCE.md](GOVERNANCE.md) explains how decisions are made,
 [MAINTAINERS.md](MAINTAINERS.md) lists the maintainers, and
 [RELEASING.md](RELEASING.md) describes how releases are made. For questions and
 bug reports, see [SUPPORT.md](SUPPORT.md). Report security vulnerabilities
 privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
-## Licence
+## License
 
 Lightwork is licensed under the [Apache License 2.0](LICENSE); see also
 [NOTICE](NOTICE) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). The
-Lightwork name and logo are trademarks and are not covered by the licence; see
+Lightwork name and logo are trademarks and are not covered by the license; see
 [TRADEMARK.md](TRADEMARK.md).
 
 Lightwork is developed by Daybreak Labs.

@@ -5,7 +5,7 @@ This is the maintainer procedure for publishing a release. It describes what
 `release-cohort.toml`, `scripts/release_version.py` and
 `scripts/github_release_state.py`.
 
-No release has been published yet, and PyPI publishing is switched off (see
+No release is currently published, and PyPI publishing is switched off (see
 [PyPI publishing](#pypi-publishing)).
 
 ## Versions and tags

@@ -1,9 +1,8 @@
 """Verifier role: independent second-opinion pass on a proposer's answer.
 
-Karpathy SOTA-review prescription: the recursive multi-agent ceremony
-only earns its complexity if there's a real verify step. The current
-``revisor`` role exists in prompt strings only -- no code actually runs
-a verifier pass before declaring FINAL.
+The recursive multi-agent ceremony only earns its complexity if there's a
+real verify step. The current ``revisor`` role exists in prompt strings
+only -- no code actually runs a verifier pass before declaring FINAL.
 
 This module gives the orchestrator a single function to call:
 

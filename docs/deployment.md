@@ -7,7 +7,8 @@ Four deployment targets, all driven by the same `maverick init` wizard.
 Install Lightwork from a clone of the repository with the
 [source installation guide](source-install.md), run `lightwork dashboard`, and
 complete setup in the dashboard. No prebuilt binary, PyPI package or container
-image is published yet; tagged releases are listed on the
+image is currently published, so install from `main`; published releases will
+be listed on the
 [releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases). The
 eight-package cohort is not on PyPI, so do not install Lightwork distribution
 names from a public package index.
@@ -50,9 +51,9 @@ the full artifact list and verification steps.
 
 No container image is published yet. Build one from a clone of the
 repository with `docker build -f deploy/docker/Dockerfile -t lightwork:local .`
-and use that tag in place of `ghcr.io/daybreak-ai-labs/lightwork:latest` in
-this example. Once release images are published, use a pinned version rather
-than `latest`.
+and use that tag in place of `ghcr.io/daybreak-ai-labs/lightwork:<version>`
+in this example. Once release images are published, use the exact version tag
+of a published release.
 
 ```bash
 docker run -it --rm \
@@ -60,7 +61,7 @@ docker run -it --rm \
   -v ~/.maverick/config.toml:/home/maverick/.maverick/config.toml:ro \
   -e MAVERICK_WORKDIR=/workspace \
   -e ANTHROPIC_API_KEY=... \
-  ghcr.io/daybreak-ai-labs/lightwork:latest \
+  ghcr.io/daybreak-ai-labs/lightwork:<version> \
   start "..."
 ```
 

@@ -132,6 +132,9 @@ worker per CPU core and grouping tests by file:
 python -m pytest -q -n auto --dist loadfile
 ```
 
+CI also runs selected suites with `MAVERICK_TEST_SECURE_DEFAULT=1` (the
+production security posture); run affected tests that way before pushing.
+
 A collection error in any file stops the whole run, so fix import errors
 first. When a collection error shows a `pyo3_runtime.PanicException`, the real
 cause (often a missing module) is on the captured stderr line above it.
@@ -226,7 +229,7 @@ refused, history stays linear, and nobody can bypass the rules.
 | `test (3.11, 1/2/3/4)`, `test (3.12, 1/2/3/4)` | The same slices on 3.11 and 3.12. On a pull request these report success without running; they run on the merge queue's commit and on `main` |
 | `posture (1/2/3/4)` | The full suite again on 3.12 under the production security defaults, gated like the 3.11 and 3.12 legs |
 | `harness-overhead`, `governance-frontier-offline` | The tracked benchmark manifests verify against the current sources (regenerate them when a source they cover changes) |
-| `audit` | OSV Scanner, pip-audit, bandit, the licence policy and the SBOM |
+| `audit` | OSV Scanner, pip-audit, bandit, the license policy and the SBOM |
 | `release-cohort`, `redteam`, `eval-smoke`, `postgres`, `docker` | Release packaging, the shield red-team corpus, the evaluation harness, the Postgres backend and the container image |
 | `Windows process containment (Python 3.10/3.11/3.12)` | Process-tree containment on Windows: 3.10 on every pull request, 3.11 and 3.12 on the merge queue and `main` |
 
@@ -287,6 +290,13 @@ Further rules:
 - **Renames update the docs.** When you rename a module, also update
   `docs/FEATURES.md` and any tool wrapper in `maverick/tools/` that refers to
   it.
+- **User-facing features need a path in the dashboard.** An API or CLI alone
+  does not complete a feature. Give it a journey in the dashboard in plain
+  language, use the shared Liquid Glass components (the dashboard design
+  system in `static/lightwork.css`), and make it reachable through the
+  dashboard Copilot (the in-product assistant panel) with the same permission
+  checks as the direct UI. See the
+  [customer experience contract](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/customer-experience-contract.md).
 
 ## Extending Lightwork
 
@@ -365,9 +375,9 @@ as described in the
 ## Code of Conduct
 
 This project follows the [Code of Conduct](CODE_OF_CONDUCT.md). Report
-unacceptable behaviour to chris@daybreakailabs.com.
+unacceptable behavior to chris@daybreakailabs.com.
 
-## Licence
+## License
 
 By contributing, you agree that your contributions are licensed under the
 [Apache License, Version 2.0](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)

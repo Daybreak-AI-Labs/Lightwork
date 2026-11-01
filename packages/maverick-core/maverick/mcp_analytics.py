@@ -1,10 +1,9 @@
-"""Opt-in MCP-client language analytics — the language-bindings decision gate.
+"""Opt-in MCP-client language analytics.
 
-The roadmap's language-bindings decision (fund a native client only if >15% of
-active installs are driven from non-Python MCP clients) needs a measurement. This
-records the *language/SDK* of MCP clients that connect, derived from their
+This records the *language/SDK* of MCP clients that connect, derived from their
 ``User-Agent``, into a local tally — so an operator can answer "who actually
-drives this over MCP" without shipping any PII.
+drives this over MCP" without shipping any PII. The tally stays on the
+installation; nothing is sent to the project.
 
 **Consent-gated and off by default**: with nothing configured
 :func:`record_client` is a no-op and nothing is written. Enable with

@@ -27,7 +27,7 @@ traceback, so a permanently broken audit path stops looking like a healthy one.
 
 Catching ``AuditWriteRefused`` alone is NOT sufficient and this gate says so:
 its sibling ``OffHostSigningRequiredError`` fires under the strictest posture
-the product sells, and the one hardened call site in the tree was hardened
+the product supports, and the one hardened call site in the tree was hardened
 against the wrong half of the pair.
 
 CLI: ``python -m maverick.audit_contract --ci`` exits non-zero on any new

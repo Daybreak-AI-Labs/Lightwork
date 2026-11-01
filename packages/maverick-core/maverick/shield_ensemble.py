@@ -1,7 +1,7 @@
-"""Shield v3 — detector ensemble with explainable reason codes (2028 H2 safety).
+"""Shield v3 — detector ensemble with explainable reason codes.
 
-The roadmap asks for a "small-model ensemble: injection + jailbreak + exfil +
-policy, explainable reason codes". This ships the **ensemble framework** and the
+The target is a small-model ensemble (injection + jailbreak + exfil + policy)
+with explainable reason codes. This ships the **ensemble framework** and the
 explainability now, with the existing deterministic detectors as members; a
 member is a small pluggable unit, so a trained small-model classifier can be
 dropped in later behind the same interface without touching callers.

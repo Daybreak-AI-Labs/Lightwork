@@ -8290,8 +8290,8 @@ def pick_license() -> dict[str, Any]:
     fail-open default, so nothing is emitted and nothing gates)."""
     console.print()
     console.print(
-        "[bold]Licensing[/bold] (optional) — limit Gold/Platinum features and "
-        "add-on suites like fleet to what a signed license grants."
+        "[bold]Licensing[/bold] (optional) — restrict gated tier features and "
+        "add-on suites such as fleet to what a signed license grants."
     )
     console.print(
         "[dim]License checks are off by default, and every feature works. Turn "

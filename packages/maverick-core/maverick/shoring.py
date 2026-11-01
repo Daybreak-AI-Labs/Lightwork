@@ -21,9 +21,9 @@ atomic private-file helpers, mirroring :mod:`maverick.fleet_memory`. SLA and
 status computation is PURE over an injected ``world`` -- no LLM, no new run
 state, read-only -- so it is trivially testable and never invents a number.
 
-On by default (``[shoring] enable`` / ``MAVERICK_SHORING``): shoring is the
-product, not a paid add-on, so there is no entitlement gate -- the knob only
-lets an operator turn the surface off.
+On by default (``[shoring] enable`` / ``MAVERICK_SHORING``): shoring is core
+functionality, not a licence-gated feature, so there is no entitlement gate --
+the knob only lets an operator turn the surface off.
 """
 from __future__ import annotations
 

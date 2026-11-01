@@ -108,8 +108,9 @@ CLI), configured in `~/.maverick/config.toml`, never hard-coded — and the
 Install from a clone of the repository with the
 [source installation guide](source-install.md), then run `lightwork dashboard`
 and finish owner and provider setup before starting work. No prebuilt binary,
-PyPI package or container image is published yet; tagged releases are listed on
-the [releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+PyPI package or container image is currently published, so install from
+`main`; published releases will be listed on the
+[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
 [Getting started](getting-started.md) walks through the first run.
 
 The dashboard is the main entry point for starting and supervising work. The
@@ -310,8 +311,8 @@ screened by the same shield/budget/sandbox machinery:
 - **Channels** — 17 wired adapters (`packages/maverick-channels/`):
   Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon,
   Voice, WhatsApp (Twilio + Cloud API), SMS, iMessage, IRC, Threads, RCS,
-  and a glasses/wearable bridge. New ones subclass `Channel` in `base.py`
-  — four steps, documented in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+  and a glasses/wearable bridge. New ones subclass `Channel` in `base.py`;
+  the steps are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - **Connectors & primary-source grounding** — 2,877 write-capable enterprise
   REST/GraphQL connectors plus 37 read-only primary-source / public-data
   connectors (SEC EDGAR, FRED, Treasury, World Bank, FDIC, Census, BLS, EIA,

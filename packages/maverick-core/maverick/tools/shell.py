@@ -132,7 +132,7 @@ _NETWORK_LEAK_PATTERNS = [
 
 
 # Block `pip install -e .` in opaque mode when running inside
-# a worktree (the Karpathy bet). Editable installs from inside a
+# a worktree. Editable installs from inside a
 # git-worktree create .pth/.egg-link entries that may point at the
 # ORIGINAL tree or fail to point anywhere useful; tests then import
 # unpatched code from the original. We surface the right pattern

@@ -374,7 +374,7 @@ def main() -> int:
             failed += 0 if r.passed else 1
             print(f"  [{tag}]  {r.label:32}  {r.detail}")
     print("=" * 78)
-    print(f"  {6 - failed} guarantees PROVEN, {failed} failed"
+    print(f"  {6 - failed} checks passed, {failed} failed"
           "   (LLM proposer stubbed; evaluator evidence is never stubbed)")
     print("=" * 78)
     return 1 if failed else 0

@@ -1,7 +1,7 @@
 """SWE-bench Verified harness for Lightwork + baselines.
 
-Karpathy SOTA-review item: real SWE-bench numbers with three baselines.
-Without these the "swarm" column is undefendable.
+Produces real SWE-bench numbers with three baselines. Without these the
+"swarm" column is undefendable.
 
 This script DOES NOT execute the test suites by itself -- SWE-bench's
 evaluation harness needs Docker + the dataset. It DOES:

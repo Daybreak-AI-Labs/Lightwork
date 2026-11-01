@@ -5,8 +5,6 @@ whole report set's embargo timelines, check one report's window, and render
 a public advisory. Pure date arithmetic — deterministic, no network, no DB;
 the caller persists records however it likes and passes them back in.
 
-Two converged implementations of the same roadmap item, merged:
-
 ops:
   - status(records[, today, policy, embargo_days])  — per-report status
     (EMBARGOED / DUE_SOON / OVERDUE / PATCHED / DISCLOSED), deadline, and

@@ -1548,7 +1548,7 @@ def base_registry(
     reg.register(speak(sandbox))
 
     # Capability tools that live in the parent package (maverick/), not the
-    # tools subpackage. ROADMAP 2027 H2 / 2028 H1.
+    # tools subpackage.
     from ..browser_auth_vault import browser_auth_vault
     from ..browser_device import browser_device
     from ..continuous_benchmark import bench_track

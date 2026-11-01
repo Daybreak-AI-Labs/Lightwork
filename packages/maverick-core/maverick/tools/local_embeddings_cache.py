@@ -1,7 +1,7 @@
 """Local-first embeddings cache.
 
-A content-addressed cache for text embeddings. The roadmap names LMDB as the
-backing store; this helper is the *pure* logic around it (key derivation + cache
+A content-addressed cache for text embeddings. LMDB is the intended backing
+store; this helper is the *pure* logic around it (key derivation + cache
 statistics) and deliberately does NOT import lmdb — so the kernel and tests stay
 dependency-free and offline. A real backend can map ``key`` -> serialized vector
 later without changing this contract.

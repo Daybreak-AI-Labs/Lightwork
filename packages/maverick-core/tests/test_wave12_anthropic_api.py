@@ -1,10 +1,10 @@
 """Anthropic API fixes.
 
-  - F13a: cache TTL must be consistent across system/tools/messages
+  - cache TTL must be consistent across system/tools/messages
     breakpoints (was hardcoded "1h" for messages).
-  - F13b: interleaved-thinking beta header set when thinking enabled.
-  - F13c: nullsafe usage.input_tokens / output_tokens.
-  - F13d: tools[] sorted before sending for deterministic cache key.
+  - interleaved-thinking beta header set when thinking enabled.
+  - nullsafe usage.input_tokens / output_tokens.
+  - tools[] sorted before sending for deterministic cache key.
 """
 from __future__ import annotations
 

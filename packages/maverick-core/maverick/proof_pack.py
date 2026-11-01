@@ -70,7 +70,7 @@ def collect_governance() -> Evidence:
     failed = [r for r in results if not r.passed and not r.skipped]
     skipped = [r for r in results if r.skipped]
     proven = [r for r in results if r.passed and not r.skipped]
-    parts = [f"{len(proven)} guarantees proven"]
+    parts = [f"{len(proven)} checks passed"]
     if skipped:
         parts.append(f"{len(skipped)} verified in CI (Ed25519)")
     if failed:

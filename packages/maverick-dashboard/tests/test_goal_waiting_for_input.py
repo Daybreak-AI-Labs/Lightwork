@@ -1,4 +1,4 @@
-"""UX-068: a goal parked on a question is 'blocked' but not finished.
+"""A goal parked on a question is 'blocked' but not finished.
 
 The REST API used to report every blocked goal the same way -- ``terminal: true``
 with nothing saying whether the task is waiting for a person's answer or has

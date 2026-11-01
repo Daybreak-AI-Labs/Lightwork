@@ -863,13 +863,13 @@ Settings and the installation wizard.
   assessment: fire rate, rating impact (re-rolled on the scorer's own
   rollup), and a verdict (load-bearing / informative / inert / unproven).
   The evidence-based questionnaire prune list.
-- **Signed license keys** (`maverick.licensing` + each standalone agent's
-  `license_kit.py`) — Ed25519 tokens (`LW1.payload.sig`) minted with
-  `python -m maverick.licensing make`, verified agent-side from
-  `LIGHTWORK_LICENSE` + `LIGHTWORK_LICENSE_PUBKEY`. Without a token a
-  standalone agent runs in evaluation mode (fully functional, open-case cap,
-  visible banner); changing capabilities or renewing is a key swap, not a
-  reinstall.
+- **Signed license keys** (`maverick.licensing` + `license_kit.py` in the
+  DSAR Concierge and PIA Concierge demos) — Ed25519 tokens
+  (`LW1.payload.sig`) minted with `python -m maverick.licensing make`,
+  verified agent-side from `LIGHTWORK_LICENSE` + `LIGHTWORK_LICENSE_PUBKEY`.
+  Without a token, those two demos run in evaluation mode (fully functional,
+  open-case cap, visible banner); changing capabilities or renewing is a key
+  swap, not a reinstall.
 - **DSAR Concierge** (`demo/dsar-concierge/`) — a second
   standalone agent on the capability seam: subject-facing intake + a
   deterministic message detector, the emailed identity-verification loop,
@@ -1880,8 +1880,9 @@ Settings and the installation wizard.
   writes, no unsourced product claims).
 - **Institutional Memory attestation — is it really compounding, and really
   yours?** (`memory_plane.py`, `maverick memory-plane compounding|export|verify`)
-  — the `attest` half of Bet 2's ingest/recall/attest API, riding the **same
-  signed bundle spine as the Bet 1 attestation** (one implementation of the
+  — the `attest` half of the fleet-memory ingest/recall/attest API, using the
+  **same signed bundle format as the attestation bundle** (`attestation.py`;
+  one implementation of the
   crypto, the out-of-band trust anchor, and the
   HOLDS/FAILS/INDETERMINATE/NOT_APPLICABLE vocabulary). Three claims:
   **cross_vendor** — how many vendors actually deposited through the governed
@@ -2694,7 +2695,7 @@ Settings and the installation wizard.
 
 ## Tools
 
-286 built-in tool modules. Highlights by group (all under `tools/`):
+Built-in tool modules. Highlights by group (all under `tools/`):
 
 - **Code & files** — `fs`, `str_edit`, `ast_edit` (tree-sitter), `apply_patch`
   (atomic multi-file), `repo_map`, `dep_graph`, `test_impact` (coverage-guided),
@@ -4905,7 +4906,7 @@ deadline enforcement, secondary-channel delivery) as a framework-agnostic,
 fully-injected core that runs as a Worker or a local service.
 
 `benchmarks/`: GAIA, τ²-bench-style stateful harness, terminal-bench-style
-harness, SWE-bench harness, moat suite, and an **adversarial-cost suite**
+harness, SWE-bench harness, warm-vs-cold memory suite, and an **adversarial-cost suite**
 (`eval_adversarial_cost.py`): scripted money-wasting scenarios — tool loops,
 token bombs, runaway iterations — each asserted CLAMPED by the cache /
 output-cap / Budget ceilings; `main()` exits 1 on any unclamped scenario. All

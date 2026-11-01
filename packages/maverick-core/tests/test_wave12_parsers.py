@@ -1,11 +1,11 @@
 """Test-runner parser fixes.
 
 Covers:
-  - F7a: pytest re.search → last-match
-  - F7b: jest doesn't strip ANSI
-  - F7c: vitest summary differs from jest (pipe-separated)
-  - F7d: gotest subtests are indented
-  - F7e: gotest build failures not detected
+  - pytest re.search → last-match
+  - jest doesn't strip ANSI
+  - vitest summary differs from jest (pipe-separated)
+  - gotest subtests are indented
+  - gotest build failures not detected
 """
 from __future__ import annotations
 

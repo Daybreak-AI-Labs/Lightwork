@@ -1,8 +1,7 @@
 """Opt-in trajectory donation — the Tesla data-engine analog.
 
-Karpathy SOTA-review item: schema v6 has the right shape for episode
-collection, but no selection function. The flywheel only works if the
-upload is:
+Schema v6 has the right shape for episode collection, but no selection
+function. The flywheel only works if the upload is:
 
 1. **Opt-in, default OFF.** ``[telemetry] donate_trajectories = true``
    in ``~/.maverick/config.toml`` (also surfaced in the installer

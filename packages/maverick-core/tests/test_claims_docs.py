@@ -27,7 +27,7 @@ def test_security_policy_does_not_claim_an_unreleased_supported_line():
     text = _read("SECURITY.md")
     assert "v0.2.x" not in text
     section = text.split("## Supported versions", 1)[1].split("\n## ", 1)[0]
-    assert "No release has been published" in section
+    assert "No release is currently published" in section
     assert "`main`" in section
     cohort = re.search(r'^version = "([^"]+)"', _read("release-cohort.toml"), re.MULTILINE)
     assert cohort is not None
@@ -52,7 +52,7 @@ def test_public_material_names_only_a_registered_proof_pack_command():
     module = _read("packages/maverick-core/maverick/proof_pack.py")
     assert 'if __name__ == "__main__"' in module
     paths = ["README.md"]
-    for root in ("pitch", "docs"):
+    for root in ("docs",):
         for path in sorted((REPO_ROOT / root).rglob("*")):
             if path.suffix in {".md", ".html"}:
                 paths.append(path.relative_to(REPO_ROOT).as_posix())

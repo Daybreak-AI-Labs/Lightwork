@@ -31,7 +31,7 @@ persona and applied to **every** agent below:
 
 ## Contents
 
-1. [How a finance agent maps onto Lightwork](#1-how-a-finance-agent-maps-onto-maverick)
+1. [How a finance agent maps onto Lightwork](#1-how-a-finance-agent-maps-onto-lightwork)
 2. [The finance control model (read this first)](#2-the-finance-control-model-read-this-first)
 3. [Per-client customization — the dials](#3-per-client-customization--the-dials)
 4. [The roster — seven towers of the CFO's office](#4-the-roster--seven-towers-of-the-cfos-office)

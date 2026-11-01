@@ -5,7 +5,7 @@
 # virtual environment first (`. .venv/bin/activate` after `make dev`).
 
 PYTHON ?= python3
-PYTEST_ARGS ?=
+PYTEST_ARGS ?= -n auto --dist loadfile
 
 .DEFAULT_GOAL := help
 
@@ -21,7 +21,7 @@ install: ## Install Lightwork from source into the active virtual environment
 dev: ## Create .venv with editable packages and the development tools
 	bash .devcontainer/post-create.sh
 
-test: ## Run the test suite (pass extra pytest options in PYTEST_ARGS)
+test: ## Run the test suite the way CI does (override PYTEST_ARGS for a serial or narrower run)
 	$(PYTHON) -m pytest -q $(PYTEST_ARGS)
 
 lint: ## Run the pre-push lint and contract gates (scripts/pre-push-lint.sh)

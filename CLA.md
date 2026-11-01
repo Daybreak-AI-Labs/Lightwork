@@ -1,7 +1,7 @@
 # Individual Contributor License Agreement
 
 Thank you for your interest in contributing to Lightwork. This agreement makes
-clear the licence you grant when you contribute. It protects you as a
+clear the license you grant when you contribute. It protects you as a
 contributor as well as the project and its users. It does not change your
 rights to use your own contributions for any other purpose: you keep the
 copyright in everything you contribute.
@@ -11,13 +11,13 @@ Individual Contributor License Agreement, version 2.2. Lightwork is distributed
 under the
 [Apache License, Version 2.0](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE).
 
-If you are contributing on behalf of a company or other organisation, ask for
+If you are contributing on behalf of a company or other organization, ask for
 the corporate CLA as described in [How to sign](#how-to-sign).
 
 ## Terms
 
 You accept and agree to the following terms and conditions for Your present and
-future Contributions submitted to the Steward. Except for the licences granted
+future Contributions submitted to the Steward. Except for the licenses granted
 in this agreement to the Steward and to recipients of software distributed by
 the Steward, You reserve all right, title and interest in and to Your
 Contributions.
@@ -26,7 +26,7 @@ Contributions.
 
    "Steward" means Christopher Day, as steward of the Lightwork project.
 
-   "You" (or "Your") means the copyright owner, or the legal entity authorised
+   "You" (or "Your") means the copyright owner, or the legal entity authorized
    by the copyright owner, that is making this agreement with the Steward. For
    legal entities, the entity making a Contribution and all other entities that
    control, are controlled by, or are under common control with that entity are
@@ -44,44 +44,44 @@ Contributions.
    modifications or additions to an existing work, that You intentionally submit
    to the Steward for inclusion in, or documentation of, the Work. "Submit"
    means any form of electronic, verbal or written communication sent to the
-   Steward or its representatives, including but not limited to pull requests,
-   patches, issues, and discussions on the project's repositories and mailing
-   lists, that is made for the purpose of discussing and improving the Work, but
-   excluding communication that You conspicuously mark, or otherwise designate
-   in writing, as "Not a Contribution."
+   Steward or the Steward's representatives, including but not limited to pull
+   requests, patches, issues, and discussions on the project's repositories and
+   mailing lists, that is made for the purpose of discussing and improving the
+   Work, but excluding communication that You conspicuously mark, or otherwise
+   designate in writing, as "Not a Contribution."
 
-2. **Grant of copyright licence.** Subject to the terms of this agreement, You
+2. **Grant of copyright license.** Subject to the terms of this agreement, You
    grant to the Steward and to recipients of software distributed by the
    Steward a perpetual, worldwide, non-exclusive, no-charge, royalty-free,
-   irrevocable copyright licence to reproduce, prepare derivative works of,
+   irrevocable copyright license to reproduce, prepare derivative works of,
    publicly display, publicly perform, sublicense, and distribute Your
    Contributions and such derivative works.
 
-3. **Grant of patent licence.** Subject to the terms of this agreement, You
+3. **Grant of patent license.** Subject to the terms of this agreement, You
    grant to the Steward and to recipients of software distributed by the
    Steward a perpetual, worldwide, non-exclusive, no-charge, royalty-free,
-   irrevocable (except as stated in this section) patent licence to make, have
+   irrevocable (except as stated in this section) patent license to make, have
    made, use, offer to sell, sell, import, and otherwise transfer the Work,
-   where such licence applies only to those patent claims licensable by You that
+   where such license applies only to those patent claims licensable by You that
    are necessarily infringed by Your Contribution alone or by the combination of
    Your Contribution with the Work to which it was submitted. If any entity
    institutes patent litigation against You or any other entity (including a
    cross-claim or counterclaim in a lawsuit) alleging that Your Contribution, or
    the Work to which You contributed, constitutes direct or contributory patent
-   infringement, then any patent licences granted to that entity under this
+   infringement, then any patent licenses granted to that entity under this
    agreement for that Contribution or Work terminate as of the date such
    litigation is filed.
 
 4. **Distribution terms.** The Work is distributed under the Apache License,
-   Version 2.0, and Your Contributions will be distributed under that licence.
-   The licences You grant in sections 2 and 3 also allow the Steward to license
+   Version 2.0, and Your Contributions will be distributed under that license.
+   The licenses You grant in sections 2 and 3 also allow the Steward to license
    and distribute Your Contributions under terms other than the Apache License,
    Version 2.0, including terms that are not open source. This does not limit
    anyone's rights under the Apache License, Version 2.0 for any version of the
    Work already distributed under it.
 
 5. **Your authority.** You represent that You are legally entitled to grant
-   the above licences. If Your employer has rights to intellectual property that
+   the above licenses. If Your employer has rights to intellectual property that
    You create that includes Your Contributions, You represent that You have
    received permission to make Contributions on behalf of that employer, that
    Your employer has waived such rights for Your Contributions to the Steward, or
@@ -90,7 +90,7 @@ Contributions.
 6. **Original work.** You represent that each of Your Contributions is Your
    original creation (see section 8 for submissions on behalf of others). You
    represent that Your Contribution submissions include complete details of any
-   third-party licence or other restriction (including, but not limited to,
+   third-party license or other restriction (including, but not limited to,
    related patents and trademarks) of which You are personally aware and which
    are associated with any part of Your Contributions.
 
@@ -106,8 +106,8 @@ Contributions.
 8. **Work that is not Your own.** Should You wish to submit work that is not
    Your original creation, You may submit it to the Steward separately from any
    Contribution, identifying the complete details of its source and of any
-   licence or other restriction (including, but not limited to, related patents,
-   trademarks, and licence agreements) of which You are personally aware, and
+   license or other restriction (including, but not limited to, related patents,
+   trademarks, and license agreements) of which You are personally aware, and
    conspicuously marking the work as "Submitted on behalf of a third party:
    [named here]".
 
@@ -125,7 +125,7 @@ That line is your signature for that pull request and for every later
 contribution you submit to the project. A maintainer checks for it before
 merging your first pull request.
 
-**Companies and other organisations.** If you contribute on behalf of your
+**Companies and other organizations.** If you contribute on behalf of your
 employer, or your employer has rights in your contributions, your employer may
 need to sign the corporate CLA. Email chris@daybreakailabs.com to request it.
 

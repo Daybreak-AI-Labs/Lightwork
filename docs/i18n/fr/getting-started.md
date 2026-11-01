@@ -6,7 +6,7 @@
 
 ## Installation
 
-Lightwork s'installe depuis les sources ; il faut Python 3.10–3.12 et Git. Suivez le [guide d'installation depuis les sources](../../source-install.md), qui donne les commandes pour macOS, Linux et Windows. Aucun binaire précompilé, paquet PyPI ou image de conteneur n'est encore publié. Les versions étiquetées sont listées sur la [page des versions](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+Lightwork s'installe depuis les sources ; il faut Python 3.10–3.12 et Git. Suivez le [guide d'installation depuis les sources](../../source-install.md), qui donne les commandes pour macOS, Linux et Windows. Aucun binaire précompilé, paquet PyPI ou image de conteneur n'est encore publié. Aucune version n'est publiée pour l'instant ; installez depuis `main`.
 
 Lancez ensuite `lightwork dashboard` et ouvrez <http://127.0.0.1:8765> pour terminer la configuration du propriétaire et du fournisseur de modèles.
 
@@ -193,7 +193,7 @@ Une fois que vous avez quelques exécutions derrière vous, la surface
 d'apprentissage tient en quatre commandes : `maverick dream` (consolider
 l'expérience), `maverick hindsight` (l'apprentissage a-t-il aidé ou régressé ?),
 `maverick proof` (livrables, coûts évités, ROI) et `maverick domains-lint`
-(auditer le catalogue de spécialistes à 2,020 agents), auxquelles s'ajoutent
+(auditer le catalogue de spécialistes), auxquelles s'ajoutent
 `maverick domains-audit` (posture de gouvernance : ce que chaque agent peut
 atteindre, refuse et rejette) et `maverick domains-eval --check` (cas de
 référence comportementaux).

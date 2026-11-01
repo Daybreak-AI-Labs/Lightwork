@@ -1,4 +1,4 @@
-# Rigorous compounding-moat — results (2026-06-16)
+# Warm-vs-cold memory benchmark — results (2026-06-16)
 
 > ## ⚠️ CORRECTION (2026-06-16, later): these numbers are INVALID — do not cite them.
 > A follow-up **correctness-graded** run found that the agent never had the

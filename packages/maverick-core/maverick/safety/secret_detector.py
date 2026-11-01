@@ -72,9 +72,9 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
     # Generic private key blocks. One pattern, one span: match the WHOLE block
     # (BEGIN..END, DOTALL, non-greedy) when an END marker is present so the
     # base64 key MATERIAL is redacted -- the prior marker-only pattern left the
-    # actual private key body and END line in cleartext (round-7 adversarial
-    # finding). Kept as a single pattern (not two) because scan() dedupes only
-    # EXACT spans (it stays a byte-for-byte mirror of the native port); a
+    # actual private key body and END line in cleartext. Kept as a single
+    # pattern (not two) because scan() dedupes only EXACT spans (it stays a
+    # byte-for-byte mirror of the native port); a
     # separate marker pattern would overlap, and only redact() coalesces
     # overlaps, so an extra pattern would still bloat scan()'s detection list.
     ("private_key_pem",    re.compile(
@@ -85,8 +85,7 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
         # (ReDoS guard); the bound (64KB) covers real key formats -- an RSA-8192
         # PEM, an OPENSSH key, or a concatenated key bundle whose body+whitespace
         # exceeds 8192 chars would otherwise leave the trailing key material +
-        # END line un-redacted (adversarial finding: the leak got WORSE on the
-        # largest keys).
+        # END line un-redacted (the leak got WORSE on the largest keys).
         r".{0,65536}?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----"
         r"|"
         # Fallback: a header WITH a body but NO END marker (a key truncated by

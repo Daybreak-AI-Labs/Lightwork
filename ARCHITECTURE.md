@@ -44,11 +44,11 @@ The agent kernel.
 | `blackboard.py` | Append-only shared workspace for one run. Mirrors entries into `world.goal_events` when `attach_world()` is called so the dashboard can stream live progress. |
 | `world_model.py` | SQLite + FTS5: goals, episodes, facts, questions, messages, goal_events. WAL mode + `busy_timeout=5000` for safe concurrent dashboard+agent access. Forward-only, checksum-locked schema migrations (`world_model.MIGRATIONS`). |
 | `budget.py` | Hard caps on tokens, $, wall-clock, tool calls. Raises `BudgetExceeded`. |
-| `llm.py` | Multi-provider adapter: Anthropic, OpenAI, Azure, Bedrock, Gemini, xAI, DeepSeek, Moonshot, OpenRouter, Ollama, TGI, vLLM (+ OpenAI-compatible). Per-role model routing via config. |
+| `llm.py` | Multi-provider adapter: Anthropic, OpenAI, Azure, Bedrock, Vertex AI, Gemini, xAI, DeepSeek, Moonshot, OpenRouter, Ollama, TGI, vLLM, any OpenAI-compatible endpoint and the Codex CLI (`providers.KNOWN_PROVIDERS`). Per-role model routing via config. |
 | `providers/` | One adapter file per provider; OpenAI ↔ Anthropic message translation lives in `openai_provider.py`. |
 | `config.py` | TOML config loader. Per-role model choice + persona + MCP server table. |
-| `skills.py` | Auto-distill successful trajectories into reusable SKILL.md files. Strict skill source validation (`gh:`, `https:`, `mvk:`); rejects bare paths, `file://`, etc. |
-| `skill_embeddings.py` | Optional ONNX embeddings via fastembed; falls back to lexical match if unavailable. |
+| `skills.py` | Auto-distill successful trajectories into reusable SKILL.md files. Strict skill source validation: `https://` and `gh:org/repo[:path]`, plus local paths from the CLI only (the REST API rejects bare paths); `http://`, `file://`, `ftp://`, `gopher://`, `data:` and `javascript:` sources are refused. |
+| `skill/embeddings.py` | Optional ONNX embeddings via fastembed; falls back to lexical match if unavailable. |
 | `persona.py` | `[persona]` config block renders a name/style/addendum into every agent's system prompt. |
 | `mcp_client.py` | Spawns external MCP servers as subprocesses, drains their stderr, registers their tools. |
 | `runner.py` | `run_goal_in_thread(...)` — process-wide BoundedSemaphore-capped background runner shared by the dashboard, REST API, and MCP server. |

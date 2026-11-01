@@ -1987,9 +1987,8 @@ def list_goals(
 ) -> list[GoalOut]:
     """List goals (newest first), paginated.
 
-    Council perf fix: previous version pulled every goal ever into
-    Python via ``list_goals()``, then sliced. Now the LIMIT/OFFSET are
-    pushed to SQL.
+    LIMIT/OFFSET are pushed to SQL rather than loading every goal into
+    Python and slicing.
 
     ``before_id`` continues below an immutable ID even if that task has been
     removed or is no longer accessible. It cannot be combined with an offset.
@@ -10112,7 +10111,7 @@ async def security_register(request: Request) -> dict:
     return await run_in_threadpool(_security_register_snapshot)
 
 
-# ---------- council pass: control surface ----------
+# ---------- control surface ----------
 
 
 _HALT_DETAIL_MAX_BYTES = 8 * 1024

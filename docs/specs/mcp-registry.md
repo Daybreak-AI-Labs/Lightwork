@@ -19,11 +19,12 @@ to validate. Static-bearer remote servers already work via `auth_token`.
 A registry is a self-hostable JSON index served at `<base>/mcp/index.json`,
 reusing the generic [`catalog.py`](./catalog.md) infra (fetch + 6h cache +
 SSRF-guarded `guarded_urlopen` + https-only + stale-serve + multi-index merge,
-earlier index wins). Point `[mcp_registries] indexes` at your own base(s);
-default is the built-in awesome-maverick index (`DEFAULT_MCP_REGISTRIES`).
+earlier index wins). Point `[mcp_registries] indexes` at your own base(s).
+The built-in default index (`DEFAULT_MCP_REGISTRIES`) is not yet published;
+configure your own under `[mcp_registries] indexes`.
 
 ```toml
-# ~/.maverick/config.toml — only needed to override the default
+# ~/.maverick/config.toml
 [mcp_registries]
 indexes = ["https://registry.example.com/catalog", "https://internal.acme/catalog"]
 ```

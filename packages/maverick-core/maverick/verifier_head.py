@@ -1,7 +1,7 @@
 """Torch-free CPU training for the judgment rung (Phase 1), end to end.
 
-Karpathy's note on the self-improvement architecture: it's "an empty gym" until
-a real reward model trains on real trajectories. This is the cheapest possible
+The self-improvement architecture is "an empty gym" until a real reward model
+trains on real trajectories. This is the cheapest possible
 proof that the gym works -- a tiny linear head over the 12-dim PRM step features
 that trains on captured trajectories with plain gradient descent (no torch, no
 GPU, no numpy), is evaluated by how well it *separates* promising from

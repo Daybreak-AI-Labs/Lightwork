@@ -14192,7 +14192,7 @@ async def api_goal_events_stream(
                                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-# ----- roadmap cluster: graph editor / goal builder / embed / benchmarks /
+# ----- feature cluster: graph editor / goal builder / embed / benchmarks /
 #       walkthroughs / 3D plan tree -----
 
 _STATIC_DIR = Path(__file__).parent / "static"

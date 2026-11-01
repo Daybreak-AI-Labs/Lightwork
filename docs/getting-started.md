@@ -8,16 +8,16 @@ virtual environment and installs the eight Lightwork packages together with
 `scripts/install_release_cohort.py`. The guide gives the commands for macOS,
 Linux and Windows PowerShell, and the checks to run afterwards.
 
-No prebuilt binary, PyPI package or container image is published yet. Tagged
-releases are listed on the
-[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases); check
-out a tag to install that release instead of `main`.
+No prebuilt binary, PyPI package or container image is currently published,
+so install from `main`. Published releases will be listed on the
+[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
 
 Run `lightwork dashboard` and open <http://127.0.0.1:8765>. The dashboard
 guides owner sign-in and provider setup. A provider account, credentials, API
 credits and any external integration prerequisites still need their own
 authorization and validation. The command-line tool is installed under two
-names, `lightwork` and `maverick`; the examples below use `maverick`.
+names, `lightwork` and `maverick`, which run the same program; other pages in
+these docs often use `maverick`.
 
 ## First run
 
@@ -48,30 +48,32 @@ owner's privileges.
 The setup wizard and its checks also run from the command line:
 
 ```bash
-maverick init
-maverick preflight
-maverick doctor
+lightwork init
+lightwork preflight
+lightwork doctor
 ```
 
 The wizard takes ~2 minutes. It writes `~/.maverick/config.toml` and `~/.maverick/.env`.
 
 New consumer setup suggests a $2 and 30-minute task limit and lets you choose
-another limit or none. **Settings → Task limits** can change that choice later.
-Usage remains metered, and organization allowances remain independent. See
-[task limits and spend accounting](task-limits.md).
+another limit or none. **Settings → General → Spending per task** can change
+that choice later. Without a task limit, Lightwork still records what each
+task spends with your model provider (the provider still charges you), and any
+organization spend allowance an administrator has configured still applies.
+See [task limits and spend accounting](task-limits.md).
 
-If setup did not find a running Docker or Podman, it switched off file changes
+If setup did not find a running Docker daemon, it switched off file changes
 and program execution: the fallback `local` backend would run commands directly
 on this computer without isolation. Start with a task that works even when
 those actions are off:
 
 ```bash
-maverick start "Draft a one-page plan to reduce our customer support response time without adding headcount. State your assumptions and the facts you need from me."
+lightwork start "Draft a one-page plan to reduce our customer support response time without adding headcount. State your assumptions and the facts you need from me."
 ```
 
 ## Watch the swarm decompose
 
-Run `maverick monitor` in a second terminal. The orchestrator plans the goal
+Run `lightwork monitor` in a second terminal. The orchestrator plans the goal
 and shows its work. For the first task above, an illustrative monitor view is:
 
 ```
@@ -96,16 +98,16 @@ Cumulative spend on this DB: $0.21
 To create files or run programs later, start Docker or Podman, open
 **Permissions → Where work runs**, choose its container, then confirm
 **Allow file work**. Lightwork checks that the container is running and shows
-any other policy that still blocks those actions. Run `maverick doctor` to see
+any other policy that still blocks those actions. Run `lightwork doctor` to see
 the same limitation from the terminal. After that setup, a code-writing task
 can use the isolated work area.
 
 When done:
 
 ```bash
-maverick status      # what's currently active or blocked
-maverick skills      # built-in and installed skills; review new suggestions on Skills
-maverick facts       # what it learned about you
+lightwork status      # what's currently active or blocked
+lightwork skills      # built-in and installed skills; review new suggestions on Skills
+lightwork facts       # what it learned about you
 ```
 
 ## Pausing / resuming
@@ -113,11 +115,11 @@ maverick facts       # what it learned about you
 If the swarm needs something only you can answer, it pauses and queues a question:
 
 ```bash
-maverick status
-# shows: open questions: #3 (goal 1): Which dates are you traveling?
+lightwork status
+# shows: open questions: #3 (goal 1): What is your current median first-response time?
 
-maverick answer 3 "May 15-29"
-maverick resume
+lightwork answer 3 "About 9 hours"
+lightwork resume
 ```
 
 Goal records survive restarts. Restoring an ordinary agent's saved execution
@@ -134,9 +136,9 @@ at the wizard's *Workspace journal* step), every file the agents overwrite or
 create through the file tools is captured before the mutation:
 
 ```bash
-maverick journal list --goal 12     # what was touched
-maverick journal diff --goal 12     # pre-run state vs the disk now
-maverick journal revert --goal 12   # restore every file, newest-first
+lightwork journal list --goal 12     # what was touched
+lightwork journal diff --goal 12     # pre-run state vs the disk now
+lightwork journal revert --goal 12   # restore every file, newest-first
 ```
 
 Reverting writes a signed `workspace_revert` audit row and archives the
@@ -156,7 +158,7 @@ SEE: digest looks right, ops confirmed receipt
 ```
 
 ```bash
-maverick learn-demo demo.txt
+lightwork learn-demo demo.txt
 ```
 
 This parses the demonstration, induces a draft specialist, shows you the derived
@@ -165,7 +167,7 @@ door, and the draft inherits the same capability clamp and persona scan a
 described pack gets — nothing activates without your yes. Useful flags:
 
 ```bash
-maverick learn-demo demo.txt --name "Morning Digest" --no-llm --yes
+lightwork learn-demo demo.txt --name "Morning Digest" --no-llm --yes
 ```
 
 `--no-llm` mirrors the observed steps deterministically (tools = what the person
@@ -174,7 +176,7 @@ used); drop it to let the model propose from the transcript.
 The same agent-factory flow runs when you build a pack conversationally:
 
 ```bash
-maverick onboard
+lightwork onboard
 ```
 
 On approval, `onboard` can provision catalog skills and synthesize declared tools
@@ -205,9 +207,9 @@ model paths and a selected cloud speech backend retain their configuration;
 this setup screen does not silently replace them. The optional CLI is also available:
 
 ```bash
-maverick voice setup    # fetch the checksum-verified model (~148 MB)
-maverick voice status   # see which speech-to-text backends are usable
-maverick voice transcribe clip.wav   # smoke-test the pipeline
+lightwork voice setup    # fetch the checksum-verified model (~148 MB)
+lightwork voice status   # see which speech-to-text backends are usable
+lightwork voice transcribe clip.wav   # smoke-test the pipeline
 ```
 
 Prefer a system engine instead? A `whisper.cpp` binary on PATH (`brew
@@ -231,7 +233,7 @@ underlying settings.
 | `~/.maverick/.env` | API keys (chmod 600) |
 | `~/.maverick/world.db` | Persistent world model: goals, facts, episodes |
 | `~/.maverick/skills/` | Skills available to agents, including administrator-approved suggestions |
-| `~/maverick-workspace/` | Default sandbox working directory |
+| `~/maverick-workspace/` | Default sandbox working directory. The quick `lightwork init` setup proposes `~/Documents/Maverick` instead; a saved `[sandbox] workdir` or `MAVERICK_WORKDIR` changes it |
 | `~/.maverick/learned-skills/` | Suggestions distilled from completed work; review and add them on Skills before agents use them |
 | `~/.maverick/dreams/` | Consolidated insights, rehearsal queue, learning snapshots |
 
@@ -240,8 +242,8 @@ AI providers or connected services, the work sent through them can leave that
 deployment. Review each provider, connector, and outbound policy before use.
 
 Once you have a few runs behind you, the learning surface is four commands:
-`maverick dream` (consolidate experience), `maverick hindsight` (did learning
-help or regress?), `maverick proof` (deliverables, cost avoided, ROI), and
-`maverick domains-lint` (audit the 2,031-agent specialist catalog), plus
-`maverick domains-audit` (governance posture: what each agent can reach, denies,
-and refuses) and `maverick domains-eval --check` (behavioral golden cases).
+`lightwork dream` (consolidate experience), `lightwork hindsight` (did learning
+help or regress?), `lightwork proof` (deliverables, cost avoided, ROI), and
+`lightwork domains-lint` (audit the 2,031-agent specialist catalog), plus
+`lightwork domains-audit` (governance posture: what each agent can reach, denies,
+and refuses) and `lightwork domains-eval --check` (behavioral golden cases).

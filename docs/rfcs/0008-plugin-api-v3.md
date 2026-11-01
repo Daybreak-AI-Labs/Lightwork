@@ -1,4 +1,4 @@
-# RFC 0002: Plugin API v3 — not warranted (triggers recorded)
+# RFC 0008: Plugin API v3 — not warranted (triggers recorded)
 
 **Status:** Closed — not warranted at this time · **Date:** June 2026
 

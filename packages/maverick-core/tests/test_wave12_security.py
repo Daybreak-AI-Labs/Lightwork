@@ -1,10 +1,10 @@
 """Security hardening.
 
 Covers:
-  - F9b: str_replace_editor.view bypassed opaque-mode test-file block
-  - F9c: subprocess inherited MAVERICK_GOLD_PATCH from env
-  - F9d: .git/ reads not blocked (refs + objects leak the gold)
-  - F9f: MAVERICK_GOLD_PATCH popped on first read (defense in depth)
+  - str_replace_editor.view bypassed opaque-mode test-file block
+  - subprocess inherited MAVERICK_GOLD_PATCH from env
+  - .git/ reads not blocked (refs + objects leak the gold)
+  - MAVERICK_GOLD_PATCH popped on first read (defense in depth)
 """
 from __future__ import annotations
 
@@ -125,7 +125,7 @@ class TestDotGitBlocked:
 
 
 class TestStrReplaceEditorOpacity:
-    """F9b: str_replace_editor.view was the opacity backdoor — same
+    """str_replace_editor.view was the opacity backdoor — same
     file gating as read_file must apply."""
 
     def test_view_blocks_test_file_in_opaque(self, tmp_path, opaque_mode):
@@ -371,7 +371,7 @@ class TestGoldPatchEmptyEnvSentinel:
 
 
 class TestShellGitInternalsBlocked:
-    """F9d: shell-level git plumbing + raw .git filesystem access."""
+    """Shell-level git plumbing + raw .git filesystem access."""
 
     def _shell(self, tmp_path):
         from maverick.tools.shell import shell
@@ -414,7 +414,7 @@ class TestShellGitInternalsBlocked:
 
 
 class TestShellPopsGoldPatch:
-    """F9c: subprocess must not inherit MAVERICK_GOLD_PATCH. The shell
+    """Subprocess must not inherit MAVERICK_GOLD_PATCH. The shell
     tool defensively pops the env var before forwarding to sandbox."""
 
     def test_shell_pops_gold_patch_in_opaque(self, tmp_path, monkeypatch):

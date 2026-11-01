@@ -1,4 +1,4 @@
-"""Tier 0 (Wave 11): tests for the pre-flight checker.
+"""Tier 0: tests for the pre-flight checker.
 
 The pre-flight is the last guard before a paid run. We need to confirm
 each check FIRES on the failure mode it's supposed to catch, and PASSES
@@ -147,7 +147,7 @@ def test_check_api_key_refuses_ping_when_egress_guard_cannot_arm(monkeypatch):
     assert pf.check_api_key() is False
 
 
-# ---- Wave 11 env (warnings only) ----
+# ---- Recommended benchmark environment (warnings only) ----
 
 
 def test_check_wave11_env_returns_true_when_all_set(monkeypatch):

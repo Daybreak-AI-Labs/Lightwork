@@ -3847,7 +3847,7 @@ def get_consequence() -> dict:
 
 
 def get_earned_autonomy() -> dict:
-    """Return the ``[earned_autonomy]`` section (Bet 5: consequence-proven trust).
+    """Return the ``[earned_autonomy]`` section (consequence-proven trust).
 
     Agents earn policy-auto-approval per action type by proving they predict
     consequences correctly (maverick.earned_autonomy). OFF by default: enabling

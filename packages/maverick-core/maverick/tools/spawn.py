@@ -643,7 +643,7 @@ async def _run_swarm(parent: Agent, args: dict) -> str:
                 extra={"name": child.name, "final": res.final or ""},
             )
 
-    # Karpathy SOTA-review item: measure disagreement across the children's
+    # Measure disagreement across the children's
     # FINAL answers, record it on the blackboard, and escalate FINAL
     # verification (Loop 1) when the swarm diverged.
     escalated = _record_swarm_disagreement(parent, children, results)

@@ -34,7 +34,7 @@ money"):
 ## Contents
 
 1. [What's already shipped — the reuse map](#1-whats-already-shipped--the-reuse-map)
-2. [How a GTM agent maps onto Lightwork](#2-how-a-gtm-agent-maps-onto-maverick)
+2. [How a GTM agent maps onto Lightwork](#2-how-a-gtm-agent-maps-onto-lightwork)
 3. [The control model (cross-cutting)](#3-the-control-model-cross-cutting)
 4. [Per-client customization — the dials](#4-per-client-customization--the-dials)
 5. [The roster — eight towers](#5-the-roster--eight-towers)

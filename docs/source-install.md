@@ -1,8 +1,9 @@
 # Install from source
 
 Lightwork is installed from a clone of its Git repository. No prebuilt binary,
-PyPI package or container image is published yet; this guide is the supported
-installation path.
+PyPI package or container image is currently published; this guide is the
+supported installation path, and a fresh clone is on `main`, the version to
+install until a release is published.
 
 ## Requirements
 
@@ -10,9 +11,12 @@ installation path.
 - Git.
 - An account with a model provider, or a self-hosted model, to run tasks. You
   can install and open the dashboard without one.
-- Optional: Docker or Podman. Until one of them is configured, Lightwork keeps
-  file changes and program execution switched off (see
-  [Getting started](getting-started.md)).
+- Optional: Docker or Podman. The setup wizard (`lightwork init`) switches
+  file changes and program execution off when Docker is not running, and the
+  dashboard's initial settings start with them off. If you skip both, the
+  default `local` sandbox backend runs commands directly on this computer; read
+  the [execution posture](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md#execution-posture) before running
+  untrusted goals.
 
 The repository root is not a pip project, so `pip install -e .` at the root
 does not work. `scripts/install_release_cohort.py` installs the eight Lightwork
@@ -44,15 +48,11 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\lightwork.exe dashboard
 ```
 
+`py -3.12` selects Python 3.12; use `py -3.11` or `py -3.10` instead if that is
+the supported version you have installed.
+
 Calling the virtual environment's executables by path avoids changing the
 PowerShell execution policy to run the activation script.
-
-## Choosing a version
-
-A fresh clone is on `main`. To install a tagged release instead, run
-`git checkout <tag>` after cloning; the
-[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases) lists
-the tags.
 
 ## Check the installation
 

@@ -6,7 +6,7 @@
 
 ## 설치
 
-Lightwork는 소스 코드에서 설치합니다. Python 3.10–3.12와 Git이 필요합니다. macOS, Linux, Windows용 명령은 [소스 설치 절차](../../source-install.md)에 나와 있습니다. 미리 빌드된 바이너리, PyPI 패키지, 컨테이너 이미지는 아직 게시되지 않았습니다. 태그가 지정된 릴리스는 [릴리스 페이지](https://github.com/Daybreak-AI-Labs/Lightwork/releases)에서 확인할 수 있습니다.
+Lightwork는 소스 코드에서 설치합니다. Python 3.10–3.12와 Git이 필요합니다. macOS, Linux, Windows용 명령은 [소스 설치 절차](../../source-install.md)에 나와 있습니다. 미리 빌드된 바이너리, PyPI 패키지, 컨테이너 이미지는 아직 게시되지 않았습니다. 현재 게시된 릴리스가 없으므로 `main`에서 설치하세요.
 
 그런 다음 `lightwork dashboard`를 실행하고 <http://127.0.0.1:8765>를 열어 소유자와 모델 제공자 설정을 마치세요.
 
@@ -179,7 +179,7 @@ Lightwork는 위 파일을 사용 중인 배포 환경에 저장합니다. 클�
 
 실행을 몇 번 쌓고 나면, 학습 영역은 네 가지 명령으로 요약됩니다. `maverick dream`(경험
 통합), `maverick hindsight`(학습이 도움이 되었는가, 아니면 퇴보했는가?),
-`maverick proof`(산출물, 절감한 비용, ROI), 그리고 `maverick domains-lint`(2,020개
-에이전트 전문 카탈로그 감사)이며, 여기에 `maverick domains-audit`(거버넌스 태세: 각
+`maverick proof`(산출물, 절감한 비용, ROI), 그리고 `maverick domains-lint`(에이전트
+전문 카탈로그 감사)이며, 여기에 `maverick domains-audit`(거버넌스 태세: 각
 에이전트가 무엇에 접근하고, 무엇을 거부하며, 무엇을 거절하는지)와
 `maverick domains-eval --check`(행동 골든 케이스)가 더해집니다.

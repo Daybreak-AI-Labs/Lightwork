@@ -43,8 +43,8 @@ PY
 ### 1. Validate the pipeline without a key (no cost)
 
 ```bash
-python proof/swebench_governed_proof.py     # every guarantee must report PROVEN
-python proof/dgm_uplift_proof.py            # every guarantee must report PROVEN
+python proof/swebench_governed_proof.py     # every check must pass
+python proof/dgm_uplift_proof.py            # every check must pass
 ```
 
 ### 2. Stage instances (manifest + per-instance repo checkouts)

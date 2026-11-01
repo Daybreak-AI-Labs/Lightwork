@@ -133,10 +133,10 @@ auditable.
   2,031 built-in specialist packs, each with a fault-injection control proving
   the test is non-vacuous, plus hostile-argument fuzzing of every connector
   and tool.
-- **Primary-source data grounding**: analyst packs are auto-granted 37
-  read-only, GET-only public-data connectors (SEC EDGAR, FRED, Treasury, World
-  Bank, FDIC, Census, BLS, EIA, openFDA, NPPES, CourtListener, Federal Register,
-  GLEIF, OpenCorporates, NWS/NOAA, EPA, …) by suite, so consequential analysis
+- **Primary-source data grounding**: analyst packs are granted their suite's
+  subset of 37 read-only, GET-only public-data connectors (SEC EDGAR, FRED,
+  Treasury, World Bank, FDIC, Census, BLS, EIA, openFDA, NPPES, CourtListener,
+  Federal Register, GLEIF, OpenCorporates, NWS/NOAA, EPA, …), so consequential analysis
   is grounded in authoritative sources rather than model memory. On by default;
   kill-switch `[workforce] data_grounding = false` /
   `MAVERICK_WORKFORCE_DATA_GROUNDING=off`.

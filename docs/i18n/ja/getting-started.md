@@ -6,7 +6,7 @@
 
 ## インストール
 
-Lightwork はソースコードからインストールします。Python 3.10〜3.12 と Git が必要です。macOS、Linux、Windows 向けのコマンドは[ソースからのインストール手順](../../source-install.md)に記載しています。ビルド済みバイナリ、PyPI パッケージ、コンテナイメージはまだ公開していません。タグ付きのリリースは[リリースページ](https://github.com/Daybreak-AI-Labs/Lightwork/releases)で確認できます。
+Lightwork はソースコードからインストールします。Python 3.10〜3.12 と Git が必要です。macOS、Linux、Windows 向けのコマンドは[ソースからのインストール手順](../../source-install.md)に記載しています。ビルド済みバイナリ、PyPI パッケージ、コンテナイメージはまだ公開していません。現在公開されているリリースはありません。`main` からインストールしてください。
 
 その後 `lightwork dashboard` を実行し、<http://127.0.0.1:8765> を開いて所有者とモデルプロバイダーの設定を完了してください。
 
@@ -171,4 +171,4 @@ Lightwork は上記のファイルを利用中のデプロイ環境に保存し�
 その環境の外に出ることがあります。利用前に、各プロバイダー、コネクター、
 外部通信ポリシーを確認してください。
 
-ある程度の実行を重ねたら、学習面は 4 つのコマンドに集約されます。`maverick dream`（経験を統合する）、`maverick hindsight`（学習は役立ったか、それとも後退したか？）、`maverick proof`（成果物、回避できたコスト、ROI）、そして `maverick domains-lint`（2,020 エージェントのスペシャリストカタログを監査する）に加えて、`maverick domains-audit`（ガバナンス態勢: 各エージェントが何にアクセスでき、何を拒否し、何を却下するか）と `maverick domains-eval --check`（振る舞いのゴールデンケース）です。
+ある程度の実行を重ねたら、学習面は 4 つのコマンドに集約されます。`maverick dream`（経験を統合する）、`maverick hindsight`（学習は役立ったか、それとも後退したか？）、`maverick proof`（成果物、回避できたコスト、ROI）、そして `maverick domains-lint`（スペシャリストカタログを監査する）に加えて、`maverick domains-audit`（ガバナンス態勢: 各エージェントが何にアクセスでき、何を拒否し、何を却下するか）と `maverick domains-eval --check`（振る舞いのゴールデンケース）です。

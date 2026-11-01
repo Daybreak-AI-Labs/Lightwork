@@ -9,7 +9,7 @@
       open-request cap {{ lic.open_case_cap }}{% endif %}</p>
 
   <div class="panel">
-    <h2>Always on (the agent you bought)</h2>
+    <h2>Active in this mode</h2>
     {% for label in caps_summary.active %}
       <div class="evt">✓ {{ label }}</div>
     {% endfor %}
@@ -17,12 +17,12 @@
 
   {% if caps_summary.gated %}
   <div class="panel">
-    <h2>Comes with the Lightwork platform</h2>
+    <h2>Added when running with the Lightwork platform</h2>
     {% for label in caps_summary.gated %}
       <div class="evt">◇ {{ label }}</div>
     {% endfor %}
-    <p class="note">Enabling these is a license key swap, not a reinstall —
-      the agent's records stay exactly where they are.</p>
+    <p class="note">These turn on when the Lightwork platform is installed and
+      <code>DSAR_STANDALONE</code> is not set.</p>
   </div>
   {% endif %}
 {% endblock %}

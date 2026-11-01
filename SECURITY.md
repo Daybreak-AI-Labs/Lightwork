@@ -34,7 +34,7 @@ stay anonymous. Disclosed issues are also recorded in the
 
 ## Supported versions
 
-No release has been published yet. The packages on `main` are at version
+No release is currently published. The packages on `main` are at version
 `0.1.7` (see `release-cohort.toml`), which is unreleased, and security fixes
 are made on `main`.
 
@@ -133,7 +133,7 @@ chooses the blast radius**. Defense in depth, from outermost to innermost:
 2. **Agent Shield** (`maverick-shield`) — screens prompts, tool calls, and
    output. Optional and fail-open by design, so it is a *floor*, not a
    guarantee. Treat it as one layer, never the only one.
-3. **Tool ACL + budget + killswitch** — `[tool_acl] denied_tools`, the
+3. **Tool ACL + budget + killswitch** — `[security] denied_tools`, the
    `Budget` cap, and `~/.maverick/HALT` bound what a run can do and spend.
 
 The consumer wizard (`maverick init`, "consumer" mode) fails closed: when no

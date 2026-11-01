@@ -162,7 +162,7 @@ def test_adv_shell_blocks_github_curl(tmp_path, monkeypatch, fresh_human_decisio
     assert "ran:" in out
 
 
-# ---- Bonus: pip install -e blocked in opaque mode (Karpathy bug) ----
+# ---- Bonus: pip install -e blocked in opaque mode (worktree editable-install bug) ----
 
 def test_adv_shell_blocks_pip_install_e(tmp_path, monkeypatch, fresh_human_decision):
     """ALL package-install commands are blocked

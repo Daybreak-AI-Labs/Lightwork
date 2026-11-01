@@ -4,9 +4,8 @@ Guidance for AI coding agents working in this repository. Human contributors
 should start with [CONTRIBUTING.md](CONTRIBUTING.md); [AGENTS.md](AGENTS.md)
 is a shorter summary of the same rules for other coding agents.
 
-Code, tests and CI cite this file by kernel-rule number ("CLAUDE.md rule 4")
-and by the heading "No AI attribution in repo artifacts". Keep both stable when
-you edit it.
+Code comments, tests and design documents cite this file by kernel-rule number
+("CLAUDE.md rule 4"); keep the numbering stable when you edit it.
 
 ## Project
 
@@ -89,6 +88,8 @@ controls; the other packages build on it.
   not only at an explicit `check()`. A test that raises only `max_dollars`
   still fails on any other cap it crosses; raise every cap the test will cross.
 - pytest-asyncio runs in strict mode; async tests need explicit markers.
+- CI also runs selected suites with `MAVERICK_TEST_SECURE_DEFAULT=1` (the
+  production security posture); run affected tests that way too.
 
 ### CI gates beyond Ruff
 
@@ -163,6 +164,18 @@ Each of these fails the build (the `lint` job in `.github/workflows/ci.yml`):
   at the repo root.
 - New capabilities need a config knob and a wizard step in
   `apps/installer-cli/maverick_installer/` (kernel rules 5 and 6).
+
+### User-facing features
+
+- A user-facing feature needs an in-product journey after installation, plain
+  language, the shared Liquid Glass design (the dashboard design system in
+  `packages/maverick-dashboard/maverick_dashboard/static/lightwork.css`), and
+  coverage through the dashboard Copilot (the in-product assistant panel)
+  under the same authorization as the direct UI. Follow
+  [docs/customer-experience-contract.md](docs/customer-experience-contract.md);
+  an API or CLI implementation alone does not complete a feature. Report
+  missing UI, Copilot or recovery coverage explicitly, and keep the same
+  authority and current-state checks across interfaces.
 
 ### Dependencies
 

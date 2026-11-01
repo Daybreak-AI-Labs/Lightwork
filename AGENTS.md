@@ -58,8 +58,10 @@ Each rule is backed by a CI gate or a failure seen in practice.
 12. pytest aborts everything on one collection error; a pyo3 `PanicException`
     usually hides a missing import on the stderr line above it.
 13. User-facing features need an in-product journey after installation, plain
-    language, the shared Liquid Glass design, and coverage through the
-    in-product Copilot under the same authorization as the direct UI. Follow
+    language, the shared Liquid Glass design (the dashboard design system in
+    `packages/maverick-dashboard/maverick_dashboard/static/lightwork.css`), and
+    coverage through the dashboard Copilot (the in-product assistant panel)
+    under the same authorization as the direct UI. Follow
     [docs/customer-experience-contract.md](docs/customer-experience-contract.md);
     an API or CLI implementation alone does not complete a feature. Report
     missing UI, Copilot or recovery coverage explicitly, and keep the same

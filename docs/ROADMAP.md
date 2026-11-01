@@ -38,7 +38,7 @@ How it is maintained:
 - **Unified dispatch.** Make the queue path the default execution contract,
   with the in-process dispatcher as one backend of it, so behavior is
   identical with or without a broker
-  ([2.0 RFC proposal](./proposals/2.0-rfc.md)).
+  ([2.0 dispatch proposal](./proposals/2.0-rfc.md), background to RFC 0001).
 - **Sandbox pool.** The explicit `sandbox/pool.py` API transfers only
   immutable policy into a fresh backend; automatic cross-run parking and its
   startup savings are not yet qualified
@@ -101,16 +101,20 @@ Fleet learning across tenants is explicitly deferred.
   signed bundles; the concrete per-target install hooks, the release-feed
   publisher and channel configuration are not built yet
   ([product operations](./enterprise/product-operations.md)).
-- **Lightwork 2.0.** [RFC 0001](./rfcs/0001-maverick-2.0.md) proposes config
-  schema v2 (with the renames carried by `maverick migrate`), an async channel
-  SDK with a structured reply object, moving the long tail of SaaS connectors
-  out of the core package (per the
+- **Lightwork 2.0.** The next breaking release after the current 0.1.x line;
+  the release checklist moves the version from 0.1.x directly to 2.0.0.
+  [RFC 0001](./rfcs/0001-maverick-2.0.md) proposes config schema v2 (with the
+  renames carried by `maverick migrate`), an async channel SDK with a
+  structured reply object, moving the long tail of SaaS connectors out of the
+  core package (per the
   [breadth-vs-depth decision](./specs/breadth-vs-depth-decision.md)), and a
   documented streaming tool contract. The release gate is
   [`release-checklist-2.0.md`](./release-checklist-2.0.md), and the upgrade
-  path is [`migration-2.0.md`](./migration-2.0.md). The plugin API v1
-  compatibility window (deprecation `plugins.api_v1`, removal in 0.3.0) closes
-  on the same path.
+  path is [`migration-2.0.md`](./migration-2.0.md). The deprecations
+  registered for removal in 0.3.0, the plugin API v1 window
+  (`plugins.api_v1`), bare-`str` channel handlers (`channels.str_handler`) and
+  the `checked_at` field of `GET /api/v1/intent-value`
+  (`intent_value.checked_at`), are removed in that release.
 
 ## User experience
 
@@ -130,10 +134,11 @@ Lightwork is the second kind. The MCP server and quickstarts for the top five
 target languages — **TypeScript**, **Go**, **Rust**, **C#** and **Java** — have
 shipped (see [`docs/clients/`](./clients/)).
 
-The opt-in analytics on MCP-client language headers ship with a consent step in
-the setup wizard (off by default). The decision gate: if more than **15%** of
-active installs drive Lightwork from non-Python MCP clients, fund **one** thin
-TypeScript client package. Under 15%, the MCP surface remains the answer.
+A thin TypeScript client package will be considered if there is demand; open
+an issue if you need one. Until then the MCP surface is the answer. Operators
+can see their own MCP client language mix with the opt-in local tally
+(`[analytics] mcp_client_language = true`), which is stored only on the
+installation and never sent to the project.
 
 Constraints that hold either way: no port of `maverick-core` to a second
 language; sandbox backends stay Python process glue and are not part of the
@@ -156,9 +161,9 @@ evasion is declined ([decision](./specs/anti-bot-evasion-decision.md)).
 
 ## Standing constraints
 
-Every item above keeps the project's house rules (see
-[`CONTRIBUTING.md`](../CONTRIBUTING.md#house-rules)): self-hosting stays the
-default, with a self-hostable path for anything that would otherwise need a
-hosted service; the kernel runs without the shield; budget caps are never
-bypassed; all shell execution goes through `sandbox.exec()`; and a new
-capability arrives with a configuration knob and a setup-wizard step.
+Self-hosting stays the default, with a self-hostable path for anything that
+would otherwise need a hosted service. Every item also keeps the house rules in
+[`CONTRIBUTING.md`](../CONTRIBUTING.md#house-rules): the kernel runs without
+the shield; budget caps are never bypassed; all shell execution goes through
+`sandbox.exec()`; and a new capability arrives with a configuration knob and a
+setup-wizard step.

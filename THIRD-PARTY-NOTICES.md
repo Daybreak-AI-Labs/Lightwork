@@ -5,16 +5,16 @@ includes, or depends on, third-party open-source software under its own
 licences. This file lists:
 
 1. third-party components whose files are included in this repository and in
-   the `maverick-dashboard` package (below); and
+   the `maverick-agent` (`maverick-core`) and `maverick-dashboard` packages
+   (below); and
 2. the **declared** runtime and optional dependencies of the `maverick-*`
    packages, with their best-known SPDX licence identifiers.
 
 ## Bundled components
 
-These files are shipped in
-`packages/maverick-dashboard/maverick_dashboard/static/` and are included in
-the `maverick-dashboard` wheel. Each file's licence text or notice is kept next
-to it or in its header.
+Each bundled file's licence text or notice is kept next to it or in its header.
+
+### `packages/maverick-dashboard/maverick_dashboard/static/` (included in the `maverick-dashboard` wheel)
 
 | Component | Files | Licence | Copyright and notices |
 |---|---|---|---|
@@ -23,6 +23,19 @@ to it or in its header.
 | [Cytoscape.js](https://js.cytoscape.org) 3.30.2 | `cytoscape-3.30.2.min.js` | MIT | Copyright (c) 2016-2024, The Cytoscape Consortium. The licence text is in the file header. |
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) 2.211 | `fonts/jbm-400.woff2`, `fonts/jbm-500.woff2` | OFL-1.1 | Copyright 2020 The JetBrains Mono Project Authors. The licence text is in `fonts/OFL.txt`; each font's metadata also carries the copyright notice and a link to the licence. |
 | [Manrope](https://github.com/sharanda/manrope) 4.504 | `fonts/manrope-var.woff2` | OFL-1.1 | Copyright 2019 The Manrope Project Authors. The licence text is in `fonts/OFL.txt`; the font's metadata also carries the copyright notice and a link to the licence. |
+
+### `docs/overrides/assets/brand/` (published with the documentation site)
+
+| Component | Files | Licence | Copyright and notices |
+|---|---|---|---|
+| [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) 2.211 | `jbm-400.woff2` | OFL-1.1 | Copyright 2020 The JetBrains Mono Project Authors. The licence text is in `OFL.txt` in the same directory. |
+| [Manrope](https://github.com/sharanda/manrope) 4.504 | `manrope-var.woff2` | OFL-1.1 | Copyright 2019 The Manrope Project Authors. The licence text is in `OFL.txt` in the same directory. |
+
+### `packages/maverick-core/maverick/data/tokenizer/` (included in the `maverick-core` wheel)
+
+| Component | Files | Licence | Copyright and notices |
+|---|---|---|---|
+| [tiktoken](https://github.com/openai/tiktoken) cl100k_base vocabulary (as defined by tiktoken 0.14.0) | `cl100k_base.tiktoken` | MIT | Copyright (c) 2022 OpenAI, Shantanu Jain. The licence text is in `TIKTOKEN_LICENSE.txt`; the source URL and SHA-256 are in `PROVENANCE.md`. |
 
 ## Declared dependencies
 

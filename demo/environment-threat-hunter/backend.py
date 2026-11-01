@@ -35,7 +35,7 @@ def _binding(implementation: str, authority: str, active: bool = True) -> dict:
 
 def _integrated_only() -> dict:
     return _binding(
-        "Not bound in this reduced SKU; use integrated Lightwork /security/soc",
+        "Not available in this standalone app; use integrated Lightwork /security/soc",
         "integrated-lightwork-only",
         False,
     )
@@ -249,7 +249,7 @@ def propose_response(investigation: dict, action: str, target: str):
         "status": "proposed",
         "digest": proposal.digest,
         "warning": (
-            "Proposal only in this SKU. Use its exact digest in Lightwork "
+            "Proposal only in this standalone app. Use its exact digest in Lightwork "
             "/security/soc for governed approval and execution."
         ),
     }

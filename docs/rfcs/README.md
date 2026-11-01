@@ -63,16 +63,15 @@ Each RFC states its status at the top of the file.
 
 ## Index
 
-| File | Title |
-| --- | --- |
-| [0001-maverick-2.0.md](0001-maverick-2.0.md) | Lightwork 2.0 |
-| [0002-plugin-api-v2.md](0002-plugin-api-v2.md) | Plugin API v2 |
-| [0002-plugin-api-v3.md](0002-plugin-api-v3.md) | Plugin API v3: not warranted (triggers recorded) |
-| [0003-platform-contracts-v1.md](0003-platform-contracts-v1.md) | Platform contracts v1 |
-| [0004-worker-authority-binding-v1.md](0004-worker-authority-binding-v1.md) | Worker authority binding v1 |
-| [0005-restore-reference-validation-v1.md](0005-restore-reference-validation-v1.md) | Staged local restore reference validation |
-| [0006-supplier-cancellation-v1.md](0006-supplier-cancellation-v1.md) | Supplier request cancellation |
-| [0007-supported-supplier-journey-v1.md](0007-supported-supplier-journey-v1.md) | Supported supplier evidence journey, version 1 |
+| File | Title | Status |
+| --- | --- | --- |
+| [0001-maverick-2.0.md](0001-maverick-2.0.md) | Lightwork 2.0 | Draft |
+| [0002-plugin-api-v2.md](0002-plugin-api-v2.md) | Plugin API v2 | Implemented |
+| [0003-platform-contracts-v1.md](0003-platform-contracts-v1.md) | Platform contracts v1 | Implemented |
+| [0004-worker-authority-binding-v1.md](0004-worker-authority-binding-v1.md) | Worker authority binding v1 | Implemented |
+| [0005-restore-reference-validation-v1.md](0005-restore-reference-validation-v1.md) | Staged local restore reference validation | Implemented |
+| [0006-supplier-cancellation-v1.md](0006-supplier-cancellation-v1.md) | Supplier request cancellation | Implemented |
+| [0007-supported-supplier-journey-v1.md](0007-supported-supplier-journey-v1.md) | Supported supplier evidence journey, version 1 | Implemented |
+| [0008-plugin-api-v3.md](0008-plugin-api-v3.md) | Plugin API v3: not warranted (triggers recorded) | Closed |
 
-Two files share the number 0002. A new RFC takes the next number not used by
-any file in this directory.
+A new RFC takes the next unused number.

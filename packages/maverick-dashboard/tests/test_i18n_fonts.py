@@ -67,7 +67,7 @@ def test_lang_param_translates_chrome_and_sets_cookie():
 
 
 def test_rtl_selection_declares_the_english_body_left_to_right():
-    """UX-198: ``dir`` describes the body like ``lang`` does. An English body
+    """``dir`` describes the body like ``lang`` does. An English body
     must not be mirrored because a few chrome strings were translated."""
     r = client.get("/overview", params={"lang": "ar"})
     assert r.status_code == 200
@@ -76,7 +76,7 @@ def test_rtl_selection_declares_the_english_body_left_to_right():
 
 
 def test_arabic_browser_gets_a_left_to_right_english_page_on_both_shells():
-    """UX-198: Accept-Language alone must not flip the English UI right-to-left
+    """Accept-Language alone must not flip the English UI right-to-left
     on the product shell (``/overview``) or the chat shell (``/chat``)."""
     fresh = TestClient(app)
     for path in ("/overview", "/chat"):

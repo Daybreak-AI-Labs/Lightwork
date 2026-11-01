@@ -12,8 +12,8 @@ how to become a maintainer are described in [GOVERNANCE.md](GOVERNANCE.md).
 
 ## Review assignments
 
-[`.github/CODEOWNERS`](.github/CODEOWNERS) assigns reviewers by path. A pull
-request that touches several areas needs a review from the owner of each.
+[`.github/CODEOWNERS`](.github/CODEOWNERS) requests a review from the owner of
+each area a pull request touches.
 
 ## Contacting the maintainers
 
