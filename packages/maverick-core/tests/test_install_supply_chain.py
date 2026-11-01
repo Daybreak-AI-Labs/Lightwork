@@ -505,7 +505,7 @@ def test_public_pypi_consumer_is_disabled_until_namespace_is_reserved():
     assert "HOMEBREW_NO_INSTALL_FROM_API" in formula_test
     assert "needs: [resolve, test-formula]" in publisher
     assert "permissions:\n      contents: read" in publisher
-    assert "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1" in publisher
+    assert "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510" in publisher
     assert "LIGHTWORK_AUTOMATION_APP_CLIENT_ID" in publisher
     assert "LIGHTWORK_AUTOMATION_APP_PRIVATE_KEY" in publisher
     assert "permission-contents: write" in publisher
