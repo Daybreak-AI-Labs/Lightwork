@@ -156,3 +156,25 @@ def test_worksheet_says_so_when_the_account_cannot_be_resolved():
 
     assert holdings["enabled"] is True
     assert holdings["resolved"] is False
+    # Nothing was read: the zeros keep the section's shape and are not a count.
+    assert set(holdings["sections"]) == {
+        "conversations", "turns", "goals", "episodes", "facts", "fact_history", "audit",
+    }
+    assert set(holdings["sections"].values()) == {0}
+
+
+def test_fulfil_names_the_ambiguous_account_and_keeps_the_request_open():
+    """The same two-channel subject must not be fulfilled with an empty export
+    (nothing is read when the account cannot be resolved), and the refusal
+    must say what the officer can do, not blame storage."""
+    world = _seed_platform_world()
+    world.get_or_create_conversation("telegram", "alice@example.com")
+    request = privacy_ops.open_dsar(
+        "alice@example.com", kind="access", opened_by="ops",
+    )
+
+    with pytest.raises(ValueError, match="more than one channel"):
+        privacy_ops.fulfill_dsar(request["id"])
+
+    assert privacy_ops.get_dsar(request["id"])["status"] == "open"
+    assert privacy_ops.read_dsar_export(request["id"]) is None

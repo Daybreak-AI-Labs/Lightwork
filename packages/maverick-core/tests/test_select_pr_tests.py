@@ -211,28 +211,41 @@ def test_every_gated_job_exists_and_the_ungated_ones_stay_ungated():
 
 
 def test_gated_jobs_skip_only_when_the_selection_says_so():
-    """A gated job needs select-tests and runs unless the jobs map says False:
-    an empty map (the selection failed, or a non-PR event) runs everything, and
-    `!cancelled()` keeps a failed selection from skipping the job (a skipped
-    job would satisfy the required check)."""
+    """A gated job needs select-tests and runs unless the jobs map carries the
+    literal '"<job>": false': a missing map or entry (the selection failed, or
+    an event the script did not see) runs everything, and `!cancelled()` keeps
+    a failed selection from skipping the job (a skipped job would satisfy the
+    required check). The gate is a substring test on purpose: in the
+    expression language a missing map entry is null, and null compares equal
+    to false, so `fromJSON(map)[job] != false` skipped every gated job on the
+    first push to main after the gate landed."""
     jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
     for job in select_pr_tests.JOB_PREFIXES:
         if job == "windows-process-containment":
             continue
         assert jobs[job]["needs"] == "select-tests", job
         assert jobs[job]["if"] == (
-            "${{ !cancelled() && fromJSON(needs.select-tests.outputs.jobs || '{}')"
-            f"['{job}'] != false }}}}"
+            "${{ !cancelled() && !contains(needs.select-tests.outputs.jobs, "
+            f"'\"{job}\": false') }}}}"
         ), job
     # The Windows job is a named matrix: a skipped job would not expand its
     # matrix and the required context would vanish, so its steps are gated.
     windows = jobs["windows-process-containment"]
     assert windows["needs"] == "select-tests" and windows["if"] == "${{ !cancelled() }}"
-    gate = "fromJSON(needs.select-tests.outputs.jobs || '{}')['windows-process-containment']"
+    gate = "contains(needs.select-tests.outputs.jobs, '\"windows-process-containment\": false')"
     assert windows["steps"][0]["name"] == "Not needed on this pull request"
-    assert windows["steps"][0]["if"] == f"{gate} == false"
+    assert windows["steps"][0]["if"] == gate
     for step in windows["steps"][1:]:
-        assert step["if"] == f"{gate} != false", step.get("name") or step.get("uses")
+        assert step["if"] == f"${{{{ !{gate} }}}}", step.get("name") or step.get("uses")
+
+
+def test_the_gate_literal_is_how_the_script_writes_the_map():
+    """The workflow looks for '"<job>": false' verbatim, so the map must keep
+    json.dumps' default separators and name every gated job."""
+    written = json.dumps(_jobs(docker=True))
+    assert '"docker": false' not in written
+    assert '"audit": false' in written
+    assert set(_jobs()) == set(select_pr_tests.JOB_PREFIXES)
 
 
 # --- the git range ---------------------------------------------------------
@@ -322,6 +335,21 @@ def test_cli_writes_the_selection_and_the_workflow_outputs(repo, tmp_path, capsy
     assert json.loads(tail.rsplit("jobs=", 1)[1]) == dict.fromkeys(select_pr_tests.JOB_PREFIXES, True)
 
 
+def test_cli_full_selects_everything_and_names_every_gated_job(tmp_path, capsys):
+    """The non-pull-request events: the whole suite and a complete jobs map."""
+    github_output = tmp_path / "github_output"
+    rc = select_pr_tests.main([
+        "--full", "push: the test legs run the whole suite", "--github-output", str(github_output),
+    ])
+    assert rc == 0
+    written = github_output.read_text(encoding="utf-8")
+    assert written.startswith("mode=full\npaths=[]\njobs=")
+    assert json.loads(written.split("jobs=", 1)[1]) == dict.fromkeys(select_pr_tests.JOB_PREFIXES, True)
+    stdout = capsys.readouterr().out
+    assert "mode=full paths=0 jobs skipped=none" in stdout
+    assert "push: the test legs run the whole suite" in stdout
+
+
 # --- the real repository ---------------------------------------------------
 
 
@@ -377,9 +405,12 @@ def test_ci_pull_request_legs_take_the_selection_and_the_queue_runs_everything()
     assert choose["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
     run = choose["run"]
     assert 'if [ "$EVENT_NAME" != "pull_request" ]; then' in run
-    assert "printf 'mode=full\\npaths=[]\\njobs={}\\n' >> \"$GITHUB_OUTPUT\"" in run
+    # Every other event goes through the script too, so the jobs map names
+    # every gated job (a hand-written `jobs={}` skipped them all on main).
+    assert re.search(r'python3 scripts/select_pr_tests\.py \\\n\s+--full "\$EVENT_NAME: ', run)
+    assert "jobs=" not in run
     assert 'python3 scripts/select_pr_tests.py --git "$BASE_SHA" "$HEAD_SHA"' in run
-    assert '--github-output "$GITHUB_OUTPUT"' in run
+    assert run.count('--github-output "$GITHUB_OUTPUT"') == 2
 
     test = jobs["test"]
     assert test["needs"] == "select-tests"

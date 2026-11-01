@@ -162,9 +162,20 @@ test('private plans survive reload, recover an unconfirmed pilot, park and erase
   await expect(page.locator('#ekko-plans-list')).toContainText('No saved plans in this view');
   await page.getByLabel('Show saved plans').selectOption('parked');
   await expect(page.locator('#ekko-plans-list')).toContainText('Reconcile the weekly sales ledger');
+  // The plan leaves the page at once and the toast offers Undo; the removal
+  // is sent only when the Undo time is up.
   await page.getByRole('button',{name:'Remove this saved plan'}).click();
-  await page.getByRole('button',{name:'Remove plan',exact:true}).click();
   await expect(page.locator('#ekko-pilot')).toBeHidden();
+  await expect(page.locator('#ekko-plan-details')).toHaveText('');
+  await expect(page.locator('#ekko-plans-list')).toContainText('No saved plans in this view');
+  await page.getByRole('button',{name:'Undo',exact:true}).click();
+  await expect(page.locator('#ekko-plans-list')).toContainText('Reconcile the weekly sales ledger');
+  await expect(page.locator('#ekko-pilot')).toBeVisible();
+  await page.getByRole('button',{name:'Remove this saved plan'}).click();
+  await expect(page.locator('#ekko-pilot')).toBeHidden();
+  await expect(page.locator('.mv-toast--undo')).toBeHidden({timeout:15000});
+  await page.getByRole('button',{name:'Refresh saved plans'}).click();
+  await expect(page.locator('#ekko-plans-list')).toContainText('No saved plans in this view');
   await expect(page.locator('#ekko-plan-details')).toHaveText('');
   expect(await (await request.get('/api/v1/flows')).json()).toEqual(definitions);
   expect((await (await request.get('/api/v1/ekko/candidates')).json()).progress.activities).toBe(4);
