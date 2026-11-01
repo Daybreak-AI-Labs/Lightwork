@@ -102,13 +102,15 @@ def test_named_and_token_callers_cannot_inherit_legacy_local_label(local_runs, m
 
 @pytest.mark.asyncio
 async def test_flow_stream_rechecks_authority_before_next_snapshot(local_runs, monkeypatch):
-    from maverick_dashboard import api, auth
+    from maverick_dashboard import api, auth, flows_api
     _, run = local_runs
     request = _request()
     async def connected():
         return False
     request.is_disconnected = connected
-    monkeypatch.setattr(api, "_require_flows", lambda: None)
+    # The stream handler lives in flows_api and calls its own _require_flows;
+    # require_permission is reached through the api seam, so it is patched there.
+    monkeypatch.setattr(flows_api, "_require_flows", lambda: None)
     calls = []
     def authority(request, permission):
         calls.append(permission)
