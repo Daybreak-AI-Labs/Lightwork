@@ -100,8 +100,8 @@ def client_language_counts() -> dict:
 
 
 def non_python_share() -> float:
-    """Fraction of recorded clients that are non-Python (0.0–1.0). The number the
-    decision gate reads; 0.0 when nothing is recorded."""
+    """Fraction of recorded clients that are non-Python (0.0–1.0); 0.0 when
+    nothing is recorded."""
     counts = client_language_counts()
     total = sum(counts.values())
     if total <= 0:

@@ -83,7 +83,6 @@ Fleet learning across tenants is explicitly deferred.
 - **Voice channel v2 adapters.** The streaming-ASR and barge-in session layer
   (`maverick_channels.streaming_voice`) has shipped; real streaming-ASR and
   playback adapters still need to be plugged into its seams.
-- **Language-bindings measurement.** See [Decisions](#decisions) below.
 
 ## Packaging and release
 

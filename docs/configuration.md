@@ -223,7 +223,7 @@ keep_last = 5
 # Consent-gated, OFF by default. When true, the MCP server tallies a coarse
 # language bucket from each client's User-Agent (typescript/go/rust/c#/java/
 # python) into a local counts file — no request content, no identifiers,
-# nothing uploaded. Feeds the language-bindings decision gate.
+# nothing uploaded. It shows you which languages your MCP clients use.
 # The wizard asks for consent in its Analytics step (`maverick init`).
 mcp_client_language = false
 

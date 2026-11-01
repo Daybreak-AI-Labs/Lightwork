@@ -7154,17 +7154,17 @@ def pick_analytics() -> dict[str, Any]:
     When granted, the MCP server tallies a coarse language bucket from each
     client's User-Agent (typescript / go / rust / c# / java / python) into a
     local counts file — no request content, no identifiers, nothing leaves
-    the machine. The tally feeds the Q1-2027 language-bindings gate
-    (``maverick.mcp_analytics.non_python_share()``). Returns a dict written
-    under ``[analytics]``.
+    the machine. The operator reads it with
+    ``maverick.mcp_analytics.client_language_counts()`` and
+    ``non_python_share()``. Returns a dict written under ``[analytics]``.
     """
     console.print()
     console.print(
         "[dim]Optional: count which languages drive this agent over MCP "
         "(a coarse bucket from each client's User-Agent). Counts stay in a "
         "local file — no request content, no identifiers, nothing is "
-        "uploaded. The tally feeds the decision on funding native client "
-        "libraries; OFF by default.[/dim]"
+        "uploaded. It shows you which languages your MCP clients use; OFF "
+        "by default.[/dim]"
     )
     if not _q_confirm("Count MCP client languages locally?", default=False):
         return {}

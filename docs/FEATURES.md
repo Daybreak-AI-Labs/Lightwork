@@ -3543,8 +3543,8 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `wrap_crewai_tool` adapt their tools into Lightwork `Tool`s (duck-typed,
   lazy imports, actionable install hints).
 - **MCP-client language analytics** (`mcp_analytics.py`) — opt-in, consent-gated
-  tally of client language (from the User-Agent) that feeds the language-bindings
-  decision gate (`non_python_share()`); off by default, consent step in the
+  local tally of client language (from the User-Agent), read with
+  `client_language_counts()` and `non_python_share()`; off by default, consent step in the
   installer wizard (`maverick init` → Analytics).
 
 ## Safety & security

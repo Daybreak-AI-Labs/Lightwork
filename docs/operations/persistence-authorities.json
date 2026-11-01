@@ -7421,7 +7421,7 @@
       "path": "packages/maverick-core/maverick/mcp_analytics.py",
       "contract": "derived",
       "owner": "packages/maverick-core/maverick/mcp_analytics.py",
-      "purpose": "Opt-in MCP-client language analytics — the language-bindings decision gate.",
+      "purpose": "Opt-in MCP-client language analytics — a local tally of the languages MCP clients use.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
