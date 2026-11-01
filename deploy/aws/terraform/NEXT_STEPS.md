@@ -67,6 +67,37 @@ terraform version || {
 }
 ```
 
+### 1b. Create the untracked operator inputs
+
+`oidc.auto.tfvars` is tracked and holds only non-personal configuration. The
+two inputs that identify people are read from `local.auto.tfvars`, which git
+ignores:
+
+```bash
+cp deploy/aws/terraform/local.auto.tfvars.example deploy/aws/terraform/local.auto.tfvars
+# fill in dashboard_admins (the break-glass Auth0 principals) and email_from
+```
+
+An existing deployment must get this file before its next `terraform apply`,
+or the plan removes the break-glass admins and switches platform email to the
+`variables.tf` default from-address. A running deployment's current values
+are the `MAVERICK_DASHBOARD_ADMINS` and `EMAIL_FROM` environment variables of
+its task definition, whose family is `<project>-<environment>`:
+
+```bash
+aws ecs describe-task-definition --task-definition lightwork-prod \
+  --query "taskDefinition.containerDefinitions[0].environment"
+```
+
+Two further protections are part of the stack and need nothing from you:
+every Secrets Manager entry keeps a 7-day recovery window (restore with
+`aws secretsmanager restore-secret`; an intentional teardown that must reuse
+a name at once deletes with `--force-delete-without-recovery` first), and the
+state volume has AWS Backup enabled (daily, 35-day retention, default vault).
+The deployer identity is bound to the deploy region and can never delete the
+database, its snapshots or the state volume; retiring those is a separately
+reviewed operation under a different identity.
+
 ### 2. Apply the stack
 
 **Critical gotcha:** the `aws login` credential store (`~/.aws/login/`) is a
@@ -152,6 +183,24 @@ aws secretsmanager put-secret-value \
   --secret-string 'sk-ant-...' \
   --profile lightwork --region us-east-2
 ```
+
+### 4b. Pin the image you just built (recommended)
+
+The repository is MUTABLE and `image_tag` defaults to `latest`, so a service
+follows whatever is pushed under that tag on its next task start. To run exactly
+the image CodeBuild produced, read its digest and set `image_digest`:
+
+```bash
+aws ecr describe-images --repository-name lightwork --region us-east-2 \
+  --image-ids imageTag=latest --query 'imageDetails[0].imageDigest' --output text
+# -> sha256:...; then in local.auto.tfvars:
+#    image_digest = "sha256:..."
+terraform apply
+```
+
+The task definition then names `repository@digest`; a later push to `latest`
+changes nothing until you update the digest. Clear the variable to follow the
+tag again.
 
 ### 5. Make sure ECS picks up the pushed image + new key
 
