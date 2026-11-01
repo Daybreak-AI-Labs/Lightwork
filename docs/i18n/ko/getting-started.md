@@ -6,9 +6,9 @@
 
 ## 설치
 
-고객 설치에는 운영체제에 맞는 서명된 파일을 [파일이 첨부된 GitHub 릴리스](https://github.com/Daybreak-AI-Labs/Lightwork/releases)에서 받으세요. 해당 릴리스의 체크섬과 서명을 확인한 뒤 `dashboard` 명령으로 실행하세요. [배포 안내](../../DISTRIBUTION.md)에 파일과 확인 절차가 나와 있습니다. 해당 플랫폼의 파일이 없다면 고객용 패키지를 요청하세요.
+Lightwork는 소스 코드에서 설치합니다. Python 3.10–3.12와 Git이 필요합니다. macOS, Linux, Windows용 명령은 [소스 설치 절차](../../source-install.md)에 나와 있습니다. 미리 빌드된 바이너리, PyPI 패키지, 컨테이너 이미지는 아직 게시되지 않았습니다. 태그가 지정된 릴리스는 [릴리스 페이지](https://github.com/Daybreak-AI-Labs/Lightwork/releases)에서 확인할 수 있습니다.
 
-고객 설치를 위해 전체 저장소를 복제하지 마세요. 내부 연구, 감사, 특허 문서도 포함됩니다. 여덟 패키지는 아직 PyPI에 일괄 게시되지 않았습니다. 이미 저장소 접근 승인을 받은 유지보수 담당자는 [개발용 설치 절차](../../internal/source-install.md)를 사용할 수 있습니다.
+그런 다음 `lightwork dashboard`를 실행하고 <http://127.0.0.1:8765>를 열어 소유자와 모델 제공자 설정을 마치세요.
 
 ## 첫 실행
 

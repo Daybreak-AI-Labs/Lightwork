@@ -2,28 +2,26 @@
 
 ## Install
 
-Request a [customer package](mailto:chris@daybreakailabs.com?subject=Lightwork%20customer%20package)
-for your operating system. It should include the Lightwork binary, its `.sig`
-and `.pem` files, and a checksum manifest. Verify the checksum and exact-tag
-Sigstore identity before running it, using the instructions supplied with that
-package. A source tag alone is not an installable customer release.
+Lightwork is installed from source, with Python 3.10–3.12 and Git. Follow
+[Install from source](source-install.md): it clones the repository, creates a
+virtual environment and installs the eight Lightwork packages together with
+`scripts/install_release_cohort.py`. The guide gives the commands for macOS,
+Linux and Windows PowerShell, and the checks to run afterwards.
 
-Run the verified binary with its `dashboard` command and open the local address
-it prints. The current filenames are `maverick-windows-x86_64.exe` on Windows,
-`maverick-macos-arm64` on Apple Silicon, and `maverick-linux-x86_64` on Linux.
-The dashboard guides owner sign-in and provider setup. A provider account,
-credentials, API credits and any external integration prerequisites still need
-their own authorization and validation.
+No prebuilt binary, PyPI package or container image is published yet. Tagged
+releases are listed on the
+[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases); check
+out a tag to install that release instead of `main`.
 
-Do not clone the full repository to install for a customer: a clone also copies
-internal research, audit evidence and patent documents. The eight-package
-public PyPI cohort is not yet published. Maintainers who already have approved
-repository access can follow the separate engineering source-install procedure
-in the private repository.
+Run `lightwork dashboard` and open <http://127.0.0.1:8765>. The dashboard
+guides owner sign-in and provider setup. A provider account, credentials, API
+credits and any external integration prerequisites still need their own
+authorization and validation. The command-line tool is installed under two
+names, `lightwork` and `maverick`; the examples below use `maverick`.
 
 ## First run
 
-In the desktop app, open **Start → Set up named sign-in** before inviting a
+In the dashboard, open **Start → Set up named sign-in** before inviting a
 team. On a fresh local installation, the owner chooses an email label and a
 local passphrase. This closes anonymous administrator access and opens the
 existing **Users** invitation controls. The email is a local identity label;
@@ -47,7 +45,7 @@ incomplete claim keeps anonymous access closed, and restore cannot silently
 replace it with a different owner. Login never restores a demoted or removed
 owner's privileges.
 
-The source-install command-line workflow remains available:
+The setup wizard and its checks also run from the command line:
 
 ```bash
 maverick init
@@ -62,8 +60,10 @@ another limit or none. **Settings → Task limits** can change that choice later
 Usage remains metered, and organization allowances remain independent. See
 [task limits and spend accounting](task-limits.md).
 
-Start with a task that works even when file changes and program execution are
-off:
+If setup did not find a running Docker or Podman, it switched off file changes
+and program execution: the fallback `local` backend would run commands directly
+on this computer without isolation. Start with a task that works even when
+those actions are off:
 
 ```bash
 maverick start "Draft a one-page plan to reduce our customer support response time without adding headcount. State your assumptions and the facts you need from me."

@@ -1,13 +1,14 @@
-# Security & compliance data room
+# Security and compliance evidence map
 
-A single entry point for technical and security due diligence. Each row maps a
+A single entry point for technical and security review. Each row maps a
 question a reviewer will ask to the artifact that answers it and, where it
 exists, the command that **verifies** the claim on a live install — so a "yes"
 can be exercised, not just asserted.
 
-This page is deliberately honest about status: **code-enforced** controls ship
-and are testable today; **company-process** controls are owned outside this
-repo; **in progress** items are named, not implied.
+This page separates status explicitly: **code-enforced** controls ship and are
+testable today; **organizational** controls belong to the operating
+organization, outside this repository; items **not yet verified against live
+services** are named, not implied.
 
 ## Posture in one paragraph
 
@@ -18,12 +19,10 @@ hard no-egress boundary additionally requires sandbox and host/OS/VPC policy
 (see [security-overview.md](security-overview.md)). Safety is defense-in-depth
 (detection + action-layer containment), measured and reproducible
 ([shield benchmark](../security/shield-benchmark.md)). Evidence is
-tamper-evident (Ed25519 hash-chained audit). The product is proprietary,
-commercially licensed software ([LICENSE](../../LICENSE)). SOC 2 Type II and a
-third-party penetration test are in progress; the code controls those reports
-rely on are in place and verifiable now.
+tamper-evident (Ed25519 hash-chained audit). Lightwork is licensed under the
+Apache License 2.0 ([LICENSE](../../LICENSE)).
 
-## Diligence map
+## Evidence map
 
 | Area | What reviewers ask | Artifact | Verify |
 |---|---|---|---|
@@ -33,13 +32,13 @@ rely on are in place and verifiable now.
 | **Audit & evidence** | Tamper-evident, exportable logs? | [security-overview.md §Audit](security-overview.md#audit--evidence) | `maverick audit verify` (validates the hash chain); `maverick audit export` |
 | **Threat model** | What's defended, what isn't? | [threat-model.md](../security/threat-model.md) (STRIDE, trust boundaries, out-of-scope) | n/a (design doc; cross-referenced by the test suites) |
 | **AI/agent safety** | Prompt-injection / unsafe actions? | [shield-benchmark.md](../security/shield-benchmark.md) (layered detection + a decode/defang pre-pass that defeats base64/hex/homoglyph obfuscation on input, tool-call, and output surfaces + confirm-gated writes + container-isolated shell + budget caps) | `python benchmarks/security/detector_score.py`; latency/ReDoS CI gate |
-| **Roster governance invariants** | Do the safety rails hold across *every* agent? | Roster-wide governance invariant test suite — six invariants verified across all 2,020 specialist packs (tool-reachability, autonomy dial, capability attenuation, compartment isolation, hard refusals, budget caps), each fault-injected with a non-vacuous control (property-fuzzed up to 5,000 iterations), plus hostile-argument fuzzing of all connectors/tools | governance invariant suite in CI (each invariant has a fault-injection control proving it is non-vacuous) |
+| **Roster governance invariants** | Do the safety rails hold across *every* agent? | Roster-wide governance invariant test suite — six invariants verified across all 2,031 built-in specialist packs (tool-reachability, autonomy dial, capability attenuation, compartment isolation, hard refusals, budget caps), each fault-injected with a non-vacuous control, plus hostile-argument fuzzing of all connectors/tools | governance invariant suite in CI (each invariant has a fault-injection control proving it is non-vacuous) |
 | **Vulnerability mgmt** | Deps, SAST, secrets? | [audit-readiness.md §Static-analysis gates](../security/audit-readiness.md#4-reproducible-verification-harness) | `pip-audit`; `bandit`; detect-secrets baseline; all blocking in CI |
 | **Supply chain** | SBOM, provenance, third-party code? | SBOM produced in CI (CycloneDX); plugin tool-call isolation under enterprise + **content-hash lockfile** checks (drift refused after a lockfile exists; plugin import/discovery still runs in-process) | CI `audit` job artifact; `[plugins] isolation` / `lock_policy` |
 | **SOC 2 readiness** | Control coverage + gaps? | [soc2-controls.md](../compliance/soc2-controls.md) (CC1–CC9, A/PI/C/P mapping + honest gap list) | `python -c "from maverick.soc2 import collect_soc2_evidence as c; print(c())"` |
 | **Deployment / topology** | How does it run in our env? | [security-overview.md §Reference architecture](security-overview.md#reference-architecture-self-host--air-gap) (laptop / VPC / k8s / air-gap) | `maverick enterprise verify` on the target host |
 | **Regulatory mapping** | GDPR / EU AI Act / DSAR? | [regulated-deployment.md](../regulated-deployment.md); `ai_act.py`; DSAR via `dsar.py` | `maverick compliance --strict` |
-| **IP / licensing** | What are we acquiring? | [LICENSE](../../LICENSE) (proprietary), [editions.md](editions.md), dependency licenses | CI license gate (denies strong-copyleft) |
+| **Licensing** | Under what terms is the code available? | [LICENSE](../../LICENSE) (Apache-2.0), dependency licenses | CI license gate (denies strong-copyleft) |
 | **Data grounding / outbound connectors** | What primary-source data do agents reach, and can it leak? | Primary-source data grounding — 37 read-only, GET-only public-data connectors (SEC EDGAR, FRED, Treasury, World Bank, FDIC, Census, BLS, EIA, openFDA, NPPES, ClinicalTrials, USAspending, SAM.gov, CourtListener, Federal Register, GLEIF, OpenCorporates, NWS/NOAA, EPA, Climatiq, …) auto-granted per analyst pack by suite (`SUITE_DATA_CONNECTORS`, layered in `domain_capability`); low-risk, deferred, ON by default; separate from the 2,877 write-capable long-tail enterprise connectors | kill-switch `[workforce] data_grounding = false` / `MAVERICK_WORKFORCE_DATA_GROUNDING=off`; installer wizard step; hostile-argument connector fuzzing in the governance invariant suite |
 
 ## Honest status
@@ -65,22 +64,20 @@ deployment turns them on — `maverick compliance --strict` gates on the
 [`REGULATED_PROFILE`](../regulated-deployment.md), and the evidence snapshot must
 show `audit_log = ok` (signed), not `unsigned`.
 
-**Company-process controls (owned outside this repo):** change-management
+**Organizational controls (owned by the operating organization, outside this repo):** change-management
 policy, vendor/sub-processor management (incl. LLM providers), incident-response
 program, HR controls, physical/environmental security (inherited from the
 hosting provider's SOC 2), and a documented risk-assessment program. These are
 enumerated in [soc2-controls.md §Gap summary](../compliance/soc2-controls.md).
 
-**In progress (named, not implied):** SOC 2 Type II attestation and a
-third-party penetration test. OIDC, SAML SSO and SCIM provisioning all ship
-today (see [security-overview.md](security-overview.md)); SAML and SCIM have
-not yet been certified against a live identity provider, only against the
-protocol test suites in this repository.
+**Not yet verified against live services:** SAML SSO and SCIM provisioning ship
+today alongside OIDC (see [security-overview.md](security-overview.md)), but
+they have been tested only against the protocol test suites in this
+repository, not certified against a live identity provider. SOC 2 and
+penetration-test attestations require external auditors and are the operating
+organization's responsibility.
 
 ## Reproduce the whole verification pass
-
-> **Robustness hardening.** The stress sweep behind the governance invariant suite drove fixes now in code: connectors return an ERROR string (no longer raise) on a non-string op/path/query; `Skill.parse` raises `ValueError` (not `AttributeError`) on malformed/untrusted frontmatter; `format_money` degrades gracefully on a None/empty currency.
-
 
 ```bash
 maverick enterprise verify          # egress lock + at-rest sealing actually hold
@@ -91,4 +88,4 @@ python benchmarks/security/detector_score.py   # shield detection numbers (offli
 ```
 
 No hyperscaler dependency and no product telemetry; everything above runs inside
-the customer boundary.
+the operator's boundary.

@@ -6,9 +6,9 @@
 
 ## Instalação
 
-Para instalar o Lightwork para um cliente, baixe o arquivo assinado para seu sistema em uma [versão do GitHub com anexos](https://github.com/Daybreak-AI-Labs/Lightwork/releases). Verifique a soma e a assinatura da versão exata e execute o arquivo com o comando `dashboard`. O [guia de distribuição](../../DISTRIBUTION.md) informa os arquivos e as verificações. Se não houver arquivo para sua plataforma, solicite um pacote para clientes.
+O Lightwork é instalado a partir do código-fonte; você precisa de Python 3.10–3.12 e Git. Siga o [guia de instalação a partir do código-fonte](../../source-install.md), que traz os comandos para macOS, Linux e Windows. Ainda não há binários pré-compilados, pacotes no PyPI nem imagens de contêiner publicados. As versões com tag estão listadas na [página de versões](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
 
-Não clone o repositório inteiro para uma instalação de cliente: ele também contém documentos internos de pesquisa, auditoria e patentes. Os oito pacotes ainda não foram publicados juntos no PyPI. Mantenedores com acesso já aprovado ao repositório podem usar o [procedimento de instalação para engenharia](../../internal/source-install.md).
+Depois execute `lightwork dashboard` e abra <http://127.0.0.1:8765> para concluir a configuração do proprietário e do provedor de modelos.
 
 ## Primeira execução
 

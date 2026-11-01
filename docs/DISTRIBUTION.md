@@ -1,81 +1,88 @@
-# Distribution & Deployment — how Lightwork ships
+# Distribution and release artifacts
 
-> How a user gets Lightwork onto a Mac, Windows PC, Linux box, or a cloud
-> (Azure / AWS / GCP). The integrated platform ships as PyInstaller binaries or
-> a Python container; the four reduced standalone SKUs deliberately ship as
-> licensed, versioned source archives rather than pretending to be PyPI
-> distributions.
+> What a tagged Lightwork release produces, how to verify it, how to build the
+> same artifacts locally, and how to run the container on Azure, AWS or GCP.
 
-## TL;DR — what the release pipeline produces
+**Current status:** no prebuilt binary, PyPI package or container image has
+been published yet. Install from a clone of the repository with
+[`source-install.md`](source-install.md). The rest of this page describes what
+the release workflow is configured to produce once a release is cut, and how
+to build the same artifacts yourself.
 
-One tagged `release.yml` run emits the customer-facing artifacts below for
-**macOS (Apple Silicon), Windows, and Linux**, plus a cloud image:
+## What the release pipeline produces
 
-| Channel | Artifact | Who it's for | Source exposed? |
+One tagged `release.yml` run produces the artifacts below for
+**macOS (Apple Silicon), Windows, and Linux**, plus a container image:
+
+| Channel | Artifact | Typical use | Readable Python source? |
 |---|---|---|---|
-| **Single-file binary** | `maverick-macos-arm64`, `maverick-windows-x86_64.exe`, `maverick-linux-x86_64` | technical users / CI / servers | **Bundled Python bytecode** — reverse-engineerable |
+| **Single-file binary** | `maverick-macos-arm64`, `maverick-windows-x86_64.exe`, `maverick-linux-x86_64` | technical users / CI / servers | No — PyInstaller bundles Python bytecode |
 | **Container image** | `ghcr.io/daybreak-ai-labs/lightwork:<ver>` | **Azure / AWS / GCP**, k8s, on-prem Docker | **Yes** — installed Python remains readable |
-| **Reduced standalone SKU** | `lightwork-<sku>-<ver>.zip` | local evaluation of GRC / platform hunt / environment hunt / model-risk assurance | **Yes** — licensed source archive |
-| Supply-chain | Sigstore material for `release.yml` binaries, standalone archives, manifests, SBOMs, and the immutable container digest; `publish.yml` separately signs Python distributions/manifests | security / procurement review | n/a |
+| **Reduced standalone SKU** | `lightwork-<sku>-<ver>.zip` | local evaluation of GRC / platform hunt / environment hunt / model-risk assurance | **Yes** — versioned source archive |
+| Supply-chain | Sigstore material for `release.yml` binaries, standalone archives, manifests, SBOMs, and the immutable container digest; `publish.yml` separately signs Python distributions/manifests | security review | n/a |
 
-`desktop.yml` separately builds an **unsigned authenticated source-bootstrap
-shell** as a private engineering workflow artifact. It requires network access
-and GitHub authorization to clone the pinned private commit, installs readable
-source, and is neither self-contained nor attached to product releases.
+The four reduced standalone SKUs are source archives of four demo
+applications (`demo/grc-concierge`, `demo/platform-threat-hunter`,
+`demo/environment-threat-hunter` and `demo/model-risk-ai-assurance-officer`).
+They are **not PyPI packages** and not a full-platform source distribution.
+Their release manifests drive deterministic ZIP builds, and each release
+carries SHA-256 checksums, a CycloneDX SBOM, and Sigstore signature and
+certificate files for them. `publish.yml` separately contains an opt-in,
+allowlisted Trusted Publishing path for the eight workspace Python
+distributions; the standalone archives never enter it.
 
-Do not grant a customer full-repository access or send a Git archive solely for
-installation. A clone includes internal research, audit evidence and patent
-documents outside the runtime package trees. The four reduced SKU archives are
-explicitly allowlisted demos, not a full-platform source distribution. If no
-signed binary is attached for the customer's platform, the release process has
-not provided that customer installation path; request an approved package.
-
-The standalone SKUs are **not PyPI packages**. Their explicit release manifests
-drive deterministic ZIP builds and each GitHub Release carries SHA-256 checksums,
-a CycloneDX SBOM, and Sigstore signature/certificate files. `publish.yml`
-separately contains an opt-in, allowlisted Trusted Publishing path for the real
-workspace Python distributions; standalone source archives never enter it.
-
-**What "compiled" means (be honest with buyers):** PyInstaller bundles Python
-**bytecode**, not source. That stops casual copying and means no `pip install`
-gives anyone the packages — but a determined reverse-engineer can decompile
-bytecode. If stronger IP protection is required, compile with **Nuitka**
-(Python → C → native) or keep crown-jewel logic server-side/license-gated. See
-§Hardening.
+`desktop.yml` separately builds an **unsigned source-bootstrap shell** (Tauri)
+as a workflow artifact. It needs network access to clone a pinned commit and
+installs readable source; it is neither self-contained nor attached to
+releases.
 
 ---
 
-## macOS (incl. Mac Mini)
+## Verifying a release artifact
 
-**Option A — download the published single-file binary:**
+Each binary, standalone archive, checksum manifest and SBOM is published with a
+detached `.sig` and `.pem`. `deploy/verify-release.sh` checks the keyless
+Sigstore signature and pins the signing identity to the release tag you expect:
+
+```bash
+deploy/verify-release.sh maverick-linux-x86_64 <release-tag>
+```
+
+The container image is verified by digest; see
+[Cut a release](#cut-a-release) below.
+
+---
+
+## macOS
+
+**Option A — download a published single-file binary** (once a release
+carries one):
 1. Download `maverick-macos-arm64` and its `.sig`/`.pem` files from the release.
 2. Verify the checksum and Sigstore identity with `deploy/verify-release.sh`.
 3. Mark it executable and run it from Terminal.
 
-**Option B — build it locally on the Mac Mini** (no release needed; what we run
-tomorrow): `scripts/build-macos-app.sh` — installs the packages non-editable
-from this source tree, PyInstaller-compiles them into a `maverick` binary, and
-wraps it into a double-click `Lightwork.app` that opens the local dashboard.
-Compiled, no PyPI, no source shipped. See the script header for prerequisites
-(Homebrew + `python@3.12`).
+**Option B — build it locally:** `scripts/build-macos-app.sh` installs the
+packages non-editable from this source tree, compiles them into a `maverick`
+binary with PyInstaller, and wraps it into a double-click `Lightwork.app` that
+opens the local dashboard. See the script header for prerequisites (Homebrew
+and `python@3.12`).
 
-**Footprint:** ~200–300 MB app, no GPU, runs on any Apple-Silicon Mac Mini. The
-model is called over an API (Anthropic / Azure OpenAI / Bedrock) **or** run
-locally via Ollama for a fully air-gapped box (`maverick init` → choose Ollama).
+No GPU is needed. The model is called over an API (Anthropic / Azure OpenAI /
+Bedrock) **or** run locally via Ollama for a fully air-gapped machine
+(`maverick init` → choose Ollama).
 
 ---
 
-## Windows & Linux
+## Windows and Linux
 
-The product release currently publishes the standalone binary on each OS:
+The release workflow builds the standalone binary on each OS:
 
 - **Windows:** `maverick-windows-x86_64.exe`.
 - **Linux:** `maverick-linux-x86_64`.
 
 The Tauri `.msi` / NSIS `.exe` / `.AppImage` / `.deb` outputs remain
-engineering-only authenticated source-bootstrap artifacts until a compiled
-payload, reliable release attachment, platform signing, and real-machine tests
-exist.
+engineering-only source-bootstrap artifacts until a compiled payload, reliable
+release attachment, platform signing, and real-machine tests exist.
 
 To build locally on either OS, the recipe is identical to the Mac script:
 install the packages non-editable, then `pyinstaller --clean --noconfirm
@@ -83,13 +90,22 @@ install the packages non-editable, then `pyinstaller --clean --noconfirm
 run **on the target OS** — a Windows exe builds on Windows, a Linux binary on
 Linux. CI's `release.yml` does all three on hosted runners.
 
+`scripts/build-nuitka.sh` is an alternative local build that compiles the
+Python to C and then to a native single-file binary with Nuitka. It is not a
+cross-compiler either, and its output is unsigned.
+
 ---
 
-## Cloud: Azure / AWS / GCP (the "drop it in" path)
+## Cloud: Azure / AWS / GCP
 
-The container image is the universal cloud artifact. Pull it and run — it needs
-only a mounted config dir and a model key (or a private model endpoint your
-cloud already offers, e.g. Azure OpenAI / Bedrock).
+The container image is the universal cloud artifact. It needs only a mounted
+config directory and a model key (or a private model endpoint your cloud
+already offers, e.g. Azure OpenAI / Bedrock).
+
+The examples use the image name that `release.yml` publishes. Until a release
+image exists, build the image yourself
+(`docker build -f deploy/docker/Dockerfile -t <registry>/lightwork:<tag> .`),
+push it to a registry your cloud can pull from, and substitute that name.
 
 ```bash
 # the image (built + pushed by release.yml)
@@ -104,7 +120,7 @@ docker run -d -p 8765:8765 \
   -v /srv/maverick:/home/maverick/.maverick \
   ghcr.io/daybreak-ai-labs/lightwork:latest \
   dashboard --host 0.0.0.0 --port 8765
-# Fargate: same image in a task definition; 0.5 vCPU / 1–2 GB is plenty.
+# Fargate: same image in a task definition.
 ```
 
 **Azure** — Container Apps (serverless) or AKS:
@@ -118,8 +134,7 @@ az containerapp create -n lightwork -g <rg> --environment <env> \
   --env-vars ANTHROPIC_API_KEY=secretref:model-key \
              MAVERICK_DASHBOARD_TOKEN=secretref:dashboard-token \
   --cpu 0.5 --memory 1Gi
-# Point at Azure OpenAI (already in-tenant) instead of Anthropic — zero new
-# model-vendor review for a bank that's already approved Azure OpenAI.
+# To keep model calls inside the tenant, configure Azure OpenAI instead of Anthropic.
 ```
 
 **GCP** — Cloud Run:
@@ -143,16 +158,14 @@ mount a PVC at `/home/maverick/.maverick` for the world DB + audit chain.
 SQLite is the default; Postgres adds database HA/isolation and supports separate
 remote-worker scale, but not multiple dashboard/serve replicas yet.
 
-Governance + data stay in the customer's tenant; only the model call goes out
-(and even that can be an in-tenant endpoint). That's the whole self-hosted
-pitch, and the container is what makes it a 5-minute deploy on any cloud.
+Governance and data stay in your own cloud account; only the model call goes
+out, and that can be an endpoint inside the same account.
 
 ---
 
-## Cut a release (populate the download page)
+## Cut a release
 
-Downloads only exist once a release is cut. The pipeline is already wired; it
-just needs to run on a tag:
+Downloads exist only once a release is cut. The pipeline runs on a tag:
 
 ```bash
 # Manual dispatch must itself run from the exact tag. Checking out the tag later
@@ -183,34 +196,28 @@ cosign verify "$IMAGE@$DIGEST" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-**Before cutting a real (public) release:** merge the intended code to `main`,
-decide signing (below), and bump the version. A release is public and
-outward-facing — cut it deliberately.
+**Before cutting a release:** merge the intended code to `main`, decide on
+platform signing (below), and bump the version. A release is public; cut it
+deliberately.
 
 ---
 
-## Signing / notarization (removes the scary prompts)
+## Signing and notarization
 
 Release artifacts carry Sigstore identity/integrity material, but current
-executables are **not platform code-signed or notarized**. Operating systems may
-still show an unknown-developer warning. For design partners:
+executables are **not platform code-signed or notarized**, so operating systems
+may show an unknown-developer warning.
 
-- **macOS:** Apple Developer Program membership ($99/yr) → a Developer ID cert →
-  notarization. Wire the cert + notary creds as CI secrets; `tauri build` and the
-  binary both get signed + stapled.
-- **Windows:** an Authenticode code-signing cert (OV ~$200–400/yr, or EV) → sign
-  the `.msi`/`.exe`.
+- **macOS:** platform signing needs an Apple Developer ID certificate and
+  notarization. Wire the certificate and notary credentials as CI secrets;
+  `tauri build` and the binary both get signed and stapled.
+- **Windows:** platform signing needs an Authenticode code-signing certificate
+  to sign the `.msi`/`.exe`.
 - Already in place: **Sigstore** keyless signatures (`.sig`/`.pem`) on the raw
   release binaries, standalone archives, checksums, and SBOMs — verifiable with
   `cosign verify-blob` (`deploy/verify-release.sh`). The container digest is
   signed with `cosign sign`; the engineering Tauri bundles are not covered.
 
-## Hardening (stronger IP protection, if needed)
-
-- **Nuitka** compile (`nuitka --standalone --onefile`) → native machine code,
-  far harder to decompile than PyInstaller bytecode.
-- Keep the highest-value logic (e.g. proprietary pack generation / evaluator)
-  **server-side** behind a licensed API, so the shipped binary orchestrates but
-  doesn't contain it.
-- License-gate the binary (offline license key checked at boot) to control who
-  can run it, independent of who can copy it.
+The local build scripts (`scripts/build-macos-app.sh`,
+`scripts/build-nuitka.sh`) produce unsigned output; sign it as above before
+distributing it.

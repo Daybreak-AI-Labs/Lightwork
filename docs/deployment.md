@@ -4,16 +4,15 @@ Four deployment targets, all driven by the same `maverick init` wizard.
 
 ## Desktop
 
-For most users, request the signed binary for the target operating system in a
-[customer package](mailto:chris@daybreakailabs.com?subject=Lightwork%20customer%20package).
-Verify its checksum and exact-tag signature, run its `dashboard` command, and
-complete setup in the local application. A tag without that binary is not a
-customer installation path. The eight-package PyPI cohort remains unpublished;
-do not install Lightwork distribution names from a public index. Full-repository
-clones include internal research, audit and patent documents and are restricted
-to authorized engineering source installs.
+Install Lightwork from a clone of the repository with the
+[source installation guide](source-install.md), run `lightwork dashboard`, and
+complete setup in the dashboard. No prebuilt binary, PyPI package or container
+image is published yet; tagged releases are listed on the
+[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases). The
+eight-package cohort is not on PyPI, so do not install Lightwork distribution
+names from a public package index.
 
-Runs as your user. Application state defaults to `~/.maverick/`; customer task
+Runs as your user. Application state defaults to `~/.maverick/`; task
 files use the selected sandbox workspace. Guided setup proposes
 `~/Documents/Maverick`, while advanced setup proposes `~/maverick-workspace`;
 `MAVERICK_WORKDIR` supplies a deployment default and an explicit saved
@@ -35,22 +34,25 @@ world backend for the same share links to work on every replica; PostgreSQL alon
 does not replicate these locators. Include the directory in application-state
 backups. Expired locators are pruned in bounded batches when new links are made.
 
-**Artifact status:** a successful tagged release is configured to publish three single-file
-PyInstaller binaries, checksums, SBOMs, and Sigstore material; ask for the
-exact operating-system file and verification material before relying on one. The engineering
-bootstrap packages and the Windows customer package candidate
-are separate paths. The customer candidate includes the frozen runtime and
-offline WebView2 installer, but still requires publisher and clean-machine
+**Artifact status:** the release workflow is configured to attach three
+single-file PyInstaller binaries, checksums, SBOMs, and Sigstore material to a
+tagged release; none has been published yet. Before relying on a binary, check
+that the release lists the exact operating-system file and its verification
+material. The source-bootstrap packages and the Windows MSI installer candidate
+are separate paths. The MSI candidate includes the frozen runtime and offline
+WebView2 installer, but still requires publisher signing and clean-machine
 acceptance before release. Engineering bootstrap packages are
-not attached to product releases. Check the exact release asset inventory and
-its signature before describing a binary as available. Engineering source
-installation is not qualified customer delivery.
+not attached to product releases. See
+[`docs/DISTRIBUTION.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/DISTRIBUTION.md) for
+the full artifact list and verification steps.
 
 ## Docker
 
-Container deployments require licensed access to the Lightwork image registry.
-Authenticate with the credentials supplied for your deployment and use the
-approved, pinned image version in place of `latest` in this example.
+No container image is published yet. Build one from a clone of the
+repository with `docker build -f deploy/docker/Dockerfile -t lightwork:local .`
+and use that tag in place of `ghcr.io/daybreak-ai-labs/lightwork:latest` in
+this example. Once release images are published, use a pinned version rather
+than `latest`.
 
 ```bash
 docker run -it --rm \
@@ -90,11 +92,12 @@ The generated service uses the configured sandbox workdir and validates that
 the service account can use it. It does not assume that every setup selected
 `~/maverick-workspace`.
 
-The VPS installer is part of licensed deployment materials, not a public
-download. [Request a customer package](mailto:chris@daybreakailabs.com?subject=Lightwork%20VPS%20deployment),
-verify its included artifacts, and follow its version-specific installation
-instructions. Confirm the generated service and reverse proxy before exposing
-the dashboard to users.
+The VPS installer is `deploy/vps/install.sh`; its usage notes are at the top
+of the script, and
+[`deploy/vps/README.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/deploy/vps/README.md)
+describes how it renders the service. Fetch the script and check out the
+repository at the same full commit SHA, as the script's header shows. Confirm
+the generated service and reverse proxy before exposing the dashboard to users.
 
 ### Security-sensitive world-schema upgrades
 
