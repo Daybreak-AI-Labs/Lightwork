@@ -1,6 +1,6 @@
 """Schema migration tests: forward-only v1 -> v2 -> v3.
 
-Council surfaced that we'd shipped migrations without tests, so a future
+Migrations had shipped without tests, so a future
 breaking change could silently corrupt a user's ~/.maverick/world.db.
 
 These tests build a *legacy* schema on disk (no schema_version row, no

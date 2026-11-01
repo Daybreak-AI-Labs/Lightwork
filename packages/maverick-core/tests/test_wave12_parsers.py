@@ -1,6 +1,6 @@
-"""Wave 12: test-runner parser fixes.
+"""Test-runner parser fixes.
 
-Covers council findings F7a-F7e:
+Covers:
   - F7a: pytest re.search → last-match
   - F7b: jest doesn't strip ANSI
   - F7c: vitest summary differs from jest (pipe-separated)

@@ -1,6 +1,6 @@
 """Destructive-op confirm gates must fail CLOSED on stringy values.
 
-Council (Security + Architecture seats): 23 tools gated destructive ops with
+23 tools gated destructive ops with
 `if not args.get("confirm"):`. Because `not "false"` is False in Python, a
 `confirm: "false"` / `"0"` from a loose LLM or non-conforming MCP client
 slipped the gate and fired the live delete/refund/send. All 23 now route
@@ -15,7 +15,7 @@ from maverick.tools import as_bool
 
 _TOOLS_DIR = pathlib.Path(__file__).resolve().parents[1] / "maverick" / "tools"
 
-# The 23 tools the council flagged (every file that gated on the unsafe form).
+# The 23 tools (every file that gated on the unsafe form).
 _FIXED_TOOLS = [
     "airtable_tool", "asana_tool", "calendly_tool", "clickup_tool",
     "cloudflare_tool", "confluence_tool", "dropbox_tool", "dynamodb_tool",

@@ -181,7 +181,7 @@ schema) and put it in `benchmarks/example-skills/`. Users install with
 - Conventional commit subject (`feat:`, `fix:`, `docs:`, `refactor:`,
   `test:`, `chore:`).
 - Body explains the *why*, not the *what*. The diff shows what.
-- Reference the council finding or issue if applicable.
+- Reference the review finding or issue if applicable.
 
 ## Reporting bugs
 

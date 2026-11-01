@@ -9,8 +9,8 @@ def _adaptive_max_tokens_floor() -> int:
     """Headroom ceiling for AUTO-adaptive thinking (Opus 4.7/4.8, no explicit
     thinking_budget). Adaptive thinking bills as output (~5x input) and can
     spend up to max_tokens, so this floor is the worst-case output cost of
-    every non-thinking-role turn on the default model. 16384 (the May 26
-    council value) quadrupled the agent loop's 4096 for roles that never asked
+    every non-thinking-role turn on the default model. 16384 (the earlier
+    value) quadrupled the agent loop's 4096 for roles that never asked
     to think; 8192 keeps generous anti-empty-response headroom at half the
     ceiling. Tune via MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR (min 2048)."""
     from ..env_setting import env_or_config_int

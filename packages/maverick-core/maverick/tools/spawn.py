@@ -5,7 +5,7 @@ children in parallel via asyncio.gather and returns their findings.
 
 Both respect the swarm's max_depth and the shared budget.
 
-v0.2 (council AI-safety review): added a fan-out anomaly cap. An agent
+v0.2: added a fan-out anomaly cap. An agent
 asking to spawn 50 siblings burns budget before refusal triggers.
 ``MAVERICK_MAX_SWARM_FANOUT`` (default 8) caps the per-call branching
 factor. Excess agents are dropped with a warning posted to the
@@ -248,7 +248,7 @@ def spawn_subagent_tool(parent: Agent) -> Tool:
                 f"ERROR: per-goal spawn cap ({parent.ctx.max_total_spawns}) reached"
             )
 
-        # May 26 council fix (agent-loop audit #3): inherit max_steps
+        # Inherit max_steps
         # from the parent. Without this, sub-agents fall back to env
         # MAVERICK_MAX_STEPS or the 25 default — silently dropping the
         # operator's intent when the parent was constructed with a

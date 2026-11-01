@@ -5,7 +5,7 @@ completion." The dashboard's BackgroundTask, the REST API, the MCP
 server's maverick_start tool, and any future channel adapter all funnel
 through here.
 
-Council-flagged: the previous implementation was duplicated across
+The previous implementation was duplicated across
 ``dashboard/app.py``, ``dashboard/api.py``, and ``mcp/server.py`` with
 three different hardcoded budgets and divergent error handling.
 Extracting once means every adapter inherits the same concurrency cap,

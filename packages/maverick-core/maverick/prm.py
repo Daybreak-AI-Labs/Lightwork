@@ -21,7 +21,7 @@ Three reference implementations ship:
   * RemotePRM         — POSTs to a user-deployed AgentPRM endpoint
                         (interface ready, no inference in-process).
 
-Wave 7c: scaffold. Real RL pipeline + Klear-AgentForge / OpenResearcher
+Scaffold. Real RL pipeline + Klear-AgentForge / OpenResearcher
 trajectory ingestion is queued for v0.3.
 """
 from __future__ import annotations

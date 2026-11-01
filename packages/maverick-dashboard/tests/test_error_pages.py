@@ -1,4 +1,4 @@
-"""Branded 404 / 500 error pages — council polish pass."""
+"""Branded 404 / 500 error pages."""
 from __future__ import annotations
 
 import pytest

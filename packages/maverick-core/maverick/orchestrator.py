@@ -1171,7 +1171,7 @@ async def _build_orchestrator_brief(
     # Multi-turn: if this goal belongs to an ongoing conversation,
     # prepend the recent turn history so the orchestrator has context
     # for follow-up messages on the same channel.
-    # Council finding (Tier 0): persisted turns were re-injected
+    # Persisted turns were re-injected
     # unscanned, so a `user` message that passed scan_input once
     # could replay forever as a prompt-injection vector. Re-scan
     # each turn here and drop any that the shield now flags.
@@ -2222,7 +2222,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             )
 
         if result.error:
-            # Wave 12 hotfix: even when the agent loop errored (e.g. hit
+            # Even when the agent loop errored (e.g. hit
             # max_steps), it may have produced a usable patch via
             # str_replace_editor before exiting. salvage it.
             if result.final_patch and (
@@ -2379,7 +2379,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 f"[{budget.summary()}]"
             )
 
-        # Wave 12: prefer the rendered unified diff (set by the agent's
+        # Prefer the rendered unified diff (set by the agent's
         # FINAL handler when SEARCH/REPLACE blocks were applied) over
         # the raw FINAL text. Without this, extract_unified_diff on
         # downstream calls (best-of-N selector, harness CSV row) returns
@@ -2675,7 +2675,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         for _s in _finalize_specs:
             await _s.result()
 
-        # Wave 12 hotfix: in coding mode the orchestrator's return value
+        # In coding mode the orchestrator's return value
         # IS the benchmark CSV's `predicted_patch` after extract_unified_diff.
         # The trailing skill_note + budget summary then pollute the patch
         # (they sit AFTER the last hunk so `git apply` ignores them, but
@@ -3156,7 +3156,7 @@ async def run_goal_best_of_n(
             conversation_id=conversation_id,
         )
 
-    # Wave 12 (council F10c): per-attempt budget is RECOMPUTED each
+    # Per-attempt budget is RECOMPUTED each
     # iteration from REMAINING parent budget / REMAINING attempts.
     # When an early attempt crashes (spending only a fraction of its
     # quota) or finishes cheaply, the leftover redistributes to
@@ -3166,7 +3166,7 @@ async def run_goal_best_of_n(
     # — the (N-1)/N of unspent budget was lost.
     candidates: list[Candidate] = []
 
-    # Wave 11: heterogeneous best-of-N. Inter-model diversity beats
+    # Heterogeneous best-of-N. Inter-model diversity beats
     # intra-model temperature diversity on SWE-bench (RoBoN paper, arxiv
     # 2512.05542: +3.4pp over best individual at large N). The default
     # ladder is (Sonnet-cheap, Sonnet-warm, Opus) — first the cheap
@@ -3201,12 +3201,12 @@ async def run_goal_best_of_n(
         # attempt i's on-disk edits don't leak into i+1 (the loop reuses one
         # sandbox.workdir). No-op when the workdir isn't a local git repo.
         _reset_workdir_to_head(getattr(sandbox, "workdir", None))
-        # Wave 9 fix (council M12): respect parent dollar cap.
+        # Respect parent dollar cap.
         if budget.max_dollars is not None and budget.dollars >= budget.max_dollars * 0.95:
             log.info("best-of-N early break: parent budget 95%% spent")
             break
 
-        # Wave 12 (F10c): redistribute remaining budget across remaining
+        # Redistribute remaining budget across remaining
         # attempts. After crashes / early-cheap completions, the surviving
         # attempts get bigger caps instead of leaving budget on the table.
         remaining_attempts = len(ladder) - i
@@ -3249,7 +3249,6 @@ async def run_goal_best_of_n(
         _temp_token = set_sampling_temperature(float(per_temp))
         try:
             try:
-                # Wave 12 fix (council F14, biggest accuracy loss):
                 # Each best-of-N attempt MUST run against a fresh
                 # conversation history. The prior code passed the same
                 # `conversation_id` to every attempt, so attempt 2 read

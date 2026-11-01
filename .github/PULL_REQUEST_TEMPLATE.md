@@ -11,7 +11,7 @@ See CONTRIBUTING.md for the dev setup and house rules.
 
 ## Why
 
-<!-- The motivation. Link the council finding, issue, or strategic gap that this closes. -->
+<!-- The motivation. Link the review finding, issue, or gap that this closes. -->
 
 ## How
 
@@ -42,10 +42,10 @@ Only use this section to flag non-obvious design decisions or trade-offs.
 - [ ] **Safety invariants hold** (if you touched the agent loop or added a tool/sink): new tools go through `ctx.shield.scan_tool_call()`, long-running paths respect `Budget`, and all shell goes through `sandbox.exec()` (never `subprocess.run` directly).
 - [ ] **Surgical change** — didn't reformat or "improve" adjacent code; matched the existing style.
 
-## Council-flag triage
+## Related finding
 
-<!-- If this addresses a council review finding (architecture / security / UX / code quality
-     / translator / channels / docs / tests / deployment / strategic), reference it: -->
+<!-- If this addresses a review finding (architecture / security / UX / code quality
+     / docs / tests / deployment), reference it: -->
 
-- Council finding: ...
+- Finding: ...
 - Severity: ...

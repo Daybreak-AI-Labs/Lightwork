@@ -1,4 +1,4 @@
-"""Regression tests for adversarial-council round-3 (clean) fixes."""
+"""Regression tests for the review round-3 fixes."""
 from __future__ import annotations
 
 import asyncio

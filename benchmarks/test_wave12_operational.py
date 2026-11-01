@@ -1,4 +1,4 @@
-"""Wave 12 (council F11): operational hardening tests.
+"""Operational hardening tests.
 
 Covers:
   - F11a: SIGTERM handler installed + flag plumbing
@@ -95,7 +95,7 @@ class TestSigtermHandler:
         )
         assert result.returncode == 0
         assert b"--max-consecutive-failures" in result.stdout, (
-            "Wave 12 added a circuit-breaker flag — must surface in --help"
+            "the circuit-breaker flag must surface in --help"
         )
 
 

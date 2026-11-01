@@ -7,7 +7,7 @@ from inspect import Signature, signature
 
 from . import Tool
 
-# Wave 10 (S2): in benchmark opaque mode, refuse git subcommands that
+# In benchmark opaque mode, refuse git subcommands that
 # can leak the gold patch (the SWE-bench evaluator pre-applies the
 # bug commit to HEAD; the fix is reachable via `git log -p`, `git
 # show <commit>`, `git diff HEAD..main`, etc.). The list is the
@@ -54,7 +54,7 @@ _GIT_GOLD_LEAK_PATTERNS = [
         r"\bgit\s[^\n;&|]*?\blog\b.*?"
         r"(?:--format|--pretty)[=\s]\S*%H",
     ),
-    # Plumbing — Wave 12 hardening: full coverage including subcommands
+    # Plumbing: full coverage including subcommands
     # that the original list missed (rev-list, show-ref, ls-files,
     # fsck, update-ref, symbolic-ref).
     re.compile(r"\bgit\s[^\n;&|]*?\bcat-file\b"),
@@ -71,10 +71,10 @@ _GIT_GOLD_LEAK_PATTERNS = [
         r"(?:HEAD\^|HEAD~|main|master|origin)"
     ),
     # `git --git-dir=PATH` redirects to a foreign .git — block any
-    # use that names a path (Wave 12 hardening from agent 2's #3).
+    # use that names a path.
     re.compile(r"\bgit\s+--git-dir[=\s]+\S+"),
     # Any *consuming utility* against `.git/<sensitive>` paths.
-    # Wave 12 hardening (agent 2's #2): the prior allowlist (cat/
+    # The prior allowlist (cat/
     # head/tail/less/more/strings/hexdump/od) missed python/awk/xxd/
     # grep/sed/cp/mv/tar/rsync. Anchor on the .git/<file> token so
     # the rule fires regardless of who reads it.
@@ -104,7 +104,7 @@ _GIT_GOLD_LEAK_PATTERNS = [
 ]
 
 
-# Wave 11: block external network egress in opaque benchmark mode.
+# Block external network egress in opaque benchmark mode.
 # The agent can `curl` / `wget` the upstream fix PR off github.com,
 # read it, then transcribe — fully bypassing our shell-level git
 # blocks. This is the most common cheating vector documented in the
@@ -131,7 +131,7 @@ _NETWORK_LEAK_PATTERNS = [
 ]
 
 
-# Wave 11: block `pip install -e .` in opaque mode when running inside
+# Block `pip install -e .` in opaque mode when running inside
 # a worktree (the Karpathy bet). Editable installs from inside a
 # git-worktree create .pth/.egg-link entries that may point at the
 # ORIGINAL tree or fail to point anywhere useful; tests then import
@@ -143,8 +143,7 @@ _EDITABLE_INSTALL_PATTERN = re.compile(
 )
 
 
-# May 26 council fix (Princeton-perspective audit #1, smoke-batch
-# pylint pip-rabbit-hole): the prompt's Rule 11 ("never run pip
+# The prompt's Rule 11 ("never run pip
 # install") is aspirational. Enforce here. The grader uses a pristine
 # Docker image with deps pre-installed; any `pip install` from the
 # agent's shell pollutes the LOCAL sandbox (changing test outcomes
@@ -167,7 +166,7 @@ _PACKAGE_INSTALL_PATTERN = re.compile(
 )
 
 
-# Wave 11: detect pytest / npm test / go test / cargo test invocations
+# Detect pytest / npm test / go test / cargo test invocations
 # so we can raise the per-call timeout from the LocalBackend default
 # of 60 s (way too short for real SWE-bench test suites — Django can
 # take 5-10 min).
@@ -242,7 +241,7 @@ def shell(sandbox) -> Tool:
         cmd = args["cmd"]
         opaque = os.environ.get("MAVERICK_BENCHMARK_OPAQUE", "1") != "0"
         coding = os.environ.get("MAVERICK_CODING_MODE", "").lower() in ("1", "true", "yes")
-        # Wave 12 (council F9c): defensively pop MAVERICK_GOLD_PATCH
+        # Defensively pop MAVERICK_GOLD_PATCH
         # (and cache) before ANY subprocess inherits the env. This
         # guards the window between agent.run() start and the first
         # defensive_validate() call. Idempotent: a no-op once popped.
@@ -265,7 +264,7 @@ def shell(sandbox) -> Tool:
                     "in git history or fetching the upstream PR. "
                     "(Override by setting MAVERICK_BENCHMARK_OPAQUE=0.)"
                 )
-            # May 26 council fix: block ALL package-install commands
+            # Block ALL package-install commands
             # in opaque mode. The grader's container has deps already;
             # any install here just pollutes the local sandbox for
             # downstream instances. Surface the right framing so the
@@ -367,7 +366,7 @@ def shell(sandbox) -> Tool:
                 "review it again"
             )
 
-        # Wave 11 (D5 follow-up): the shell tool used to always fall back to
+        # The shell tool used to always fall back to
         # `sandbox.timeout` (60 s on LocalBackend) which kills pytest runs
         # on real SWE-bench repos. Detect long-running commands and pass
         # a higher per-call timeout. Falls back gracefully when sandbox

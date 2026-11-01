@@ -1,4 +1,4 @@
-"""SEARCH/REPLACE edit format — Wave 11.
+"""SEARCH/REPLACE edit format.
 
 Aider's published edit-format benchmarks (Diff-XYZ, arxiv 2510.12487v2,
 plus the public leaderboard) show SEARCH/REPLACE blocks beat both
@@ -84,7 +84,7 @@ class ApplySummary:
     """Result of applying one or more SEARCH/REPLACE blocks."""
     results: list[ApplyResult] = field(default_factory=list)
     files_touched: set[str] = field(default_factory=set)
-    # June 17 council fix (SR audit #5): paths whose atomic-rollback
+    # Paths whose atomic-rollback
     # restore/unlink itself failed, leaving on-disk state mutated despite
     # the transaction reporting failure. Non-empty => the workspace is
     # NOT clean; callers must not trust a "rolled back" outcome.
@@ -218,7 +218,7 @@ def _normalise_indent(s: str) -> tuple[str, list[str]]:
     leads = [re.match(r"^[ \t]*", ln).group(0) for ln in lines]
     if not any(leads):
         return s, leads
-    # May 26 council fix (SR audit #2): the old version used
+    # The old version used
     # `leads.index(lead)` which returns the FIRST index of that lead
     # value. With two lines sharing the same indent (common: two
     # consecutive same-level statements), the wrong source line gets
@@ -277,7 +277,7 @@ def _find_with_fuzzy(content: str, needle: str) -> tuple[int | None, int | None,
         return idx, idx + len(needle), "exact"
 
     # 2. Trailing-whitespace-stripped per-line match.
-    # June 17 council fix (SR audit #4): the step-1 ambiguity guard in
+    # The step-1 ambiguity guard in
     # `_apply_one` only counts EXACT needle occurrences; an rstrip-equal
     # needle could still match 2+ locations here, and the find()-based
     # map-back would silently edit the FIRST. Mirror step 3's guard:
@@ -349,7 +349,7 @@ def _find_with_fuzzy(content: str, needle: str) -> tuple[int | None, int | None,
                 return matches[0][0], matches[0][1], "ws_collapse"
 
     # 5. Levenshtein ≥ 0.9 — last-resort fuzzy window.
-    # May 26 council fix (SR audit #3): scan ALL windows scoring near
+    # Scan ALL windows scoring near
     # the best. If 2+ windows are within 0.02 of the top ratio, the
     # match is ambiguous — silently picking the first by `>` (current
     # code) lands the edit at the wrong place.
@@ -419,7 +419,7 @@ def _apply_one(block: SearchReplaceBlock, workdir: Path) -> ApplyResult:  # noqa
             reason=f"path {block.path!r} escapes the workspace",
         )
 
-    # May 26 council fix (SR audit #5): reject absolute paths + `..`
+    # Reject absolute paths + `..`
     # segments at apply time. The block parser doesn't filter these;
     # `Path(workdir) / "/etc/passwd"` evaluates to /etc/passwd and the
     # relative_to check above DOES catch it via ValueError. But for
@@ -494,7 +494,7 @@ def _apply_one(block: SearchReplaceBlock, workdir: Path) -> ApplyResult:  # noqa
 
     start, end, kind = _find_with_fuzzy(content_lf, needle_lf)
     if start is None and kind == "ambiguous":
-        # May 26 council fix (SR audit #3): fuzzy ladder hit 2+
+        # Fuzzy ladder hit 2+
         # near-tied windows. Refuse to guess; ask the model for
         # more context.
         return ApplyResult(
@@ -539,7 +539,7 @@ def _apply_one(block: SearchReplaceBlock, workdir: Path) -> ApplyResult:  # noqa
         new_content_lf.replace("\n", original_eol)
         if original_eol == "\r\n" else new_content_lf
     )
-    # May 26 council fix (Princeton-perspective audit #4): preserve
+    # preserve
     # the file's executable bit. `Path.write_text()` uses the default
     # umask (0o644) which drops mode 0o755 from `bin/foo.py` and
     # similar shipped scripts. The grader's `git apply` against a
@@ -608,7 +608,7 @@ def apply_blocks(blocks: list[SearchReplaceBlock], workdir: Path,
             break
 
     if rollback_needed:
-        # June 17 council fix (SR audit #5): a failed restore write (or a
+        # A failed restore write (or a
         # failed unlink of a created file) used to be swallowed, leaving a
         # mutated file on disk while the summary still read as a clean
         # rollback. Collect the failures and surface them so the caller
@@ -642,7 +642,7 @@ def render_diff(workdir: Path,
     cannot leak into the rendered patch. When omitted, only changes to
     already-tracked files are emitted — new files won't appear.
 
-    Wave 12 fix: `git diff HEAD` does NOT include untracked files. SR
+    `git diff HEAD` does NOT include untracked files. SR
     blocks that create a new file via empty-SEARCH succeed on disk but
     were silently absent from the rendered patch (~15% of fix instances
     on SWE-bench Pro need new files). We `git add --intent-to-add` the

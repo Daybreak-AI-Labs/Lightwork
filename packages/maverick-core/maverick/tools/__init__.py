@@ -712,7 +712,7 @@ class ToolRegistry:
                 # Tool errors (incl. an injected tool_dispatch chaos failure)
                 # are surfaced as a tool-result string so the agent can react
                 # — this mirrors how real tool exceptions behave. The chaos
-                # gap the council flagged is on the LLM path, fixed by wiring
+                # gap worth covering is on the LLM path, fixed by wiring
                 # maybe_fail("llm_call") into complete_async (not here).
                 return _tool_error_result(e, name)
             finally:
@@ -964,7 +964,7 @@ def base_registry(
     reg.register(read_tool_result(goal_id=goal_id, principal=principal or None))
     reg.register(read_attachment_tool(world, goal_id))
     reg.register(repo_map(sandbox))
-    # Wave 10 (B1): surgical exact-match editor. OpenHands' biggest
+    # Surgical exact-match editor. OpenHands' biggest
     # single contribution to SWE-bench scores — eliminates ~30% of
     # apply-fail failures by side-stepping hand-authored diffs.
     reg.register(str_replace_editor(sandbox))

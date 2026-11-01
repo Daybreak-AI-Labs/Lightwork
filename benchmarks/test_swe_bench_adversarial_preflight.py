@@ -1,4 +1,4 @@
-"""Wave 11 adversarial pre-flight tests for the SWE-bench harness.
+"""Adversarial pre-flight tests for the SWE-bench harness.
 
 These five hand-crafted cases exercise the failure modes that the
 operational research surfaced (CRLF, --- /dev/null, multi-file,
@@ -62,8 +62,8 @@ def test_adv_crlf_search_replace_applies(tmp_path):
 # ---- 2. New file via empty SEARCH ----
 
 def test_adv_new_file_via_empty_search(tmp_path):
-    """Pro's `--- /dev/null` instances need this. Wave 10 fix was
-    in validate_patch; here we lock the SR-format equivalent."""
+    """Pro's `--- /dev/null` instances need this. validate_patch handles
+    the unified-diff form; here we lock the SR-format equivalent."""
     from maverick.edit_format import apply_blocks, parse_blocks
     repo = _init_repo(tmp_path, {"src/foo.py": "x = 1\n"})
     text = (
@@ -165,8 +165,8 @@ def test_adv_shell_blocks_github_curl(tmp_path, monkeypatch, fresh_human_decisio
 # ---- Bonus: pip install -e blocked in opaque mode (Karpathy bug) ----
 
 def test_adv_shell_blocks_pip_install_e(tmp_path, monkeypatch, fresh_human_decision):
-    """May 26 council fix: ALL package-install commands are blocked
-    in opaque mode (not just `-e`). The prior Wave 11 fix only
+    """ALL package-install commands are blocked
+    in opaque mode (not just `-e`). The earlier fix only
     blocked `pip install -e` but `pip install <pkg>` could still
     pollute the local sandbox between instances. The grader's
     container has dependencies pre-installed; agent installs are

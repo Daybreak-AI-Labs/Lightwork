@@ -7,7 +7,7 @@ into OpenAI's chat format and converting the response back.
 Used directly for OpenAI; subclassed by OpenRouter and Ollama, which
 are OpenAI-compatible at different base_urls.
 
-v0.1.1 fixes (per council review):
+v0.1.1 fixes:
   - tool_result.content may be a list of blocks; extract `text` from each
   - max_completion_tokens for gpt-4o / o1 / o3 (max_tokens deprecated)
   - finish_reason mapped to Anthropic stop_reason vocabulary
