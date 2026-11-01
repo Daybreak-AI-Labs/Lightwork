@@ -14185,6 +14185,29 @@
       ]
     },
     {
+      "path": "packages/maverick-core/maverick/work_discovery_planning.py",
+      "contract": "sqlite_domain",
+      "owner": "packages/maverick-core/maverick/work_discovery_store.py",
+      "purpose": "Private Ekko opportunity plans and user-reported pilot results, written through the work-discovery store's SQLite database under its scoped encryption and transactions.",
+      "referenced_store_owners": [
+        ".work_discovery_store"
+      ],
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "executemany": 1
+      },
+      "source_sites": [
+        {
+          "line": 164,
+          "function": "save",
+          "kind": "executemany",
+          "expression": "conn.executemany(\"INSERT INTO ekko_plan_sources VALUES (?,?,?,?,?)\","
+        }
+      ]
+    },
+    {
       "path": "packages/maverick-core/maverick/work_discovery_store.py",
       "contract": "sqlite_domain",
       "owner": "packages/maverick-core/maverick/work_discovery_store.py",
@@ -26575,6 +26598,40 @@
           "sample_path": "owned_task_diagnostics/record.json",
           "recovery_policy": "private_diagnostic_release_authority",
           "disposition": "Retain authenticated bytes under global startup hold; reconcile current consent, source/revision and consumed operation receipts before admission. No automatic replay or grant restoration."
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/product_operations_ekko_factory.py",
+      "contract": "execution",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/product_operations_ekko_factory.py",
+      "purpose": "Durable admission and completion receipts prevent replay of a reviewed Ekko draft-building operation, including after the person removes the drafts it built.",
+      "referenced_store_owners": [
+        "maverick.governed_records"
+      ],
+      "review": "Reviewed Ekko build adapter admission-before-effect, owner/context binding, bounded receipt retention and recovery of an earlier operation by receipt. Receipt metadata holds the actor, context, state and outcome message, no task notes or draft contents. A restored receipt absence or stale completion cannot authorize another build; hold startup until current authority and consumed-operation state are reconciled. Retained replay evidence is disclosed in My Data.",
+      "governed_namespaces": [
+        {
+          "namespace": "ekko_build_operations",
+          "line": 15,
+          "recovery_policy": "ekko_build_operation_receipt_authority"
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 15,
+          "function": "<module>",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('ekko_build_operations', 'EKB', 'ekko_build_operation')"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "ekko_build_operations/EKB-example.json",
+          "recovery_policy": "ekko_build_operation_receipt_authority",
+          "disposition": "Retain authenticated receipt bytes under global startup hold. Reconcile current workspace authority and consumed-operation evidence before admission; no automatic replay and no inference of completion from the drafts that exist."
         }
       ]
     },

@@ -399,8 +399,10 @@ def ekko_discover(
     rows: list[dict[str, Any]] = []
     for opportunity in opportunities:
         row = opportunity.to_dict()
-        if drafts:
+        if drafts and opportunity.observation_basis != "application_metadata":
             row["draft"] = draft_bundle(opportunity, owner=owner).to_dict()
+        elif drafts:
+            row["next_step"] = "Open Ekko and describe the job, inputs, output and review before drafting."
         rows.append(row)
     if as_json:
         _emit_json({"opportunities": rows, "saved": False, "activated": False})
@@ -412,8 +414,7 @@ def ekko_discover(
         click.echo(
             f"{opportunity.opportunity_id}  {opportunity.title}  "
             f"({opportunity.occurrences} occurrences / "
-            f"{opportunity.distinct_days} days; confidence "
-            f"{opportunity.confidence:.2f}; risk {opportunity.risk})"
+            f"{opportunity.distinct_days} days; task review required)"
         )
     click.echo("review-only: no agent, flow, schedule, or automation was saved or activated")
 

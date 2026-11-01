@@ -164,7 +164,7 @@
     document.addEventListener(event, invalidateAvailability); window.addEventListener(event, invalidateAvailability);
   });
   document.addEventListener('lightwork:copilot-context-changed', event => { if (event.detail?.reason !== 'selection') invalidateAvailability(); });
-  window.LightworkEkkoRecording = {openReview: async function (payload, handoff) {
+  async function openControls(payload, handoff, discovery) {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) || Object.keys(payload).length
         || !handoff || typeof handoff.isCurrent !== 'function' || typeof handoff.context !== 'string' || !/^[a-f0-9]{64}$/.test(handoff.context)
         || !handoff.isCurrent() || location.pathname !== '/ekko' || busy || modalOpen() || !root.isConnected) return false;
@@ -173,6 +173,13 @@
     try {
       const data = options(await window.mvFetchJSON('/api/v1/ekko/recording/options', {cache: 'no-store'}));
       if (!current() || data.context !== handoff.context) return false;
+      if (discovery) {
+        const heading = document.getElementById(discovery === 'planning' ? 'ekko-planning-heading' : 'ekko-opportunities-heading');
+        if (!heading || !current()) return false;
+        heading.scrollIntoView({block: 'nearest'}); heading.focus();
+        document.dispatchEvent(new CustomEvent(discovery === 'planning' ? 'lightwork:ekko-planning-review' : 'lightwork:ekko-discovery-review'));
+        return true;
+      }
       showAvailability(data);
       await checkWatching(false);
       if (!current()) return false;
@@ -182,5 +189,10 @@
       if (current()) { $('watch').hidden = true; $('availability').textContent = failText(error, 'check whether this computer can record activity'); }
       return false;
     }
-  }};
+  }
+  window.LightworkEkkoRecording = {
+    openReview: (payload, handoff) => openControls(payload, handoff, false),
+    openDiscovery: (payload, handoff) => openControls(payload, handoff, true),
+    openPlanning: (payload, handoff) => openControls(payload, handoff, 'planning')
+  };
 })();

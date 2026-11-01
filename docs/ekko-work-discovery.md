@@ -1,12 +1,12 @@
 # Ekko work discovery
 
-Ekko turns repeated, observable work into evidence-backed Lightwork drafts. A
-typical candidate is “download a scheduled report, open PowerPoint, and assemble
-the same management deck.” Ekko can identify that repeated sequence and propose
-a first-pass flow and agent profile. It does not execute, save, schedule, or
-activate either draft.
+Ekko finds repeated business work and builds private workflow drafts for review.
+The page starts with **Find and build for me**, followed by recorded evidence,
+individual task review and the opportunity workspace. Bulk building saves native
+workflows; opening an individual draft remains unsaved. Neither action publishes,
+schedules or executes work.
 
-That detailed example requires a reviewed `guided` integration to supply the
+Identifying actions such as downloading a report and creating a presentation requires a reviewed `guided` integration to supply the
 semantic labels `download/report` and `create/presentation`. The built-in
 desktop metadata observers deliberately know only that the user moved between
 allowlisted applications; it never guesses a document action from a process
@@ -40,8 +40,10 @@ values. Guided mode also rejects `email`, `message`, and system-of-record
 sensitive-data floor cannot be weakened by enrollment policy.
 
 Raw events stay in the active tenant's local data boundary and expire after 14
-days by default (hard maximum: 30 days). Opportunities are computed on demand,
-not retained in a second candidate store. Provider egress is reserved and
+days by default (hard maximum: 30 days). Opportunities are computed on demand.
+Separately, an owner can explicitly save task notes and pilot observations when
+private opportunity planning is enabled; this does not copy the raw events.
+Provider egress is reserved and
 unsupported in this release; it must remain false, and setting it true fails
 closed rather than opening a network path.
 
@@ -67,6 +69,8 @@ same native policy for installations managed outside the ordinary page:
 ```toml
 [ekko]
 enable = true
+planning_enabled = false # opt in separately to private opportunity plans
+build_enabled = false # opt in separately to automatic workflow draft building
 retention_days = 14
 enrollment_days = 30
 min_occurrences = 3
@@ -157,9 +161,170 @@ TPM/OS-backed monotonic authority before enabling production capture.
 
 ## Draft review boundary
 
-Discovery requires repeated evidence across the configured number of days. A
-candidate contains frequency, confidence, estimated manual time, and risk
-signals. `discover` produces reviewable data only. Saving an agent profile,
-saving a flow, activating a schedule, or running a side effect remains a
-separate authenticated human action through the normal Agent Factory and Flow
-governance paths.
+Discovery requires separate occurrences across the configured number of UTC
+days. Overlapping windows of the same pattern cannot inflate its occurrence
+count. Repeated identical actions and periodic app loops are suppressed; a
+sequence gap, reversed clock or gap longer than 30 minutes breaks a sequence.
+These checks cannot establish that all work between recorded events was observed.
+Shorter, more frequent patterns remain visible beside less frequent longer ones.
+Evidence previews include up to 20 examples, representing distinct days first.
+Discovery consumes at most 50,000 events; the page discloses when that boundary
+is reached. This is a bounded sample, not a complete activity-history analysis.
+
+App switches are labelled as app activity, never inferred document actions.
+Their intervals do not establish task duration or savings. The API returns
+`estimated_minutes_per_run: null` when timing is unknown; guided sequences with
+positive recorded durations may show median step time, explicitly not savings.
+The legacy `confidence` field remains a recurrence ranking heuristic, labelled
+`confidence_kind: recurrence_heuristic`; it is not a calibrated probability and
+is no longer shown as “% sure.” Risk signals describe observed labels, not a
+completed automation assessment.
+
+Choose **Review this opportunity** and describe the job, starting inputs,
+expected output and what a person checks. Choose general work, reporting,
+reconciliation or document review to tailor the draft's checks and instructions.
+These owner-supplied notes are distinct from recorded evidence and travel with
+the draft. They are not persisted by opening a draft; saving an opportunity plan
+is a separate, explicit action.
+Keep descriptions general; select actual sources and authorized connections in
+the editor. The generated plan approves inputs, checks them, prepares a draft,
+checks for gaps and pauses again for final review. It does not infer tool access
+from an app name. Missing sources and integrations still require qualification.
+
+Both dashboard handoffs require the reviewed evidence revision. Changed or
+erased evidence is refused; retry after refreshing and reviewing the pattern.
+Entered notes survive a recoverable handoff error. Device or workspace changes
+clear the review and invalidate pending replies. Drafts remain unsaved and use
+the normal editor's separate save, publish and execution controls.
+
+Copilot's **Review repeated work with Ekko** operation opens the same protected
+review through current access/workspace checks. It does not put recorded
+activity or task notes into conversational context, select a candidate or
+submit the review. This is a protected in-product handoff, not autonomous
+conversational drafting. Existing `[ekko]` settings, installer setup and the
+Learning operation family control these improvements; no additional capture or
+provider permission is introduced. The compatibility CLI returns metadata
+candidates with a next step to review them in Ekko; semantic guided proposals
+retain their review-only CLI path.
+
+## Private opportunity workspace
+
+Enable **Save private Ekko opportunity plans** in All settings, or opt in during
+the Ekko installer step (`ekko.planning_enabled`, default false). The owner must
+also acknowledge private storage before each save. This capability does not
+start capture, save a workflow or grant automation authority.
+
+After reviewing an opportunity:
+
+1. Enter runs per week, current human minutes, remaining human minutes including
+   review/rework, and setup/testing hours. Blank remaining effort or setup means
+   an incomplete estimate; zero must be entered explicitly. Estimated weekly
+   hours equal frequency times the per-run difference divided by 60. The
+   four-week estimate subtracts setup; break-even uses positive weekly savings.
+   Negative estimates remain negative. These are owner assumptions, with no
+   monetary ROI or verified savings claim.
+2. Save the plan as **Shortlisted**, **In pilot** or **Parked for later**. The
+   opportunity workspace sorts plans by estimated weekly benefit and filters
+   parked work. Reopening restores the task description and assumptions.
+3. Test the draft through its normal editor, connections and approval controls.
+   Record the manual baseline, actual checking/rework, and whether the output
+   was accepted. Accepted runs save baseline minus human effort. Rejected runs
+   assume the full manual job still had to be done, making the extra effort a
+   negative saving. The scorecard shows acceptance, total and median time saved,
+   clearly labelled **owner-reported pilot**, separate from verified outcomes.
+
+Plans use scoped authenticated encryption in the local Ekko database, bound to
+the current tenant, owner and device. A maximum of 100 plans per device and 30
+pilot runs per plan bounds storage. Saves expire within the shorter deployment
+or enrollment retention period (2–30 days); explicitly saving a revision renews
+that period, but recording a pilot does not. Raw events may expire earlier than
+the separately saved notes. Erasing a linked evidence session, erasing the
+device's data, or forgetting the device removes its linked plans. Audit events
+contain identifiers/stage/count, not the entered task text or assumptions.
+
+Current permissions are checked on every API request. Mutations also require
+the fresh workspace/access/configuration context returned when reading plans,
+so a stale tab cannot apply old notes to a different current context.
+Concurrent edits require
+the latest saved revision; an older tab cannot overwrite a newer plan. An
+unconfirmed pilot can be retried with the same reference without double counting.
+After an unconfirmed plan save, use **Refresh saved plans** and **Open saved plan**
+to inspect the current record before retrying. Disabling planning blocks saves
+and pilot additions but preserves authorized inspection and deletion. Device,
+workspace or access changes clear the private view and invalidate late replies.
+
+Copilot's **Open private opportunity plans** opens the same protected workspace
+with fresh authority/context checks. It does not receive the notes, estimate
+benefits conversationally, submit a plan or record a run. Direct conversational
+editing remains outside this implementation. Local browser qualification uses
+synthetic activity against native APIs; real desktop capture, live task execution
+and independently measured savings require separate validation.
+
+## Find and build for me
+
+Enable **Let Ekko find and build workflow drafts** in All settings or the Ekko
+installer step (`ekko.build_enabled`, default false), and enable Workflows.
+The page can inspect discovery results while building is off. Select **Find
+opportunities** to inspect the current sources, or acknowledge saving private
+workflow drafts and select **Find and build my workflows** to discover and build
+them together. Optional additional work is entered once, one task per line;
+customers do not have to design each workflow themselves.
+
+Discovery combines three sources:
+
+- Accessible Lightwork work history: three or more distinct requests for the
+  same recognized business activity. Original prompt text and result contents
+  are not copied into drafts. Requests are distinct from successful execution.
+- Current recorded patterns with an owner-reviewed saved task plan, or guided
+  recordings that already identify semantic task steps. Guided steps can build
+  directly without an additional task form. Parked plans are excluded, and
+  changed or erased evidence requires renewed review.
+- Tasks explicitly supplied in the optional additional-work field. These are
+  customer requests, not inferred observations or proven automation benefits.
+
+Existing workflows with the same exact normalized business title are offered
+for review. A stable source identity also preserves an earlier Ekko draft after
+the customer edits its title. Existing definitions are never overwritten.
+Declined, deferred and explicitly manual Work value recommendations are excluded.
+App switches alone remain a context gap; they do not establish the business job.
+
+Each new workflow is saved through the native Workflows service with input
+approval, input preparation, result production, result checking and final human
+review. The three agent steps pass their outputs explicitly to the next step.
+Reporting, reconciliation, document work and general tasks receive different
+instructions. Run ceilings are 30 minutes, $5 and one concurrent instance;
+normal platform admission, provider and approval controls also apply. Building
+uses deterministic templates and makes no provider calls. The agent steps call
+the configured runtime only if the customer later publishes and runs the flow.
+
+Builds proceed in batches of at most 20, with at most 250 proposals in one pass.
+The page continues through eligible batches and supports **Stop after this
+batch**. It reports built, existing and blocked work, preserves task descriptions
+on recoverable failures, and rescans after each batch. After a lost response,
+**Find opportunities** reveals drafts already saved; retrying preserves them.
+An error on one task does not roll back earlier saved drafts. Current authority,
+workspace context and source revisions are checked again before native writes.
+
+Saved workflow drafts are independent artifacts with the ordinary Workflows
+lifecycle. They remain until removed there; deleting or expiring an Ekko plan
+does not delete an explicitly saved workflow. Review sources and connections in
+the builder, test the task, then explicitly publish and run it. An automatically
+built graph is not proof that integrations, credentials or business outputs are
+ready. Connection readiness checks are shown, but this release does not crawl
+external business-system contents or discover all work across a company.
+
+Copilot's **Find and build my workflows** performs the same discovery and native
+build after its sealed review and confirmation. It requires the existing
+`features.copilot_operations` switch and Learning action family in addition to
+the native feature permissions. Its preview discloses counts and consequences;
+private saved notes are not added to conversational context. Durable, bounded
+operation receipts prevent a replay from rebuilding a subsequently deleted
+workflow; an interrupted operation directs the customer back to the native
+discovery results. Receipts contain context, state and counts, not task text,
+and are eligible for cleanup after 15 minutes, beyond the review-token lifetime.
+
+Qualification includes native graph execution with a synthetic agent callback,
+native persistence, stale-source and authority refusal, partial-build recovery,
+existing-draft preservation, a lost build reply, Copilot execution/replay and
+desktop/narrow browser rendering. External provider execution, autonomous
+connection setup and live customer output quality remain unqualified.

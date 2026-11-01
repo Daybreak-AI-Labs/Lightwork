@@ -1841,6 +1841,15 @@ def pick_ekko() -> dict[str, Any]:
     )
     return {
         "enable": True,
+        "planning_enabled": _q_confirm(
+            "  Allow people to save private opportunity plans and pilot results? "
+            "These expire within the Ekko retention period; no recording or automation starts.",
+            default=False,
+        ),
+        "build_enabled": _q_confirm(
+            "  Allow Ekko to find business tasks and build private workflow drafts in batches? "
+            "Drafts require review and publication before running.", default=False,
+        ),
         "retention_days": retention_days,
         "enrollment_days": 30,
         "min_occurrences": min_occurrences,
