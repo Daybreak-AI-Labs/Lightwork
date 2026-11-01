@@ -30,5 +30,5 @@ a throwaway `python -c`.
 
 - Add *"verify with a one-line python -c"* to the goal if you want the
   agent to actually run the examples through `re.match` via the sandbox.
-- Great fit for `claude-session` / `chatgpt-session` providers — no
-  tool-heavy work, so you keep API spend near zero.
+- There is little tool use here, so a smaller model, or a self-hosted one
+  through Ollama, keeps spend low (see [Configuration](../configuration.md)).
