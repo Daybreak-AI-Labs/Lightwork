@@ -1,4 +1,4 @@
-"""Static accessibility audit (roadmap: 2027 H2 UX — accessibility audit pass).
+"""Static accessibility audit.
 
 The ``a11y`` tool runs pa11y/axe against a *live* URL. This is the
 complementary **static, offline, CI-runnable** pass: parse the shipped HTML

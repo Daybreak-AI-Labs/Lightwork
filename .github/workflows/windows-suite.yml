@@ -1,7 +1,7 @@
 name: Windows test suite
 
 # The deterministic Python suite on Windows, on request only. Windows is a
-# customer platform (the MSI and desktop builds), but the required test matrix
+# supported platform (the MSI and desktop builds), but the required test matrix
 # runs on Linux, and the Windows jobs in ci.yml run focused checks only. This
 # lets a maintainer see what the full suite does on Windows -- before a release,
 # or after a change to file locking, paths or processes -- without adding a

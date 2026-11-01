@@ -1,4 +1,4 @@
-"""Dashboard UX store: pins, saved views, trace annotations (roadmap 2027-H1 UX).
+"""Dashboard UX store: pins, saved views, trace annotations.
 
 Three small per-deployment UX features share one persistence problem — tiny
 per-principal records that must survive restarts but don't belong in the

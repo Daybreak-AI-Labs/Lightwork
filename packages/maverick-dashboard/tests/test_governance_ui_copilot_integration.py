@@ -82,7 +82,7 @@ class _AssetParser(HTMLParser):
         candidates += [attributes.get("data-copilot-src"), attributes.get("data-operations-src")]
         for candidate in candidates:
             if candidate and candidate.startswith("/static/"):
-                # Shell assets carry a content-hash query (W3-77); count by path.
+                # Shell assets carry a content-hash query; count by path.
                 candidate = candidate.split("?")[0]
                 self.assets.add(candidate)
                 self.asset_counts[candidate] += 1

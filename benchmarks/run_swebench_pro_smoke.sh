@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# One-shot smoke runner for SWE-bench Pro. Validates the full
-# producer-then-scorer pipeline on 5 instances so you know the
-# wiring works before spending real money on the 1865-instance run.
+# One-shot smoke runner for SWE-bench Pro. Runs the producer on 5
+# instances and writes the patch files the official evaluator scores, so
+# you know the wiring works before spending real money on the full test
+# split.
 #
 # Costs: ~$10-30 depending on which pipelines you enable.
-# Time: ~15-30 min (first run includes Docker image builds).
+# Time: ~15-30 min for the producer; scoring (runbook step 3) is separate.
 #
 # Usage:
 #   ./benchmarks/run_swebench_pro_smoke.sh             # default 5 inst, maverick + sonnet_single
@@ -25,7 +26,6 @@ MANIFEST="${HOME}/.maverick/swebench-pro/manifest.jsonl"
 WORKDIR="$(mktemp -d -t maverick-swe-XXXXXX)"
 SMOKE_MANIFEST="${WORKDIR}/smoke.jsonl"
 PREDS_CSV="${WORKDIR}/predictions.csv"
-PREDS_JSONL="${WORKDIR}/preds.jsonl"
 
 if [[ ! -f "${MANIFEST}" ]]; then
     echo "ERROR: manifest not found at ${MANIFEST}" >&2
@@ -131,44 +131,30 @@ if [[ "${PATCH_COUNT}" -eq 0 ]]; then
     exit 1
 fi
 
-# ---- scorer (optional; needs Docker + the `swebench` PyPI package) ----
-if ! command -v docker >/dev/null 2>&1; then
-    echo "[smoke] docker not on PATH; skipping evaluator step."
-    echo "[smoke] producer pipeline OK. Install Docker + 'pip install swebench' to score."
-    exit 0
-fi
-
-if ! python -c "import swebench" 2>/dev/null; then
-    echo "[smoke] swebench python pkg not installed; skipping evaluator step."
-    echo "[smoke] producer pipeline OK. Run 'pip install swebench>=2.0' to score."
-    exit 0
-fi
-
-echo
-echo "[smoke] running official SWE-bench evaluator (this builds Docker images; slow first time)..."
-
-python -c "
-import csv, json, sys
-with open('${PREDS_CSV}') as f, open('${PREDS_JSONL}', 'w') as out:
-    r = csv.DictReader(f)
-    for row in r:
-        if row['pipeline'] != 'maverick':
-            continue
-        out.write(json.dumps({
-            'instance_id': row['instance_id'],
-            'model_patch': row['predicted_patch'].replace('\\\\n', chr(10)),
-            'model_name_or_path': row['model_id'] or 'maverick',
-        }) + chr(10))
-"
-
-python -m swebench.harness.run_evaluation \
-    --predictions_path "${PREDS_JSONL}" \
-    --dataset_name Scale/swe-bench-pro \
-    --split test \
-    --max_workers 2 \
-    --run_id "maverick-smoke-$$"
+# ---- patch files for the official evaluator ----
+# The original `swebench` evaluator does not support the SWE-bench Pro
+# repositories. Write one patch file per pipeline in the format of the
+# official evaluator (swe_bench_pro_eval.py in
+# https://github.com/scaleapi/SWE-bench_Pro-os) and print how to score them.
+python3 - "${PREDS_CSV}" <<'PY'
+import collections, csv, json, pathlib, sys
+csv_path = pathlib.Path(sys.argv[1])
+by_pipeline = collections.defaultdict(list)
+with open(csv_path, newline="", encoding="utf-8") as f:
+    for row in csv.DictReader(f):
+        by_pipeline[row["pipeline"]].append({
+            "instance_id": row["instance_id"],
+            "patch": row["predicted_patch"],
+            "prefix": row["pipeline"],
+        })
+for pipeline, patches in by_pipeline.items():
+    out = csv_path.with_name(f"{csv_path.stem}_{pipeline}_patches.json")
+    out.write_text(json.dumps(patches), encoding="utf-8")
+    print(f"[smoke] wrote {out}")
+PY
 
 echo
-echo "[smoke] DONE. Pareto table on these 5 instances is meaningless"
-echo "         statistically but proves the wiring. Now schedule the"
-echo "         real 1865-instance run per RUNBOOK_SWE_BENCH_PRO.md step 4."
+echo "[smoke] DONE. Score the patch files with step 3 of RUNBOOK_SWE_BENCH_PRO.md,"
+echo "         using PREDICTIONS=${PREDS_CSV%.csv}. A Pareto table on these"
+echo "         instances is meaningless statistically but proves the wiring."
+echo "         Then schedule the real run on the full test split (step 4)."

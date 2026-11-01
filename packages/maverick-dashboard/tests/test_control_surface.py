@@ -1,4 +1,4 @@
-"""Council pass: dashboard control surface.
+"""Dashboard control surface.
 
 Adds halt button, consent / answer-question UI, audit log page,
 plugins / MCP / tools / channels list pages, skill install form, and

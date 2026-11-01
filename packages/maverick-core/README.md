@@ -4,18 +4,14 @@ The Lightwork agent kernel. A recursive multi-agent swarm with persistent
 world model, shared blackboard, hard budget caps, and closed-loop skill
 learning.
 
-See the [top-level README](../../README.md) and
-[`ARCHITECTURE.md`](../../ARCHITECTURE.md) for the full picture.
+See the [top-level README](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/README.md)
+and [`ARCHITECTURE.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/ARCHITECTURE.md)
+for the full picture.
 
-This package installs on its own (PyPI publish is pending the first tagged
-release; install from a source clone for now):
-
-```bash
-pip install -e packages/maverick-core   # `pip install maverick-agent` once published
-export ANTHROPIC_API_KEY=sk-ant-...
-maverick start "your goal"
-```
-
-But you probably want `pipx install maverick-agent` (once published) +
-`maverick init` instead, which also pulls in the safety layer and configures
-per-role model choice.
+Lightwork is installed from source: follow
+[Install from source](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md).
+`scripts/install_release_cohort.py` installs this package together with the
+other seven (shield, dashboard, setup wizard and so on). No PyPI package is
+published. For kernel-only development, `pip install -e ./packages/maverick-core`
+from the repository root installs this package alone, without the safety layer
+or the setup wizard.

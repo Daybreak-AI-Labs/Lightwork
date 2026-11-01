@@ -181,7 +181,7 @@ def _retry_after_from(exc: Exception) -> float | None:
 def _compute_delay(attempt: int, exc: Exception) -> float:
     """Honor Retry-After if present; else exponential backoff with jitter.
 
-    Council finding: a hostile/buggy server returning `Retry-After: -1`
+    A hostile/buggy server returning `Retry-After: -1`
     would feed time.sleep / asyncio.sleep a negative value and raise
     ValueError, killing the retry loop. We clamp to [0, MAX_DELAY].
     """

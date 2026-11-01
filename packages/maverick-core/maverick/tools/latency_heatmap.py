@@ -1,4 +1,4 @@
-"""Latency heatmap tool (roadmap: 2027 H1 UX — "latency heatmap").
+"""Latency heatmap tool.
 
 Render a text heatmap of latency percentiles per bucket (a bucket = a tool name
 or a time slot). Each cell is shaded with a unicode block (``░▒▓█``) scaled to

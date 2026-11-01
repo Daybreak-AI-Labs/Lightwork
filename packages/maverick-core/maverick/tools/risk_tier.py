@@ -1,5 +1,4 @@
-"""Operational risk-tier scorer for agent goals (roadmap: 2028 safety —
-"risk-tier auto-classifier (low/med/high goal scoring)").
+"""Operational risk-tier scorer for agent goals.
 
 Scores a goal/task into LOW / MEDIUM / HIGH from explicit operational risk
 signals (shell, network, secrets, PII, spend, irreversibility, production,

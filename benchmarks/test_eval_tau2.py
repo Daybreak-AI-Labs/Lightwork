@@ -1,4 +1,4 @@
-"""tau2-style stateful tool-agent harness (ROADMAP C1).
+"""tau2-style stateful tool-agent harness.
 
 Drives eval_tau2 with deterministic solvers (no LLM): an oracle that performs
 the right tool actions, a no-op, and partial solvers -- exercising BOTH grading

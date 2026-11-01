@@ -1,4 +1,4 @@
-"""Tenant lifecycle / provisioning registry (ROADMAP platform spine)."""
+"""Tenant lifecycle / provisioning registry."""
 from __future__ import annotations
 
 import pytest

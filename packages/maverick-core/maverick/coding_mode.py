@@ -306,7 +306,7 @@ Available tools: `str_replace_editor` (secondary), `read_file`,
 (sandboxed), and the spawn tools."""
 
 
-# Wave 10: accept either `--- a/x ... +++ b/y ... @@` (raw unified diff)
+# Accept either `--- a/x ... +++ b/y ... @@` (raw unified diff)
 # OR a `diff --git a/x b/y` header (git format-patch output, which is
 # what every real-world diff in SWE-bench looks like). The latter
 # captures rename-only, mode-only, and binary patches that have no
@@ -423,12 +423,12 @@ def has_final_marker(text: str) -> bool:
 def extract_unified_diff(text: str) -> str | None:
     """Extract the unified diff from an LLM reply, or None.
 
-    Wave 10 rewrite: normalise CRLF, accept `diff --git` headers
+    Normalise CRLF, accept `diff --git` headers
     (rename-only / mode-only / binary patches), preserve trailing
     `\\ No newline at end of file` markers without forcing an extra
     newline.
 
-    Wave 12 fix (council F6):
+    FINAL marker rules:
       - `FINAL:` is now anchored at line start, not substring. Models
         occasionally write "FINAL: please disregard" mid-prose; the
         old substring `find` would cut there and miss the real FINAL.
@@ -473,7 +473,7 @@ def extract_unified_diff(text: str) -> str | None:
     # Markdown patches (lines starting with " ```" / "+```" / "-```").
     # We match exactly ``` plus optional trailing whitespace; a context
     # line " ```" has a leading space and won't match.
-    # May 26 council fix (SR audit #4): some models emit nested fences
+    # Some models emit nested fences
     # — a ```diff envelope wrapping a diff that itself includes
     # ```python context lines. The model then closes BOTH fences,
     # leaving two trailing ``` lines. Strip up to 2 trailing pure
@@ -513,13 +513,13 @@ def validate_patch(
     local checkout's core.autocrlf setting. Other callers, including candidate
     scoring, keep the default strict worktree check.
 
-    Wave 10: accept new-file diffs (`--- /dev/null`), rename-only diffs
+    Accept new-file diffs (`--- /dev/null`), rename-only diffs
     (`diff --git` without `--- a/`), and normalise CRLF to LF before
     handing bytes to git.
     """
     if not patch or not patch.strip():
         return PatchValidation(valid=False, reason="empty patch")
-    # Wave 10: a valid header is EITHER `--- a/x` + `+++ b/y` (raw
+    # A valid header is EITHER `--- a/x` + `+++ b/y` (raw
     # unified diff), OR `--- /dev/null` + `+++ b/y` (new file), OR
     # `diff --git a/x b/y` (full git format-patch, may have no `---`
     # for rename-only or mode-only changes).
@@ -604,13 +604,13 @@ def validate_patch(
     )
 
 
-# Wave 12 (council F9f): MAVERICK_GOLD_PATCH is popped from os.environ
+# MAVERICK_GOLD_PATCH is popped from os.environ
 # on first read so the gold answer cannot be exfiltrated via
 # `printenv` / `env` / `cat $MAVERICK_GOLD_PATCH` inside the agent's
 # sandboxed shell. Subsequent reads in the same instance return the
 # cached value. The harness re-sets the env var per instance.
 #
-# Wave 12 hardening: track `_GOLD_PATCH_POPPED` as an explicit sentinel
+# Track `_GOLD_PATCH_POPPED` as an explicit sentinel
 # so empty-string env values (legitimate "no gold" signal) are NOT
 # treated as "not yet read" — the prior `if new is not None` logic
 # misread an empty value as "pop again next time".
@@ -644,7 +644,7 @@ def reset_gold_patch_cache() -> None:
     _GOLD_PATCH_POPPED = False
 
 
-# ---- Wave 11: defensive patch validation (grader brittleness rules)
+# ---- Defensive patch validation (grader brittleness rules)
 
 
 # Files we will refuse to patch in opaque benchmark mode. Touching any
@@ -654,7 +654,7 @@ _FORBIDDEN_PATH_PATTERNS = [
     re.compile(r"(?:^|/)tests?/"),
     re.compile(r"(?:^|/)test_[^/]+\.py$"),
     re.compile(r"(?:^|/)[^/]+_test\.py$"),
-    # Wave 12 hardening: Django convention `tests.py` (no underscore)
+    # Django convention `tests.py` (no underscore)
     # and plural `*_tests.py`.
     re.compile(r"(?:^|/)tests?\.py$"),
     re.compile(r"(?:^|/)[^/]+_tests\.py$"),
@@ -670,7 +670,7 @@ _FORBIDDEN_PATH_PATTERNS = [
     re.compile(r"^pytest/"),
     re.compile(r"\.test\.(?:js|jsx|ts|tsx)$"),
     re.compile(r"\.spec\.(?:js|jsx|ts|tsx|rb)$"),
-    # Wave 12 hardening: JVM family test files outside src/test/.
+    # JVM family test files outside src/test/.
     # Maven/Gradle convention is `(Foo)Test.java` / `FooSpec.scala` /
     # `FooSpec.kt`; some monorepos put them at arbitrary depths.
     re.compile(r"(?:^|/)\w*Tests?\.(?:java|kt|kts|scala|groovy)$"),
@@ -682,7 +682,7 @@ _FORBIDDEN_PATH_PATTERNS = [
     re.compile(r"(?:^|/)yarn\.lock$"),
     re.compile(r"(?:^|/)Cargo\.lock$"),
     re.compile(r"(?:^|/)go\.sum$"),
-    # May 26 council fix (Princeton-perspective audit): package
+    # Package
     # metadata + CI + lint config files. Edits to these are reverted
     # or ignored by the grader's pristine container build. The model
     # often "fixes" what it thinks is an env issue by tweaking these,
@@ -697,7 +697,7 @@ _FORBIDDEN_PATH_PATTERNS = [
 ]
 
 
-# Wave 12 (council F8a): files we WARN on but no longer hard-block.
+# Files we WARN on but no longer hard-block.
 # Real-world SWE-bench Pro instances sometimes need legitimate edits
 # in these files (e.g. registering a new fixture in conftest.py for
 # the production module, adding a [tool.pytest.ini_options] entry).
@@ -712,7 +712,7 @@ _WARN_PATH_PATTERNS = [
     re.compile(r"(?:^|/)setup\.py$"),
     re.compile(r"(?:^|/)setup\.cfg$"),
     re.compile(r"(?:^|/)pyproject\.toml$"),
-    # Wave 12 hardening: pip-tools layout uses `requirements/dev.txt`,
+    # pip-tools layout uses `requirements/dev.txt`,
     # `requirements/base.txt`, etc. The original pattern with
     # `[^/]*` couldn't cross `/`. Also handle `requirements.in`.
     re.compile(r"(?:^|/)requirements(?:/[^/]+|[^/]*)?\.(?:txt|in)$"),
@@ -734,7 +734,7 @@ _GIT_PATH_RE = re.compile(
 
 @dataclass
 class DefensiveValidation:
-    """Wave 11: catch grader-fatal patches before submission."""
+    """Catch grader-fatal patches before submission."""
     ok: bool
     blocked_paths: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -765,7 +765,7 @@ class DefensiveValidation:
 def _extract_diff_paths(patch: str) -> list[str]:
     """Pull the set of file paths touched by a unified diff.
 
-    Wave 12 (council F8c): handle git's quoted-path form for paths
+    Handle git's quoted-path form for paths
     containing spaces or non-ASCII bytes:
         diff --git "a/path with space" "b/path with space"
     The prior `\\S+` regex silently matched only the first segment of
@@ -782,7 +782,7 @@ def _extract_diff_paths(patch: str) -> list[str]:
                 paths.add(a)
                 paths.add(b)
         elif line.startswith('+++ "b/'):
-            # Quoted +++/--- form. Wave 12 hardening: .strip() so a
+            # Quoted +++/--- form: .strip() so a
             # trailing space inside the quoted content doesn't desync
             # path extraction from the bare form (`+++ b/foo` vs
             # `+++ "b/foo "`).
@@ -807,7 +807,7 @@ def _extract_diff_paths(patch: str) -> list[str]:
 
 
 def _ast_check_python_files(workdir: Path, paths: list[str]) -> list[str]:
-    """Wave 11: syntax-check Python files touched by the patch.
+    """Syntax-check Python files touched by the patch.
 
     Returns a list of `path: error` strings (empty list = all clean).
     Called AFTER apply so the model's edits show up; the caller is
@@ -845,7 +845,7 @@ def _classify_diff_paths(paths, test_id_paths, result) -> None:
             result.blocked_paths.append(p)
             continue
         # conftest.py / pyproject.toml / requirements*.txt etc — WARN
-        # but don't block (council F8a, see _WARN_PATH_PATTERNS).
+        # but don't block (see _WARN_PATH_PATTERNS).
         if any(pat.search(p) for pat in _WARN_PATH_PATTERNS):
             result.warnings.append(
                 f"patch touches {p!r}; SWE-bench grader may overwrite or "
@@ -866,7 +866,7 @@ def _has_substantive_change(patch: str) -> bool:
 
 def _cheating_overlap_check(patch: str, gold_patch: str, result) -> None:
     # Verbatim-overlap cheating-detector simulator.
-    # Wave 12 (council F8b): switch from character-level SequenceMatcher
+    # Switch from character-level SequenceMatcher
     # to token-level. Char-level mis-flags coincidental whitespace and
     # under-flags semantically-identical code that differs in
     # whitespace/punctuation. Tokens capture identifiers, numeric and
@@ -900,7 +900,7 @@ def _cheating_overlap_check(patch: str, gold_patch: str, result) -> None:
         return
     ours_all = _TOKEN_RE.findall(ours_text)
     theirs_all = _TOKEN_RE.findall(theirs_text)
-    # Wave 12 hardening (agent 5 #1 + agent 1 review): measure
+    # Measure
     # "what fraction of the GOLD appears as a verbatim run in
     # ours?", not symmetric ratio. The symmetric metric is
     # defeated by prepending unrelated noise: noise dilutes the
@@ -961,8 +961,7 @@ def _cheating_overlap_check(patch: str, gold_patch: str, result) -> None:
     longest = max((b.size for b in blocks), default=0)
     gold_fraction = longest / max(1, len(theirs_tokens))
 
-    # Signal 2 (May 26 council fix, Princeton-perspective
-    # audit #5): n-gram Jaccard. Closes the splice-bypass
+    # Signal 2: n-gram Jaccard. Closes the splice-bypass
     # of signal 1 by working at the 3-gram-set level —
     # inserting noise between gold tokens breaks the
     # CONTIGUOUS run but preserves the 3-gram overlap.
@@ -1000,7 +999,7 @@ def defensive_validate(patch: str, *, fail_to_pass: list[str] = None,
                        pass_to_pass: list[str] = None,
                        gold_patch: str = "",
                        opaque: bool = True) -> DefensiveValidation:
-    """Wave 11: reject patches likely to fail the SWE-bench Pro grader.
+    """Reject patches likely to fail the SWE-bench Pro grader.
 
     Implements the hard rules from the grader-brittleness research:
       - Block edits to tests/, test_*.py, conftest.py, FAIL_TO_PASS/
@@ -1061,7 +1060,7 @@ class TestRunResult:
 
     @property
     def all_pass(self) -> bool:
-        # May 26 council fix (agent-loop audit #1): when both totals
+        # When both totals
         # are 0 AND skipped/error are unset, the math evaluates True
         # (`0 == 0 AND 0 == 0`) and the verifier reports "all pass"
         # for a candidate that didn't actually run any tests. Best-of-N
@@ -1109,7 +1108,7 @@ class TestRunResult:
         )
 
 
-# ---- Polyglot test runners (Wave 9, council multi-lang agent) ----------
+# ---- Polyglot test runners ----------------------------------------------
 
 _RUNNER_MARKERS = [
     ("pytest",  ("pyproject.toml", "setup.py", "setup.cfg", "tox.ini")),
@@ -1141,7 +1140,7 @@ _LANGUAGE_TO_RUNNER = {
 def detect_test_runner(workdir: Path, language: str = "") -> str:
     """Return one of: pytest|jest|vitest|mocha|cargo|gotest|rspec|gradle|maven|unsupported.
 
-    Wave 10: when `language` is provided (from the SWE-bench instance
+    When `language` is provided (from the SWE-bench instance
     metadata), use it to disambiguate monorepos that ship multiple
     marker files (e.g. JS repos with a `pyproject.toml` for `pre-commit`
     + a `package.json` for actual tests). Without this hint, the
@@ -1183,7 +1182,7 @@ def detect_test_runner(workdir: Path, language: str = "") -> str:
                 for name, files in _RUNNER_MARKERS:
                     if name == "gradle" and any((workdir / f).exists() for f in files):
                         return "gradle"
-        # May 26 council fix (test-runner audit #3): when the
+        # When the
         # language hint is set but its expected markers are missing,
         # the OLD code fell through to the generic loop — which picks
         # pytest first if any `pyproject.toml` / `setup.py` exists
@@ -1225,7 +1224,7 @@ def _cmd_for(
     def q(s: str) -> str:
         return _shell_quote_arg(s, sandbox)
     if runner == "pytest":
-        # Wave 9 fix (council #12): NO `-x` — that aborts on first
+        # NO `-x` — that aborts on first
         # failure and we can never count PASS_TO_PASS correctly.
         # `python3 -m pytest`, never bare `pytest` (CLAUDE.md environment
         # rule): the module form puts the workdir on sys.path, so a repo's
@@ -1308,7 +1307,7 @@ def _cmd_for(
     return None
 
 
-# Wave 12: shared ANSI escape stripper. Jest/vitest/mocha colorize
+# Shared ANSI escape stripper. Jest/vitest/mocha colorize
 # their output by default; the harness passes --colors=false but a few
 # reporters honor it incompletely (vitest's UI reporter, jest's
 # verbose). Strip on every parser entry to be safe.
@@ -1321,10 +1320,10 @@ def _strip_ansi(out: str) -> str:
 
 # Each parser: (passed, failed_or_errored, parsed_ok).
 def _parse_pytest(out: str) -> tuple[int, int, bool]:
-    # Wave 9 (council B7): anchor to the summary line `===== ... in Ns =====`,
+    # Anchor to the summary line `===== ... in Ns =====`,
     # not the first occurrence of "N passed" which can match stdout from
     # tests that emit "3 passed" in their own output.
-    # Wave 12 (council F7a): use the LAST `===` summary line when
+    # Use the LAST `===` summary line when
     # pytest is re-invoked in the same shell call (e.g. tox).
     out = _strip_ansi(out)
     summary_re = re.compile(
@@ -1341,7 +1340,7 @@ def _parse_pytest(out: str) -> tuple[int, int, bool]:
         p = int(m.group("passed") or 0)
         f = int(m.group("failed") or 0)
         e = int(m.group("errored") or 0)
-        # May 26 council fix (test-runner audit #1): pytest emits
+        # pytest emits
         # "no tests ran in Ns" when the requested node IDs don't
         # exist (typo, refactor, test_patch reshuffled). The summary
         # regex matches with all groups = 0, and we'd report
@@ -1367,7 +1366,7 @@ def _parse_pytest(out: str) -> tuple[int, int, bool]:
 
 
 def _parse_jest(out: str) -> tuple[int, int, bool]:
-    # Wave 12 (council F7b/c): strip ANSI, accept `todo`, use LAST
+    # Strip ANSI, accept `todo`, use LAST
     # match (jest 27+ may emit per-file Tests: lines BEFORE the summary).
     out = _strip_ansi(out)
     jest_re = re.compile(
@@ -1391,7 +1390,7 @@ def _parse_jest(out: str) -> tuple[int, int, bool]:
 
 
 def _parse_vitest(out: str) -> tuple[int, int, bool]:
-    # Wave 12 (council F7c): vitest summary differs from jest. It uses
+    # vitest summary differs from jest. It uses
     # pipe-separated counts:
     #   Tests  3 failed | 5 passed (8)
     #   Tests  5 passed (5)
@@ -1424,10 +1423,10 @@ def _parse_cargo(out: str) -> tuple[int, int, bool]:
 
 
 def _parse_gotest(out: str) -> tuple[int, int, bool]:
-    # Wave 12 (council F7d): subtests are indented (`    --- PASS:`);
-    # allow leading whitespace. (council F7e): detect build/compile
+    # Subtests are indented (`    --- PASS:`);
+    # allow leading whitespace. Detect build/compile
     # failures so we don't silently report 0/0 = ok.
-    # Wave 12 hardening: tighten the bare-error-line heuristic — a
+    # Tighten the bare-error-line heuristic — a
     # package name like `github.com/PASSport/foo` contains "PASS" but
     # isn't a real test pass. Anchor on `\nFAIL\t` (the canonical go
     # test failure-status line) instead of substring "PASS not in out".
@@ -1466,7 +1465,7 @@ def _parse_rspec(out: str) -> tuple[int, int, bool]:
 
 
 def _parse_gradle(out: str) -> tuple[int, int, bool]:
-    # May 26 council fix (test-runner audit #4): the old bare-word
+    # The old bare-word
     # `\bPASSED\b` / `\bFAILED\b` matched any prose line containing
     # those words — `println("PASSED for user X")`, gradle task
     # banners (`> Task :compileTestJava PASSED`), etc. — inflating
@@ -1511,7 +1510,7 @@ _PARSERS = {
 }
 
 
-# Wave 11 (PROBE-lite): classify test-failure type so we can give
+# Classify test-failure type so we can give
 # the model a tailored revision critique. Per Scale's empirical
 # study + the PROBE paper (arxiv 2605.08717), failure-class-aware
 # revision lifts +1-2pp on Pro and converges 30-50% faster than a
@@ -1523,7 +1522,7 @@ _FAILURE_PATTERNS = [
     ("NameError",        re.compile(r"\bNameError\b")),
     ("KeyError",         re.compile(r"\bKeyError\b")),
     ("ValueError",       re.compile(r"\bValueError\b")),
-    # May 26 council fix (test-runner audit #5): the old `\bassert\s`
+    # The old `\bassert\s`
     # branch matched any prose containing "assert " — log messages,
     # docstrings, pytest's `>       assert x == y` traceback lines,
     # etc. — flipping TypeError-class failures into AssertionError
@@ -1647,7 +1646,7 @@ _FAILURE_HINTS = {
 def classify_failure(raw_output: str) -> tuple[str, str]:
     """Return (class, hint) for the dominant failure pattern in raw_output.
 
-    Wave 11: lightweight PROBE-style failure-class router. We scan in
+    Lightweight PROBE-style failure-class router. We scan in
     a deterministic order; the FIRST match wins (more specific classes
     listed earlier). Returns ("other", "") on no match.
     """
@@ -1792,12 +1791,12 @@ def run_failing_tests(
 ) -> TestRunResult:
     """Apply the staged patch + run the SWE-bench tests.
 
-    Wave 9: polyglot dispatch on detected runner (pytest / jest /
+    Polyglot dispatch on detected runner (pytest / jest /
     cargo / gotest / rspec / gradle / maven). Unsupported runners
     return TestRunResult(skipped=True) so the caller can skip the
     instance instead of scoring 0.
 
-    Wave 10: `timeout` is honoured by temporarily raising
+    `timeout` is honoured by temporarily raising
     `sandbox.timeout` for the test runs (sandbox.exec's signature is
     backend-agnostic and takes no timeout kwarg; the per-backend
     `self.timeout` is what shell, write_file, etc. all share). On
@@ -1864,7 +1863,7 @@ def run_failing_tests(
         cmds = cmd if isinstance(cmd, list) else [cmd]
         passed = failed = 0
         chunks: list[str] = []
-        # May 26 council fix (test-runner audit #2): for runners that
+        # For runners that
         # use one-cmd-per-id (cargo), the original `len(test_ids) -
         # passed - failed` math conflated already-counted tests across
         # prior chunks. A parse failure mid-stream charged the
@@ -1901,7 +1900,7 @@ def run_failing_tests(
         result.pass_to_pass_passing = p_pass
         result.pass_to_pass_failing = p_fail
         result.raw_output = (f_out + "\n" + p_out)[-2000:]
-        # June 17 council fix (test-runner audit #3): both call sites
+        # Both call sites
         # previously discarded `_run`'s `failed` return, so a mid-stream
         # parse/sandbox failure — where `_run` early-returns with the
         # un-executed ids folded into `failed` and the rest never run —
@@ -1938,7 +1937,7 @@ class CodingModeConfig:
     fail_to_pass: list[str] = field(default_factory=list)
     pass_to_pass: list[str] = field(default_factory=list)
     require_apply_check: bool = True
-    language: str = ""  # Wave 10: language hint for monorepo disambiguation
+    language: str = ""  # language hint for monorepo disambiguation
 
 
 def from_env() -> CodingModeConfig:
@@ -1950,7 +1949,7 @@ def from_env() -> CodingModeConfig:
         cfg.best_of_n = int(os.environ.get("MAVERICK_BEST_OF_N", "1"))
     except ValueError:
         cfg.best_of_n = 1
-    # May 26 council fix (long-tail audit #5): strip per-entry. A
+    # Strip per-entry. A
     # pathological manifest with `"a||  ||b"` would yield `["a", "  ",
     # "b"]` — the whitespace-only ID gets forwarded to pytest as
     # `tests/foo.py::  ` which hangs the collector for the per-test
@@ -1979,12 +1978,12 @@ class Candidate:
 def select_best_candidate(candidates: list[Candidate]) -> Candidate | None:
     """Pick the candidate with the highest test score; tiebreak by
     proximity to median patch length (Occam, but not "smallest at all
-    costs" — see Wave 12 council finding F1).
+    costs").
 
     Used at the end of a best-of-N orchestrator run. Returns None if
     no candidate is usable.
 
-    Wave 12 fix: when ALL candidates score 0.0 (no FAIL_TO_PASS
+    When ALL candidates score 0.0 (no FAIL_TO_PASS
     provided, or runner error), the prior `(-score, len(c.patch))`
     sort silently picked the SMALLEST patch — backward for any
     instance whose correct fix is a new feature / multi-file refactor
@@ -2010,7 +2009,7 @@ def select_best_candidate(candidates: list[Candidate]) -> Candidate | None:
     if all_zero:
         # Prefer the LAST (typically most-thought) attempt that produced
         # any non-empty patch; ladder ordering is cheap→warm→Opus.
-        # Wave 12 hardening: deterministic final tiebreaker (patch text)
+        # Deterministic final tiebreaker (patch text)
         # in case two attempts share index AND length (e.g., the BoN
         # ladder retried the same model and produced identical patches).
         usable.sort(key=lambda c: (-c.index, -len(c.patch), c.patch))
@@ -2035,7 +2034,7 @@ async def evaluate_candidate(
 ) -> Candidate:
     """Validate + score one candidate.
 
-    Wave 9 rewrite (council code reviewer #7 + #8): the prior stash
+    The prior stash
     dance was unsafe (silent no-op on clean tree, stash pop popped
     prior candidate's stash, untracked files leaked between
     candidates, apply return code ignored). New approach: spawn a
@@ -2076,7 +2075,7 @@ async def evaluate_candidate(
                       + ", ".join(guard.blocked_paths))
         return cand
 
-    # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W2-4): `workdir` is the
+    # Host-git hardening (see git_safety.py): `workdir` is the
     # agent's own working directory. `git worktree add` / `apply` / `reset
     # --hard` / `clean -fd` below all check out or touch tracked files, so a
     # repo-local `[filter "x"] smudge` command (referenced from

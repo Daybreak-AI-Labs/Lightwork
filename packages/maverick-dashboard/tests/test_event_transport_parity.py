@@ -168,7 +168,7 @@ async def test_customer_activity_is_plain_across_transports_and_retains_durable_
 
 @pytest.mark.asyncio
 async def test_goal_waiting_for_an_answer_is_held_open_only_by_the_rest_poll(event_world, monkeypatch):
-    """UX-068 transport contract (docs/api.md): a goal parked on a question is
+    """Transport contract (docs/api.md): a goal parked on a question is
     ``blocked``. GET /api/v1/goals/{id}/events says so with ``terminal: false``
     and ``needs_input: true``; the push streams and the older browser poller
     still end at ``blocked`` (a stream cannot be held open for a person's

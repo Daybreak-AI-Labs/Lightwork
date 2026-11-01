@@ -5,6 +5,7 @@
 # with `source.md|destination.md`.
 index.md
 getting-started.md
+source-install.md
 using-lightwork.md
 configuration.md
 task-limits.md
@@ -26,7 +27,6 @@ external-agents.md
 clients/external-agent-quickstart.md
 clients/examples/lightwork.ts
 clients/examples/external_agent_loop.py
-comparison.md
 performance/streaming-parity.md
 SECURITY_GRC.md
 MODEL_RISK_ASSURANCE.md
@@ -46,11 +46,8 @@ encryption.md
 regulated-deployment.md
 compliance-assessments.md
 threat-hunting.md
-enterprise/editions.md
 enterprise/security-overview.md
 enterprise/architecture.md
-showcase.md
-press-kit.md
 integrations/observability-partners.md
 CONTRIBUTING.md
 CLA.md

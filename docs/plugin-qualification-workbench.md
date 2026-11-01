@@ -100,9 +100,9 @@ requires a fresh review and explicit confirmation; durable operation receipts
 recover uncertain responses without redispatch. Turning Copilot off leaves the
 native Plugins journey available.
 
-The October 5 native browser journey used an actual restricted Python-tool
+A native browser journey has been run against an actual restricted Python-tool
 container: inspected schema, ordinary input form, complete review, execution,
 lost-response recovery and the original single saved result. Changed schemas and
 accounts were refused; cleanup was verified. This qualifies that bounded local
 journey, not arbitrary third-party plugins, live services, Node/gRPC images or
-customer outcomes. Each installation still needs its own approved environment.
+production outcomes. Each installation still needs its own approved environment.

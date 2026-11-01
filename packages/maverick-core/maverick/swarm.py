@@ -32,9 +32,8 @@ def _default_use_skills() -> bool:
 
     Precedence: the MAVERICK_USE_SKILLS env var wins when set (the runbook
     tells operators to set MAVERICK_USE_SKILLS=0 for SWE-bench Pro runs --
-    skill memorization is a contamination risk, see reproducibility-audit +
-    Karpathy-review findings). When the env var is unset, fall back to the
-    [features] skills config toggle (default on). Fail-soft to on so an
+    skill memorization is a contamination risk). When the env var is unset,
+    fall back to the [features] skills config toggle (default on). Fail-soft to on so an
     unreadable config never silently disables skills.
     """
     env = os.environ.get("MAVERICK_USE_SKILLS")

@@ -1,4 +1,4 @@
-"""Air-gapped preflight verification (roadmap: 2028 H2 safety — "air-gapped mode").
+"""Air-gapped preflight verification.
 
 A regulated / classified deployment needs to *prove* there is no outbound path
 before it trusts the box. Full OS-level air-gapping (firewall, no NIC) is the
@@ -94,7 +94,7 @@ def _audit_egress(config: dict) -> list[str]:
             'egress is not deny-all — set [egress] deny = ["*"] to block '
             "all outbound hosts")
 
-    # W2-90: [egress] deny is honored only by a handful of callers
+    # [egress] deny is honored only by a handful of callers
     # (tenant.egress.egress_allowed) — NOT the process-wide runtime guard
     # (egress_guard.py), which wraps httpx/requests across ~80 connectors
     # and every provider SDK. That guard's default-deny (enterprise.

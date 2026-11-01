@@ -137,14 +137,16 @@ def test_visible_suites_drops_held_modules_and_empty_suites() -> None:
     assert page.visible_suites(suites, frozenset()) == list(suites)
 
 
-def test_labels_note_and_pricing_call_are_present(client: TestClient) -> None:
+def test_labels_note_is_present_and_no_pricing_call(client: TestClient) -> None:
     body = client.get(page.PAGE_PATH).text
     assert "What the labels mean" in body
     for status in catalog.STATUS_ORDER:
         assert catalog.STATUS_LABELS[status] in body
-    assert page.PRICING_MAILTO in body
-    assert "chris@daybreakailabs.com" in body
-    assert "Autonomous%20Compliance%20pricing" in body
+    # The open-source dashboard carries no sales contact or pricing panel.
+    assert not hasattr(page, "PRICING_MAILTO")
+    assert "Packaging &amp; pricing" not in body
+    assert "Contact us about pricing" not in body
+    assert "daybreakailabs.com" not in body
 
 
 def test_nav_entry_is_registered_and_heads_the_govern_group() -> None:

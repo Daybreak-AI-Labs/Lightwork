@@ -1,4 +1,4 @@
-"""KaTeX / Mermaid rich-render layer (roadmap: 2028 H2 ecosystem).
+"""KaTeX / Mermaid rich-render layer.
 
 Chat channels are plain-text: a reply carrying display math (``$$...$$`` /
 ``\\(...\\)``) or a ```` ```mermaid ```` diagram arrives as unreadable source.

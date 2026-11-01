@@ -1,4 +1,4 @@
-"""Cross-provider speculative drafting (ROADMAP 2028 H2) — offline tests."""
+"""Cross-provider speculative drafting — offline tests."""
 from __future__ import annotations
 
 import json

@@ -1,6 +1,7 @@
 # Finance agent suite — the Office of the CFO, governed by construction
 
-**Status:** design / roadmap. Companion to [`agent-factory.md`](agent-factory.md)
+**Status:** design reference; the per-agent status tags record what existed when it was
+written. Companion to [`agent-factory.md`](agent-factory.md)
 (how the factory emits sealed domain agents) and
 [`../enterprise/architecture.md`](../enterprise/architecture.md) (the three-layer
 control plane). This doc enumerates the **finance domain agents** — what each
@@ -30,7 +31,7 @@ persona and applied to **every** agent below:
 
 ## Contents
 
-1. [How a finance agent maps onto Lightwork](#1-how-a-finance-agent-maps-onto-maverick)
+1. [How a finance agent maps onto Lightwork](#1-how-a-finance-agent-maps-onto-lightwork)
 2. [The finance control model (read this first)](#2-the-finance-control-model-read-this-first)
 3. [Per-client customization — the dials](#3-per-client-customization--the-dials)
 4. [The roster — seven towers of the CFO's office](#4-the-roster--seven-towers-of-the-cfos-office)
@@ -157,7 +158,7 @@ release, and file.**
 | **Least privilege per finance role** | RBAC roles (`role_for_principal`) narrow the controller/AP-clerk/treasurer principals; child agents attenuate further. |
 | **Data residency / egress lock** | `allow_hosts` per pack + enterprise egress lock pins LLM calls to local/self-hosted providers (GLBA, PCI). |
 | **Encryption at rest** | AES-256-GCM seals world-DB + memory (bank details, payroll PII, contracts). |
-| **Budget caps** | Long-running close/forecast/audit runs respect `Budget` (CLAUDE.md rule 3). |
+| **Budget caps** | Long-running close/forecast/audit runs respect `Budget` (kernel rule 3). |
 | **Blast-radius containment** | Compartment seals quarantine a single finance function on a detected threat. |
 | **Kill switch** | `~/.maverick/HALT` aborts every running finance goal. |
 | **Sanctions / AML / KYC screening** | A screening tool every payment + vendor-onboarding path must pass (OFAC SDN, PEP) — *connector to build*, see §8. |
@@ -179,7 +180,7 @@ spreadsheets — closing the classic end-user-computing (EUC) gap.
 
 ### 2.8 Controls over autonomous agents are now in ICFR scope
 
-A second-order point that is also a differentiator: once the "user" recording or
+A second-order point: once the "user" recording or
 paying is an **agent**, the platform's own **access** (capabilities), **change**
 (versioned packs + signed grants), and **operations** (budget, kill switch, audit)
 controls *become* the SOX **IT general controls** over the financial-reporting
@@ -320,7 +321,7 @@ timeout = "fail_closed"            # finance never fail-opens an approval
 
 ## 4. The roster — seven towers of the CFO's office
 
-~43 agents (38 base + 5 council-added) across seven functional towers (each a sealed compartment), plus
+~43 agents (38 base + 5 added after review) across seven functional towers (each a sealed compartment), plus
 optional **vertical packs** (end of §4) a client switches on for its industry. For
 each: **Job** (what it does), **Connects to** (systems/knowledge), **Capability**
 (envelope + the high-risk actions it may *only draft*), and **Controls** (beyond
@@ -955,9 +956,9 @@ interest billing/depletion are further verticals on the same opt-in model.
 
 ---
 
-### Council-added agents (from the adversarial review)
+### Additional agents
 
-Five seats the adversarial-council pass surfaced as missing; folded into the roster under the
+Five seats a later review found missing; folded into the roster under the
 same SoD + maker-checker + audit discipline. Full skills in [`agent-skills-catalog.md`](agent-skills-catalog.md).
 
 #### +1 Treasury Payments / Disbursements Agent  *(Tower 3 — the custody node)*
@@ -1061,7 +1062,7 @@ The conversational **finance assessor** is then the existing
 
 ## 8. Integrations catalog — what to connect, build order
 
-Per CLAUDE.md rule 5, **every** connector below ships with a config knob, and per
+Per kernel rule 5, **every** connector below ships with a config knob, and per
 rule 6 the **installer wizard** gets a toggle for it. Tools follow the existing
 `verb_noun` convention and the read-only-by-default split (mutating tools land on
 `deny_tools` / `require_human`).

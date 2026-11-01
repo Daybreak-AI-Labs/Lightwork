@@ -1,4 +1,4 @@
-"""Multi-modal RAG ranker (roadmap: 2027 H2 — "multi-modal RAG").
+"""Multi-modal RAG ranker.
 
 Rank a mixed bag of retrieved chunks (text / image-caption / table) against a
 query by lexical overlap, with a small per-modality weight so a caller can nudge

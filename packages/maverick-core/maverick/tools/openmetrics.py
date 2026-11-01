@@ -1,4 +1,4 @@
-"""OpenMetrics exposition renderer (roadmap: 2028 H1 — "open metric standard").
+"""OpenMetrics exposition renderer.
 
 Render a list of metric samples into a valid OpenMetrics / Prometheus text
 exposition: ``# TYPE`` and ``# HELP`` lines per metric family, escaped labels,

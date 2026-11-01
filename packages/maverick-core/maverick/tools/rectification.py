@@ -1,4 +1,4 @@
-"""Right-to-rectification applier (roadmap: 2027 safety — "right-to-rectification").
+"""Right-to-rectification applier.
 
 GDPR Art. 16 lets a data subject have inaccurate personal data corrected and
 incomplete data completed. ``audit/erase.py`` already covers Art. 17 erasure;

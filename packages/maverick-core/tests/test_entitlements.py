@@ -1,4 +1,4 @@
-"""Signed-license entitlements: fail-open core, fail-closed paid add-ons,
+"""Signed-license entitlements: fail-open core, fail-closed gated add-ons,
 offline verification, grace window. See maverick/entitlements.py."""
 from __future__ import annotations
 

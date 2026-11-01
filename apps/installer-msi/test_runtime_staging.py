@@ -133,7 +133,7 @@ def test_invalid_msi_version_fails_before_runtime_probe_or_output(runtime, tmp_p
     monkeypatch.setattr(stage, "verify_runtime", lambda *_: pytest.fail("invalid package must not execute runtime"))
     key = base64.b64encode(b"untrusted comment: synthetic\n" + base64.b64encode(b"Ed" + bytes(40))).decode()
     output = tmp_path / "stage"
-    with pytest.raises(ValueError, match="Windows customer package version"):
+    with pytest.raises(ValueError, match="Windows desktop package version"):
         stage.stage(runtime, output, "https://updates.example.test/stable.json", key, fixture_version=version)
     assert not output.exists()
 

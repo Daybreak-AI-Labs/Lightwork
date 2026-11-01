@@ -1,6 +1,6 @@
 # RFC 0005: staged local restore reference validation
 
-Status: implemented locally; installed and external recovery qualification is separate.
+- Status: **Implemented** for local restores. Qualification of installed and external recovery is separate.
 
 ## Problem and behavior
 

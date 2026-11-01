@@ -1,7 +1,7 @@
 """Facts injected into the orchestrator brief must be scanned/redacted, and
 tool output must be secret-redacted before it reaches the model.
 
-Council (Security seat, findings #4-#5 + #14):
+Findings:
   - "Known facts about the user" were concatenated into the orchestrator
     system brief verbatim -- a fact set via REST/MCP (or poisoned by a prior
     injection) became a standing instruction in EVERY future run.

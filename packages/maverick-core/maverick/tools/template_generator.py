@@ -1,4 +1,4 @@
-"""Skill + channel template generators (roadmap: 2027 H1 distribution).
+"""Skill + channel template generators.
 
 Scaffold a valid starting point so contributors don't hand-copy boilerplate:
   - a ``SKILL.md`` with the right frontmatter (name / triggers / tools_needed),

@@ -56,7 +56,7 @@ def test_guarded_urlopen_allows_public_host(monkeypatch):
 
 
 def test_guarded_urlopen_installs_an_explicit_empty_proxy_handler(monkeypatch):
-    """W2-94: build_opener's default ProxyHandler reads HTTP(S)_PROXY and
+    """Build_opener's default ProxyHandler reads HTTP(S)_PROXY and
     rewrites the connection target to the proxy host -- the pinned
     connect() then validates THAT address instead of the real, already-
     validated destination. A corporate proxy is nearly always on a

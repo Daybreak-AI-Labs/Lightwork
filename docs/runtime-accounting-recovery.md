@@ -24,8 +24,8 @@ those decisions. A model answer is never a human approval.
 
 Durable execution remains opt-in (`MAVERICK_DURABLE=1` or `[durable] enabled`).
 Its supported boundary remains the existing linear depth-zero agent loop,
-using the SQLite world model's `checkpoints` table. This change does not add
-swarm-tree or in-flight external-action checkpointing.
+using the SQLite world model's `checkpoints` table. Swarm-tree and in-flight
+external-action checkpointing are not supported.
 
 Resumption restores counters and elapsed execution time into the caller's
 existing `Budget`. Current caps, capability, execution principal, tenant
@@ -102,5 +102,5 @@ existing prohibition on exporting the rejected final through success webhooks.
 `python3 -m pytest -q packages/maverick-core/tests/test_run_lifecycle_reliability.py`
 covers the lifecycle and accounting boundaries with synthetic provider
 responses, isolated SQLite records, the real local usage ledger, and no live
-customer mutations. The durable-checkpoint, orchestrator, output/webhook,
+external mutations. The durable-checkpoint, orchestrator, output/webhook,
 quota and tenant-budget suites provide compatibility coverage.

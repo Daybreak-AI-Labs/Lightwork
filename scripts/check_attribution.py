@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Refuse AI-attribution trailers and footers in commit messages and PR text.
 
-House rule (CLAUDE.md, "No AI attribution in repo artifacts"): nothing that
-lands in this repository or on GitHub carries a generator footer, an AI
-co-author trailer, or an assistant session link. The rule kept being broken
-by the MERGE step rather than by authors: a squash merge prefills the merge
-commit from the branch's commit messages, so one trailer on one branch commit
-lands on ``main`` inside the squash. This gate runs at each place such a line
-can still be refused:
+Project policy (see "Commits and pull requests" in CONTRIBUTING.md): nothing
+that lands in this repository or on GitHub carries a generator footer, an AI
+co-author trailer, or an assistant session link. The MERGE step can break the
+rule even when authors do not: a squash merge prefills the merge commit from
+the branch's commit messages, so one trailer on one branch commit lands on
+``main`` inside the squash. This gate runs at each place such a line can still
+be refused:
 
 * ``pull_request`` -- every commit in the PR range plus the PR title and body
   (the squash dialog is prefilled from exactly these).
@@ -20,7 +20,7 @@ The commit AUTHOR and COMMITTER identities are inspected as well as the
 message: GitHub's squash merge appends a ``Co-authored-by:`` trailer for every
 distinct author in the squashed commits, so a branch whose commits are merely
 *authored* as an assistant lands the trailer on ``main`` without a single
-offending line in any message (this is how ``main`` went red at 3b2c9cf).
+offending line in any message.
 
 Usage::
 
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if problems:
         print("check-attribution: AI attribution is not allowed in commit messages "
-              "or PR text (CLAUDE.md, 'No AI attribution in repo artifacts'):",
+              "or PR text (see 'Commits and pull requests' in CONTRIBUTING.md):",
               file=sys.stderr)
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)

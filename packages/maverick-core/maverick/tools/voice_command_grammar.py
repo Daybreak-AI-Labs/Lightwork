@@ -1,4 +1,4 @@
-"""Voice command grammar (roadmap: 2027 H1 UX — "voice command grammar").
+"""Voice command grammar.
 
 A tiny, deterministic intent parser for the voice channel: the operator
 declares a grammar of command templates with ``{slot}`` placeholders, and an

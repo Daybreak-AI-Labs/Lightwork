@@ -1,4 +1,4 @@
-"""Token-level cost projection at plan time (roadmap: 2027 H2 performance).
+"""Token-level cost projection at plan time.
 
 ``maverick start --dry-cost`` forecasts a goal's cost from *history*
 (:mod:`maverick.cost_forecast`); this module projects a *specific plan's*

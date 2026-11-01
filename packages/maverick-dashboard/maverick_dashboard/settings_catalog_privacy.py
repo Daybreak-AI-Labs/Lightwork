@@ -1317,7 +1317,7 @@ def _check_profiles(effective, by_id, error) -> None:
                     "up on the server first.")
 
 
-# -------------------------------- installation defaults and caps (wave 2)
+# -------------------------------- installation defaults and caps
 def _consent_limit_rows(S) -> tuple:
     reports = _sub("Consent preferences", "reports")
     delivery = _sub("Consent preferences", "delivery tries")

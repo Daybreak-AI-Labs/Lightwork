@@ -201,7 +201,8 @@ linear model plateaus on novel/obfuscated attacks.
 
 ## 4. Licensing / commercial-use caveats
 
-Lightwork is proprietary/commercial, so non-commercial and unlicensed assets are
+Lightwork is distributed under Apache-2.0, which permits commercial use, so
+assets licensed for non-commercial use only, or with no licence at all, are
 disqualified for the *bundled, ship-by-default* model.
 
 - **❌ `rogue-security/prompt-injections-benchmark` (ex-Qualifire) — CC-BY-NC-4.0,

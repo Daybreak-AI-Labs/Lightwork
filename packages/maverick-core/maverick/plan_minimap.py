@@ -1,4 +1,4 @@
-"""Plan-tree minimap (roadmap 2028-H1 UX — "plan-tree minimap").
+"""Plan-tree minimap.
 
 A compact, one-line-per-node unicode rendering of a goal's subtree — the
 at-a-glance companion to ``maverick monitor``'s full plan tree. Each line is

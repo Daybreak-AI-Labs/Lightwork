@@ -1,13 +1,13 @@
 """Validate the cross-language MCP surface we promise in the README.
 
-The council recommendation (May 2026) committed us to:
+The language-bindings decision in the roadmap commits us to:
   1. The `maverick mcp` CLI command exists + advertises the
      cross-language surface in its docstring.
   2. The TS / Go / Rust quickstart docs are present, runnable-shaped
      (i.e. have a real fenced code block), and cross-link to the
-     council decision in the roadmap.
-  3. The roadmap contains the "Language Bindings — Council Decision"
-     section with the top-5 language list + the 15% gate.
+     language-bindings decision in the roadmap.
+  3. The roadmap records that decision under "Decisions" with the
+     top-5 language list + the 15% gate.
   4. The main README points consumers at all three quickstarts.
 
 If anyone removes the cross-language surface, this test fails.
@@ -45,7 +45,7 @@ def test_typescript_quickstart_present():
     text = _quickstart("docs/clients/typescript-quickstart.md")
     assert "@modelcontextprotocol/sdk" in text
     assert "maverick mcp" in text or "[\"mcp\"]" in text
-    assert "ROADMAP" in text  # cross-link back
+    assert "ROADMAP.md#language-bindings" in text  # cross-link back
 
 
 def test_go_quickstart_present():
@@ -60,15 +60,17 @@ def test_rust_quickstart_present():
     assert "Rust" in text or "tokio" in text
 
 
-def test_roadmap_has_council_section():
+def test_roadmap_records_the_language_bindings_decision():
     text = (_REPO_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
-    assert "Language Bindings — Council Decision" in text
-    # Each top-5 language appears once in the section heading list.
+    assert "## Decisions" in text
+    assert "### Language bindings" in text
+    section = text.split("### Language bindings", 1)[1].split("\n#", 1)[0]
+    # Each top-5 language is named in the decision.
     for lang in ("TypeScript", "Go", "Rust", "C#", "Java"):
-        assert lang in text, f"top-5 language {lang!r} not in roadmap"
-    # The 15% gate is the decision criterion the council recommended.
-    assert "15%" in text
-    assert "MCP" in text
+        assert lang in section, f"top-5 language {lang!r} not in the decision"
+    # A thin TypeScript client is the only port considered, and only on demand.
+    assert "thin TypeScript client package" in section
+    assert "MCP" in section
 
 
 def test_readme_links_to_clients():

@@ -1,4 +1,4 @@
-"""Watch-glance payload (roadmap: 2027 H1 UX — "Apple Watch glance").
+"""Watch-glance payload.
 
 The data half of a watch complication/glance: one **tiny, fixed-shape**
 payload sized for a watch face — active/today counts, today's spend, and the

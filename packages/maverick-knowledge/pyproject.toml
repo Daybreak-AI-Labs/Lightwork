@@ -7,12 +7,13 @@ name = "maverick-knowledge"
 version = "0.1.7"
 description = "Per-domain document knowledge (vector RAG) for Lightwork agents"
 requires-python = ">=3.10"
-license = "LicenseRef-Proprietary"
-authors = [{ name = "cdayAI" }]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "The Lightwork Authors" }]
 # Pure core (chunking, SQLite brute-force store, deterministic embedder,
 # text/markdown/HTML parsing) has no third-party deps. Real embedding providers,
 # richer parsers, and pgvector are opt-in extras so the kernel never has to pull
-# heavy deps to run (CLAUDE.md rules 1 & 5).
+# heavy deps to run.
 dependencies = []
 
 [project.optional-dependencies]
@@ -25,6 +26,8 @@ qdrant = ["qdrant-client>=1.7"]
 
 [project.urls]
 Homepage = "https://github.com/Daybreak-AI-Labs/Lightwork"
+Repository = "https://github.com/Daybreak-AI-Labs/Lightwork"
+Issues = "https://github.com/Daybreak-AI-Labs/Lightwork/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

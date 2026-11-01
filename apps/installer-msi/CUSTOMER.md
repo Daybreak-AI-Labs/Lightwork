@@ -1,23 +1,23 @@
-# Windows customer package candidate
+# Windows desktop package candidate
 
-The customer build packages Lightwork Desktop, the full eight-package frozen
+The packaged build combines Lightwork Desktop, the full eight-package frozen
 release runtime, and the offline WebView2 installer into one x64 MSI. The
-customer runs the installer and opens Lightwork from the Start menu; no Git,
-Python, pip, Node, or private source checkout is required on that computer.
-Provider accounts, licensing and network-dependent product features retain
-their normal requirements. The engineering `Package.wxs` bootstrap is separate.
+user runs the installer and opens Lightwork from the Start menu; no Git,
+Python, pip, Node, or source checkout is required on that computer.
+Provider accounts and network-dependent product features retain their normal
+requirements. The engineering `Package.wxs` bootstrap is separate.
 
-**Status: implemented candidate path, not yet an accepted customer release.**
-The [Windows candidate workflow at the source merged in PR #2512](https://github.com/Daybreak-AI-Labs/Lightwork/actions/runs/34777432941)
-passed native installation, repair, synthetic upgrade/rollback and WebView
-journeys. Those runs used disposable signing identities and the same frozen
+**Status: implemented candidate path, not yet an accepted release.**
+The Windows candidate workflow (`.github/workflows/windows-customer.yml`)
+exercises native installation, repair, synthetic upgrade/rollback and WebView
+journeys. Those runs use disposable signing identities and the same frozen
 runtime under different fixture versions. They do not qualify a recognized
-customer publisher, a clean customer computer or a real release migration.
-As checked on September 14, 2026, the repository has no published releases or
-recorded real release-pair acceptance run. This workflow produces candidates;
-it does not publish an installer or activate an update channel.
+publisher, a clean end-user computer or a real release migration. No release
+has been published and no real release-pair acceptance run has been recorded.
+This workflow produces candidates; it does not publish an installer or
+activate an update channel.
 
-## Customer maintenance
+## In-app maintenance
 
 Open **Lightwork → Install & updates**. Checking updates does not install
 anything. The app displays the offered version and release notes, then requires
@@ -77,14 +77,14 @@ Payload files within a supported home retain extended Windows path support.
 Local maintenance snapshots are limited to 8 GiB expanded and 200 workspaces;
 there are 20 usable recovery points with explicit administrator retirement.
 An unprotected earlier upgrade has no retrospective rollback snapshot. This
-candidate protocol still needs actual native MSI and customer acceptance below.
+candidate protocol still needs actual native MSI and release acceptance below.
 
 Signing transitions are a separate default-off global setting and administrator
 review in recovery mode. They require the existing trusted key and proposed key
 to sign the exact release-pair policy; neither a feed nor a repair offer can
 grant this authority. Admission expiry does not strand an already admitted
 interrupted pair. See the [signing transition procedure](../../docs/windows-signing-identity-transition.md)
-for preparation, customer controls and the distinct native acceptance boundary.
+for preparation, in-app controls and the distinct native acceptance boundary.
 The disposable hosted workflow has a separate two-publisher transition fixture
 that uses actual signed MSI upgrade/rollback and a pre-execution process-resume
 boundary. Its `publisher-transition-acceptance.json` must pass independently of
@@ -107,7 +107,7 @@ does not support automatic rollback after accounting or database state changes.
 ## Build and acceptance
 
 The desktop also provides a separately started [local workspace recovery
-mode](../../docs/workspace-recovery.md). Customer acceptance starts its frozen
+mode](../../docs/workspace-recovery.md). Package acceptance starts its frozen
 entry point and checks ordinary work is blocked. Same-build local snapshots are
 a recovery prerequisite. Completed-upgrade rollback restores the exact prior
 application and matching pre-upgrade state; it is not an arbitrary cross-version
@@ -126,15 +126,15 @@ size and SHA-256 are streamed before the checks, rechecked after each command,
 and compared with the staged copy before its inventory is written. These checks
 detect input drift; they do not provide atomic admission against hostile writers
 or containment for untrusted binaries. Installed acceptance remains separate.
-The customer desktop pins the sibling `maverick.exe` and never falls back to
+The packaged desktop pins the sibling `maverick.exe` and never falls back to
 another executable from PATH or an environment override.
 
 `build-customer.ps1` generates an isolated Tauri MSI configuration. It embeds
 the runtime and offline WebView2 installer, disables downgrades and the elevated
-updater scheduled task, and uses stable customer UpgradeCode
+updater scheduled task, and uses the stable UpgradeCode
 `AB5BC260-7EC9-4B70-AF78-28F4067BC530`. Do not change this identity for subsequent
-customer releases. Acceptance-only fault injection cannot be enabled without a
-separate labelled fixture version and never enters the signed customer artifact.
+releases. Acceptance-only fault injection cannot be enabled without a
+separate labelled fixture version and never enters the signed release artifact.
 
 The CI acceptance script installs into a fresh directory under `RUNNER_TEMP`,
 removes developer tools from PATH, checks all eight installed packages, deletes
@@ -145,7 +145,7 @@ successful fixture upgrade, and checks the packaged dashboard setup page. It
 uninstalls the fixtures afterwards. It also checks a real ephemeral updater
 signature and rejects tampered installer bytes using the updater's verification
 library. This is **CI acceptance with developer tools absent from PATH**, not a
-claim that the GitHub runner is a clean customer computer. Fixture upgrade
+claim that the GitHub runner is a clean end-user computer. Fixture upgrade
 versions exercise installer behavior; they do not exercise a production data
 migration between two independently released application versions.
 
@@ -156,7 +156,7 @@ the real authenticated recovery API grants an update, the helper captures all
 local state and upgrades, a second grant captures newer safety state, and the
 helper reinstalls the old MSI and restores two workspaces. Developer tools are
 absent from the runtime PATH. Certificate/key material and trust are removed
-afterwards; fixture-signed packages are never uploaded as customer artifacts.
+afterwards; fixture-signed packages are never uploaded as release artifacts.
 The installed native application's fixed channel query must report the base,
 candidate and base versions in sequence, with the expected compiled public key.
 Both fixture installers contain identical frozen Python runtime bytes; the
@@ -223,7 +223,7 @@ then signs those final MSI bytes with the separate updater key. The workflow
 removes imported private keys before verifying the updater signature with the
 compiled public key. A separate signature verification record identifies the
 final installer hash and certificate; the unsigned runtime staging inventory
-remains an honest record of that earlier phase.
+remains an accurate record of that earlier phase.
 
 The output includes `Lightwork.msi`, its `.sig`, `updater.pub`, `latest.json`,
 `versions/<version>.json`, `SHA256SUMS`, runtime inventory, and CI

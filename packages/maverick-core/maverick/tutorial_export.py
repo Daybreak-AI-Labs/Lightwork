@@ -1,4 +1,4 @@
-"""Run-as-tutorial export (roadmap: 2027 H2 UX).
+"""Run-as-tutorial export.
 
 A successful run *is* a worked example: the goal, the plan, the steps that
 mattered, the dead ends, the outcome. This renders a run's recorded events

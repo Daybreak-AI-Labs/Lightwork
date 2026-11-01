@@ -1,4 +1,4 @@
-"""Speculative tool execution: pre-warm the tool-output cache (roadmap: 2027 H1 performance).
+"""Speculative tool execution: pre-warm the tool-output cache.
 
 An agent's next tool calls are often predictable -- it re-reads the file it
 just edited, refreshes the same repo map, polls the same status endpoint.

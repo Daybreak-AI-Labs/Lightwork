@@ -22,16 +22,16 @@ extension code cannot spawn processes, so a slash command implemented in
 that results in a real local process is the context-server hook, where the
 extension returns a command **and Zed spawns it** — that is exactly what
 `src/lib.rs` does with `maverick mcp`. Everything terminal-shaped is
-delivered as tasks, which Zed runs in its own terminal. This is the honest
-split; anything else would be pretending the sandbox isn't there.
+delivered as tasks, which Zed runs in its own terminal. The split follows
+what the extension sandbox actually allows.
 
 ## Prerequisites
 
 - The `maverick` CLI installed and on PATH, with the MCP server package:
-  from the reviewed Lightwork checkout, run
+  from a Lightwork checkout, run
   `pip install -e ./packages/maverick-core -e ./packages/maverick-mcp` (or use
-  the pinned-source installers under `apps/` / `deploy/`). Public PyPI names
-  remain disabled until every Lightwork namespace is reserved and protected.
+  the pinned-source installers under `apps/` / `deploy/`). Lightwork packages
+  are not published on PyPI; install from source.
 - Zed (stable) with assistant/context-server support.
 
 ## Building and qualification
@@ -39,7 +39,7 @@ split; anything else would be pretending the sandbox isn't there.
 **Preview:** the pinned Rust1.97.1 / `wasm32-wasip2` / API0.7.0 build and source
 bundle are supplied in [BUILDING.md](BUILDING.md). Run `python build.py` to compile
 the locked dependencies and produce an unsigned archive with the WASM component,
-source and checksum manifest. This source now compiles locally; no installed Zed
+source and checksum manifest. The source compiles with the pinned toolchain; no installed Zed
 host, authenticated MCP session or accessibility qualification is claimed.
 
 An end-user marketplace release still requires the release owner's selected

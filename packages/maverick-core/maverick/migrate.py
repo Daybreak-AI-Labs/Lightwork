@@ -1,4 +1,4 @@
-"""Backwards-compat tooling: ``maverick migrate`` (roadmap: 2027 H2 distribution).
+"""Backwards-compat tooling: ``maverick migrate``.
 
 Upgrades change what config means; this is the tool that walks an existing
 ``~/.maverick/config.toml`` forward. Three honest pieces:
@@ -30,8 +30,8 @@ log = logging.getLogger(__name__)
 # Top-level config sections the runtime actually reads. A section outside
 # this table is almost always a typo that silently no-ops.
 # Every top-level section some runtime reader consumes. Enumerated from the
-# load_config().get("<section>") call sites across the packages (platform-test
-# finding: this list held 44 names while the runtime reads ~90, so `migrate`
+# load_config().get("<section>") call sites across the packages (this list
+# once held 44 names while the runtime reads ~90, so `migrate`
 # told users that wizard-written sections like [models] / [capabilities] /
 # [security] "silently do nothing" -- advice that would delete live config).
 # When adding a new config section, add it here or migrate will lint it.

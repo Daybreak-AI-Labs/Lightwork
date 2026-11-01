@@ -33,7 +33,7 @@ def _binding(implementation: str, authority: str, active: bool = True) -> dict:
 
 def _integrated_only() -> dict:
     return _binding(
-        "Not bound in this reduced SKU; use integrated Lightwork /security/threats",
+        "Not available in this standalone app; use integrated Lightwork /security/threats",
         "integrated-lightwork-only",
         False,
     )

@@ -1,4 +1,4 @@
-"""Memory-leak quarantine (roadmap: 2027 H1 performance).
+"""Memory-leak quarantine.
 
 Long-horizon runs die slow deaths: one component (an agent's scratch buffers,
 a connector's response cache) grows a little every episode until the process

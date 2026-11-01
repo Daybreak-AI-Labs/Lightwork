@@ -22,7 +22,7 @@ def feed(inventory: dict, signature: str, url_template: str) -> dict:
             or inventory.get("acceptance_fixture") is not False
             or inventory.get("complete_release_cohort") is not True
             or not re.fullmatch(r"\d+\.\d+\.\d+", version)):
-        raise ValueError("Only a complete customer candidate may produce update metadata")
+        raise ValueError("Only a complete release candidate may produce update metadata")
     if url_template.count("{version}") != 1:
         raise ValueError("Installer address must contain one immutable {version} placeholder")
     url = url_template.replace("{version}", version)
@@ -47,8 +47,8 @@ def feed(inventory: dict, signature: str, url_template: str) -> dict:
         raise ValueError("Expected the verified Tauri installer signature") from exc
     runtime_sha256 = (inventory.get("runtime") or {}).get("sha256", "")
     if not re.fullmatch(r"[0-9a-f]{64}", runtime_sha256):
-        raise ValueError("The customer release requires its exact runtime SHA-256 identity")
-    return {"version": version, "runtime_sha256": runtime_sha256, "notes": "Lightwork customer release " + version,
+        raise ValueError("The release requires its exact runtime SHA-256 identity")
+    return {"version": version, "runtime_sha256": runtime_sha256, "notes": "Lightwork " + version,
             "pub_date": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "platforms": {"windows-x86_64": {"signature": signature, "url": url}}}
 

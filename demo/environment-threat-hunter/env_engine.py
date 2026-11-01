@@ -168,7 +168,7 @@ def propose_response(investigation: dict, action: str, target: str) -> dict:
         "status": "proposed",
         "digest": digest,
         "warning": (
-            "Proposal only. This standalone SKU has no response execution or "
+            "Proposal only. This standalone app has no response execution or "
             "approval endpoint; use Lightwork /security/soc for governed execution."
         ),
     }

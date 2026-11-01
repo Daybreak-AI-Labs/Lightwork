@@ -7,24 +7,24 @@ from maverick_dashboard.identity_format import (
 
 
 def test_google_federated_sub_hides_the_raw_string():
-    idn = humanize_principal("user:google-oauth2|115836816027351327475")
+    idn = humanize_principal("user:google-oauth2|100000000000000000001")
     assert idn.name == "Google account"
-    assert idn.detail == "…327475"
-    assert idn.raw == "user:google-oauth2|115836816027351327475"
+    assert idn.detail == "…000001"
+    assert idn.raw == "user:google-oauth2|100000000000000000001"
     assert idn.kind == "Person"
     # The opaque id never appears in the human label.
-    assert "115836816027351327475" not in idn.name
+    assert "100000000000000000001" not in idn.name
 
 
 def test_auth0_database_connection_reads_as_email_and_password():
-    idn = humanize_principal("user:auth0|6a9ad1a287e571a6c9d4d080")
+    idn = humanize_principal("user:auth0|000000000000000000000002")
     assert idn.name == "Email & password account"
-    assert idn.detail == "…d4d080"
+    assert idn.detail == "…000002"
 
 
 def test_email_subject_is_shown_directly():
-    idn = humanize_principal("user:drewb@daybreakailabs.com")
-    assert idn.name == "drewb@daybreakailabs.com"
+    idn = humanize_principal("user:person@example.com")
+    assert idn.name == "person@example.com"
     assert idn.detail == "Email"
 
 

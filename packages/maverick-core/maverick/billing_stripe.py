@@ -16,8 +16,8 @@ Three moving parts, all per-tenant:
   - **Metered usage** — :func:`push_usage_items` pushes the invoice's line items
     as Stripe invoice items so model-usage is billed *on top of* the
     subscription. This is behind the :func:`bill_metered_usage` flag
-    (**default off**): a pricing decision is pending, so out of the box only the
-    platform fee is billed. No markup is hardcoded anywhere — the amounts come
+    (**default off**): until the operator turns it on, only the platform fee
+    is billed. No markup is hardcoded anywhere — the amounts come
     straight from whatever :class:`~maverick.billing.RateCard` produced the
     invoice.
 
@@ -144,9 +144,9 @@ def enabled() -> bool:
 
 
 def bill_metered_usage() -> bool:
-    """The pricing-decision flag: whether metered model-usage line items are
-    pushed to Stripe on top of the platform fee. **Default off** -- until the
-    markup is decided, only the recurring subscription is billed.
+    """Whether metered model-usage line items are pushed to Stripe on top of
+    the platform fee. **Default off** -- until the operator turns it on, only
+    the recurring subscription is billed.
     ``MAVERICK_STRIPE_BILL_METERED`` overrides ``[billing.stripe]
     bill_metered_usage``. Never raises."""
     flag = env_flag("MAVERICK_STRIPE_BILL_METERED")
@@ -206,7 +206,7 @@ def status() -> StripeStatus:
         reason = f"enabled but no secret key ({_SECRET_KEY_ENV} is unset)"
     elif not sdk:
         reason = "enabled with a key but the 'stripe' extra is not installed " \
-                 "(pip install 'maverick-core[stripe]')"
+                 "(python -m pip install -e './packages/maverick-core[stripe]')"
     else:
         reason = "ready"
     return StripeStatus(
@@ -399,7 +399,7 @@ def _client(client: StripeClient | None = None) -> StripeClient:
     except ImportError as exc:  # optional extra absent
         raise StripeNotConfigured(
             "Stripe billing is enabled but the 'stripe' extra is not installed. "
-            "Run: pip install 'maverick-core[stripe]'."
+            "Run: python -m pip install -e './packages/maverick-core[stripe]'."
         ) from exc
 
 
@@ -514,7 +514,7 @@ def push_usage_items(tenant_id: str, invoice, *,
                      client: StripeClient | None = None) -> list[dict]:
     """Push the metered invoice's line items to Stripe as invoice items.
 
-    Behind the :func:`bill_metered_usage` pricing-decision flag: **off by
+    Behind the :func:`bill_metered_usage` flag: **off by
     default**, in which case this bills nothing (the platform fee is the only
     charge) and returns ``[]``. When on, each :class:`~maverick.billing.LineItem`
     becomes one Stripe invoice item whose amount is the line's ``charge`` in the
@@ -524,8 +524,8 @@ def push_usage_items(tenant_id: str, invoice, *,
     double-bills."""
     require_enabled()
     if not bill_metered_usage():
-        log.info("stripe: metered usage billing disabled (pricing decision "
-                 "pending); billing platform fee only for tenant %r", tenant_id)
+        log.info("stripe: metered usage billing disabled (bill_metered_usage "
+                 "is off); billing platform fee only for tenant %r", tenant_id)
         return []
     currency = (getattr(invoice, "currency", None) or "usd").lower()
     _validate_collection_period(tenant_id, invoice)
@@ -633,7 +633,7 @@ def preview_charges(tenant_id: str, card, *, since: str | None = None,
 
     Shows the platform-fee price id for the tenant's plan and the metered invoice
     (from :func:`maverick.billing.generate_invoice` under ``card``), plus whether
-    the metered line would actually be pushed given the pricing-decision flag.
+    the metered line would actually be pushed given the bill_metered_usage flag.
     Works even when billing is disabled, so an operator can inspect before
     turning it on. Behind ``maverick billing stripe-preview``."""
     from .billing import generate_invoice

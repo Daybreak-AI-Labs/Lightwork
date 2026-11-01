@@ -1,4 +1,4 @@
-"""Provider migration cost calculator (roadmap: 2027 H2 performance).
+"""Provider migration cost calculator.
 
 Answers the procurement question every multi-provider shop eventually asks:
 "what would last month have cost on model X?". Given observed usage rows

@@ -1,4 +1,4 @@
-"""QA-057: the server-rendered tool catalog stays bounded at scale."""
+"""The server-rendered tool catalog stays bounded at scale."""
 from __future__ import annotations
 
 import re

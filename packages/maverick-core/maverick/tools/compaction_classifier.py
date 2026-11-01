@@ -1,4 +1,4 @@
-"""Compaction v6 hybrid strategy picker (roadmap: 2028 H1 perf — "compaction v6").
+"""Compaction v6 hybrid strategy picker.
 
 Pick the cheapest compaction strategy that fits a conversation's shape. The
 caller supplies coarse features; this applies a documented rule ladder and

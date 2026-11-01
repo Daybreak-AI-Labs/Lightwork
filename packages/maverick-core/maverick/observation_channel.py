@@ -1,4 +1,4 @@
-"""Multi-agent observation channel (roadmap: 2027 H2 capabilities).
+"""Multi-agent observation channel.
 
 The blackboard is a *pull* model — agents post events, readers walk the list.
 This is the *push* counterpart: a read-only broadcast an external observer

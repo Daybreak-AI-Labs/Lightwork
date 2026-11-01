@@ -6,14 +6,14 @@ body:
     attributes:
       value: |
         Thanks for the report. Before submitting:
-          - Run `maverick doctor` and paste the output below
-          - Redact any API keys / tokens from your config
+          - Run `lightwork doctor` and paste the output below
+          - Remove any API keys or tokens from what you paste
 
   - type: textarea
     id: doctor
     attributes:
-      label: maverick doctor output
-      description: Paste the full output of `maverick doctor`
+      label: lightwork doctor output
+      description: Paste the full output of `lightwork doctor`
       placeholder: |
         Lightwork health check
         ✓ config  (~/.maverick/config.toml)
@@ -43,15 +43,15 @@ body:
     attributes:
       label: Logs (optional)
       description: |
-        Output of `journalctl -u maverick -f` (VPS) or the maverick serve
-        process (local). Redact secrets.
+        Recent output of `journalctl -u maverick` (VPS service) or of the
+        `lightwork serve` process (local). Remove secrets.
       render: shell
 
   - type: input
     id: version
     attributes:
       label: Version
-      description: Output of `pip show maverick | grep Version` (or git commit SHA if from source)
+      description: The package version shown by `lightwork version` and, for a source install, the commit from `git rev-parse --short HEAD`
     validations:
       required: true
 

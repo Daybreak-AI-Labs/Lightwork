@@ -1,4 +1,4 @@
-# Operations / Supply Chain — council-added — OT / ICS Security.
+# Operations / Supply Chain — OT / ICS Security.
 # Integration targets (connectors to build): OT monitoring; historian/SCADA (READ-scoped only).
 name = "ops_ot_security"
 compartment = "ops_ot_security"

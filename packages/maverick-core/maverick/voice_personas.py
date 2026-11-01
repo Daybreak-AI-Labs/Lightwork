@@ -1,4 +1,4 @@
-"""Voice persona presets + multi-language voice (roadmap: 2027 H2 UX).
+"""Voice persona presets + multi-language voice.
 
 Two knobs the voice surface was missing:
 

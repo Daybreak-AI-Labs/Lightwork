@@ -1,4 +1,4 @@
-"""Signed license keys for the sellable agent SKUs.
+"""Signed license tokens for the standalone agents under ``demo/``.
 
 The capability seam (each standalone agent's ``capabilities.py``) is the
 enforcement point; this module is the platform-side mint. A license is a
@@ -8,8 +8,8 @@ compact token::
 
 with payload ``{customer, sku, capabilities, issued_at, expires_at}``. The
 agent ships only the PUBLIC key (env ``LIGHTWORK_LICENSE_PUBKEY``) and the
-token (``LIGHTWORK_LICENSE``); the private key never leaves the vendor. An
-upsell is a key swap, not a reinstall. No license -> the agent runs in
+token (``LIGHTWORK_LICENSE``); the private key stays with the issuer. A
+new license is a token swap, not a reinstall. No license -> the agent runs in
 evaluation mode (bounded, honest, never crippled mid-flight).
 
 CLI::

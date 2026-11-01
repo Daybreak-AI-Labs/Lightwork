@@ -128,7 +128,7 @@ def get_provider_client(
         )
     if canon == "bedrock":
         from .bedrock_provider import BedrockClient
-        # Native Anthropic Messages client (W1-10): region, auth mode and
+        # Native Anthropic Messages client: region, auth mode and
         # endpoint come from the same admitted environment snapshot.
         return BedrockClient(
             api_key=api_key,

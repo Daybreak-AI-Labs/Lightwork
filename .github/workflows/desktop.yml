@@ -1,6 +1,6 @@
 name: Desktop bundle
 
-# Builds the authenticated source-bootstrap shell (Tauri) for macOS, Windows,
+# Builds the source-bootstrap shell (Tauri) for macOS, Windows,
 # and Linux as an unsigned engineering workflow artifact. It is not a
 # self-contained product installer and is not attached to product releases.
 
@@ -22,7 +22,7 @@ on:
   push:
     tags:
       # Engineering-only version markers. Product `v*` releases deliberately
-      # do not publish these source-bootstrap bundles as customer installers.
+      # do not publish these source-bootstrap bundles as end-user installers.
       - "desktop-v*"
 
 concurrency:

@@ -17,7 +17,7 @@ def _clear_env(monkeypatch):
 class TestModelWindow:
     def test_known_model(self, monkeypatch):
         _clear_env(monkeypatch)
-        # W1-5: Opus 4.8 is a 1M-context model, not 200k.
+        # Opus 4.8 is a 1M-context model, not 200k.
         assert cs.model_window("claude-opus-4-8") == 1_000_000
 
     def test_million_token_model(self, monkeypatch):
@@ -34,7 +34,7 @@ class TestModelWindow:
 class TestScaledBounds:
     def test_200k_window_scales_up_from_legacy(self, monkeypatch):
         _clear_env(monkeypatch)
-        # W1-5: claude-opus-4-8 used to be (wrongly) the 200k case here, but
+        # Claude-opus-4-8 used to be (wrongly) the 200k case here, but
         # it's actually a 1M-context model -- claude-opus-4-5 genuinely has
         # the 200k window this test is scaling from.
         model = "claude-opus-4-5"
@@ -120,7 +120,7 @@ class TestAgentWiring:
         monkeypatch.delenv("MAVERICK_MAX_TOOL_RESULT_BYTES", raising=False)
         from maverick.agent import _tool_result_limit
         assert _tool_result_limit("gemini-3-pro") == 160_000
-        # W1-5: claude-opus-4-5 (not 4-8, which is a 1M-context model) is
+        # Claude-opus-4-5 (not 4-8, which is a 1M-context model) is
         # the genuine 200k baseline case.
         assert _tool_result_limit("claude-opus-4-5") == 32_000
 
