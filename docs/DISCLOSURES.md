@@ -2,8 +2,7 @@
 
 Resolved security issues, published after the embargo window in
 [`SECURITY.md`](SECURITY.md) (90 days, or sooner once a fix ships and users
-have had a reasonable window to upgrade). This is the public record the roadmap's
-"coordinated-disclosure log" item calls for — a standing companion to
+have had a reasonable window to upgrade). It is a standing companion to
 `SECURITY.md` (which covers *how* to report) and `CHANGELOG.md` (which lists *what*
 changed).
 

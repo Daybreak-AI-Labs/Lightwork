@@ -1,9 +1,30 @@
 # Third-Party Notices
 
-Lightwork is distributed with, or depends on, third-party open-source software.
-This file inventories the **declared** runtime and optional dependencies of the
-`maverick-*` packages and their best-known SPDX license identifiers, so that
-attribution and license obligations can be tracked.
+Lightwork is licensed under the Apache License, Version 2.0 (see `LICENSE`). It
+includes, or depends on, third-party open-source software under its own
+licences. This file lists:
+
+1. third-party components whose files are included in this repository and in
+   the `maverick-dashboard` package (below); and
+2. the **declared** runtime and optional dependencies of the `maverick-*`
+   packages, with their best-known SPDX licence identifiers.
+
+## Bundled components
+
+These files are shipped in
+`packages/maverick-dashboard/maverick_dashboard/static/` and are included in
+the `maverick-dashboard` wheel. Each file's licence text or notice is kept next
+to it or in its header.
+
+| Component | Files | Licence | Copyright and notices |
+|---|---|---|---|
+| [Swagger UI](https://github.com/swagger-api/swagger-ui) 5.33.1 | `swagger-ui-5.33.1-bundle.js`, `swagger-ui-5.33.1.css` | Apache-2.0 | Copyright 2020-2021 SmartBear Software Inc. The licence is in `swagger-ui-5.33.1-LICENSE.txt` and the NOTICE in `swagger-ui-5.33.1-NOTICE.txt`; the NOTICE is reproduced in the repository's `NOTICE` file. |
+| Components bundled inside Swagger UI | `swagger-ui-5.33.1-bundle.js`, `swagger-ui-5.33.1.css` | MIT, BSD-3-Clause, and Apache-2.0 OR MPL-2.0 (DOMPurify 3.4.13) | Licence notices for the bundled libraries, including React, DOMPurify, classnames, JSON-Patch, ieee754 and safe-buffer, are in `swagger-ui-bundle.js.LICENSE.txt`; the stylesheet includes normalize.css 7.0.0 (MIT). |
+| [Cytoscape.js](https://js.cytoscape.org) 3.30.2 | `cytoscape-3.30.2.min.js` | MIT | Copyright (c) 2016-2024, The Cytoscape Consortium. The licence text is in the file header. |
+| [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) 2.211 | `fonts/jbm-400.woff2`, `fonts/jbm-500.woff2` | OFL-1.1 | Copyright 2020 The JetBrains Mono Project Authors. The licence text is in `fonts/OFL.txt`; each font's metadata also carries the copyright notice and a link to the licence. |
+| [Manrope](https://github.com/sharanda/manrope) 4.504 | `fonts/manrope-var.woff2` | OFL-1.1 | Copyright 2019 The Manrope Project Authors. The licence text is in `fonts/OFL.txt`; the font's metadata also carries the copyright notice and a link to the licence. |
+
+## Declared dependencies
 
 > **Provenance & scope.** This list is generated from the `dependencies` and
 > `optional-dependencies` declared in each package's `pyproject.toml`; it does
@@ -15,7 +36,7 @@ attribution and license obligations can be tracked.
 > (`.github/workflows/ci.yml`) and reproduce each dependency's required license
 > text and `NOTICE` (Apache-2.0) per its terms.
 
-## ⚠️ Copyleft / requires legal review before redistribution
+### Copyleft: review before redistribution
 
 These carry obligations beyond permissive attribution (e.g. LGPL relink/notice,
 GPL). Confirm each against the actual installed version and your distribution
@@ -29,7 +50,7 @@ scans only the installed tree — optional extras can slip past it):
 | `caldav` | `GPL-3.0-or-later OR Apache-2.0` | **Verified against PyPI metadata (`license_expression`), July 2026: dual-licensed, so Apache-2.0 may be elected and there is no copyleft obligation.** Optional `[calendar]` extra, and `calendar_tool._get_caldav_calendar` imports it inside the function body, so it is never bundled. Not a redistribution risk; kept in this table only because the name recurs in scanner output. |
 | `matrix-nio` | ISC (verify) | Generally permissive, but confirm — some optional crypto extras pull copyleft. |
 
-## Permissive dependencies (attribution required)
+### Permissive dependencies (attribution required)
 
 The following are distributed under permissive licenses (MIT / BSD / Apache-2.0
 / ISC / PSF) that require reproducing their copyright and license notice on
@@ -110,12 +131,12 @@ installed version:
 | tomli | MIT |
 | stripe | MIT |
 
-## Build / dev / test tooling (not redistributed in runtime artifacts)
+### Build, development and test tooling (not redistributed in runtime artifacts)
 
 `ruff`, `pytest`, `pytest-asyncio`, `pre-commit` — used for development and CI
 only; not bundled into distributed wheels.
 
-## Optional/non-distributed
+### Optional, not distributed
 
 `agent-shield` — declared as an optional extra; the kernel runs without it
 (fail-open) and it is not bundled. If you ship it, add its license here.

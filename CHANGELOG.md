@@ -78,26 +78,24 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connectors onto saved connections is not part of this change.
 
 ### Changed
-- **Business material left the product repository.** The fundraising and
-  go-to-market package (`pitch/`), patent material (`docs/patents/`), strategy
-  essays (`docs/strategy/`), commercialization and competitor research
-  (`docs/research/commercialization/`, `docs/research/competitive/`, the
-  invention register and purchase-blocker notes), the OneTrust gap analyses,
-  the Palantir playbook and three dated internal hand-off documents now live
-  in the private business repository. The public marketing site moved from
-  `pitch/site/` to `website/` (same Cloudflare Pages deploy); the benchmark
-  plan moved beside its code at `benchmarks/benchmark-plan.md`; every
-  remaining citation was rewritten, and a claims-docs test keeps the
-  material from coming back.
-- **No point-in-time working material or personal identifiers in the
-  tracked tree.** The dated UX audit dump (`docs/ux-audit-2026-09-30/`) and
-  its delivered-fixes log left the repository and the pages that cited them
-  describe the evidence instead; personal workstation paths and the AWS
-  account id became placeholders, and the Terraform state bucket is now
-  supplied at `terraform init` time from a git-ignored `backend.hcl`. The
-  Homebrew README names the same tap as the formula and the logo moved
-  under `docs/assets/`.
-- The point-in-time audits, ledgers and reviews that lived at the repository root (`USER_EXPERIENCE_AUDIT.md`, `PLATFORM_IMPROVEMENT_AUDIT.md`, `CODE_QUALITY_AUDIT.md`, `QA_FINDINGS.md`, `ADVERSARY_COUNCIL_REVIEW.md`, `STRESS_TEST.md`, `PUNCHLIST_RESOLUTION.md`, `FIXES.md`, `LAUNCH_AUDIT.md`, `INFRA_AND_POLICY_DECISIONS.md`) moved to `docs/audits/`, indexed by `docs/audits/README.md`. `docs/OPEN_ITEMS.md` is the only live list of findings; code comments and tests cite the archived documents by their new path.
+- **Lightwork is open source under the Apache License 2.0.** `LICENSE` is the
+  verbatim Apache License, Version 2.0, a new `NOTICE` carries the copyright
+  line and the bundled swagger-ui attribution, and every package manifest
+  declares `Apache-2.0`. Versions previously published under the MIT License
+  remain available under that licence. Contributions are accepted under the
+  contributor licence agreement in `CLA.md`.
+- **Documentation for an open-source project.** New `GOVERNANCE.md`,
+  `SUPPORT.md`, `RELEASING.md` and an RFC process index (`docs/rfcs/README.md`);
+  rewritten `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `MAINTAINERS.md`,
+  `TRADEMARK.md` and the unabridged Contributor Covenant 2.1. The from-source
+  install is the documented install path (`docs/source-install.md`), one public
+  roadmap (`docs/ROADMAP.md`) replaces the internal ones, and an
+  `.editorconfig` and a `Makefile` cover common contributor tasks.
+- **No personal identifiers or session narration in the tracked tree.**
+  Personal workstation paths and the AWS account id became placeholders, the
+  Terraform state bucket is supplied at `terraform init` time from a
+  git-ignored `backend.hcl`, the logo moved under `docs/assets/`, and code
+  comments describe behaviour instead of the review round that produced it.
 - **Ordinary tasks have optional limits** — omitted dollar, time, token,
   tool-call and step limits remain unset across customer entrypoints. Existing
   numeric settings stay intact; Settings can reversibly disable saved task
@@ -161,6 +159,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/static/*?v=` links with a one-year immutable cache for the shell CSS/JS.
 - **`/compartments` search and pagination** (`q`, `page`, `per_page`), like
   `/tools`, instead of one multi-megabyte page.
+
+### Removed
+- **Company administration and business material.** The company's fundraising,
+  go-to-market, patent, strategy, pricing and competitor material; its own
+  ISMS/AIMS records (policies, procedures, registers, statements of
+  applicability, management review and internal audit); dated internal audits,
+  readiness reviews, launch checklists and the open-items tracker; community
+  marketing programme plans and unstaffed governance charters; the long-range
+  roadmap, press kit, comparison and editions pages, contract templates and the
+  user-story backlog; the company marketing website and its deploy workflow;
+  the licence-issuing vendor console; and dated machine-specific evidence files
+  moved to a private company repository. A claims-docs test keeps the business
+  material from returning.
 
 ### Fixed
 - **Client and consent state stays attached to the current action** — stale
@@ -253,8 +264,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Executive PDF paginates by vertical space, so no line lands in the footer.
 - OneTrust vendor import reports every skipped row with its reason
   (duplicate, invalid, capacity) in the API, CLI and privacy page.
-- Marketing page positions Lightwork as the governed AI workforce platform
-  with the Daybreak favicon and licensing-appropriate calls to action.
 - **Per-tenant BYOK provider keys** — a config-gated, default-off layer
   (`[providers] per_tenant_keys` / `MAVERICK_PER_TENANT_KEYS`) that lets an
   active tenant run on ITS OWN LLM/provider API key instead of the
@@ -271,7 +280,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   agent offline — and the key bytes never reach config, the repo, the tenant
   record, or logs (the name ends in `_API_KEY` so the GitHub Action output
   sanitizer redacts it). Installer wizard step + docs. BYOK only — no Bedrock
-  resale, usage metering, or markup (that waits on a separate pricing decision).
+  resale, usage metering, or markup.
   Distinct from per-tenant `[kms]` BYOK (envelope-encryption key custody).
 - **Stripe billing collection** — a config-gated, default-off integration
   (`maverick.billing_stripe`; `[billing.stripe] enable` / `MAVERICK_STRIPE_ENABLE`)
@@ -280,9 +289,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (create-or-lookup, idempotent; the `cus_...` id is stored on the tenant record),
   a **subscription** matching the tenant's plan (the recurring platform fee, priced
   from `[billing.stripe.prices]`), and the metered invoice pushed as Stripe invoice
-  items behind the `bill_metered_usage` **pricing-decision flag** — off by default,
-  so only the platform fee is billed until the model-usage markup is decided (no
-  markup is hardcoded; amounts come from the `RateCard` that rated the invoice). A
+  items behind the `bill_metered_usage` flag — off by default, so only the
+  platform fee is billed until an operator turns it on (no markup is
+  hardcoded; amounts come from the `RateCard` that rated the invoice). A
   signature-verified **webhook** (`MAVERICK_STRIPE_WEBHOOK_SECRET`, stdlib HMAC —
   no SDK needed) maps `invoice.payment_failed` / a past-due subscription to a
   downgrade to the base entitlement tier (via a new `billing_status` on the tenant
@@ -591,9 +600,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.6] -- 2026-05-31
 
-Post-0.1.4 hardening, plus the cross-language MCP client surface (the
-council's "drive Lightwork from any language over MCP" decision) and the
-polyglot sandbox / coding-mode work.
+Post-0.1.4 hardening, plus the cross-language MCP client surface (drive
+Lightwork from any language over MCP) and the polyglot sandbox / coding-mode
+work.
 
 ### Added
 - **Cross-language MCP clients.** Runnable example clients and quickstarts for
@@ -720,7 +729,7 @@ The launch-hardening pass that landed just after the 0.1.3 tag was cut.
   skills, personas. Fault-isolated.
 - `benchmarks/harness.py` + RESULTS.md.
 - `ask_user` is now scoped to the running goal.
-- Council medium-priority polish: docs, schema migration tests,
+- Polish: docs, schema migration tests,
   orchestrator E2E test, channel adapter smoke tests, /chat/goal
   user-friendly labels, multi-line REPL.
 
