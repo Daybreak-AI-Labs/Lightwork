@@ -308,7 +308,7 @@ screened by the same shield/budget/sandbox machinery:
   (`sdks/plugin-ts/`, `@maverick/plugin-sdk`) and a **gRPC plugin host**
   for any language. Single Python tools need only the `@tool` decorator
   (`tools/decorator.py`).
-- **Channels** — 17 wired adapters (`packages/maverick-channels/`):
+- **Channels** — 18 wired adapters (`packages/maverick-channels/`):
   Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon,
   Voice, WhatsApp (Twilio + Cloud API), SMS, iMessage, IRC, Threads, RCS,
   and a glasses/wearable bridge. New ones subclass `Channel` in `base.py`;

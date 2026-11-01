@@ -160,8 +160,9 @@ Each of these fails the build (the `lint` job in `.github/workflows/ci.yml`):
   loop-variable capture B023, and the rest). FastAPI `Depends`/`Form`/`Query`
   and similar calls in argument defaults are allowed through
   `extend-immutable-calls`; they are not violations. Cyclomatic complexity is
-  capped at 20. Functions already over the cap carry `# noqa: C901` as
-  refactor debt; new code stays under the cap.
+  capped at 20, with 167 grandfathered `# noqa: C901` waivers in non-test code
+  (`test_complexity_waivers_do_not_grow` pins that ceiling, so the backlog can
+  only shrink); new code stays under the cap.
 - There is no mypy or pyright. Ruff is the only static gate, so do not add
   type-only "fixes" expecting a checker to validate them.
 
