@@ -84,8 +84,8 @@ not available from this repository.
 ### Changed
 - **Lightwork is open source under the Apache License 2.0.** `LICENSE` is the
   verbatim Apache License, Version 2.0, a new `NOTICE` carries the copyright
-  line and the bundled swagger-ui attribution, and every package manifest
-  declares `Apache-2.0`. Versions previously published under the MIT License
+  line and the bundled swagger-ui attribution, and every published package
+  manifest declares `Apache-2.0`. Versions previously published under the MIT License
   remain licensed under it. Contributions are accepted under the
   contributor licence agreement in `CLA.md`.
 - **Documentation for an open-source project.** New `GOVERNANCE.md`,
