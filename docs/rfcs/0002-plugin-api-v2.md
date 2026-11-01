@@ -1,7 +1,9 @@
 # RFC 0002: Plugin API v2
 
-- Status: **Draft — open for comment**
-- Tracking: roadmap item "Plugin API v2 RFC" (2028-H1 Ecosystem)
+- Status: **Implemented** (with changes). Plugin API v2 shipped as documented in
+  [`../plugin-api-v2.md`](../plugin-api-v2.md). The released contract differs from
+  this draft: plugins keep the v1 entry-point groups and declare
+  `api_version = "2"` in `maverick-plugin.toml`.
 
 ## What v1 is
 
@@ -20,7 +22,7 @@ lockfile, and opt-in telemetry.
    answer "what would this add?"
 3. **No lifecycle hooks** — plugins can't run setup/teardown (e.g. open a
    connection pool) outside tool-call time.
-4. **Python-only** — the gRPC plugin host (2028 roadmap) needs a wire-level
+4. **Python-only** — a gRPC plugin host needs a wire-level
    contract, which v1's "import a callable" cannot express.
 
 ## Proposed v2 surface

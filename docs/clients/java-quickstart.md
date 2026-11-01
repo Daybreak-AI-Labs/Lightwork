@@ -146,7 +146,7 @@ used by the runnable TypeScript example.
   not part of the wire protocol.
 - **The MCP server is for cross-language clients, not for tunneling
   Lightwork over the public internet.** Pair with your own auth +
-  TLS layer if you go remote (see `packages/maverick-mcp/http_transport.py`).
+  TLS layer if you go remote (see `http_transport.py` in `packages/maverick-mcp/`).
 
 ## SDK status
 
@@ -157,12 +157,10 @@ not — you can also implement the JSON-RPC handshake by hand.
 
 ## Why no `maven install maverick-core`?
 
-See [docs/ROADMAP.md → "Language Bindings — Council Decision"](../ROADMAP.md).
-Java / Kotlin is council target #5 (JVM enterprise + Android). Short
-version: thin API clients port well; opinionated frameworks don't. We
-don't intend to port a 1600-test, 7-sandbox, multi-agent kernel. We
-intend to make sure every MCP-speaking language can drive that kernel
-without giving up features.
+Thin API clients port well; opinionated frameworks don't. The multi-agent
+kernel stays in Python, and every MCP-speaking language, Java and Kotlin
+included, can drive it without giving up features. The decision is recorded
+under [Language bindings](../ROADMAP.md#language-bindings) in the roadmap.
 
 ## See also
 
@@ -171,4 +169,4 @@ without giving up features.
 - [TypeScript client quickstart](./typescript-quickstart.md)
 - [Go client quickstart](./go-quickstart.md)
 - [Rust client quickstart](./rust-quickstart.md)
-- [docs/ROADMAP.md → Language Bindings — Council Decision](../ROADMAP.md)
+- [Roadmap: language bindings](../ROADMAP.md#language-bindings)

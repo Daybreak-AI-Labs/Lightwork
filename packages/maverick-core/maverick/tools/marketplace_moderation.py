@@ -1,5 +1,4 @@
-"""Marketplace listing moderation (roadmap: 2028 H1 ecosystem — marketplace
-moderation tools).
+"""Marketplace listing moderation.
 
 Scan a marketplace listing and return a moderation decision —
 ``APPROVE`` / ``REVIEW`` / ``REJECT`` — by checking for banned terms, missing

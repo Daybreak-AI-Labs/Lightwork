@@ -1,4 +1,4 @@
-"""Slack workflow integration (roadmap: 2028 H1).
+"""Slack workflow integration.
 
 Build the JSON for a Slack Workflow custom step — the function definition you
 register so a Lightwork goal can appear as a step in Workflow Builder — and the

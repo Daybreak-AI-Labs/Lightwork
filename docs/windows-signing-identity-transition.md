@@ -1,6 +1,6 @@
 # Reviewed Windows signing identity transitions
 
-Lightwork supports a bounded bridge between two exact customer releases. The
+Lightwork supports a bounded bridge between two exact releases. The
 installed updater key must authorize the bridge, and the proposed updater key
 must independently sign the same policy. Both MSI files must still pass Windows
 publisher verification. This does not recover a lost or compromised signing key,
@@ -24,7 +24,7 @@ compiled public key and channel, then builds and Authenticode-signs the target
 MSI. Hash the final signed MSI bytes. Use immutable source and target inventories
 to record both Python runtime hashes, both native executable hashes, exact
 three-part versions, both certificate thumbprints and both encoded updater public
-keys. No production signing keys belong in the repository or a customer upload.
+keys. No production signing keys belong in the repository or in any upload.
 
 A schema-1 policy has exactly these fields:
 
@@ -65,7 +65,7 @@ the latest feed. Preserve the existing source version manifest; publish the
 reviewed target version manifest and feed only through the organization's
 authorized release process.
 
-## Administrator and customer workflow
+## Administrator and user workflow
 
 1. In **Install & updates**, check the proposed newer release and use **Save
    signing transition for review**. This downloads public review material and
@@ -155,7 +155,7 @@ release-owner dependencies.
 
 ### Disposable hosted publisher-transition gate
 
-The Windows customer workflow also runs
+The Windows desktop package workflow (`.github/workflows/windows-customer.yml`) also runs
 `apps/installer-msi/accept_signing_transition_fixture.py` after the same-identity
 acceptance. It copies the existing base and candidate MSIs, creates **two distinct
 self-signed fixture publishers**, signs and verifies those copied packages using

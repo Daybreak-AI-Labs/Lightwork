@@ -1,4 +1,4 @@
-"""Wave 8: coding mode, patch validation, test-driven verifier, repo_map."""
+"""Coding mode, patch validation, test-driven verifier, repo_map."""
 from __future__ import annotations
 
 import os
@@ -64,7 +64,7 @@ class TestExtractUnifiedDiff:
         assert extract_unified_diff(None) is None
 
     def test_final_marker_anchored_at_line_start(self):
-        """Wave 12: `FINAL:` is line-anchored. A mid-prose "FINAL:"
+        """`FINAL:` is line-anchored. A mid-prose "FINAL:"
         must NOT trigger truncation; only line-start does."""
         text = (
             "I'll send the FINAL: response below.\n"
@@ -78,7 +78,7 @@ class TestExtractUnifiedDiff:
         assert "+new" in out
 
     def test_last_final_marker_wins(self):
-        """Wave 12: multiple FINAL: markers at line start — the LAST
+        """Multiple FINAL: markers at line start — the LAST
         is canonical (the model is told to END its turn with FINAL:)."""
         text = (
             "FINAL:\n"
@@ -108,7 +108,7 @@ class TestExtractUnifiedDiff:
         assert "+new" in out
 
     def test_internal_markdown_fence_preserved(self):
-        """Wave 12: diffs that edit Markdown files contain triple-
+        """Diffs that edit Markdown files contain triple-
         backtick context lines (e.g. ` \\`\\`\\`python`). The pre-Wave-12
         fence stripper nuked every line beginning with ``` and silently
         corrupted these patches."""
@@ -342,7 +342,7 @@ class TestSelectBestCandidate:
         assert select_best_candidate([a, b, c]) is b
 
     def test_median_length_wins_ties(self):
-        """Wave 12: among score-tied candidates, prefer the one closest
+        """Among score-tied candidates, prefer the one closest
         to median patch length (not just the smallest)."""
         a = Candidate(0, "x" * 5,   score=0.8, apply_check_passed=True)
         b = Candidate(1, "x" * 50,  score=0.8, apply_check_passed=True)
@@ -351,7 +351,7 @@ class TestSelectBestCandidate:
         assert select_best_candidate([a, b, c]) is b
 
     def test_all_zero_score_picks_last_attempt(self):
-        """Wave 12 (council F1 fix): when ALL scores are 0 (no
+        """When ALL scores are 0 (no
         FAIL_TO_PASS or runner error), prefer the LAST attempt — the
         BoN ladder is ordered cheap→warm→Opus, so attempt N-1 is the
         most-thought attempt. Prior behaviour was to pick the SMALLEST

@@ -15,8 +15,6 @@
   .acm-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .75rem; margin: .5rem 0 0; padding: 0; list-style: none; }
   .acm-legend li { display: flex; flex-direction: column; gap: .3rem; }
   .acm-legend p { margin: 0; color: var(--muted); font-size: var(--text-sm); }
-  .acm-price { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
-  .acm-price p { margin: 0; max-width: 44rem; }
 </style>
 {% if tab_host %}
 {% from "_tabs.html" import host_header, panel_attrs %}{{ host_header(tab_host) }}
@@ -72,17 +70,6 @@
       </li>
       {% endfor %}
     </ul>
-  </section>
-
-  <section class="panel" aria-labelledby="acm-price-title">
-    <div class="acm-price">
-      <div>
-        <h2 id="acm-price-title">Packaging &amp; pricing</h2>
-        <p class="muted">One product, six suites, one workforce. For packaging and
-          pricing, contact us.</p>
-      </div>
-      <a class="btn btn--primary" href="{{ pricing_mailto }}">Contact us about pricing</a>
-    </div>
   </section>
 </div>
 {% endblock %}

@@ -252,14 +252,14 @@ def roster(key: str, cfg: dict | None = None) -> list[DomainProfile]:
 
 
 # ---------------------------------------------------------------------------
-# Deploy a department as a fleet — a PAID ADD-ON.
+# Deploy a department as a fleet — a plan-gated add-on.
 #
-# Departments are not bundled with the base product: a tenant deploys one only
+# On a multi-tenant deployment, a tenant deploys a department only
 # when its plan carries the ``departments`` add-on (or a per-department
 # ``department:<key>`` grant). The gate is :func:`maverick.billing.feature_allowed`,
 # which fails OPEN for self-host / single-tenant / unprovisioned deployments and
 # closed only for a tenant an operator has explicitly put on a limited plan —
-# so this never breaks a self-hoster, and always bills a managed tenant.
+# so this never breaks a self-hoster.
 # ---------------------------------------------------------------------------
 DEPARTMENTS_FEATURE = "departments"
 
@@ -271,7 +271,7 @@ class EntitlementError(RuntimeError):
         self.department = key
         self.feature = feature
         super().__init__(
-            f"the {key!r} department is a paid add-on; the active plan does not "
+            f"the {key!r} department is an add-on; the active plan does not "
             f"include the {feature!r} entitlement"
         )
 

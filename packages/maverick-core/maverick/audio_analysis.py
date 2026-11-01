@@ -1,5 +1,4 @@
-"""Audio diarization + emotion (roadmap: 2028 H1 capabilities, "audio
-diarization + emotion").
+"""Audio diarization + emotion.
 
 Honest scope — this is **heuristic segmentation, not trained diarization**:
 speaker changes are detected by thresholding the cosine *distance* between

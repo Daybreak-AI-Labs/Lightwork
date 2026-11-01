@@ -1,4 +1,4 @@
-"""Smart goal completion (roadmap: 2028 H1 UX).
+"""Smart goal completion.
 
 Given a partial goal the user is typing and a history of past goals, suggest the
 most likely completions. Pure lexical ranking — no LLM, no embeddings: a past

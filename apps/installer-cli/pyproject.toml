@@ -7,8 +7,9 @@ name = "maverick-installer"
 version = "0.1.7"
 description = "Interactive setup wizard for Lightwork"
 requires-python = ">=3.10"
-license = "LicenseRef-Proprietary"
-authors = [{ name = "cdayAI" }]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "The Lightwork Authors" }]
 readme = "README.md"
 dependencies = [
     "maverick-agent>=0.1.7",
@@ -18,6 +19,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/Daybreak-AI-Labs/Lightwork"
+Repository = "https://github.com/Daybreak-AI-Labs/Lightwork"
+Issues = "https://github.com/Daybreak-AI-Labs/Lightwork/issues"
 
 [project.scripts]
 maverick-init = "maverick_installer.main:main"

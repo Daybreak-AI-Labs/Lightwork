@@ -1,4 +1,4 @@
-# Operations / Supply Chain — council-added — Trade Compliance / Export Control.
+# Operations / Supply Chain — Trade Compliance / Export Control.
 # Integration targets (connectors to build): screening; cross-ref legal (6.3) + finance AML.
 name = "ops_trade_compliance"
 compartment = "ops_logistics"

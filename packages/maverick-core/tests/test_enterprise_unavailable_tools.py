@@ -1,4 +1,4 @@
-"""UX-081: admins can learn which connector tools Enterprise mode refuses.
+"""Admins can learn which connector tools Enterprise mode refuses.
 
 While the hand-written connectors still read operator-global environment
 credentials, a signed-in person's task cannot run them in Enterprise mode

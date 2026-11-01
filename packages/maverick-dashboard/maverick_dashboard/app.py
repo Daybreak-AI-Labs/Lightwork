@@ -578,7 +578,7 @@ def _theme_context(request: Request) -> dict:
         "custom_theme_names": sorted(custom),
         # ``lang`` is the selected UI language (drives ``t()``); ``page_lang``
         # is what the page body is actually written in and is what
-        # ``<html lang>`` and ``dir`` declare (W3-73, UX-198). They differ
+        # ``<html lang>`` and ``dir`` declare. They differ
         # until the templates are translated, so an English body is never
         # mirrored because a few chrome strings are Arabic.
         "lang": lang,
@@ -1463,7 +1463,7 @@ async def _lifespan(app: FastAPI):
         await _start_privacy_discovery_remediation_scheduler()
         await _start_privacy_notice_publication_scheduler()
         # Connected-entitlement auto-refresh: a deployment with [license] api_url
-        # configured polls the vendor console so an upgrade/downgrade issued there
+        # configured polls that license service so a license re-issued there
         # lands within ~a minute — no redeploy, no manual refresh. No-op (returns
         # None) without an API URL or with refresh_interval_seconds = 0, so tests
         # and offline/air-gapped boxes are untouched. Fail-open by construction:
@@ -1956,7 +1956,7 @@ app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 def _compress_enabled() -> bool:
     """``[dashboard] compress`` (default on), overridden by
     ``MAVERICK_DASHBOARD_COMPRESS``. Response compression for a self-hosted
-    dashboard behind a bare uvicorn or a default ingress (W3-77); turn it off
+    dashboard behind a bare uvicorn or a default ingress; turn it off
     when a proxy in front already compresses."""
     env = os.environ.get("MAVERICK_DASHBOARD_COMPRESS", "").strip().lower()
     if env:
@@ -4132,7 +4132,7 @@ async def tenant_pinning(request: Request, call_next):
 
 
 # ----- goal-creation rate limit -----
-# Council safety-seat (round 1): nothing throttled /chat/send or
+# Nothing throttled /chat/send or
 # POST /api/v1/goals. A runaway loop or a flood of same-origin posts
 # could spawn unbounded goals, each costing real money. This is an
 # in-process sliding-window limiter (no new dependency) shared by all
@@ -4297,7 +4297,7 @@ def check_goal_rate_limit(request: Request | None = None, *, source: str | None 
 
 
 # ----- SSE stream concurrency cap -----
-# Council security finding (exposed-deployment hardening): each open SSE
+# Exposed-deployment hardening: each open SSE
 # stream spawns a 300s task polling SQLite every 0.5s. Thousands of
 # EventSource opens exhaust file descriptors and the event loop. The cap now
 # lives in _shared so app and api share ONE process-wide semaphore (was a
@@ -7469,7 +7469,7 @@ async def providers_page(request: Request) -> HTMLResponse:
     )
 
 
-# ----- Control surface pages (council pass) -----
+# ----- Control surface pages -----
 
 
 def safe_audit_day(day: str | None) -> str | None:
@@ -8004,7 +8004,7 @@ async def compartments_page(
     Reads the discoverable domain packs (built-in + onboarded) so an operator
     can see which sealed agents exist and the capability envelope each runs
     under -- the compartments a Rung-2 seal acts on. Searched and paginated
-    like /tools (W3-30): unscoped, the full roster is 2,000+ packs and rendered
+    like /tools: unscoped, the full roster is 2,000+ packs and rendered
     every capability envelope into one multi-megabyte page."""
     query = q.strip()
     domain_page = {
@@ -14019,7 +14019,7 @@ def errors_page(request: Request, goal_id: int) -> HTMLResponse:
 def cost_csv(request: Request, month: str | None = None) -> StreamingResponse:
     """CSV rollup of episode spend, streamed.
 
-    Council perf finding: prior version fetched up to 100k episodes
+    The prior version fetched up to 100k episodes
     into memory, then filtered by month in Python before writing the
     CSV to a StringIO. Now: stream rows directly from the DB, with the
     month filter pushed to SQL.
@@ -14151,7 +14151,7 @@ async def api_goal_events_stream(
 ) -> StreamingResponse:
     """Server-Sent Events stream of new goal events.
 
-    Council perf-seat fix: client polled this route every 2s (visible
+    The client used to poll this route every 2s (visible
     tab) / 5s (hidden tab) over the lifetime of every open goal page,
     burning 30 req/min/tab idle on a goal that finished an hour ago.
     SSE holds one TCP connection open, server polls SQLite at 0.5s
@@ -14192,7 +14192,7 @@ async def api_goal_events_stream(
                                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-# ----- roadmap cluster: graph editor / goal builder / embed / benchmarks /
+# ----- feature cluster: graph editor / goal builder / embed / benchmarks /
 #       walkthroughs / 3D plan tree -----
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -15349,8 +15349,7 @@ async def benchmarks_page(request: Request) -> HTMLResponse:
 
     Per-suite trend sparklines + a comparison table over the real
     ``~/.maverick/benchmarks/history.json`` store. No competitor numbers are
-    shown or invented here — see docs/comparison.md for the qualitative
-    comparison."""
+    shown or invented here."""
     from .api import _benchmark_snapshot
 
     snap = _benchmark_snapshot()

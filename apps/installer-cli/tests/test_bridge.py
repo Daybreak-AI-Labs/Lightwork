@@ -1,7 +1,7 @@
-"""Bridge sandbox-selection contract (post council round-2 rewrite).
+"""Bridge sandbox-selection contract.
 
 The desktop sidecar no longer asks the user about deployment target or
-sandbox backend (those were jargon the council flagged). It always
+sandbox backend (those questions were jargon to end users). It always
 configures a desktop install and auto-detects Docker — local if the
 daemon isn't up. These tests pin that behaviour. The full 4-question
 flow is covered in test_bridge_consumer_flow.py.

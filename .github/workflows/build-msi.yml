@@ -2,7 +2,7 @@
 #
 # Manual dispatch only: this artifact contains only the maverick-agent wheel,
 # requires a preinstalled Python plus live PyPI resolution on first launch, and
-# is neither an offline platform installer nor a customer release artifact.
+# is neither an offline platform installer nor a release artifact.
 name: build-msi-engineering-bootstrap
 
 on:

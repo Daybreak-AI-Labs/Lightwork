@@ -1,4 +1,4 @@
-"""Differential privacy helper (roadmap: 2027 H1 safety — "differential privacy on usage stats").
+"""Differential privacy helper.
 
 Adds calibrated Laplace noise to an aggregate statistic so a published number
 (e.g. "how many users hit this feature") doesn't leak any single individual's

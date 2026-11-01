@@ -1,4 +1,4 @@
-"""Plain-language explanation tool (roadmap: 2027 H1 UX — "plain-language explanations").
+"""Plain-language explanation tool.
 
 Narrate a plan/trace in plain English so a non-technical stakeholder can follow
 what the agent intends to do: a numbered "First, I will … Then …" story that

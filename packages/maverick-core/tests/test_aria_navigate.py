@@ -1,4 +1,4 @@
-"""ARIA-first navigation (ROADMAP 2028 H2) — offline, fake-page tests."""
+"""ARIA-first navigation — offline, fake-page tests."""
 from __future__ import annotations
 
 import pytest

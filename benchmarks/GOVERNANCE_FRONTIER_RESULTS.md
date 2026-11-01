@@ -10,8 +10,8 @@
 ## Run identity
 
 - Suite: `governance-frontier-v1`
-- Started: `2026-11-01T10:43:55.888467+00:00`
-- Git commit: `722104f4357d05ae2bdce82289bf8b942ae31d9b`
+- Started: `2026-11-01T15:23:24.499729+00:00`
+- Git commit: `0ce49eece3dc5c64c10640a90a8c86f851ba17f6`
 - Working tree dirty during run: `false`
 - Definitions: 40 (24 unsafe, 16 benign) × seeds [17, 29, 43]
 - Arms: 120 governed and 120 disabled-baseline instances
@@ -19,12 +19,12 @@
 - Network claim basis: no model/network API is called; config/overlay, deployment profile, tenant/client, and injected or KMS-wrapped audit-key inputs are cleared; the egress adapter only evaluates URL and provider policy
 - Inherited config/overlay, profile/trust, tenant/client binding, consent override, and audit-key injection inputs: cleared; related process caches reset
 - Consent mode override: cleared outside the action adapter; unsafe action fixtures receive no approval and are deterministically denied; benign action fixtures receive a labelled synthetic explicit decision whose exact one-use permit is consumed by an in-memory simulated effect
-- Input digest: `2ffaa1e927734f36f70effbada6dcd86e1585ef575495f9a8428d6b3a9935e4b`
+- Input digest: `a50b5a05473f03932ff48125d54d4d66f0955e0bed2575a6d1ba08721d756e32`
 - Manifest signature: `ed25519` (self-signed run integrity)
 - Public evidence: [signed measured manifest](./results/governance-frontier-v1/measured-manifest.json), [trusted publisher key](./results/governance-frontier-v1/trusted-publisher.pub), and [standalone verifier](./results/governance-frontier-v1/verify_manifest.py)
-- Signed manifest file SHA-256 (UTF-8/LF): `a1bfe825c5825dc6c304b909f9f697a2c57034d2261977cbd2d1d6ef4e9f3e4d`
-- Trusted-key file SHA-256 (UTF-8/LF): `f653ec5804d8667ceb938c6a2d2335f03bd00f5e099b127aba3e138b02851576`
-- Ed25519 public-key fingerprint (SHA-256 of the 32 raw key bytes): `38545c6ca463d671e7a7579ff9e4072ad34a3d15abef5cdce24fc5f0233d1eb8`
+- Signed manifest file SHA-256 (UTF-8/LF): `52e0d8adcfa7e0fe38010cad7ea4c6cb8121af3250fcd178c4440b2000fe830e`
+- Trusted-key file SHA-256 (UTF-8/LF): `91636872b562e76a455fcca116e1799860fe2676b193e662f53806c12406bbb8`
+- Ed25519 public-key fingerprint (SHA-256 of the 32 raw key bytes): `a72a396d20c2099f09a90f11663448145afc7ecb31f5680099c4536d0eedee31`
 - Publication verification requires the separately downloaded trusted key; the manifest-embedded key is not trusted by itself
 
 ## Scorecard
@@ -67,10 +67,10 @@ reported outside that denominator.
 
 | Path | Samples | Median | p95 |
 |---|---:|---:|---:|
-| Governed control call | 120 | 382.656 µs | 13943.686 µs |
-| Disabled baseline call | 120 | 16.974 µs | 300.911 µs |
-| Paired governance overhead | 120 | 211.606 µs | 13917.848 µs |
-| Harness signed decision append | 120 | 1611.705 µs | 2097.185 µs |
+| Governed control call | 120 | 489.860 µs | 17351.076 µs |
+| Disabled baseline call | 120 | 18.569 µs | 318.275 µs |
+| Paired governance overhead | 120 | 226.729 µs | 17317.012 µs |
+| Harness signed decision append | 120 | 1893.451 µs | 2950.481 µs |
 
 Times are local-machine observations, not an SLA. Each seed changes
 execution order to expose state/order dependence; it is not model
@@ -79,7 +79,7 @@ sampling. Verdicts, not timings, are required to be seed-invariant.
 ## Evidence and custody
 
 - Signed audit events: 190
-- Audit-chain SHA-256: `551fb24ea0bc3aa83b0e5f50a8f8b247fc35579d8f1c07817e97d3b4dcf022fa`
+- Audit-chain SHA-256: `40cd42295dd119b3138f80ff201d1b54864e7693de3c858a0985099c6b7b8532`
 - Audit chain verified in-run against the run public key: `true`
 - Manifest schema: `maverick-bench-repro/1`
 - Key custody: ephemeral co-located benchmark key; self-signed run integrity only, not off-host custody, publisher identity, or resistance to a same-user actor.
@@ -134,7 +134,7 @@ python verify_manifest.py measured-manifest.json trusted-publisher.pub
 That check independently verifies the Ed25519 signature and prints the
 downloaded-file SHA-256 values plus the raw-key fingerprint. It does
 **not** recompute the manifest's signed control-source digests.
-Source-binding verification requires a licensed Lightwork source
+Source-binding verification requires a Lightwork source
 snapshot at the measured commit and the full tracked-artifact command
 below.
 

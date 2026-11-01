@@ -70,7 +70,7 @@ jobs:
     needs: pin-original-inputs
     if: github.ref == 'refs/heads/main' && inputs.confirm_disposable_vm
     # Provision a fresh ephemeral VM from an owner-reviewed supported Windows
-    # image, then destroy it after this job. Never attach a customer machine.
+    # image, then destroy it after this job. Never attach a persistent machine.
     runs-on: [self-hosted, Windows, X64, lightwork-clean-release-acceptance]
     environment: windows-release-acceptance
     timeout-minutes: 100

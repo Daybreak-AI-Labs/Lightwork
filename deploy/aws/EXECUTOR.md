@@ -21,7 +21,7 @@ client (build argument `KUBECTL_VERSION`, currently v1.36.4).
    [client installation guidance](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/).
 2. Review and apply `executor-namespace.yaml`. Adjust all namespace fields
    together if needed. Use a dedicated namespace with no application secrets,
-   databases, shared host mounts or other client services. Do not add egress
+   databases, shared host mounts or other application services. Do not add egress
    allow policies to this namespace. The role can create/exec/delete pods and
    inspect NetworkPolicy; it cannot list secrets or change cluster policy.
 3. Provision a credential for `lightwork-controller` only. Store its flattened,
@@ -51,14 +51,14 @@ token; the kubeconfig stays in private application control-plane storage.
 
 ## Required acceptance evidence
 
-Before client use, exercise a real goal that creates, changes, renames and deletes
+Before production use, exercise a real goal that creates, changes, renames and deletes
 workspace files; verify the resulting local files. Exercise command timeout,
 lost export connectivity, concurrent local edits and the recovery procedure in
 `docs/sandbox-kubernetes-recovery.md`. Confirm that a worker cannot read app
 credentials, contact cloud metadata, reach the Internet or other tenants, mount
 host storage or create a privileged pod. Record image digests, cluster/CNI/runtime
-versions, identities and results. Run the actual customer integrations separately
-with their authorized test accounts.
+versions, identities and results. Run the actual third-party integrations
+separately with authorized test accounts.
 
 This repository supplies the application contract, namespace policy and local
 regression coverage. It does **not** create/qualify an external cluster, populate

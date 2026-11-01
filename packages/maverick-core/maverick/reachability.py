@@ -1,23 +1,8 @@
 """Which modules does production actually reach?
 
-Two defect classes in this repo share one root cause: nobody could answer that
-question, so everyone guessed, and the guesses went both ways.
-
-* **Unreached code cited as substrate.** A strategy review cited
-  ``sigstore_signing.py`` as shipped capability. Its own header reads
-  "roadmap: 2027 H2" and nothing in production imports it. In the same review,
-  ``erasure_verify.py`` was skipped as unbuilt -- it is tagged 2028 H2 and
-  backs the shipping ``maverick erase-verify`` command.
-* **Documentation drift.** ``FEATURES.md`` opens with "what Lightwork does
-  today" and names modules that nothing calls.
-
-The ``roadmap: 20XX HN`` header was the only signal available, and it is
-useless: 232 modules carry one and most of them ARE reachable from production.
-A tag that is wrong ~80% of the time, in both directions, is worse than no tag,
-because it looks like evidence.
-
-This module answers the question structurally instead. It walks the import
-graph from real entry points and classifies every non-test module:
+Documentation and capability claims should only name modules that production
+can reach. This module answers that structurally: it walks the import graph
+from real entry points and classifies every non-test module:
 
 ``PRODUCTION``   reachable from the CLI, the dashboard app, or the agent kernel
 ``CLI_ONLY``     reachable only as a ``python -m`` module main
@@ -27,7 +12,7 @@ graph from real entry points and classifies every non-test module:
 
 The ledger is committed (``reachability.lock.json``) and CI-ratcheted, so a
 module going dark, or a doc naming an unreached one, fails the build instead of
-being discovered a year later by someone writing a strategy memo.
+going unnoticed.
 
 CLI: ``python -m maverick.reachability`` prints the classification;
 ``--ci`` fails on drift; ``--regen`` rewrites the lock.

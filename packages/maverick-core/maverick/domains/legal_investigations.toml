@@ -1,4 +1,4 @@
-# Legal — council-added — Internal Investigations (GC-led).
+# Legal — Internal Investigations (GC-led).
 # Sealed, privileged compartment (distinct from the HR investigations agent).
 name = "legal_investigations"
 compartment = "legal_investigations"

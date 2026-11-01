@@ -1,5 +1,4 @@
-"""Cross-run anomaly scanner (roadmap: 2027 safety — "cross-run anomaly
-detection").
+"""Cross-run anomaly scanner.
 
 Flags outliers in a metric tracked across runs (latency, cost, tool-call count,
 refusal rate, ...) using the robust **median / MAD modified z-score**

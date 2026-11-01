@@ -1,4 +1,4 @@
-"""Geofence policy tool (roadmap: 2027 H1 safety — "geofence config").
+"""Geofence policy tool.
 
 Decide whether an operation is permitted from a given region against an
 allow/deny policy — the building block for "this workload may only run in the

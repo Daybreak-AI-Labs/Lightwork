@@ -1,14 +1,14 @@
-﻿# reset-demo.ps1 - one-click pitch reset for the PIA Concierge demo.
+﻿# reset-demo.ps1 - one-click reset for the PIA Concierge demo.
 #
 # Stops anything already running, wipes the demo workspace, relaunches with
 # the full environment, waits for both servers, and prints a go/no-go
-# checklist. Run it before every pitch:
+# checklist. Run it before each demo session:
 #
-#   cd C:\Users\Cstep\Lightwork\demo\pia-concierge
+#   cd <your Lightwork checkout>\demo\pia-concierge
 #   powershell -ExecutionPolicy Bypass -File .\reset-demo.ps1
 #
 # The relaunch reseeds ~14 months of history (1-2 minutes) - the script waits
-# and tells you when the demo is ready to present.
+# and tells you when the demo is ready.
 
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path

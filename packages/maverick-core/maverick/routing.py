@@ -1,8 +1,7 @@
 """Cascaded model routing — cheap-first escalation.
 
-Karpathy SOTA-review prescription: cheap-first cascade
-(Haiku draft -> Sonnet if verifier confidence < 0.6 OR tool-call
-depth > 3 -> Opus with thinking budget on second-pass failure).
+The cascade: Haiku draft -> Sonnet if verifier confidence < 0.6 OR
+tool-call depth > 3 -> Opus with thinking budget on second-pass failure.
 
 This module is a stateless picker: callers ask for a model spec
 for a (role, signal) tuple, get back the best fit for the current

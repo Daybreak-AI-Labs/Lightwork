@@ -430,9 +430,9 @@ def forward(lines: Iterable[str], dest: str, *, timeout: float = 10.0) -> int:
     ``iter_audit_events``). Raises on an unsupported/ malformed destination or a
     transport error so the caller can surface the gap.
     """
-    # SIEM push is a paid (Gold) add-on. Fail-open: the gate only bites when a
-    # deployment has turned enforcement on and the license doesn't grant it — a
-    # community/dev box forwards freely (see maverick.entitlements.require).
+    # SIEM push is a tier-gated (Gold) feature. Fail-open: the gate only bites
+    # when a deployment has turned enforcement on and the license doesn't grant
+    # it — a default install forwards freely (see maverick.entitlements.require).
     try:
         from ..entitlements import require
         licensed = require("siem_export")

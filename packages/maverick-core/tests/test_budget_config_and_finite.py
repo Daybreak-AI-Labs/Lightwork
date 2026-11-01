@@ -1,7 +1,7 @@
 """Budget caps must actually bind on the primary CLI paths and reject
 non-finite values.
 
-Two regressions the council found:
+Two regressions:
   1. `maverick start` / `chat` / `resume` built Budget() directly, so a
      user's [budget] config (and, for resume, any raised cap) was silently
      ignored -- only the dashboard/runner path honored config.

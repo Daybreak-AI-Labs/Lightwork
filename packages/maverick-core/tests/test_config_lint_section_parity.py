@@ -1,6 +1,6 @@
 """config-lint and migrate must agree on which sections the runtime reads.
 
-Client-journey finding (round 6): a client configured the documented
+A client configured the documented
 provider-failover resilience feature --
 
     [provider_failover.chains]
@@ -28,7 +28,7 @@ def test_every_runtime_section_is_known_to_config_lint():
 def test_registries_are_bidirectionally_consistent():
     # Neither tool may flag a section the other recognizes as real -- a2a
     # (read by a2a.py) and deployment (wizard-written) were known to
-    # config-lint but flagged by migrate (round-6 finding).
+    # config-lint but flagged by migrate.
     lint_only = sorted(set(KNOWN_SCHEMA) - set(KNOWN_SECTIONS))
     assert not lint_only, f"migrate would false-flag real sections: {lint_only}"
 

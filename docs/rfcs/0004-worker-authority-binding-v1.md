@@ -1,6 +1,6 @@
 # RFC 0004: Worker authority binding v1
 
-- Status: implemented for the supplier evidence workflow
+- Status: **Implemented** for the supplier evidence workflow
 - Contract: `lightwork.worker-authority.v1`
 - Scope: request composition, durable action intent, execution, provider readback, customer outcome and tenant-local denial audit
 

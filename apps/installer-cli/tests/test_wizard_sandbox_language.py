@@ -72,7 +72,7 @@ def test_offered_languages_are_real_sandbox_keys(monkeypatch):
         assert key in sandbox._IMAGE_BY_LANGUAGE
 
 
-# ---- kubernetes: networking must be asked, not silently defaulted (W1-104) ----
+# ---- kubernetes: networking must be asked, not silently defaulted ----
 
 _K8S = "kubernetes - Pod-per-command in a cluster (kubectl)"
 _PY = "python     - python:3.12-slim (default)"

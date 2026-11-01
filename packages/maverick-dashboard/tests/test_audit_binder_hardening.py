@@ -341,7 +341,7 @@ def test_binder_detached_signature_verifies_with_saved_public_key(
         str(artifact["digest"]),
         tampered.hex(),
     )
-    # W2-46: the signature is over a domain-separated message, not the bare
+    # The signature is over a domain-separated message, not the bare
     # digest -- a plain verify_ed25519 against the raw digest bytes (what a
     # forged AuditSigner chain-row signature, or a federation envelope
     # signature, over this same digest would look like) must NOT verify.

@@ -1,4 +1,4 @@
-"""Compaction quality regression suite (ROADMAP Q2 perf).
+"""Compaction quality regression suite.
 
 test_compaction.py covers the mechanical block-level behavior; this guards the
 INVARIANTS compaction must hold over a long trajectory -- the ones whose quiet

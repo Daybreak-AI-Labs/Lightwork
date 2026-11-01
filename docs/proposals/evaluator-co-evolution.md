@@ -28,7 +28,7 @@ something a fixed objective cannot express.
 
 The catch, stated plainly in the paper's limitations: **everything hinges on the
 anchor.** "A weak or biased anchor could yield uninformative evaluators." For a
-platform whose moat is *provable* learning, that is the line in the sand — an
+platform built around *provable* learning, that is the line in the sand — an
 evolving judge is only safe if the ground truth it is judged against is itself
 governed and immutable.
 

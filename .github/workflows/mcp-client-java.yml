@@ -3,7 +3,7 @@ name: MCP client (Java)
 # Executes the Java/JVM MCP client example against a live `maverick mcp` stdio
 # server. Mirrors .github/workflows/mcp-clients.yml (TypeScript + Go); kept as a
 # separate workflow because the JVM toolchain (setup-java + Maven) is heavier
-# and the Java client is a later addition (council target #5).
+# and the Java client was added later.
 #
 # Only the no-LLM flow runs (initialize -> tools/list -> maverick_facts_get);
 # maverick_start needs a provider key + budget and is out of scope for CI.

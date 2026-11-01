@@ -1,4 +1,4 @@
-"""Predictive approvals (roadmap: 2028 H2 UX).
+"""Predictive approvals.
 
 When an operator has approved "git push to a feature branch" twenty times and
 never denied it, the twenty-first prompt is friction with no signal. This learns,

@@ -1,8 +1,11 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Security vulnerability
+  - name: Report a vulnerability (GitHub private vulnerability reporting)
     url: https://github.com/Daybreak-AI-Labs/Lightwork/security/advisories/new
-    about: Report security issues privately via GitHub Security Advisories. Do not file public issues for vulnerabilities.
-  - name: Discussion / general question
+    about: Report vulnerabilities privately through GitHub's private vulnerability reporting. Do not open a public issue.
+  - name: Questions and discussion
     url: https://github.com/Daybreak-AI-Labs/Lightwork/discussions
-    about: For questions about usage, design, or to share what you're building with Lightwork.
+    about: Ask usage and design questions, or share what you are building with Lightwork.
+  - name: Documentation
+    url: https://daybreak-ai-labs.github.io/Lightwork/
+    about: Installation, configuration and usage guides.

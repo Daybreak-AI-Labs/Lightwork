@@ -1,4 +1,4 @@
-"""UX-218: the public read-only page shows the answer as formatted prose.
+"""The public read-only page shows the answer as formatted prose.
 
 The page used to print the model's markdown inside a monospace ``<pre>``
 ("## Summary", "**bold**" shown literally). It now hands the text to the same

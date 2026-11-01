@@ -6,4 +6,4 @@ Enable Organize shared facts with tags in Settings, Memory & learning, or choose
 
 Migration is additive. Disable the feature to stop new tag edits; existing facts remain usable and tagged metadata stays stored. Do not drop the column or lower the schema version during rollback. Older binaries reject newer schemas by design; roll forward with a compatible build, or restore the verified pre-upgrade backup with the corresponding old binary. Restoring a backup loses subsequent writes and requires the ordinary administrator backup/recovery review.
 
-Validation: 14 focused local tests passed, including 10,000-row filtering. PostgreSQL service, full suite and interactive browser qualification remain pending.
+Local tests cover filtering across 10,000 rows. PostgreSQL service and interactive browser qualification have not been performed.

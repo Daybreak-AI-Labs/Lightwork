@@ -1,4 +1,4 @@
-"""Sigstore keyless signing for skill/plugin artifacts (roadmap: 2027 H2 Safety).
+"""Sigstore keyless signing for skill/plugin artifacts.
 
 Ed25519 skill signing (``maverick.skills``) binds an artifact to a publisher
 *key*; sigstore's keyless flow binds it to a publisher *identity* (an OIDC

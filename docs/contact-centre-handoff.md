@@ -72,10 +72,10 @@ Each handoff creates one ticket:
   "external_id": "handoff:<id>", "requester": {"name", "email"}}}`. The
   requester is omitted when no email is known.
 
-Not verified: the exact endpoint form (`tickets.json` versus `tickets`), the
-success status code, and the rate-limit wording for this endpoint. The
-Zendesk reference pages could not be read in full while this was written. Test
-with one handoff to a sandbox Zendesk before you rely on it.
+Not verified against Zendesk's documentation: the exact endpoint form
+(`tickets.json` versus `tickets`), the success status code, and the rate-limit
+wording for this endpoint. Test with one handoff to a sandbox Zendesk before
+you rely on it.
 
 ## Signed webhook
 

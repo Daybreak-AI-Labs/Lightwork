@@ -1,38 +1,28 @@
 # Maintainers
 
-| Name | Github | Areas |
-|------|--------|-------|
-| cdayAI | [@cdayAI](https://github.com/cdayAI) | All packages (BDFL) |
+Maintainers review and merge pull requests, triage issues, cut releases and
+enforce the [Code of Conduct](CODE_OF_CONDUCT.md). How decisions are made and
+how to become a maintainer are described in [GOVERNANCE.md](GOVERNANCE.md).
 
-## How to reach us
+## Current maintainers
 
-- **Conduct / community issues**: open a private security advisory at
-  https://github.com/Daybreak-AI-Labs/Lightwork/security/advisories/new
-  with `[CONDUCT]` in the title.
-- **Security vulnerabilities**: see [SECURITY.md](SECURITY.md).
-- **General questions**: GitHub Discussions (when enabled), or open a
-  regular issue.
+| Name | GitHub | Role | Areas |
+| --- | --- | --- | --- |
+| Christopher Day | [@cdayAI](https://github.com/cdayAI) | Lead maintainer | All areas |
 
-## Becoming a maintainer
+## Review assignments
 
-The project is currently solo-maintained. The path to becoming a
-co-maintainer is:
+[`.github/CODEOWNERS`](.github/CODEOWNERS) requests a review from the owner of
+each area a pull request touches.
 
-1. Land 3+ substantive PRs (new tests, bug fixes, doc improvements,
-   or a new channel adapter / sandbox backend / plugin).
-2. Triage / review on at least 5 issues or PRs.
-3. Ask. We'll add you to `CODEOWNERS` for the area you've been
-   working in.
+## Contacting the maintainers
 
-## Area ownership (CODEOWNERS)
+| Topic | Where |
+| --- | --- |
+| Questions and ideas | [GitHub Discussions](https://github.com/Daybreak-AI-Labs/Lightwork/discussions) |
+| Bugs and feature requests | [GitHub issues](https://github.com/Daybreak-AI-Labs/Lightwork/issues), using the templates |
+| Security vulnerabilities | Privately, as described in [SECURITY.md](SECURITY.md) |
+| Code of Conduct reports | chris@daybreakailabs.com |
+| Licensing, the CLA and trademarks | chris@daybreakailabs.com |
 
-See [`.github/CODEOWNERS`](.github/CODEOWNERS) for the source of truth.
-Reviewers default to the area owner; PRs touching multiple areas need
-review from each.
-
-## Decision process
-
-Until the project has a second maintainer, decisions follow BDFL
-("Benevolent Dictator For Life") — cdayAI has final call. We
-expect that to change as the maintainer team grows; at 3+ maintainers
-we'll adopt a lightweight RFC process documented in `docs/rfcs/README.md`.
+See [SUPPORT.md](SUPPORT.md) for where to get help using Lightwork.

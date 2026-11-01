@@ -1,4 +1,4 @@
-"""Director mode (roadmap: 2028 H2 UX — "outcomes → plans → autonomy").
+"""Director mode.
 
 The director states an **outcome** and picks how much rope the swarm gets;
 the mode assembles the run configuration from the controls that already

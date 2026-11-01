@@ -301,7 +301,7 @@ class _BrowserSession:
         # background requests (fetch/XHR, images, iframes, a popup this
         # context spawns) to a blocked/enterprise-denied host were never
         # checked at all -- readable/exfiltratable without ever showing up
-        # as page.url (platform audit W2-88). Registered on the CONTEXT, not
+        # as page.url. Registered on the CONTEXT, not
         # just the one page this tool tracks, so it also covers any popup a
         # page opens (this tool doesn't interact with popups, but Playwright
         # still lets a page's script open and use one).
@@ -759,7 +759,7 @@ def _egress_denial(url: str) -> str | None:
     [egress] or [tenancy.egress.<t>] plane with no check at all -- every other
     outbound-request tool (http_fetch, websocket, connectors) gates on these
     two, but a prompt-injected page could still make the *browser* reach
-    anything the process itself could (platform audit W2-88).
+    anything the process itself could.
     """
     from ..enterprise import enterprise_egress_denial
     deny = enterprise_egress_denial(url, tool="browser")

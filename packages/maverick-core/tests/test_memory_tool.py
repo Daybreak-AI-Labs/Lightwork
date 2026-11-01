@@ -1,4 +1,4 @@
-"""The cross-session `memory` tool (ROADMAP A3).
+"""The cross-session `memory` tool.
 
 A model-curated filesystem of long-term notes, confined to a memory root, that
 persists across goals and sessions. These tests drive the tool's fn directly

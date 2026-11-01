@@ -1,4 +1,4 @@
-"""Wave 12 hardening pass 2: correctness fixes from the 20-round
+"""Correctness fixes from the 20-round
 bug-hunt. Covers TTL normalization, Budget pickling, gotest false-
 positive, token-overlap noise bypass, and Anthropic SDK robustness.
 """
@@ -104,7 +104,7 @@ class TestGotestPassInPackageName:
 class TestTokenOverlapNoisePrefixBypass:
     def test_prepended_noise_does_not_zero_ratio(self):
         """Bypass attempt: prepend ~1000 noise tokens before a verbatim
-        gold copy. Before Wave 12 hardening, the `[:5000]` slice did
+        gold copy. Previously, the `[:5000]` slice did
         not cut here but the symmetric ratio metric was diluted; the
         new "longest contiguous block / gold length" metric is
         immune to noise dilution as long as the gold body is preserved
@@ -200,7 +200,7 @@ class TestAnthropicProviderRobust:
         assert budget.input_tokens == 100
 
     def test_split_cache_creation_ttl_bills_each_tier(self):
-        """W1-6: usage.cache_creation.{ephemeral_5m,ephemeral_1h}_input_tokens
+        """Usage.cache_creation.{ephemeral_5m,ephemeral_1h}_input_tokens
         must be read and passed through so a call that writes both a 1h
         (system/tools) and a 5m (messages) breakpoint bills each tier at its
         own rate, instead of the whole cache_creation_input_tokens total at
@@ -302,7 +302,7 @@ class TestSanitizerCrlfBomC1:
 
 class TestSwebenchSigtermReset:
     def test_main_resets_terminate_flag(self):
-        """Wave 12 hardening: main() must reset _TERMINATE_REQUESTED so
+        """main() must reset _TERMINATE_REQUESTED so
         a previously-flagged process can re-enter without immediate exit."""
         from pathlib import Path
         # parents[3] = repo root (tests → maverick-core → packages → root).

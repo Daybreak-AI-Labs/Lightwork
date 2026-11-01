@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 # leave room for the response (max_tokens param) and tools schema.
 # Keys are exact model ids; lookups fall back to family prefix.
 #
-# W1-5: every Opus/Sonnet 4.6+ model is actually a 1M-context model per
+# Every Opus/Sonnet 4.6+ model is actually a 1M-context model per
 # https://platform.claude.com/docs/en/build-with-claude/context-windows
 # (and each model's own overview page) -- this table had them all capped
 # at 200k, silently refusing prompts up to 800k tokens that the real API
@@ -197,7 +197,7 @@ def preflight(
     into ``LLM.complete`` / ``LLM.complete_async`` via ``llm._run_preflight``;
     the mode is chosen by the ``MAVERICK_PREFLIGHT`` env var and defaults to
     ``warn`` (log only) so the live path can't false-refuse a borderline
-    request. Set ``MAVERICK_PREFLIGHT=strict`` for the roadmap hard-refuse.
+    request. Set ``MAVERICK_PREFLIGHT=strict`` for a hard refuse.
     """
     limit = context_limit(model)
     budget = limit - max_tokens - safety_margin

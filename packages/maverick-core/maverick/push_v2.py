@@ -1,4 +1,4 @@
-"""Mobile push v2 — device registry + per-device routing (roadmap: 2027 H1 UX).
+"""Mobile push v2 — device registry + per-device routing.
 
 v1 (``notifications.notify``) fires the configured backends globally. v2 adds
 what multi-device life actually needs, layered ON TOP (v1 unchanged):

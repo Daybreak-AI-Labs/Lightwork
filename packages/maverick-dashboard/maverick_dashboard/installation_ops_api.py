@@ -263,7 +263,7 @@ def _database_updates() -> dict[str, Any]:
     if problems:
         return {"ok": False, "pending": 0, "needs_pause": False,
                 "summary": "This copy of Lightwork has a problem in its database update list. Share the "
-                           "technical details with your Lightwork contact.",
+                           "technical details with whoever looks after this installation.",
                 "technical": [{"level": "fail", "text": _bounded(p)} for p in problems][:_TECHNICAL_LIMIT]}
     if not steps:
         summary = f"The records database is up to date (version {current})."

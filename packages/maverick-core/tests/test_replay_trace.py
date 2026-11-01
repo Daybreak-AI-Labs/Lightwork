@@ -1,4 +1,4 @@
-"""Replayable trace format (ROADMAP 2028 H1)."""
+"""Replayable trace format."""
 from __future__ import annotations
 
 import os

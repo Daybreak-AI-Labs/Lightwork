@@ -1,4 +1,4 @@
-"""Weaviate vector store adapter (roadmap: 2027 H1 ecosystem — "Weaviate vector store").
+"""Weaviate vector store adapter.
 
 Embedding-backed memory using Weaviate. Mirrors the Chroma / Qdrant adapter API
 (``add(docs)``, ``query(text, top_k)``, ``delete(ids)``, ``count()``) so callers

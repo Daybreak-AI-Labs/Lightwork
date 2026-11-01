@@ -1,10 +1,11 @@
 """Outcome metrics: what the workforce delivered, not what it consumed.
 
-Billing meters tokens and credits; buyers ask "what did it get *done*?" This
-rolls the Operating Record (:mod:`maverick.operating_record`) up into per-worker
-*outcomes* — goals completed, completion rate, spend — so a worker card can lead
-with delivery ("12 of 14 goals completed this period") instead of usage. A
-firm-level rollup adds human approvals and total spend across the whole record.
+Billing meters tokens and credits; the useful question is "what did it get
+*done*?" This rolls the Operating Record (:mod:`maverick.operating_record`) up
+into per-worker *outcomes* — goals completed, completion rate, spend — so a
+worker card can lead with delivery ("12 of 14 goals completed this period")
+instead of usage. A firm-level rollup adds human approvals and total spend
+across the whole record.
 
 Read-only and pure: every number is derived from
 :class:`~maverick.operating_record.DecisionRecord` rows. Honest when empty — no

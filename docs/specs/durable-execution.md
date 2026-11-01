@@ -1,9 +1,10 @@
 # Design Spec: Durable & Resumable Execution
 
-**Status:** Draft / proposal · **Roadmap ref:** [`ROADMAP.md`](../ROADMAP.md) → "Current state & gap analysis" (A1) ([#396](https://github.com/Daybreak-AI-Labs/Lightwork/issues/396)) · **Date:** May 2026
+**Status:** Draft / proposal; Phases 1 and 1.1 and the rewind/fork half of
+Phase 2 have shipped (see §8) · **Date:** May 2026
 
-> This is a proposal for discussion, not an accepted design. It deliberately
-> stops at the interface + phasing; implementation waits on sign-off.
+> This was written as a proposal for discussion. It deliberately stops at the
+> interface + phasing; the later phases are not yet an accepted design.
 
 > Historical May 2026 proposal: the problem statement below describes that
 > snapshot. Current ordinary agents support opt-in checkpoints and no generated
@@ -158,7 +159,7 @@ new goal id, leaving the original untouched (enables "try a different branch").
   warm-restart instead of silent resume**.
 - **Context-window growth.** Saved `messages` can be large; the checkpoint store
   references the same compaction output the loop already produces rather than
-  duplicating raw history (ties into ADDITIONS §A3 context-lifecycle work).
+  duplicating raw history.
 - **Non-determinism.** Resume is *continuation*, not replay, so LLM
   non-determinism is fine; deterministic replay (Phase 4) is the part that needs
   recorded tool outputs + seeds.
@@ -216,7 +217,7 @@ lands when the durable loop exists to hang it on.
 ## 10. Open questions
 1. Default `keep_last` for rewind history vs. DB growth on long runs?
 2. Should checkpoints be **opt-out** (on by default) once Phase 1 is proven, given
-   it's the headline wedge — or stay opt-in through 1.0?
+   it is the headline capability — or stay opt-in through 1.0?
 3. Is a separate `~/.maverick/checkpoints.db` better than new tables in the main
    world-model DB (isolation vs. one-file simplicity)?
 4. Do we expose rewind in the dashboard/REST now, or CLI-only until Phase 2?

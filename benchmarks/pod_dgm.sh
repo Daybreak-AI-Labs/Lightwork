@@ -57,8 +57,8 @@ n=$(wc -l < dgm_corpus.jsonl)
 [ "$n" -ge 20 ] || { echo "!!! corpus too small ($n); need >=20 (min-samples 10 on the held-out half)"; exit 1; }
 
 echo "[2/3] FREE self-test: offline DGM proof must be 6/6..."
-python3 ~/Lightwork/proof/dgm_uplift_proof.py 2>&1 | grep -E "PROVEN|failed" \
-    | grep -q "6 guarantees PROVEN" \
+python3 ~/Lightwork/proof/dgm_uplift_proof.py 2>&1 | grep -E "passed|failed" \
+    | grep -q "6 checks passed, 0 failed" \
     || { echo "!!! DGM proof not 6/6 -- not spending. Send this to Claude."; exit 1; }
 echo "    proof 6/6 OK"
 
