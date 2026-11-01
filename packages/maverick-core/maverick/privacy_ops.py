@@ -3301,6 +3301,18 @@ def dsar_estate_worksheet(request_id: str) -> dict:
     }
 
 
+# Worksheet section -> the export's canonical count it reports.
+_PLATFORM_HOLDING_SECTIONS = {
+    "conversations": "conversations",
+    "turns": "turns",
+    "goals": "goals",
+    "episodes": "episodes",
+    "facts": "facts",
+    "fact_history": "fact_history",
+    "audit": "audit_events",
+}
+
+
 def _dsar_platform_holdings(record: dict) -> dict:
     """Count what Lightwork itself holds for the request's subject, by area.
 
@@ -3308,29 +3320,33 @@ def _dsar_platform_holdings(record: dict) -> dict:
     the current tenant -- so the plan matches what the export would deliver.
     ``resolved`` is False when the account could not be pinned to one channel:
     nothing is read then, and a zero must not be mistaken for "holds nothing".
+    Storage that cannot be read raises, and the worksheet reports the section
+    as unavailable rather than as a count.
     """
     from . import dsar as dsar_export
     from .paths import current_tenant_id
 
-    bundle = dsar_export.export_subject_data(
-        str(record.get("subject_id") or ""),
-        channel=record.get("channel") or None,
-        tenant=current_tenant_id() or None,
-        strict=True,
-    )
+    try:
+        bundle = dsar_export.export_subject_data(
+            str(record.get("subject_id") or ""),
+            channel=record.get("channel") or None,
+            tenant=current_tenant_id() or None,
+            strict=True,
+        )
+    except dsar_export.SubjectAmbiguousError:
+        # The id is on more than one channel and the request names none, so
+        # the strict export read nothing. The zeros keep the section's shape;
+        # ``resolved`` tells the reader they are not a count.
+        return {
+            "enabled": True,
+            "sections": dict.fromkeys(_PLATFORM_HOLDING_SECTIONS, 0),
+            "resolved": False,
+        }
     # Use the export's canonical row counts. Counting top-level containers
     # misses nested turns/episodes and counts history subjects instead of the
     # actual number of fact revisions.
     counts = bundle["counts"]
-    sections = {
-        "conversations": counts["conversations"],
-        "turns": counts["turns"],
-        "goals": counts["goals"],
-        "episodes": counts["episodes"],
-        "facts": counts["facts"],
-        "fact_history": counts["fact_history"],
-        "audit": counts["audit_events"],
-    }
+    sections = {name: counts[key] for name, key in _PLATFORM_HOLDING_SECTIONS.items()}
     subject = bundle.get("subject")
     resolved = bool(isinstance(subject, dict) and subject.get("channel"))
     return {"enabled": True, "sections": sections, "resolved": resolved}
@@ -3375,7 +3391,7 @@ def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
             intent = _dsar_export_intent(record)
             recovered = _load_dsar_export_artifact(out_path, intent=intent)
             if recovered is None:
-                from .dsar import export_subject_data
+                from .dsar import SubjectAmbiguousError, export_subject_data
 
                 try:
                     bundle = export_subject_data(
@@ -3384,6 +3400,10 @@ def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
                         tenant=intent["tenant"] or None,
                         strict=True,
                     )
+                except SubjectAmbiguousError as exc:
+                    raise ValueError(
+                        "This person's id is used on more than one channel. Record the channel on the request, then fulfil it."
+                    ) from exc
                 except RuntimeError as exc:
                     raise ValueError(
                         "Subject data could not be verified. Keep this request open and try again after storage is restored."
