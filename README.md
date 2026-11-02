@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/Daybreak-AI-Labs/Lightwork/actions/workflows/ci.yml/badge.svg)](https://github.com/Daybreak-AI-Labs/Lightwork/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Python 3.10 | 3.11 | 3.12](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](docs/source-install.md)
+[![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](docs/source-install.md)
 
 Lightwork is a self-hosted runtime for multi-agent AI work. You give it a goal,
 and an orchestrator agent plans the work, hands parts of it to specialist
@@ -25,12 +25,12 @@ installing from source is the supported path. Published releases will be
 listed on the
 [releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
 Configuration and APIs can change between versions; [CHANGELOG.md](CHANGELOG.md)
-records notable changes. Supported Python versions are 3.10, 3.11 and 3.12, the
+records notable changes. Supported Python versions are 3.11 and 3.12, the
 versions tested in CI.
 
 ## Quickstart
 
-Requires Git and Python 3.10, 3.11 or 3.12.
+Requires Git and Python 3.11 or 3.12.
 
 ```bash
 git clone https://github.com/Daybreak-AI-Labs/Lightwork

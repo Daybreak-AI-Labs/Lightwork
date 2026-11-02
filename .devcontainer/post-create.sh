@@ -3,15 +3,21 @@
 # the same way CI does, so tests and the CLI work out of the box.
 set -euo pipefail
 
-# Stay inside the interpreter window CI tests (3.10-3.12). A newer host
+# Stay inside the interpreter window CI tests (3.11-3.12). A newer host
 # interpreter (3.13) cannot install the cohort, so prefer a supported one.
 python_bin=python3
-for candidate in python3.12 python3.11 python3.10; do
+for candidate in python3.12 python3.11; do
   if command -v "$candidate" >/dev/null 2>&1; then
     python_bin="$candidate"
     break
   fi
 done
+# The host python3 fallback can be below the floor (3.10 on Ubuntu 22.04);
+# stop here rather than inside pip's requires-python check.
+if ! "$python_bin" -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+  echo "post-create.sh: Lightwork needs Python 3.11 or 3.12, but $python_bin is $("$python_bin" -c 'import sys;print("%d.%d"%sys.version_info[:2])'). Install Python 3.11 or 3.12, then re-run." >&2
+  exit 1
+fi
 
 "$python_bin" -m venv .venv
 export PATH="$PWD/.venv/bin:$PATH"

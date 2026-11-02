@@ -8,6 +8,7 @@ private index, never an implicit public lookup.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -219,6 +220,125 @@ def test_desktop_installers_require_a_pinned_source_ref():
 
     assert "rev-parse HEAD" in shell
     assert "rev-parse HEAD" in powershell
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.parametrize(("reported", "installs", "stops"), [
+    ("3.10", True, True),
+    ("3.12", False, False),
+])
+def test_desktop_installer_checks_the_python_floor_after_installing(tmp_path, reported, installs, stops):
+    """A distro python3 below the floor (3.10 on Ubuntu 22.04) must stop the
+    installer with a plain message right after the package-manager install,
+    not later at pip's requires-python check."""
+    script = _read("deploy/desktop/install.sh")
+    start = script.index("python3_meets_floor() {")
+    function = script[start:script.index("\n}\n", script.index("ensure_python() {")) + 3]
+    major, minor = reported.split(".")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stubs = {
+        "python3": f'#!/bin/sh\ncase "$2" in *02d*) echo {major}{int(minor):02d} ;; *) echo {reported} ;; esac\n',
+        "apt-get": f'#!/bin/sh\necho "apt-get $*" >> "{tmp_path}/calls"\n',
+        "sudo": '#!/bin/sh\nexec "$@"\n',
+        "uname": "#!/bin/sh\necho Linux\n",
+    }
+    for name, body in stubs.items():
+        (bin_dir / name).write_text(body, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    harness = (
+        "set -euo pipefail\n"
+        "log() { :; }\n"
+        "die() { printf 'DIE: %s\\n' \"$*\"; exit 1; }\n"
+        "have() { command -v \"$1\" >/dev/null 2>&1; }\n"
+        f"{function}"
+        "ensure_python\n"
+        "echo RETURNED\n"
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness],
+        env={"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert (tmp_path / "calls").exists() is installs
+    if stops:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "DIE: Lightwork needs Python 3.11 or newer" in result.stdout
+        assert "python3 is 3.10" in result.stdout
+        assert "RETURNED" not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "RETURNED" in result.stdout
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.parametrize(("reported", "stops"), [("3.10", True), ("3.12", False)])
+def test_vps_installer_checks_the_python_floor_after_installing(tmp_path, reported, stops):
+    """The VPS path installs the distro python3, which is 3.10 on Ubuntu
+    22.04; it must stop with a plain message before the cohort install."""
+    script = _read("deploy/vps/install.sh")
+    start = script.index("install_system_deps() {")
+    function = script[start:script.index("\n}\n", start) + 3]
+    major, minor = reported.split(".")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stubs = {
+        "python3": f'#!/bin/sh\ncase "$2" in *02d*) echo {major}{int(minor):02d} ;; *) echo {reported} ;; esac\n',
+        "apt-get": "#!/bin/sh\nexit 0\n",
+        "pipx": "#!/bin/sh\nexit 0\n",
+    }
+    for name, body in stubs.items():
+        (bin_dir / name).write_text(body, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    harness = f"set -euo pipefail\nlog() {{ :; }}\n{function}install_system_deps\necho RETURNED\n"
+    result = subprocess.run(
+        ["bash", "-c", harness],
+        env={"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if stops:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "Lightwork needs Python 3.11 or newer" in result.stderr
+        assert "python3 is 3.10" in result.stderr
+        assert "RETURNED" not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "RETURNED" in result.stdout
+    assert "Installs Python 3.12" not in script
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.parametrize(("reported", "stops"), [("3.10", True), ("3.12", False)])
+def test_dev_bootstrap_checks_the_python_floor_before_creating_the_venv(tmp_path, reported, stops):
+    """post-create.sh falls back to the host python3 when no python3.12 or
+    python3.11 exists; a 3.10 host (Ubuntu 22.04, the benchmark VM guide's old
+    image) must stop with a plain message, not inside pip."""
+    script = _read(".devcontainer/post-create.sh")
+    start = script.index("python_bin=python3\n")
+    selection = script[start:script.index('"$python_bin" -m venv .venv', start)]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    python3 = bin_dir / "python3"
+    python3.write_text(
+        "#!/bin/sh\n"
+        f'case "$2" in *version_info\\ \\<*) [ "{reported}" != "3.10" ] ;; *) echo {reported} ;; esac\n',
+        encoding="utf-8",
+    )
+    python3.chmod(0o755)
+    # PATH holds only the stub, so a host python3.12/3.11 cannot be preferred;
+    # the selection code uses only shell builtins besides the interpreter.
+    result = subprocess.run(
+        [shutil.which("bash"), "-c", f"set -euo pipefail\n{selection}echo SELECTED \"$python_bin\"\n"],
+        env={"PATH": str(bin_dir), "HOME": str(tmp_path)},
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if stops:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "Lightwork needs Python 3.11 or 3.12, but python3 is 3.10" in result.stderr
+        assert "SELECTED" not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "SELECTED python3" in result.stdout
 
 
 def test_vps_installer_requires_a_clean_immutable_checkout():
@@ -577,27 +697,53 @@ def test_cross_ecosystem_osv_gate_is_pinned_complete_and_expiring():
 
     policy = tomllib.loads(_read("osv-scanner.toml"))
     ignored = policy["IgnoredVulns"]
-    expected = {
+    reasons = {item["id"]: item["reason"] for item in ignored}
+    assert set(reasons) == {
         "GHSA-wrw7-89jp-8q8g",
         "RUSTSEC-2024-0370",
-        "RUSTSEC-2025-0075",
-        "RUSTSEC-2025-0080",
-        "RUSTSEC-2025-0081",
-        "RUSTSEC-2025-0098",
-        "RUSTSEC-2025-0100",
+        "GHSA-gcqx-w48m-w2h4",
     }
-    assert {item["id"] for item in ignored} == expected
-    assert all(item["ignoreUntil"] == date(2026, 10, 31) for item in ignored)
-    assert all("Tauri" in item["reason"] for item in ignored)
+    assert all(item["ignoreUntil"] == date(2027, 1, 31) for item in ignored)
+    assert "Tauri" in reasons["GHSA-wrw7-89jp-8q8g"]
+    assert "Tauri" in reasons["RUSTSEC-2024-0370"]
+    assert reasons["GHSA-gcqx-w48m-w2h4"].startswith("Build-time only:")
+
+
+def test_build_time_only_osv_exception_stays_build_time_only():
+    """The deepmerge exception (GHSA-gcqx-w48m-w2h4) holds only while deepmerge
+    is reachable solely through installer-desktop's vite-plugin-svelte
+    devDependency. osv-scanner applies an exception by advisory ID to every
+    scanned lockfile, so a runtime path would be filtered silently."""
+    step = _read(".github/workflows/ci.yml").split(
+        "- name: OSV Scanner across every reviewed dependency surface", 1,
+    )[1].split("- name: Upload cross-ecosystem vulnerability report", 1)[0]
+    scanned = [path for path in re.findall(r"--lockfile\s+(\S+)", step) if "$" not in path]
+    assert "apps/installer-desktop/pnpm-lock.yaml" in scanned
+    for path in [*scanned, "requirements/ci.txt"]:
+        if path != "apps/installer-desktop/pnpm-lock.yaml":
+            assert "deepmerge" not in _read(path), path
+
+    snapshots = _read("apps/installer-desktop/pnpm-lock.yaml").split("\nsnapshots:\n", 1)[1]
+    parents = [
+        block.strip().splitlines()[0].strip().strip("':")
+        for block in snapshots.split("\n\n")
+        if re.search(r"^ {6}deepmerge: ", block, re.MULTILINE)
+    ]
+    assert parents
+    assert all(parent.startswith("@sveltejs/vite-plugin-svelte@") for parent in parents), parents
+    manifest = json.loads(_read("apps/installer-desktop/package.json"))
+    assert "@sveltejs/vite-plugin-svelte" in manifest["devDependencies"]
+    assert "@sveltejs/vite-plugin-svelte" not in manifest.get("dependencies", {})
+    assert "deepmerge" not in manifest.get("dependencies", {})
 
 
 def test_go_java_and_standalone_demo_security_floors_are_explicit():
     go_client = _read("examples/clients/go/go.mod")
     model_proxy = _read("go/model-proxy/go.mod")
     java_client = _read("examples/clients/java/pom.xml")
-    assert "\ngo 1.26.9\n" in go_client
+    assert "\ngo 1.26.10\n" in go_client
     assert "golang.org/x/sys v0.47.0" in go_client
-    assert "\ngo 1.26.9\n" in model_proxy
+    assert "\ngo 1.26.10\n" in model_proxy
     assert "<jackson.version>3.1.7</jackson.version>" in java_client
     assert "<artifactId>jackson-bom</artifactId>" in java_client
 
@@ -618,6 +764,8 @@ def test_go_java_and_standalone_demo_security_floors_are_explicit():
         "demo/pia-concierge/requirements-standalone.txt",
     ):
         assert "python-multipart>=0.0.32" in _read(path)
+    # The PIA demo pulls in httpx, whose CA bundle comes from certifi.
+    assert "certifi>=2026.10.18" in _read("demo/pia-concierge/requirements-standalone.txt")
 
 
 def test_ci_integration_docs_do_not_call_workdir_a_security_boundary():
@@ -783,10 +931,10 @@ def test_security_dependency_floors_cover_current_fixed_releases():
     _assert_floor(core_deps, "cryptography", "48.0.1")
     _assert_floor(core_extras["langchain"], "langchain-core", "1.3.3")
     _assert_floor(core_extras["langchain"], "langsmith", "0.8.18")
-    _assert_floor(core_extras["computer-use"], "pillow", "12.3.0")
+    _assert_floor(core_extras["computer-use"], "pillow", "13.0.0")
     _assert_floor(core_extras["pdf"], "pypdf", "6.14.2")
     _assert_floor(core_extras["evidence-analysis"], "pypdf", "6.14.2")
-    _assert_floor(core_extras["evidence-analysis"], "pillow", "12.3.0")
+    _assert_floor(core_extras["evidence-analysis"], "pillow", "13.0.0")
     assert all(
         canonicalize_name(Requirement(item).name) != "pytesseract"
         for item in core_extras["evidence-analysis"]
@@ -809,7 +957,7 @@ def test_security_dependency_floors_cover_current_fixed_releases():
     knowledge = _metadata("packages/maverick-knowledge/pyproject.toml")
     knowledge_extras = knowledge["project"]["optional-dependencies"]
     _assert_floor(knowledge_extras["parsers"], "pypdf", "6.14.2")
-    _assert_floor(knowledge_extras["vision"], "pillow", "12.3.0")
+    _assert_floor(knowledge_extras["vision"], "pillow", "13.0.0")
 
 
 def test_all_python_builds_require_patched_setuptools_floor():

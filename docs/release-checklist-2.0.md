@@ -7,7 +7,7 @@ artifact.
 
 ## Code gates (all must be green on the release commit)
 
-- [ ] Full matrix CI green (3.10 / 3.11 / 3.12, lint, docker, postgres,
+- [ ] Full matrix CI green (3.11 / 3.12, lint, docker, postgres,
       redteam, audit, eval-smoke, language-binding jobs)
 - [ ] `python -m maverick.grpc_api.contract --check` — wire compatibility
 - [ ] `python -m maverick.deprecations --ci` — nothing past-due ships;

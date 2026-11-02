@@ -10,7 +10,7 @@
 # of them side by side.
 #
 # PREREQUISITES:
-#   - Python 3.10–3.12 (set PYTHON=... to pick one; default python3.12)
+#   - Python 3.11–3.12 (set PYTHON=... to pick one; default python3.12)
 #   - A C toolchain Nuitka can drive:
 #       macOS   : xcode-select --install            (clang)
 #       Linux   : apt-get install -y build-essential patchelf   (gcc + patchelf)
@@ -33,7 +33,7 @@ cd "$ROOT"
 
 PY="${PYTHON:-python3.12}"
 command -v "$PY" >/dev/null 2>&1 || {
-  echo "need $PY (or set PYTHON=... to an installed 3.10–3.12)"; exit 1; }
+  echo "need $PY (or set PYTHON=... to an installed 3.11–3.12)"; exit 1; }
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"

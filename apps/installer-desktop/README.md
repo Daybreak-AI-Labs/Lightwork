@@ -74,17 +74,17 @@ Real-machine release testing must cover winget/brew/apt and elevation flows;
 after cancellation, use the safe retry path (or the platform package manager's
 repair/uninstall command) rather than assuming the machine was rolled back.
 
-The Rust lockfile is current for Tauri 2.11, but its Linux dependency graph
-still inherits Wry's GTK3 bindings. OSV Scanner 2.3.8 reports one
-medium-severity `glib` soundness advisory and sixteen unmaintained-crate
-advisories. They have no compatible lockfile-only resolution: current Tauri
-requires GTK/GLib 0.18, the `glib` fix begins at 0.20, and most of the
-maintenance advisories have no fixed release. The GLib/GTK-family findings are
-Linux-only. Five additional `unic-*` maintenance advisories arrive through
-Tauri's cross-platform `urlpattern` dependency; they describe abandoned crates
-rather than known exploitable defects and also have no fixed versions. Keep
-Linux bundles engineering-only, do not globally suppress the findings, and
-re-evaluate when Tauri/Wry adopts maintained dependencies.
+The Rust lockfile is current for Tauri 2.12, but its Linux dependency graph
+still inherits Wry's GTK3 bindings. OSV Scanner 2.3.8 reports two advisories:
+the medium-severity `glib` 0.18 soundness advisory (GHSA-wrw7-89jp-8q8g, also
+published as RUSTSEC-2024-0429) and the unmaintained build-time
+`proc-macro-error` (RUSTSEC-2024-0370) that the gtk/glib 0.18 macros pull in.
+They have no compatible lockfile-only resolution: Wry 0.57 pins webkit2gtk
+2.0.2, which requires GTK/GLib 0.18, and the `glib` fix begins at 0.20. Both
+findings are Linux-only. `osv-scanner.toml` carries narrow exceptions for
+exactly these two that expire on 2027-01-31; keep Linux bundles
+engineering-only and re-evaluate when webkit2gtk-rs and Wry move to gtk 0.19 /
+glib 0.20 or later.
 
 ## Local development
 
@@ -158,7 +158,7 @@ The app keeps a bounded local `bootstrap-recovery.json` journal in its OS app-da
 directory. It records the pinned commit, last known phase, terminal outcome and
 non-secret local dependency inventory. It does not store bootstrap log payloads,
 GitHub credentials or AI keys. Launch or **Recheck dependencies** checks Git,
-Python 3.10+, pipx and the installed Lightwork package report with owned processes,
+Python 3.11+, pipx and the installed Lightwork package report with owned processes,
 eight-second deadlines and bounded output. A successful version response is
 labelled **responded**, not proof of a complete dependency installation.
 
@@ -185,7 +185,7 @@ installers or remove platform trust protections to suppress warnings.
 Release operators can verify separately approved signed engineering packages with
 `scripts/verify_desktop_artifact.py`. Supply a release-owner public key obtained
 independently of the download and an expected commit/version/target. The tool
-requires Python 3.10+ and [Minisign](https://jedisct1.github.io/minisign/) on the
+requires Python 3.11+ and [Minisign](https://jedisct1.github.io/minisign/) on the
 operator's machine, verifies a bounded immutable signed manifest, and streams the
 artifact SHA-256. It neither extracts nor executes the selected artifact, and it
 never generates signing keys or changes credentials.

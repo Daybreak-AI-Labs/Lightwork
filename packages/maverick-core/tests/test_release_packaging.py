@@ -520,6 +520,38 @@ def test_public_python_release_cohort_is_complete_and_lockstep():
     assert "tzdata>=2026.3" in core["dependencies"]
 
 
+def test_python_distributions_declare_the_interpreter_window_ci_tests():
+    """The supported interpreters are the ones CI tests: the floor `test` legs
+    plus `test-window`. Every first-party Python distribution, and the plugin
+    scaffold, declares that floor, and Python version classifiers list exactly
+    that window."""
+    import yaml
+    from maverick.plugin_scaffold import _PYPROJECT_TMPL
+
+    jobs = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )["jobs"]
+    floor = jobs["test"]["strategy"]["matrix"]["python-version"]
+    window = [*floor, *jobs["test-window"]["strategy"]["matrix"]["python-version"]]
+    assert floor == ["3.11"]
+    assert window == ["3.11", "3.12"]
+
+    cohort = tomllib.loads((REPO_ROOT / "release-cohort.toml").read_text(encoding="utf-8"))
+    manifests = [REPO_ROOT / item["path"] / "pyproject.toml" for item in cohort["packages"]]
+    manifests += [REPO_ROOT / "sdks" / "python-client" / "pyproject.toml",
+                  REPO_ROOT / "rust" / "mvk-scan-py" / "pyproject.toml"]
+    for manifest in manifests:
+        project = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]
+        assert project["requires-python"] == f">={floor[0]}", manifest
+        versions = [
+            classifier.rsplit(" :: ", 1)[1]
+            for classifier in project.get("classifiers", [])
+            if classifier.startswith("Programming Language :: Python :: 3.")
+        ]
+        assert versions in ([], window), (manifest, versions)
+    assert f'requires-python = ">={floor[0]}"' in _PYPROJECT_TMPL
+
+
 def test_ci_constraints_cover_every_release_base_dependency():
     cohort = tomllib.loads(
         (REPO_ROOT / "release-cohort.toml").read_text(encoding="utf-8")

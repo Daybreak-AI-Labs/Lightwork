@@ -370,7 +370,7 @@ haven't installed yet.
 ### The honest closing note
 
 Lightwork is alpha. It installs from source today, runs its test suite in CI
-on Python 3.10–3.12, and the features in this handbook ship and run. Parts of
+on Python 3.11–3.12, and the features in this handbook ship and run. Parts of
 the frontier are explicitly unfinished, and the roadmap and the decision memos
 in [`docs/specs/`](./specs/) say so, including the things that were considered
 and declined. Shipped, planned and declined are kept separate. Hold this handbook to it: if you find a claim here the

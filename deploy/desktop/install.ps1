@@ -89,7 +89,7 @@ function Winget-Install($id, $override) {
   Refresh-Path
 }
 
-# Validate one interpreter: run it and confirm it reports >= 3.10. On
+# Validate one interpreter: run it and confirm it reports >= 3.11. On
 # success, record how to invoke it ($script:PyExe / $script:PyPre).
 #
 # Probe with `--version`, NOT `-c "..."`. Windows PowerShell 5.1 mangles
@@ -100,7 +100,7 @@ function Test-PyCandidate($exe, $pre) {
   try {
     $out = (& $exe @($pre + @('--version')) 2>&1) | Out-String
     if ($out -match 'Python\s+(\d+)\.(\d+)' -and
-        ([int]$Matches[1] -gt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -ge 10))) {
+        ([int]$Matches[1] -gt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -ge 11))) {
       $script:PyExe = $exe; $script:PyPre = $pre
       return $true
     }
@@ -133,7 +133,7 @@ function Get-RegistryPythons {
   return $found
 }
 
-# Find a usable Python >= 3.10. PATH first, then the registry (winget
+# Find a usable Python >= 3.11. PATH first, then the registry (winget
 # runs the python.org installer, which does NOT add Python to PATH
 # unless PrependPath is set), then a scan of well-known install dirs.
 function Resolve-Python {
@@ -169,7 +169,7 @@ Write-Host "Lightwork desktop installer (Windows)" -ForegroundColor Green
 Write-Host ""
 Ensure-SourcePin
 
-# 1. Python 3.10+
+# 1. Python 3.11+
 if (-not (Resolve-Python)) {
   Ensure-Winget
   # PrependPath puts python.org's install on PATH for future sessions;

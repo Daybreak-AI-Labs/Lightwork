@@ -148,7 +148,7 @@ Application Gateway with Entra ID auth.
 ## 7. Plain Linux VM (on-prem, EC2, GCE, Azure VM)
 
 ```bash
-# 1. Prereqs: Python 3.10–3.12 + venv
+# 1. Prereqs: Python 3.11–3.12 + venv
 sudo apt-get update && sudo apt-get install -y python3 python3-venv   # Debian/Ubuntu
 # (RHEL/Amazon Linux: sudo dnf install -y python3.12)
 

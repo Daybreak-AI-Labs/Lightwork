@@ -309,16 +309,20 @@ def test_typescript_client_dependency_and_ci_security_gates():
     assert "environment.test.ts" in package["scripts"]["test:environment"]
     assert "tsc --noEmit --strict" in package["scripts"]["typecheck"]
     assert package["overrides"] == {
-        "@hono/node-server": "2.0.12",
-        "body-parser": "2.3.0",
+        # 2.1.3 fixes GHSA-rmxm-3fg6-px4f; body-parser 2.4.0 fixes
+        # GHSA-27r3-jxmh-p828 (both found by the OSV scan on 2026-11-02).
+        "@hono/node-server": "2.1.3",
+        "body-parser": "2.4.0",
         # fast-uri < 3.1.6 and qs < 6.16.0 carry OSV advisories (four High, two
         # Medium) that failed the audit job on 2026-09-02; both are transitive
         # through the MCP SDK's ajv/express, so the pins live in overrides.
         # fast-uri 3.1.7 fixes GHSA-58mr-gqgx-xq4g and GHSA-qw65-cvwx-89v3;
         # 3.1.8 fixes GHSA-hrr3-gc8f-f4qj (percent-encoded host case;
-        # failed the audit job on 2026-09-30).
-        "fast-uri": "3.1.8",
-        "qs": "6.16.0",
+        # failed the audit job on 2026-09-30). fast-uri 3.1.9 fixes
+        # GHSA-333x-w4r6-6crp, GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr and
+        # GHSA-xhq7-xmqj-769h; qs 6.16.1 fixes GHSA-6pq8-jhm2-2vcw.
+        "fast-uri": "3.1.9",
+        "qs": "6.16.1",
     }
 
     lock = json.loads((client_root / "package-lock.json").read_text(encoding="utf-8"))
@@ -340,7 +344,7 @@ def test_typescript_client_dependency_and_ci_security_gates():
         "'packaging==26.3'",
     ):
         assert workflow.count(packaging_tool) == 2
-    assert 'go-version: "1.26.9"' in workflow
+    assert 'go-version: "1.26.10"' in workflow
     assert "go-version-file:" not in workflow
     assert "go run -mod=readonly ." in workflow
 

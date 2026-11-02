@@ -169,9 +169,9 @@ pub async fn inventory(app: &AppHandle) -> Result<Journal, String> {
             .map_err(|_| "Inventory lock unavailable.")?;
         read(app)?
     };
-    let (git, mut python, pipx, lightwork) = tokio::join!(probe("Git", "git", &["--version"]), probe("Python", "python3", &["-I", "-S", "-c", "import sys; print(sys.version.split()[0]); sys.exit(0 if sys.version_info >= (3,10) else 1)"]), probe("pipx", "pipx", &["--version"]), probe("Lightwork package cohort", "maverick", &["version"]));
+    let (git, mut python, pipx, lightwork) = tokio::join!(probe("Git", "git", &["--version"]), probe("Python", "python3", &["-I", "-S", "-c", "import sys; print(sys.version.split()[0]); sys.exit(0 if sys.version_info >= (3,11) else 1)"]), probe("pipx", "pipx", &["--version"]), probe("Lightwork package cohort", "maverick", &["version"]));
     if python.state != "responded" {
-        python = probe("Python", "python", &["-I", "-S", "-c", "import sys; print(sys.version.split()[0]); sys.exit(0 if sys.version_info >= (3,10) else 1)"]).await;
+        python = probe("Python", "python", &["-I", "-S", "-c", "import sys; print(sys.version.split()[0]); sys.exit(0 if sys.version_info >= (3,11) else 1)"]).await;
     }
     let _guard = JOURNAL_LOCK
         .lock()

@@ -43,22 +43,28 @@ ensure_git() {
   fi
 }
 
+python3_meets_floor() {
+  [ "$(python3 -c 'import sys;print("%d%02d"%sys.version_info[:2])')" -ge 311 ]
+}
+
 ensure_python() {
-  if have python3 && \
-     [ "$(python3 -c 'import sys;print("%d%02d"%sys.version_info[:2])')" -ge 310 ]; then
+  if have python3 && python3_meets_floor; then
     return
   fi
   log "Installing Python 3 ..."
   case "$(uname -s)" in
-    Darwin) have brew || die "Install Homebrew (https://brew.sh) or Python 3.10+, then re-run."
+    Darwin) have brew || die "Install Homebrew (https://brew.sh) or Python 3.11+, then re-run."
             brew install python ;;
     *)      if   have apt-get; then sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip
             elif have dnf;     then sudo dnf install -y python3 python3-pip
             elif have pacman;  then sudo pacman -Sy --noconfirm python python-pip
-            else die "No supported package manager. Install Python 3.10+, then re-run."
+            else die "No supported package manager. Install Python 3.11+, then re-run."
             fi ;;
   esac
   have python3 || die "Python install finished but 'python3' is not on PATH. Open a new terminal and re-run."
+  # A distro's python3 can still be older than the floor (3.10 on
+  # Ubuntu 22.04); stop here rather than at pip's requires-python check.
+  python3_meets_floor || die "Lightwork needs Python 3.11 or newer, but this system's python3 is $(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])'). Install Python 3.11 or newer as python3, then re-run."
 }
 
 ensure_pipx() {

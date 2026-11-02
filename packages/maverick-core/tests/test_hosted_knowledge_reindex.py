@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 import pytest
@@ -17,7 +17,7 @@ from maverick_knowledge.embed import HostedEmbedder
 def setup(tmp_path, monkeypatch):
     from maverick import embedding_prices
 
-    monkeypatch.setattr(embedding_prices, "_utc_today", lambda: date(2026, 10, 1))
+    monkeypatch.setattr(embedding_prices, "_utc_today", lambda: date.fromisoformat(embedding_prices._AS_OF))
     policy = {"knowledge": {"reindex_jobs": True, "reindex_max_dollars": 5.0}}
     monkeypatch.setattr(config, "load_config", lambda: policy)
     monkeypatch.setattr(jobs, "data_dir", lambda: tmp_path)
@@ -272,7 +272,7 @@ def test_expired_review_refuses_before_any_provider_call(setup, monkeypatch):
 
     kb, context, _ = setup
     job = _start(kb, context)
-    monkeypatch.setattr(embedding_prices, "_utc_today", lambda: date(2026, 11, 2))
+    monkeypatch.setattr(embedding_prices, "_utc_today", lambda: date.fromisoformat(embedding_prices._VALID_UNTIL) + timedelta(days=1))
     def denied(*args, **kwargs):
         pytest.fail("Expired rate evidence cannot authorize paid dispatch")
     monkeypatch.setattr(httpx, "post", denied)
@@ -296,7 +296,7 @@ def test_completed_publication_is_recovered_without_fresh_paid_admission(setup, 
     monkeypatch.setattr(kb.store, "replace_embeddings", interrupted)
     with pytest.raises(KeyboardInterrupt):
         jobs.run(kb, context=context, job_id=job["job_id"], authority=lambda: None)
-    monkeypatch.setattr(embedding_prices, "_utc_today", lambda: date(2026, 11, 2))
+    monkeypatch.setattr(embedding_prices, "_utc_today", lambda: date.fromisoformat(embedding_prices._VALID_UNTIL) + timedelta(days=1))
     final = jobs.run(kb, context=context, job_id=job["job_id"], authority=lambda: None)
     assert final["state"] == "completed" and calls == [64, 1]
     assert "verified after interruption" in final["message"]

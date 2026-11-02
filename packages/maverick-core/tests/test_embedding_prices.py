@@ -1,16 +1,20 @@
 """No transport or provider calls: exact sourced embedding price admission."""
 import json
 from dataclasses import FrozenInstanceError
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from maverick import embedding_prices as prices
 from maverick.pricing import PricingError
 
+# The reviewed capture's own dates, so a refreshed capture needs no test edit.
+CAPTURED = date.fromisoformat(prices._AS_OF)
+EXPIRES = date.fromisoformat(prices._VALID_UNTIL)
+
 
 @pytest.fixture(autouse=True)
 def captured_day(monkeypatch):
-    monkeypatch.setattr(prices, "_utc_today", lambda: date(2026, 10, 1))
+    monkeypatch.setattr(prices, "_utc_today", lambda: CAPTURED)
 
 
 def test_default_voyage_price_is_namespaced_and_keeps_full_context_bound():
@@ -24,7 +28,8 @@ def test_default_voyage_price_is_namespaced_and_keeps_full_context_bound():
     assert prices.quote_for_budget(contract.quote.model_id) == contract.quote
     evidence = json.loads(json.dumps(contract.metadata()))
     assert evidence["quote"]["verified"] is True
-    assert evidence["quote"]["valid_until"] == "2026-11-01"
+    assert evidence["quote"]["valid_until"] == prices._VALID_UNTIL
+    assert CAPTURED < EXPIRES <= CAPTURED + timedelta(days=31)
     assert evidence["invoice_qualified"] is False
 
 
@@ -82,7 +87,7 @@ def test_batch_bound_rejects_invalid_counts(count):
         contract.token_ceiling(count)
 
 
-@pytest.mark.parametrize("day", [date(2026, 9, 30), date(2026, 11, 2)])
+@pytest.mark.parametrize("day", [CAPTURED - timedelta(days=1), EXPIRES + timedelta(days=1)])
 def test_stale_or_future_evidence_cannot_admit_or_meter(day, monkeypatch):
     contract = prices.resolve_embedding_contract("voyage", "voyage-3", "https://api.voyageai.com/v1")
     monkeypatch.setattr(prices, "_utc_today", lambda: day)

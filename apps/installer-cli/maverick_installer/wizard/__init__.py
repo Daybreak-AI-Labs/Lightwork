@@ -565,8 +565,8 @@ def preflight() -> bool:
     all_ok = True
 
     # Python version
-    if sys.version_info < (3, 10):
-        console.print(f"[red]✗[/red] Python 3.10+ required (you have {sys.version.split()[0]})")
+    if sys.version_info < (3, 11):
+        console.print(f"[red]✗[/red] Python 3.11+ required (you have {sys.version.split()[0]})")
         all_ok = False
     else:
         console.print(f"[green]✓[/green] Python {sys.version.split()[0]}")

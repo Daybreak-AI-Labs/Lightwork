@@ -7,7 +7,7 @@ install until a release is published.
 
 ## Requirements
 
-- Python 3.10, 3.11 or 3.12 (the versions tested in CI).
+- Python 3.11 or 3.12 (the versions tested in CI).
 - Git.
 - An account with a model provider, or a self-hosted model, to run tasks. You
   can install and open the dashboard without one.
@@ -48,8 +48,8 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\lightwork.exe dashboard
 ```
 
-`py -3.12` selects Python 3.12; use `py -3.11` or `py -3.10` instead if that is
-the supported version you have installed.
+`py -3.12` selects Python 3.12; use `py -3.11` instead if that is the
+supported version you have installed.
 
 Calling the virtual environment's executables by path avoids changing the
 PowerShell execution policy to run the activation script.

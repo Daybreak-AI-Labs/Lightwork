@@ -1,7 +1,7 @@
 """Reviewed standard-price contracts for direct, text-only embedding calls.
 
 Prices and input limits were read from the linked first-party pages on
-2026-10-01. The expiry is Lightwork's freshness policy, not a vendor promise.
+2026-11-02 (unchanged from the 2026-10-01 capture). The expiry is Lightwork's freshness policy, not a vendor promise.
 These quotes exclude tax, credits, discounts and account-specific agreements;
 they meter documented input usage at the captured standard list rate. They do
 not establish an absolute vendor-invoice maximum or live-service qualification.
@@ -25,10 +25,10 @@ from .pricing import (
     VersionedPricingProvider,
 )
 
-RATE_CARD_VERSION = "embedding-direct-text-2026-10-01.1"
-_AS_OF = "2026-10-01"
-_FETCHED_AT = "2026-10-01T01:07:09Z"
-_VALID_UNTIL = "2026-11-01"
+RATE_CARD_VERSION = "embedding-direct-text-2026-11-02.1"
+_AS_OF = "2026-11-02"
+_FETCHED_AT = "2026-11-02T16:11:35Z"
+_VALID_UNTIL = "2026-12-02"
 _VOYAGE_PRICING = "https://docs.voyageai.com/docs/pricing"
 _VOYAGE_LIMITS = "https://docs.voyageai.com/docs/embeddings"
 _OPENAI_LIMITS = (
@@ -103,7 +103,7 @@ class EmbeddingPriceContract:
 
 def _evidence(provider: str, model: str, rate: float, source: str) -> RateEvidence:
     return RateEvidence(
-        evidence_id=f"embedding-{provider}-{model}-2026-10-01",
+        evidence_id=f"embedding-{provider}-{model}-{_AS_OF}",
         source_url=source,
         retrieved_at=_FETCHED_AT,
         as_of=_AS_OF,

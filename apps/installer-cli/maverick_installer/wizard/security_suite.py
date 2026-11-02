@@ -69,7 +69,7 @@ def _pick_evidence_local_parsers(enabled: bool) -> dict[str, Any]:
             "  Reviewed runtime-library manifest SHA-256", default=""
         ).strip().lower()
         result["ai_evidence_ocr_pillow_version"] = _q_text(
-            "  Exact installed Pillow distribution version", default="12.3.0"
+            "  Exact installed Pillow distribution version", default="13.0.0"
         ).strip()
         result["ai_evidence_ocr_pillow_manifest_sha256"] = _q_text(
             "  Reviewed Pillow package-file manifest SHA-256", default=""

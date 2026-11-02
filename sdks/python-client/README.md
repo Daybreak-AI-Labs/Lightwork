@@ -2,7 +2,7 @@
 
 A small Python client for the Lightwork dashboard REST API (`/api/v1`). It uses
 only the standard library (`urllib`, `json`, `ssl`, `ipaddress`), so it has no
-dependencies and runs on Python 3.10 to 3.12.
+dependencies and runs on Python 3.11 to 3.12.
 
 **Not published.** This package is a checkout-only helper. It is not on PyPI,
 it is not a member of the uv workspace, and it is not part of the release
