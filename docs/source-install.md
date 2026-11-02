@@ -20,7 +20,7 @@ install until a release is published.
 
 When upgrading a Python 3.10 installation, recreate its virtual environment
 with Python 3.11 or 3.12 first. The minimum changed to support patched image
-processing dependencies; see the [dependency review](operations/dependency-audit.md).
+processing dependencies; see the [dependency review](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/operations/dependency-audit.md).
 
 The repository root is not a pip project, so `pip install -e .` at the root
 does not work. `scripts/install_release_cohort.py` installs the eight Lightwork

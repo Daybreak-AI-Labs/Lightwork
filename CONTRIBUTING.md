@@ -59,7 +59,7 @@ You need git, bash and Python 3.11 or 3.12 (the versions CI tests).
 Docker or Podman is optional; the container sandbox backends use it. Node.js
 and npm are needed for the TypeScript SDK and for the dashboard, desktop and
 mobile JavaScript tests. The UI regression workflow uses Node.js 22.23.1;
-see the [browser test guide](packages/maverick-dashboard/tests/browser/README.md)
+see the [browser test guide](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-dashboard/tests/browser/README.md)
 for its additional Chromium setup.
 
 ```bash
@@ -119,7 +119,7 @@ sdks/                  Client and plugin SDKs
 ```
 
 [ARCHITECTURE.md](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/ARCHITECTURE.md)
-describes how the pieces fit together. The [dashboard service boundaries](docs/operations/dashboard-architecture.md) describe shared policies, configuration contracts, and where request authorization belongs.
+describes how the pieces fit together. The [dashboard service boundaries](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/operations/dashboard-architecture.md) describe shared policies, configuration contracts, and where request authorization belongs.
 
 ## Running the tests
 

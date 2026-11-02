@@ -133,6 +133,10 @@ run "grpc contract --check"   python -m maverick.grpc_api.contract --check
 run "a11y_audit --ci"         python -m maverick.a11y_audit --ci
 run "schema_migrations --ci"  python -m maverick.schema_migrations --ci
 
+echo "== signed benchmark evidence matches current source =="
+run "governance-frontier tracked evidence" python benchmarks/eval_governance_frontier.py --verify-tracked-artifacts
+run "harness-overhead tracked evidence" python benchmarks/eval_harness_overhead.py --verify-tracked-artifacts
+
 echo "== release packaging and installer disclosures =="
 run "release packaging" python -m pytest -q packages/maverick-core/tests/test_release_packaging.py
 
