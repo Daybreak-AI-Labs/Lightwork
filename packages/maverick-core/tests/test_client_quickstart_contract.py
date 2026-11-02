@@ -308,17 +308,15 @@ def test_typescript_client_dependency_and_ci_security_gates():
     assert package["devDependencies"]["@types/node"] == "22.20.1"
     assert "environment.test.ts" in package["scripts"]["test:environment"]
     assert "tsc --noEmit --strict" in package["scripts"]["typecheck"]
+    # Reviewed patched versions from the November 2026 cross-ecosystem audit.
     assert package["overrides"] == {
-        "@hono/node-server": "2.0.12",
-        "body-parser": "2.3.0",
-        # fast-uri < 3.1.6 and qs < 6.16.0 carry OSV advisories (four High, two
-        # Medium) that failed the audit job on 2026-09-02; both are transitive
-        # through the MCP SDK's ajv/express, so the pins live in overrides.
-        # fast-uri 3.1.7 fixes GHSA-58mr-gqgx-xq4g and GHSA-qw65-cvwx-89v3;
-        # 3.1.8 fixes GHSA-hrr3-gc8f-f4qj (percent-encoded host case;
-        # failed the audit job on 2026-09-30).
-        "fast-uri": "3.1.8",
-        "qs": "6.16.0",
+        "@hono/node-server": "2.1.3",
+        "body-parser": "2.4.0",
+        "fast-uri": "3.1.9",
+        "qs": "6.16.1",
+        "hono": "4.13.11",
+        "ip-address": "10.7.4",
+        "zod": "4.6.6",
     }
 
     lock = json.loads((client_root / "package-lock.json").read_text(encoding="utf-8"))

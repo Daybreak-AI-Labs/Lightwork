@@ -26,8 +26,8 @@ def test_other_process_fences_local_snapshot_and_late_read():
     before = tool.generation()
     tool.store_cached(read, {}, "old", generation=before)
     assert tool.save_snapshot() == 1
-    subprocess.run([sys.executable, "-c", "from maverick.cache.epoch import local_epoch; assert local_epoch(advance=True)"],
-                   env=os.environ.copy(), check=True, timeout=30)
+    subprocess.run([sys.executable, "-c", "from types import SimpleNamespace; from maverick.cache.tool import note_side_effect; note_side_effect(SimpleNamespace(parallel_safe=False))"],
+                   env={**os.environ, "MAVERICK_TOOL_CACHE": "0"}, check=True, timeout=30)
     assert tool.get_cached(read, {}) == (False, None)
     tool.store_cached(read, {}, "late old", generation=before)
     assert tool.get_cached(read, {}) == (False, None)
@@ -44,3 +44,11 @@ def test_unavailable_epoch_bypasses_cached_values(monkeypatch):
     assert tool.get_cached(read, {}) == (False, None)
     tool.store_cached(read, {}, "unverified")
     assert tool.stats()["size"] == 0
+
+
+def test_write_without_cache_readers_does_not_create_generation(monkeypatch):
+    monkeypatch.setenv("MAVERICK_TOOL_CACHE", "0")
+    path = epoch.data_dir("tool_cache_epoch")
+    assert not path.exists()
+    tool.note_side_effect(SimpleNamespace(parallel_safe=False))
+    assert not path.exists()

@@ -10,9 +10,14 @@ from ..paths import data_dir
 
 
 def local_epoch(*, advance: bool = False) -> str | None:
-    """Read or atomically replace the per-workspace generation identifier."""
+    """Readers create a generation; writes rotate it only once caching is active."""
     path = data_dir("tool_cache_epoch")
     try:
+        # A reader publishes the first generation before executing its read.
+        # If no reader has done so, there is no result or in-flight read to
+        # invalidate. Avoid durable cache writes on the default uncached path.
+        if advance and not path.exists():
+            return None
         path.parent.mkdir(parents=True, exist_ok=True)
         if not advance:
             try:
