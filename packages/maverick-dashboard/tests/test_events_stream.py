@@ -130,21 +130,41 @@ def test_stream_pushes_the_answer_preview_without_an_event(monkeypatch, tmp_path
     """The model's answer lands in ``result`` while the goal is still running
     (agent._PartialAnswerStream). The stream must push it as soon as it
     changes, without waiting for an event row, and the terminal payload must
-    carry the final text."""
+    carry the final text.
+
+    The writer replaces a preview only after the stream has read it. On a
+    fixed 0.8 s timer it raced the stream's first read: when the request took
+    longer than that to reach the read (a loaded CI worker, or the first
+    request in a process), the first frame correctly carried a later preview."""
     import threading
-    import time
 
     from maverick import world_model
+    from maverick_dashboard import _event_stream
 
     w = world_model.WorldModel(world_model.DEFAULT_DB)
     gid = w.create_goal("stream me", "")
     w.set_goal_status(gid, "running")
     assert w.set_goal_partial_result(gid, "Hello, I am") is True
 
+    # The stream builds every frame from this read; note each preview it sees.
+    read_state = _event_stream.stream_state
+    read = {"Hello, I am": threading.Event(), "Hello, I am still writing": threading.Event()}
+
+    def stream_state(world, goal_id, *, include_result=False):
+        state = read_state(world, goal_id, include_result=include_result)
+        if include_result and state.result in read:
+            read[state.result].set()
+        return state
+
+    monkeypatch.setattr(_event_stream, "stream_state", stream_state)
+    unread = []
+
     def writer():
-        time.sleep(0.8)
+        if not read["Hello, I am"].wait(30):
+            unread.append("Hello, I am")
         w.set_goal_partial_result(gid, "Hello, I am still writing")
-        time.sleep(0.8)
+        if not read["Hello, I am still writing"].wait(30):
+            unread.append("Hello, I am still writing")
         w.set_goal_status(gid, "done", "Hello, I am done.")
 
     threading.Thread(target=writer, daemon=True).start()
@@ -156,6 +176,7 @@ def test_stream_pushes_the_answer_preview_without_an_event(monkeypatch, tmp_path
                 payloads.append(json.loads(line[6:]))
             if payloads and payloads[-1].get("terminal") is True:
                 break
+    assert unread == []                                    # the stream read each preview in turn
     results = [p["result"] for p in payloads]
     assert results[0] == "Hello, I am"                     # first tick: the preview already there
     assert "Hello, I am still writing" in results          # pushed on change, no event needed
