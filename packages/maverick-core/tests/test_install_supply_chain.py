@@ -8,6 +8,7 @@ private index, never an implicit public lookup.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -304,6 +305,40 @@ def test_vps_installer_checks_the_python_floor_after_installing(tmp_path, report
         assert result.returncode == 0, result.stdout + result.stderr
         assert "RETURNED" in result.stdout
     assert "Installs Python 3.12" not in script
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.parametrize(("reported", "stops"), [("3.10", True), ("3.12", False)])
+def test_dev_bootstrap_checks_the_python_floor_before_creating_the_venv(tmp_path, reported, stops):
+    """post-create.sh falls back to the host python3 when no python3.12 or
+    python3.11 exists; a 3.10 host (Ubuntu 22.04, the benchmark VM guide's old
+    image) must stop with a plain message, not inside pip."""
+    script = _read(".devcontainer/post-create.sh")
+    start = script.index("python_bin=python3\n")
+    selection = script[start:script.index('"$python_bin" -m venv .venv', start)]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    python3 = bin_dir / "python3"
+    python3.write_text(
+        "#!/bin/sh\n"
+        f'case "$2" in *version_info\\ \\<*) [ "{reported}" != "3.10" ] ;; *) echo {reported} ;; esac\n',
+        encoding="utf-8",
+    )
+    python3.chmod(0o755)
+    # PATH holds only the stub, so a host python3.12/3.11 cannot be preferred;
+    # the selection code uses only shell builtins besides the interpreter.
+    result = subprocess.run(
+        [shutil.which("bash"), "-c", f"set -euo pipefail\n{selection}echo SELECTED \"$python_bin\"\n"],
+        env={"PATH": str(bin_dir), "HOME": str(tmp_path)},
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if stops:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "Lightwork needs Python 3.11 or 3.12, but python3 is 3.10" in result.stderr
+        assert "SELECTED" not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "SELECTED python3" in result.stdout
 
 
 def test_vps_installer_requires_a_clean_immutable_checkout():
@@ -672,6 +707,34 @@ def test_cross_ecosystem_osv_gate_is_pinned_complete_and_expiring():
     assert "Tauri" in reasons["GHSA-wrw7-89jp-8q8g"]
     assert "Tauri" in reasons["RUSTSEC-2024-0370"]
     assert reasons["GHSA-gcqx-w48m-w2h4"].startswith("Build-time only:")
+
+
+def test_build_time_only_osv_exception_stays_build_time_only():
+    """The deepmerge exception (GHSA-gcqx-w48m-w2h4) holds only while deepmerge
+    is reachable solely through installer-desktop's vite-plugin-svelte
+    devDependency. osv-scanner applies an exception by advisory ID to every
+    scanned lockfile, so a runtime path would be filtered silently."""
+    step = _read(".github/workflows/ci.yml").split(
+        "- name: OSV Scanner across every reviewed dependency surface", 1,
+    )[1].split("- name: Upload cross-ecosystem vulnerability report", 1)[0]
+    scanned = [path for path in re.findall(r"--lockfile\s+(\S+)", step) if "$" not in path]
+    assert "apps/installer-desktop/pnpm-lock.yaml" in scanned
+    for path in [*scanned, "requirements/ci.txt"]:
+        if path != "apps/installer-desktop/pnpm-lock.yaml":
+            assert "deepmerge" not in _read(path), path
+
+    snapshots = _read("apps/installer-desktop/pnpm-lock.yaml").split("\nsnapshots:\n", 1)[1]
+    parents = [
+        block.strip().splitlines()[0].strip().strip("':")
+        for block in snapshots.split("\n\n")
+        if re.search(r"^ {6}deepmerge: ", block, re.MULTILINE)
+    ]
+    assert parents
+    assert all(parent.startswith("@sveltejs/vite-plugin-svelte@") for parent in parents), parents
+    manifest = json.loads(_read("apps/installer-desktop/package.json"))
+    assert "@sveltejs/vite-plugin-svelte" in manifest["devDependencies"]
+    assert "@sveltejs/vite-plugin-svelte" not in manifest.get("dependencies", {})
+    assert "deepmerge" not in manifest.get("dependencies", {})
 
 
 def test_go_java_and_standalone_demo_security_floors_are_explicit():

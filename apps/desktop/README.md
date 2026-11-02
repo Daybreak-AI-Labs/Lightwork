@@ -119,17 +119,16 @@ the source installation. It is not currently selected by
 treat it as an unshipped engineering prototype rather than a supported
 installer.
 
-The current Tauri 2.11 dependency graph uses Wry's GTK3 backend on Linux. OSV
-Scanner 2.3.8 therefore reports one medium-severity `glib` soundness advisory
-and sixteen unmaintained-crate advisories in `Cargo.lock`. `cargo update`
-cannot resolve them: current Tauri constrains the Linux bindings to GTK
-0.18/GLib 0.18, while the `glib` fix begins at 0.20, and most of the remaining
-advisories have no fixed release. The GLib/GTK-family findings are Linux-only.
-Five additional `unic-*` maintenance advisories arrive through Tauri's
-cross-platform `urlpattern` dependency; they describe abandoned crates rather
-than known exploitable defects and also have no fixed versions. Do not suppress
-the findings globally; keep Linux artifacts engineering-only and re-evaluate
-the graph when Tauri/Wry moves to maintained dependencies.
+The current Tauri 2.12 dependency graph uses Wry's GTK3 backend on Linux. OSV
+Scanner 2.3.8 therefore reports two advisories in `Cargo.lock`: the
+medium-severity `glib` 0.18 soundness advisory (GHSA-wrw7-89jp-8q8g, also
+published as RUSTSEC-2024-0429) and the unmaintained build-time
+`proc-macro-error` (RUSTSEC-2024-0370), which the gtk/glib 0.18 macros pull
+in. `cargo update` cannot resolve them: Wry 0.57 pins webkit2gtk 2.0.2, which
+requires GTK/GLib 0.18, while the `glib` fix begins at 0.20. Both findings are
+Linux-only. `osv-scanner.toml` carries narrow exceptions for exactly these two
+that expire on 2027-01-31; keep Linux artifacts engineering-only and
+re-evaluate when webkit2gtk-rs and Wry move to gtk 0.19 / glib 0.20 or later.
 
 Any locally produced bundles are **unsigned**, so SmartScreen (Windows) and
 Gatekeeper (macOS) will warn until code-signing certificates exist.

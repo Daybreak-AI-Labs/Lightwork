@@ -1,7 +1,8 @@
 # Narrow, expiring exceptions, each for an advisory with no fixed release
 # reachable from the current dependency tree:
 # - Tauri 2's Linux WebKit/GTK3 chain (wry 0.57 pins webkit2gtk =2.0.2, which
-#   requires gtk/glib 0.18). Recheck when Tauri/wry can move off GTK3.
+#   requires gtk/glib 0.18). Recheck when webkit2gtk-rs and wry move to gtk 0.19
+#   (still GTK3) and glib >= 0.20, which clears both Tauri entries.
 # - Build-time-only development tooling that never ships in an application
 #   bundle, when neither the package nor its parent has a fixed release.
 # No application or service dependency may be added here; every exception
