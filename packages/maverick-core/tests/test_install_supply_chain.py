@@ -868,10 +868,10 @@ def test_security_dependency_floors_cover_current_fixed_releases():
     _assert_floor(core_deps, "cryptography", "48.0.1")
     _assert_floor(core_extras["langchain"], "langchain-core", "1.3.3")
     _assert_floor(core_extras["langchain"], "langsmith", "0.8.18")
-    _assert_floor(core_extras["computer-use"], "pillow", "12.3.0")
+    _assert_floor(core_extras["computer-use"], "pillow", "13.0.0")
     _assert_floor(core_extras["pdf"], "pypdf", "6.14.2")
     _assert_floor(core_extras["evidence-analysis"], "pypdf", "6.14.2")
-    _assert_floor(core_extras["evidence-analysis"], "pillow", "12.3.0")
+    _assert_floor(core_extras["evidence-analysis"], "pillow", "13.0.0")
     assert all(
         canonicalize_name(Requirement(item).name) != "pytesseract"
         for item in core_extras["evidence-analysis"]
@@ -894,7 +894,7 @@ def test_security_dependency_floors_cover_current_fixed_releases():
     knowledge = _metadata("packages/maverick-knowledge/pyproject.toml")
     knowledge_extras = knowledge["project"]["optional-dependencies"]
     _assert_floor(knowledge_extras["parsers"], "pypdf", "6.14.2")
-    _assert_floor(knowledge_extras["vision"], "pillow", "12.3.0")
+    _assert_floor(knowledge_extras["vision"], "pillow", "13.0.0")
 
 
 def test_all_python_builds_require_patched_setuptools_floor():

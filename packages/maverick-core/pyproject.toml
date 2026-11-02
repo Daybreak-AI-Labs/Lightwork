@@ -99,7 +99,7 @@ grok-session    = ["httpx>=0.27"]
 gemini-session  = ["httpx>=0.27"]
 capture         = ["playwright>=1.40"]
 browser         = ["playwright>=1.40", "lxml>=5.0"]
-computer-use    = ["pillow>=12.3.0", "mss>=9.0", "pyautogui>=0.9.54"]
+computer-use    = ["pillow>=13.0.0", "mss>=9.0", "pyautogui>=0.9.54"]
 pdf             = ["pdfplumber>=0.10", "pypdf>=6.14.2"]
 # Bounded local parsers used by the AI Evidence Analysis workbench. Production
 # OCR invokes an operator-installed, absolute-path/SHA-pinned Tesseract binary;
@@ -108,7 +108,7 @@ pdf             = ["pdfplumber>=0.10", "pypdf>=6.14.2"]
 evidence-analysis = [
     "pypdf>=6.14.2",
     "openpyxl>=3.1",
-    "pillow>=12.3.0",
+    "pillow>=13.0.0",
     "xlrd==2.0.2",
     "olefile==0.47",
 ]
@@ -195,7 +195,7 @@ dev        = [
     "starlette>=1.3.1",
     "requests>=2.33.0",
     "urllib3>=2.7.0",
-    "pillow>=12.3.0",
+    "pillow>=13.0.0",
     "twilio>=9.0",
 ]
 all        = [

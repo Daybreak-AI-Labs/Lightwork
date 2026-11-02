@@ -177,6 +177,11 @@ not available from this repository.
   the software. A test keeps such material out of the tree.
 
 ### Fixed
+- Bumped the Pillow floor past known CVEs: the `computer-use`,
+  `evidence-analysis` and `dev` extras of `maverick-agent` and the `vision`
+  extra of `maverick-knowledge` now require `pillow>=13.0.0`, which fixes the
+  59 advisories OSV lists for 12.3.0 (PYSEC-2026-4326 to 4343 among them).
+  Pillow 13 requires Python 3.11, the new floor.
 - **Client and consent state stays attached to the current action** — stale
   assessment and demo responses no longer overwrite a newer selection; failed
   saves remain visible. Consent edits carry their version and failed bulk
