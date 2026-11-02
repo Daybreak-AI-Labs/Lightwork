@@ -46,7 +46,7 @@ Design notes:
 - **Python and network access are prerequisites, not bundled capabilities.**
   The MSI does not embed a Python runtime, a locked dependency wheelhouse, or
   the full eight-package release cohort. `maverick.cmd` prints an actionable
-  error if Python 3.10+ is missing; pip otherwise resolves runtime dependencies
+  error if Python 3.11+ is missing; pip otherwise resolves runtime dependencies
   from live PyPI without a shipped constraints file. This bootstrap is not an
   offline MSI; the separate desktop package candidate is.
 

@@ -208,7 +208,7 @@ def test_multi_statement_does_not_execute_injected_write(tmp_path):
     # sqlite3.Warning, 3.11+ raises ProgrammingError, and a hypothetical
     # future could run only the first statement). Asserting the data
     # invariant instead of a version-specific error message is what keeps
-    # this test from breaking across the 3.10/3.11/3.12 matrix.
+    # this test from breaking across the interpreter matrix.
     sql_query().fn({
         "database": str(db),
         "query": "SELECT 1; DROP TABLE users",

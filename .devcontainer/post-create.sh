@@ -3,10 +3,10 @@
 # the same way CI does, so tests and the CLI work out of the box.
 set -euo pipefail
 
-# Stay inside the interpreter window CI tests (3.10-3.12). A newer host
+# Stay inside the interpreter window CI tests (3.11-3.12). A newer host
 # interpreter (3.13) cannot install the cohort, so prefer a supported one.
 python_bin=python3
-for candidate in python3.12 python3.11 python3.10; do
+for candidate in python3.12 python3.11; do
   if command -v "$candidate" >/dev/null 2>&1; then
     python_bin="$candidate"
     break

@@ -38,7 +38,7 @@ How you tested the change. For example:
 - [ ] **The pull request title follows Conventional Commits**: a type prefix (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `perf:`, `chore:`, `ci:`, `build:`, `style:` or `revert:`) and a subject that **starts with a letter** (not a digit, quote or backtick). The `lint-pr-title` check enforces this.
 - [ ] **Tests are added or updated**, and `python3 -m pytest -q` passes for the code I changed (never a bare `pytest`; see CONTRIBUTING.md).
 - [ ] **`bash scripts/pre-push-lint.sh` passes** (ruff, vulture, the `tomllib` and `shell=True` checks, detect-secrets and the contract gates).
-- [ ] **No bare `import tomllib`**: it is in the standard library only from Python 3.11 and breaks the 3.10 build. Use the `try: import tomllib` / `except ModuleNotFoundError: import tomli as tomllib` fallback (see CONTRIBUTING.md).
+- [ ] **No bare `import tomllib`**: Python 3.11, the supported floor, has it, but the fallback is kept for helpers that still run on older interpreters, and CI rejects a bare import. Use the `try: import tomllib` / `except ModuleNotFoundError: import tomli as tomllib` fallback (see CONTRIBUTING.md).
 - [ ] **A new capability is reachable from the setup wizard.** If you added a channel, provider, sandbox or feature, `apps/installer-cli/` can enable it.
 - [ ] **Safety invariants hold** (if you touched the agent loop or added a tool or sink): new tools go through `ctx.shield.scan_tool_call()`, long-running paths respect `Budget`, and all shell goes through `sandbox.exec()` (never `subprocess.run` directly).
 - [ ] **The change is surgical**: no reformatting or unrelated changes to adjacent code, and it matches the existing style.

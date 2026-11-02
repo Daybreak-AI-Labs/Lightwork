@@ -6,7 +6,7 @@
 
 ## Installation
 
-Lightwork s'installe depuis les sources ; il faut Python 3.10–3.12 et Git. Suivez le [guide d'installation depuis les sources](../../source-install.md), qui donne les commandes pour macOS, Linux et Windows. Aucun binaire précompilé, paquet PyPI ou image de conteneur n'est encore publié. Aucune version n'est publiée pour l'instant ; installez depuis `main`.
+Lightwork s'installe depuis les sources ; il faut Python 3.11–3.12 et Git. Suivez le [guide d'installation depuis les sources](../../source-install.md), qui donne les commandes pour macOS, Linux et Windows. Aucun binaire précompilé, paquet PyPI ou image de conteneur n'est encore publié. Aucune version n'est publiée pour l'instant ; installez depuis `main`.
 
 Lancez ensuite `lightwork dashboard` et ouvrez <http://127.0.0.1:8765> pour terminer la configuration du propriétaire et du fournisseur de modèles.
 

@@ -6,7 +6,7 @@
 
 ## 설치
 
-Lightwork는 소스 코드에서 설치합니다. Python 3.10–3.12와 Git이 필요합니다. macOS, Linux, Windows용 명령은 [소스 설치 절차](../../source-install.md)에 나와 있습니다. 미리 빌드된 바이너리, PyPI 패키지, 컨테이너 이미지는 아직 게시되지 않았습니다. 현재 게시된 릴리스가 없으므로 `main`에서 설치하세요.
+Lightwork는 소스 코드에서 설치합니다. Python 3.11–3.12와 Git이 필요합니다. macOS, Linux, Windows용 명령은 [소스 설치 절차](../../source-install.md)에 나와 있습니다. 미리 빌드된 바이너리, PyPI 패키지, 컨테이너 이미지는 아직 게시되지 않았습니다. 현재 게시된 릴리스가 없으므로 `main`에서 설치하세요.
 
 그런 다음 `lightwork dashboard`를 실행하고 <http://127.0.0.1:8765>를 열어 소유자와 모델 제공자 설정을 마치세요.
 

@@ -60,7 +60,7 @@ select = [
 ignore = [
     "E501",   # line length
     "UP036",  # "outdated" version blocks -- ours are intentional runtime
-              # "Python 3.10+ required" guards (installer/preflight), not dead code.
+              # "Python 3.11+ required" guards (installer/preflight), not dead code.
 ]
 
 [tool.ruff.lint.flake8-bugbear]

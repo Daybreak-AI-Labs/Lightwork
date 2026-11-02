@@ -47,7 +47,7 @@ between runs in a world-model database. Lightwork is open source under the Apach
 
 ## Quick start
 
-Lightwork is installed from source. You need Python 3.10–3.12 and Git: clone
+Lightwork is installed from source. You need Python 3.11–3.12 and Git: clone
 the repository, create a virtual environment, and run
 `python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis`,
 which installs the eight Lightwork packages together. Then run

@@ -294,17 +294,17 @@ def check_wave11_env() -> bool:
 
 
 def check_python_version() -> bool:
-    """Lightwork targets 3.10+. 3.13 isn't officially tested but works."""
-    if sys.version_info < (3, 10):
+    """Lightwork targets 3.11+. 3.13 isn't officially tested but works."""
+    if sys.version_info < (3, 11):
         _fail(
             f"Python {sys.version_info.major}.{sys.version_info.minor} is "
-            "below the supported minimum (3.10). Upgrade Python."
+            "below the supported minimum (3.11). Upgrade Python."
         )
         return False
     if sys.version_info >= (3, 13):
         _warn(
             f"Python {sys.version_info.major}.{sys.version_info.minor} is "
-            "newer than CI's tested range (3.10-3.12). Works but unsupported."
+            "newer than CI's tested range (3.11-3.12). Works but unsupported."
         )
     else:
         _ok(f"Python {sys.version_info.major}.{sys.version_info.minor} (supported)")

@@ -47,7 +47,7 @@ it, follow the
 [source installation guide](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md)
 instead.
 
-You need git, bash and Python 3.10, 3.11 or 3.12 (the versions CI tests).
+You need git, bash and Python 3.11 or 3.12 (the versions CI tests).
 Docker or Podman is optional; the container sandbox backends use it. Node.js is
 needed only for the TypeScript SDK in `sdks/plugin-ts`.
 
@@ -137,7 +137,7 @@ security posture): selected suites on pull requests, and the whole suite in
 the merge queue and on `main` (the `posture` jobs). Run the tests you changed
 that way before pushing.
 
-On a pull request the `test (3.10, n)` legs run only the test files your
+On a pull request the `test (3.11, n)` legs run only the test files your
 changed files can affect (the `select-tests` job in `ci.yml`; the rules are in
 `scripts/select_pr_tests.py` and in the table below). The merge queue and
 `main` run everything, so run the whole suite locally before pushing a change
@@ -148,7 +148,7 @@ A collection error in any file stops the whole run, so fix import errors
 first. When a collection error shows a `pyo3_runtime.PanicException`, the real
 cause (often a missing module) is on the captured stderr line above it.
 
-CI runs the suite on Python 3.10, 3.11 and 3.12 as four file-level slices
+CI runs the suite on Python 3.11 and 3.12 as four file-level slices
 (`--shard N/4`, an option defined in the root `conftest.py`). Each slice runs
 under pytest-xdist and then runs the tests marked `heavy_concurrency` serially,
 so their own threads do not compete with a second worker
@@ -235,13 +235,13 @@ refused, history stays linear, and nobody can bypass the rules.
 | `lint-pr-title` | Conventional Commits pull request title (see below) |
 | `no-ai-attribution` | `scripts/check_attribution.py` over the pull request's commits, title and description, the merge-queue commit and pushes to `main` |
 | `select-tests` | On a pull request, the test files the changed files can affect (`scripts/select_pr_tests.py`): a change to the kernel, a `conftest.py`, `pyproject.toml`, the requirements, `.github/` or `scripts/` selects the full suite; a package change selects its tests and every test naming its import package; other files select the tests naming them by path. The heavier jobs (`docker`, `postgres`, `audit`, `release-cohort`, `redteam`, `eval-smoke`, the benchmark gates, Windows containment) run on a pull request only when a changed file is under their inputs (`JOB_PREFIXES`) |
-| `test (3.10, 1/2/3/4)` | The test suite on Python 3.10, in four slices: the `select-tests` selection on a pull request, the full suite in the merge queue and on `main` |
-| `test (3.11, 1/2/3/4)`, `test (3.12, 1/2/3/4)` | The same slices on 3.11 and 3.12. On a pull request these report success without running; they run on the merge queue's commit and on `main` |
-| `posture (1/2/3/4)` | The full suite again on 3.12 under the production security defaults, gated like the 3.11 and 3.12 legs |
+| `test (3.11, 1/2/3/4)` | The test suite on Python 3.11, in four slices: the `select-tests` selection on a pull request, the full suite in the merge queue and on `main` |
+| `test (3.12, 1/2/3/4)` | The same slices on 3.12. On a pull request these report success without running; they run on the merge queue's commit and on `main` |
+| `posture (1/2/3/4)` | The full suite again on 3.12 under the production security defaults, gated like the 3.12 legs |
 | `harness-overhead`, `governance-frontier-offline` | The tracked benchmark manifests verify against the current sources (regenerate them when a source they cover changes) |
 | `audit` | OSV Scanner, pip-audit, bandit, the license policy and the SBOM |
 | `release-cohort`, `redteam`, `eval-smoke`, `postgres`, `docker` | Release packaging, the shield red-team corpus, the evaluation harness, the Postgres backend and the container image |
-| `Windows process containment (Python 3.10/3.11/3.12)` | Process-tree containment on Windows: 3.10 on every pull request, 3.11 and 3.12 on the merge queue and `main` |
+| `Windows process containment (Python 3.11/3.12)` | Process-tree containment on Windows: 3.11 on every pull request, 3.12 on the merge queue and `main` |
 
 Each required check must also run on `merge_group` events, or the queue cannot
 merge; `test_every_required_workflow_runs_in_the_merge_queue` enforces this.
@@ -281,8 +281,10 @@ The kernel rules below are numbered; code comments and documents cite them as
 
 Further rules:
 
-- **Python 3.10 compatibility.** `tomllib` is in the standard library only from
-  Python 3.11, so a bare `import tomllib` breaks the 3.10 build. Use:
+- **Keep the `tomllib` fallback.** Python 3.11, the supported floor, has
+  `tomllib` in its standard library, but some bootstrap, deploy and benchmark
+  helpers still run under an older system interpreter, so CI still rejects a
+  bare `import tomllib`. Use:
 
   ```python
   try:
