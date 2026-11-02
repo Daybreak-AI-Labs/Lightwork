@@ -50,6 +50,10 @@ run "ruff check ." python -m ruff check .
 echo "== mypy (selected boundaries) =="
 run "mypy" python -m mypy
 
+echo "== reviewed dependency patches =="
+run "vendor source integrity" python scripts/check_vendor_patches.py
+run "merge dependency regressions" node --test vendor/tests/deepmerge.test.cjs
+
 echo "== standalone demo support =="
 run "standalone demo support" python scripts/sync_standalone_support.py --check
 

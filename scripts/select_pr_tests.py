@@ -100,7 +100,7 @@ JOB_PREFIXES: dict[str, tuple[str, ...]] = {
     # OSV/pip-audit/bandit/SBOM over every dependency surface and all Python code.
     "audit": (
         "packages/", "apps/", "benchmarks/", "demo/", "examples/", "rust/", "go/", "sdks/",
-        "web/", "extensions/", "deploy/", "osv-scanner.toml",
+        "web/", "extensions/", "deploy/", "vendor/", "osv-scanner.toml",
     ),
     # Wheel builds and package metadata of the release cohort.
     "release-cohort": ("packages/", "apps/installer-cli/"),

@@ -14,25 +14,32 @@ change to the repository's active rules before merging a PR whose workflow
 no longer emits those checks; changing the JSON file alone does not update
 GitHub's active rules.
 
-The OSV scan still reports these upstream dependency paths. They remain
-release blockers under the existing blocking audit policy. No new ignore or
-extension of an expired exception was added:
+The desktop dependency review now includes local source fixes where compatible
+registry releases are unavailable:
 
-| Locked dependency | Dependency path | Upstream constraint |
-| --- | --- | --- |
-| `glib 0.18.5` | Tauri's Linux GTK3 integration | The reported iterator unsoundness is fixed in the incompatible 0.20 line. |
-| `proc-macro-error 1.0.4` | Tauri's GTK build macros | Upstream maintenance advisory; no patched version in this dependency line. |
-| `unic-char-property`, `unic-char-range`, `unic-common`, `unic-ucd-ident`, `unic-ucd-version` at `0.9.0` | Tauri's URL-pattern dependencies | Upstream maintenance advisories; no patched releases. |
-| `deepmerge 4.3.1` | Svelte's Vite plugin | Reported prototype-pollution advisory; no published fixed version. |
+| Previously reported dependency | Resolution |
+| --- | --- |
+| `glib 0.18.5` | Backport the upstream mutable out-pointer fix, preserving GTK3 compatibility. |
+| `proc-macro-error 1.0.4` | Move both GLib and GTK3 macro adapters to maintained `proc-macro-error3 3.1.1`. |
+| Five `unic-* 0.9.0` crates | Update `tauri-utils` to 2.10.2, which uses `urlpattern 0.6.0` and ICU. |
+| `deepmerge 4.3.1` | Use a private compatibility fork that rejects prototype-control keys in both operands. |
 
-The Tauri exceptions in `osv-scanner.toml` expired on October 31, 2026 and
-are not a passing audit result. Moving to an incompatible GUI stack or
-maintaining patched dependency forks requires a separate implementation and
-platform validation. The scanner findings above identify dependency exposure;
-they are not an application exploitability assessment.
+The local copies retain upstream licenses and provenance, with a checked
+inventory of source hashes and behavioral regression tests. See
+[the dependency patch inventory](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/vendor/README.md)
+for the exact changes and maintenance/removal conditions. These copies create
+a maintenance obligation until compatible upstream fixes can replace them.
+
+There are no advisory exceptions in `osv-scanner.toml`. The audit first verifies
+local source integrity and application overrides, then scans all registry
+surfaces, including the dependency regression harness. OSV still reports the local GLib version as an affected registry version.
+The audit records only that exact backport as repaired after verifying the
+source hashes and local Cargo resolution; both the raw findings and remediation
+record remain attached to CI. Registry copies, new advisories, source drift and
+scanner errors remain blocking. Optimized native regressions and frontend
+tests cover the specific repaired behavior.
 
 Reproduce the dependency scan with the `audit` job in
 `.github/workflows/ci.yml`. Keep the Python runtime audit, complete optional
-pin audit, and cross-ecosystem OSV result separate: a clean Python report does
-not clear the native or frontend build dependencies. Generate the release
+pin audit, and cross-ecosystem OSV result separate. Generate the release
 SBOM from the isolated release-runtime environment, not the development venv.

@@ -342,6 +342,8 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12.13"
+      - name: Verify reviewed local dependency sources
+        run: python scripts/check_vendor_patches.py
       - name: OSV Scanner across every reviewed dependency surface
         shell: bash
         run: |
@@ -360,10 +362,12 @@ jobs:
           # exact pin is scanned without creating a second Python lock.
           python_lock="$RUNNER_TEMP/requirements.txt"
           cp requirements/ci.txt "$python_lock"
+          scan_status=0
           "$scanner" scan source \
             --config osv-scanner.toml \
             --lockfile "$python_lock" \
             --lockfile rust/Cargo.lock \
+            --lockfile vendor/tests/Cargo.lock \
             --lockfile examples/clients/rust/Cargo.lock \
             --lockfile apps/desktop/src-tauri/Cargo.lock \
             --lockfile apps/installer-desktop/src-tauri/Cargo.lock \
@@ -380,13 +384,18 @@ jobs:
             --lockfile demo/pia-concierge/requirements-standalone.txt \
             --lockfile demo/platform-threat-hunter/requirements.txt \
             --format json \
-            --output-file "$report"
+            --output-file "$report" || scan_status=$?
+          python -m scripts.check_osv_results "$report" \
+            --scanner-exit "$scan_status" \
+            --output "$GITHUB_WORKSPACE/osv-remediation.json"
       - name: Upload cross-ecosystem vulnerability report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: osv-cross-ecosystem
-          path: osv-results.json
+          path: |
+            osv-results.json
+            osv-remediation.json
           if-no-files-found: warn
       - name: Install packages (so pip-audit sees the real dependency tree)
         run: |
