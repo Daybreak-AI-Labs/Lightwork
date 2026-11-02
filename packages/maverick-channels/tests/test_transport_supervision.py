@@ -738,12 +738,18 @@ def test_a_conversation_blocked_behind_a_briefly_unreadable_receipt_continues(mo
 
 def test_a_blocked_conversation_keeps_its_order_through_a_store_wide_read_outage(monkeypatch):
     # X's send is refused and Y waits behind X; then no receipt can be read
-    # (the at-rest key is unavailable) for a few retry periods. Y cannot be
-    # read either, so once the key is back X is sent before Y.
-    # X's retry must not come due before the outage starts, and one retry must
-    # fall inside the outage: 0.05 s left ~20 ms of slack, which a loaded
-    # machine overran (X was resent before the outage began).
-    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.5)
+    # (the at-rest key is unavailable) when X's retry comes due and for a few
+    # retry periods after. Y cannot be read either, so nothing is sent, and
+    # once the key is back X is sent before Y.
+    # The worker's clock is the test's, so X's retry comes due only inside the
+    # outage. On the real clock, a runner that stalled for the retry delay
+    # (0.05 s, then 0.5 s) between X's refusal and the outage made the retry
+    # due first, and the worker rightly resent X before the outage began.
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)  # real seconds between idle scans
+    now = [0.0]
+    monkeypatch.setattr(transport_worker, "time", SimpleNamespace(monotonic=lambda: now[0]))
     outage = [False]
     journal = _unreadable_journal(0, lambda record_id: outage[0])
     sends = []
@@ -760,14 +766,16 @@ def test_a_blocked_conversation_keeps_its_order_through_a_store_wide_read_outage
         worker = TransportWorker(Adapter(handler), account="account", authorize=lambda msg: True,
                                  send=send, journal=journal).start()
         await asyncio.sleep(0.05)
-        await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="X", channel=Adapter.name,
-                                            message_id="x"), external_id="x")
+        x = await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="X", channel=Adapter.name,
+                                                message_id="x"), external_id="x")
         await until(lambda: bool(worker._blocked_conversations))
-        await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="Y", channel=Adapter.name,
-                                            message_id="y"), external_id="y")
-        await asyncio.sleep(0.02)
+        y = await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="Y", channel=Adapter.name,
+                                                message_id="y"), external_id="y")
+        await until(lambda: y["id"] in worker._retry_after)  # Y waits for X's retry
         outage[0] = True
-        await asyncio.sleep(1.0)  # spans X's next retry, which cannot read its receipt
+        now[0] += transport_worker.RETRY_DELAY  # X's retry comes due
+        await until(lambda: worker._unreadable == {x["id"], y["id"]})  # a scan could not read either
+        await asyncio.sleep(0.2)  # a few more retry periods
         assert sends == ["X"]
         outage[0] = False
         await until(lambda: len(sends) == 3)
