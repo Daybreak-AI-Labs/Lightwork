@@ -44,7 +44,7 @@ def authority(request, context=None, *, historical=False):
     if context is not None and not hmac.compare_digest(context, current):
         raise HTTPException(409, "The account or workspace changed. Private rule contents cannot be reused.")
     if not historical:
-        from .api import _require_flows
+        from .flows_api import _require_flows
         _require_flows()
         release._learning_allowed()
         if config.config_source_errors(include_tenant=True) or config.get_features().get(FEATURE) is not True:
@@ -88,7 +88,7 @@ def _owned(request, identifier, *, historical=False):
 
 
 def _flow(request, flow_id):
-    from .api import _assert_flow_access, _require_learned_flow_evidence
+    from .flows_api import _assert_flow_access, _require_learned_flow_evidence
     actor, _context = authority(request)
     flow = store.load_flow(flow_id)
     if not flow or flow.owner != actor:

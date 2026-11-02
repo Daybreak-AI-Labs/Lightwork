@@ -29,6 +29,7 @@ from ..budget import Budget, UsageAccountingError
 from ..llm import LLMResponse, ToolCall
 from ..retry import async_physical_attempt, async_retry, sync_physical_attempt, sync_retry
 from ..secrets import scrub
+from .conversation import ContentPart, ConversationMessage, PartKind
 
 log = logging.getLogger(__name__)
 
@@ -95,9 +96,13 @@ def _strict_usage_count(v: object, field: str, *, missing_ok: bool = False) -> i
             return 0
         raise UsageAccountingError(f"invalid OpenAI usage.{field}: missing token count")
     try:
+        if isinstance(v, bool):
+            raise ValueError("boolean")
         if isinstance(v, float) and not math.isfinite(v):
             raise ValueError("non-finite")
-        n = int(v or 0)
+        n = int(v)
+        if not isinstance(v, (str, bytes)) and v != n:
+            raise ValueError("fractional")
     except (TypeError, ValueError, OverflowError) as exc:
         raise UsageAccountingError(f"invalid OpenAI usage.{field}: {v!r}") from exc
     if n < 0:
@@ -361,16 +366,19 @@ class OpenAIClient:
         return sorted(tools, key=lambda t: str(t.get("name") or ""))
 
     @staticmethod
-    def _to_openai_messages(system: str, anthropic_messages: list[dict]) -> list[dict]:
+    def _to_openai_messages(
+        system: str, anthropic_messages: list[dict | ConversationMessage],
+    ) -> list[dict]:
         out: list[dict] = [{"role": "system", "content": system}]
         for msg in anthropic_messages:
-            role = msg.get("role")
-            content = msg.get("content")
+            message = msg if isinstance(msg, ConversationMessage) else ConversationMessage.from_anthropic(msg)
+            role = message.role
+            content = message.content
 
             if role == "user":
                 if isinstance(content, str):
                     out.append({"role": "user", "content": content})
-                elif isinstance(content, list):
+                elif message.content_is_parts:
                     # A `tool` message MUST immediately follow the assistant
                     # `tool_calls` it answers -- OpenAI 400s ("messages with role
                     # 'tool' must be a response to a preceding message with
@@ -380,7 +388,9 @@ class OpenAIClient:
                     # that raw order: emit ALL tool messages first (keeping their
                     # relative order so each matches its tool_call), then any
                     # supplementary text as a single trailing user message.
-                    tool_msgs, user_msg = _translate_user_blocks(content)
+                    blocks = [part.to_anthropic() if isinstance(part, ContentPart) else part
+                              for part in content]
+                    tool_msgs, user_msg = _translate_user_blocks(blocks)
                     out.extend(tool_msgs)
                     if user_msg is not None:
                         out.append(user_msg)
@@ -388,22 +398,21 @@ class OpenAIClient:
             elif role == "assistant":
                 if isinstance(content, str):
                     out.append({"role": "assistant", "content": content})
-                elif isinstance(content, list):
+                elif message.content_is_parts:
                     text_parts: list[str] = []
                     tool_calls: list[dict] = []
                     for block in content:
-                        if not isinstance(block, dict):
+                        if not isinstance(block, ContentPart):
                             continue
-                        bt = block.get("type")
-                        if bt == "text":
-                            text_parts.append(block.get("text", ""))
-                        elif bt == "tool_use":
+                        if block.kind is PartKind.TEXT:
+                            text_parts.append(block.payload.get("text", ""))
+                        elif block.kind is PartKind.TOOL_CALL:
                             tool_calls.append({
-                                "id": block["id"],
+                                "id": block.payload["id"],
                                 "type": "function",
                                 "function": {
-                                    "name": block["name"],
-                                    "arguments": json.dumps(block.get("input", {})),
+                                    "name": block.payload["name"],
+                                    "arguments": json.dumps(block.payload.get("input", {})),
                                 },
                             })
                         # thinking blocks are dropped (OpenAI has no equivalent)
@@ -543,7 +552,10 @@ class OpenAIClient:
             # NaN/Inf/garbage has already billed the upstream call; accepting
             # that as zero would fail open and let later calls bypass budget
             # checks. Fail closed instead.
-            full_in = _strict_usage_count(getattr(usage, "prompt_tokens", 0), "prompt_tokens")
+            default_count = None if usage_required else 0
+            full_in = _strict_usage_count(
+                getattr(usage, "prompt_tokens", default_count), "prompt_tokens",
+            )
             billable_in = max(full_in - cache_read_tok, 0)
             # Bill cache reads at the provider's real discount, not Anthropic's
             # 0.1x budget default. OpenAI/o-series/gpt-5 auto-cache reads are
@@ -552,7 +564,9 @@ class OpenAIClient:
             # over-billed at OpenAI's shallower rate.
             budget.record_tokens(
                 billable_in,
-                _strict_usage_count(getattr(usage, "completion_tokens", 0), "completion_tokens"),
+                _strict_usage_count(
+                    getattr(usage, "completion_tokens", default_count), "completion_tokens",
+                ),
                 model=(price_model_prefix + model) if model else model,
                 cache_read_tok=cache_read_tok,
                 cache_read_mult=cls.CACHE_READ_MULT,

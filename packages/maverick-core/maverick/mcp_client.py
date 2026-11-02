@@ -1071,7 +1071,9 @@ class StreamableHttpMCPClient:
         if bearer:
             headers["Authorization"] = f"Bearer {bearer}"
         extra = {"transport": self._transport} if self._transport is not None else {}
-        self._client = httpx.AsyncClient(timeout=self.timeout, headers=headers, **extra)
+        self._client = httpx.AsyncClient(
+            timeout=self.timeout, headers=headers, follow_redirects=False, **extra,
+        )
         log.info("MCP HTTP client connecting %r (%s)", self.spec.name, self.spec.url)
         init = await self._request("initialize", {
             "protocolVersion": PROTOCOL_VERSION,
@@ -1105,6 +1107,9 @@ class StreamableHttpMCPClient:
         async def _send() -> _HTTPMCPResponse:
             if payload.get("method") == "tools/call":
                 check_call_guard()
+            from .governed_http import admit_client_request
+
+            admit_client_request(self._client, self.spec.url)
             async with self._client.stream(
                 "POST", self.spec.url, json=payload, headers=self._headers()
             ) as resp:

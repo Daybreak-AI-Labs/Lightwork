@@ -13,6 +13,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ def _get(path: str, params: dict) -> tuple[int, Any]:
     import httpx
     # Key goes in the X-Api-Key header, never the query string: a URL with
     # the key embedded leaks into httpx error reprs and any request log.
-    r = httpx.get(f"{_API}{path}", params=params,
+    r = _governed_sender(httpx.get)(f"{_API}{path}", params=params,
                   headers={"X-Api-Key": _key()}, timeout=30.0)
     try:
         return r.status_code, r.json()

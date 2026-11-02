@@ -35,6 +35,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from random import Random
 
+from .tool_results import ToolOutcome, ToolResultText, tool_result_failed
+
 log = logging.getLogger(__name__)
 
 
@@ -90,7 +92,7 @@ def _monotonic_growth(samples: list[float]) -> bool:
 
 
 def run_drill(
-    call: Callable[[dict], str],
+    call: Callable[[dict], str | ToolOutcome],
     *,
     iterations: int = 1000,
     rates: FaultRates | None = None,
@@ -136,7 +138,9 @@ def run_drill(
             report.surfaced_failures += 1
             continue
         # a returned value (success or "ERROR: ...")
-        if isinstance(result, str) and result.startswith("ERROR"):
+        explicit = isinstance(result, (ToolOutcome, ToolResultText))
+        failed = tool_result_failed(result) if explicit else isinstance(result, str) and result.startswith("ERROR")
+        if failed:
             report.surfaced_failures += 1
         else:
             report.successes += 1
@@ -145,7 +149,8 @@ def run_drill(
                 pending_crash = False
             # isolation: a clean call must echo its OWN payload, proving no
             # carry-over from the previous (faulted) call.
-            if isinstance(result, str) and f"i={i}" not in result and inject is None:
+            text = result.content if isinstance(result, ToolOutcome) else result
+            if isinstance(text, str) and f"i={i}" not in text and inject is None:
                 report.isolation_violations += 1
         if mem_sampler is not None:
             mem.append(mem_sampler())

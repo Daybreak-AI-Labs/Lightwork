@@ -23,7 +23,9 @@ class FakeRedisClient:
     def get(self, key):
         return self.data.get(key)
 
-    def set(self, key, value):
+    def set(self, key, value, *, nx=False):
+        if nx and key in self.data:
+            return None
         self.data[key] = value
         self.set_calls.append(key)
 
@@ -172,3 +174,48 @@ def test_config_table_wiring(monkeypatch):
     # Env beats the config table for the backend choice.
     monkeypatch.setenv("MAVERICK_TOOL_CACHE_BACKEND", "memory")
     assert rtc.enabled() is False
+
+
+def test_generation_is_shared_and_survives_purge(monkeypatch):
+    _install_fake_redis(monkeypatch, FakeRedisClient())
+    first, second = rtc.RedisToolCache(), rtc.RedisToolCache()
+    epoch = first.epoch()
+    assert epoch is not None and second.epoch() == epoch
+    first.store("read_file", {}, "old", scope="generation:" + epoch)
+    advanced = second.epoch(advance=True)
+    assert advanced is not None and advanced != epoch
+    assert first.epoch() == advanced
+    assert first.get("read_file", {}, scope="generation:" + advanced) == (False, None)
+    assert first.purge() == 1
+    assert second.epoch() == advanced
+    assert second.stats()["size"] == 0
+
+
+def test_generation_failure_does_not_reuse_local_values(monkeypatch):
+    from maverick.cache import tool
+
+    cache = rtc.RedisToolCache()
+    cache._cli = FakeRedisClient()
+    monkeypatch.setenv("MAVERICK_TOOL_CACHE", "1")
+    monkeypatch.setenv("MAVERICK_TOOL_CACHE_BACKEND", "redis")
+    monkeypatch.setattr(tool, "_shared_backend", lambda: cache)
+    monkeypatch.setattr(tool, "snapshot_enabled", lambda: False)
+    read = types.SimpleNamespace(name="read_file", parallel_safe=True)
+    tool.reset()
+    try:
+        generation = tool.generation()
+        tool.store_cached(read, {}, "old", generation=generation)
+        assert tool.get_cached(read, {}) == (True, "old")
+        cache.epoch(advance=True)  # another worker invalidates the shared tier
+        assert tool.get_cached(read, {}) == (False, None)
+        tool.store_cached(read, {}, "late old", generation=generation)
+        assert tool.get_cached(read, {}) == (False, None)
+        tool.store_cached(read, {}, "fresh", generation=tool.generation())
+        assert tool.get_cached(read, {}) == (True, "fresh")
+        cache._cli = BoomClient()
+        assert tool.get_cached(read, {}) == (False, None)
+        assert cache.epoch(advance=True) is None
+        tool.store_cached(read, {}, "unverified")
+        assert tool.stats()["size"] == 0
+    finally:
+        tool.reset()

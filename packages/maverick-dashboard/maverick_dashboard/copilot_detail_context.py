@@ -88,8 +88,8 @@ def authorized_detail_context(
     # The native flow APIs require operator access and a running flow feature.
     from maverick import flow as flow_engine
 
-    from .api import _assert_flow_access, _load_owned_run
     from .auth import has_permission
+    from .flows_api import _assert_flow_access, _load_owned_run
 
     if not has_permission(request, "operate"):
         return replace(

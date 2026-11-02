@@ -20,6 +20,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -63,7 +64,7 @@ def _translate_deepl(text: str, target: str, source: str) -> str:
     payload = {"text": [text], "target_lang": target.upper()}
     if source:
         payload["source_lang"] = source.upper()
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         f"https://{host}/v2/translate",
         headers={"Authorization": f"DeepL-Auth-Key {key}"},
         json=payload, timeout=30.0,
@@ -84,7 +85,7 @@ def _translate_libre(text: str, target: str, source: str) -> str:
     key = os.environ.get("LIBRETRANSLATE_API_KEY", "").strip()
     if key:
         payload["api_key"] = key
-    r = httpx.post(f"{base}/translate", json=payload, timeout=30.0)
+    r = _governed_sender(httpx.post)(f"{base}/translate", json=payload, timeout=30.0)
     if r.status_code >= 400:
         return f"ERROR: LibreTranslate ({r.status_code}): {r.text[:300]}"
     data = r.json()
@@ -103,7 +104,7 @@ def _detect_libre(text: str) -> str:
     key = os.environ.get("LIBRETRANSLATE_API_KEY", "").strip()
     if key:
         payload["api_key"] = key
-    r = httpx.post(f"{base}/detect", json=payload, timeout=30.0)
+    r = _governed_sender(httpx.post)(f"{base}/detect", json=payload, timeout=30.0)
     if r.status_code >= 400:
         return f"ERROR: LibreTranslate detect ({r.status_code}): {r.text[:300]}"
     data = r.json()

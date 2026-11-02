@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from ..fastjson import dumps_compact
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ def _headers() -> dict[str, str]:
 
 def _post_json(model: str, payload: dict) -> tuple[int, Any]:
     import httpx
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         f"{_API_BASE}/{model}",
         json=payload,
         headers=_headers(),
@@ -94,7 +95,7 @@ def _post_bytes(model: str, blob: bytes, content_type: str) -> tuple[int, Any]:
     import httpx
     headers = _headers()
     headers["Content-Type"] = content_type
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         f"{_API_BASE}/{model}",
         content=blob,
         headers=headers,

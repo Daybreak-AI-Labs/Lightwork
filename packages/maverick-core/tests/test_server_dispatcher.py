@@ -292,7 +292,7 @@ def test_existing_slack_dm_question_keeps_legacy_conversation_key(monkeypatch, t
     ("dispatch_result", "response_text", "goal_status"),
     [
         ("queued", "queued for background processing", "pending"),
-        (None, "internal error occurred", "blocked"),
+        (None, "may still be running", "pending"),
     ],
 )
 def test_channel_submission_uses_dispatcher_and_never_runs_locally(

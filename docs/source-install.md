@@ -7,7 +7,7 @@ install until a release is published.
 
 ## Requirements
 
-- Python 3.10, 3.11 or 3.12 (the versions tested in CI).
+- Python 3.11 or 3.12 (the versions tested in CI).
 - Git.
 - An account with a model provider, or a self-hosted model, to run tasks. You
   can install and open the dashboard without one.
@@ -17,6 +17,10 @@ install until a release is published.
   default `local` sandbox backend runs commands directly on this computer; read
   the [execution posture](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md#execution-posture) before running
   untrusted goals.
+
+When upgrading a Python 3.10 installation, recreate its virtual environment
+with Python 3.11 or 3.12 first. The minimum changed to support patched image
+processing dependencies; see the [dependency review](operations/dependency-audit.md).
 
 The repository root is not a pip project, so `pip install -e .` at the root
 does not work. `scripts/install_release_cohort.py` installs the eight Lightwork
@@ -48,7 +52,7 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\lightwork.exe dashboard
 ```
 
-`py -3.12` selects Python 3.12; use `py -3.11` or `py -3.10` instead if that is
+`py -3.12` selects Python 3.12; use `py -3.11` instead if that is
 the supported version you have installed.
 
 Calling the virtual environment's executables by path avoids changing the
@@ -83,6 +87,35 @@ one.
 The command-line tool is installed under two names, `lightwork` and
 `maverick`, which run the same program. `lightwork init` runs the setup wizard
 in the terminal instead of the dashboard.
+
+## Optional native scanner
+
+The normal installation uses Python implementations of the safety scanners and
+image hash. To build the optional Rust extension from this checkout, install
+the Rust toolchain using [rustup](https://rustup.rs/) and make sure `cargo` is
+on your `PATH`. The repository's `rust-toolchain.toml` selects the Rust version.
+From the repository root, using the same Python environment as Lightwork, run:
+
+```bash
+python scripts/install_release_cohort.py --native-source
+lightwork version
+```
+
+On Windows, use `.\.venv\Scripts\python.exe` for the first command and
+`.\.venv\Scripts\lightwork.exe version` for the second. The first command builds and installs a wheel for
+your machine, installs it alongside the cohort, and verifies that the Unicode
+and image hash shims can use it. The version output reports whether each uses a
+native wrapper or Python. A native wrapper can fall back to Python on an
+individual call. The profile needs a working Rust toolchain and build dependencies;
+regular cohort installation does not require either. Native artifacts are
+released separately from the eight-package cohort, so `--verify-only` verifies
+the cohort but does not install or verify this optional extension. If the
+extension is absent, Lightwork uses its Python implementations. Native secret
+and PII scans are not the active Python paths; the built-in Python regex
+implementations are used for those scans.
+
+If you use `--only` to install a subset of the cohort with `--native-source`,
+include `maverick-agent` so the installer can verify the native runtime wrappers.
 
 ## Next steps
 

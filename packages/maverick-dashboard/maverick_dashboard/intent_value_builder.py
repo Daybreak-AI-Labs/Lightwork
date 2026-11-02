@@ -36,8 +36,8 @@ def plan(recommendation):
 
 
 def build(request, identifier, expected_revision):
-    from .api import _require_flows, _save_flow_definition
     from .api_schemas import FlowSaveIn
+    from .flows_api import _require_flows, _save_flow_definition
     from .intent_value_api import capabilities, recommendation, records
 
     _require_flows()

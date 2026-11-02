@@ -17,6 +17,7 @@ import os
 import urllib.parse
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ def _url(base: str, table: str, *parts: str) -> str:
 
 def _get(url: str, params: dict | None = None, key: str = "") -> tuple[int, Any]:
     import httpx
-    r = httpx.get(url, headers=_headers(key), params=params or {}, timeout=30.0)
+    r = _governed_sender(httpx.get)(url, headers=_headers(key), params=params or {}, timeout=30.0)
     try:
         return r.status_code, r.json()
     except ValueError:
@@ -76,7 +77,7 @@ def _get(url: str, params: dict | None = None, key: str = "") -> tuple[int, Any]
 
 def _post(url: str, body: dict, key: str) -> tuple[int, Any]:
     import httpx
-    r = httpx.post(url, headers=_headers(key), json=body, timeout=30.0)
+    r = _governed_sender(httpx.post)(url, headers=_headers(key), json=body, timeout=30.0)
     try:
         return r.status_code, r.json()
     except ValueError:
@@ -85,7 +86,7 @@ def _post(url: str, body: dict, key: str) -> tuple[int, Any]:
 
 def _patch(url: str, body: dict, key: str) -> tuple[int, Any]:
     import httpx
-    r = httpx.patch(url, headers=_headers(key), json=body, timeout=30.0)
+    r = _governed_sender(httpx.patch)(url, headers=_headers(key), json=body, timeout=30.0)
     try:
         return r.status_code, r.json()
     except ValueError:
@@ -94,7 +95,7 @@ def _patch(url: str, body: dict, key: str) -> tuple[int, Any]:
 
 def _delete(url: str, key: str) -> tuple[int, Any]:
     import httpx
-    r = httpx.delete(url, headers=_headers(key), timeout=30.0)
+    r = _governed_sender(httpx.delete)(url, headers=_headers(key), timeout=30.0)
     try:
         return r.status_code, r.json()
     except ValueError:

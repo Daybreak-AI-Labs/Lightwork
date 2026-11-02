@@ -12,11 +12,15 @@ A new or renewed license is a key swap, not a reinstall.
 
 Standalone-safe: cryptography + stdlib only (cryptography is already in
 requirements-standalone.txt).
+
+Edit demo/shared/license_kit.py, then run scripts/sync_standalone_support.py to
+update the independently distributable demo copies.
 """
 from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import time
 
@@ -71,19 +75,29 @@ def load_license() -> dict:
             out["reason"] = "license signature is invalid"
             return out
         payload = json.loads(body)
+        if not isinstance(payload, dict):
+            raise ValueError("license payload must be an object")
+        expires = float(payload.get("expires_at") or 0)
+        if not math.isfinite(expires):
+            raise ValueError("license expiry must be finite")
     except Exception as exc:
         out["reason"] = f"license could not be verified: {exc}"[:160]
         return out
-    expires = float(payload.get("expires_at") or 0)
     if expires <= time.time():
         out["reason"] = "license has expired"
         out["customer"] = str(payload.get("customer", ""))
         out["sku"] = str(payload.get("sku", ""))
         out["expires_at"] = expires
         return out
+    capabilities = payload.get("capabilities")
+    if capabilities is None:
+        capabilities = []
+    if not isinstance(capabilities, list) or not all(isinstance(item, str) for item in capabilities):
+        out["reason"] = "license could not be verified: capabilities must be a list of strings"
+        return out
     return {"mode": "licensed",
             "customer": str(payload.get("customer", "")),
             "sku": str(payload.get("sku", "")),
             "expires_at": expires,
-            "capabilities": list(payload.get("capabilities") or []),
+            "capabilities": list(capabilities),
             "reason": "", "open_case_cap": None}

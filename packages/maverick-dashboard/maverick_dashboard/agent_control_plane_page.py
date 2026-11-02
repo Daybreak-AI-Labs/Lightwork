@@ -39,9 +39,9 @@ _HEADERS = {
 def _shared_halt_backend() -> bool:
     """Use the same deployment-scope decision as the hardened halt API."""
 
-    from .api import _shared_halt_backend as api_shared_halt_backend
+    from .halt_policy import shared_halt_backend
 
-    return api_shared_halt_backend()
+    return shared_halt_backend()
 
 
 def _halt_authority(request: Request) -> tuple[bool, str]:

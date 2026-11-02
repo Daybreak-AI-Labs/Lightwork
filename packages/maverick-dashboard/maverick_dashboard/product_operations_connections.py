@@ -23,9 +23,9 @@ class TemplateAccountInput(StrictInput):
 def _key_setup_current(request):
     from maverick.tools.enterprise_connectors import connection_setup_catalog
 
-    from .api import _require_connections
     from .app import require_page_visible
     from .auth import require_page_permission
+    from .connection_dependencies import require_connections as _require_connections
     from .draft_api import context_for
 
     require_permission(request, "admin")
@@ -77,8 +77,8 @@ def account_prepare(request, selection, arguments):
 
 
 def connection_snapshot(request, selection):
-    from .api import _require_connections
     from .connection_dependencies import owned_connections
+    from .connection_dependencies import require_connections as _require_connections
 
     require_permission(request, "operate")
     _require_connections()
@@ -152,7 +152,7 @@ def _schedules(request):
     from maverick.job_queue import JobQueue
     from maverick.schedule_definitions import list_definitions
 
-    from .api import _require_scheduling
+    from .schedule_policy import require_scheduling as _require_scheduling
 
     require_permission(request, "operate")
     _require_scheduling()

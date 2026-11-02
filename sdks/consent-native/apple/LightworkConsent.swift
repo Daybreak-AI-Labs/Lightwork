@@ -83,12 +83,14 @@ public struct NativeConsentAuthority: Codable, Sendable, Equatable {
     public func validate(expectedPlatform: String) throws {
         guard platform == expectedPlatform,
               ["ios", "tvos"].contains(platform),
-              applicationID.count >= 3,
-              deviceRevision > 0,
-              keyRevision > 0,
-              sdkVersion > 0,
-              publicClientRevision > 0,
-              policyVersion > 0 else { throw LightworkConsentError.invalidContract }
+              applicationID.range(of: "^[A-Za-z0-9][A-Za-z0-9_.:-]{2,254}\\z", options: .regularExpression) != nil,
+              [applicationRef, tenantID, deviceID, policyID].allSatisfy({
+                  $0.range(of: "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\\z", options: .regularExpression) != nil
+              }),
+              [deviceRevision, keyRevision, publicClientRevision, policyVersion].allSatisfy({
+                  (1...2_147_483_647).contains($0)
+              }),
+              (1...1_000_000).contains(sdkVersion) else { throw LightworkConsentError.invalidContract }
         let digests = [
             applicationAuthoritySHA256, publicClientRecordSHA256,
             publicationSHA256, publicationBundleSHA256, configurationSHA256,

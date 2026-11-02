@@ -472,6 +472,13 @@ def test_ensure_private_file_rejects_identity_swap_during_hardening(
     displaced = tmp_path / "displaced.txt"
     path.write_text("original", encoding="utf-8")
     replacement.write_text("attacker replacement", encoding="utf-8")
+    # Force the branch under test even when the process umask makes new files
+    # private. Windows ACL posture cannot be broadened with chmod, so bypass
+    # its already-private fast path while retaining the real hardening call.
+    if os.name == "nt":
+        monkeypatch.setattr(file_lock, "_windows_open_private_file_is_restricted", lambda *_: False)
+    else:
+        path.chmod(0o644)
     real_harden = file_lock.harden_path_permissions
 
     def _swap_after_hardening(candidate, mode=0o600):

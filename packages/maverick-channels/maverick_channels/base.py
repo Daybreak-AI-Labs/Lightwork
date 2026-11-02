@@ -6,6 +6,7 @@ so the agent loop doesn't have to care where a message came from.
 from __future__ import annotations
 
 import logging
+import math
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
@@ -126,7 +127,14 @@ def backoff_delay(base_interval: float, consecutive_errors: int, *, cap: float =
     0 on the first successful poll, which returns to ``base_interval``."""
     if consecutive_errors <= 0:
         return base_interval
-    return min(cap, base_interval * (2 ** consecutive_errors))
+    if base_interval == 0:
+        return min(cap, base_interval)
+    try:
+        delay = math.ldexp(base_interval, consecutive_errors)
+    except OverflowError:
+        # Even an exponent too large for ldexp has a well-defined limit.
+        delay = math.copysign(math.inf, base_interval)
+    return min(cap, delay)
 
 
 def webhook_body_limit() -> int:

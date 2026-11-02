@@ -219,6 +219,29 @@ async def test_goal_execution_principal_mismatch_refuses_before_side_effects(
 
 
 @pytest.mark.asyncio
+async def test_goal_unobservable_principal_binding_refuses_before_side_effects(
+    tmp_path: Path, fake_llm, monkeypatch,
+):
+    world = WorldModel(path=tmp_path / "world.db")
+    gid = world.create_goal("unbound work")
+    # Simulate a storage implementation acknowledging a binding that cannot be
+    # read back. The run must not proceed under an unverified identity.
+    monkeypatch.setattr(world, "bind_goal_execution_principal", lambda *_: True)
+
+    out = await run_goal(
+        llm=fake_llm, world=world, budget=Budget(max_dollars=1.0),
+        goal_id=gid, sandbox=LocalBackend(workdir=tmp_path), user_id="alice",
+    )
+
+    assert out == "BLOCKED: goal execution-principal binding is unavailable"
+    assert world.get_goal(gid).status == "pending"
+    assert world.get_goal(gid).execution_principal == ""
+    assert world.list_episodes() == []
+    assert world.goal_events(gid) == []
+    assert fake_llm.calls == []
+
+
+@pytest.mark.asyncio
 async def test_explicit_opaque_capability_principal_binds_owner_and_runs(
     tmp_path: Path, fake_llm, make_llm_response,
 ):

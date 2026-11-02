@@ -85,6 +85,24 @@ def test_a_stopped_task_message_is_not_labelled_as_an_agent_answer(monkeypatch, 
     assert "Written by an agent" not in reply
 
 
+def test_unknown_dispatch_asks_for_reconciliation_without_repainting_goal(monkeypatch, tmp_path):
+    from maverick import runner
+
+    srv, world = _server(monkeypatch, tmp_path, ("done", "unused"))
+
+    async def unknown_dispatch(goal_id, **kwargs):
+        return None
+
+    monkeypatch.setattr(runner, "run_goal_in_background_async", unknown_dispatch)
+    try:
+        reply = asyncio.run(srv._handle_message(ChannelMessage("slack", "U1", "U1", "Do it")))
+        assert world.get_goal(1).status == "pending"
+    finally:
+        world.close()
+    assert "may still be running" in reply
+    assert "Check its status before trying again" in reply
+
+
 @pytest.mark.parametrize("channel", ["voice", "glasses", "discord-stage"])
 def test_a_spoken_answer_says_it_was_written_by_an_agent_without_reading_a_link(monkeypatch, tmp_path, channel):
     monkeypatch.setenv("MAVERICK_PUBLIC_BASE_URL", "https://lightwork.example.test/")

@@ -6,6 +6,11 @@ const path = require("node:path");
 const vm = require("node:vm");
 const core = require("../../maverick_dashboard/templates/flow_designer_core.js");
 const inputs = require("../../maverick_dashboard/templates/flow_designer_inputs.js");
+const draft = require("../../maverick_dashboard/templates/flow_designer_draft.js");
+const schedule = require("../../maverick_dashboard/templates/flow_designer_schedule.js");
+const wire = require("../../maverick_dashboard/templates/flow_designer_wire.js");
+const transport = require("../../maverick_dashboard/templates/flow_designer_transport.js");
+const historyModule = require("../../maverick_dashboard/templates/flow_designer_history.js");
 const source = fs.readFileSync(path.resolve(__dirname,
   "../../maverick_dashboard/templates/flow_designer.js"), "utf8");
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -27,7 +32,7 @@ function fixture() {
     view: { x: 23, y: 42, k: 0.8 }, lastRunId: null, draftGeneration: 0, pendingDraft: null,
     saveInFlight: false, publishInFlight: false, applyInFlight: false, retireInFlight: false, actionFieldsChecking: false,
     FDActionFields: {async ready() {}, check() { return []; }, validDetails() { return true; }}, syncSaveButtons() {},
-    FDCore: core, FDRecipeInputs: inputs, rawErrors: [],
+    FDCore: core, FDRecipeInputs: inputs, FDDraft: draft, FDSchedule: schedule, FDWire: wire, FDTransport: transport, FDHistory: historyModule, rawErrors: [],
     commitRawFields() { return context.rawErrors; },
     draftSnapshot() { return JSON.stringify(context.rootFlow); },
     toApiFlow() { return clone(context.rootFlow); },
@@ -273,16 +278,22 @@ test("opening for a run explanation never toggles an already open drawer closed"
 
 function realEditorFixture() {
   const ui = fixture(), ctx = ui.context, controls = {};
+  assert.equal(typeof ctx.FDHistory.snapshot, "function", "use the real history module in the editor fixture");
   for (const id of ["fd-notify", "fd-maxsec", "fd-maxdollars", "fd-schedule", "fd-tz", "fd-maxconc", "fd-test-data"])
     controls[id] = { value: "", checked: false };
   const originalGet = ctx.document.getElementById;
   ctx.document.getElementById = id => controls[id] || (["fd-chat-input", "fd-chat-log"].includes(id) ? originalGet(id) : null);
   Object.assign(ctx, { flowInputs: [], undoStack: [], redoStack: [], pendingSnap: null,
+    fd: { dataset: { flowEngineOn: "true", canManageFlows: "true" } },
     idInput: { value: "orders" }, nameInput: { value: "Orders" }, normalizeNode: core.normalizeNode,
     serializeFlow: core.serializeFlow, renderCrumbs() {}, autoLayout() {}, renderProps() {},
     Event: class { constructor(type) { this.type = type; } },
     window: { dispatchEvent(event) { ui.events.push(event.type); } } });
   ui.events = [];
+  // Load the real response handler too: mutation transport needs it even when
+  // the eventual response succeeds, and it formats actual refusal messages.
+  vm.runInNewContext(source.slice(source.indexOf("  var ACTION_WORDS ="),
+    source.indexOf("  // Problems in words")), ctx);
   for (const [start, end] of [["snapState", "nodeById"], ["toApiFlow", "fromApiFlow"], ["fromApiFlow", "autoLayout"]])
     vm.runInNewContext(source.slice(source.indexOf("  function " + start + "("), source.indexOf("  function " + end + "(")), ctx);
   vm.runInNewContext(source.slice(source.indexOf("  function draftSnapshot("), source.indexOf("  function markClean(")), ctx);
@@ -353,6 +364,12 @@ test("complete Undo and Redo preserve exact learning evidence while restoring ch
   assert.equal(ctx.toApiFlow().max_dollars, 10);
   assert.equal(ctx.toApiFlow().nodes[0].label, "Changed label");
   assert.match(inputs.flowText(ctx.toApiFlow()), /"exact":1\.0,"large":9007199254740993/);
+});
+test("real editor transport formats a rejected mutation without accepting it", async () => {
+  const ctx = realEditorFixture().context;
+  vm.runInNewContext(source.slice(source.indexOf("  function unconfirmedMutation("), source.indexOf("  function slugify(")), ctx);
+  await assert.rejects(ctx.readMutationResult({ok: false, status: 409, json: async () => ({})}, "Save"),
+    /This flow was changed since you opened it/);
 });
 for (const operation of ["save", "publishFlow"]) test(`Undo after actual ${operation} keeps current server receipts for the same saved workflow`, async () => {
   const ui = realEditorFixture(), ctx = ui.context;

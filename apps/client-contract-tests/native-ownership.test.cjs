@@ -57,7 +57,7 @@ test('a streamed run is still stopped by one endless line or by a total the call
   total.child.stdout.emit('data', Buffer.from('ab\n'.repeat(6))); total.child.emit('close', 0, null);
   await totalRejected; assert.equal(total.killed(), 1);
 });
-function connectionFixture({legacy = '', base = 'https://one.example', failStore = false, consent, fetch} = {}) {
+function connectionFixture({legacy = '', base = 'https://one.example', failStore = false, consent, fetch, timers = {}} = {}) {
   const settings = {dashboardUrl: base, dashboardToken: legacy}, secrets = new Map(), state = new Map(), warnings = [];
   const context = {secrets: {get: async key => secrets.get(key), store: async (key, value) => {
     if (failStore) throw new Error('protected store unavailable'); secrets.set(key, value);
@@ -67,7 +67,7 @@ function connectionFixture({legacy = '', base = 'https://one.example', failStore
     window: {showWarningMessage: async (...args) => { warnings.push(args[0]); return consent ? consent(settings, secrets) : 'Use this dashboard'; }}};
   const transport = source('apps/vscode-extension/src/eventWatch.ts');
   const {DashboardConnections} = source('apps/vscode-extension/src/dashboardConnection.ts', {
-    fetch, require: name => name === 'vscode' ? vscode : name === './eventWatch' ? transport : require(name)});
+    fetch, ...timers, require: name => name === 'vscode' ? vscode : name === './eventWatch' ? transport : require(name)});
   let owner; owner = new DashboardConnections(context, () => owner.dispose());
   return {owner, settings, secrets, warnings};
 }
@@ -145,4 +145,22 @@ test('a token write keeps its bearer credential and names the same origin', asyn
   const f = connectionFixture({base, fetch: recordedFetch(sent)});
   await f.owner.request({base, token: 'secret', scope: 'scope', generation: 0}, '/api/v1/goals/7/resume', {});
   assert.equal(sent[0].options.headers.Authorization, 'Bearer secret'); assert.equal(sent[0].options.headers.Origin, base);
+});
+test('deadline and disposal settle a noncooperative transport without replaying a write', async () => {
+  const contract = require('./contracts/goal-submission-recovery-v1.json');
+  for (const operation of ['deadline', 'dispose']) {
+    let fire, calls = 0, resolveLate;
+    const f = connectionFixture({fetch: () => {
+      calls++; return new Promise(resolve => { resolveLate = resolve; });
+    }, timers: {setTimeout(callback) { fire = callback; return 1; }, clearTimeout() {}}});
+    const connection = {base: 'https://one.example', token: '', scope: 'scope', generation: 0};
+    const result = f.owner.request(connection, '/api/v1/goals/7/cancel', {});
+    const rejected = assert.rejects(result, /timed out or was cancelled.*unconfirmed/);
+    if (operation === 'deadline') fire(); else f.owner.dispose();
+    await rejected;
+    resolveLate(new Response('', {status: 401}));
+    await Promise.resolve();
+    assert.equal(calls, contract.write_count_after_interruption);
+    if (operation === 'deadline') assert.equal(f.owner.isCurrent(connection), true);
+  }
 });

@@ -171,9 +171,9 @@ def test_workbench_lists_set_ups_with_row_buttons_and_speaks_plainly(client: Tes
 
 
 def test_turned_off_feature_shows_the_standard_banner(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    from maverick_dashboard import api
+    from maverick_dashboard import module_activation
 
-    monkeypatch.setattr(api, "_module_switch_enabled", lambda _loaded, _section: False)
+    monkeypatch.setattr(module_activation, "_module_switch_enabled", lambda _loaded, _section: False)
     off = client.get(ROUTE).text
     assert 'data-module-gate="consent_preferences.global_opt_out"' in off
     assert "Global opt-out is turned off." in off
@@ -184,7 +184,7 @@ def test_turned_off_feature_shows_the_standard_banner(client: TestClient, monkey
     assert '<p id="goo-runtime-status" class="muted" role="status" aria-live="polite" hidden></p>' in main
     assert "Loading" not in main and "Checking" not in main
     assert "Opt-out set-ups appear here once this is turned on." in main
-    monkeypatch.setattr(api, "_module_switch_enabled", lambda _loaded, _section: True)
+    monkeypatch.setattr(module_activation, "_module_switch_enabled", lambda _loaded, _section: True)
     on = client.get(ROUTE).text
     assert "data-module-gate=" not in on
     assert 'data-module-enabled="true"' in on and "Loading…" in on

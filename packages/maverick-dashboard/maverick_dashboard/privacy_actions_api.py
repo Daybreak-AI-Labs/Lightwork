@@ -36,7 +36,7 @@ async def collect_microsoft365(request: Request, request_id: str, body: CollectI
     from maverick import dsar_fulfillment as df
     from maverick.privacy_ops import RecordConflict
 
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
 
     if not df.enabled():
         from .feature_gate import feature_off

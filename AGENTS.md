@@ -4,14 +4,14 @@ Instructions for AI coding agents. [CLAUDE.md](CLAUDE.md) is the full version,
 including the numbered kernel rules and the attribution policy; human
 contributors should read [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Lightwork is an Apache-2.0 agent platform: a Python 3.10-3.12 uv-workspace
+Lightwork is an Apache-2.0 agent platform: a Python 3.11-3.12 uv-workspace
 monorepo with 8 pip packages (`packages/*`, `apps/installer-cli`) and a
 TypeScript plugin SDK (`sdks/plugin-ts`).
 
 ## Setup
 
-    bash .devcontainer/post-create.sh   # creates .venv, editable-installs all 8
-                                        # packages under PIP_CONSTRAINT=
+    bash .devcontainer/post-create.sh   # creates .venv, editable-installs the
+                                        # release cohort under PIP_CONSTRAINT=
                                         # requirements/ci.txt (CI parity) + dev
                                         # tools (pytest-xdist, pytest-timeout,
                                         # sqlalchemy, detect-secrets,
@@ -26,7 +26,7 @@ TypeScript plugin SDK (`sdks/plugin-ts`).
   `-n auto --dist loadfile` for a serial run). Never bare `pytest`: the
   `pytest` on PATH may be an isolated uv or pipx shim that cannot see the
   packages.
-- Lint: `python -m ruff check .` and `python -m vulture`
+- Lint: `python -m ruff check .`, `python -m mypy`, and `python -m vulture`
 - Build: `python3 -m build --wheel` inside a package directory
 - Smoke: `maverick version`, `maverick doctor`
 - TS SDK: `cd sdks/plugin-ts && npm install && npm test`
@@ -37,7 +37,7 @@ TypeScript plugin SDK (`sdks/plugin-ts`).
 Each rule is backed by a CI gate or a failure seen in practice.
 
 1. Never use a bare `import tomllib`; use the try/except `tomli` fallback
-   (Python 3.10; CI greps for it).
+   (portable bootstrap convention; CI greps for it).
 2. No `shell=True` outside `maverick/sandbox/`; use `sandbox.exec()` (CI greps
    for it).
 3. Never hard-code model ids; use `maverick.config.get_role_model(role)`.
@@ -74,13 +74,13 @@ Each rule is backed by a CI gate or a failure seen in practice.
     titles or PR bodies. The `no-ai-attribution` check (`scripts/check_attribution.py`)
     enforces this; CLAUDE.md has the details.
 
-Collect and run the test suite from the repository root. No type checker is
-configured; Ruff, Vulture and the contract and governance gates in
-`.github/workflows/ci.yml` are required. Run the `heavy_concurrency` tests
+Collect and run the test suite from the repository root. Mypy checks the small
+set of boundary modules listed in `pyproject.toml`; Ruff, Vulture and the
+contract and governance gates in `.github/workflows/ci.yml` are required. Run the `heavy_concurrency` tests
 serially after the ordinary suite, as `.github/actions/test-shard/action.yml`
 does. Also validate with `MAVERICK_TEST_SECURE_DEFAULT=1`, the production
 security posture that CI tests.
-On a pull request the `test (3.10, n)` legs run only the test files
+On a pull request the `test (3.11, n)` legs run only the test files
 `scripts/select_pr_tests.py` selects from the changed files; the merge queue
 and `main` run everything, so run the whole suite locally for a change to
 shared code.

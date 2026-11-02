@@ -32,6 +32,8 @@ def state(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "caller_principal", lambda request: state.actor)
     monkeypatch.setattr(app, "_require_same_origin", lambda request: None)
     monkeypatch.setattr(api, "_world", lambda: world)
+    from maverick_dashboard import _shared
+    monkeypatch.setattr(_shared, "_world", lambda: world)
     monkeypatch.setattr(facts_api, "tags_enabled", lambda: state.tags)
     monkeypatch.setattr(audit, "record", lambda *a, **kw: True)
     yield state

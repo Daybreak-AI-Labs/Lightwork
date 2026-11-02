@@ -36,7 +36,7 @@ class RebindIn(ReviewedIn):
 
 
 def _authority(request, body=None):
-    from .api import _require_connections
+    from .connection_dependencies import require_connections as _require_connections
 
     require_permission(request, "admin" if body is not None else "operate")
     _require_connections()
@@ -82,8 +82,8 @@ async def check_capability(request: Request, name: str, body: CapabilityIn):
     from maverick import connections
     from maverick.connection_capabilities import probe
 
-    from .api import _request_identity
     from .app import _require_same_origin
+    from .request_identity import request_identity as _request_identity
 
     def authorize():
         _authority(request)
@@ -118,7 +118,7 @@ def qualification_matrix(request: Request):
 async def replace_staged(request: Request, name: str, body: ReviewedIn):
     from maverick import connections
 
-    from .api import _request_identity
+    from .request_identity import request_identity as _request_identity
 
     _authority(request, body)
     def mutate():
@@ -140,9 +140,9 @@ async def replace_staged(request: Request, name: str, body: ReviewedIn):
 async def rebind_source(request: Request, name: str, body: RebindIn):
     from maverick import connections, privacy_discovery_credentials
 
-    from .api import _request_identity
     from .privacy_data_discovery_api import _actor_ref
     from .privacy_data_discovery_api import _authority as discovery_authority
+    from .request_identity import request_identity as _request_identity
 
     _authority(request, body)
     require_global_permission(request, "admin")

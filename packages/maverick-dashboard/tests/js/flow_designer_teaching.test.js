@@ -6,6 +6,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const core = require("../../maverick_dashboard/templates/flow_designer_core.js");
+const schedule = require("../../maverick_dashboard/templates/flow_designer_schedule.js");
+const wire = require("../../maverick_dashboard/templates/flow_designer_wire.js");
 const clone = value => JSON.parse(JSON.stringify(value));
 
 function flow() {
@@ -29,7 +31,7 @@ function flow() {
 }
 
 function fixture() {
-  const context = { document: { getElementById() { return null; } },
+  const context = { FDSchedule: schedule, FDWire: wire, document: { getElementById() { return null; } },
     renderCrumbs() {}, syncScheduleControls() {}, syncSaveButtons() {}, autoLayout() {}, render() {}, renderProps() {}, markClean() {},
     nameInput: {}, idInput: {}, normalizeNode: core.normalizeNode, serializeFlow: core.serializeFlow };
   const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/flow_designer.js"), "utf8");

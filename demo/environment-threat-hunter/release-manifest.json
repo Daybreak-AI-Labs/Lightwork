@@ -10,6 +10,8 @@
     "capabilities.py",
     "env_engine.py",
     "request_limits.py",
+    "request_boundary.py",
+    "local_store_lock.py",
     "requirements.txt",
     "run_standalone.sh",
     "serve_standalone.py",

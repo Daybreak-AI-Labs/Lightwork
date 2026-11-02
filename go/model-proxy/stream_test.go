@@ -3,15 +3,49 @@ package proxy
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestSharedStreamingParityFixture(t *testing.T) {
+	data, err := os.ReadFile("testdata/stream_parity.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		ContentType string   `json:"content_type"`
+		Chunks      []string `json:"chunks"`
+	}
+	if err := json.Unmarshal(data, &fixture); err != nil || len(fixture.Chunks) < 2 {
+		t.Fatalf("invalid shared stream fixture: %v", err)
+	}
+	var calls atomic.Int32
+	proxy, _ := streamingProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", fixture.ContentType)
+		for _, chunk := range fixture.Chunks {
+			_, _ = io.WriteString(w, chunk)
+			w.(http.Flusher).Flush()
+		}
+	}), nil)
+	response := request(t, proxy.URL, strings.NewReader("{}"))
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || string(body) != strings.Join(fixture.Chunks, "") {
+		t.Fatalf("stream mismatch: status=%d body=%q error=%v", response.StatusCode, body, err)
+	}
+	if response.Header.Get("Content-Type") != fixture.ContentType || calls.Load() != 1 {
+		t.Fatal("stream response headers or upstream request count differ")
+	}
+}
 
 func streamingProxy(t *testing.T, upstream http.Handler, configure func(*Config)) (*httptest.Server, *httptest.Server) {
 	t.Helper()

@@ -46,7 +46,7 @@ def authority(request, action=None):
         auth.require_permission(request, "admin")
     elif action == "copy":
         auth.require_global_permission(request, "admin")
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
     return _request_actor(request), context_for(request)
 
 

@@ -63,7 +63,13 @@ def _backend(monkeypatch, tmp_path, shell):
             else:
                 command = args[args.index("--") + 1:]
                 assert command[:2] == ["sh", "-c"]
-                mapped = [value.replace("/workspace", remote.as_posix()) for value in command[1:]]
+                # Only the sandbox's positional workspace arguments represent
+                # pod paths. The command itself may legitimately contain a
+                # host interpreter under /workspace (for example a venv).
+                mapped = command[1:]
+                assert mapped[3].startswith("/workspace/") and mapped[4] == "/workspace"
+                mapped[3] = remote.as_posix() + mapped[3][len("/workspace"):]
+                mapped[4] = remote.as_posix()
                 environment = {**os.environ, **container_environment}
                 if "TMPDIR" in environment:
                     environment["TMPDIR"] = environment["TMPDIR"].replace("/workspace", remote.as_posix())

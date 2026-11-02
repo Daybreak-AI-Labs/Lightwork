@@ -19,6 +19,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ def _headers(content_type: str = "application/json") -> dict[str, str]:
 
 def _get(path: str, params: dict | None = None) -> tuple[int, Any]:
     import httpx
-    r = httpx.get(f"{_API}{path}", headers=_headers(),
+    r = _governed_sender(httpx.get)(f"{_API}{path}", headers=_headers(),
                   params=params or {}, timeout=30.0)
     try:
         return r.status_code, r.json()
@@ -82,7 +83,7 @@ def _get_raw(url: str, params: dict | None = None, max_bytes: int = 4096) -> tup
     # a cross-origin 30x (it strips only the `auth=` param, not header creds), so
     # a redirect off the Drive API host would leak the access token. A genuine
     # download/export redirect surfaces as its 3xx code rather than leaking.
-    r = httpx.get(url, headers={"Authorization": f"Bearer {_token()}"},
+    r = _governed_sender(httpx.get)(url, headers={"Authorization": f"Bearer {_token()}"},
                   params=params or {}, timeout=30.0, follow_redirects=False)
     if r.status_code >= 400:
         return r.status_code, r.text[:300]
@@ -91,7 +92,7 @@ def _get_raw(url: str, params: dict | None = None, max_bytes: int = 4096) -> tup
 
 def _delete_req(path: str) -> int:
     import httpx
-    r = httpx.delete(f"{_API}{path}", headers=_headers(), timeout=30.0)
+    r = _governed_sender(httpx.delete)(f"{_API}{path}", headers=_headers(), timeout=30.0)
     return r.status_code
 
 
@@ -186,7 +187,7 @@ def _op_create(args: dict) -> str:
         f"{content}\r\n"
         f"--{boundary}--"
     ).encode()
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         f"{_UPLOAD}/files",
         headers={
             "Authorization": f"Bearer {_token()}",

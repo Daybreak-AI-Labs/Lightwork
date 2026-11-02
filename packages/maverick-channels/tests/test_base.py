@@ -119,6 +119,22 @@ def test_backoff_delay_is_capped():
     assert backoff_delay(10.0, 100, cap=120.0) == 120.0
 
 
+def test_backoff_delay_handles_extremely_long_outages():
+    from maverick_channels.base import backoff_delay
+
+    assert backoff_delay(30.0, 1024) == 300.0
+    assert backoff_delay(30.0, 10**100) == 300.0
+    assert backoff_delay(0.0, 10**100) == 0.0
+
+
+def test_backoff_delay_preserves_small_intervals_before_the_cap():
+    import math
+
+    from maverick_channels.base import backoff_delay
+
+    assert backoff_delay(1e-310, 1024) == math.ldexp(1e-310, 1024)
+
+
 def test_incoming_message_principal_id_prefers_sender_id():
     room_msg = IncomingMessage(
         user_id="CROOM", text="hello", channel="slack", sender_id="UALICE",

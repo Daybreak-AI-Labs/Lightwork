@@ -110,7 +110,23 @@ class ConnectorResult(str):
 
 def public_result(result):
     """Drop internal attempt metadata only after the retry decision is final."""
-    return str(result) if isinstance(result, ConnectorResult) else result
+    if not isinstance(result, ConnectorResult):
+        return result
+    attempt = result.attempt
+    if (attempt.outcome_unknown or (attempt.error_class is None
+            and attempt.status_code is not None and 200 <= attempt.status_code < 300)):
+        from .tool_results import ToolResultText, classify_tool_result
+
+        state = classify_tool_result(result)
+        text = str(result)
+        # An indeterminate attempt must retain its uncertainty marker even
+        # when the legacy prefix already conveys the same classification.
+        # Agent audit receipts use that marker to avoid treating the external
+        # effect as a known failure.
+        if attempt.outcome_unknown or classify_tool_result(text) is not state:
+            return ToolResultText(text, state)
+        return text
+    return str(result)
 
 
 _BUDGET: contextvars.ContextVar = contextvars.ContextVar("connector_budget", default=None)

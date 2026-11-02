@@ -50,6 +50,7 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
 
+from ..config_contracts import BOOLEAN_SETTINGS, INTEGER_SETTINGS
 from ..constant_time import text_equals
 from ..file_lock import (
     atomic_create_bytes,
@@ -1362,7 +1363,8 @@ def approval_undo_grace_seconds() -> float:
     ``[approval] undo_grace_seconds`` (Settings > All settings) applies;
     default 30. ``0`` disables undo and restores immediate consumption.
     """
-    raw = os.environ.get("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS", "")
+    contract = INTEGER_SETTINGS["approval.undo_grace_seconds"]
+    raw = os.environ.get(contract.dashboard_env[0], "")
     if not raw.strip():
         try:
             from ..config import load_config
@@ -1372,12 +1374,12 @@ def approval_undo_grace_seconds() -> float:
             value = None
         if isinstance(value, (int, float)) and not isinstance(value, bool) \
                 and math.isfinite(value):
-            return max(0.0, min(float(value), 3600.0))
-        raw = "30"
+            return max(float(contract.minimum), min(float(value), float(contract.maximum)))
+        raw = str(contract.default)
     try:
-        return max(0.0, min(float(raw), 3600.0))
+        return max(float(contract.minimum), min(float(raw), float(contract.maximum)))
     except ValueError:
-        return 30.0
+        return float(contract.default)
 
 
 def approval_requires_acknowledgement() -> bool:
@@ -1388,7 +1390,8 @@ def approval_requires_acknowledgement() -> bool:
     ``MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT`` wins; otherwise ``[approval]
     require_acknowledgement`` applies; default on.
     """
-    raw = os.environ.get("MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT", "").strip().lower()
+    contract = BOOLEAN_SETTINGS["approval.require_acknowledgement"]
+    raw = os.environ.get(contract.dashboard_env[0], "").strip().lower()
     if raw:
         return raw not in ("0", "false", "no", "off")
     try:
@@ -1397,7 +1400,7 @@ def approval_requires_acknowledgement() -> bool:
         value = ((load_config() or {}).get("approval") or {}).get("require_acknowledgement")
     except Exception:  # config never weakens the confirmation
         value = None
-    return value if isinstance(value, bool) else True
+    return value if isinstance(value, bool) else contract.default
 
 
 def approval_decision_settles_at(row: object, *, grace: float | None = None) -> float:

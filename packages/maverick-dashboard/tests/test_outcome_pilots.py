@@ -597,6 +597,8 @@ def test_goal_resume_api_blocks_pending_pilot_without_state_change_and_allows_ex
         dispatched.append((args, kwargs))
 
     monkeypatch.setattr(dashboard_api, "_world", lambda: world)
+    from maverick_dashboard import _shared
+    monkeypatch.setattr(_shared, "_world", lambda: world)
     monkeypatch.setattr("maverick.runner.run_goal_in_background_async", run)
     client = TestClient(app, headers={"Origin": "http://testserver"})
     refused = client.post(f"/api/v1/goals/{goal_id}/resume")

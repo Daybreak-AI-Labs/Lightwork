@@ -225,7 +225,7 @@ def test_the_ruleset_requires_every_blocking_check_and_the_queue():
         assert check in contexts, check
     # One required context per (interpreter, slice) and per posture slice; the
     # slice count is the COUNT in ci.yml's --shard.
-    for version in ("3.10", "3.11", "3.12"):
+    for version in ("3.11", "3.12"):
         for shard in (1, 2, 3, 4):
             assert f"test ({version}, {shard})" in contexts
     for shard in (1, 2, 3, 4):

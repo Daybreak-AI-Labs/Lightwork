@@ -28,6 +28,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -103,7 +104,7 @@ def _op_capture(event: str, distinct_id: str, properties: dict) -> str:
         "distinct_id": distinct_id,
         "properties": properties or {},
     }
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         f"{_ingestion_host()}/capture/",
         # follow_redirects=False: don't replay the project API key to another
         # host on a cross-origin 30x off the ingestion endpoint.
@@ -128,7 +129,7 @@ def _op_insights(limit: int) -> str:
     pid = _project_id()
     if not pkey or not pid:
         return "ERROR: insights requires POSTHOG_PERSONAL_API_KEY + POSTHOG_PROJECT_ID"
-    r = httpx.get(
+    r = _governed_sender(httpx.get)(
         f"{_host()}/api/projects/{pid}/insights/",
         headers={"Authorization": f"Bearer {pkey}"},
         params={"limit": limit}, timeout=30.0,
@@ -154,7 +155,7 @@ def _op_insight_get(insight_id: int) -> str:
     pid = _project_id()
     if not pkey or not pid:
         return "ERROR: insight_get requires POSTHOG_PERSONAL_API_KEY + POSTHOG_PROJECT_ID"
-    r = httpx.get(
+    r = _governed_sender(httpx.get)(
         f"{_host()}/api/projects/{pid}/insights/{insight_id}/",
         headers={"Authorization": f"Bearer {pkey}"},
         timeout=30.0,

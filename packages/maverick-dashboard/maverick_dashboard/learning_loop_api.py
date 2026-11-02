@@ -141,7 +141,7 @@ def _audit(request: Request, action: str, **payload: Any) -> None:
 
 
 def _actor(request: Request) -> str:
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
     return _request_actor(request)
 
 

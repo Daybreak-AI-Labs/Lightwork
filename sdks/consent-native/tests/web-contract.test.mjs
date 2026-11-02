@@ -45,6 +45,14 @@ test("Tizen/webOS client signs and drains an exact bounded operation", async () 
     policy_sha256: await digest("policy"),
     standards_contract_sha256: await digest("standards"),
   };
+  for (const invalid of [
+    { sdk_version: 1_000_001 },
+    { application_id: "com.example/invalid" },
+    { application_ref: "invalid ref" },
+    { device_revision: 2_147_483_648 },
+  ]) {
+    assert.throws(() => new LightworkCTVConsentClient({ authority: { ...authority, ...invalid } }), TypeError);
+  }
   const pending = [];
   const acknowledgements = [];
   const transmitted = [];

@@ -20,32 +20,9 @@
   }
   function stepName(n) { return (n && (n.label || '').trim()) || (n ? kindLabel(n.kind) : 'step'); }
   // Duration choices shown as words; values are seconds.
-  var DURATIONS = [{ v: '60', t: '1 minute' }, { v: '300', t: '5 minutes' }, { v: '900', t: '15 minutes' },
-    { v: '1800', t: '30 minutes' }, { v: '3600', t: '1 hour' }, { v: '14400', t: '4 hours' },
-    { v: '86400', t: '1 day' }, { v: '259200', t: '3 days' }, { v: '604800', t: '1 week' }];
-  function durationOptions(value, none) {
-    var opts = [{ v: '0', t: none }].concat(DURATIONS);
-    var cur = String(Math.round(Number(value) || 0));
-    if (!opts.some(function (o) { return o.v === cur; })) opts.push({ v: cur, t: durationText(Number(cur)) });
-    return opts;
-  }
-  function durationText(sec) {
-    sec = Number(sec) || 0;
-    if (sec % 86400 === 0) return (sec / 86400) + (sec === 86400 ? ' day' : ' days');
-    if (sec % 3600 === 0) return (sec / 3600) + (sec === 3600 ? ' hour' : ' hours');
-    if (sec % 60 === 0) return (sec / 60) + (sec === 60 ? ' minute' : ' minutes');
-    return sec + (sec === 1 ? ' second' : ' seconds');
-  }
-  function retryWaitOptions(value) {
-    var options = [{ v: '0', t: 'No wait' }, { v: '10', t: '10 seconds' }, { v: '30', t: '30 seconds' }];
-    var saved = Number(value) || 0;
-    if (!options.some(function (option) { return Number(option.v) === saved; })) {
-      options.push({ v: String(saved), t: saved > 30
-        ? 'Saved request: ' + durationText(saved) + ' (first wait: 30 seconds)'
-        : 'Saved request: ' + durationText(saved) });
-    }
-    return options;
-  }
+  var durationOptions = FDDurations.durationOptions;
+  var durationText = FDDurations.durationText;
+  var retryWaitOptions = FDDurations.retryWaitOptions;
 
   var flow = { id: '', name: '', start: '', nodes: [] };
   var rootFlow = flow;  // the top-level flow (save/run/history operate on this)
@@ -161,26 +138,7 @@
     // invalid Params JSON and nested sub-flow drafts are user work too. Runtime
     // version/publication metadata is excluded so a successful save can update
     // CAS tokens without making an otherwise unchanged canvas look dirty.
-    var editableFlow = JSON.parse(JSON.stringify(rootFlow));
-    (function removeEmptyActionBuffers(graph) {
-      (Array.isArray(graph.nodes) ? graph.nodes : Object.values(graph.nodes || {})).forEach(function (node) {
-        ['_actionRaw', '_actionErrors', '_actionKinds'].forEach(function (key) {
-          if (node[key] && !Object.keys(node[key]).length) delete node[key];
-        });
-        if (!node._actionRaw && !node._actionErrors && FDActionFields.validDetails(node)) delete node._actionKinds;
-        if (!node._actionRaw && !node._actionErrors && !node._actionKinds) delete node._actionTool;
-        if (node.body) removeEmptyActionBuffers(node.body);
-        (node.branches || []).forEach(removeEmptyActionBuffers);
-      });
-    }(editableFlow));
-    // Absent evidence custody is the same draft whether it was loaded as null
-    // or restored from history (which drops an empty custody record).
-    if (editableFlow._fdEvidence == null) delete editableFlow._fdEvidence;
-    delete editableFlow.version;
-    delete editableFlow.revision;
-    delete editableFlow.published;
-    delete editableFlow.published_version;
-    delete editableFlow.published_revision;
+    var editableFlow = FDDraft.editableFlow(rootFlow, FDActionFields.validDetails);
     return JSON.stringify({
       flow: editableFlow,
       id: idInput.value,
@@ -247,18 +205,8 @@
   // ---- undo/redo: whole-editor snapshots, including unfinished work.
   // Save serialization deliberately drops buffers/blank rows; history must not. ----
   function snapState() {
-    var snapshot = JSON.parse(JSON.stringify(rootFlow));
-    snapshot._editorSettings = { id: idInput.value, name: nameInput.value,
-      inputs: JSON.parse(JSON.stringify(flowInputs)) };
-    [['fd-maxsec', 'max_seconds'], ['fd-maxdollars', 'max_dollars'], ['fd-schedule', 'schedule'],
-      ['fd-tz', 'timezone'], ['fd-maxconc', 'max_concurrent']].forEach(function (pair) {
-      var field = document.getElementById(pair[0]);
-      snapshot._editorSettings[pair[1]] = field ? field.value : '';
-    });
-    var notify = document.getElementById('fd-notify');
-    snapshot._editorSettings.notify = !!(notify && notify.checked);
-    snapshot._editorSettings.notify_on = (document.getElementById('fd-notify-on') || {}).value || 'all';
-    return FDRecipeInputs.flowText(snapshot);
+    return FDHistory.snapshot({ rootFlow: rootFlow, idInput: idInput, nameInput: nameInput,
+      flowInputs: flowInputs, document: document, recipeInputs: FDRecipeInputs });
   }
   // An explicit creation receipt can bind the exact unsaved history that
   // preceded that request. Empty revisions alone never match saved history.
@@ -280,25 +228,8 @@
     pendingSnap = null;
   }
   function restoreState(s) {
-    var f = FDRecipeInputs.parseText(s);
-    var settings = f._editorSettings || f;
-    delete f._editorSettings;
-    if (firstSaveHistory && firstSaveHistory.snapshots.indexOf(s) >= 0 &&
-        !(f.version || 0) && !f.revision && f.id === firstSaveHistory.sourceId) {
-      f.id = firstSaveHistory.receipt.id;
-      settings.id = f.id;
-      ['version', 'revision', 'published', 'published_version', 'published_revision'].forEach(function (key) {
-        f[key] = firstSaveHistory.receipt[key];
-      });
-    }
-    // Undo edits, not a successful server save/publication. Retain the latest
-    // receipts only for the same saved identity; never borrow another flow's.
-    if (f.id && f.id === rootFlow.id && f.revision && f.revision === rootFlow.revision &&
-        Number.isInteger(rootFlow.version) && rootFlow.version > 0) {
-      ['version', 'revision', 'published', 'published_version', 'published_revision'].forEach(function (key) {
-        if (rootFlow[key] !== undefined) f[key] = rootFlow[key];
-      });
-    }
+    var restored = FDHistory.restore(s, rootFlow, firstSaveHistory, FDRecipeInputs);
+    var f = restored.flow, settings = restored.settings;
     stack = []; crumbs = ['Main flow']; renderCrumbs();
     flow = f;
     flow.nodes = (f.nodes || []).map(function (nd, i) { return normalizeNode(nd, i); });
@@ -336,148 +267,33 @@
   function nodeById(id) { for (var i = 0; i < flow.nodes.length; i++) if (flow.nodes[i].id === id) return flow.nodes[i]; return null; }
   function newId() { var id; do { id = 'n' + (idSeq++); } while (nodeById(id)); return id; }
   function say(t, err) { if (window.mvStatus) window.mvStatus(msg, t || '', {error: !!err}); else msg.textContent = t || ''; msg.style.color = err ? 'var(--danger)' : 'var(--muted)'; }
-  function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
-
-  function summary(n) {
-    if (n.kind === 'agent') return trunc(n.brief || 'No instructions yet', 30);
-    if (n.kind === 'action') return trunc(n.tool ? human(n.tool) : 'No action chosen yet', 30);
-    if (n.kind === 'branch') return trunc(n.condition ? conditionText(n.condition) : 'No question yet', 30);
-    if (n.kind === 'switch') return (n.cases || []).length + ' paths by ' + trunc(n.condition ? human(n.condition) : '…', 14);
-    if (n.kind === 'foreach') return 'For each of ' + trunc(n.items ? human(n.items) : '…', 18);
-    if (n.kind === 'while') return 'While ' + trunc(n.condition ? conditionText(n.condition) : '…', 24);
-    if (n.kind === 'parallel') return (n.branches ? n.branches.length : 0) + ' paths at once';
-    if (n.kind === 'approval') return trunc(n.prompt || 'No question yet', 30);
-    if (n.kind === 'delay') return 'Wait ' + durationText(n.seconds || 0);
-    if (n.kind === 'wait_event') return trunc(n.prompt || 'Waiting for another app', 30);
-    if (n.kind === 'scope') return (((n.body || {}).nodes || []).length) + ' step(s) that might fail';
-    if (n.kind === 'subflow') return 'Runs ' + trunc(n.flow_ref ? (flowNames[n.flow_ref] || human(n.flow_ref)) : 'another flow', 24);
-    if (n.kind === 'setvar') return 'Saves ' + trunc(Object.keys(n.assignments || {}).map(human).join(', ') || '…', 22);
-    return kindLabel(n.kind);
+  var trunc = FDPresentation.truncate;
+  function summary(node) {
+    return FDPresentation.summary(node, {
+      human: human, conditionText: conditionText, durationText: durationText,
+      flowNames: flowNames, kindLabel: kindLabel
+    });
   }
-  function ports(n) {
-    if (n.kind === 'branch') return [
-      { key: 'if_true', x: 50, cls: 't', label: 'Yes' },
-      { key: 'if_false', x: W - 50, cls: 'f', label: 'No' }];
-    return [{ key: 'next', x: W / 2, cls: '', label: '' }];
-  }
-  function runClass(id) {
-    if (id === runCursor) return ' run-active';        // where the run is waiting
-    var rs = runState[id]; if (!rs) return '';
-    if (rs.outcome === 1) return ' run-ok';
-    if (rs.outcome === 0) return ' run-err';
-    return ' run-info';                                // a control step that ran
-  }
-  function runBadge(id) {
-    if (id === runCursor) return '⏳';
-    var rs = runState[id]; if (!rs) return '';
-    if (rs.outcome === 1) return '🟢';
-    if (rs.outcome === 0) return '🔴';
-    if (rs.status === 'true') return '✓';
-    if (rs.status === 'false') return '✗';
-    return '🟠';
-  }
+  function ports(node) { return FDPresentation.ports(node, W); }
+  function runClass(id) { return FDPresentation.runClass(id, runCursor, runState); }
+  function runBadge(id) { return FDPresentation.runBadge(id, runCursor, runState); }
 
   function render() {
     if (draftRecovery) draftRecovery.changed();
-    var focusedNode = document.activeElement && document.activeElement.getAttribute
-      ? document.activeElement.getAttribute('data-node') : null;
-    vp.setAttribute('transform', 'translate(' + view.x + ',' + view.y + ') scale(' + view.k + ')');
-    gEdges.textContent = ''; gNodes.textContent = '';
-    // edges
-    flow.nodes.forEach(function (n) {
-      ports(n).forEach(function (p) {
-        var tgt = n[p.key]; if (!tgt) return;
-        var t = nodeById(tgt); if (!t) return;
-        var px = n.x + p.x, py = n.y + H, tx = t.x + W / 2, ty = t.y;
-        var d = 'M' + px + ' ' + py + ' C ' + px + ' ' + (py + 46) + ', ' + tx + ' ' + (ty - 46) + ', ' + tx + ' ' + ty;
-        var isSel = selectedEdge && selectedEdge.from === n.id && selectedEdge.port === p.key;
-        gEdges.appendChild(el('path', { class: 'fd-edge ' + p.cls + (isSel ? ' selected' : ''), d: d }));
-        // invisible fat twin so a 2px curve is actually clickable (click = select,
-        // Delete = cut; a second click on the same edge also cuts)
-        var hit = el('path', { class: 'fd-edge-hit', d: d });
-        hit.setAttribute('data-edge-from', n.id); hit.setAttribute('data-edge-port', p.key);
-        gEdges.appendChild(hit);
-        if (p.label) gEdges.appendChild(el('text', { class: 'fd-edge-label', x: px + 4, y: py + 14 }, p.label));
-      });
-    });
-    var unreachable = flow.start && FDCore.unreachableNodeIds
-      ? FDCore.unreachableNodeIds(flow) : [];
-    // nodes
-    flow.nodes.forEach(function (n) {
-      var g = el('g', { class: 'fd-node' + ((n.id === selected || multiSel[n.id]) ? ' selected' : '') + (n.id === flow.start ? ' start' : '') + runClass(n.id),
-                        transform: 'translate(' + n.x + ',' + n.y + ')' });
-      if (unreachable.indexOf(n.id) >= 0) g.setAttribute('opacity', '0.45');
-      g.setAttribute('data-node', n.id);
-      g.setAttribute('tabindex', '0');
-      g.setAttribute('role', 'button');
-      g.setAttribute('aria-label', (n.label || summary(n)) + ', ' + kindLabel(n.kind)
-        + ' step' + (n.id === flow.start ? ', first step' : '')
-        + (unreachable.indexOf(n.id) >= 0 ? ', not connected and will never run' : '')
-        + '. Press Enter to edit; use arrow keys to move.');
-      g.setAttribute('aria-pressed', n.id === selected ? 'true' : 'false');
-      g.appendChild(el('rect', { class: 'card', width: W, height: H, rx: 10 }));
-      g.appendChild(el('rect', { class: 'swatch k-' + n.kind, x: 0, y: 0, width: 8, height: H, rx: 4 }));
-      g.appendChild(el('text', { class: 'kind', x: 16, y: 20 }, (KIND_ICON[n.kind] || '') + ' ' + kindLabel(n.kind)));
-      g.appendChild(el('text', { x: 16, y: 40 }, trunc(n.label || summary(n), 26)));
-      var badge = runBadge(n.id);
-      if (badge) g.appendChild(el('text', { class: 'runbadge', x: W - 20, y: 20 }, badge));
-      if (proposals[n.id]) {
-        var lamp = el('text', { class: 'runbadge', x: W - (badge ? 40 : 20), y: 20 }, '💡');
-        lamp.appendChild(el('title', {}, 'Suggestion — select this step to review it'));
-        g.appendChild(lamp);
-      }
-      if (n.id === flow.start) g.appendChild(el('text', { x: 16, y: 56, class: 'fd-edge-label' }, '▶ First step'));
-      ports(n).forEach(function (p) {
-        var c = el('circle', { class: 'port', cx: p.x, cy: H, r: 6 });
-        c.setAttribute('data-port', p.key); c.setAttribute('data-node', n.id);
-        g.appendChild(c);
-      });
-      gNodes.appendChild(g);
-    });
-    if (focusedNode) {
-      Array.prototype.some.call(gNodes.querySelectorAll('[data-node]'), function (node) {
-        if (node.getAttribute('data-node') !== focusedNode) return false;
-        node.focus(); return true;
-      });
-    }
-    // Skip the minimap rebuild mid-drag (render() fires every mousemove frame);
-    // the mouseup handler refreshes it once the drag settles.
+    FDCanvas.render({ flow: flow, view: view, selected: selected, multiSel: multiSel,
+      selectedEdge: selectedEdge, proposals: proposals, width: W, height: H, icons: KIND_ICON },
+      { document: document, viewport: vp, edges: gEdges, nodes: gNodes },
+      { core: FDCore, ports: ports, nodeById: nodeById, el: el, runClass: runClass,
+        runBadge: runBadge, summary: summary, kindLabel: kindLabel, truncate: trunc });
+    // Skip the minimap rebuild mid-drag; mouseup refreshes it when the drag settles.
     if (!drag || drag.kind === 'connect' || drag.kind === 'marquee') renderMinimap();
   }
 
   // ---- minimap: a scaled overview with the viewport rect; click to jump ----
   var MINI_W = 160, MINI_H = 110, MINI_PAD = 8;
-  function miniScale() {
-    var minX = 0, minY = 0, maxX = 400, maxY = 300;
-    if (flow.nodes.length) {
-      minX = Infinity; minY = Infinity; maxX = -Infinity; maxY = -Infinity;
-      flow.nodes.forEach(function (n) {
-        minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
-        maxX = Math.max(maxX, n.x + W); maxY = Math.max(maxY, n.y + H);
-      });
-    }
-    var r = canvas.getBoundingClientRect();
-    // include the visible viewport so the view rect always fits on the map
-    minX = Math.min(minX, -view.x / view.k); minY = Math.min(minY, -view.y / view.k);
-    maxX = Math.max(maxX, (-view.x + r.width) / view.k); maxY = Math.max(maxY, (-view.y + r.height) / view.k);
-    var k = Math.min((MINI_W - 2 * MINI_PAD) / Math.max(1, maxX - minX),
-                     (MINI_H - 2 * MINI_PAD) / Math.max(1, maxY - minY));
-    return { minX: minX, minY: minY, k: k };
-  }
+  function miniScale() { return FDCanvas.miniScale(flow, view, canvas, W, H, MINI_W, MINI_H, MINI_PAD); }
   function renderMinimap() {
-    var mm = document.getElementById('fd-minimap'); if (!mm) return;
-    mm.textContent = '';
-    var s = miniScale();
-    flow.nodes.forEach(function (n) {
-      mm.appendChild(el('rect', { class: 'mini-node',
-        x: MINI_PAD + (n.x - s.minX) * s.k, y: MINI_PAD + (n.y - s.minY) * s.k,
-        width: Math.max(2, W * s.k), height: Math.max(2, H * s.k), rx: 1 }));
-    });
-    var r = canvas.getBoundingClientRect();
-    mm.appendChild(el('rect', { class: 'mini-view',
-      x: MINI_PAD + (-view.x / view.k - s.minX) * s.k,
-      y: MINI_PAD + (-view.y / view.k - s.minY) * s.k,
-      width: (r.width / view.k) * s.k, height: (r.height / view.k) * s.k }));
+    FDCanvas.renderMinimap(flow, view, canvas, W, H, MINI_W, MINI_H, MINI_PAD, document, el);
   }
 
   // ---- coordinate + interaction ----
@@ -1463,86 +1279,25 @@
   }
   var serializeFlow = FDCore.serializeFlow;
   function toApiFlow() {
-    var notifyEl = document.getElementById('fd-notify');
-    var out = serializeFlow({ id: (idInput.value || rootFlow.id || '').trim(),
-      name: nameInput.value || rootFlow.name || 'Untitled flow', start: rootFlow.start, nodes: rootFlow.nodes,
-      learned_recipe: rootFlow.learned_recipe, recipe_lineage: rootFlow.recipe_lineage,
-      recipe_teaching: rootFlow.recipe_teaching, _fdEvidence: rootFlow._fdEvidence });
-    out.notify = !!(notifyEl && notifyEl.checked);
-    out.notify_on = (document.getElementById('fd-notify-on') || {}).value || 'all';
-    out.max_seconds = parseFloat((document.getElementById('fd-maxsec') || {}).value) || 0;
-    out.max_dollars = parseFloat((document.getElementById('fd-maxdollars') || {}).value) || 0;
-    out.schedule = ((document.getElementById('fd-schedule') || {}).value || '').trim();
-    out.timezone = ((document.getElementById('fd-tz') || {}).value || '').trim();
-    out.max_concurrent = parseInt((document.getElementById('fd-maxconc') || {}).value, 10) || 0;
-    out.inputs = flowInputs.filter(function (i) { return (i.key || '').trim(); });
-    out.version = parseInt(rootFlow.version, 10) || 0;
-    out.revision = String(rootFlow.revision || '');
-    return out;
+    return FDWire.toApiFlow({ document: document, rootFlow: rootFlow, idInput: idInput,
+      nameInput: nameInput, flowInputs: flowInputs, serializeFlow: serializeFlow });
   }
   // ---- schedule picker: frequency, days, time and time zone -> timetable ----
-  var WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  function clockWords(h, m) {
-    var hour = Number(h), mm = ('0' + m).slice(-2);
-    return (hour % 12 || 12) + (mm === '00' ? '' : ':' + mm) + (hour < 12 ? ' am' : ' pm');
-  }
-  function ordinalWords(n) { n = Number(n); var t = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (t[(v - 20) % 10] || t[v] || t[0]); }
-  var SCHEDULE_HOURS = [1, 2, 3, 4, 6, 8, 12];
-  function scheduleHours(hour) {
-    if (hour === '*') return 1;
-    var match = /^\*\/(\d+)$/.exec(hour);
-    return match && SCHEDULE_HOURS.indexOf(Number(match[1])) >= 0 ? Number(match[1]) : null;
-  }
-  function scheduleWords(cron) {
-    var f = String(cron || '').trim().split(/\s+/);
-    if (f.length !== 5) return 'a custom timetable';
-    var mi = f[0], hr = f[1], dom = f[2], mon = f[3], dow = f[4];
-    var every = scheduleHours(hr);
-    if (/^\d+$/.test(mi) && every && dom === '*' && mon === '*' && dow === '*') return (every === 1 ? 'every hour' : 'every ' + every + ' hours') + ' at ' + Number(mi) + (Number(mi) === 1 ? ' minute past' : ' minutes past');
-    if (!/^\d+$/.test(mi) || !/^\d+$/.test(hr) || mon !== '*') return 'a custom timetable';
-    var at = ' at ' + clockWords(hr, mi);
-    if (dom === '*' && dow === '*') return 'every day' + at;
-    if (dom === '*' && dow === '1-5') return 'weekdays' + at;
-    if (dom === '*' && /^[0-7](,[0-7])*$/.test(dow)) return 'every ' + dow.split(',').map(function (d) { return WEEKDAYS[Number(d) % 7]; }).join(', ') + at;
-    if (/^\d+$/.test(dom) && dow === '*') return 'monthly on the ' + ordinalWords(dom) + at;
-    return 'a custom timetable';
-  }
+  var scheduleWords = FDSchedule.words;
+  var parseSchedule = FDSchedule.parse;
   function schedEl(id) { return document.getElementById(id); }
-  function parseSchedule(cron) {
-    var f = String(cron || '').trim().split(/\s+/);
-    if (!cron || !String(cron).trim()) return { freq: '' };
-    if (f.length !== 5) return { freq: 'custom' };
-    var mi = f[0], hr = f[1], dom = f[2], mon = f[3], dow = f[4];
-    if (mon !== '*' || !/^\d+$/.test(mi) || Number(mi) > 59) return { freq: 'custom' };
-    var every = scheduleHours(hr);
-    if (every && dom === '*' && dow === '*') return { freq: 'hourly', minute: mi, every: every };
-    if (!/^\d+$/.test(hr) || Number(hr) > 23) return { freq: 'custom' };
-    var time = ('0' + hr).slice(-2) + ':' + ('0' + mi).slice(-2);
-    if (dom === '*' && dow === '*') return { freq: 'daily', time: time };
-    if (dom === '*' && dow === '1-5') return { freq: 'weekdays', time: time };
-    if (dom === '*' && /^[0-7](,[0-7])*$/.test(dow)) return { freq: 'weekly', time: time, days: dow.split(',').map(function (d) { return String(Number(d) % 7); }) };
-    if (/^\d+$/.test(dom) && Number(dom) >= 1 && Number(dom) <= 31 && dow === '*') return { freq: 'monthly', time: time, dom: dom };
-    return { freq: 'custom' };
-  }
   function buildSchedule() {
-    var freq = (schedEl('fd-sched-freq') || {}).value || '';
-    var time = String((schedEl('fd-sched-time') || {}).value || '09:00').split(':');
-    var hr = String(Number(time[0]) || 0), mi = String(Number(time[1]) || 0);
-    if (freq === '') return '';
-    if (freq === 'custom') return ((schedEl('fd-schedule') || {}).value || '').trim();
-    if (freq === 'hourly') {
-      var every = Number((schedEl('fd-sched-every') || {}).value) || 1;
-      return String(Number((schedEl('fd-sched-minute') || {}).value) || 0) + ' ' + (every === 1 ? '*' : '*/' + every) + ' * * *';
-    }
-    if (freq === 'daily') return mi + ' ' + hr + ' * * *';
-    if (freq === 'weekdays') return mi + ' ' + hr + ' * * 1-5';
-    if (freq === 'weekly') {
-      var days = Array.prototype.filter.call(document.querySelectorAll('#fd-sched-days input[type=checkbox]'), function (c) { return c.checked; })
-        .map(function (c) { return c.value; });
-      return mi + ' ' + hr + ' * * ' + (days.length ? days.join(',') : '1');
-    }
-    if (freq === 'monthly') return mi + ' ' + hr + ' ' + ((schedEl('fd-sched-dom') || {}).value || '1') + ' * *';
-    return '';
+    var days = Array.prototype.filter.call(document.querySelectorAll('#fd-sched-days input[type=checkbox]'), function (c) { return c.checked; })
+      .map(function (c) { return c.value; });
+    return FDSchedule.build({
+      freq: (schedEl('fd-sched-freq') || {}).value || '',
+      time: (schedEl('fd-sched-time') || {}).value || '09:00',
+      cron: (schedEl('fd-schedule') || {}).value || '',
+      every: (schedEl('fd-sched-every') || {}).value,
+      minute: (schedEl('fd-sched-minute') || {}).value,
+      days: days,
+      dom: (schedEl('fd-sched-dom') || {}).value
+    });
   }
   function showScheduleParts() {
     var freq = (schedEl('fd-sched-freq') || {}).value || '';
@@ -1694,9 +1449,7 @@
     });
   }
 
-  function apiFetch(url, opts) {
-    return fetch(url, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}));
-  }
+  function apiFetch(url, opts) { return FDTransport.fetchJson(fetch, url, opts); }
   var ACTION_WORDS = { Save: 'save the flow', Publish: 'publish the flow', Run: 'start the run',
     Draft: 'draft the flow', Apply: 'apply the suggestion' };
   function workflowsOff(response) {
@@ -1735,27 +1488,13 @@
     });
     return { data: out };
   }
-  function unconfirmedMutation(action) {
-    return action + ' could not be confirmed. ' + (action === 'Run'
-      ? 'Check recent runs before retrying.' : 'Reload the flow before retrying.');
-  }
+  function unconfirmedMutation(action) { return FDTransport.unconfirmedMutation(action); }
   async function readMutationResult(response, action) {
-    var result;
-    try { result = typeof FDRecipeInputs !== 'undefined' && typeof response.text === 'function'
-      ? await FDRecipeInputs.responseJson(response) : await response.json(); }
-    catch (e) { throw new Error(unconfirmedMutation(action)); }
-    if (!result || typeof result !== 'object' || Array.isArray(result)) {
-      throw new Error(unconfirmedMutation(action));
-    }
-    if (!response.ok) throw new Error(failText(response, action));
-    return result;
+    return FDTransport.readMutationResult(response, action, {
+      recipeInputs: typeof FDRecipeInputs !== 'undefined' ? FDRecipeInputs : null, failText: failText
+    });
   }
-  function validPublication(result) {
-    return typeof result.published === 'boolean' && (result.published
-      ? Number.isInteger(result.published_version) && result.published_version > 0 &&
-        typeof result.published_revision === 'string' && !!result.published_revision.trim()
-      : result.published_version === null && result.published_revision === '');
-  }
+  function validPublication(result) { return FDTransport.validPublication(result); }
   function slugify(s) {
     return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
   }
@@ -2907,12 +2646,7 @@
   // so nodes built on the canvas show up the moment you switch views.
   window.__fdLiveFlow = toApiFlow;
   // The Steps view edits the same live graph through these helpers.
-  function linearOrder() {
-    var order = [], seen = {}, id = rootFlow.start;
-    while (id && !seen[id]) { var n = nodeById(id); if (!n) break; seen[id] = 1; order.push(n); id = n.next; }
-    rootFlow.nodes.forEach(function (n) { if (!seen[n.id]) order.push(n); });
-    return order;
-  }
+  function linearOrder() { return FDGraph.linearOrder(rootFlow, flow); }
   function moveStep(id, dir) {
     if (flow !== rootFlow) return false;
     var order = linearOrder();
@@ -2929,26 +2663,9 @@
   }
   function autoLayoutForce() { flow.nodes.forEach(function (n) { n.x = 0; n.y = 0; }); autoLayout(); }
   // The steps a run can reach from the first step, over every way out of a step.
-  function reachableIds() {
-    var seen = {}, unreachable = FDCore.unreachableNodeIds(rootFlow);
-    rootFlow.nodes.forEach(function (n) { if (unreachable.indexOf(n.id) < 0) seen[n.id] = true; });
-    return seen;
-  }
-  // Where a new step can still be attached: the end of each path that leads nowhere.
-  // A Decision whose Yes/No paths are unset continues to its `next`, so it is open
-  // only while both are unset.
-  function openEnds() {
-    var reach = reachableIds(), ends = [];
-    linearOrder().forEach(function (n) {
-      if (!reach[n.id]) return;
-      if (n.kind === 'branch') {
-        if (n.next) return;
-        if (!n.if_true) ends.push({ id: n.id, port: 'if_true', label: 'If yes, after “' + stepName(n) + '”' });
-        if (!n.if_false) ends.push({ id: n.id, port: 'if_false', label: 'If no, after “' + stepName(n) + '”' });
-      } else if (!n.next) ends.push({ id: n.id, port: 'next', label: 'After “' + stepName(n) + '”' });
-    });
-    return ends;
-  }
+  function reachableIds() { return FDGraph.reachableIds(rootFlow, FDCore); }
+  // Where a new step can attach on a reachable path.
+  function openEnds() { return FDGraph.openEnds(rootFlow, flow, FDCore, stepName); }
   function addStepAtEnd(kind, end) {
     if (flow !== rootFlow) exitToDepth(0);
     var ends = openEnds(), at = null;
@@ -2972,10 +2689,7 @@
     return selected;
   }
   // Which way each Decision path leads, by step id (a path left unset continues to `next`).
-  function pathsOf(n) {
-    return n.kind === 'branch'
-      ? [{ label: 'Yes', to: n.if_true || n.next || null }, { label: 'No', to: n.if_false || n.next || null }] : [];
-  }
+  function pathsOf(n) { return FDGraph.pathsOf(n); }
   window.__fdEngine = {
     order: function () {
       var reach = reachableIds();

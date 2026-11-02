@@ -64,7 +64,7 @@ def _entities(request, query, kind):
     if kind == "processes":
         from maverick.flow import store
 
-        from .api import _can_access_flow
+        from .flows_api import _can_access_flow
         choices.update({flow.id: flow.name for flow in store.list_flows() if _can_access_flow(request, flow)})
     elif kind == "specialists":
         from maverick.domain import available_domains

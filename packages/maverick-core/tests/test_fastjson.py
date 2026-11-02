@@ -1,8 +1,11 @@
-"""fastjson: stdlib-compatible fast JSON seam (orjson when present)."""
+"""The JSON seam preserves stdlib semantics with optional extras installed."""
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+from datetime import datetime
 
+import pytest
 from maverick import fastjson
 
 
@@ -28,8 +31,7 @@ def test_sort_keys():
 
 
 def test_falls_back_for_nonstandard_types():
-    # a set isn't JSON-serializable by orjson OR stdlib; default=str in the
-    # stdlib fallback stringifies it rather than raising.
+    # default=str stringifies unsupported values rather than raising.
     out = fastjson.dumps({"s": {1, 2}})
     assert isinstance(out, str)
     assert "s" in fastjson.loads(out)
@@ -41,7 +43,25 @@ def test_output_is_valid_json_for_stdlib_consumers():
 
 
 def test_backend_name():
-    assert fastjson.backend() in ("orjson", "stdlib")
+    assert fastjson.backend() == "stdlib"
+
+
+@pytest.mark.parametrize("serializer", [fastjson.dumps, fastjson.dumps_compact])
+def test_serialization_matches_stdlib_for_nonstandard_values(serializer):
+    @dataclass
+    class Record:
+        value: int
+
+    value = {"nan": float("nan"), "date": datetime(2026, 1, 2, 3, 4, 5), "record": Record(3)}
+    expected = json.dumps(value, default=str)
+    assert json.loads(serializer(value), parse_constant=str) == json.loads(
+        expected, parse_constant=str
+    )
+
+
+@pytest.mark.parametrize("payload", ["115292150460684697612345", b'{"n":115292150460684697612345}'])
+def test_loads_preserves_arbitrary_precision_integers(payload):
+    assert fastjson.loads(payload) == json.loads(payload)
 
 
 def test_dumps_compact_has_no_separator_whitespace():
@@ -60,8 +80,7 @@ def test_dumps_compact_roundtrips_and_sorts():
 
 
 def test_dumps_compact_falls_back_for_nonstandard_types():
-    # sets aren't serializable by either backend; the stdlib fallback's
-    # default=str stringifies instead of raising (same contract as dumps()).
+    # default=str stringifies unsupported values, as in dumps().
     out = fastjson.dumps_compact({"s": {1, 2}})
     assert "s" in fastjson.loads(out)
 

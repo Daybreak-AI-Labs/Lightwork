@@ -33,6 +33,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import ClassVar
 
 from ..paths import data_dir
 from .local import ExecResult, scrub_env
@@ -71,6 +72,8 @@ class FirecrackerBackend:
     Firecracker sandboxes are excluded from the cross-RUN pool
     (``sandbox/pool.py``) — they never carry state into another run.
     """
+    # Neither provider currently transfers the host workspace into the VM.
+    workdir_is_local: ClassVar[bool] = False
     workdir: Path
     image: str = "ubuntu:24.04-maverick"
     timeout: float = 60.0
@@ -283,6 +286,9 @@ class FirecrackerBackend:
 
     def _e2b_create(self, client) -> tuple[str | None, int]:
         """Create one e2b sandbox; returns ``(id, status_code)``."""
+        from ..governed_http import admit_client_request
+
+        admit_client_request(client, "https://api.e2b.dev/sandboxes")
         sb = client.post(
             "https://api.e2b.dev/sandboxes",
             headers=self._e2b_headers(),
@@ -293,6 +299,9 @@ class FirecrackerBackend:
         return sb.json().get("id"), sb.status_code
 
     def _e2b_process(self, client, sb_id: str, cmd: str):
+        from ..governed_http import admit_client_request
+
+        admit_client_request(client, f"https://api.e2b.dev/sandboxes/{sb_id}/processes")
         return client.post(
             f"https://api.e2b.dev/sandboxes/{sb_id}/processes",
             headers=self._e2b_headers(),
@@ -345,6 +354,9 @@ class FirecrackerBackend:
                     return self._e2b_exec_result(run)
                 finally:
                     try:
+                        from ..governed_http import admit_client_request
+
+                        admit_client_request(client, f"https://api.e2b.dev/sandboxes/{sb_id}")
                         client.delete(
                             f"https://api.e2b.dev/sandboxes/{sb_id}",
                             headers=self._e2b_headers(),
@@ -399,6 +411,9 @@ class FirecrackerBackend:
         try:
             import httpx
             with httpx.Client(timeout=min(self.timeout, 15.0)) as client:
+                from ..governed_http import admit_client_request
+
+                admit_client_request(client, f"https://api.e2b.dev/sandboxes/{sb_id}")
                 client.delete(
                     f"https://api.e2b.dev/sandboxes/{sb_id}",
                     headers=self._e2b_headers(),

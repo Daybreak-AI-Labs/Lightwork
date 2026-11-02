@@ -27,3 +27,11 @@ Before promoting a deployment, create a harmless workspace file, replace the
 container while preserving its volumes, and verify the file is still present.
 The repository's local contract tests verify the path/default and entrypoint
 behavior; they do not replace a container-volume test on the target platform.
+# Base image updates
+
+The Dockerfile pins the Python and kubectl-builder image indexes by digest so
+local and release builds begin from the reviewed images. The Python digest can
+be overridden with `--build-arg PYTHON_DIGEST=@sha256:<digest>` when reviewing
+an update; advance the release and CI build arguments with it. Dependabot checks
+the Dockerfile for base-image updates. Apt repositories remain mutable, so the
+base-image pins alone do not make the complete image reproducible.

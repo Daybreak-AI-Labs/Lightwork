@@ -159,6 +159,73 @@ def test_error_results_not_cached(monkeypatch, tmp_path):
     assert tool_cache.stats()["size"] == 0  # error not stored
 
 
+@pytest.mark.parametrize("outcome", ["indeterminate", "exception", "cancelled"])
+def test_dispatched_write_invalidates_cache_even_without_confirmed_success(
+    monkeypatch, tmp_path, outcome,
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_TOOL_CACHE", "1")
+    monkeypatch.setenv("MAVERICK_TOOL_CACHE_SNAPSHOT", "1")
+    snapshot = tmp_path / "cache.jsonl"
+    monkeypatch.setenv("MAVERICK_TOOL_CACHE_SNAPSHOT_PATH", str(snapshot))
+    read, calls = _counting_tool()
+
+    def write(_args):
+        if outcome == "exception":
+            raise RuntimeError("response lost")
+        if outcome == "cancelled":
+            raise asyncio.CancelledError
+        return "INDETERMINATE: response lost after dispatch"
+
+    reg = ToolRegistry()
+    reg.register(read)
+    reg.register(Tool(name="write_file", description="write", input_schema={"type": "object"},
+                      fn=write, parallel_safe=False))
+    _run(reg, "read_file", {"path": "a"})
+    assert tool_cache.save_snapshot() == 1
+    if outcome == "cancelled":
+        with pytest.raises(asyncio.CancelledError):
+            _run(reg, "write_file", {})
+    else:
+        _run(reg, "write_file", {})
+    assert not snapshot.exists()
+    tool_cache.reset()  # a future process must not reload pre-write results
+    _run(reg, "read_file", {"path": "a"})
+    assert calls["n"] == 2
+
+
+def test_read_started_before_write_cannot_repopulate_stale_cache(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_TOOL_CACHE", "1")
+    calls = []
+
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def read(_args):
+            calls.append(1)
+            if len(calls) == 1:
+                entered.set()
+                await release.wait()
+                return "old"
+            return "new"
+
+        reg = ToolRegistry()
+        reg.register(Tool(name="read_file", description="read", input_schema={"type": "object"},
+                          fn=read, parallel_safe=True))
+        reg.register(Tool(name="write_file", description="write", input_schema={"type": "object"},
+                          fn=lambda _: "ok", parallel_safe=False))
+        pending = asyncio.create_task(reg.run("read_file", {}))
+        await entered.wait()
+        await reg.run("write_file", {})
+        release.set()
+        assert await pending == "old"
+        assert await reg.run("read_file", {}) == "new"
+        assert len(calls) == 2
+
+    asyncio.run(scenario())
+
+
 def test_lru_eviction(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_TOOL_CACHE", "1")
@@ -232,8 +299,8 @@ class TestWarmOnStart:
 
         from maverick.cache import tool as tc
         snap = tmp_path / "snap.jsonl"
-        fresh = {"k": "repo_map:fresh", "v": "ok", "t": _time.time()}
-        stale = {"k": "repo_map:stale", "v": "old", "t": _time.time() - 9999}
+        fresh = {"k": "repo_map:fresh", "v": "ok", "t": _time.time(), "generation": tc._sync_epoch()}
+        stale = {"k": "repo_map:stale", "v": "old", "t": _time.time() - 9999, "generation": tc._sync_epoch()}
         snap.write_text(
             _json.dumps(fresh) + "\n" + _json.dumps(stale) + "\nnot-json\n"
         )
@@ -253,7 +320,7 @@ class TestWarmOnStart:
 
         from maverick.cache import tool as tc
         snap = tmp_path / "snap.jsonl"
-        snap.write_text(_json.dumps({"k": "a:1", "v": "x", "t": _time.time()}) + "\n")
+        snap.write_text(_json.dumps({"k": "a:1", "v": "x", "t": _time.time(), "generation": tc._sync_epoch()}) + "\n")
         monkeypatch.setenv("MAVERICK_TOOL_CACHE", "1")
         monkeypatch.setenv("MAVERICK_TOOL_CACHE_SNAPSHOT", "1")
         monkeypatch.setenv("MAVERICK_TOOL_CACHE_SNAPSHOT_PATH", str(snap))

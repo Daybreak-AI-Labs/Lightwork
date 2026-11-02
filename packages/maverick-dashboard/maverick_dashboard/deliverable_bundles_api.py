@@ -181,7 +181,9 @@ def render(request: Request, bundle_id: str):
 
 @router.get(BASE + "/{bundle_id}/files/{item_key}")
 def file(request: Request, bundle_id: str, item_key: str):
-    from .api import _attachment_content_disposition
+    from .attachment_headers import (
+        attachment_content_disposition as _attachment_content_disposition,
+    )
 
     source = service(request)
     record = call(lambda: source.get(bundle_id))

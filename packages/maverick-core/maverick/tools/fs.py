@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from ..tool_results import confirmed_success_text
 from . import Tool
 
 MAX_READ_BYTES = 8000
@@ -288,8 +289,10 @@ def read_file(sandbox) -> Tool:
         except (ValueError, PermissionError, OSError) as e:
             return f"ERROR: {e}"
         if len(data) > MAX_READ_BYTES:
-            return data[:MAX_READ_BYTES] + f"\n... [truncated, total {len(data)} bytes]"
-        return data
+            data = data[:MAX_READ_BYTES] + f"\n... [truncated, total {len(data)} bytes]"
+        # File bytes can begin with reserved legacy result markers. Their
+        # contents do not describe the success or failure of the read itself.
+        return confirmed_success_text(data)
 
     return Tool(
         name="read_file",

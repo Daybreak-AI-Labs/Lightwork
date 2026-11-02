@@ -11,8 +11,8 @@ setlocal
 rem Resolve a Python 3 interpreter: the py launcher first, plain python second.
 set "PYCMD=py -3"
 %PYCMD% -c "import sys" >nul 2>nul || set "PYCMD=python"
-%PYCMD% -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul || (
-  echo maverick: Python 3.10+ was not found. Install it from https://python.org
+%PYCMD% -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>nul || (
+  echo maverick: Python 3.11+ was not found. Install it from https://python.org
   echo           ^(check "Add python.exe to PATH"^) and run `maverick` again.
   exit /b 1
 )

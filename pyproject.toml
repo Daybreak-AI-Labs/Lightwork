@@ -60,7 +60,7 @@ select = [
 ignore = [
     "E501",   # line length
     "UP036",  # "outdated" version blocks -- ours are intentional runtime
-              # "Python 3.10+ required" guards (installer/preflight), not dead code.
+              # "Python 3.11+ required" guards (installer/preflight), not dead code.
 ]
 
 [tool.ruff.lint.flake8-bugbear]
@@ -85,6 +85,19 @@ extend-immutable-calls = [
 # gate stays green today while blocking NEW over-complex functions. Ratchet
 # this down as the noqa'd backlog gets simplified.
 max-complexity = 20
+
+[tool.mypy]
+# Start with isolated boundaries whose types are maintained. Imports are not
+# checked transitively until their owning modules join the checked set.
+files = [
+    "packages/maverick-core/maverick/config_contracts.py",
+    "packages/maverick-core/maverick/fastjson.py",
+    "packages/maverick-core/maverick/tool_results.py",
+    "packages/maverick-core/maverick/world_model_contracts.py",
+]
+python_version = "3.11"
+strict = true
+follow_imports = "skip"
 
 [tool.vulture]
 # Dead-code gate. min_confidence 80 keeps it to high-signal findings

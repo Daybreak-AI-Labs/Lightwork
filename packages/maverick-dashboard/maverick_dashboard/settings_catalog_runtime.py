@@ -12,7 +12,10 @@ reads it; a value the environment sets (``env``) wins over this page.
 """
 from __future__ import annotations
 
-_HTTPS = r"https://[^\s\"'<>?#]{1,300}"
+from maverick.config_contracts import BOOLEAN_SETTINGS, INTEGER_SETTINGS, TEXT_SETTINGS
+
+from .settings_catalog_patterns import HTTPS as _HTTPS
+
 # An address that is secure, or plain http only on this computer.
 _ADDRESS = (r"(" + _HTTPS + r"|http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?"
             r"(/[^\s\"'<>?#]{0,300})?)?")
@@ -111,41 +114,47 @@ def _models(S, C) -> tuple:
         S("agent_tests", "max_cases_per_specialist", "Saved answer checks per specialist",
           "How many saved answer checks one specialist can keep, and how many one run checks at once. "
           "Lowering it keeps the checks already saved, but a set larger than the limit cannot pass "
-          "a full run.", "number", "AI models", 20, "maverick.agent_tests_policy",
-          subgroup="Effort and planning", minimum=1, maximum=200, integer=True, unit="checks",
+          "a full run.", "number", "AI models", INTEGER_SETTINGS["agent_tests.max_cases_per_specialist"].default,
+          "maverick.agent_tests_policy", subgroup="Effort and planning",
+          minimum=INTEGER_SETTINGS["agent_tests.max_cases_per_specialist"].minimum,
+          maximum=INTEGER_SETTINGS["agent_tests.max_cases_per_specialist"].maximum, integer=True, unit="checks",
           aliases="test cases answer checks test set limit"),
         S("agent_tests", "require_for_new_specialists", "Require a passing run before a new specialist is published",
           "A specialist that has never been published needs at least one saved check, and a full run of "
           "every saved check on its exact draft must pass, before it can be published. A reason does not "
-          "skip this.", "toggle", "AI models", False, "maverick.agent_tests_policy",
+          "skip this.", "toggle", "AI models", BOOLEAN_SETTINGS["agent_tests.require_for_new_specialists"].default, "maverick.agent_tests_policy",
           subgroup="Effort and planning", weaker=False,
           warning="A new specialist could be published without any test run.",
           aliases="new agent publish gate test cases answer checks"),
         S("agent_tests", "bypass_requires_second_person", "Second administrator approves publishing without passing tests",
           "When changed instructions are published without a passing run, a different administrator must "
           "approve the reason first. The person who asked cannot approve their own reason.", "toggle",
-          "AI models", False, "maverick.agent_tests_policy", subgroup="Effort and planning", weaker=False,
+          "AI models", BOOLEAN_SETTINGS["agent_tests.bypass_requires_second_person"].default, "maverick.agent_tests_policy",
+          subgroup="Effort and planning", weaker=False,
           warning="A reason alone is enough to publish changed instructions without a passing run.",
           aliases="four eyes approval reason publish gate test cases answer checks"),
         S("agent_tests", "tool_checks", "Saved answer checks may test which tools a specialist calls",
           "A saved check can say which tools a specialist must call, must not call, and what the call must "
           "include. Each tool is replaced by a test stub that records the call and answers with a fixed result, "
           "so no real tool, file, network call or shell command runs. Checks that use tools are skipped while this is off.",
-          "toggle", "AI models", False, "maverick.agent_tests_policy", subgroup="Effort and planning",
-          aliases="tool use tool calls stub test checks answer checks"),
+          "toggle", "AI models", BOOLEAN_SETTINGS["agent_tests.tool_checks"].default, "maverick.agent_tests_policy",
+          subgroup="Effort and planning", aliases="tool use tool calls stub test checks answer checks"),
         S("agent_tests", "canary_percent", "Share of new goals that try a changed specialist first",
           "0 publishes changed instructions straight away, as today. From 1 to 50, a changed specialist "
           "is first tried on that share of new goals, chosen by goal, while the rest keep the current "
           "version. Goals already running are not changed. Promote the new version for everyone, or roll it back, "
-          "in Workforce.", "number", "AI models", 0, "maverick.agent_tests_policy",
-          subgroup="Effort and planning", minimum=0, maximum=50, integer=True, unit="percent", weaker="higher",
+          "in Workforce.", "number", "AI models", INTEGER_SETTINGS["agent_tests.canary_percent"].default,
+          "maverick.agent_tests_policy", subgroup="Effort and planning",
+          minimum=INTEGER_SETTINGS["agent_tests.canary_percent"].minimum,
+          maximum=INTEGER_SETTINGS["agent_tests.canary_percent"].maximum, integer=True, unit="percent", weaker="higher",
           warning="Some new goals would use changed instructions before everyone does.",
           aliases="canary gradual rollout trial share percent candidate changed instructions"),
         S("agent_tests", "canary_auto_rollback", "Roll back a trial version that fails clearly more often",
           "After at least 10 finished goals on the trial version, roll it back automatically when its share of "
           "failed goals is more than 20 percentage points above the current version. It needs a finished goal on "
           "the current version to compare with. The roll back is recorded.",
-          "toggle", "AI models", False, "maverick.agent_tests_policy", subgroup="Effort and planning", weaker=False,
+          "toggle", "AI models", BOOLEAN_SETTINGS["agent_tests.canary_auto_rollback"].default, "maverick.agent_tests_policy",
+          subgroup="Effort and planning", weaker=False,
           warning="A trial version that fails more often would stay live until someone rolls it back.",
           aliases="canary automatic rollback trial failures"),
 
@@ -1353,8 +1362,10 @@ def _switches(S) -> tuple:
           warning="Timing traces, which name tasks and tools, will be sent to the collector."),
         S("observability", "otel_endpoint", "Trace collector address",
           "Where traces are sent. Leave empty for a collector on this computer.", "text",
-          "Performance", "", "maverick.observability", subgroup="Error reporting",
-          pattern=_ADDRESS, max_length=320, restart=True, env=("MAVERICK_OTEL_ENDPOINT",),
+          "Performance", TEXT_SETTINGS["observability.otel_endpoint"].default, "maverick.observability",
+          subgroup="Error reporting", pattern=TEXT_SETTINGS["observability.otel_endpoint"].pattern,
+          max_length=TEXT_SETTINGS["observability.otel_endpoint"].dashboard_max_length,
+          restart=True, env=TEXT_SETTINGS["observability.otel_endpoint"].dashboard_env,
           weaker="change", warning="Traces will be sent to a different address."),
         S("observability", "otel_headers", "Trace collector sign-in",
           "The sign-in details the collector asks for, written as name=value pairs "

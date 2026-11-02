@@ -9,7 +9,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 _STANDALONE_MODULES = ("app.py", "backend.py", "capabilities.py",
-                       "dsar_engine.py", "mailsink.py", "value_ledger.py",
+                       "dsar_engine.py", "mailsink.py", "mailsink_transport.py", "value_ledger.py",
                        "license_kit.py", "serve_standalone.py")
 
 

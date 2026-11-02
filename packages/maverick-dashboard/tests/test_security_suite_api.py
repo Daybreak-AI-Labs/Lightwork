@@ -1080,7 +1080,7 @@ this is not valid toml
 
 
 def test_security_config_lifecycle_and_actor_label_are_safe(monkeypatch):
-    from maverick_dashboard import api, security_api
+    from maverick_dashboard import api, request_identity, security_api
 
     recorded = []
 
@@ -1091,6 +1091,7 @@ def test_security_config_lifecycle_and_actor_label_are_safe(monkeypatch):
 
     monkeypatch.setattr("maverick.audit.global_audit_log", lambda: AcceptingAudit())
     monkeypatch.setattr(api, "_request_actor", lambda _request: "actor-" + "x" * 500)
+    monkeypatch.setattr(request_identity, "request_actor", lambda _request: "actor-" + "x" * 500)
     lifecycle = []
     monkeypatch.setattr(
         security_api,

@@ -508,7 +508,7 @@ class RegulatoryFeedBridge:
     def _record_impact(self, alert: Mapping[str, Any], impact: Mapping[str, Any], actor: str) -> dict[str, Any]:
         recorder = self._impact_recorder
         if recorder is None:
-            from .ai_evidence_gateway import record_regulatory_impact
+            from .ai_evidence.delivery import record_regulatory_impact
 
             recorder = record_regulatory_impact
         saved = recorder(

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "maverick-channels"
 version = "0.1.7"
 description = "Channel adapters for Lightwork (Telegram, Discord, Slack, Signal, ...)"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "The Lightwork Authors" }]

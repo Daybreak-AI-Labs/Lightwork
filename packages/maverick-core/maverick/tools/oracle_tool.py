@@ -18,6 +18,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool
 from .sql_safety import has_unconfirmed_statement_separator
 
@@ -54,7 +55,7 @@ def _op_sql(statement: str, limit: int, confirm: bool) -> str:
         return "DRY RUN: non-read SQL. Re-run with confirm=true."
     url, tok = _config()
     import httpx
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         f"{url}/_/sql",
         headers={"Authorization": f"Bearer {tok}",
                  "Content-Type": "application/sql", "Accept": "application/json"},

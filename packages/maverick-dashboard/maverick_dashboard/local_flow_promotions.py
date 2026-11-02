@@ -92,7 +92,7 @@ def _owner_authority(tenant, owner):
 
 
 def _pure_definition(flow, *, permit_fallback=False):
-    from .api import _require_learned_flow_evidence
+    from .flows_api import _require_learned_flow_evidence
 
     if flow.learned_recipe is not None or not flow.nodes or len(flow.nodes) > 64:
         raise CandidatePromotionDenied("This release path supports bounded taught rules only.")
@@ -664,7 +664,7 @@ def prepare_local_release(request, payload, *, rules_only=False):
     from fastapi import Response
     from maverick.authority_effects import authority_effect_fence
 
-    from .api import _assert_flow_access, _require_flows, _require_learned_flow_evidence
+    from .flows_api import _assert_flow_access, _require_flows, _require_learned_flow_evidence
 
     tenant, actor, _context = _binding(request, Response(), payload)
     if not getattr(request.app.state, "local_flow_promotions_installed", False):

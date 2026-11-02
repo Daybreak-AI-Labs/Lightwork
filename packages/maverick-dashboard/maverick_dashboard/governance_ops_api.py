@@ -49,7 +49,7 @@ _RISK_WORDS = {"low": "low-risk", "medium": "medium-risk", "high": "high-risk"}
 
 
 def _actor(request: Request) -> str:
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
 
     return _request_actor(request)
 

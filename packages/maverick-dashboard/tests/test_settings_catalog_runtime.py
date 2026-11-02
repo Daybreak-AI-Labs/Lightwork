@@ -777,8 +777,9 @@ def test_shared_tool_results_use_the_redis_store_with_the_same_scope(monkeypatch
         def get(self, key):
             return kept.get(key)
 
-        def set(self, key, value):
-            kept[key] = value
+        def set(self, key, value, *, nx=False):
+            if not nx or key not in kept:
+                kept[key] = value
 
         def setex(self, key, ttl, value):
             kept[key] = value
@@ -797,7 +798,8 @@ def test_shared_tool_results_use_the_redis_store_with_the_same_scope(monkeypatch
     monkeypatch.setattr(tool_cache, "cacheable", lambda tool: True)
     tool_cache.reset()
     tool_cache.store_cached(Tool(), {"path": "."}, "tree", namespace="user:a")
-    assert len(kept) == 1
+    assert len(kept) == 2  # one scoped result and the shared generation
+    assert "mvk:toolcache:generation" in kept
     tool_cache.reset()  # another server: nothing kept locally
     assert tool_cache.get_cached(Tool(), {"path": "."}, namespace="user:a") == (True, "tree")
     assert tool_cache.get_cached(Tool(), {"path": "."}, namespace="user:b") == (False, None)

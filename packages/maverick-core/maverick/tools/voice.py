@@ -29,6 +29,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -439,6 +440,8 @@ def warm_up_local_stt(*, cancel: threading.Event | None = None) -> bool:
 
 
 def _run_transcribe(args: dict[str, Any], sandbox: Any = None) -> str:
+    from ..tool_results import confirmed_success_text
+
     src = (args.get("source") or "").strip()
     if not src:
         return "ERROR: source is required"
@@ -459,13 +462,13 @@ def _run_transcribe(args: dict[str, Any], sandbox: Any = None) -> str:
     if backend in ("openai", "auto"):
         out = _whisper_openai(path, language)
         if out is not None:
-            return out
+            return confirmed_success_text(out)
         if backend == "openai":
             return "ERROR: OpenAI Whisper failed (check OPENAI_API_KEY)"
     if backend in ("groq", "auto"):
         out = _whisper_groq(path, language)
         if out is not None:
-            return out
+            return confirmed_success_text(out)
         if backend == "groq":
             return "ERROR: Groq Whisper failed (check GROQ_API_KEY)"
     if backend in ("local", "auto"):
@@ -475,7 +478,7 @@ def _run_transcribe(args: dict[str, Any], sandbox: Any = None) -> str:
         if out is None:
             out = _whisper_cpp(path, language)
         if out is not None:
-            return out
+            return confirmed_success_text(out)
         if backend == "local":
             return (
                 "ERROR: no local STT engine available. Run `maverick voice "
@@ -530,7 +533,7 @@ def _tts_elevenlabs(text: str, voice: str | None, output: Path) -> bool:
         return False
     voice_id = voice or os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
     try:
-        resp = httpx.post(
+        resp = _governed_sender(httpx.post)(
             f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
             headers={
                 "xi-api-key": key,

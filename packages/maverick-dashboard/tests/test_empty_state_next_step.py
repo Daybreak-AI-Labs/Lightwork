@@ -51,9 +51,9 @@ VALUES = {
     ("lightwork-privacy-rights-consumer-delivery.js", "None yet"): "delivery code cell",
     ("lightwork-third-party-intelligence.js", "None yet"): "latest data or decision cell",
     ("lightwork-trust-receipts.js", "No activity recorded yet"): "select placeholder",
-    ("flow_designer.js", "No instructions yet"): "flow-step chip",
-    ("flow_designer.js", "No action chosen yet"): "flow-step chip",
-    ("flow_designer.js", "No question yet"): "flow-step chip",
+    ("flow_designer_presentation.js", "No instructions yet"): "flow-step chip",
+    ("flow_designer_presentation.js", "No action chosen yet"): "flow-step chip",
+    ("flow_designer_presentation.js", "No question yet"): "flow-step chip",
 }
 # The most this may be. Lower it when you fix one; never raise it.
 MAX_WITHOUT_NEXT_STEP = 0  # 6 October 2026: 134 before the ONB-2 pass

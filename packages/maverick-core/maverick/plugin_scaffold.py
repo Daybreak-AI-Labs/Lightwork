@@ -53,7 +53,7 @@ build-backend = "setuptools.build_meta"
 name = "{slug}"
 version = "0.1.0"
 description = "A Lightwork {kind} plugin"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 readme = "README.md"
 license = {{ text = "MIT" }}
 authors = [{{ name = "your name", email = "you@example.com" }}]

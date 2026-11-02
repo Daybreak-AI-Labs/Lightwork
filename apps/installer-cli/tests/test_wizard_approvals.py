@@ -83,3 +83,35 @@ def test_the_record_of_approval_checks_is_asked_and_bounded(monkeypatch):
     assert "record_checks = false" in lines and "check_retention_days = 30" in lines
     assert approval_checks.validate_retention_days(30) == 30
     config.reset_config_cache()
+
+
+def test_shared_approval_contract_matches_wizard_and_settings_page(monkeypatch):
+    from maverick.config_contracts import BOOLEAN_SETTINGS, CHOICE_SETTINGS, INTEGER_SETTINGS
+    from maverick_dashboard.settings_catalog import BY_ID
+    from maverick_installer import wizard
+
+    monkeypatch.setattr(wizard, "_q_text", lambda *_a, **kw: kw["default"])
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *_a, **kw: kw["default"])
+    monkeypatch.setattr(wizard, "_q_select", lambda *_a, **kw: kw["default"])
+    answers = wizard.pick_approvals()
+
+    for path, contract in INTEGER_SETTINGS.items():
+        if not path.startswith("approval."):
+            continue
+        row = BY_ID[path]
+        assert (row.default, row.minimum, row.maximum, row.env) == (
+            contract.default, contract.minimum, contract.maximum, contract.dashboard_env,
+        )
+        assert answers[path.split(".", 1)[1]] == contract.default
+    for path, contract in BOOLEAN_SETTINGS.items():
+        if not path.startswith("approval."):
+            continue
+        row = BY_ID[path]
+        assert (row.default, row.env) == (contract.default, contract.dashboard_env)
+        assert answers[path.split(".", 1)[1]] == contract.default
+    contract = CHOICE_SETTINGS["approval.separate_approver"]
+    row = BY_ID[contract.setting]
+    assert row.default == contract.default
+    assert tuple(value for value, _label in row.choices) == contract.options
+    assert row.env == contract.dashboard_env
+    assert answers["separate_approver"] == contract.default

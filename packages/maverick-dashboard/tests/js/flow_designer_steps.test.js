@@ -22,6 +22,15 @@ function pageHtml(options = {}) {
     .replace("{{ 'true' if can_manage_flows else 'false' }}", options.canManage ? "true" : "false")
     .replace(/\{\{[^}]*\}\}/g, "")
     .replace('{% include "flow_designer_core.js" %}', () => raw(read("flow_designer_core.js")))
+    .replace('{% include "flow_designer_durations.js" %}', () => raw(read("flow_designer_durations.js")))
+    .replace('{% include "flow_designer_schedule.js" %}', () => raw(read("flow_designer_schedule.js")))
+    .replace('{% include "flow_designer_draft.js" %}', () => raw(read("flow_designer_draft.js")))
+    .replace('{% include "flow_designer_presentation.js" %}', () => raw(read("flow_designer_presentation.js")))
+    .replace('{% include "flow_designer_canvas.js" %}', () => raw(read("flow_designer_canvas.js")))
+    .replace('{% include "flow_designer_graph.js" %}', () => raw(read("flow_designer_graph.js")))
+    .replace('{% include "flow_designer_wire.js" %}', () => raw(read("flow_designer_wire.js")))
+    .replace('{% include "flow_designer_transport.js" %}', () => raw(read("flow_designer_transport.js")))
+    .replace('{% include "flow_designer_history.js" %}', () => raw(read("flow_designer_history.js")))
     .replace('{% include "flow_designer_inputs.js" %}', () => raw(read("flow_designer_inputs.js")))
     .replace('{% include "flow_designer_action_fields.js" %}', () => raw(read("flow_designer_action_fields.js")))
     .replace('{% include "flow_hardening_review.js" %}', () => raw(read("flow_hardening_review.js")))
@@ -138,6 +147,21 @@ test("steps can be added, changed and reordered without the canvas", async () =>
     const order = JSON.parse(JSON.stringify(w.__fdEngine.order().map((s) => s.kind)));
     assert.deepEqual(order, ["approval", "agent"]);
     assert.equal(w.__fdLiveFlow().start, w.__fdEngine.order()[0].id);
+  } finally { dom.window.close(); }
+});
+
+test("a wait step offers duration choices and keeps the selected seconds", async () => {
+  const { dom, w, doc } = open();
+  try {
+    await settle();
+    await stepsHelpers(doc).addKind("delay");
+    const field = Array.from(doc.querySelectorAll("#fd-props .field"))
+      .find((item) => item.textContent.includes("How long to wait"));
+    const select = field.querySelector("select");
+    assert.ok(Array.from(select.options).some((option) => option.textContent === "5 minutes"));
+    select.value = "300";
+    select.dispatchEvent(new w.Event("change"));
+    assert.equal(w.__fdLiveFlow().nodes.find((node) => node.kind === "delay").seconds, 300);
   } finally { dom.window.close(); }
 });
 

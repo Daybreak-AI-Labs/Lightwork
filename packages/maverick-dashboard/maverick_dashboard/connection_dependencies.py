@@ -5,13 +5,26 @@ import hashlib
 import json
 import time
 
+from fastapi import HTTPException
+
 from .auth import has_permission
+
+
+def require_connections() -> None:
+    """Reject connection operations while the installation has disabled them."""
+    from maverick import connections
+
+    if not connections.enabled():
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "connections_disabled", "message": "Connections are turned off. An administrator can enable them in Settings."},
+        )
 
 
 def owned_connections(request):
     from maverick.connections import list_connections
 
-    from .api import _request_identity
+    from .request_identity import request_identity as _request_identity
 
     actor = _request_identity(request)
     rows = list_connections(owner=actor)
@@ -79,7 +92,7 @@ def _active_flow_impact(request, name, record, owner, items, coverage):
     from fastapi import HTTPException
     from maverick.flow import store
 
-    from .api import _assert_flow_access
+    from .flows_api import _assert_flow_access
 
     try:
         count = 0
@@ -121,9 +134,9 @@ def impact(request, name):
     from maverick.job_queue import JobQueue
     from maverick.schedule_definitions import list_definitions
 
-    from .api import _assert_flow_access
     from .auth import goal_owner_filter, has_global_permission, require_permission
     from .draft_api import context_for
+    from .flows_api import _assert_flow_access
 
     require_permission(request, "operate")
     record = next((row for row in owned_connections(request) if row["name"] == name), None)

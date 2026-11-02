@@ -24,6 +24,8 @@ import time
 import uuid
 from typing import Any
 
+from .config_contracts import BOOLEAN_SETTINGS, INTEGER_SETTINGS
+
 log = logging.getLogger(__name__)
 
 SQLITE_SCHEMA: list[str] = [
@@ -38,8 +40,8 @@ SQLITE_SCHEMA: list[str] = [
 POSTGRES_SCHEMA: list[str] = [s.replace(" REAL", " DOUBLE PRECISION") for s in SQLITE_SCHEMA]
 
 OUTCOMES = ("allowed", "asked", "refused")
-DEFAULT_RETENTION_DAYS = 90
-MAX_RETENTION_DAYS = 3650
+DEFAULT_RETENTION_DAYS = INTEGER_SETTINGS["approval.check_retention_days"].default
+MAX_RETENTION_DAYS = INTEGER_SETTINGS["approval.check_retention_days"].maximum
 PRUNE_BATCH = 500
 _PRUNE_EVERY_SECONDS = 600.0
 _RISKS = frozenset({"low", "medium", "high", "critical"})
@@ -65,7 +67,8 @@ def _approval_section() -> dict:
 
 def enabled() -> bool:
     """``[approval] record_checks``; on unless set to false."""
-    return _approval_section().get("record_checks") is not False
+    value = _approval_section().get("record_checks")
+    return value if isinstance(value, bool) else BOOLEAN_SETTINGS["approval.record_checks"].default
 
 
 def validate_retention_days(value: object) -> int:
@@ -76,7 +79,7 @@ def validate_retention_days(value: object) -> int:
         value = int(value)
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError("must be a whole number of days")
-    if not 1 <= value <= MAX_RETENTION_DAYS:
+    if not INTEGER_SETTINGS["approval.check_retention_days"].minimum <= value <= MAX_RETENTION_DAYS:
         raise ValueError(f"must be from 1 to {MAX_RETENTION_DAYS} days")
     return value
 

@@ -22,6 +22,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def _post(path: str, body: dict) -> tuple[int, Any]:
     import httpx
     cid, sec = _config()
     body = {"client_id": cid, "secret": sec, **body}
-    r = httpx.post(f"{_base()}{path}", json=body, timeout=30.0)
+    r = _governed_sender(httpx.post)(f"{_base()}{path}", json=body, timeout=30.0)
     try:
         return r.status_code, r.json()
     except ValueError:

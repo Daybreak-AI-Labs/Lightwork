@@ -92,6 +92,36 @@ def dispatcher(monkeypatch):
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
+def test_conversation_records_reach_provider_without_losing_signed_blocks(dispatcher, asynchronous):
+    from maverick.providers.conversation import ConversationMessage
+
+    llm, state = dispatcher
+    seen = []
+
+    class Client:
+        def complete(self, **kwargs):
+            seen.append(kwargs["messages"])
+            return _response()
+
+        async def complete_async(self, **kwargs):
+            seen.append(kwargs["messages"])
+            return _response()
+
+    state.client = Client()
+    original = {"role": "assistant", "content": [
+        {"type": "thinking", "thinking": "first", "signature": "signed-one"},
+        {"type": "text", "text": "answer"},
+        {"type": "thinking", "thinking": "second", "signature": "signed-two"},
+    ]}
+    call = llm.complete_async if asynchronous else llm.complete
+    result = call(system="Private system", messages=[ConversationMessage.from_anthropic(original)])
+    if asynchronous:
+        result = asyncio.run(result)
+    assert result.text == "A draft"
+    assert seen == [[original]]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
 def test_guard_denies_before_client_setup_without_private_error(dispatcher, asynchronous):
     llm, state = dispatcher
 

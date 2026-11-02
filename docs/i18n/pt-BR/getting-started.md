@@ -6,7 +6,7 @@
 
 ## Instalação
 
-O Lightwork é instalado a partir do código-fonte; você precisa de Python 3.10–3.12 e Git. Siga o [guia de instalação a partir do código-fonte](../../source-install.md), que traz os comandos para macOS, Linux e Windows. Ainda não há binários pré-compilados, pacotes no PyPI nem imagens de contêiner publicados. No momento não há nenhuma versão publicada; instale a partir de `main`.
+O Lightwork é instalado a partir do código-fonte; você precisa de Python 3.11–3.12 e Git. Siga o [guia de instalação a partir do código-fonte](../../source-install.md), que traz os comandos para macOS, Linux e Windows. Ainda não há binários pré-compilados, pacotes no PyPI nem imagens de contêiner publicados. No momento não há nenhuma versão publicada; instale a partir de `main`.
 
 Depois execute `lightwork dashboard` e abra <http://127.0.0.1:8765> para concluir a configuração do proprietário e do provedor de modelos.
 

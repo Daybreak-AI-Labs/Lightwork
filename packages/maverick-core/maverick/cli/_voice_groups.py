@@ -170,6 +170,9 @@ def voice_transcribe_cmd(audio_file: str, language: str | None,
     if backend:
         args["backend"] = backend
     out = _run_transcribe(args, None)
-    if out.startswith("ERROR:"):
-        raise click.ClickException(out[len("ERROR:"):].strip())
+    from ..tool_results import tool_result_failed
+
+    if tool_result_failed(out):
+        message = out[len("ERROR:"):].strip() if out.startswith("ERROR:") else str(out)
+        raise click.ClickException(message)
     click.echo(out)

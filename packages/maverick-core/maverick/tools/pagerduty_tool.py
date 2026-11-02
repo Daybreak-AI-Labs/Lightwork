@@ -21,6 +21,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ def _headers() -> dict[str, str]:
 
 def _get(path: str, params: dict | None = None) -> tuple[int, Any]:
     import httpx
-    r = httpx.get(f"https://api.pagerduty.com{path}", headers=_headers(),
+    r = _governed_sender(httpx.get)(f"https://api.pagerduty.com{path}", headers=_headers(),
                   params=params or {}, timeout=30.0)
     try:
         return r.status_code, r.json()
@@ -87,7 +88,7 @@ def _put(path: str, body: dict, *, from_email: str | None = None) -> tuple[int, 
     headers = _headers()
     if from_email:
         headers["From"] = from_email
-    r = httpx.put(f"https://api.pagerduty.com{path}", headers=headers,
+    r = _governed_sender(httpx.put)(f"https://api.pagerduty.com{path}", headers=headers,
                   json=body, timeout=30.0)
     try:
         return r.status_code, r.json()
@@ -177,7 +178,7 @@ def _op_trigger(routing_key: str, summary: str, severity: str, confirm: bool) ->
             "severity": sev,
         },
     }
-    r = httpx.post("https://events.pagerduty.com/v2/enqueue",
+    r = _governed_sender(httpx.post)("https://events.pagerduty.com/v2/enqueue",
                    json=body, timeout=15.0)
     if r.status_code >= 400:
         return f"ERROR: trigger ({r.status_code}): {r.text[:300]}"

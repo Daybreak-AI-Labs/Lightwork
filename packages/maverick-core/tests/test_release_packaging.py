@@ -205,6 +205,66 @@ def test_release_cohort_helper_validates_sources_and_preserves_core_extra():
     assert all("==" in requirement for requirement in requirements)
 
 
+def test_release_cohort_editable_install_keeps_the_full_local_cohort():
+    installer = _load_release_cohort_installer()
+    _version, cohort = installer.load_cohort(REPO_ROOT)
+    constraint = REPO_ROOT / "requirements" / "ci.txt"
+
+    command = installer.pip_install_command(
+        sys.executable, constraint, cohort, "openai", editable=True,
+    )
+
+    assert command[:6] == [
+        sys.executable, "-m", "pip", "install", "--constraint", str(constraint),
+    ]
+    assert command[6::2] == ["-e"] * len(cohort)
+    assert command[7::2] == [
+        f"{package.source}[openai]" if package.distribution == "maverick-agent"
+        else str(package.source)
+        for package in cohort
+    ]
+
+
+def test_optional_native_source_profile_installs_and_verifies(monkeypatch):
+    installer = _load_release_cohort_installer()
+    commands = []
+
+    def capture(command, *, check):
+        assert check is True
+        commands.append(command)
+
+    monkeypatch.setattr(installer.subprocess, "run", capture)
+    constraint = REPO_ROOT / "requirements" / "ci.txt"
+    installer.install_native_source(sys.executable, constraint, REPO_ROOT)
+
+    assert commands[0] == [
+        sys.executable, "-m", "pip", "install", "--constraint", str(constraint),
+        str(REPO_ROOT / "rust" / "mvk-scan-py"),
+    ]
+    assert commands[1][:2] == [sys.executable, "-c"]
+    assert "import maverick_native" in commands[1][2]
+    assert "perceptual_hash._native is None" in commands[1][2]
+    assert "unicode_filter._native is None" in commands[1][2]
+
+
+def test_native_source_profile_rejects_non_install_modes(capsys):
+    installer = _load_release_cohort_installer()
+    assert installer.main(["--native-source", "--validate-only"]) == 1
+    assert "requires a source or editable install" in capsys.readouterr().err
+
+
+def test_native_source_profile_rejects_a_subset_without_core_before_install(capsys, monkeypatch):
+    installer = _load_release_cohort_installer()
+
+    def no_install(*args, **kwargs):
+        raise AssertionError("subset validation must finish before invoking pip")
+
+    monkeypatch.setattr(installer, "pip_install_command", no_install)
+    monkeypatch.setattr(installer, "install_native_source", no_install)
+    assert installer.main(["--native-source", "--only", "maverick-shield"]) == 1
+    assert "--only subsets must include maverick-agent" in capsys.readouterr().err
+
+
 def test_release_cohort_helper_rejects_unknown_extras_and_rootless_subsets():
     installer = _load_release_cohort_installer()
     _version, cohort = installer.load_cohort(REPO_ROOT)

@@ -14,6 +14,10 @@ operators must use an authorized copy of CIS Controls v8.1.
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
+from .catalog_schema import index_security_catalogs
+
 SecurityPractice = tuple[str, str, str, str, int | None]
 
 SECURITY_CATALOG_PROVENANCE = {
@@ -7243,9 +7247,23 @@ FEDRAMP_CLASS_C_CONTROLS: tuple[SecurityPractice, ...] = (
     ),
 )
 
+SECURITY_CATALOGS = MappingProxyType({
+    "nist_csf": NIST_CSF_2_SUBCATEGORIES,
+    "nist_800_53": NIST_800_53_MODERATE,
+    "cis_v8": CIS_V81_SAFEGUARDS,
+    "cmmc_l2": CMMC_L2_PRACTICES,
+    "fedramp_moderate": FEDRAMP_CLASS_C_CONTROLS,
+})
+
+# Built directly from the frozen rows; a malformed or duplicated practice must
+# not silently disappear from generated questionnaires and evidence lookups.
+SECURITY_CATALOG_INDEX = index_security_catalogs(SECURITY_CATALOGS, SECURITY_CATALOG_PROVENANCE)
+
 __all__ = [
     "SecurityPractice",
     "SECURITY_CATALOG_PROVENANCE",
+    "SECURITY_CATALOGS",
+    "SECURITY_CATALOG_INDEX",
     "NIST_CSF_2_SUBCATEGORIES",
     "NIST_800_53_MODERATE",
     "CIS_V81_SAFEGUARDS",

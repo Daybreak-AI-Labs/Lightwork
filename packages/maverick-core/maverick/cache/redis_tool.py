@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 
 from .tool import _key  # reuse: identical call identity to the local cache
 
@@ -82,6 +83,23 @@ class RedisToolCache:
         # ``scope`` is the local cache's per-person/workspace namespace, so a
         # shared Redis never hands one caller another caller's result.
         return f"{self.namespace}:{_key(tool_name, args, namespace=scope)}"
+
+    def epoch(self, *, advance: bool = False) -> str | None:
+        """A separate generation key fences stale local, snapshot and Redis entries."""
+        try:
+            client = self._client()
+            key = self.namespace + ":generation"
+            if advance:
+                token = uuid.uuid4().hex
+                client.set(key, token)
+                return token
+            client.set(key, uuid.uuid4().hex, nx=True)
+            token = client.get(key)
+            if isinstance(token, bytes):
+                token = token.decode("ascii")
+            return token if isinstance(token, str) and len(token) == 32 else None
+        except Exception:
+            return None
 
     def get(self, tool_name: str, args: dict, *, scope: str = "") -> tuple[bool, str | None]:
         """Return ``(hit, value)``; any redis trouble is a miss, never a raise."""
@@ -127,7 +145,8 @@ class RedisToolCache:
         )
         try:
             cli = self._client()
-            keys = list(cli.scan_iter(match=pattern, count=_SCAN_COUNT))
+            keys = [key for key in cli.scan_iter(match=pattern, count=_SCAN_COUNT)
+                    if key not in {f"{self.namespace}:generation", f"{self.namespace}:generation".encode()}]
             for i in range(0, len(keys), _SCAN_COUNT):
                 chunk = keys[i:i + _SCAN_COUNT]
                 if chunk:
@@ -142,8 +161,9 @@ class RedisToolCache:
         namespace-scoped key count (SCAN, not DBSIZE: the db may be shared)."""
         size = 0
         try:
-            for _ in self._client().scan_iter(match=f"{self.namespace}:*", count=_SCAN_COUNT):
-                size += 1
+            for key in self._client().scan_iter(match=f"{self.namespace}:*", count=_SCAN_COUNT):
+                if key not in {f"{self.namespace}:generation", f"{self.namespace}:generation".encode()}:
+                    size += 1
         except Exception as exc:
             log.debug("redis tool cache: stats scan failed (%s)", exc)
         return {"hits": self._hits, "misses": self._misses, "size": size}

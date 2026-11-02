@@ -15,6 +15,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_redirect_get
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -43,9 +44,9 @@ def _ua() -> str:
 
 def _get(url: str, params: dict | None = None) -> tuple[int, Any]:
     import httpx
-    r = httpx.get(url, headers={"User-Agent": _ua()},
-                  params=params or {}, timeout=20.0,
-                  follow_redirects=True)
+    r = guarded_redirect_get(httpx.get)(url, headers={"User-Agent": _ua()},
+                                       params=params or {}, timeout=20.0,
+                                       follow_redirects=True)
     try:
         return r.status_code, r.json()
     except ValueError:

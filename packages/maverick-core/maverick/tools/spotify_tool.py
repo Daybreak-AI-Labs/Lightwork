@@ -59,9 +59,9 @@ def _headers() -> dict[str, str]:
 
 
 def _get(path: str, params: dict | None = None) -> tuple[int, Any]:
-    import httpx
-    r = httpx.get(f"https://api.spotify.com/v1{path}",
-                  headers=_headers(), params=params or {}, timeout=20.0)
+    from ..governed_http import request
+    r = request("GET", f"https://api.spotify.com/v1{path}",
+                headers=_headers(), params=params or {}, timeout=20.0)
     try:
         return r.status_code, r.json() if r.text else {}
     except ValueError:
@@ -69,9 +69,9 @@ def _get(path: str, params: dict | None = None) -> tuple[int, Any]:
 
 
 def _put(path: str, body: dict | None = None) -> int:
-    import httpx
-    r = httpx.put(f"https://api.spotify.com/v1{path}",
-                  headers=_headers(), json=body or {}, timeout=20.0)
+    from ..governed_http import request
+    r = request("PUT", f"https://api.spotify.com/v1{path}",
+                headers=_headers(), json=body or {}, timeout=20.0)
     return r.status_code
 
 

@@ -16,6 +16,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ def _run(args: dict[str, Any]) -> str:
         if year:
             params["year"] = str(year)
         try:
-            resp = httpx.get(
+            resp = _governed_sender(httpx.get)(
                 f"{_API_BASE}/paper/search",
                 params=params, headers=headers, timeout=20.0,
             )
@@ -137,7 +138,7 @@ def _run(args: dict[str, Any]) -> str:
         else:
             paper_path = f"arXiv:{pid}"  # bare arxiv id fallback
         try:
-            resp = httpx.get(
+            resp = _governed_sender(httpx.get)(
                 f"{_API_BASE}/paper/{paper_path}",
                 params={"fields": _FIELDS},
                 headers=headers, timeout=20.0,

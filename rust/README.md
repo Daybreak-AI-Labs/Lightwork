@@ -32,9 +32,12 @@ The reason the carve is worth it — the unicode scanner alone:
 
 `has_dangerous_unicode` runs on *every* input; the per-char Python loop is the
 worst case and Rust's short-circuit scan is ~50× faster. Even the smallest input
-(where FFI overhead is highest) is 3×. This is per-call latency; the bigger win
-is density — the native path is GIL-free, so parallel swarm scanning no longer
-serializes.
+(where FFI overhead is highest) is 3×. These figures measure per-call latency.
+For large normalization, secret/PII scan and image-hash inputs, the Python
+bindings copy the input to owned Rust data and release the GIL during the
+computation. Small calls and the short-circuit Unicode check retain it. The
+historical figures above measure single-call latency; they do not establish
+parallel throughput or an optimal detach threshold.
 
 ## Build
 
@@ -43,7 +46,7 @@ Python wheel (the `maverick_native` extension):
 ```bash
 cd rust/mvk-scan-py
 maturin build --release          # -> rust/target/wheels/maverick_native-*.whl
-pip install rust/target/wheels/maverick_native-*.whl
+pip install ../target/wheels/maverick_native-*.whl
 # maverick.safety.unicode_filter now uses it automatically; absent => pure Python
 ```
 

@@ -34,6 +34,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from ..config_contracts import CHOICE_SETTINGS
+
 _RISK_ORDER = ("low", "medium", "high", "critical")
 
 
@@ -103,7 +105,7 @@ def allow_self_approval() -> bool:
     return bool(v)
 
 
-SEPARATE_APPROVER_MODES = ("when_available", "always", "never")
+SEPARATE_APPROVER_MODES = CHOICE_SETTINGS["approval.separate_approver"].options
 _SEPARATE_APPROVER_RISKS = frozenset({"high", "critical"})
 
 
@@ -121,7 +123,7 @@ def separate_approver_mode() -> str:
 
     ``MAVERICK_SEPARATE_APPROVER`` wins. A value this module does not know is
     treated as ``"always"``, so a typo never loosens the rule."""
-    env = os.environ.get("MAVERICK_SEPARATE_APPROVER", "").strip().lower()
+    env = os.environ.get(CHOICE_SETTINGS["approval.separate_approver"].dashboard_env[0], "").strip().lower()
     if env:
         return env if env in SEPARATE_APPROVER_MODES else "always"
     try:
@@ -131,7 +133,7 @@ def separate_approver_mode() -> str:
     except Exception:  # pragma: no cover -- config never blocks a request
         raw = None
     if raw is None or (isinstance(raw, str) and not raw.strip()):
-        return "when_available"
+        return CHOICE_SETTINGS["approval.separate_approver"].default
     value = str(raw).strip().lower()
     return value if value in SEPARATE_APPROVER_MODES else "always"
 

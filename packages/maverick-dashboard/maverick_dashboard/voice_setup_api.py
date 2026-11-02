@@ -24,7 +24,7 @@ _ACTIVE = frozenset({"checking", "downloading", "cancelling"})
 def _target() -> dict:
     from maverick.tools.voice import _default_stt_backend
 
-    from .api import _voice_commands_enabled
+    from .voice_policy import voice_commands_enabled as _voice_commands_enabled
 
     cfg = voice_models._voice_cfg()
     name = voice_models.configured_model()
@@ -249,7 +249,7 @@ _warmup_lock = threading.Lock()
 def start_warmup(app) -> None:
     from maverick.tools.voice import warm_up_local_stt
 
-    from .api import _voice_commands_enabled
+    from .voice_policy import voice_commands_enabled as _voice_commands_enabled
 
     with _warmup_lock:
         existing = getattr(app.state, "voice_warmup_thread", None)

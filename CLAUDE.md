@@ -14,7 +14,7 @@ kernel, `maverick-core` (import name `maverick`), is a recursive multi-agent
 runtime for long-horizon work that runs under budget, sandbox and governance
 controls; the other packages build on it.
 
-- **Stack:** Python 3.10-3.12 uv-workspace monorepo with 8 pip packages: seven
+- **Stack:** Python 3.11-3.12 uv-workspace monorepo with 8 pip packages: seven
   under `packages/` (`maverick-core`, `maverick-shield`, `maverick-channels`,
   `maverick-evolve`, `maverick-dashboard`, `maverick-mcp`,
   `maverick-knowledge`) plus the setup wizard in `apps/installer-cli`. The
@@ -27,10 +27,9 @@ controls; the other packages build on it.
 ## Commands
 
 - **Setup:** `bash .devcontainer/post-create.sh` creates `.venv` and
-  editable-installs all 8 packages: core first with its dependencies, the rest
-  with `--no-deps` so pip does not try to resolve their `maverick-agent`
-  dependency from PyPI. It then installs the runtime dependencies the
-  `--no-deps` installs skip, plus the dev tools, including `pytest-xdist`,
+  editable-installs all 8 local packages together via the release cohort
+  installer, so pip resolves the declared runtime dependencies from the local
+  cohort. It then installs the dev tools, including `pytest-xdist`,
   `pyjwt[crypto]` (CI parity; `test_oidc` skips itself without it), `cffi` and
   `build`. Everything resolves under `PIP_CONSTRAINT=requirements/ci.txt`, as
   the CI jobs do, and the script also installs `pytest-timeout`, `sqlalchemy`
@@ -41,8 +40,8 @@ controls; the other packages build on it.
   (pytest-xdist, one worker per core, grouped by file), not bare `pytest`. CI
   runs this with `-m "not heavy_concurrency"` and then runs the
   `heavy_concurrency` tests serially (`.github/actions/test-shard/action.yml`).
-- **Lint:** `python -m ruff check .` and `python -m vulture` (no arguments; the
-  paths come from `[tool.vulture]` in `pyproject.toml`).
+- **Lint:** `python -m ruff check .`, `python -m mypy`, and `python -m vulture`
+  (no arguments; the paths come from `[tool.vulture]` in `pyproject.toml`).
 - **Build:** `python3 -m build --wheel` in each package directory (setup
   installs `build`).
 - **CLI smoke:** `maverick version`, `maverick doctor`.
@@ -102,7 +101,7 @@ controls; the other packages build on it.
 - CI also runs tests with `MAVERICK_TEST_SECURE_DEFAULT=1` (the production
   security posture): selected suites on pull requests, the whole suite in the
   merge queue and on `main`. Run affected tests that way too.
-- On a pull request the `test (3.10, n)` legs run only the test files
+- On a pull request the `test (3.11, n)` legs run only the test files
   `scripts/select_pr_tests.py` selects from the changed files (a kernel,
   `conftest.py`, requirements, `.github/` or `scripts/` change means the full
   suite; a package change means its tests plus every test naming its import
@@ -118,7 +117,7 @@ controls; the other packages build on it.
 Each of these fails the build (the `lint` job in `.github/workflows/ci.yml`):
 
 - A bare `import tomllib` at column 0 in `apps/`, `packages/` or `benchmarks/`.
-  Python 3.10 has no `tomllib`; use
+  Bootstrap utilities retain guarded imports even with the Python 3.11 floor; use
   `try: import tomllib` / `except ModuleNotFoundError: import tomli as tomllib`.
 - `shell=True` outside `maverick/sandbox/` and tests (the grep also matches the
   literal in comments). Route shell through `sandbox.exec()` (kernel rule 4).
@@ -163,8 +162,9 @@ Each of these fails the build (the `lint` job in `.github/workflows/ci.yml`):
   capped at 20, with 167 grandfathered `# noqa: C901` waivers in non-test code
   (`test_complexity_waivers_do_not_grow` pins that ceiling, so the backlog can
   only shrink); new code stays under the cap.
-- There is no mypy or pyright. Ruff is the only static gate, so do not add
-  type-only "fixes" expecting a checker to validate them.
+- Mypy checks only the small set of boundary modules named in `pyproject.toml`;
+  its strict gate does not check transitive imports. Expand the set deliberately
+  as interfaces gain annotations and behavioral tests.
 
 ### File structure and imports
 

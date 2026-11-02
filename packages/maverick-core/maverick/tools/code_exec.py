@@ -130,7 +130,12 @@ def code_exec_tool(agent) -> Tool:
             with execution_output_scope():
                 framed = await agent._run_tool(str(name), cargs)
             value = unframe_tool_output(framed)
-            if not framed.startswith("<tool_output ") or value.startswith("INDETERMINATE:"):
+            from ..tool_results import ToolResultState, ToolResultText, classify_tool_result
+
+            unknown = (classify_tool_result(framed) is ToolResultState.INDETERMINATE
+                       if isinstance(framed, ToolResultText)
+                       else value.startswith("INDETERMINATE:"))
+            if not framed.startswith("<tool_output ") or unknown:
                 return (
                     "INDETERMINATE: a declared tool did not provide a complete screened value. "
                     "Script withheld; reconcile prior tool calls and do not repeat them blindly."

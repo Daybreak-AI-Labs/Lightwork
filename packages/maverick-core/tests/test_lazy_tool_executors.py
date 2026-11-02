@@ -340,6 +340,28 @@ def test_resolved_governance_preserves_real_callable_provenance_and_binding(monk
     assert other_locals["tool"] is not left["tool"]
 
 
+@pytest.mark.parametrize(
+    ("user_id", "ambient", "expected"),
+    [
+        (None, "user:network", "user:network"),
+        ("  ", "user:network", "user:network"),
+        (" alice ", "user:network", "user:alice"),
+        ("user:bob", "user:network", "user:bob"),
+        (None, None, "anonymous"),
+    ],
+)
+def test_base_registry_retains_resolved_principal(tmp_path, user_id, ambient, expected):
+    from maverick.connections import bind_principal, current_principal
+    from maverick.sandbox import LocalBackend
+
+    with bind_principal(ambient):
+        registry = base_registry(SimpleNamespace(), LocalBackend(workdir=tmp_path),
+                                 user_id=user_id, _include_generated_tools=False)
+    registry.register(Tool("capture_principal", "Capture principal", {"type": "object"},
+                           lambda _: current_principal() or "anonymous"))
+    assert asyncio.run(registry.run("capture_principal", {})) == expected
+
+
 def test_registry_instances_bind_current_principal_and_tenant_per_call(monkeypatch):
     from maverick.connections import current_principal
     from maverick.paths import current_tenant_id, reset_tenant, set_tenant

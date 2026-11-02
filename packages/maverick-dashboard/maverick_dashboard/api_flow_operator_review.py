@@ -84,7 +84,7 @@ def _service(request: Request, flow_id: str, *, human=False):
     from maverick.flow import store
     from maverick.flow.operator_review import OperatorReviewService
 
-    from .api import _assert_flow_access, _require_flows
+    from .flows_api import _assert_flow_access, _require_flows
 
     actor = caller_principal(request)
     if not actor:

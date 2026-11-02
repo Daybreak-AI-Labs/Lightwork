@@ -353,9 +353,9 @@ def test_workbench_is_plain_language_with_lists_and_row_actions(client: TestClie
 def test_turned_off_module_shows_its_gate_instead_of_loaders(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, enabled: bool,
 ) -> None:
-    from maverick_dashboard import api
+    from maverick_dashboard import module_activation
 
-    monkeypatch.setattr(api, "module_activation_enabled", lambda _section: enabled)
+    monkeypatch.setattr(module_activation, "module_activation_enabled", lambda _section: enabled)
     text = client.get(ROUTE).text
     main = text[text.index('<div class="evidence-workbench"'):text.index("<noscript>")]
     assert f'data-module-enabled="{"true" if enabled else "false"}"' in main

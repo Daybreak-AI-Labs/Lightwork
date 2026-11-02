@@ -18,6 +18,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def _auth() -> dict[str, str]:
 
 def _get(path: str, params: dict | None = None) -> tuple[int, Any]:
     import httpx
-    r = httpx.get(f"{_API}{path}", params={**_auth(), **(params or {})},
+    r = _governed_sender(httpx.get)(f"{_API}{path}", params={**_auth(), **(params or {})},
                   timeout=30.0)
     try:
         return r.status_code, r.json()
@@ -67,7 +68,7 @@ def _get(path: str, params: dict | None = None) -> tuple[int, Any]:
 
 def _post(path: str, params: dict) -> tuple[int, Any]:
     import httpx
-    r = httpx.post(f"{_API}{path}", params={**_auth(), **params}, timeout=30.0)
+    r = _governed_sender(httpx.post)(f"{_API}{path}", params={**_auth(), **params}, timeout=30.0)
     try:
         return r.status_code, r.json()
     except ValueError:
@@ -76,7 +77,7 @@ def _post(path: str, params: dict) -> tuple[int, Any]:
 
 def _put(path: str, params: dict) -> tuple[int, Any]:
     import httpx
-    r = httpx.put(f"{_API}{path}", params={**_auth(), **params}, timeout=30.0)
+    r = _governed_sender(httpx.put)(f"{_API}{path}", params={**_auth(), **params}, timeout=30.0)
     try:
         return r.status_code, r.json()
     except ValueError:

@@ -323,6 +323,21 @@ def test_run_transcribe_local_end_to_end(monkeypatch, tmp_path):
     assert os.path.basename(seen["argv"][0]) == "whisper-cli"
 
 
+def test_transcript_starting_with_error_marker_remains_successful_data(monkeypatch, tmp_path):
+    from maverick import attachments
+    from maverick.tool_results import ToolResultState, classify_tool_result
+
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr(voice_mod, "_whisper_local", lambda _path, _lang: "ERROR: this is a spoken sentence")
+    audio = tmp_path / "clip.wav"
+    audio.write_bytes(b"RIFFfake")
+    output = voice_mod._run_transcribe({"source": str(audio), "backend": "local"})
+    assert output == "ERROR: this is a spoken sentence"
+    assert classify_tool_result(output) is ToolResultState.SUCCEEDED
+    monkeypatch.setattr(voice_mod, "_default_stt_backend", lambda: "local")
+    assert attachments._transcribe_media(audio) == "ERROR: this is a spoken sentence"
+
+
 # ---- _whisper_pywhispercpp -----------------------------------------------------
 
 class _FakeSegment:

@@ -21,6 +21,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ def _from_default() -> str:
 def _post(path: str, data: dict) -> tuple[int, Any]:
     import httpx
     sid, _t = _config()
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         f"https://api.twilio.com/2010-04-01/Accounts/{sid}{path}",
         headers={"Authorization": _basic_header(),
                  "Content-Type": "application/x-www-form-urlencoded"},
@@ -86,7 +87,7 @@ def _get(path: str, params: dict | None = None, lookups: bool = False) -> tuple[
     base = "https://lookups.twilio.com/v2" if lookups else (
         f"https://api.twilio.com/2010-04-01/Accounts/{sid}"
     )
-    r = httpx.get(f"{base}{path}", headers={"Authorization": _basic_header()},
+    r = _governed_sender(httpx.get)(f"{base}{path}", headers={"Authorization": _basic_header()},
                   params=params or {}, timeout=30.0)
     try:
         return r.status_code, r.json()

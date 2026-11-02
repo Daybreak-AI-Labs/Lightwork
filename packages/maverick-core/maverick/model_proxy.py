@@ -262,6 +262,9 @@ def forward(config: ProxyConfig, method: str, path: str,
         raise ValueError("proxy request body limit exceeded")
     if client is not None:
         # Explicit legacy buffered adapter for existing embedders/test clients.
+        from .governed_http import admit_client_request
+
+        admit_client_request(client, url)
         resp = client.request(method, url, headers=fwd_headers, content=body or b"",
                               timeout=min(timeout, config.total_seconds))
         if len(resp.content) > config.max_response_bytes:

@@ -98,7 +98,7 @@ def _module_off(section: str) -> bool:
     try:
         from maverick.config import load_config
 
-        from .api import _module_switch_enabled
+        from .module_activation import _module_switch_enabled
         return not _module_switch_enabled(load_config() or {}, section)
     except Exception:  # noqa: BLE001 -- the page's own status line still reports
         return False

@@ -123,13 +123,13 @@ def _replace_with_guard(
     records.append(record)
     try:
         setattr(owner, attribute, wrapper)
-    except Exception:
+    except Exception:  # failure-policy: fail_closed -- roll back and re-raise
         # A metaclass can reject one half of a sync/async pair.  Remove this
         # record immediately; the caller's transaction restores earlier ones.
         try:
             if getattr(owner, attribute) is wrapper:
                 setattr(owner, attribute, current)
-        except Exception:  # pragma: no cover - pathological metaclass
+        except Exception:  # failure-policy: fail_soft_with_audit -- restore logged
             log.exception(
                 "egress guard: failed to restore rejected patch %r.%s",
                 owner,
@@ -145,7 +145,7 @@ def _restore_record(record: tuple[Any, str, Any, Any]) -> None:
     owner, attribute, original, wrapper = record
     try:
         current = getattr(owner, attribute)
-    except Exception:  # pragma: no cover - exotic class teardown
+    except Exception:  # failure-policy: best_effort -- owner already unavailable
         return
     if current is wrapper or _is_guard_wrapper(
         current,
@@ -153,7 +153,7 @@ def _restore_record(record: tuple[Any, str, Any, Any]) -> None:
     ):
         try:
             setattr(owner, attribute, original)
-        except Exception:  # pragma: no cover - exotic immutable class
+        except Exception:  # failure-policy: fail_soft_with_audit -- restore logged
             log.exception(
                 "egress guard: could not restore %r.%s",
                 owner,
@@ -198,8 +198,9 @@ def _denied(url: str) -> str | None:
     try:
         from .enterprise import _host_of
         host = _host_of(url)
-    except Exception:  # failure-policy: best_effort
-        host = ""
+    except Exception:  # failure-policy: fail_closed -- host policy is unavailable
+        log.exception("egress guard: hostname parsing unavailable; refusing egress")
+        return "egress policy could not be evaluated, so the boundary stays closed"
     tenant_denied = False
     try:
         from .enterprise import egress_permitted
@@ -312,7 +313,7 @@ def _reaches_the_network(client: Any, request: Any) -> bool:
     """Whether this request will actually leave the process."""
     try:
         transport = client._transport_for_url(request.url)
-    except Exception:  # pragma: no cover - unknown client shape; fail closed
+    except Exception:  # failure-policy: fail_closed -- assume it reaches network
         return True
     return _is_network_transport(transport)
 
@@ -331,7 +332,7 @@ def _httpx_degraded_check(request: Any, *, client_name: str) -> None:
         from .enterprise import enterprise_enabled
 
         boundary_required = enterprise_enabled()
-    except Exception:  # pragma: no cover - enterprise_enabled is fail-closed
+    except Exception:  # failure-policy: fail_closed -- require boundary
         boundary_required = True
     if not boundary_required:
         return
@@ -342,7 +343,7 @@ def _httpx_degraded_check(request: Any, *, client_name: str) -> None:
         from .enterprise import _host_of
 
         host = _host_of(url) or url
-    except Exception:  # pragma: no cover - diagnostic only
+    except Exception:  # failure-policy: best_effort -- diagnostic label only
         pass
 
     # Record the compatibility refusal when possible. Failure to write this
@@ -575,7 +576,7 @@ class _PatchOnImport:
                 continue
             try:
                 spec = found(fullname, path, target)
-            except Exception:  # pragma: no cover - a broken finder is not ours
+            except Exception:  # failure-policy: best_effort -- try other finders
                 spec = None
             if spec is not None:
                 break
@@ -644,7 +645,7 @@ def _patch_target(name: str, module: Any) -> None:
     snapshot = _record_lengths()
     try:
         _TARGETS[name](module)
-    except Exception:
+    except Exception:  # failure-policy: fail_closed -- undo and re-raise
         _restore_since(snapshot)
         raise
 
@@ -678,6 +679,17 @@ def _teardown(*, clear_compatibility: bool = True) -> None:
     _installed = False
 
 
+def _patch_loaded_target(name: str) -> None:
+    """Guard a target that has already been imported, if present."""
+    module = sys.modules.get(name)
+    if module is None:
+        return
+    _patch_target(name, module)
+    _patched.add(name)
+    if name not in _HTTPX_FAMILIES:
+        _compatibility.pop(name, None)
+
+
 def install() -> bool:
     """Arm the guard. Idempotent; returns whether it is active.
 
@@ -697,12 +709,7 @@ def install() -> bool:
             # First cover everything already loaded.
             for name in _TARGETS:
                 failed_name = name
-                module = sys.modules.get(name)
-                if module is not None:
-                    _patch_target(name, module)
-                    _patched.add(name)
-                    if name not in _HTTPX_FAMILIES:
-                        _compatibility.pop(name, None)
+                _patch_loaded_target(name)
 
             # Then arm lazy imports. A second scan closes the interval between
             # the first scan and hook insertion for another importing thread.
@@ -711,13 +718,8 @@ def install() -> bool:
                 sys.meta_path.insert(0, _hook)
             for name in _TARGETS:
                 failed_name = name
-                module = sys.modules.get(name)
-                if module is not None:
-                    _patch_target(name, module)
-                    _patched.add(name)
-                    if name not in _HTTPX_FAMILIES:
-                        _compatibility.pop(name, None)
-        except Exception:
+                _patch_loaded_target(name)
+        except Exception:  # failure-policy: fail_closed -- tear down and re-raise
             failure = dict(
                 _compatibility.get(
                     failed_name,

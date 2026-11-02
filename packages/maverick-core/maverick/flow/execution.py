@@ -15,9 +15,7 @@ from __future__ import annotations
 import contextvars
 import copy
 import inspect
-import time
 from collections.abc import Callable
-from functools import wraps
 from typing import Any
 
 from ..tool_results import tool_result_failed
@@ -31,25 +29,40 @@ from .action_episodes import (
     native_completed,
     resume_capture,
 )
+from .approval_dispatch import ApprovalDispatch
+from .budgeting import (
+    _budget_gated,
+    _spend_tracked,
+)
+from .budgeting import (
+    _MeteredAgentResult as _MeteredAgentResult,
+)
+from .execution_plan import bind_execution_plan, pin_new_plan
+from .execution_trace import ExecutionTrace
 from .ir import Flow, FlowNode
-from .runner import (
-    PAUSED_STATUSES,
-    STATUS_BUDGET_LIMITED,
-    STATUS_CLAIMED,
+from .lifecycle import serialize_runs
+from .pause_snapshot import ApprovalPauseContext, build_human_pause
+from .resume_admission import prepare_saved_resume
+from .run_events import FlowBudgetExceeded
+from .run_state import (
+    STATUS_BUDGET_LIMITED as STATUS_BUDGET_LIMITED,
+)
+from .run_state import (
+    STATUS_CLAIMED as STATUS_CLAIMED,
+)
+from .run_state import (
     STATUS_COMPLETED,
     STATUS_FAILED,
     STATUS_INDETERMINATE,
-    STATUS_PAUSED_APPROVAL,
     STATUS_RESUMING,
     STATUS_RUNNING,
-    FlowApprovalStale,
-    FlowBudgetExceeded,
-    run_flow,
 )
+from .run_state import (
+    STATUS_PAUSED_APPROVAL as STATUS_PAUSED_APPROVAL,
+)
+from .runner import run_flow
 
 TRIGGER_NODE = "__trigger__"  # reserved node id under which a trigger's run-outcome is grounded
-
-_RESUMABLE = PAUSED_STATUSES
 
 
 class FlowNotResumable(ValueError):
@@ -84,67 +97,6 @@ ActionRunner = Callable[[str, dict, dict], "tuple[Any, float | None]"]
 
 
 DEFAULT_AGENT_BUDGET = 5.0   # legacy injected-runner reservation; production meters actual usage
-
-
-class _MeteredAgentResult(tuple):
-    """Keep the two-value executor contract with response-local spend."""
-
-    def __new__(cls, result, outcome, dollars):
-        value = super().__new__(cls, (result, outcome))
-        value.dollars = float(dollars)
-        return value
-
-
-def _budget_gated(agent_runner: AgentRunner, cap: float, per_call: float, spent: list) -> AgentRunner:
-    """Wrap an agent runner with a per-RUN aggregate spend ceiling. Each agent
-    node is reserved at its worst-case per-node budget (``per_call``) against a
-    shared, lock-guarded total; once the next reservation would exceed ``cap`` the
-    node is held instead of spawning another goal. This bounds fan-out spend --
-    a wide ``parallel`` or a long ``foreach`` can't multiply cost without a
-    ceiling. Conservative: it counts each node at its cap, so it never
-    under-counts real spend. Thread-safe for concurrent branches.
-
-    Production runners meter actual usage and accept the remaining allowance.
-    With an explicit aggregate cap they serialize agent admission, so parallel
-    children cannot each consume the same remainder. Injected legacy runners
-    retain their declared conservative reservation contract. A pre-dispatch
-    refusal is a control stop, with no business result or learning outcome."""
-    import threading
-    lock = threading.Lock()
-
-    def run(brief: str, data: dict, **kw) -> tuple:
-        with lock:
-            if getattr(agent_runner, "_meters_usage", False):
-                remaining = cap - spent[0]
-                if remaining <= 0:
-                    raise FlowBudgetExceeded(f"flow spending allowance reached (${cap:g}) before dispatch")
-                result = agent_runner(brief, data, allowance=remaining, **kw)
-                spent[0] += result.dollars
-                return result
-            if spent[0] + per_call > cap:
-                raise FlowBudgetExceeded(f"flow spending allowance reached (${cap:g}) before dispatch")
-            spent[0] += per_call
-        return agent_runner(brief, data, **kw)
-    return run
-
-
-def _spend_tracked(agent_runner: AgentRunner, per_call: float, spent: list) -> AgentRunner:
-    """Wrap a runner to accumulate reserved spend (``per_call`` per invocation)
-    into ``spent`` so the run's total cost can be persisted -- used when there is
-    NO ``max_dollars`` gate (the gate already tracks spend itself)."""
-    import threading
-    lock = threading.Lock()
-
-    def run(brief: str, data: dict, **kw) -> tuple:
-        if getattr(agent_runner, "_meters_usage", False):
-            result = agent_runner(brief, data, **kw)
-            with lock:
-                spent[0] += result.dollars
-            return result
-        with lock:
-            spent[0] += per_call
-        return agent_runner(brief, data, **kw)
-    return run
 
 
 # The node an agent runner is currently serving, set by _call_agent around the
@@ -201,54 +153,8 @@ def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float,
 
 
 def _serialize_runs(fn):
-    """Hold one durable run lock across state check, execution, and save.
-
-    Queue delivery is intentionally at-least-once.  Without this boundary two
-    workers can both load the same paused approval and both execute the approved
-    side effect before either publishes ``completed``.  The second worker now
-    observes the first worker's terminal state and receives FlowNotResumable.
-    """
-    @wraps(fn)
-    def guarded(flow: Flow, **kwargs):
-        resume_id = kwargs.get("resume_run_id")
-        run_id = resume_id or kwargs.get("run_id")
-        if not run_id:
-            return fn(flow, **kwargs)
-        with store.run_lock(str(run_id)):
-            if not resume_id:
-                current = store.load_run(str(run_id))
-                if current is not None and current.status == STATUS_RUNNING:
-                    # A previous worker crossed the durable execution boundary
-                    # and vanished.  Its last tool may have committed, so an
-                    # at-least-once delivery must quarantine rather than replay.
-                    current.status = STATUS_INDETERMINATE
-                    current.error = (
-                        current.error
-                        or "fresh run interrupted after execution began; external effects may have committed"
-                    )
-                    store.save_run(current)
-                    return current
-                if current is not None and current.status not in {"queued", STATUS_CLAIMED}:
-                    # At-least-once queue redelivery after the first attempt
-                    # published a terminal/pause state is a no-op.
-                    return current
-            try:
-                return fn(flow, **kwargs)
-            except BaseException as exc:
-                # If execution escaped after the durable resume claim, the
-                # external-effect boundary is unknowable.  Preserve that honest
-                # state and never let queue redelivery replay it automatically.
-                current = store.load_run(str(run_id))
-                if current is not None and current.status in {STATUS_RESUMING, STATUS_RUNNING}:
-                    current.status = STATUS_INDETERMINATE
-                    phase = "resume" if resume_id else "execution"
-                    current.error = (
-                        f"{phase} interrupted: {type(exc).__name__}: "
-                        f"{_safe_failure(exc)}"
-                    )
-                    store.save_run(current)
-                raise
-    return guarded
+    # Resolve the redactor at call time to preserve the public driver seam.
+    return serialize_runs(fn, safe_failure=lambda exc: _safe_failure(exc))
 
 
 @_serialize_runs
@@ -284,16 +190,6 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     inputs = copy.deepcopy(inputs)
     resume = None
     prior = None
-    definition_digest = ""
-    release_digest = ""
-    release_id = ""
-    definition_version = 0
-    definition_revision = ""
-    subflow_digests: dict[str, str | None] = {}
-    execution_channel = ""
-    execution_user_id = ""
-    allowed_suites: list[str] | None = None
-    has_pinned_plan = False
     approval_resume = False
     approval_actor = ""
     approval_submitted_inputs: dict = {}
@@ -303,152 +199,34 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     if budget_limit_dollars is not None and not resume_run_id:
         raise FlowNotResumable("a run allowance change requires a saved budget-held run")
     if resume_run_id:
-        prior = store.load_run(resume_run_id)
-        if prior is None:
-            raise ValueError(f"no such flow run {resume_run_id!r}")
-        # Only a paused run may be resumed -- or, with ``from_failure``, a FAILED
-        # run whose failing node was recorded (it re-enters AT that node with the
-        # data as of the failure, instead of re-running the whole flow). Without
-        # this guard, resuming a completed run re-executes the whole flow
-        # (duplicate side effects) and resuming a rejected run runs the very node
-        # a human rejected -- defeating the approval gate.
-        retryable_failure = (from_failure and prior.status in {STATUS_FAILED, STATUS_BUDGET_LIMITED}
-                             and bool(prior.cursor))
-        approval_resume = prior.status == STATUS_PAUSED_APPROVAL
-        if prior.status not in _RESUMABLE and not retryable_failure:
-            raise FlowNotResumable(
-                f"run {resume_run_id!r} is not paused (status {prior.status!r})"
-                + ("; it has no failure cursor to retry from"
-                   if from_failure and prior.status == STATUS_FAILED else ""))
-        if budget_limit_dollars is not None:
-            import math
-            if (
-                prior.status != STATUS_BUDGET_LIMITED or not from_failure
-                or isinstance(budget_limit_dollars, bool)
-                or not math.isfinite(budget_limit_dollars)
-                or budget_limit_dollars <= max(
-                    prior.cost_dollars, prior.budget_limit_dollars or 0.0,
-                )
-            ):
-                raise FlowNotResumable("a budget-held run requires a larger finite total allowance")
-        # Resume the immutable graph captured at run start.  This makes an
-        # approval meaningful: an edit made while the run is paused cannot swap
-        # the reviewed downstream action (or a referenced child flow) for a new
-        # one.  Runs created before snapshots existed retain legacy behaviour.
-        if prior.definition_digest:
-            flow = store.load_flow_snapshot(prior.definition_digest)
-            definition_digest = prior.definition_digest
-            release_digest = prior.release_digest
-            release_id = prior.release_id
-            definition_version = prior.definition_version
-            definition_revision = prior.definition_revision or flow.revision
-            subflow_digests = dict(prior.subflow_digests)
-            has_pinned_plan = True
-        execution_channel = prior.execution_channel
-        execution_user_id = prior.execution_user_id
-        allowed_suites = (
-            list(prior.allowed_suites) if prior.allowed_suites is not None else None
+        admission = prepare_saved_resume(
+            flow, run_id=resume_run_id, owner=owner, inputs=inputs,
+            from_failure=from_failure, budget_limit_dollars=budget_limit_dollars,
+            decision=decision, decided_by=decided_by, expired=expired,
+            approval_binding=approval_binding_sha256, expiry_binding=approval_expiry_binding_sha256,
+            actor_matches=_approval_actor_matches, not_resumable=FlowNotResumable,
         )
+        prior, flow, owner, resume = admission.prior, admission.flow, admission.owner, admission.resume
+        submitted_inputs = admission.submitted_inputs
+        approval_resume = admission.approval_resume
+        approval_actor = admission.approval_actor
+        approval_check_binding = admission.approval_binding
+        approval_check_expired = admission.approval_expired
+        if approval_resume:
+            approval_submitted_inputs = submitted_inputs
         run_id = prior.run_id
-        owner = owner or prior.owner
-        # Free-form human input merges into the run data on resume, so an approval
-        # can also COLLECT data (a corrected value, a note) -- not just yes/no.
-        # The merge is append-only for existing run data: a resume caller must not
-        # be able to change values that earlier nodes produced and that a human
-        # may have reviewed at the pause. When the paused node declares a `form`,
-        # only its declared field names are accepted as the server-side allowlist;
-        # form-less nodes keep free-form *new* inputs for compatibility.
-        submitted_inputs = dict(inputs or {})
-        resume_data = dict(prior.data)
-        if inputs:
-            paused = flow.node(prior.cursor) if prior.cursor else None
-            declared = [str(f.get("name")) for f in getattr(paused, "form", None) or []
-                        if isinstance(f, dict) and f.get("name")]
-            allowed = set(declared) if declared else set(inputs)
-            inputs = {k: v for k, v in inputs.items()
-                      if k in allowed and k not in resume_data}
-            resume_data.update(inputs)
-        resume = {"node_id": prior.cursor, "data": resume_data}
-        if retryable_failure:
-            resume["rerun"] = True
-            if prior.continuation:
-                resume["continuation"] = prior.continuation
-        elif prior.status == STATUS_PAUSED_APPROVAL:
-            # `expired` rides outside the human-verdict string. The dashboard
-            # worker validates its bound scheduler reservation and due time
-            # immediately before calling this execution boundary.
-            if expired:
-                if decision or decided_by or submitted_inputs:
-                    raise ValueError("approval expiry payload is invalid")
-                approval_submitted_inputs = submitted_inputs
-                approval_check_binding = approval_expiry_binding_sha256
-                approval_check_expired = True
-                resume["expired"] = True
-            else:
-                verdict = str(decision or "").strip()
-                paused = flow.node(prior.cursor) if prior.cursor else None
-                allowed_verdicts = {"approved", "rejected"}
-                if paused is not None:
-                    allowed_verdicts.update(str(v) for v in paused.choices)
-                if flow.recipe_teaching is not None and prior.cursor == "teaching_review":
-                    # Selecting a continuation is distinct from approving it.
-                    # Refuse generic approval while retaining the current pause.
-                    allowed_verdicts = {"route:0", "route:1", "rejected"}
-                if not verdict or verdict not in allowed_verdicts:
-                    raise ValueError("an explicit valid approval decision is required")
-                approval_actor = str(decided_by or "").strip()
-                if not approval_actor:
-                    raise ValueError("an attributable approver identity is required")
-                assignee = str(
-                    (prior.human or {}).get("assignee")
-                    or (paused.assignee if paused is not None else "")
-                    or ""
-                )
-                if not _approval_actor_matches(approval_actor, assignee):
-                    raise ValueError("the approver is not the declared assignee")
-                approval_submitted_inputs = submitted_inputs
-                approval_check_binding = approval_binding_sha256
-                resume["decision"] = verdict
     rid = run_id or store.new_run_id()
     # A fresh run may have a queued placeholder (saved at enqueue with the
     # idempotency key + original inputs) -- preserve those instead of resetting.
     placeholder = store.load_run(rid) if (run_id and not resume_run_id) else None
-    if placeholder is not None and placeholder.definition_digest:
-        flow = store.load_flow_snapshot(placeholder.definition_digest)
-        definition_digest = placeholder.definition_digest
-        release_digest = placeholder.release_digest
-        release_id = placeholder.release_id
-        definition_version = placeholder.definition_version
-        definition_revision = placeholder.definition_revision or flow.revision
-        subflow_digests = dict(placeholder.subflow_digests)
-        has_pinned_plan = True
-    if placeholder is not None:
-        execution_channel = placeholder.execution_channel
-        execution_user_id = placeholder.execution_user_id
-        allowed_suites = (
-            list(placeholder.allowed_suites)
-            if placeholder.allowed_suites is not None else None
-        )
-    if has_pinned_plan:
-        # Durable runs created before owner-bound snapshots were introduced may
-        # already contain a crafted cross-user child manifest.  Revalidate the
-        # immutable objects before any node executor is reached.
-        expected_flow_id = (
-            prior.flow_id
-            if prior is not None
-            else placeholder.flow_id
-            if placeholder is not None
-            else flow.id
-        )
-        if flow.id != expected_flow_id:
-            raise store.FlowSnapshotError(
-                "flow snapshot identity does not match the durable run"
-            )
-        store.validate_snapshot_bundle_owners(flow, subflow_digests)
-    plan_errors = flow.validate()
-    if plan_errors:
-        raise ValueError(
-            "invalid flow execution plan: " + "; ".join(plan_errors))
+    plan = bind_execution_plan(flow, prior=prior, placeholder=placeholder)
+    flow = plan.flow
+    # This flag denotes a previously persisted plan. Legacy resumed runs may
+    # still need the historical subflow loader after their new snapshot is made.
+    has_pinned_plan = plan.pinned
+    execution_channel = plan.execution_channel
+    execution_user_id = plan.execution_user_id
+    allowed_suites = plan.allowed_suites
     if approval_resume and prior is not None:
         from .approvals import require_current_paused_operation
 
@@ -467,57 +245,27 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             expired=approval_check_expired,
             decision_attestation=approval_decision_attestation,
         )
-    if not has_pinned_plan:
-        definition_digest, definition_version, subflow_digests = (
-            store.snapshot_flow_bundle(flow))
-        release_digest = store.release_digest_for(
-            definition_digest, subflow_digests,
-        )
-        release_id = release_digest
-        definition_revision = flow.revision
+    plan = pin_new_plan(plan)
+    definition_digest = plan.definition_digest
+    release_digest = plan.release_digest
+    release_id = plan.release_id
+    definition_version = plan.definition_version
+    definition_revision = plan.definition_revision
+    subflow_digests = dict(plan.subflow_digests or {})
     evidence_cohort = store.definition_cohort(
         definition_revision or flow.revision,
         definition_version or flow.version,
     )
     # Per-node run trace for the designer overlay. Seeded from the prior run on
     # resume so the pre-pause nodes' status survives across the pause.
-    node_states: dict = dict(prior.nodes) if (resume_run_id and prior) else {}
-    # Wall-clock per work node (accumulated across retries), measured at the
-    # executor seam so the pure runner's on_node contract stays unchanged.
-    durations: dict[str, float] = {}
-    # A concurrent foreach runs the SAME body node ids on several threads through
-    # this shared sink; guard the trace mutations so the duration read-modify-
-    # write can't lose updates.
-    import threading as _threading
-    trace_lock = _threading.Lock()
-
-    def _timed(node_id: str, fn, *args):
-        import time as _time
-        t0 = _time.perf_counter()
-        try:
-            return fn(*args)
-        finally:
-            dt = _time.perf_counter() - t0
-            with trace_lock:
-                durations[node_id] = durations.get(node_id, 0.0) + dt
-
-    def _on_node(node: FlowNode, status: str, outcome: float | None) -> None:
-        if execution_guard is not None:
-            execution_guard()
-        with trace_lock:
-            entry: dict = {"status": status, "outcome": outcome}
-            if node.id in durations:
-                entry["seconds"] = round(durations[node.id], 3)
-            node_states[node.id] = entry
-        if outcome is not None and record_outcomes:
-            node_outcomes.record(
-                flow.id,
-                node.id,
-                node.kind,
-                outcome,
-                revision=definition_revision or flow.revision,
-                cohort=evidence_cohort,
-            )
+    node_trace = ExecutionTrace(
+        flow_id=flow.id,
+        revision=definition_revision or flow.revision,
+        cohort=evidence_cohort,
+        initial_states=prior.nodes if (resume_run_id and prior) else {},
+        record_outcomes=record_outcomes,
+        execution_guard=execution_guard,
+    )
 
     # Origin (what fired this run) comes from the queued placeholder when present,
     # else the caller's argument -- carried across a resume from the prior run.
@@ -599,60 +347,24 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         prior.status = STATUS_RESUMING
         store.save_run(prior)
 
-    approval_effect_claimed = False
-    approval_effect_claim_lock = _threading.Lock()
-
-    def _dispatch_action(node: FlowNode, params: dict, action_data: dict):
-        nonlocal approval_effect_claimed
-        if not approval_resume or approval_snapshot is None:
-            return action_runner(node.tool, params, action_data)
-
-        from ..approval_cards import ApprovalCardError
-        from ..authority_effects import authority_effect_fence
-        from .approvals import require_current_paused_operation
-
-        # Authority mutations and the provider boundary share this fence.  A
-        # mutation that wins is observed by the final validation; one that loses
-        # cannot land between validation and dispatch.  The durable resume claim
-        # is also made here, so a rejection before the first effect leaves the
-        # run paused for a fresh human review while a later rejection is honestly
-        # quarantined as indeterminate by ``_serialize_runs``.
-        with authority_effect_fence():
-            try:
-                require_current_paused_operation(
-                    approval_snapshot,
-                    flow,
-                    inputs=approval_submitted_inputs,
-                    expected_binding=approval_check_binding,
-                    authority_binding_sha256=approval_authority_binding_sha256,
-                    decision=str(resume.get("decision") or ""),
-                    decided_by=approval_actor,
-                    expired=approval_check_expired,
-                    decision_attestation=approval_decision_attestation,
-                )
-            except ApprovalCardError as exc:
-                raise FlowApprovalStale(
-                    "Approval authority changed before execution. Review the current operation again."
-                ) from exc
-            with approval_effect_claim_lock:
-                if not approval_effect_claimed:
-                    prior.status = STATUS_RESUMING
-                    if not expired:
-                        prior.decided_by = approval_actor
-                    store.save_run(prior)
-                    approval_effect_claimed = True
-            return action_runner(node.tool, params, action_data)
+    dispatch_action = ApprovalDispatch(
+        action_runner=action_runner, flow=flow, prior=prior, snapshot=approval_snapshot,
+        approval_resume=approval_resume, submitted_inputs=approval_submitted_inputs,
+        binding=approval_check_binding, authority_binding=approval_authority_binding_sha256,
+        decision=str((resume or {}).get("decision") or ""), actor=approval_actor,
+        expired=approval_check_expired, decision_attestation=approval_decision_attestation,
+    )
 
     def _run_action(node: FlowNode, params: dict, action_data: dict):
         from ..plugin_execution_pins import flow_scope
 
         with action_capture_scope(episode_capture, node), flow_scope(rid, owner, definition_revision or flow.revision):
-            return _dispatch_action(node, params, action_data)
+            return dispatch_action(node, params, action_data)
 
     res = run_flow(
         flow,
         run_id=rid,
-        agent_fn=lambda node, brief, d: _timed(node.id, lambda: _call_agent(
+        agent_fn=lambda node, brief, d: node_trace.timed(node.id, lambda: _call_agent(
             agent_runner,
             brief,
             d,
@@ -663,10 +375,10 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             cohort=evidence_cohort,
             run_id=rid,
         )),
-        action_fn=lambda node, params, d: _timed(
+        action_fn=lambda node, params, d: node_trace.timed(
             node.id, lambda: _run_action(node, params, d)
         ),
-        approve_fn=approve_fn, data=data, resume=resume, on_node=_on_node, now=now,
+        approve_fn=approve_fn, data=data, resume=resume, on_node=node_trace.on_node, now=now,
         # A subflow node resolves to another SAVED flow; the runner's flow_stack
         # guards against a cyclic reference (this loader stays a plain lookup).
         resolve_flow=_resolve_pinned_flow,
@@ -684,94 +396,14 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             cohort=evidence_cohort,
         )
 
-    # Snapshot the paused human task's declared UI (choices/form/assignee) onto
-    # the run, like `prompt` -- the viewer must render what the node said AT
-    # PAUSE time, not whatever the flow definition says by the time a human looks.
-    human: dict = {}
-    if res.status == STATUS_PAUSED_APPROVAL and res.cursor:
-        paused_node = flow.node(res.cursor)
-        if paused_node is not None:
-            from ..approval_cards import build_approval_card, digest
-            from .approvals import approval_card_presentation, current_flow_runtime_authority
-
-            next_node = flow.node(paused_node.next) if paused_node.next else None
-            continuation = next_node.to_dict() if next_node is not None else {
-                "kind": "complete", "id": "end",
-            }
-            presentation = approval_card_presentation(
-                flow, paused_node, next_node, res.prompt,
-            )
-            expiry = (
-                float(res.resume_at)
-                if res.resume_at is not None
-                else time.time() + 7 * 24 * 3600
-            )
-            from .payloads import SCHEMA as data_format
-            from .payloads import approval_data
-
-            persisted_data = approval_data(res.data or {})
-            runtime_authority = current_flow_runtime_authority(
-                owner=str(owner or ""),
-                execution_user_id=str(execution_user_id or ""),
-                execution_channel=str(execution_channel or ""),
-                allowed_suites=allowed_suites,
-            )
-            approval_card = build_approval_card(
-                action="flow.resume",
-                summary=res.prompt or f"Resume {flow.name or flow.id}",
-                target_label=presentation["target_label"],
-                target={
-                    "flow_id": flow.id,
-                    "pause_node": paused_node.id,
-                    "continuation": continuation,
-                },
-                parameters={"data": persisted_data, "continuation": continuation},
-                parameter_summary=presentation["parameter_summary"],
-                actor=owner or "local:operator",
-                workspace=runtime_authority["workspace"],
-                role=runtime_authority["role"],
-                authority_versions={
-                    "definition_digest": definition_digest,
-                    "release_digest": release_digest,
-                    "release_id": release_id,
-                    "execution_principal_sha256": digest(
-                        execution_user_id or owner or "local:operator"
-                    ),
-                    "allowed_suites_sha256": digest(allowed_suites),
-                    "runtime_authority_sha256": runtime_authority[
-                        "authority_sha256"
-                    ],
-                },
-                input_versions={
-                    "run_data_format": data_format,
-                    "run_data_sha256": digest(persisted_data),
-                    "definition_revision": definition_revision or flow.revision,
-                },
-                credential_versions={
-                    "execution_channel": execution_channel or "local",
-                    "inventory_sha256": runtime_authority[
-                        "credential_inventory_sha256"
-                    ],
-                },
-                budget={
-                    "currency": "USD",
-                    "run_limit_dollars": run_budget_limit or "configured runtime limit",
-                    "reserved_so_far_dollars": round(spent[0], 4),
-                    "authority_sha256": runtime_authority[
-                        "budget_authority_sha256"
-                    ],
-                },
-                expires_at=expiry,
-                known_effects=presentation["known_effects"],
-                unresolved_assumptions=presentation["unresolved_assumptions"],
-                before=presentation["before"],
-                after=presentation["after"],
-                irreversible=bool(next_node is not None and next_node.kind == "action"),
-            )
-            human = {"choices": list(paused_node.choices),
-                     "assignee": paused_node.assignee,
-                     "form": [dict(f) for f in paused_node.form],
-                     "approval_card": approval_card}
+    human = build_human_pause(ApprovalPauseContext(
+        flow=flow, result=res, owner=owner,
+        execution_user_id=execution_user_id, execution_channel=execution_channel,
+        allowed_suites=allowed_suites, definition_digest=definition_digest,
+        release_digest=release_digest, release_id=release_id,
+        definition_revision=definition_revision, run_budget_limit=run_budget_limit,
+        cost_dollars=spent[0],
+    ))
     run = store.FlowRun(
         run_id=rid, flow_id=flow.id, status=res.status, data=res.data,
         cursor=res.cursor, resume_at=res.resume_at, prompt=res.prompt,
@@ -786,7 +418,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         ),
         created=(prior.created if resume_run_id and prior
                  else (placeholder.created if placeholder else 0.0)),
-        nodes=node_states,
+        nodes=node_trace.states,
         # Keep the original trigger payload (from the queued placeholder or this
         # fresh data) / carry it across a resume, so a failed run can be retried
         # from scratch with the same inputs; carry the idempotency key too.
@@ -1083,7 +715,7 @@ def default_action_runner(
             # tenant data.  The caller and signed audit row need the failure
             # class, not the exception's attacker-controlled text.
             result = f"ERROR: tool execution raised {type(e).__name__}"
-        if isinstance(result, str) and result.startswith("ERROR: "):
+        if isinstance(result, str) and tool_result_failed(result) and result.startswith("ERROR: "):
             # ToolRegistry converts connector exceptions to
             # ``ERROR: ExceptionType: raw message`` instead of raising them.
             # Strip that raw message at this outer trust boundary too.
@@ -1093,7 +725,14 @@ def default_action_runner(
                 and exception_name.replace("_", "").isalnum()
                 and exception_name.endswith(("Error", "Exception"))
             ):
-                result = f"ERROR: tool execution raised {exception_name}"
+                from ..tool_results import ToolResultText, classify_tool_result
+
+                state = classify_tool_result(result)
+                cleaned = f"ERROR: tool execution raised {exception_name}"
+                # A redacted preview must retain explicit unknown-effect or
+                # refusal state, even when the sanitized text reads ERROR.
+                result = (ToolResultText(cleaned, state)
+                          if classify_tool_result(cleaned) is not state else cleaned)
         ok = not tool_result_failed(result)
         if authorized:
             # Keep result auditing outside the tool-dispatch try block: a strict

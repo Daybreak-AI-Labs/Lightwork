@@ -236,6 +236,9 @@ class N8nImporter:
                 params = {"limit": 100}
                 if cursor:
                     params["cursor"] = cursor
+                if self.request is None:
+                    from ..governed_http import admit_client_request
+                    admit_client_request(client, f"{self.base_url}/api/v1/workflows")
                 r = (self.request or client.get)(
                     f"{self.base_url}/api/v1/workflows",
                     headers={"X-N8N-API-KEY": self.api_key, "Accept": "application/json"},

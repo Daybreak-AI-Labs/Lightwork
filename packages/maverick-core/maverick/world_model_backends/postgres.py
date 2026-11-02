@@ -1158,14 +1158,31 @@ def _dec_goal_row(row) -> PGGoal:
     (title / description / result). Reuses the SQLite backend's field codec so
     sealing semantics (legacy-plaintext passthrough, strict-mode withhold) are
     identical across backends. No-op when at-rest encryption is off."""
+    return _goal_from_decoded_row(row, _unseal(row[2]), _unseal(row[3]), _unseal(row[8]))
+
+
+def _goal_from_decoded_row(row, title, description, result) -> PGGoal:
     return PGGoal(
-        row[0], row[1], _unseal(row[2]), _unseal(row[3]), row[4],
-        row[5], row[6], row[7], _unseal(row[8]),
+        row[0], row[1], title, description, row[4],
+        row[5], row[6], row[7], result,
         str(row[9] or "") if len(row) > 9 else "",
         str(row[10] or "") if len(row) > 10 else "",
         str(row[11] or "") if len(row) > 11 else "",
         (int(row[12]) if row[12] is not None else None) if len(row) > 12 else None,
     )
+
+
+def _dec_goal_rows(rows) -> list[PGGoal]:
+    """Decode a page with the same shared at-rest policy as SQLite."""
+    if not rows:
+        return []
+    from ..world_model import _dec_fields
+
+    decoded = iter(_dec_fields([value for row in rows for value in (row[2], row[3], row[8])]))
+    return [
+        _goal_from_decoded_row(row, next(decoded), next(decoded), next(decoded))
+        for row in rows
+    ]
 
 
 def _dec_approval_row(r):
@@ -1174,7 +1191,7 @@ def _dec_approval_row(r):
     action, risk, scope, detail, provenance, status, requested_at, decided_at,
     claimed_by, claimed_at, decided_by, approvals_required, requested_by,
     goal_id, department, undo_hold."""
-    from ..world_model import Approval
+    from ..world_records import Approval
     return Approval(r[0], _unseal(r[1]), r[2], _unseal(r[3]), _unseal(r[4]),
                     r[5], r[6], r[7], r[8], r[9], r[10], r[11],
                     int(r[12]) if len(r) > 12 and r[12] is not None else 1,
@@ -1185,7 +1202,7 @@ def _dec_approval_row(r):
 
 
 def _dec_approval_audit_row(r):
-    from ..world_model import ApprovalAuditEvent
+    from ..world_records import ApprovalAuditEvent
 
     return ApprovalAuditEvent(
         event_id=str(r[0]),
@@ -1201,7 +1218,7 @@ def _dec_approval_audit_row(r):
 def _dec_question_row(r):
     """Build a Question, unsealing the question text and the answer. Row order:
     id, goal_id, question, asked_at, answer, answered_at."""
-    from ..world_model import Question
+    from ..world_records import Question
     return Question(r[0], r[1], _unseal(r[2]), r[3], _unseal(r[4]), r[5])
 
 
@@ -1712,6 +1729,32 @@ class PostgresWorldModel:
             return None
         return _dec_goal_row(row)
 
+    def get_goals(self, goal_ids) -> dict[int, PGGoal]:
+        """Read existing goals in batches under the current tenant scope.
+
+        This follows the SQLite batch contract and keeps the same field
+        decoding and tenant predicate as :meth:`get_goal`. Chunking bounds the
+        array sent to PostgreSQL even when a caller supplies a large iterable.
+        """
+        ids = sorted({int(goal_id) for goal_id in goal_ids})
+        if not ids:
+            return {}
+        scope, scope_params = _tenant_scope()
+        sql = (
+            "SELECT id, parent_id, title, description, status, "
+            "created_at, updated_at, deadline, result, owner, execution_principal, "
+            "domain, project_id FROM goals WHERE id = ANY(%s)"
+        )
+        if scope:
+            sql += " AND " + scope
+        found: dict[int, PGGoal] = {}
+        with self._tx() as cur:
+            for start in range(0, len(ids), 500):
+                cur.execute(sql, (ids[start:start + 500], *scope_params))
+                for goal in _dec_goal_rows(cur.fetchall()):
+                    found[goal.id] = goal
+        return found
+
     def set_goal_status(self, goal_id: int, status: str, *, result: str | None = None) -> None:
         # Match SQLite's monotonically advancing optimistic review version.
         # GREATEST is evaluated against the row under the UPDATE lock, not a
@@ -1782,6 +1825,21 @@ class PostgresWorldModel:
                 cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
         if legacy_refused:
             raise LegacyEventGoalHeld("Earlier event request held for review")
+
+    def block_pending_goal(self, goal_id: int, *, result: str) -> bool:
+        """Atomically block a pending goal in the active tenant only."""
+        frag, fparams = _mutation_tenant_scope()
+        sql = (
+            "UPDATE goals SET status='blocked', completed_at=NULL, "
+            "updated_at=GREATEST(updated_at + 0.000001, %s), result=%s "
+            "WHERE id=%s AND status='pending' AND " + frag
+        )
+        with self._tx() as cur:
+            cur.execute(sql, tuple([time.time(), _seal(result), int(goal_id), *fparams]))
+            changed = cur.rowcount == 1
+            if changed:
+                cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
+            return changed
 
     def block_goal_admission(self, goal_id: int, *, result: str) -> bool:
         """Refuse only an exact-tenant, non-terminal goal before dispatch."""
@@ -3220,7 +3278,7 @@ class PostgresWorldModel:
         predicates are cumulative, so an owner filter can never widen the
         active tenant boundary.
         """
-        from ..world_model import EpisodeSpend
+        from ..world_records import EpisodeSpend
         cols = (
             "e.id, e.goal_id, e.started_at, e.ended_at, e.outcome, "
             "COALESCE(e.cost_dollars, 0), COALESCE(e.input_tokens, 0), "
@@ -3373,7 +3431,7 @@ class PostgresWorldModel:
         return int(row[0])
 
     def goal_events(self, goal_id: int, since_id: int = 0, limit: int = 200) -> list:
-        from ..world_model import GoalEvent
+        from ..world_records import GoalEvent
         frag, fparams = _tenant_scope("g.tenant_id")
         table = "goal_events ge"
         if frag:
@@ -3395,7 +3453,7 @@ class PostgresWorldModel:
         return [GoalEvent(r[0], r[1], r[2], r[3], _unseal(r[4]), r[5]) for r in rows]
 
     def recent_goal_events(self, goal_id: int, limit: int = 200) -> list:
-        from ..world_model import GoalEvent
+        from ..world_records import GoalEvent
         frag, fparams = _tenant_scope("g.tenant_id")
         table = "goal_events ge"
         scope = ""
@@ -3684,7 +3742,7 @@ class PostgresWorldModel:
         temporal`` retained history. Mirrors the SQLite backend."""
         if not token:
             return {}
-        from ..world_model import FactVersion
+        from ..world_records import FactVersion
         prefix = f"user:{token}:"
         frag, params = _tenant_scope()
         tenant = _active_tenant()
@@ -3763,7 +3821,7 @@ class PostgresWorldModel:
                      owned_only: bool = False) -> list:
         """Every recorded version of ``key``, newest first (requires ``[memory]
         temporal``). The row whose ``valid_to is None`` is the current value."""
-        from ..world_model import FactVersion
+        from ..world_records import FactVersion
         frag, params = _mutation_tenant_scope() if owned_only else _tenant_scope()
         tenant = _active_tenant()
         row_limit = max(1, int(limit))
@@ -4400,7 +4458,8 @@ class PostgresWorldModel:
         if not approver:
             return None
 
-        from ..world_model import ApprovalAuditEvent, _approval_audit_event_id
+        from ..world_model import _approval_audit_event_id
+        from ..world_records import ApprovalAuditEvent
 
         tenant = _active_tenant()
         approval_scope, approval_params = _tenant_scope()
@@ -4862,7 +4921,7 @@ class PostgresWorldModel:
     def get_or_create_conversation(self, channel: str, user_id: str):
         """Idempotent per (channel, user_id); bumps last_seen each call so
         prune_conversations can retire idle ones. Mirrors SQLite."""
-        from ..world_model import Conversation
+        from ..world_records import Conversation
         now = time.time()
         tenant = _active_tenant()
         frag, params = _tenant_scope()
@@ -4922,7 +4981,7 @@ class PostgresWorldModel:
     def recent_turns(self, conversation_id: int, limit: int = 20) -> list:
         """Most recent N turns in chronological (ascending) order, ready to feed
         into a chat-format prompt. Mirrors SQLite."""
-        from ..world_model import Turn
+        from ..world_records import Turn
         frag, fparams = _tenant_scope("c.tenant_id")
         table = "turns t"
         scope = ""
@@ -4943,7 +5002,7 @@ class PostgresWorldModel:
                               for r in rows]))
 
     def list_conversations(self, channel: str | None = None) -> list:
-        from ..world_model import Conversation
+        from ..world_records import Conversation
         frag, params = _tenant_scope()
         sql = "SELECT id, channel, user_id, created_at, last_seen FROM conversations"
         conds: list[str] = []
@@ -5493,7 +5552,7 @@ class PostgresWorldModel:
         )[0]
 
     def list_attachments(self, goal_id: int) -> list:
-        from ..world_model import Attachment
+        from ..world_records import Attachment
         frag, fparams = _tenant_scope("g.tenant_id")
         table = "attachments a"
         if frag:

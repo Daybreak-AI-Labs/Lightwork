@@ -38,6 +38,8 @@ def task_actions(tmp_path, monkeypatch):
     monkeypatch.setattr(draft_api, "context_for", lambda request: "current-workspace")
     monkeypatch.setattr(actions, "context_for", lambda request: "current-workspace")
     monkeypatch.setattr(api, "_world", lambda: world)
+    from maverick_dashboard import _shared
+    monkeypatch.setattr(_shared, "_world", lambda: world)
     monkeypatch.setattr(app, "_world", lambda: world)
     monkeypatch.setattr(api, "require_permission", lambda *args: None)
     monkeypatch.setattr(api, "require_provider_or_400", lambda: None)

@@ -47,10 +47,16 @@ run() {  # run "<name>" <command...>
 echo "== ruff =="
 run "ruff check ." python -m ruff check .
 
+echo "== mypy (selected boundaries) =="
+run "mypy" python -m mypy
+
+echo "== standalone demo support =="
+run "standalone demo support" python scripts/sync_standalone_support.py --check
+
 echo "== vulture (dead code) =="
 run "vulture" python -m vulture
 
-echo "== bare 'import tomllib' (needs the 3.10 tomli fallback) =="
+echo "== bare 'import tomllib' (portable bootstrap convention) =="
 if grep -rn --include='*.py' -E '^import[[:space:]]+tomllib([[:space:]]|$)' apps packages benchmarks; then
   echo "  FAIL bare 'import tomllib' (use the try/except tomli fallback)"; fail=1
 else

@@ -18,7 +18,8 @@ from .product_errors import next_action, product_error
 
 
 def current(request, goal_id):
-    from .api import _world, assert_goal_access, require_permission
+    from ._shared import _world
+    from .api import assert_goal_access, require_permission
     require_permission(request, "operate")
     world = _world()
     goal = world.get_goal(goal_id)

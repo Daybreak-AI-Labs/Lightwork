@@ -263,8 +263,10 @@ async def _exchange_code_for_tokens(
     # OIDC login is optional, and importing the route must remain side-effect
     # free when the feature is disabled.
     import httpx
+    from maverick.governed_http import admit_client_request
 
     async with httpx.AsyncClient(timeout=10.0) as client:
+        admit_client_request(client, token_endpoint)
         token_resp = await client.post(
             token_endpoint,
             data={

@@ -215,7 +215,7 @@ def _store(ops, tenant_id: str):
 def _actor_binding(request: Request) -> tuple[str, str]:
     """Bind review authority to the authenticated server-side actor."""
 
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
 
     actor = _request_actor(request)
     actor_sha = hashlib.sha256(actor.encode("utf-8")).hexdigest()

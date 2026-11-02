@@ -225,8 +225,8 @@ def _source_guard(request, body, proposal):
 def build(request, body):
     from maverick.audit import EventKind
 
-    from .api import _save_flow_definition
     from .api_schemas import FlowSaveIn
+    from .flows_api import _save_flow_definition
 
     authority(request, body.context, write=True)
     if not body.acknowledge_draft_storage:

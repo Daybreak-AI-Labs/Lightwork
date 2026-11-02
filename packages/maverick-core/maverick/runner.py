@@ -29,7 +29,9 @@ import math
 import os
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -51,6 +53,139 @@ class GoalRunUnavailable:
 
 def _unavailable_goal_run(reason, *, detailed_outcome: bool):
     return GoalRunUnavailable(reason) if detailed_outcome else None
+
+
+class DispatchState(str, Enum):
+    """What a dispatcher reported about submission, not ownership of effects."""
+
+    QUEUED = "queued"
+    REPORTED = "reported"
+    NOT_ACCEPTED = "not_accepted"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class DispatchObservation:
+    """Immutable dispatch result with no implied cancellation guarantee.
+
+    A queued submission is an admission receipt, and an unknown submission
+    does not prove the worker had no effect. Callers needing execution state
+    must reconcile through the durable goal/worker owner.
+    """
+
+    goal_id: int
+    state: DispatchState
+    status: str | None
+    owner: Literal["legacy", "local", "queue", "grpc"] = "legacy"
+    receipt_id: str | None = None
+    reason: str | None = None
+
+    def as_handle(self) -> ExecutionHandle:
+        """Wrap this admission evidence without submitting a second time."""
+        return ExecutionHandle(self)
+
+
+def observe_dispatch(goal_id: int, status: str | None, *,
+                     owner: Literal["legacy", "local", "queue", "grpc"] = "legacy",
+                     receipt_id: str | None = None) -> DispatchObservation:
+    """Classify a legacy result while retaining the status for old callers."""
+    state = (DispatchState.UNKNOWN if status is None else
+             DispatchState.QUEUED if status == "queued" else DispatchState.REPORTED)
+    return DispatchObservation(goal_id=goal_id, state=state, status=status,
+                               owner=owner, receipt_id=receipt_id)
+
+
+def _valid_dispatch_observation(observation: object, goal_id: int) -> bool:
+    """Reject contradictory adapter reports before exposing legacy status.
+
+    In particular, an unknown effect cannot carry the legacy ``queued`` or
+    terminal-success status: consumers could otherwise mistake uncertainty for
+    a confirmed acceptance or completion.
+    """
+    if not isinstance(observation, DispatchObservation) or observation.goal_id != goal_id:
+        return False
+    if not isinstance(observation.state, DispatchState):
+        return False
+    if observation.owner not in {"legacy", "local", "queue", "grpc"}:
+        return False
+    if observation.receipt_id is not None and not isinstance(observation.receipt_id, str):
+        return False
+    if observation.reason is not None and not isinstance(observation.reason, str):
+        return False
+    if observation.state is DispatchState.QUEUED:
+        return observation.status == "queued"
+    if observation.state is DispatchState.REPORTED:
+        return isinstance(observation.status, str) and observation.status != "queued"
+    return observation.status is None or observation.status == "error"
+
+
+@dataclass(frozen=True)
+class ExecutionControlResult:
+    """A control request that the handle did not send to any owner.
+
+    ``performed`` describes only the control request, not whether the goal has
+    already executed or whether its owner later cancels or settles it.
+    """
+
+    operation: Literal["cancel", "settle"]
+    outcome: Literal["unsupported"] = "unsupported"
+    performed: Literal[False] = False
+
+
+@dataclass(frozen=True)
+class ExecutionHandle:
+    """Submission evidence shared by local, queue, gRPC and legacy adapters.
+
+    This handle carries no credentials or lease. Its observation is a snapshot,
+    not a live status query. Owner-specific authorities remain responsible for
+    status, cancellation, and settlement, subject to their own authorization.
+    """
+
+    observation: DispatchObservation
+
+    def __post_init__(self) -> None:
+        if (not isinstance(self.observation, DispatchObservation)
+                or not _valid_dispatch_observation(
+                    self.observation, self.observation.goal_id)):
+            raise ValueError("invalid execution observation")
+
+    @property
+    def goal_id(self) -> int:
+        return self.observation.goal_id
+
+    @property
+    def owner(self) -> Literal["legacy", "local", "queue", "grpc"]:
+        return self.observation.owner
+
+    @property
+    def receipt_id(self) -> str | None:
+        return self.observation.receipt_id
+
+    def cancel(self) -> ExecutionControlResult:
+        """Report that this handle cannot submit a cancellation request."""
+        return ExecutionControlResult(operation="cancel")
+
+    def settle(self) -> ExecutionControlResult:
+        """Report that this handle cannot settle a worker-owned attempt."""
+        return ExecutionControlResult(operation="settle")
+
+
+def _submission_handle(
+    goal_id: int, submit: Callable[[], DispatchObservation], *,
+    owner: Literal["legacy", "local", "queue", "grpc"] = "legacy",
+) -> ExecutionHandle:
+    """Submit once, preserving uncertainty if no valid report comes back."""
+    try:
+        observation = submit()
+        if not _valid_dispatch_observation(observation, goal_id):
+            raise RuntimeError("dispatcher returned an invalid submission observation")
+        return observation.as_handle()
+    except Exception:
+        log.exception("goal #%s dispatcher submission failed", goal_id)
+        return DispatchObservation(
+            goal_id, DispatchState.UNKNOWN, "error", owner=owner,
+            reason="dispatch_exception",
+        ).as_handle()
 
 
 # Two-level fair concurrency so people don't wait behind each other:
@@ -593,8 +728,10 @@ class Dispatcher(Protocol):
     distributed task queue (arq / Celery / Temporal) later.
 
     ``submit`` returns a terminal status for a waiting dispatcher, ``"queued"``
-    for an accepted asynchronous enqueue, or ``None`` when it could not start.
-    This keeps acceptance distinct from failure while preserving the terminal
+    for an accepted asynchronous enqueue, or ``None`` for an unavailable or
+    indeterminate result. A queued status is an admission receipt, not a
+    completion or cancellation handle. ``None`` does not establish that a
+    previous attempt had no effects. These return values preserve the legacy
     status contract of :func:`run_goal_in_thread`.
     """
 
@@ -633,7 +770,8 @@ class LocalThreadDispatcher:
         concurrency_principal: str | None = None,
         allowed_suites: frozenset[str] | None = None,
         db_path: Path | None = None,
-    ) -> str | None:
+        _detailed_outcome: bool = False,
+    ) -> str | None | GoalRunUnavailable:
         return run_goal_in_thread(
             goal_id=goal_id, max_dollars=max_dollars,
             max_wall_seconds=max_wall_seconds, max_depth=max_depth,
@@ -641,7 +779,27 @@ class LocalThreadDispatcher:
             capability=capability,
             concurrency_principal=concurrency_principal,
             allowed_suites=allowed_suites,
+            **({"detailed_outcome": True} if _detailed_outcome else {}),
             **({"db_path": db_path} if db_path is not None else {}),
+        )
+
+    def submit_observed(self, goal_id: int, **kwargs: Any) -> DispatchObservation:
+        """Report the synchronous result; it is not a cancellable thread handle."""
+        # Subclasses may override submit without the internal detailed option;
+        # preserve that legacy override and do not infer refusal from None.
+        if type(self) is not LocalThreadDispatcher:
+            return observe_dispatch(goal_id, self.submit(goal_id, **kwargs), owner="local")
+        result = self.submit(goal_id, _detailed_outcome=True, **kwargs)
+        if isinstance(result, GoalRunUnavailable):
+            state = (DispatchState.UNKNOWN if result.reason == "unknown"
+                     else DispatchState.NOT_ACCEPTED)
+            return DispatchObservation(goal_id, state, None, owner="local", reason=result.reason)
+        return observe_dispatch(goal_id, result, owner="local")
+
+    def submit_handle(self, goal_id: int, **kwargs: Any) -> ExecutionHandle:
+        """Return a handle for the same single synchronous submission."""
+        return _submission_handle(
+            goal_id, lambda: self.submit_observed(goal_id, **kwargs), owner="local",
         )
 
 
@@ -661,6 +819,70 @@ def set_dispatcher(dispatcher: Dispatcher) -> None:
     _dispatcher = dispatcher
 
 
+def _eligible_dispatcher(goal_id: int, db_path: Path | None) -> Dispatcher | None:
+    """Apply deployment restrictions before either submission interface."""
+    from . import practice
+
+    dispatcher = get_dispatcher()
+    if db_path is not None and not isinstance(dispatcher, LocalThreadDispatcher):
+        raise RuntimeError("An explicit local database cannot be sent to a network worker.")
+    if practice.active() and not isinstance(dispatcher, LocalThreadDispatcher):
+        _mark_dispatch_failure(goal_id, practice.WORKERS_REASON + " This practice task did not start.",
+                               **({"db_path": db_path} if db_path is not None else {}))
+        return None
+    return dispatcher
+
+
+def start_goal_observed(
+    goal_id: int,
+    max_dollars: float | None = None,
+    max_wall_seconds: float | None = None,
+    max_depth: int = DEFAULT_MAX_DEPTH,
+    *,
+    channel: str | None = None,
+    user_id: str | None = None,
+    conversation_id: int | None = None,
+    capability: Any | None = None,
+    concurrency_principal: str | None = None,
+    allowed_suites: frozenset[str] | None = None,
+    db_path: Path | None = None,
+) -> DispatchObservation:
+    """Submit once and return only the dispatcher's known acceptance evidence.
+
+    Queue receipts identify a signed submission, not a worker lease. The
+    current queue and local adapters do not provide a unified cancellation or
+    settlement operation: callers must use the goal/worker owner for those
+    actions. A raised transport exception remains an exception and may leave
+    the submission outcome unknown; this function never retries it.
+    """
+    dispatcher = _eligible_dispatcher(goal_id, db_path)
+    if dispatcher is None:
+        return DispatchObservation(goal_id, DispatchState.NOT_ACCEPTED, "error",
+                                   reason="practice_worker_unavailable")
+    kwargs = dict(
+        max_dollars=max_dollars, max_wall_seconds=max_wall_seconds,
+        max_depth=max_depth, channel=channel, user_id=user_id,
+        conversation_id=conversation_id, capability=capability,
+        concurrency_principal=concurrency_principal, allowed_suites=allowed_suites,
+        **({"db_path": db_path} if db_path is not None else {}),
+    )
+    submit_observed = getattr(dispatcher, "submit_observed", None)
+    if callable(submit_observed):
+        observation = submit_observed(goal_id, **kwargs)
+        if not _valid_dispatch_observation(observation, goal_id):
+            raise RuntimeError("dispatcher returned an invalid submission observation")
+        return observation
+    observation = observe_dispatch(goal_id, dispatcher.submit(goal_id, **kwargs))
+    if not _valid_dispatch_observation(observation, goal_id):
+        raise RuntimeError("dispatcher returned an invalid submission status")
+    return observation
+
+
+def start_goal_handle(goal_id: int, **kwargs: Any) -> ExecutionHandle:
+    """Submit once using the active adapter and retain its typed evidence."""
+    return _submission_handle(goal_id, lambda: start_goal_observed(goal_id, **kwargs))
+
+
 def run_goal_in_background(
     goal_id: int,
     max_dollars: float | None = None,
@@ -678,20 +900,13 @@ def run_goal_in_background(
     """Dispatch a goal through the active :class:`Dispatcher`. Defaults to
     in-process thread execution; ``set_dispatcher`` swaps in a task queue
     without breaking callers (the contract is unchanged: returns the terminal
-    status, ``"queued"`` after asynchronous acceptance, or ``None`` if it could
-    not start).
+    status, ``"queued"`` after asynchronous acceptance, or ``None`` when no
+    definitive status is available).
 
     A practice task (:mod:`maverick.practice`) never goes to an outside
     worker, which would run it live: it is stopped with the reason instead."""
-    from . import practice
-
-    dispatcher = get_dispatcher()
-    if db_path is not None and not isinstance(dispatcher, LocalThreadDispatcher):
-        raise RuntimeError("An explicit local database cannot be sent to a network worker.")
-
-    if practice.active() and not isinstance(dispatcher, LocalThreadDispatcher):
-        _mark_dispatch_failure(goal_id, practice.WORKERS_REASON + " This practice task did not start.",
-                               **({"db_path": db_path} if db_path is not None else {}))
+    dispatcher = _eligible_dispatcher(goal_id, db_path)
+    if dispatcher is None:
         return "error"
     return dispatcher.submit(
         goal_id, max_dollars=max_dollars,
@@ -702,6 +917,78 @@ def run_goal_in_background(
         allowed_suites=allowed_suites,
         **({"db_path": db_path} if db_path is not None else {}),
     )
+
+
+async def start_goal_observed_async(
+    goal_id: int,
+    max_dollars: float | None = None,
+    max_wall_seconds: float | None = None,
+    max_depth: int = DEFAULT_MAX_DEPTH,
+    *,
+    channel: str | None = None,
+    user_id: str | None = None,
+    conversation_id: int | None = None,
+    capability: Any | None = None,
+    concurrency_principal: str | None = None,
+    allowed_suites: frozenset[str] | None = None,
+    db_path: Path | None = None,
+) -> DispatchObservation:
+    """Dispatch without blocking an async channel or HTTP event loop.
+
+    Dispatcher submission is deliberately synchronous: local execution waits
+    for the terminal status, queue submission may perform broker I/O, and gRPC
+    waits for the worker RPC. Runs on the dedicated ``_goal_executor``
+    rather than ``asyncio.to_thread``'s shared default pool, so a long local
+    run can't starve other to_thread callers or get starved by them, and the
+    advertised MAX_CONCURRENT_GOALS ceiling is actually reachable regardless
+    of host core count. Context is propagated the same way
+    ``asyncio.to_thread`` does it (``contextvars.copy_context().run(...)``),
+    preserving the active tenant across the thread hop.
+
+    Cancelling the waiting coroutine does not stop a submission that has
+    already started in the executor, and does not cancel an accepted queued
+    job. Callers must use the execution owner's own cancellation and status
+    mechanisms instead of treating cancellation of this await as confirmation
+    that execution stopped.
+    """
+    loop = asyncio.get_running_loop()
+    ctx = contextvars.copy_context()
+    call = functools.partial(
+        ctx.run,
+        start_goal_observed,
+        goal_id,
+        max_dollars,
+        max_wall_seconds,
+        max_depth,
+        channel=channel,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        capability=capability,
+        concurrency_principal=concurrency_principal,
+        allowed_suites=allowed_suites,
+        **({"db_path": db_path} if db_path is not None else {}),
+    )
+    try:
+        observation = await loop.run_in_executor(_goal_executor, call)
+    except Exception:
+        # An exception can follow a remote acceptance or an effect. Preserve the
+        # legacy no-raise return without repainting a potentially live goal or
+        # falling back locally. A caller must reconcile before another attempt.
+        log.exception("goal #%s dispatcher submission failed", goal_id)
+        return DispatchObservation(goal_id, DispatchState.UNKNOWN, "error",
+                                   reason="dispatch_exception")
+    if observation.state is DispatchState.NOT_ACCEPTED:
+        # Rejection proves only this invocation did not start. Another pending
+        # submission may already have been accepted, so do not repaint its
+        # goal without a durable exclusive dispatch reservation.
+        log.info("goal #%s dispatch not accepted (%s)", goal_id, observation.reason)
+    return observation
+
+
+async def start_goal_handle_async(goal_id: int, **kwargs: Any) -> ExecutionHandle:
+    """Submit once without blocking, retaining the resulting typed evidence."""
+    observation = await start_goal_observed_async(goal_id, **kwargs)
+    return observation.as_handle()
 
 
 async def run_goal_in_background_async(
@@ -718,54 +1005,14 @@ async def run_goal_in_background_async(
     allowed_suites: frozenset[str] | None = None,
     db_path: Path | None = None,
 ) -> str | None:
-    """Dispatch without blocking an async channel or HTTP event loop.
-
-    Dispatcher submission is deliberately synchronous: local execution waits
-    for the terminal status, queue submission may perform broker I/O, and gRPC
-    waits for the worker RPC. Runs on the dedicated ``_goal_executor``
-    rather than ``asyncio.to_thread``'s shared default pool, so a long local
-    run can't starve other to_thread callers or get starved by them, and the
-    advertised MAX_CONCURRENT_GOALS ceiling is actually reachable regardless
-    of host core count. Context is propagated the same way
-    ``asyncio.to_thread`` does it (``contextvars.copy_context().run(...)``),
-    preserving the active tenant across the thread hop.
-    """
-    loop = asyncio.get_running_loop()
-    ctx = contextvars.copy_context()
-    call = functools.partial(
-        ctx.run,
-        run_goal_in_background,
-        goal_id,
-        max_dollars,
-        max_wall_seconds,
-        max_depth,
-        channel=channel,
-        user_id=user_id,
-        conversation_id=conversation_id,
-        capability=capability,
-        concurrency_principal=concurrency_principal,
-        allowed_suites=allowed_suites,
+    """Legacy async result; unknown effects must be reconciled before retry."""
+    observation = await start_goal_observed_async(
+        goal_id, max_dollars, max_wall_seconds, max_depth, channel=channel,
+        user_id=user_id, conversation_id=conversation_id, capability=capability,
+        concurrency_principal=concurrency_principal, allowed_suites=allowed_suites,
         **({"db_path": db_path} if db_path is not None else {}),
     )
-    try:
-        status = await loop.run_in_executor(_goal_executor, call)
-    except Exception:
-        # Adapters historically rely on the background runner's no-raise
-        # contract. A rejecting queue or broken broker must fail closed, but it
-        # must not strand the newly-created goal as "pending" or trigger an
-        # in-process fallback. Keep the external error generic and the details
-        # in operator logs.
-        log.exception("goal #%s dispatcher submission failed", goal_id)
-        await asyncio.to_thread(_mark_dispatch_failure, goal_id, "dispatch failed",
-                                **({"db_path": db_path} if db_path is not None else {}))
-        return "error"
-    if status is None:
-        # ``None`` means the dispatcher could not start the goal. Queue-backed
-        # acceptance has the explicit ``queued`` status, so this is no longer
-        # ambiguous with a successful asynchronous enqueue.
-        await asyncio.to_thread(_mark_dispatch_failure, goal_id, "dispatch unavailable",
-                                **({"db_path": db_path} if db_path is not None else {}))
-    return status
+    return observation.status
 
 
 def _mark_dispatch_failure(goal_id: int, result: str, *, db_path: Path | None = None) -> None:
@@ -775,11 +1022,14 @@ def _mark_dispatch_failure(goal_id: int, result: str, *, db_path: Path | None = 
         from .world_model import close_world_if_owned
 
         world = _run_world(db_path)
-        goal = world.get_goal(goal_id)
-        # Do not clobber a worker that started despite an ambiguous transport
-        # failure, or any goal that reached a terminal state in the meantime.
-        if goal is not None and goal.status == "pending":
-            world.set_goal_status(goal_id, "blocked", result=result)
+        # The pending predicate must be part of the update: a worker can claim
+        # the goal after a read but before a separate status write.
+        block_pending = getattr(world, "block_pending_goal", None)
+        if callable(block_pending):
+            block_pending(goal_id, result=result)
+        else:
+            log.warning("world backend cannot atomically repair dispatch failure (goal_id=%s)",
+                        goal_id)
     except Exception:  # pragma: no cover - status repair must never mask dispatch
         log.exception("failed to terminalize undispatched goal #%s", goal_id)
     finally:

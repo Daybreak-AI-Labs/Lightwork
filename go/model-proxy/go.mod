@@ -1,3 +1,3 @@
 module github.com/Daybreak-AI-Labs/Lightwork/go/model-proxy
 
-go 1.26.9
+go 1.26.10

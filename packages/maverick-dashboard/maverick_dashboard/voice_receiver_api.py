@@ -111,6 +111,9 @@ async def receive(request: Request):
     result = bytearray()
     try:
         async with httpx.AsyncClient(timeout=120, trust_env=False, follow_redirects=False) as client:
+            from maverick.governed_http import admit_client_request
+
+            admit_client_request(client, f"http://127.0.0.1:{port}/webhook/voice")
             async with client.stream("POST", f"http://127.0.0.1:{port}/webhook/voice", content=bytes(body),
                                      headers={"Authorization": authorization, "Content-Type": "application/json"}) as reply:
                 unchanged()

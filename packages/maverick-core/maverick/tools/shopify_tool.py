@@ -72,8 +72,10 @@ def _config() -> tuple[str, str]:
 
 def _client():
     import httpx
+
+    from ..governed_http import GuardedClient
     store, tok = _config()
-    return store, httpx.Client(
+    return store, GuardedClient(httpx.Client(
         headers={
             "X-Shopify-Access-Token": tok,
             "Content-Type": "application/json",
@@ -83,7 +85,7 @@ def _client():
         # header httpx replays across a cross-origin 30x, so an open-redirect off
         # the store host would leak the token to another host.
         timeout=30.0, follow_redirects=False,
-    )
+    ))
 
 
 def _money(amount: str | float | None, currency: str | None) -> str:

@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from maverick import deliverable_signoff_receipts as store
 from maverick.governed_operations import digest
 
-from . import auth
+from . import _shared, auth
 from .draft_api import context_for
 from .product_errors import next_action, product_error
 
@@ -20,10 +20,9 @@ def selected(selection):
 
 
 def authorized(request, goal_id, *, write=False):
-    from . import api
 
     auth.require_permission(request, "operate" if write else "view")
-    world = api._world()
+    world = _shared._world()
     goal = world.get_goal(goal_id)
     if goal is None:
         raise HTTPException(404, "no such goal")

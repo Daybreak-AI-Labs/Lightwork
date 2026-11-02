@@ -3054,15 +3054,19 @@ def _perform_execution(agent_id: str, connector: str, op: str, path: str,
                           "The change may already have happened. Check the connected "
                           "service before submitting another request."}, effect_started=effect_started)
     from .connector_attempts import ConnectorResult
+    from .tool_results import ToolOutcome, ToolResultState, ToolResultText, classify_tool_result
 
-    unknown = (
+    explicit_state = (classify_tool_result(raw)
+                      if isinstance(raw, (ConnectorResult, ToolOutcome, ToolResultText)) else None)
+    unknown = (explicit_state is ToolResultState.INDETERMINATE if explicit_state is not None else (
         isinstance(raw, ConnectorResult) and raw.attempt.outcome_unknown
-    ) or str(raw).lstrip().startswith("INDETERMINATE:")
+    ) or str(raw).lstrip().startswith("INDETERMINATE:"))
     accepted = isinstance(raw, ConnectorResult) and raw.attempt.status_code == 202
     outcome = (
         "indeterminate" if unknown else
         "accepted" if accepted else
-        "failed" if str(raw).lstrip().startswith("ERROR") else "executed"
+        "failed" if (explicit_state is not None and explicit_state is not ToolResultState.SUCCEEDED)
+        or (explicit_state is None and str(raw).lstrip().startswith("ERROR")) else "executed"
     )
     try:
         record_tool_lineage(
@@ -3074,7 +3078,8 @@ def _perform_execution(agent_id: str, connector: str, op: str, path: str,
         log.warning("external_agents: COMMIT receipt failed", exc_info=True)
     try:
         from .safety.secret_detector import redact
-        result = redact(str(raw))[0][:_MAX_TEXT]
+        raw_text = raw.content if isinstance(raw, ToolOutcome) else str(raw)
+        result = redact(raw_text)[0][:_MAX_TEXT]
     except Exception:
         # The redactor erroring must not leak the raw response outward.
         result = f"({outcome}; response withheld — redaction unavailable)"

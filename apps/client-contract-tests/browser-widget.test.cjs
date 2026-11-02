@@ -8,6 +8,14 @@ const {JSDOM} = require('jsdom');
 const root = path.resolve(__dirname, '../..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8');
 const flush = async () => { for(let i=0;i<25;i++) await new Promise(setImmediate); };
+async function waitFor(condition, description) {
+  const deadline = Date.now() + 10000;
+  while (!condition()) {
+    assert.ok(Date.now() < deadline, 'Timed out waiting for ' + description);
+    await new Promise(setImmediate);
+  }
+}
+const hasTimer = (timers, ms) => [...timers.timers.values()].some(timer => timer.ms === ms);
 const deferred = () => { let resolve; const promise = new Promise(r => {resolve=r;}); return {promise,resolve}; };
 function clock() {
   let seq=0;
@@ -36,7 +44,7 @@ test('worker fences duplicate writes and persists a confirmed id even if popup c
   const fixture=worker(async()=>{calls++;return pending.promise;});
   const identity=await fixture.call({type:'identity'});
   const first=fixture.call({type:'chat',scope:identity.scope,title:'goal',description:'brief'});
-  await flush();
+  await waitFor(() => calls === 1, 'the first goal request');
   const duplicate=await fixture.call({type:'chat',scope:identity.scope,title:'goal',description:'brief'});
   assert.equal(duplicate.kind,'pending'); assert.equal(calls,1);
   pending.resolve(response({id:42,status:'pending'}));
@@ -49,7 +57,8 @@ test('worker timeout aborts transport, records unknown and never automatically r
   let signal,calls=0;
   const fixture=worker(async(_url,options)=>{signal=options.signal;calls++;return new Promise(()=>{});});
   const first=fixture.call({type:'chat',title:'goal',description:'brief'});
-  await flush(); fixture.timers.fire(15000);
+  await waitFor(() => calls === 1 && hasTimer(fixture.timers, 15000), 'the timed goal request');
+  fixture.timers.fire(15000);
   assert.equal((await first).kind,'unknown'); assert.equal(signal.aborted,true);
   const identity=await fixture.call({type:'identity'});
   assert.equal(fixture.local.values['pendingGoal:'+identity.scope].state,'unknown');
@@ -128,7 +137,7 @@ test('popup submission guard preserves draft when no start acknowledgement arriv
   const fixture=await popup(msg=>msg.type==='identity'?identity:pending.promise,null);
   const input=fixture.doc.querySelector('#prompt'); input.value='my full draft';
   fixture.doc.querySelector('#send').click(); fixture.doc.querySelector('#send').click();
-  await flush(); assert.equal(fixture.messages.filter(m=>m.type==='chat').length,1);
+  await waitFor(() => fixture.messages.filter(m=>m.type==='chat').length === 1 && hasTimer(fixture.timers, 17000), 'the popup request and its deadline');
   fixture.timers.fire(17000); await flush();
   assert.equal(input.value,'my full draft');
   assert.equal(fixture.doc.querySelector('#send').disabled,true);
@@ -144,7 +153,7 @@ test('popup waits for both worker requests of a page send before calling the sta
   let calls=0; const pending=deferred();
   const fixture=worker(async()=>{calls++; return calls===1 ? response(policy) : pending.promise;});
   const chat=fixture.call({type:'chat',title:'goal',description:'brief',capturePolicy:{revision:'r1',form_values:false,page_structure:false}});
-  while(calls<2) await flush();
+  await waitFor(() => calls === 2 && hasTimer(fixture.timers, 15000), 'the goal request after policy checking');
   const workerWorstCase=fixture.timers.history.filter(ms=>ms===15000).length*15000;
   assert.equal(workerWorstCase,30000);
   fixture.timers.fire(15000); await chat;
@@ -262,7 +271,8 @@ test('a cross-origin data-maverick-url is refused with its real reason before an
 test('widget never-submitted acknowledgement times out and duplicate submits remain fenced',async()=>{
   let calls=0,signal;
   const fixture=await widget(async(_url,options)=>{calls++;signal=options.signal;return new Promise(()=>{});});
-  fixture.input.value='goal'; fixture.submit(); fixture.submit(); await flush();
+  fixture.input.value='goal'; fixture.submit(); fixture.submit();
+  await waitFor(() => calls === 1 && hasTimer(fixture.timers, 15000), 'the widget request and its deadline');
   assert.equal(calls,1); fixture.timers.fire(15000); await flush();
   assert.equal(signal.aborted,true); assert.equal(fixture.input.value,'goal');
   assert.equal(fixture.send.disabled,true); assert.equal(fixture.timers.timers.size,0);
@@ -280,19 +290,22 @@ test('browser replay projection visibly bounds old event history without losing 
 });
 
 test('extension recovers accepted lost response after worker restart by the same durable key, without POST replay',async()=>{
+  const contract=require('./contracts/goal-submission-recovery-v1.json');
   const calls=[];
   const fixture=worker(async(url,options)=>{calls.push({url,options});return new Promise(()=>{});});
   const identity=await fixture.call({type:'identity'});
-  const first=fixture.call({type:'chat',scope:identity.scope,title:'goal',description:'brief'});
-  await flush(); fixture.timers.fire(15000); assert.equal((await first).kind,'unknown');
+  const first=fixture.call({type:'chat',scope:identity.scope,title:contract.title,description:contract.description});
+  await waitFor(() => calls.length === 1 && hasTimer(fixture.timers, 15000), 'the goal request and its deadline');
+  fixture.timers.fire(15000); assert.equal((await first).kind,'unknown');
+  assert.equal(calls.length,contract.write_count_after_interruption);
   const key=calls[0].options.headers['Idempotency-Key'];
   assert.equal(typeof key,'string');
-  const restarted=worker(async(url,options)=>{calls.push({url,options});return response({state:'accepted',goal:{id:52,status:'pending'},execution_confirmed:false});},fixture.local.values);
+  const restarted=worker(async(url,options)=>{calls.push({url,options});return response(contract.receipt);},fixture.local.values);
   const resolved=await restarted.call({type:'reconcile',scope:identity.scope});
-  assert.equal(resolved.goal.id,52);
+  assert.equal(resolved.goal.id,contract.receipt.goal.id);
   assert.deepEqual(calls.map(c=>c.options.method),['POST','GET']);
   assert.equal(calls[1].options.headers['Idempotency-Key'],key);
-  assert.equal(restarted.session.values.activeWatch.goalId,52);
+  assert.equal(restarted.session.values.activeWatch.goalId,contract.receipt.goal.id);
   assert.equal(restarted.local.values['pendingGoal:'+identity.scope],null);
 });
 
@@ -312,7 +325,9 @@ test('unavailable reconciliation remains held and changed credentials cannot que
 test('widget retains submission key across reload and performs only a bounded receipt read',async()=>{
   let postedKey;
   const fixture=await widget(async(_url,options)=>{postedKey=options.body.get('submission_key');return new Promise(()=>{});});
-  fixture.input.value='goal';fixture.submit();await flush();fixture.timers.fire(15000);await flush();
+  fixture.input.value='goal';fixture.submit();
+  await waitFor(() => hasTimer(fixture.timers, 15000), 'the widget request deadline');
+  fixture.timers.fire(15000);await flush();
   assert.equal(fixture.dom.window.localStorage.getItem('lightwork.pending-chat.v1:http://127.0.0.1:8765'),postedKey);
   fixture.close();
   const reads=[];
@@ -331,7 +346,9 @@ test('late POST response cannot replace a reconciled widget goal',async()=>{
   const late=deferred();
   const fixture=await widget(async(_url,options)=>options.method==='POST'?late.promise:
     new Response(JSON.stringify({state:'accepted',goal:{id:22,status:'pending'}})));
-  fixture.input.value='goal';fixture.submit();await flush();fixture.timers.fire(15000);await flush();
+  fixture.input.value='goal';fixture.submit();
+  await waitFor(() => hasTimer(fixture.timers, 15000), 'the widget request deadline');
+  fixture.timers.fire(15000);await flush();
   fixture.check.click();await flush();
   late.resolve({ok:true,status:200,redirected:true,url:'http://127.0.0.1:8765/chat/goal/999'});await flush();
   const links=[...fixture.dom.window.document.querySelectorAll('a')].map(a=>a.href);

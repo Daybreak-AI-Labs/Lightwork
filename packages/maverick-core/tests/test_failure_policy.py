@@ -16,6 +16,27 @@ def test_real_audit_tree_is_fully_classified():
     assert fp.main([]) == 0
 
 
+def test_flow_approval_authority_is_in_scope():
+    """Changes to approval authority handlers must receive a classification."""
+    approval_file = fp._PKG / "flow" / "approvals.py"
+    assert approval_file in fp.SCOPED_FILES
+    assert fp.scan_file(approval_file) == []
+
+
+def test_egress_guard_is_in_scope():
+    """The network boundary's broad error paths need a declared policy."""
+    guard_file = fp._PKG / "egress_guard.py"
+    assert guard_file in fp.SCOPED_FILES
+    assert fp.scan_file(guard_file) == []
+
+
+def test_sandbox_lifecycle_files_are_in_scope():
+    for name in ("local.py", "kubernetes.py"):
+        path = fp._PKG / "sandbox" / name
+        assert path in fp.SCOPED_FILES
+        assert fp.scan_file(path) == []
+
+
 def _write(tmp_path: Path, body: str) -> Path:
     p = tmp_path / "mod.py"
     p.write_text(body, encoding="utf-8")

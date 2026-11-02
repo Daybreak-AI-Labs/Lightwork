@@ -344,9 +344,9 @@ def test_page_is_plain_language_with_a_task_table_and_row_actions(client: TestCl
 def test_turned_off_module_shows_its_gate_instead_of_loaders(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, enabled: bool,
 ) -> None:
-    from maverick_dashboard import api
+    from maverick_dashboard import module_activation
 
-    monkeypatch.setattr(api, "module_activation_enabled", lambda _section: enabled)
+    monkeypatch.setattr(module_activation, "module_activation_enabled", lambda _section: enabled)
     page_text = client.get(ROUTE).text
     main = page_text[page_text.index('<div class="aet-shell"'):page_text.index("<noscript>")]
     assert f'data-module-enabled="{"true" if enabled else "false"}"' in main

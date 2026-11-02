@@ -30,7 +30,7 @@ class SourceIn(BaseModel):
 
 def _page(request, goal_id):
     from . import auth
-    from .api import _world
+    from ._shared import _world
     from .app import require_page_visible
 
     with auth.fresh_configuration():

@@ -9,6 +9,9 @@ pure-Python sanity check runs.
 """
 from __future__ import annotations
 
+import sys
+import threading
+
 import pytest
 from maverick.safety import unicode_filter as uf
 
@@ -49,6 +52,39 @@ def test_native_matches_pure_python(text):
 def test_native_is_actually_engaged():
     assert uf._native is not None
     assert uf.normalize is not uf._normalize_py
+
+
+@pytest.mark.skipif(not NATIVE, reason="maverick_native wheel not built in this env")
+def test_large_native_normalization_allows_another_python_thread_to_progress():
+    """A large scan detaches while its Rust-only work is running."""
+    ready = threading.Event()
+    begin = threading.Event()
+    progressed = threading.Event()
+
+    def other_thread():
+        ready.set()
+        begin.wait()
+        progressed.set()
+
+    thread = threading.Thread(target=other_thread, daemon=True)
+    thread.start()
+    assert ready.wait(5)
+    old_interval = sys.getswitchinterval()
+    payload = "a" * 2_000_000
+    try:
+        # Suppress normal bytecode time-slicing between begin.set() and the
+        # native call. The other thread can run while the native call detaches.
+        sys.setswitchinterval(5.0)
+        begin.set()
+        cleaned, removed, categories = uf._native.normalize(payload, False)
+        ran_during_call = progressed.is_set()
+    finally:
+        sys.setswitchinterval(old_interval)
+        begin.set()
+        thread.join(timeout=5)
+    assert ran_during_call
+    assert cleaned == payload
+    assert removed == [] and categories == []
 
 
 def test_pure_python_api_unchanged_by_shim():

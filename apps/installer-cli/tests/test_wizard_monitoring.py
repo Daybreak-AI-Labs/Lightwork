@@ -236,20 +236,21 @@ def test_plain_http_collector_on_this_computer_is_accepted(monkeypatch, address)
     assert config["observability"]["otel_endpoint"] == address
 
 
-@pytest.mark.parametrize(("setting", "constant"), [
-    ("observability.otel_endpoint", "_COLLECTOR_PATTERN"),
-    ("kms.key_id", "_KEY_ID_PATTERN"),
-    ("kms.region", "_REGION_PATTERN"),
-    ("kms.address", "_VAULT_ADDRESS_PATTERN"),
-    ("kms.mount", "_VAULT_MOUNT_PATTERN"),
-    ("audit.siem_dest", "_SIEM_PATTERN"),
+@pytest.mark.parametrize("setting", [
+    "observability.otel_endpoint", "kms.key_id", "kms.region", "kms.address",
+    "kms.mount", "audit.siem_dest",
 ])
-def test_wizard_patterns_are_the_settings_page_patterns(setting, constant):
-    # The wizard checks the same text the settings page checks, so an answer it accepts
-    # is one the settings page keeps.
+def test_shared_setting_contract_drives_the_settings_page(setting):
+    # The wizard and page both consume the same source contract.
+    from maverick.config_contracts import TEXT_SETTINGS
     from maverick_dashboard import settings_catalog
 
-    assert settings_catalog.BY_ID[setting].pattern == getattr(wizard, constant)
+    row = settings_catalog.BY_ID[setting]
+    contract = TEXT_SETTINGS[setting]
+    assert row.pattern == contract.pattern
+    assert row.default == contract.default
+    assert row.max_length == contract.dashboard_max_length
+    assert row.env == contract.dashboard_env
 
 
 # ---------- key services ----------

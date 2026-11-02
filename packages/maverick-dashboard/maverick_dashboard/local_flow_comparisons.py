@@ -92,7 +92,7 @@ def _definition_domain(flow):
 def _current(request, flow_id, *, changed=True):
     from maverick.config import candidate_promotion_enabled
 
-    from .api import _assert_flow_access, _require_flows, _require_learned_flow_evidence
+    from .flows_api import _assert_flow_access, _require_flows, _require_learned_flow_evidence
 
     tenant, owner, context = _binding(request, Response())
     if not candidate_promotion_enabled() or not getattr(request.app.state, "local_flow_promotions_installed", False):

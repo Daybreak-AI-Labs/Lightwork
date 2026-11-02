@@ -17,6 +17,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def _key() -> str:
 
 def _post(query: str, variables: dict | None = None) -> dict:
     import httpx
-    resp = httpx.post(
+    resp = _governed_sender(httpx.post)(
         _API_URL,
         json={"query": query, "variables": variables or {}},
         headers={

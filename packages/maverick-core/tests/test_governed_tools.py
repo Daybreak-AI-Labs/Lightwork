@@ -1058,7 +1058,7 @@ class TestEnterpriseBoundary:
         assert out.startswith("INDETERMINATE (governed)")
         assert "do not retry automatically" in out
 
-    @pytest.mark.parametrize("failure_kind", ["raise", "error-result"])
+    @pytest.mark.parametrize("failure_kind", ["raise", "error-result", "typed-unknown", "typed-refusal"])
     def test_connector_failure_after_prepare_is_indeterminate(
         self, monkeypatch, failure_kind,
     ):
@@ -1082,6 +1082,14 @@ class TestEnterpriseBoundary:
         def _fail(_args):
             if failure_kind == "raise":
                 raise TimeoutError("response lost")
+            if failure_kind == "typed-unknown":
+                from maverick.tool_results import ToolOutcome, ToolResultState
+
+                return ToolOutcome(ToolResultState.INDETERMINATE, "acknowledgment lost")
+            if failure_kind == "typed-refusal":
+                from maverick.tool_results import ToolOutcome, ToolResultState
+
+                return ToolOutcome(ToolResultState.REFUSED, "denied")
             return "ERROR: upstream connection reset"
 
         tool = Tool(
@@ -1093,6 +1101,26 @@ class TestEnterpriseBoundary:
         assert out.startswith("INDETERMINATE (governed)")
         assert "reconcile" in out
         assert receipts == ["PREPARE", "INDETERMINATE"]
+
+    def test_typed_success_commits_and_returns_content(self, monkeypatch):
+        import maverick.governed_actions as actions
+        from maverick.tool_results import ToolOutcome, ToolResultState
+
+        _grant_human(monkeypatch)
+        receipts = []
+        monkeypatch.setattr(
+            actions, "record_tool_lineage",
+            lambda *args, **kwargs: receipts.append(kwargs["phase"]) or True,
+        )
+        tool = Tool(
+            name="acme", description="Acme", input_schema=_SCHEMA,
+            fn=lambda _args: ToolOutcome(ToolResultState.SUCCEEDED, "created"),
+        )
+        out = wrap_connector_tool(tool, enterprise=True).fn({
+            "op": "post", "path": "/accounts",
+        })
+        assert out == "created"
+        assert receipts == ["PREPARE", "COMMIT"]
 
     @pytest.mark.parametrize("stop_name", ["BudgetExceeded", "UsageAccountingError", "Halted", "CancelledError"])
     @pytest.mark.parametrize("receipt_fails", [None, "OSError", "UsageAccountingError", "CancelledError"])

@@ -146,7 +146,7 @@ class VerifiedInspectIn(_In):
 # ---- shared helpers ---------------------------------------------------------
 
 def _gate(request: Request) -> None:
-    from .api import _require_flows
+    from .flows_api import _require_flows
 
     require_permission(request, "operate")
     _require_flows()
@@ -155,7 +155,7 @@ def _gate(request: Request) -> None:
 def _flow(request: Request, flow_id: str):
     from maverick.flow import store
 
-    from .api import _assert_flow_access
+    from .flows_api import _assert_flow_access
 
     _gate(request)
     from .draft_api import context_for
@@ -462,8 +462,8 @@ def learning_examples_inbox(request: Request, cursor: str | None = None) -> dict
     from maverick.config import get_flows
     from maverick.flow import store
 
-    from .api import _assert_flow_access
     from .auth import caller_principal, goal_owner_filter
+    from .flows_api import _assert_flow_access
 
     _gate(request)
     if get_flows().get("action_episode_capture") is not True:

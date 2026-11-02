@@ -160,7 +160,7 @@ def authority(request, expected=None, *, write=False):
                  "workspace_source": getattr(request.state, "workspace_tenant_source", "operator_floor"), "workspace_binding": binding,
                  "mfa": mfa, "address": request.client.host if request.client else ""}
         if write:
-            from .api import _require_scheduling
+            from .schedule_policy import require_scheduling as _require_scheduling
             if config.config_source_errors(include_tenant=True):
                 raise HTTPException(503, "Current report settings are unavailable. Your entered choices are kept.")
             _require_scheduling()
