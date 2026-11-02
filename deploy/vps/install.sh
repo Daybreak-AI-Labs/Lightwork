@@ -8,7 +8,7 @@
 #   sudo MAVERICK_REF="$LIGHTWORK_REF" bash /tmp/lightwork-install.sh
 #
 # What it does:
-#   1. Installs Python 3.12, pipx, git
+#   1. Installs the distro's Python 3 (3.11 or newer is required), pipx, git
 #   2. Installs the complete eight-package Lightwork release cohort into one
 #      pipx venv
 #   3. Runs `maverick init` interactively
@@ -95,6 +95,12 @@ install_system_deps() {
   apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv pipx \
     git curl ca-certificates sqlite3 sudo
+  # The distro python3 can be older than the floor (3.10 on Ubuntu 22.04);
+  # stop here rather than at pip's requires-python check.
+  if [ "$(python3 -c 'import sys;print("%d%02d"%sys.version_info[:2])')" -lt 311 ]; then
+    echo "Lightwork needs Python 3.11 or newer, but this system's python3 is $(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])'). Use a distribution release whose python3 is 3.11 or newer, then re-run." >&2
+    exit 1
+  fi
   pipx ensurepath || true
 }
 

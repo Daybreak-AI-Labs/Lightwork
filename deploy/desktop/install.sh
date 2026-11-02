@@ -43,9 +43,12 @@ ensure_git() {
   fi
 }
 
+python3_meets_floor() {
+  [ "$(python3 -c 'import sys;print("%d%02d"%sys.version_info[:2])')" -ge 311 ]
+}
+
 ensure_python() {
-  if have python3 && \
-     [ "$(python3 -c 'import sys;print("%d%02d"%sys.version_info[:2])')" -ge 311 ]; then
+  if have python3 && python3_meets_floor; then
     return
   fi
   log "Installing Python 3 ..."
@@ -59,6 +62,9 @@ ensure_python() {
             fi ;;
   esac
   have python3 || die "Python install finished but 'python3' is not on PATH. Open a new terminal and re-run."
+  # A distro's python3 can still be older than the floor (3.10 on
+  # Ubuntu 22.04); stop here rather than at pip's requires-python check.
+  python3_meets_floor || die "Lightwork needs Python 3.11 or newer, but this system's python3 is $(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])'). Install Python 3.11 or newer as python3, then re-run."
 }
 
 ensure_pipx() {

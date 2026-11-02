@@ -221,6 +221,91 @@ def test_desktop_installers_require_a_pinned_source_ref():
     assert "rev-parse HEAD" in powershell
 
 
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.parametrize(("reported", "installs", "stops"), [
+    ("3.10", True, True),
+    ("3.12", False, False),
+])
+def test_desktop_installer_checks_the_python_floor_after_installing(tmp_path, reported, installs, stops):
+    """A distro python3 below the floor (3.10 on Ubuntu 22.04) must stop the
+    installer with a plain message right after the package-manager install,
+    not later at pip's requires-python check."""
+    script = _read("deploy/desktop/install.sh")
+    start = script.index("python3_meets_floor() {")
+    function = script[start:script.index("\n}\n", script.index("ensure_python() {")) + 3]
+    major, minor = reported.split(".")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stubs = {
+        "python3": f'#!/bin/sh\ncase "$2" in *02d*) echo {major}{int(minor):02d} ;; *) echo {reported} ;; esac\n',
+        "apt-get": f'#!/bin/sh\necho "apt-get $*" >> "{tmp_path}/calls"\n',
+        "sudo": '#!/bin/sh\nexec "$@"\n',
+        "uname": "#!/bin/sh\necho Linux\n",
+    }
+    for name, body in stubs.items():
+        (bin_dir / name).write_text(body, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    harness = (
+        "set -euo pipefail\n"
+        "log() { :; }\n"
+        "die() { printf 'DIE: %s\\n' \"$*\"; exit 1; }\n"
+        "have() { command -v \"$1\" >/dev/null 2>&1; }\n"
+        f"{function}"
+        "ensure_python\n"
+        "echo RETURNED\n"
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness],
+        env={"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert (tmp_path / "calls").exists() is installs
+    if stops:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "DIE: Lightwork needs Python 3.11 or newer" in result.stdout
+        assert "python3 is 3.10" in result.stdout
+        assert "RETURNED" not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "RETURNED" in result.stdout
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.parametrize(("reported", "stops"), [("3.10", True), ("3.12", False)])
+def test_vps_installer_checks_the_python_floor_after_installing(tmp_path, reported, stops):
+    """The VPS path installs the distro python3, which is 3.10 on Ubuntu
+    22.04; it must stop with a plain message before the cohort install."""
+    script = _read("deploy/vps/install.sh")
+    start = script.index("install_system_deps() {")
+    function = script[start:script.index("\n}\n", start) + 3]
+    major, minor = reported.split(".")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stubs = {
+        "python3": f'#!/bin/sh\ncase "$2" in *02d*) echo {major}{int(minor):02d} ;; *) echo {reported} ;; esac\n',
+        "apt-get": "#!/bin/sh\nexit 0\n",
+        "pipx": "#!/bin/sh\nexit 0\n",
+    }
+    for name, body in stubs.items():
+        (bin_dir / name).write_text(body, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    harness = f"set -euo pipefail\nlog() {{ :; }}\n{function}install_system_deps\necho RETURNED\n"
+    result = subprocess.run(
+        ["bash", "-c", harness],
+        env={"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if stops:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "Lightwork needs Python 3.11 or newer" in result.stderr
+        assert "python3 is 3.10" in result.stderr
+        assert "RETURNED" not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "RETURNED" in result.stdout
+    assert "Installs Python 3.12" not in script
+
+
 def test_vps_installer_requires_a_clean_immutable_checkout():
     text = _read("deploy/vps/install.sh")
 
