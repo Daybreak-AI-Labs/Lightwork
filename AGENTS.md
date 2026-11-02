@@ -4,7 +4,7 @@ Instructions for AI coding agents. [CLAUDE.md](CLAUDE.md) is the full version,
 including the numbered kernel rules and the attribution policy; human
 contributors should read [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Lightwork is an Apache-2.0 agent platform: a Python 3.10-3.12 uv-workspace
+Lightwork is an Apache-2.0 agent platform: a Python 3.11-3.12 uv-workspace
 monorepo with 8 pip packages (`packages/*`, `apps/installer-cli`) and a
 TypeScript plugin SDK (`sdks/plugin-ts`).
 
@@ -37,7 +37,7 @@ TypeScript plugin SDK (`sdks/plugin-ts`).
 Each rule is backed by a CI gate or a failure seen in practice.
 
 1. Never use a bare `import tomllib`; use the try/except `tomli` fallback
-   (Python 3.10; CI greps for it).
+   (kept for helpers that run on older interpreters; CI greps for it).
 2. No `shell=True` outside `maverick/sandbox/`; use `sandbox.exec()` (CI greps
    for it).
 3. Never hard-code model ids; use `maverick.config.get_role_model(role)`.
@@ -80,7 +80,7 @@ configured; Ruff, Vulture and the contract and governance gates in
 serially after the ordinary suite, as `.github/actions/test-shard/action.yml`
 does. Also validate with `MAVERICK_TEST_SECURE_DEFAULT=1`, the production
 security posture that CI tests.
-On a pull request the `test (3.10, n)` legs run only the test files
+On a pull request the `test (3.11, n)` legs run only the test files
 `scripts/select_pr_tests.py` selects from the changed files; the merge queue
 and `main` run everything, so run the whole suite locally for a change to
 shared code.

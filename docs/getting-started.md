@@ -2,7 +2,7 @@
 
 ## Install
 
-Lightwork is installed from source, with Python 3.10–3.12 and Git. Follow
+Lightwork is installed from source, with Python 3.11–3.12 and Git. Follow
 [Install from source](source-install.md): it clones the repository, creates a
 virtual environment and installs the eight Lightwork packages together with
 `scripts/install_release_cohort.py`. The guide gives the commands for macOS,

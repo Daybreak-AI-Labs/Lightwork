@@ -10,7 +10,7 @@ context-server hook returns the unchanged `maverick mcp` command. The current
 [Zed development guide](https://zed.dev/docs/extensions/developing-extensions)
 specifies this WASI target; hosts must support the pinned API generation.
 
-From this directory, with Python 3.10+ and the pinned Rust toolchain installed:
+From this directory, with Python 3.11+ and the pinned Rust toolchain installed:
 
 ```sh
 python build.py

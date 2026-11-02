@@ -22,7 +22,7 @@ Set `JAVA_HOME` to a JDK21 installation. From this directory run:
 python build.py
 ```
 
-Python3.10+ invokes the checked-in wrapper JAR directly (including on Windows),
+Python3.11+ invokes the checked-in wrapper JAR directly (including on Windows),
 runs `check buildPlugin`, verifies the archive exists and emits a SHA256/input
 manifest. The initial build downloads public Gradle, Kotlin and IntelliJ SDK
 dependencies. `check` includes the standalone synthetic-loopback SSE fixtures;

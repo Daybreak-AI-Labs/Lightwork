@@ -33,8 +33,8 @@ _DIAG_SCHEMA: dict[str, Any] = {
 
 def _check_python() -> list[str]:
     v = sys.version_info
-    if v < (3, 10):
-        return [f"  ✗ python {v.major}.{v.minor} (need >= 3.10)"]
+    if v < (3, 11):
+        return [f"  ✗ python {v.major}.{v.minor} (need >= 3.11)"]
     return [f"  ✓ python {v.major}.{v.minor}"]
 
 

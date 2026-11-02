@@ -2,11 +2,11 @@
 #
 # Seeded from the successful Python 3.12 environment in exact-main CI run
 # 30315811092 (2026-07-27), then completed with the test/posture toolchain and
-# common Python 3.10-compatible transitive resolutions.
+# common transitive resolutions for the supported interpreters.
 # Package manifests retain supported ranges for consumers; CI intentionally
 # resolves one reviewed environment so a dependency release cannot silently
 # change the security-posture baseline. Dependabot/security review should bump
-# this file deliberately and run the complete 3.10-3.12 matrix.
+# this file deliberately and run the complete 3.11-3.12 matrix.
 annotated-doc==0.0.5
 annotated-types==0.8.0
 aiohappyeyeballs==2.7.1

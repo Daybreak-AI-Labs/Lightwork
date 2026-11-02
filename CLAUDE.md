@@ -14,7 +14,7 @@ kernel, `maverick-core` (import name `maverick`), is a recursive multi-agent
 runtime for long-horizon work that runs under budget, sandbox and governance
 controls; the other packages build on it.
 
-- **Stack:** Python 3.10-3.12 uv-workspace monorepo with 8 pip packages: seven
+- **Stack:** Python 3.11-3.12 uv-workspace monorepo with 8 pip packages: seven
   under `packages/` (`maverick-core`, `maverick-shield`, `maverick-channels`,
   `maverick-evolve`, `maverick-dashboard`, `maverick-mcp`,
   `maverick-knowledge`) plus the setup wizard in `apps/installer-cli`. The
@@ -102,7 +102,7 @@ controls; the other packages build on it.
 - CI also runs tests with `MAVERICK_TEST_SECURE_DEFAULT=1` (the production
   security posture): selected suites on pull requests, the whole suite in the
   merge queue and on `main`. Run affected tests that way too.
-- On a pull request the `test (3.10, n)` legs run only the test files
+- On a pull request the `test (3.11, n)` legs run only the test files
   `scripts/select_pr_tests.py` selects from the changed files (a kernel,
   `conftest.py`, requirements, `.github/` or `scripts/` change means the full
   suite; a package change means its tests plus every test naming its import
@@ -118,7 +118,8 @@ controls; the other packages build on it.
 Each of these fails the build (the `lint` job in `.github/workflows/ci.yml`):
 
 - A bare `import tomllib` at column 0 in `apps/`, `packages/` or `benchmarks/`.
-  Python 3.10 has no `tomllib`; use
+  The supported floor (3.11) has `tomllib`, but the fallback is kept for
+  helpers that still run on older interpreters; use
   `try: import tomllib` / `except ModuleNotFoundError: import tomli as tomllib`.
 - `shell=True` outside `maverick/sandbox/` and tests (the grep also matches the
   literal in comments). Route shell through `sandbox.exec()` (kernel rule 4).

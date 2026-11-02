@@ -12,7 +12,7 @@ live services.
 
 ## Run the offline demonstration
 
-Use Python 3.10–3.12 and install the monorepo's eight packages as documented in
+Use Python 3.11–3.12 and install the monorepo's eight packages as documented in
 `CONTRIBUTING.md` / `.devcontainer/post-create.sh`. The repository root is a workspace,
 not an installable Python package. Verify that `maverick.__file__` resolves to
 this checkout before running tests.

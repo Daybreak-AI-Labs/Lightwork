@@ -158,7 +158,7 @@ The app keeps a bounded local `bootstrap-recovery.json` journal in its OS app-da
 directory. It records the pinned commit, last known phase, terminal outcome and
 non-secret local dependency inventory. It does not store bootstrap log payloads,
 GitHub credentials or AI keys. Launch or **Recheck dependencies** checks Git,
-Python 3.10+, pipx and the installed Lightwork package report with owned processes,
+Python 3.11+, pipx and the installed Lightwork package report with owned processes,
 eight-second deadlines and bounded output. A successful version response is
 labelled **responded**, not proof of a complete dependency installation.
 
@@ -185,7 +185,7 @@ installers or remove platform trust protections to suppress warnings.
 Release operators can verify separately approved signed engineering packages with
 `scripts/verify_desktop_artifact.py`. Supply a release-owner public key obtained
 independently of the download and an expected commit/version/target. The tool
-requires Python 3.10+ and [Minisign](https://jedisct1.github.io/minisign/) on the
+requires Python 3.11+ and [Minisign](https://jedisct1.github.io/minisign/) on the
 operator's machine, verifies a bounded immutable signed manifest, and streams the
 artifact SHA-256. It neither extracts nor executes the selected artifact, and it
 never generates signing keys or changes credentials.

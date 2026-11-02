@@ -164,6 +164,12 @@ not available from this repository.
   `/tools`, instead of one multi-megabyte page.
 
 ### Removed
+- **Python 3.10 support.** Python 3.10 reached end of life in October 2026, and
+  the security fixes in Pillow 13 and filelock 4.2 require Python 3.11 or
+  later. Every package now declares `requires-python = ">=3.11"`; the supported
+  interpreters are 3.11 and 3.12. CI's pull-request legs, the required checks,
+  the setup wizard, the installers' interpreter checks and the agent's
+  `diagnose` tool move their floor to 3.11.
 - **Internal project-administration documents.** Company records, dated
   internal audits and readiness reviews, the long-range roadmap, marketing
   pages and the website, contract templates, the licence-issuing vendor console
