@@ -142,7 +142,10 @@ run "governance-frontier tracked evidence" python benchmarks/eval_governance_fro
 run "harness-overhead tracked evidence" python benchmarks/eval_harness_overhead.py --verify-tracked-artifacts
 
 echo "== release packaging and installer disclosures =="
-run "release packaging" python -m pytest -q packages/maverick-core/tests/test_release_packaging.py
+run "release and supply-chain contracts" python -m pytest -q \
+  packages/maverick-core/tests/test_release_packaging.py \
+  packages/maverick-core/tests/test_install_supply_chain.py \
+  packages/maverick-core/tests/test_vendor_patches.py
 
 echo
 if [ "$fail" -ne 0 ]; then

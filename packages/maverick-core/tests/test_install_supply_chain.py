@@ -13,7 +13,6 @@ import re
 import shutil
 import subprocess
 from collections.abc import Iterator
-from datetime import date
 from pathlib import Path
 from textwrap import dedent
 
@@ -541,7 +540,7 @@ def test_homebrew_formula_bootstraps_python_312_without_venv_pip():
     assert "brew install cdayAI/tap/maverick" not in formula
 
 
-def test_cross_ecosystem_osv_gate_is_pinned_complete_and_expiring():
+def test_cross_ecosystem_osv_gate_is_pinned_complete_and_source_verified():
     ci = _read(".github/workflows/ci.yml")
     step = ci.split(
         "- name: OSV Scanner across every reviewed dependency surface",
@@ -557,6 +556,7 @@ def test_cross_ecosystem_osv_gate_is_pinned_complete_and_expiring():
     for dependency_surface in (
         "requirements/ci.txt",
         "rust/Cargo.lock",
+        "vendor/tests/Cargo.lock",
         "examples/clients/rust/Cargo.lock",
         "apps/desktop/src-tauri/Cargo.lock",
         "apps/installer-desktop/src-tauri/Cargo.lock",
@@ -576,19 +576,15 @@ def test_cross_ecosystem_osv_gate_is_pinned_complete_and_expiring():
         assert dependency_surface in step
 
     policy = tomllib.loads(_read("osv-scanner.toml"))
-    ignored = policy["IgnoredVulns"]
-    expected = {
-        "GHSA-wrw7-89jp-8q8g",
-        "RUSTSEC-2024-0370",
-        "RUSTSEC-2025-0075",
-        "RUSTSEC-2025-0080",
-        "RUSTSEC-2025-0081",
-        "RUSTSEC-2025-0098",
-        "RUSTSEC-2025-0100",
-    }
-    assert {item["id"] for item in ignored} == expected
-    assert all(item["ignoreUntil"] == date(2026, 10, 31) for item in ignored)
-    assert all("Tauri" in item["reason"] for item in ignored)
+    assert policy.get("IgnoredVulns", []) == []
+    assert "python scripts/check_vendor_patches.py" in ci
+    assert "|| scan_status=$?" in step
+    assert 'python -m scripts.check_osv_results "$report"' in step
+    assert '--scanner-exit "$scan_status"' in step
+    assert '--output "$GITHUB_WORKSPACE/osv-remediation.json"' in step
+    artifact_step = ci.split("- name: Upload cross-ecosystem vulnerability report", 1)[1].split("- name:", 1)[0]
+    assert "osv-results.json" in artifact_step
+    assert "osv-remediation.json" in artifact_step
 
 
 def test_go_java_and_standalone_demo_security_floors_are_explicit():
