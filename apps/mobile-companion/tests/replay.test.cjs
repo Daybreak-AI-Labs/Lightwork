@@ -1,6 +1,7 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {React,act,create,source,deferred,text} = require('./helpers.cjs');
+const sharedReplay = require('../../client-contract-tests/contracts/goal-events-v1.json');
 const settings={baseUrl:'http://127.0.0.1:8765',token:'fixture',cacheScope:'11111111-1111-4111-8111-111111111111'};
 function timers() {
   let seq=0;
@@ -13,6 +14,17 @@ function timers() {
 const page=(since,total=401)=>({status:'done',result:'FINAL',next_id:Math.min(total,since+200),
   has_more:since+200<total,terminal:since+200>=total,
   events:Array.from({length:Math.min(200,total-since)},(_,i)=>({id:since+i+1,agent:'agent',kind:'output',content:'event-'+(since+i+1),ts:1}))});
+
+test('mobile replay consumes the shared dashboard page fixture',async()=>{
+  const calls=[];
+  const replay=source('src/runReplay.ts',{'./api':{ApiError:Error,getGoalEvents:async(_cfg,_id,since)=>{
+    calls.push(since);return sharedReplay.pages[calls.length-1];
+  }}});
+  const result=await replay.createRunReplay(settings,7).poll(new AbortController().signal);
+  assert.deepEqual(calls,[0,2]);
+  assert.equal(result.next_id,3);assert.equal(result.terminal,true);
+  assert.deepEqual(Array.from(result.events,event=>event.id),[1,2,3]);
+});
 
 test('API owns its timeout and external cancellation, without retrying',async()=>{
   for(const mode of ['timeout','cancel']) {

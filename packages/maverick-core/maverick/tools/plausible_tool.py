@@ -17,6 +17,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -78,7 +79,7 @@ def _op_event(args: dict) -> str:
     }
     if args.get("props"):
         body["props"] = args["props"]
-    r = httpx.post(f"{_host()}/api/event", json=body,
+    r = _governed_sender(httpx.post)(f"{_host()}/api/event", json=body,
                    headers={"User-Agent": "maverick-agent"},
                    timeout=15.0)
     if r.status_code >= 400:
@@ -88,7 +89,7 @@ def _op_event(args: dict) -> str:
 
 def _stats_get(path: str, params: dict) -> tuple[int, Any]:
     import httpx
-    r = httpx.get(f"{_host()}/api/v1/stats{path}",
+    r = _governed_sender(httpx.get)(f"{_host()}/api/v1/stats{path}",
                   headers={"Authorization": f"Bearer {_read_key()}"},
                   params=params, timeout=30.0)
     try:

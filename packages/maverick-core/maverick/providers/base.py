@@ -2,8 +2,10 @@
 
 The Lightwork provider contract is structural (duck-typed): any object
 with ``complete()`` and ``complete_async()`` methods that take the
-Anthropic-format system/messages/tools and return ``LLMResponse``
-works. This module exists as a documentation anchor; new providers
+system/messages/tools and return ``LLMResponse`` works. The LLM facade
+accepts provider-neutral conversation records and adapts them to the
+legacy Anthropic-format boundary before invoking installed providers.
+This module exists as a documentation anchor; new providers
 don't need to inherit from anything.
 """
 from __future__ import annotations

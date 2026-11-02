@@ -24,6 +24,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
+from .config_contracts import BOOLEAN_SETTINGS
 from .pricing import (
     ModelPrice,
     UnverifiedRateError,
@@ -126,7 +127,7 @@ def _billing_strict() -> bool:
         log.warning("pricing config unavailable; failing closed: %s", exc)
         return True
     if "strict_pricing" not in budget:
-        return True
+        return BOOLEAN_SETTINGS["budget.strict_pricing"].default
     value = budget.get("strict_pricing")
     if isinstance(value, bool):
         return value

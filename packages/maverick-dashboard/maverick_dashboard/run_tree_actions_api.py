@@ -33,7 +33,7 @@ class RewindIn(BaseModel):
 
 
 def _goal(request: Request, goal_id: int):
-    from .api import _world
+    from ._shared import _world
 
     world = _world()
     goal = world.get_goal(goal_id)
@@ -49,7 +49,7 @@ async def fork_task(request: Request, goal_id: int, body: ForkIn) -> dict:
     require_permission(request, "operate")
     from maverick import session_tree
 
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
 
     _goal(request, goal_id)
     try:
@@ -98,7 +98,7 @@ async def rewind_task(request: Request, goal_id: int, body: RewindIn) -> dict:
     require_permission(request, "operate")
     from maverick.checkpoint import rewind
 
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
 
     world, goal = _goal(request, goal_id)
     status = getattr(goal, "status", "")

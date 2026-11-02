@@ -8,11 +8,13 @@ for scale (``build_store`` selects it when configured).
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import math
+import operator
 import sqlite3
 import threading
-from contextlib import nullcontext
+from contextlib import closing, contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -34,6 +36,23 @@ class StoredChunk:
     chunk_id: str
     text: str
     meta: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _ExactIndex:
+    """A bounded, process-local index from a completely validated snapshot."""
+
+    collection: str
+    key: str
+    value: str
+    data_version: int
+    local_changes: int
+    ids: tuple[str, ...]
+
+
+_MAX_EXACT_INDEX_IDS = 4096
+_MAX_EXACT_INDEX_CHARS = 1_000_000
+_MAX_EXACT_INDEX_KEY_CHARS = 4096
 
 
 class VectorStore(Protocol):
@@ -70,15 +89,31 @@ class VectorStore(Protocol):
     ) -> list[StoredChunk]: ...
 
 
-def _cosine(a: list[float], b: list[float]) -> float:
+def _cosine(a: list[float], b: list[float], *, a_norm: float | None = None) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
     dot = sum(x * y for x, y in zip(a, b, strict=False))
-    na = math.sqrt(sum(x * x for x in a))
+    na = math.sqrt(sum(x * x for x in a)) if a_norm is None else a_norm
     nb = math.sqrt(sum(y * y for y in b))
     if na == 0 or nb == 0:
         return 0.0
     return dot / (na * nb)
+
+
+def _score_sqlite_rows(rows, vector, collection):
+    """Decode and validate every row, computing the query norm once."""
+    query_norm = None
+    for text, vec, meta in rows:
+        stored = json.loads(vec)
+        if len(stored) != len(vector):
+            raise ValueError(
+                f"knowledge: query vector dim {len(vector)} != stored dim "
+                f"{len(stored)} for collection {collection!r}; the corpus was "
+                "embedded with a different embedder/model than this query"
+            )
+        if query_norm is None:
+            query_norm = math.sqrt(sum(x * x for x in vector))
+        yield Match(_cosine(vector, stored, a_norm=query_norm), text, json.loads(meta))
 
 
 def _document_publication(items: list, existing: list[StoredChunk]) -> list:
@@ -150,6 +185,7 @@ class SqliteVectorStore:
         # for concurrent use.
         self._db = sqlite3.connect(str(path), check_same_thread=False)
         self._lock = threading.Lock()
+        self._exact_index: _ExactIndex | None = None
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS chunks ("
             "collection TEXT, id TEXT, text TEXT, vec TEXT, meta TEXT, "
@@ -159,6 +195,7 @@ class SqliteVectorStore:
 
     def add(self, collection, items) -> None:
         with self._lock:
+            self._exact_index = None
             self._db.executemany(
                 "INSERT OR REPLACE INTO chunks VALUES (?,?,?,?,?)",
                 [
@@ -182,6 +219,7 @@ class SqliteVectorStore:
         self, collection, items, fingerprint: str, *, source: str | None = None, snapshot=None, effect_guard=None, publication_scope=None,
     ) -> None:
         with publication_scope() if publication_scope is not None else nullcontext(), self._lock, self._db:
+            self._exact_index = None
             self._db.execute("BEGIN IMMEDIATE")
             if effect_guard is not None:
                 effect_guard()
@@ -220,29 +258,33 @@ class SqliteVectorStore:
     def search(self, collection, vector, k: int = 5) -> list[Match]:
         if k <= 0:
             return []
+        k = operator.index(k)
         with self._lock:
             rows = self._db.execute(
                 "SELECT text, vec, meta FROM chunks WHERE collection = ?", (collection,)
             ).fetchall()
-        scored: list[Match] = []
-        for text, vec, meta in rows:
-            stored = json.loads(vec)
-            # A query embedded with a different model/dim than the corpus would
-            # silently score 0.0 against every chunk and return arbitrary
-            # results. Surface that misconfiguration instead of guessing.
-            if len(stored) != len(vector):
-                raise ValueError(
-                    f"knowledge: query vector dim {len(vector)} != stored dim "
-                    f"{len(stored)} for collection {collection!r}; the corpus was "
-                    "embedded with a different embedder/model than this query"
-                )
-            scored.append(Match(_cosine(vector, stored), text, json.loads(meta)))
-        scored.sort(key=lambda m: m.score, reverse=True)
-        return scored[:k]
+        # Keep at most k matches while still validating every row. The ordinal
+        # makes ties stable: earlier rows win, matching the original sort.
+        best: list[tuple[float, int, Match]] = []
+        for ordinal, match in enumerate(_score_sqlite_rows(rows, vector, collection)):
+            if not math.isfinite(match.score):
+                # NaN is not totally ordered. Preserve Python's original stable
+                # sort for the whole snapshot, not heap ordering around NaNs.
+                scored = list(_score_sqlite_rows(rows, vector, collection))
+                scored.sort(key=lambda item: item.score, reverse=True)
+                return scored[:k]
+            item = (match.score, -ordinal, match)
+            if len(best) < k:
+                heapq.heappush(best, item)
+            else:
+                heapq.heappushpop(best, item)
+        best.sort(reverse=True)
+        return [match for _score, _ordinal, match in best]
 
     def delete_collection(self, collection: str) -> None:
         """Remove all chunks for one collection."""
         with self._lock:
+            self._exact_index = None
             self._db.execute("DELETE FROM chunks WHERE collection = ?", (collection,))
             self._db.commit()
 
@@ -262,9 +304,10 @@ class SqliteVectorStore:
         dependency) — collections are per-domain corpora, not billion-row sets.
         """
         with self._lock:
+            self._exact_index = None
             rows = self._db.execute(
                 "SELECT id, meta FROM chunks WHERE collection = ?", (collection,)
-            ).fetchall()
+            )
             doomed = [
                 cid for cid, meta in rows
                 if (json.loads(meta or "{}")).get(key) == value
@@ -280,12 +323,99 @@ class SqliteVectorStore:
     def count_where(self, collection: str, key: str, value: str) -> int:
         """Chunks whose ``meta[key] == value`` — the erasure-verify primitive."""
         with self._lock:
-            rows = self._db.execute(
-                "SELECT meta FROM chunks WHERE collection = ?", (collection,)
-            ).fetchall()
-        return sum(
-            1 for (meta,) in rows if (json.loads(meta or "{}")).get(key) == value
+            with self._exact_snapshot(collection) as token:
+                cached = self._matching_exact_index(collection, key, value, token)
+                if cached is not None:
+                    return len(cached.ids)
+                total = 0
+                ids: list[str] | None = []
+                id_chars = 0
+                with closing(self._db.execute(
+                    "SELECT id, meta FROM chunks WHERE collection = ? ORDER BY id", (collection,)
+                )) as rows:
+                    for chunk_id, meta in rows:
+                        if (json.loads(meta or "{}")).get(key) == value:
+                            total += 1
+                            if ids is not None:
+                                if (type(chunk_id) not in (str,) or len(ids) >= _MAX_EXACT_INDEX_IDS
+                                        or id_chars + len(chunk_id) > _MAX_EXACT_INDEX_CHARS):
+                                    ids = None
+                                else:
+                                    ids.append(chunk_id)
+                                    id_chars += len(chunk_id)
+                if (token is not None and ids is not None
+                        and self._exact_indexable(collection, key, value)):
+                    self._exact_index = _ExactIndex(collection, key, value, *token, tuple(ids))
+                else:
+                    self._exact_index = None
+                return total
+
+    @contextmanager
+    def _exact_snapshot(self, collection):
+        """Pin a snapshot only when SQLite can prove external-write freshness.
+
+        A cache is never consulted inside a caller-owned transaction. An
+        unsupported data-version pragma or failed snapshot setup simply leaves
+        the caller on the authoritative scan path. ``total_changes`` also
+        invalidates the cache after writes through this connection.
+        """
+        if self._db.in_transaction:
+            yield None
+            return
+        try:
+            with closing(self._db.execute("PRAGMA data_version")) as version:
+                before_row = version.fetchone()
+            before = before_row[0] if before_row else None
+        except sqlite3.Error:
+            before = None
+        if not isinstance(before, int):
+            yield None
+            return
+        try:
+            self._db.execute("BEGIN")
+        except sqlite3.Error:
+            yield None
+            return
+        try:
+            try:
+                # A SELECT starts the read snapshot before the second version
+                # check; a concurrent commit cannot make the cached IDs newer
+                # than the rows visible to this operation.
+                with closing(self._db.execute(
+                    "SELECT id FROM chunks WHERE collection = ? LIMIT 1", (collection,)
+                )) as anchor:
+                    anchor.fetchone()
+                with closing(self._db.execute("PRAGMA data_version")) as version:
+                    after_row = version.fetchone()
+                after = after_row[0] if after_row else None
+                token = (before, self._db.total_changes) if before == after else None
+            except sqlite3.Error:
+                token = None
+            yield token
+        finally:
+            self._db.rollback()
+
+    @staticmethod
+    def _exact_indexable(collection, key, value):
+        # The supported fast path is intentionally narrower than Python's
+        # general equality rules. Other inputs retain the authoritative scan.
+        return all(
+            type(item) in (str,) and len(item) <= _MAX_EXACT_INDEX_KEY_CHARS
+            for item in (collection, key, value)
         )
+
+    def _matching_exact_index(self, collection, key, value, token):
+        index = self._exact_index
+        if index is None:
+            return None
+        if token is None or (index.data_version, index.local_changes) != token:
+            self._exact_index = None
+            return None
+        if not self._exact_indexable(collection, key, value):
+            return None
+        if (index.collection, index.key, index.value) != (collection, key, value):
+            return None
+        return index
 
     def count(self, collection: str) -> int:
         with self._lock:
@@ -302,17 +432,55 @@ class SqliteVectorStore:
         if maximum < 1:
             raise ValueError("knowledge exact-read limit must be positive")
         with self._lock:
-            rows = self._db.execute(
+            if self._exact_index is not None:
+                with self._exact_snapshot(collection) as token:
+                    index = self._matching_exact_index(collection, key, value, token)
+                    if index is not None:
+                        indexed = self._read_indexed(collection, key, value, maximum, index)
+                        if indexed is not None:
+                            return indexed
+            return self._read_where_scan(collection, key, value, maximum)
+
+    def _read_indexed(self, collection, key, value, maximum, index):
+        """Read index candidates in bounded queries, validating every result."""
+        selected = index.ids[:maximum + 1]
+        result = []
+        for start in range(0, len(selected), 400):
+            ids = selected[start:start + 400]
+            placeholders = ",".join("?" for _ in ids)
+            try:
+                rows = self._db.execute(
+                    f"SELECT id, text, meta FROM chunks WHERE collection = ? AND id IN ({placeholders}) ORDER BY id",
+                    (collection, *ids),
+                ).fetchall()
+            except sqlite3.Error:
+                # A build may impose a lower parameter limit, or a transient
+                # optimized query may be unavailable. The ordinary scan stays
+                # authoritative and will still surface underlying DB failures.
+                return None
+            if [row[0] for row in rows] != list(ids):
+                return None
+            for chunk_id, text, raw_meta in rows:
+                meta = json.loads(raw_meta or "{}")
+                if meta.get(key) != value:
+                    return None
+                result.append(StoredChunk(str(chunk_id), str(text), dict(meta)))
+        return result
+
+    def _read_where_scan(self, collection, key, value, maximum):
+        result: list[StoredChunk] = []
+        with closing(
+            self._db.execute(
                 "SELECT id, text, meta FROM chunks WHERE collection = ? ORDER BY id",
                 (collection,),
-            ).fetchall()
-        result: list[StoredChunk] = []
-        for chunk_id, text, raw_meta in rows:
-            meta = json.loads(raw_meta or "{}")
-            if meta.get(key) == value:
-                result.append(StoredChunk(str(chunk_id), str(text), dict(meta)))
-                if len(result) > maximum:
-                    break
+            )
+        ) as rows:
+            for chunk_id, text, raw_meta in rows:
+                meta = json.loads(raw_meta or "{}")
+                if meta.get(key) == value:
+                    result.append(StoredChunk(str(chunk_id), str(text), dict(meta)))
+                    if len(result) > maximum:
+                        break
         return result
 
     def read_collection(self, collection: str, *, limit: int) -> list[StoredChunk]:
@@ -328,6 +496,7 @@ class SqliteVectorStore:
     def replace_embeddings(self, collection: str, snapshot: list[StoredChunk], items: list) -> None:
         """Compare the entire source snapshot and replace vectors in one transaction."""
         with self._lock, self._db:
+            self._exact_index = None
             self._db.execute("BEGIN IMMEDIATE")
             rows = self._db.execute(
                 "SELECT id, text, meta FROM chunks WHERE collection = ? ORDER BY id", (collection,),
@@ -346,6 +515,7 @@ class SqliteVectorStore:
         if db is not None:
             db.close()
             self._db = None
+        self._exact_index = None
 
     def __enter__(self) -> SqliteVectorStore:
         return self

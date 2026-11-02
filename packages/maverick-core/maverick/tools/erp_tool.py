@@ -28,6 +28,7 @@ import os
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -125,7 +126,7 @@ def erp_tool() -> Tool:
         import httpx
         url = f"{base}{path}"
         try:
-            r = httpx.get(
+            r = _governed_sender(httpx.get)(
                 url,
                 params={str(k): str(v) for k, v in params.items()},
                 headers={"Authorization": f"Bearer {tok}", "Accept": "application/json"},

@@ -1,11 +1,4 @@
-"""flows api: routes moved out of api.py (see module notes below).
-
-Handlers are verbatim from api.py. Anything they took from the api module's
-namespace (auth helpers, the world accessor, the supervisor) is reached through
-:mod:`._api_seams`, which resolves the api module's *current* attribute at call
-time -- so a monkeypatch of ``maverick_dashboard.api.<name>`` applies here too.
-api.py re-exports every name defined here and includes ``router``.
-"""
+"""Workflow HTTP routes, using explicitly configured application services."""
 from __future__ import annotations
 
 import hashlib
@@ -14,24 +7,9 @@ import logging
 import re
 import secrets
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from starlette.responses import StreamingResponse
 
-from ._api_seams import (
-    _dashboard_token_authenticated,
-    _event_trigger_allowed_owners,
-    _live_tool_index,
-    _live_tool_schemas,
-    _supervisor,
-    auth_genuinely_off,
-    caller_principal,
-    caller_suites,
-    configured_goal_ceiling_dollars,
-    execution_user_id_from_request,
-    goal_owner_filter,
-    require_permission,
-    run_in_threadpool,
-)
 from .api_schemas import (
     FlowApplyIn,
     FlowApprovalPreviewIn,
@@ -45,9 +23,25 @@ from .api_schemas import (
     FlowRunIn,
     FlowSaveIn,
 )
+from .flow_dependencies import (
+    _dashboard_token_authenticated,
+    _event_trigger_allowed_owners,
+    _live_tool_index,
+    _live_tool_schemas,
+    _supervisor,
+    auth_genuinely_off,
+    bind_request_services,
+    caller_principal,
+    caller_suites,
+    configured_goal_ceiling_dollars,
+    execution_user_id_from_request,
+    goal_owner_filter,
+    require_permission,
+    run_in_threadpool,
+)
 
 log = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(bind_request_services)])
 
 
 def _require_flows() -> None:

@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 from maverick.budget import Budget, UsageAccountingError
 from maverick.providers.ollama_provider import OllamaClient
-from maverick.providers.openai_provider import OpenAIClient
+from maverick.providers.openai_provider import OpenAIClient, _strict_usage_count
 from maverick.providers.openrouter_provider import OpenRouterClient
 
 
@@ -43,6 +43,35 @@ def test_paid_provider_missing_usage_aborts():
     with pytest.raises(UsageAccountingError, match="missing token usage"):
         OpenAIClient._from_response(_Resp(_Msg()), budget, model="gpt-4o",
                                     usage_required=True)
+
+
+@pytest.mark.parametrize("invalid", [0.5, -0.5, True, False, "", [], {}])
+@pytest.mark.parametrize("field", ["prompt_tokens", "completion_tokens"])
+def test_paid_provider_rejects_noninteger_usage(field, invalid):
+    usage = {"prompt_tokens": 10, "completion_tokens": 5}
+    usage[field] = invalid
+    budget = Budget(max_dollars=10.0)
+    with pytest.raises(UsageAccountingError, match="invalid OpenAI usage"):
+        OpenAIClient._from_response(
+            _Resp(_Msg(), SimpleNamespace(**usage)), budget, model="gpt-4o",
+        )
+    assert budget.input_tokens == 0
+    assert budget.output_tokens == 0
+
+
+@pytest.mark.parametrize("value", [5, 5.0, "5"])
+def test_usage_accepts_valid_integral_counts(value):
+    assert _strict_usage_count(value, "test") == 5
+
+
+@pytest.mark.parametrize("missing", ["prompt_tokens", "completion_tokens"])
+def test_paid_provider_rejects_missing_individual_usage_count(missing):
+    usage = {"prompt_tokens": 10, "completion_tokens": 5}
+    del usage[missing]
+    with pytest.raises(UsageAccountingError, match="missing token count"):
+        OpenAIClient._from_response(
+            _Resp(_Msg(), SimpleNamespace(**usage)), Budget(max_dollars=10.0), model="gpt-4o",
+        )
 
 
 def test_self_hosted_missing_usage_does_not_abort():

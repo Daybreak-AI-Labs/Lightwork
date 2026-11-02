@@ -23,6 +23,7 @@ import os
 import re
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -91,7 +92,7 @@ def _op_query(statement: str, ctx: dict, limit: int, confirm: bool) -> str:
         v = (ctx.get(k) or os.environ.get(f"SNOWFLAKE_{k.upper()}", "")).strip()
         if v:
             body[k] = v
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         f"https://{acct}.snowflakecomputing.com/api/v2/statements",
         headers={
             "Authorization": f"Bearer {tok}",

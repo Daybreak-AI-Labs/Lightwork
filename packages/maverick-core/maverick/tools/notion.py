@@ -73,7 +73,9 @@ def _config() -> str:
 
 def _client():
     import httpx
-    return httpx.Client(
+
+    from ..governed_http import GuardedClient
+    return GuardedClient(httpx.Client(
         headers={
             "Authorization": f"Bearer {_config()}",
             "Notion-Version": _API_VERSION,
@@ -84,7 +86,7 @@ def _client():
         # `auth=` param, not header creds) -- an open-redirect off api.notion.com
         # would exfiltrate the token to another host.
         timeout=30.0, follow_redirects=False,
-    )
+    ))
 
 
 def _paginate(c, url: str, body: dict, limit: int) -> tuple[int, str, list[dict]]:

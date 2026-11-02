@@ -446,6 +446,18 @@ def test_an_unevaluable_policy_blocks_rather_than_allows(guarded, monkeypatch) -
         httpx.get("https://api.example.com/x", timeout=0.5)
 
 
+def test_host_parser_failure_blocks_even_without_enterprise_mode(guarded, monkeypatch) -> None:
+    """Tenant checks cannot be skipped when host extraction is unavailable."""
+    monkeypatch.setattr("maverick.enterprise.enterprise_enabled", lambda: False)
+
+    def fail_host_parser(url):
+        raise RuntimeError("host parser unavailable")
+
+    monkeypatch.setattr("maverick.enterprise._host_of", fail_host_parser)
+    with pytest.raises(EgressBlocked, match="could not be evaluated"):
+        httpx.get("https://api.example.com/x", timeout=0.5)
+
+
 def test_a_block_is_audited(guarded, monkeypatch) -> None:
     """A blocked exfiltration attempt is exactly what an auditor needs to see."""
     seen = []

@@ -82,7 +82,7 @@ def _services(request):
     ops, tenant, discovery = _access(request)
     target = targets._store(targets._ops(), tenant)
     key = _key(tenant)
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
 
     actor = _request_actor(request)
     service = bridge.PrivacyDiscoveryDataUseBridgeStore(

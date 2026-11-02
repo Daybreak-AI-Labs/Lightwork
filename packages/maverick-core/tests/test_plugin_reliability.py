@@ -9,6 +9,7 @@ from maverick.plugin_reliability import (
     PluginTimeout,
     run_drill,
 )
+from maverick.tool_results import ToolOutcome, ToolResultState
 
 
 def _healthy_plugin():
@@ -28,6 +29,18 @@ def _healthy_plugin():
         return f"ok i={payload.get('i')}"
 
     return call
+
+
+def test_drill_respects_explicit_tool_outcomes():
+    def call(payload):
+        if payload["i"] == 0:
+            return ToolOutcome(ToolResultState.SUCCEEDED, "ERROR: valid data i=0")
+        return ToolOutcome(ToolResultState.INDETERMINATE, "remote response was inconclusive")
+
+    report = run_drill(call, iterations=2, max_surfaced_rate=1.0)
+    assert report.successes == 1
+    assert report.surfaced_failures == 1
+    assert report.isolation_violations == 0
 
 
 def test_healthy_plugin_passes_all_properties():

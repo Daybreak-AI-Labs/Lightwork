@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from ..catalog_schema import index_connector_specs
 from . import Tool
 from ._connector_specs import _GRAPHQL_SPECS, _SPECS
 from ._rest_connector import _build_auth_headers
@@ -31,6 +32,11 @@ def _fill_env(spec: dict) -> dict:
 
 for _spec in (*_SPECS, *_GRAPHQL_SPECS):
     _fill_env(_spec)
+
+# Compile the authoritative catalog once. Duplicate names or invalid credential
+# metadata would otherwise silently overwrite a connector during setup.
+_CONNECTOR_INDEX = index_connector_specs((*_SPECS, *_GRAPHQL_SPECS))
+_REST_SPEC_INDEX = {spec["name"]: spec for spec in _SPECS}
 
 # Read-only (GET-only) variants for finance vendors -- the bridge that
 # lets a read-only pack (max_risk <= medium) pull narrowly-scoped data without
@@ -61,10 +67,9 @@ def _read_specs_for(vendors: list[str]) -> list[dict]:
     token env, and auth mode (so creds + auth are correct by construction); only
     the name (``<vendor>_read``) and a read-only description differ. Unknown
     vendors are skipped rather than wedging import."""
-    by_name = {s["name"]: s for s in _SPECS}
     out: list[dict] = []
     for v in vendors:
-        src = by_name.get(v)
+        src = _REST_SPEC_INDEX.get(v)
         if src is None:
             continue
         spec = {k: val for k, val in src.items() if k not in ("name", "description")}
@@ -673,7 +678,8 @@ def connector_catalog() -> list[dict]:
 
 def connection_setup_catalog() -> list[dict]:
     """Describe existing adapters without resolving credentials or calling providers."""
-    specs = {spec["name"]: spec for spec in _SPECS + _READ_SPECS + _GRAPHQL_SPECS}
+    specs = {**_CONNECTOR_INDEX, **{spec["name"]: spec for spec in _READ_SPECS}}
+    specs.update({spec["name"]: spec for spec in _GRAPHQL_SPECS})
     rows = []
     for item in connector_catalog():
         spec = specs.get(item["name"])

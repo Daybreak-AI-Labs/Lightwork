@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
+import tempfile
 import threading
 import time
 from collections import OrderedDict
@@ -37,11 +39,34 @@ from ..paths import data_dir
 
 _DEFAULT_SIZE = 256
 _lock = threading.Lock()
+_snapshot_lock = threading.RLock()
+log = logging.getLogger(__name__)
 # key -> (value, stored_at_monotonic, stored_at_epoch)
 _store: OrderedDict[str, tuple[str, float, float]] = OrderedDict()
 _hits = 0
 _misses = 0
 _warmed = False
+_generation = 0
+_epoch: str | None = None
+
+
+def _sync_epoch() -> str | None:
+    """Discard local entries when another worker has invalidated their generation."""
+    global _epoch, _generation
+    from .epoch import local_epoch
+    from .redis_tool import enabled as redis_enabled
+
+    try:
+        shared = _shared_backend() if redis_enabled() else None
+        token = shared.epoch() if shared is not None else (None if redis_enabled() else local_epoch())
+    except Exception:
+        token = None
+    with _lock:
+        if token != _epoch or token is None:
+            _store.clear()
+            _generation += 1
+            _epoch = token
+    return token
 
 
 def _env_true(name: str) -> bool:
@@ -99,20 +124,31 @@ def save_snapshot() -> int:
     re-apply the TTL. Best-effort: any I/O problem is swallowed (the cache
     must never break the tool path) and 0 is returned.
     """
+    with _snapshot_lock:
+        return _save_snapshot()
+
+
+def _save_snapshot() -> int:
     if not snapshot_enabled():
         return 0
     try:
+        token = _sync_epoch()
+        if token is None:
+            return 0
         path = _snapshot_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         with _lock:
             rows = [(k, v, epoch) for k, (v, _mono, epoch) in _store.items()]
-        tmp = path.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as fh:
-            for k, v, epoch in rows:
-                # Round-trip snapshot (written here, parsed back at load): exact
-                # bytes don't matter for identity, so use the fast backend.
-                fh.write(_fastjson.dumps({"k": k, "v": v, "t": epoch}) + "\n")
-        os.replace(tmp, path)
+        tmp: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as fh:
+                tmp = Path(fh.name)
+                for k, v, epoch in rows:
+                    fh.write(_fastjson.dumps({"k": k, "v": v, "t": epoch, "generation": token}) + "\n")
+            os.replace(tmp, path)
+        finally:
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
         try:
             os.chmod(path, 0o600)
         except OSError:
@@ -129,6 +165,11 @@ def warm_on_start() -> int:
     entry's wall-clock stamp; expired rows are skipped. Capped at the
     configured cache size. Best-effort: a missing/corrupt snapshot loads 0.
     """
+    with _snapshot_lock:
+        return _warm_on_start()
+
+
+def _warm_on_start() -> int:
     global _warmed
     with _lock:
         if _warmed:
@@ -137,6 +178,9 @@ def warm_on_start() -> int:
     if not (enabled() and snapshot_enabled()):
         return 0
     try:
+        token = _sync_epoch()
+        if token is None:
+            return 0
         path = _snapshot_path()
         if not path.exists():
             return 0
@@ -152,6 +196,8 @@ def warm_on_start() -> int:
                     continue
                 try:
                     row = _fastjson.loads(line)
+                    if row.get("generation") != token:
+                        continue
                     k, v, epoch = str(row["k"]), str(row["v"]), float(row["t"])
                 except (ValueError, TypeError, KeyError):
                     continue  # tolerate a corrupt / partial line
@@ -206,8 +252,12 @@ def get_cached(
     global _hits, _misses
     if not enabled() or not cacheable(tool):
         return (False, None)
+    token = _sync_epoch()
+    if token is None:
+        return (False, None)
     if not _warmed:
         warm_on_start()
+    namespace = namespace + "|generation:" + token
     name = getattr(tool, "name", "")
     k = _key(name, args, namespace=namespace)
     ttl = _ttl_s()
@@ -216,17 +266,18 @@ def get_cached(
     if entry is None:
         # Shared tier ([tools] output_cache_backend = "redis"): a hit there
         # warms this process too. Same key scope as the local cache.
-        shared = _shared_backend()
-        hit, value = shared.get(name, args, scope=namespace) if shared else (False, None)
-        with _lock:
-            if hit and isinstance(value, str):
-                _store[k] = (value, time.monotonic(), time.time())
-                while len(_store) > _maxsize():
-                    _store.popitem(last=False)
-                _hits += 1
-                return (True, value)
-            _misses += 1
-            return (False, None)
+        with _snapshot_lock:
+            shared = _shared_backend()
+            hit, value = shared.get(name, args, scope=namespace) if shared else (False, None)
+            with _lock:
+                if hit and isinstance(value, str):
+                    _store[k] = (value, time.monotonic(), time.time())
+                    while len(_store) > _maxsize():
+                        _store.popitem(last=False)
+                    _hits += 1
+                    return (True, value)
+                _misses += 1
+                return (False, None)
     with _lock:
         entry = _store.get(k)
         if entry is None:
@@ -248,23 +299,39 @@ def store_cached(
     value: str,
     *,
     namespace: str = "",
+    generation: int | None = None,
 ) -> None:
     """Memoize a successful, non-error result for a cacheable tool."""
     if not enabled() or not cacheable(tool):
         return
     if not isinstance(value, str) or value.startswith("ERROR:"):
         return
+    token = _sync_epoch()
+    if token is None:
+        return
+    namespace = namespace + "|generation:" + token
     name = getattr(tool, "name", "")
     k = _key(name, args, namespace=namespace)
     cap = _maxsize()
+    with _snapshot_lock:
+        with _lock:
+            if generation is not None and generation != _generation:
+                return
+            _store[k] = (value, time.monotonic(), time.time())
+            _store.move_to_end(k)
+            while len(_store) > cap:
+                _store.popitem(last=False)  # evict least-recently-used
+        shared = _shared_backend()
+        if shared is not None:
+            shared.store(name, args, value, scope=namespace)
+
+
+def generation() -> int:
+    """Capture a cache epoch before executing a read outside the cache."""
+    if enabled():
+        _sync_epoch()
     with _lock:
-        _store[k] = (value, time.monotonic(), time.time())
-        _store.move_to_end(k)
-        while len(_store) > cap:
-            _store.popitem(last=False)  # evict least-recently-used
-    shared = _shared_backend()
-    if shared is not None:
-        shared.store(name, args, value, scope=namespace)
+        return _generation
 
 
 _SHARED: dict[str, Any] = {}
@@ -297,8 +364,9 @@ def stats() -> dict[str, int]:
 
 def reset() -> None:
     """Clear the cache and counters (tests / a fresh run)."""
-    global _hits, _misses, _warmed
+    global _hits, _misses, _warmed, _generation
     with _lock:
+        _generation += 1
         _store.clear()
         _hits = 0
         _misses = 0
@@ -312,11 +380,33 @@ def note_side_effect(tool: Any) -> None:
     patch, shell command, or message send may have changed what any cached
     read (read_file, repo_map, ...) returned, so the whole store is dropped.
     Conservative over-invalidation is the price of correctness; the LRU
-    re-warms on the next reads. No-op when the cache is off/empty or the
-    tool is itself read-only."""
-    if not enabled() or cacheable(tool):
+    re-warms on the next reads. Read-only tools leave the cache unchanged.
+    Snapshot deletion is serialized with local saves and loads, preventing a
+    concurrent save from putting this process's stale snapshot back on disk.
+    Generation checks fence other workers and late read publication.
+    An unavailable coordinator bypasses reads; a failed invalidation still
+    requires operator recovery before shared caching can be trusted.
+    """
+    if cacheable(tool):
         return
-    purge()  # no-ops cheaply on an empty store; single lock acquisition
+    global _warmed
+    with _snapshot_lock:
+        from .epoch import local_epoch
+
+        local_epoch(advance=True)
+        shared = _shared_backend()
+        if shared is not None:
+            shared.epoch(advance=True)
+        purge()
+        with _lock:
+            _warmed = True
+        try:
+            _snapshot_path().unlink(missing_ok=True)
+        except OSError:
+            log.warning("could not invalidate tool-cache snapshot", exc_info=True)
+        shared = _shared_backend()
+        if shared is not None:
+            shared.purge()
 
 
 def purge(tool_name: str | None = None) -> int:
@@ -326,7 +416,9 @@ def purge(tool_name: str | None = None) -> int:
     counters are left intact, so a targeted purge (e.g. after a tool's
     underlying data changed) doesn't throw away the run's hit-rate history.
     """
+    global _generation
     with _lock:
+        _generation += 1
         if tool_name:
             prefix = f"{tool_name}:"
             keys = [k for k in _store if k.startswith(prefix)]

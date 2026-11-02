@@ -36,10 +36,13 @@ import ssl
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .constant_time import text_equals
+
+if TYPE_CHECKING:
+    from .runner import DispatchObservation, ExecutionHandle
 
 log = logging.getLogger(__name__)
 
@@ -738,29 +741,88 @@ class QueueDispatcher:
         concurrency_principal: str | None = None,
         allowed_suites: frozenset[str] | None = None,
     ) -> str | None:
-        from .runner import DEFAULT_MAX_DEPTH
-
-        payload = _payload(
-            goal_id,
-            conversation_id=conversation_id,
-            max_dollars=max_dollars,
-            max_wall_seconds=max_wall_seconds,
-            max_depth=DEFAULT_MAX_DEPTH if max_depth is None else max_depth,
-            channel=channel,
-            user_id=user_id,
-            capability=capability,
-            concurrency_principal=concurrency_principal,
-            allowed_suites=allowed_suites,
-            auth_mode=self._auth_mode,
-            signing_key=self._signing_key,
-            ttl_seconds=self._ttl_seconds,
+        return self._submit(
+            goal_id, max_dollars=max_dollars, max_wall_seconds=max_wall_seconds,
+            max_depth=max_depth, conversation_id=conversation_id, channel=channel,
+            user_id=user_id, capability=capability,
+            concurrency_principal=concurrency_principal, allowed_suites=allowed_suites,
+            observed=False,
         )
-        self._enqueue(JOB_NAME, payload)
+
+    def submit_observed(
+        self,
+        goal_id: int,
+        *,
+        max_dollars: float | None = None,
+        max_wall_seconds: float | None = None,
+        max_depth: int | None = None,
+        conversation_id: int | None = None,
+        channel: str | None = None,
+        user_id: str | None = None,
+        capability: Any | None = None,
+        concurrency_principal: str | None = None,
+        allowed_suites: frozenset[str] | None = None,
+    ) -> DispatchObservation:
+        return self._submit(
+            goal_id, max_dollars=max_dollars, max_wall_seconds=max_wall_seconds,
+            max_depth=max_depth, conversation_id=conversation_id, channel=channel,
+            user_id=user_id, capability=capability,
+            concurrency_principal=concurrency_principal, allowed_suites=allowed_suites,
+            observed=True,
+        )
+
+    def submit_handle(self, goal_id: int, **kwargs: Any) -> ExecutionHandle:
+        """Return the signed submission evidence without acquiring a lease."""
+        from .runner import _submission_handle
+
+        return _submission_handle(
+            goal_id, lambda: self.submit_observed(goal_id, **kwargs), owner="queue",
+        )
+
+    def _submit(
+        self, goal_id: int, *, max_dollars: float | None,
+        max_wall_seconds: float | None, max_depth: int | None,
+        conversation_id: int | None, channel: str | None, user_id: str | None,
+        capability: Any | None, concurrency_principal: str | None,
+        allowed_suites: frozenset[str] | None, observed: bool,
+    ) -> str | DispatchObservation:
+        from .runner import DEFAULT_MAX_DEPTH, DispatchObservation, DispatchState, observe_dispatch
+
+        try:
+            payload = _payload(
+                goal_id, conversation_id=conversation_id, max_dollars=max_dollars,
+                max_wall_seconds=max_wall_seconds,
+                max_depth=DEFAULT_MAX_DEPTH if max_depth is None else max_depth,
+                channel=channel, user_id=user_id, capability=capability,
+                concurrency_principal=concurrency_principal, allowed_suites=allowed_suites,
+                auth_mode=self._auth_mode, signing_key=self._signing_key,
+                ttl_seconds=self._ttl_seconds,
+            )
+        except Exception as exc:
+            if not observed:
+                raise
+            log.warning("queue preflight rejected goal #%s (%s)", goal_id, type(exc).__name__)
+            return DispatchObservation(goal_id, DispatchState.NOT_ACCEPTED, "error",
+                                       owner="queue", reason="queue_preflight")
+        try:
+            self._enqueue(JOB_NAME, payload)
+        except Exception as exc:
+            if not observed:
+                raise
+            # The broker may have committed before an acknowledgement was
+            # lost. Keep its signed message identity for reconciliation.
+            log.warning("queue outcome unknown for goal #%s (%s)", goal_id, type(exc).__name__)
+            return DispatchObservation(goal_id, DispatchState.UNKNOWN, "error",
+                                       owner="queue", receipt_id=payload["message_id"],
+                                       reason="queue_acknowledgement_unknown")
         log.info(
             "queued goal #%s as authenticated message %s",
             goal_id,
             payload["message_id"],
         )
+        if observed:
+            return observe_dispatch(goal_id, QUEUED_STATUS, owner="queue",
+                                    receipt_id=payload["message_id"])
         return QUEUED_STATUS
 
 
@@ -1232,6 +1294,19 @@ class _FailClosedQueueDispatcher:
     def submit(self, *_args: Any, **_kwargs: Any) -> str | None:
         raise QueueSecurityError(
             f"configured network queue is unavailable or insecure: {self._reason}"
+        )
+
+    def submit_observed(self, goal_id: int, **_kwargs: Any) -> DispatchObservation:
+        from .runner import DispatchObservation, DispatchState
+
+        return DispatchObservation(goal_id, DispatchState.NOT_ACCEPTED, "error",
+                                   owner="queue", reason="queue_unavailable")
+
+    def submit_handle(self, goal_id: int, **kwargs: Any) -> ExecutionHandle:
+        from .runner import _submission_handle
+
+        return _submission_handle(
+            goal_id, lambda: self.submit_observed(goal_id, **kwargs), owner="queue",
         )
 
 

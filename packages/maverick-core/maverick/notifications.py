@@ -172,7 +172,9 @@ def _send_ntfy(title: str, body: str, priority: str, server: str, topic: str) ->
             log.warning("notify ntfy: invalid topic format")
             return False
         url = f"{server.rstrip('/')}/{topic}"
-        resp = httpx.post(url, content=body.encode("utf-8"), headers=headers, timeout=10.0)
+        from .governed_http import guarded_sender
+
+        resp = guarded_sender(httpx.post)(url, content=body.encode("utf-8"), headers=headers, timeout=10.0)
         return _response_accepted(resp.status_code)
     except Exception as e:
         mark_transport_failure(e)
@@ -206,7 +208,9 @@ def _send_pushover(title: str, body: str, priority: str, cfg: dict | None = None
         return False
     prio_map = {"low": "-1", "default": "0", "high": "1", "max": "2"}
     try:
-        resp = httpx.post(
+        from .governed_http import guarded_sender
+
+        resp = guarded_sender(httpx.post)(
             "https://api.pushover.net/1/messages.json",
             data={
                 "token": app, "user": user,
@@ -230,7 +234,10 @@ def _send_discord(title: str, body: str, url: str) -> bool:
         return False
     try:
         import httpx
-        resp = httpx.post(
+
+        from .governed_http import guarded_sender
+
+        resp = guarded_sender(httpx.post)(
             url,
             # allowed_mentions parse:[] so an agent-controlled title/body
             # containing @everyone/@here can't trigger a mass ping.
@@ -255,7 +262,10 @@ def _send_slack(title: str, body: str, url: str) -> bool:
         return False
     try:
         import httpx
-        resp = httpx.post(
+
+        from .governed_http import guarded_sender
+
+        resp = guarded_sender(httpx.post)(
             url,
             json={"text": f"*{title}*\n{body}"},
             timeout=10.0,

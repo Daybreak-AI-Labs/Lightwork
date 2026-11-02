@@ -36,9 +36,11 @@ so an unreadable file cannot publish a changed specialist straight to everyone.
 """
 from __future__ import annotations
 
-DEFAULT_MAX_CASES = 20
-MAX_CASES_LIMIT = 200
-MAX_CANARY_PERCENT = 50
+from .config_contracts import BOOLEAN_SETTINGS, INTEGER_SETTINGS
+
+DEFAULT_MAX_CASES = INTEGER_SETTINGS["agent_tests.max_cases_per_specialist"].default
+MAX_CASES_LIMIT = INTEGER_SETTINGS["agent_tests.max_cases_per_specialist"].maximum
+MAX_CANARY_PERCENT = INTEGER_SETTINGS["agent_tests.canary_percent"].maximum
 _UNREADABLE = object()
 NEW_SPECIALIST_NEEDS_TESTS = (
     "A new specialist needs at least one saved check and a full passing run of those checks on its exact draft "
@@ -70,7 +72,7 @@ def _switch(key: str) -> bool:
     section = _section()
     if section is _UNREADABLE:
         return True
-    value = section.get(key, False)
+    value = section.get(key, BOOLEAN_SETTINGS[f"agent_tests.{key}"].default)
     return value if isinstance(value, bool) else True
 
 
@@ -80,7 +82,8 @@ def max_cases_per_specialist() -> int:
     if section is _UNREADABLE:
         return DEFAULT_MAX_CASES
     value = section.get("max_cases_per_specialist", DEFAULT_MAX_CASES)
-    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_CASES_LIMIT:
+    minimum = INTEGER_SETTINGS["agent_tests.max_cases_per_specialist"].minimum
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= MAX_CASES_LIMIT:
         return DEFAULT_MAX_CASES
     return value
 
@@ -100,17 +103,18 @@ def tool_checks_enabled() -> bool:
     section = _section()
     if section is _UNREADABLE:
         return False
-    return section.get("tool_checks", False) is True
+    return section.get("tool_checks", BOOLEAN_SETTINGS["agent_tests.tool_checks"].default) is True
 
 
 def canary_percent() -> int:
     """The ``[agent_tests] canary_percent`` knob: 0 (off) or a whole share from 1 to 50."""
     section = _section()
     if section is _UNREADABLE:
-        return 0
-    value = section.get("canary_percent", 0)
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_CANARY_PERCENT:
-        return 0
+        return 0  # An unreadable policy must not enable rollout.
+    contract = INTEGER_SETTINGS["agent_tests.canary_percent"]
+    value = section.get("canary_percent", contract.default)
+    if isinstance(value, bool) or not isinstance(value, int) or not contract.minimum <= value <= MAX_CANARY_PERCENT:
+        return 0  # An invalid policy must not enable rollout.
     return value
 
 
@@ -119,7 +123,7 @@ def canary_auto_rollback() -> bool:
     section = _section()
     if section is _UNREADABLE:
         return False
-    return section.get("canary_auto_rollback", False) is True
+    return section.get("canary_auto_rollback", BOOLEAN_SETTINGS["agent_tests.canary_auto_rollback"].default) is True
 
 
 __all__ = ["DEFAULT_MAX_CASES", "MAX_CANARY_PERCENT", "MAX_CASES_LIMIT", "NEW_SPECIALIST_NEEDS_TESTS",

@@ -15,12 +15,11 @@ import os
 import re
 import tempfile
 import threading
-import time
 import uuid
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from local_store_lock import cross_process_lock as _shared_cross_process_lock
 from request_limits import reject_sensitive_fields
 
 MAX_LOCAL_STORE_BYTES = 8 * 1024 * 1024
@@ -265,48 +264,8 @@ def _checked_revision(value: object) -> int:
     return value
 
 
-@contextmanager
 def _cross_process_lock(path: Path):
-    lock_path = path.with_name(f"{path.name}.lock")
-    lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if lock_path.is_symlink():
-        raise ValueError("local store lock must not be a symbolic link")
-    try:
-        os.chmod(lock_path.parent, 0o700)
-    except OSError:
-        pass
-    with lock_path.open("a+b") as handle:
-        try:
-            os.chmod(lock_path, 0o600)
-        except OSError:
-            pass
-        if os.name == "nt":  # pragma: no cover - exercised on Windows
-            import msvcrt
-
-            while True:
-                try:
-                    if lock_path.stat().st_size == 0:
-                        handle.seek(0)
-                        handle.write(b"\0")
-                        handle.flush()
-                    handle.seek(0)
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                    break
-                except OSError:
-                    time.sleep(0.01)
-            try:
-                yield
-            finally:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        else:  # pragma: no cover - exercised on POSIX
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    return _shared_cross_process_lock(path, private=True)
 
 
 class LocalStore:

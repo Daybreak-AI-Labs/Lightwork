@@ -43,7 +43,7 @@ router.include_router(governance_router)
 def _actor(request: Request) -> str:
     # Import lazily: api.py mounts this router after defining the stricter
     # authenticated/local actor resolver, avoiding an import cycle.
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
 
     return _request_actor(request)
 
@@ -51,7 +51,7 @@ def _actor(request: Request) -> str:
 def _document_principal(request: Request) -> str | None:
     """Reuse the dashboard's authenticated connector-credential boundary."""
 
-    from .api import _document_source_principal
+    from .request_identity import document_source_principal as _document_source_principal
 
     return _document_source_principal(request)
 

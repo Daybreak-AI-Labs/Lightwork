@@ -369,6 +369,8 @@ def test_a_reasoned_bypass_needs_another_administrator_when_switched_on(client, 
     (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n"
                                     "[agent_tests]\nbypass_requires_second_person = true\n", encoding="utf-8")
     config.reset_config_cache()
+    # Pack editing requires globally pinned admins, not just tenant RBAC roles.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:requester,user:reviewer")
     actor = {"who": "user:requester"}
     monkeypatch.setattr(auth, "caller_principal", lambda request: actor["who"])
     rbac.set_role("user:requester", "admin")
@@ -420,6 +422,8 @@ def test_an_approved_bypass_covers_one_publication_only(client, monkeypatch):
     (tmp / "config.toml").write_text("[models]\ncapability_tests = true\n"
                                     "[agent_tests]\nbypass_requires_second_person = true\n", encoding="utf-8")
     config.reset_config_cache()
+    # Pack editing requires globally pinned admins, not just tenant RBAC roles.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:requester,user:reviewer")
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:requester")
     rbac.set_role("user:requester", "admin")
     rbac.set_role("user:reviewer", "admin")

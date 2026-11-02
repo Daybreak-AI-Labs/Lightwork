@@ -166,7 +166,7 @@ def _label_entities(request, entities):
     from maverick.domain import available_domains
     from maverick.flow import store
 
-    from .api import _can_access_flow
+    from .flows_api import _can_access_flow
 
     names = {flow.id: flow.name for flow in store.list_flows() if _can_access_flow(request, flow)}
     domains = available_domains()
@@ -340,7 +340,7 @@ def capabilities(request):
     from maverick.domain import available_domains
     from maverick.flow import store
 
-    from .api import _can_access_flow
+    from .flows_api import _can_access_flow
 
     out = []
     for flow in store.list_flows():

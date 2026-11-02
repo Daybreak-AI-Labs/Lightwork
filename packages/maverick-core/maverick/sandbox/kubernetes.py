@@ -256,13 +256,16 @@ class KubernetesBackend:
         called only when the workspace is safe locally or execution never began.
         """
         try:
-            subprocess.run(
+            result = subprocess.run(
                 [*self._kubectl_prefix(), "delete", "pod", pod_name,
                  "--ignore-not-found=true", "--grace-period=0", "--force"],
                 capture_output=True, timeout=10, env=scrub_env(),
             )
-        except Exception:
-            pass
+            if result.returncode:
+                log.warning("kubernetes sandbox: failed to delete pod %s (exit %s)",
+                            pod_name, result.returncode)
+        except Exception:  # failure-policy: fail_soft_with_audit -- cleanup warning
+            log.warning("kubernetes sandbox: could not delete pod %s", pod_name)
 
     def _start_and_wait(self, pod_name: str, execution_timeout: float | None = None) -> ExecResult | None:
         """Start the pod detached (long-lived ``sleep``, not ``--rm -i``) and
@@ -423,7 +426,7 @@ class KubernetesBackend:
             workspace_transfer.publish(self.workdir, baseline, recovery / "exported", recovery / "originals")
         except subprocess.TimeoutExpired:
             return "; workspace export timed out; pod retained for recovery"
-        except Exception as exc:
+        except Exception as exc:  # failure-policy: fail_closed -- preserve recovery data
             return f"; workspace export/publication failed ({type(exc).__name__}: {str(exc)[:300]})"
         return ""
 
@@ -499,7 +502,7 @@ class KubernetesBackend:
             else:
                 complete = True
             return result
-        except Exception as exc:
+        except Exception as exc:  # failure-policy: fail_closed -- return transfer failure
             return ExecResult(stdout="", exit_code=74,
                               stderr=f"workspace transfer failed ({type(exc).__name__})"
                               + (self._recovery_note(pod_name, recovery) if command_started else ""))

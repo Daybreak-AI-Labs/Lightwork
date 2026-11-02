@@ -302,6 +302,38 @@ def test_delivery_is_idempotent_and_carries_the_round_trip_link(monkeypatch):
     assert len(writer.calls) == 3
 
 
+def test_typed_success_records_remote_id_and_never_replays(monkeypatch):
+    from maverick.tool_results import ToolOutcome, ToolResultState
+
+    _sources(monkeypatch, findings=[_finding()])
+    writer = _Writer([ToolOutcome(ToolResultState.SUCCEEDED, '{"result":{"sys_id":"sys123"}}')])
+    first = grc_sync.run_sync(actor="ops", writer=writer)
+    assert first["delivered_count"] == 1
+    row = grc_sync.list_outbound()[0]
+    assert row["status"] == "delivered" and row["remote_id"] == "sys123"
+    grc_sync.run_sync(actor="ops", writer=writer)
+    assert len(writer.calls) == 1
+
+
+def test_typed_unknown_remains_held_even_with_success_looking_content(monkeypatch):
+    from maverick.tool_results import ToolOutcome, ToolResultState
+
+    _sources(monkeypatch, findings=[_finding()])
+    writer = _Writer([ToolOutcome(ToolResultState.INDETERMINATE, '{"result":{"sys_id":"sys123"}}')])
+    grc_sync.run_sync(actor="ops", writer=writer)
+    row = grc_sync.list_outbound()[0]
+    assert row["status"] == "dispatch_unconfirmed"
+    grc_sync.run_sync(actor="ops", writer=writer)
+    assert len(writer.calls) == 1
+
+
+def test_typed_failed_read_is_never_used_for_reconciliation():
+    from maverick.tool_results import ToolOutcome, ToolResultState
+
+    with pytest.raises(grc_sync.GRCSyncStateError, match="could not verify"):
+        grc_sync._remote_rows(ToolOutcome(ToolResultState.FAILED, '{"result":[]}'))
+
+
 def test_changed_source_updates_the_same_remote_record(monkeypatch):
     finding = _finding("MRF-open")
     _sources(monkeypatch, findings=[finding])

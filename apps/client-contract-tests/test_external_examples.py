@@ -1,5 +1,6 @@
 """Controlled contracts for maintained examples, using synthetic external boundaries."""
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -101,22 +102,34 @@ def test_three_page_terminal_backlog_is_delivered_once(status):
     assert result == {"terminal": True, "since": 40, "status": status}
 
 
+def test_shared_dashboard_fixture_replays_in_the_standalone_rest_client():
+    path = ROOT / "apps/client-contract-tests/contracts/goal-events-v1.json"
+    fixture = json.loads(path.read_text(encoding="utf-8"))
+    pages = iter(Response(page) for page in fixture["pages"])
+    seen = []
+    result = rest.poll_events(SimpleNamespace(get=lambda *_args, **_kwargs: next(pages)),
+                              "https://example.test", {}, 1, seen.append)
+    assert [event["id"] for event in seen] == [1, 2, 3]
+    assert result["terminal"] is True and result["since"] == 3
+
+
 def test_poll_401_stops_with_repair_message():
     with pytest.raises(PermissionError, match="Restore sign-in"):
         rest.poll_events(SimpleNamespace(get=lambda *_args, **_kwargs: Response({}, 401)), "https://example.test", {}, 1, lambda _event: None)
 
 
 def test_accepted_timeout_performs_one_post_then_original_key_receipt_get():
+    fixture = json.loads((ROOT / "apps/client-contract-tests/contracts/goal-submission-recovery-v1.json").read_text())
     writes, reads = [], []
     def post(*args, **kwargs):
         writes.append(kwargs)
         raise requests.Timeout("reply lost")
     def get(*args, **kwargs):
         reads.append(kwargs)
-        return Response({"state": "accepted", "submission_state": "dispatch_claimed", "goal": {"id": 9}, "execution_confirmed": False})
-    receipt = rest.start_or_reconcile(SimpleNamespace(post=post, get=get), "https://example.test", {}, {"title": "work"}, "persisted-key")
+        return Response(fixture["receipt"])
+    receipt = rest.start_or_reconcile(SimpleNamespace(post=post, get=get), "https://example.test", {}, {"title": fixture["title"]}, fixture["idempotency_key"])
     assert receipt["execution_confirmed"] is False and len(writes) == len(reads) == 1
-    assert writes[0]["headers"]["Idempotency-Key"] == reads[0]["headers"]["Idempotency-Key"] == "persisted-key"
+    assert writes[0]["headers"]["Idempotency-Key"] == reads[0]["headers"]["Idempotency-Key"] == fixture["idempotency_key"]
 
 
 class Unreadable(Response):

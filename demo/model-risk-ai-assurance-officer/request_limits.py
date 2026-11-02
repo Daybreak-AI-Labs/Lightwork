@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import re
-from dataclasses import dataclass
 from urllib.parse import urlsplit
+
+from request_boundary import PayloadError as PayloadError
+from request_boundary import _declared_length as _declared_length
+from request_boundary import read_bounded_object as _read_bounded_object
 
 MAX_REQUEST_BYTES = 768 * 1024
 MAX_DEPTH = 14
@@ -20,15 +22,6 @@ _SENSITIVE_KEY = re.compile(
     r"result|call)|request[_-]?body|response[_-]?body|raw(?:_|$)|payload|content)",
     re.IGNORECASE,
 )
-
-
-@dataclass
-class PayloadError(ValueError):
-    detail: str
-    status_code: int = 422
-
-    def __str__(self) -> str:
-        return self.detail
 
 
 def _port(scheme: str, value: int | None) -> int | None:
@@ -102,30 +95,10 @@ def reject_sensitive_fields(value) -> None:
 
 
 async def read_bounded_json(request) -> dict:
-    _validate_boundary(request)
-    content_length = request.headers.get("content-length")
-    if content_length is not None:
-        try:
-            declared = int(content_length)
-        except ValueError as exc:
-            raise PayloadError("invalid Content-Length header") from exc
-        if declared < 0:
-            raise PayloadError("invalid Content-Length header")
-        if declared > MAX_REQUEST_BYTES:
-            raise PayloadError(f"request body exceeds {MAX_REQUEST_BYTES} bytes", 413)
-    raw = bytearray()
-    async for chunk in request.stream():
-        if len(raw) + len(chunk) > MAX_REQUEST_BYTES:
-            raise PayloadError(f"request body exceeds {MAX_REQUEST_BYTES} bytes", 413)
-        raw.extend(chunk)
-    try:
-        value = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise PayloadError("request body must be valid JSON") from exc
-    _validate_shape(value)
-    if not isinstance(value, dict):
-        raise PayloadError("request body must be a JSON object")
-    return value
+    return await _read_bounded_object(
+        request, max_bytes=MAX_REQUEST_BYTES, validate_boundary=_validate_boundary,
+        validate_shape=_validate_shape, declared_length=_declared_length,
+    )
 
 
 def require_expected_revision(value: dict) -> int:

@@ -18,7 +18,6 @@ import contextlib
 import hashlib
 import hmac
 import json
-import os
 import re
 import secrets
 import sqlite3
@@ -517,29 +516,11 @@ class ConsentIdentityFederationStore:
 
     @contextlib.contextmanager
     def _connect(self):
-        if consent_storage.shared():
-            connection = consent_storage.connect(self.path, timeout=10.0)
-        else:
-            ensure_private_directory(self.path.parent)
-            if not self.path.exists():
-                try:
-                    descriptor = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
-                except FileExistsError:
-                    pass
-                else:
-                    os.close(descriptor)
-            ensure_private_file(self.path, 0o600)
-            connection = sqlite3.connect(str(self.path), isolation_level=None, timeout=10.0)
-        try:
-            connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA busy_timeout=10000")
-            connection.execute("PRAGMA journal_mode=DELETE")
-            connection.execute("PRAGMA synchronous=FULL")
-            connection.execute("PRAGMA trusted_schema=OFF")
-            connection.execute("PRAGMA secure_delete=ON")
+        with consent_storage.authority_connection(
+            self.path, ensure_directory=ensure_private_directory,
+            ensure_file=ensure_private_file, foreign_keys=False,
+        ) as connection:
             yield connection
-        finally:
-            connection.close()
 
     def _initialize(self) -> None:
         with self._connect() as connection:

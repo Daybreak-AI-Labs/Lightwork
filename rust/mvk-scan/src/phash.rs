@@ -36,11 +36,10 @@ pub fn average_hash_from_pixels(
             pixels.len()
         ));
     }
-    let gray: Vec<i128> = pixels
-        .iter()
-        .map(|&(r, g, b)| r as i128 * 299 + g as i128 * 587 + b as i128 * 114)
-        .collect();
-    Ok(hash_gray(&gray, width, height))
+    Ok(hash_pixels(width, height, |i| {
+        let (r, g, b) = pixels[i];
+        r as i128 * 299 + g as i128 * 587 + b as i128 * 114
+    }))
 }
 
 /// Like [`average_hash_from_pixels`] but reads a contiguous row-major RGB byte
@@ -66,16 +65,32 @@ pub fn average_hash_from_rgb_bytes(
             rgb.len()
         ));
     }
-    let gray: Vec<i128> = rgb
-        .chunks_exact(3)
-        .map(|c| c[0] as i128 * 299 + c[1] as i128 * 587 + c[2] as i128 * 114)
-        .collect();
-    Ok(hash_gray(&gray, width, height))
+    Ok(hash_pixels(width, height, |i| {
+        let i = i * 3;
+        rgb[i] as i128 * 299 + rgb[i + 1] as i128 * 587 + rgb[i + 2] as i128 * 114
+    }))
 }
 
-/// Shared core: the 8x8 cross-multiplied average comparison over a luma plane.
-fn hash_gray(gray: &[i128], width: usize, height: usize) -> String {
-    let total_sum: i128 = gray.iter().sum();
+/// Shared core: accumulate the 64 cells without allocating a full luma plane.
+fn hash_pixels(width: usize, height: usize, luma: impl Fn(usize) -> i128) -> String {
+    let mut cells = [0i128; 64];
+    let mut total_sum = 0i128;
+    for cy in 0..8usize {
+        let y0 = cy * height / 8;
+        let y1 = (cy + 1) * height / 8;
+        for cx in 0..8usize {
+            let x0 = cx * width / 8;
+            let x1 = (cx + 1) * width / 8;
+            let mut cell_sum = 0i128;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    cell_sum += luma(y * width + x);
+                }
+            }
+            cells[cy * 8 + cx] = cell_sum;
+            total_sum += cell_sum;
+        }
+    }
     let total_count = (width * height) as i128;
     let mut bits: u64 = 0;
     for cy in 0..8usize {
@@ -84,13 +99,7 @@ fn hash_gray(gray: &[i128], width: usize, height: usize) -> String {
         for cx in 0..8usize {
             let x0 = cx * width / 8;
             let x1 = (cx + 1) * width / 8;
-            let mut cell_sum: i128 = 0;
-            for y in y0..y1 {
-                let row = y * width;
-                for x in x0..x1 {
-                    cell_sum += gray[row + x];
-                }
-            }
+            let cell_sum = cells[cy * 8 + cx];
             let cell_count = ((y1 - y0) * (x1 - x0)) as i128;
             let bit = u64::from(cell_sum * total_count > total_sum * cell_count);
             bits = (bits << 1) | bit;
@@ -156,6 +165,68 @@ mod tests {
         let from_bytes = average_hash_from_rgb_bytes(&bytes, 64, 64).unwrap();
         assert_eq!(from_tuples, from_bytes);
         assert_eq!(from_bytes, "000001071f7fffff");
+    }
+
+    #[test]
+    fn uneven_dimensions_match_reference_for_signed_and_byte_pixels() {
+        // Keep the former luma-plane algorithm as an independent oracle for
+        // cell boundaries, including dimensions that are not multiples of 8.
+        fn reference(pixels: &[(i64, i64, i64)], width: usize, height: usize) -> String {
+            let gray: Vec<i128> = pixels
+                .iter()
+                .map(|&(r, g, b)| r as i128 * 299 + g as i128 * 587 + b as i128 * 114)
+                .collect();
+            let total: i128 = gray.iter().sum();
+            let mut bits = 0u64;
+            for cy in 0..8 {
+                let (y0, y1) = (cy * height / 8, (cy + 1) * height / 8);
+                for cx in 0..8 {
+                    let (x0, x1) = (cx * width / 8, (cx + 1) * width / 8);
+                    let mut cell = 0i128;
+                    for y in y0..y1 {
+                        for x in x0..x1 {
+                            cell += gray[y * width + x];
+                        }
+                    }
+                    let count = ((y1 - y0) * (x1 - x0)) as i128;
+                    bits = (bits << 1) | u64::from(cell * (width * height) as i128 > total * count);
+                }
+            }
+            format!("{bits:016x}")
+        }
+
+        for (width, height) in [(8, 8), (9, 17), (15, 10), (31, 23), (40, 16)] {
+            let pixels: Vec<_> = (0..width * height)
+                .map(|i| {
+                    (
+                        (i % 256) as i64,
+                        ((i * 73) % 256) as i64,
+                        ((i * 19) % 256) as i64,
+                    )
+                })
+                .collect();
+            let bytes: Vec<_> = pixels
+                .iter()
+                .flat_map(|&(r, g, b)| [r as u8, g as u8, b as u8])
+                .collect();
+            assert_eq!(
+                average_hash_from_pixels(&pixels, width, height).unwrap(),
+                reference(&pixels, width, height)
+            );
+            assert_eq!(
+                average_hash_from_rgb_bytes(&bytes, width, height).unwrap(),
+                reference(&pixels, width, height)
+            );
+
+            let signed: Vec<_> = pixels
+                .iter()
+                .map(|&(r, g, b)| (r - 300, g * 2 - 200, b - 100))
+                .collect();
+            assert_eq!(
+                average_hash_from_pixels(&signed, width, height).unwrap(),
+                reference(&signed, width, height)
+            );
+        }
     }
 
     #[test]

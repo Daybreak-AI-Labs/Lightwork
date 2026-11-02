@@ -40,8 +40,9 @@ class OriginalIn(BaseModel):
 
 
 def authority(request, *, historical=False):
-    from .api import _privacy_ops_or_403, _request_actor
     from .api_flow_operator_review import _workspace_authority
+    from .privacy_access import privacy_ops_or_403 as _privacy_ops_or_403
+    from .request_identity import request_actor as _request_actor
 
     with auth.fresh_configuration():
         principal = getattr(request.state, "principal", None)

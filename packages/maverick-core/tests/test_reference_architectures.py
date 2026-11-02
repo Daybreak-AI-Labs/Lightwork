@@ -72,8 +72,8 @@ def test_devcontainer_parses_and_bootstraps():
     assert int(_PORT) in data["forwardPorts"]
     assert "post-create.sh" in data["postCreateCommand"]
     script = (dc_dir / "post-create.sh").read_text()
-    # Mirrors CI's editable install so tests run out of the box.
-    assert "pip install -e ./packages/maverick-core" in script
+    # The shared installer selects the reviewed cohort from its manifest.
+    assert "scripts/install_release_cohort.py --editable" in script
     assert "pytest" in script
 
 

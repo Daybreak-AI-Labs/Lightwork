@@ -36,7 +36,8 @@ Not given a row, with the reason:
 """
 from __future__ import annotations
 
-_HTTPS = r"https://[^\s\"'<>?#]{1,300}"
+from .settings_catalog_patterns import HTTPS as _HTTPS
+
 _TEAM = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
 _OPTION = r"[A-Za-z_][A-Za-z0-9_]{0,63}"
 _PARAM = r"[A-Za-z0-9_.:-]{1,64}"

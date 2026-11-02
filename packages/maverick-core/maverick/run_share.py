@@ -29,7 +29,9 @@ def upload_payload(payload: dict, token: str) -> str:
     """Send exactly a reviewed payload. Exceptions after dispatch are uncertain."""
     import httpx
 
-    response = httpx.post(_GIST_API, content=json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(), headers={
+    from .governed_http import guarded_sender
+
+    response = guarded_sender(httpx.post)(_GIST_API, content=json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(), headers={
         "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28",

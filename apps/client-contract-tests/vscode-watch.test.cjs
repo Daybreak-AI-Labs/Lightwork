@@ -6,6 +6,7 @@ const vm = require('node:vm');
 const {EventEmitter} = require('node:events');
 const ts = require('typescript');
 const root = path.resolve(__dirname,'../..');
+const sharedReplay = require('./contracts/goal-events-v1.json');
 function source(file,context={}) {
   const compiled=ts.transpileModule(fs.readFileSync(path.join(root,file),'utf8'),{
     compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}});
@@ -34,6 +35,15 @@ function fixture(cursor=0) {
   return {stop,timers,connections,events,cursors,notices,stops,fire,send,open};
 }
 const event=id=>`id: ${id}\ndata: ${JSON.stringify({id,content:'event-'+id})}\n\n`;
+
+test('SSE viewer accepts event and terminal fields from the shared dashboard fixture',()=>{
+  const f=fixture();f.open();
+  for(const page of sharedReplay.pages) for(const item of page.events)
+    f.send(`id: ${item.id}\ndata: ${JSON.stringify(item)}\n\n`);
+  const last=sharedReplay.pages.at(-1);
+  f.send(`event: end\ndata: ${JSON.stringify({terminal:last.terminal,next_id:last.next_id,status:last.status})}\n\n`);
+  assert.deepEqual(f.cursors,[1,2,3]);assert.equal(f.stops[0].terminal,true);
+});
 
 test('SSE viewer renders 401 events and ends exactly once after matching terminal acknowledgement',()=>{
   const f=fixture();f.open();

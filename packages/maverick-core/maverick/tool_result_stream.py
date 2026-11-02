@@ -270,6 +270,10 @@ async def _collect_tool(fn, args: dict, progress: Callable[[int], None] | None =
                 await _close_async(out, stop_error)
         if inspect.isgenerator(out) or (hasattr(out, "__next__") and not isinstance(out, str)):
             out = await _owned_thread(lambda: _drain_sync(out, stop, sink), stop)
+        from .tool_results import ToolOutcome
+
+        if isinstance(out, ToolOutcome):
+            out = out.as_text()
         out = "" if out is None else out if isinstance(out, str) else str(out)
         result_bytes(out)
         return out  # do not strip ConnectorResult's retry metadata

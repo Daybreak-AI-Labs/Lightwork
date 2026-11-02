@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from ..budget_tuner import percentile
-from .runner import (
+from .run_state import (
     PAUSED_STATUSES,
     STATUS_BUDGET_LIMITED,
     STATUS_COMPLETED,

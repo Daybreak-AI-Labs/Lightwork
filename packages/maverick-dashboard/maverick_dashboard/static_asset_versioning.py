@@ -1,8 +1,10 @@
 """Version trusted template assets and revalidate public controller responses."""
 from __future__ import annotations
 
+import hashlib
 import re
 from html.parser import HTMLParser
+from pathlib import Path
 
 from jinja2.ext import Extension
 
@@ -10,6 +12,38 @@ _ASSET = re.compile(r"/static/([A-Za-z0-9_-][A-Za-z0-9_.-]*\.(?:js|css))")
 _ATTRIBUTE = re.compile(r'''\s+([\w:.-]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]+))?''')
 _JINJA_LITERAL = re.compile(r"{#.*?#}|{%[-+]?\s*raw\s*[-+]?%}.*?{%[-+]?\s*endraw\s*[-+]?%}", re.DOTALL)
 _ETAGS = re.compile(r'\s*(?:W/)?"[^"\r\n]*"\s*(?:,\s*(?:W/)?"[^"\r\n]*"\s*)*')
+
+
+class AssetVersions:
+    """Content hashes cached against a file's identity, size and timestamps."""
+
+    def __init__(self, directory: Path) -> None:
+        self.directory = directory
+        self._versions: dict[str, tuple[tuple, str]] = {}
+
+    def version(self, name: str) -> str:
+        if not name or "/" in name or "\\" in name or name.startswith("."):
+            return ""
+        path = self.directory / name
+        try:
+            before = path.stat()
+            identity = (str(path), before.st_dev, before.st_ino, before.st_size,
+                        before.st_mtime_ns, before.st_ctime_ns)
+            cached = self._versions.get(name)
+            if cached is not None and cached[0] == identity:
+                return cached[1]
+            contents = path.read_bytes()
+            after = path.stat()
+            if identity != (str(path), after.st_dev, after.st_ino, after.st_size,
+                            after.st_mtime_ns, after.st_ctime_ns) or len(contents) != after.st_size:
+                self._versions.pop(name, None)
+                return ""
+            version = hashlib.sha256(contents).hexdigest()[:8]
+            self._versions[name] = identity, version
+            return version
+        except OSError:
+            self._versions.pop(name, None)
+            return ""
 
 
 class _AssetTags(HTMLParser):
@@ -80,3 +114,33 @@ def cache_response(scope, message, version, immutable):
     if unchanged:
         headers = [(key, value) for key, value in headers if key.lower() not in {b"content-length", b"content-range"}]
     return {**message, "status": 304 if unchanged else 200, "headers": headers}, unchanged
+
+
+class StaticCacheMiddleware:
+    """Cache public asset responses only after the route admits the request."""
+
+    def __init__(self, app, *, version_for) -> None:
+        self.app = app
+        self.version_for = version_for
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") != "http" or not scope.get("path", "").startswith("/static/"):
+            await self.app(scope, receive, send)
+            return
+        name = scope["path"].rsplit("/", 1)[-1]
+        query = scope.get("query_string", b"").decode("latin-1")
+        unchanged = False
+
+        async def send_cached(message) -> None:
+            nonlocal unchanged
+            if message.get("type") == "http.response.start":
+                wanted = self.version_for(name)
+                immutable = bool(wanted) and any(part == f"v={wanted}" for part in query.split("&"))
+                message, unchanged = cache_response(scope, message, wanted, immutable)
+            elif unchanged:
+                if message.get("type") == "http.response.pathsend" or not message.get("more_body", False):
+                    await send({"type": "http.response.body", "body": b""})
+                return
+            await send(message)
+
+        await self.app(scope, receive, send_cached)

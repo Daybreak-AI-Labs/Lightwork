@@ -8,13 +8,11 @@ private index, never an implicit public lookup.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
 import subprocess
 from collections.abc import Iterator
-from datetime import date
 from pathlib import Path
 from textwrap import dedent
 
@@ -661,7 +659,7 @@ def test_homebrew_formula_bootstraps_python_312_without_venv_pip():
     assert "brew install cdayAI/tap/maverick" not in formula
 
 
-def test_cross_ecosystem_osv_gate_is_pinned_complete_and_expiring():
+def test_cross_ecosystem_osv_gate_is_pinned_complete_and_source_verified():
     ci = _read(".github/workflows/ci.yml")
     step = ci.split(
         "- name: OSV Scanner across every reviewed dependency surface",
@@ -677,6 +675,7 @@ def test_cross_ecosystem_osv_gate_is_pinned_complete_and_expiring():
     for dependency_surface in (
         "requirements/ci.txt",
         "rust/Cargo.lock",
+        "vendor/tests/Cargo.lock",
         "examples/clients/rust/Cargo.lock",
         "apps/desktop/src-tauri/Cargo.lock",
         "apps/installer-desktop/src-tauri/Cargo.lock",
@@ -696,45 +695,15 @@ def test_cross_ecosystem_osv_gate_is_pinned_complete_and_expiring():
         assert dependency_surface in step
 
     policy = tomllib.loads(_read("osv-scanner.toml"))
-    ignored = policy["IgnoredVulns"]
-    reasons = {item["id"]: item["reason"] for item in ignored}
-    assert set(reasons) == {
-        "GHSA-wrw7-89jp-8q8g",
-        "RUSTSEC-2024-0370",
-        "GHSA-gcqx-w48m-w2h4",
-    }
-    assert all(item["ignoreUntil"] == date(2027, 1, 31) for item in ignored)
-    assert "Tauri" in reasons["GHSA-wrw7-89jp-8q8g"]
-    assert "Tauri" in reasons["RUSTSEC-2024-0370"]
-    assert reasons["GHSA-gcqx-w48m-w2h4"].startswith("Build-time only:")
-
-
-def test_build_time_only_osv_exception_stays_build_time_only():
-    """The deepmerge exception (GHSA-gcqx-w48m-w2h4) holds only while deepmerge
-    is reachable solely through installer-desktop's vite-plugin-svelte
-    devDependency. osv-scanner applies an exception by advisory ID to every
-    scanned lockfile, so a runtime path would be filtered silently."""
-    step = _read(".github/workflows/ci.yml").split(
-        "- name: OSV Scanner across every reviewed dependency surface", 1,
-    )[1].split("- name: Upload cross-ecosystem vulnerability report", 1)[0]
-    scanned = [path for path in re.findall(r"--lockfile\s+(\S+)", step) if "$" not in path]
-    assert "apps/installer-desktop/pnpm-lock.yaml" in scanned
-    for path in [*scanned, "requirements/ci.txt"]:
-        if path != "apps/installer-desktop/pnpm-lock.yaml":
-            assert "deepmerge" not in _read(path), path
-
-    snapshots = _read("apps/installer-desktop/pnpm-lock.yaml").split("\nsnapshots:\n", 1)[1]
-    parents = [
-        block.strip().splitlines()[0].strip().strip("':")
-        for block in snapshots.split("\n\n")
-        if re.search(r"^ {6}deepmerge: ", block, re.MULTILINE)
-    ]
-    assert parents
-    assert all(parent.startswith("@sveltejs/vite-plugin-svelte@") for parent in parents), parents
-    manifest = json.loads(_read("apps/installer-desktop/package.json"))
-    assert "@sveltejs/vite-plugin-svelte" in manifest["devDependencies"]
-    assert "@sveltejs/vite-plugin-svelte" not in manifest.get("dependencies", {})
-    assert "deepmerge" not in manifest.get("dependencies", {})
+    assert policy.get("IgnoredVulns", []) == []
+    assert "python scripts/check_vendor_patches.py" in ci
+    assert "|| scan_status=$?" in step
+    assert 'python -m scripts.check_osv_results "$report"' in step
+    assert '--scanner-exit "$scan_status"' in step
+    assert '--output "$GITHUB_WORKSPACE/osv-remediation.json"' in step
+    artifact_step = ci.split("- name: Upload cross-ecosystem vulnerability report", 1)[1].split("- name:", 1)[0]
+    assert "osv-results.json" in artifact_step
+    assert "osv-remediation.json" in artifact_step
 
 
 def test_go_java_and_standalone_demo_security_floors_are_explicit():

@@ -18,35 +18,19 @@
 
 import { connectionValidationError } from "./connectionValidation";
 import { nativePlatform, nativeTransportReady, nativeRequest } from './nativeTransport';
+import type {GoalOut, GoalEventOut, GoalEventsResponse as DashboardGoalEventsResponse} from "./generated/dashboard-contracts";
 
 export type DeviceInfo = {id: string; generation: number; expires_at: number; enrollment_expires_at: number; principal: string; tenant: string | null; actions: boolean; new_tasks?: boolean; approvals?: boolean};
 export type Settings = { baseUrl: string; token: string; cacheScope?: string; needsSetup?: boolean; offlineEnabled?: boolean; pairedDevice?: DeviceInfo };
 
-export type Goal = {
-  id: number;
-  status: string;
-  title: string;
-  description?: string | null;
-  result?: string | null;
-};
+export type Goal = GoalOut;
 
-export type GoalEvent = {
-  id: number;
-  agent: string;
-  kind: string;
-  content: string;
-  ts: number;
-};
+export type GoalEvent = GoalEventOut;
 
-export type GoalEventsResponse = {
-  status: string;
-  result: string | null;
-  next_id: number;
-  events: GoalEvent[];
-  has_more: boolean;
-  terminal: boolean;
-  truncated?: boolean;
-};
+// Pagination requires the server's optional-default fields in actual responses;
+// truncated is client-side state and is not part of the server schema.
+export type GoalEventsResponse = DashboardGoalEventsResponse &
+  Required<Pick<DashboardGoalEventsResponse, "has_more" | "terminal">> & {truncated?: boolean};
 
 export type ActiveGoal = {
   id: number;

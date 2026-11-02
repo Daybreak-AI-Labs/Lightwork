@@ -41,7 +41,7 @@ def authority(request, context=None, *, write=False):
     if context is not None and current != context:
         raise HTTPException(409, "Your account or workspace changed. Reopen this specialist.")
     if write:
-        from .api import _require_pack_editing
+        from .editor_policy import require_pack_editing as _require_pack_editing
         _require_pack_editing(request)
         tools_ops_api.same_origin(request)
         if config.config_source_errors(include_tenant=True):
@@ -99,7 +99,8 @@ def _draft(request, name, entered, source):
     allowed = auth.caller_suites(request)
     if allowed is not None and not domain.suites_for_domain(name, profile) <= allowed:
         raise HTTPException(403, "The entered draft belongs to a department outside your current access.")
-    from .api import AgentOverrideIn, _agent_action_errors, _agent_autonomy_errors
+    from .api import _agent_action_errors, _agent_autonomy_errors
+    from .api_schemas import AgentOverrideIn
     body = AgentOverrideIn.model_validate(patch)
     errors = _agent_action_errors(name, body) + _agent_autonomy_errors(name, body)
     if errors:
@@ -603,7 +604,7 @@ def _starts_trial(prepared) -> bool:
 
 
 def _payload(prepared):
-    from .api import AgentOverrideIn
+    from .api_schemas import AgentOverrideIn
     return AgentOverrideIn.model_validate({**prepared["patch"], "publish_without_passing_tests": bool(prepared["reason"]),
         "override_reason": prepared["reason"], "expected_generation": prepared["before"]["generation"]})
 

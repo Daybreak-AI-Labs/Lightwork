@@ -30,9 +30,11 @@ from maverick.config import (
 from maverick.config import (
     DEFAULT_MFA_SAML_CONTEXTS as _MFA_SAML,
 )
+from maverick.config_contracts import TEXT_SETTINGS
+
+from .settings_catalog_patterns import HTTPS as _HTTPS
 
 # Plain patterns (full match) for text and list entries.
-_HTTPS = r"https://[^\s\"'<>?#]{1,300}"
 _HTTPS_OR_LOCAL = r"(https://[^\s\"'<>?#]{1,300}|http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?(/[^\s\"'<>?#]{0,200})?)"
 _ENTITY = r"(https://[^\s\"'<>]{1,300}|urn:[A-Za-z0-9:._-]{1,200})"
 _REF = r"[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}"
@@ -47,7 +49,6 @@ _BUCKET = r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]"
 _PREFIX = r"[A-Za-z0-9!_.*'()/{}-]{0,200}"
 _HOST = r"[A-Za-z0-9*]([A-Za-z0-9*.-]{0,251}[A-Za-z0-9])?"
 _HOST_PORT = r"[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?|\[[0-9A-Fa-f:.]{2,45}\](:[0-9]{1,5})?"
-_SIEM = r"(https?|tcp|udp|datadog|sentinel)://[^\s\"'<>]{1,300}"
 _AZURE_ID = r"[A-Za-z0-9][A-Za-z0-9.-]{0,254}"
 _REDIS = r"(rediss?|unix)://\S{1,500}"
 _PAGE = r"/[A-Za-z0-9/_.-]{0,200}"
@@ -630,20 +631,25 @@ def _security(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "the account needs the keys/get permission. For Azure, the key must allow wrapKey, "
           "unwrapKey, sign and verify, and the account needs wrapKey, unwrapKey and sign, plus "
           "keys/verify or keys/get.",
-          "text", grp, "", "maverick.kms_backends", subgroup=keys, max_length=300,
-          pattern=r"[A-Za-z0-9:/._-]{1,300}", restart=True, test="kms",
-          env=("MAVERICK_KMS_KEY_ID",), aliases="key id arn"),
+          "text", grp, TEXT_SETTINGS["kms.key_id"].default, "maverick.kms_backends", subgroup=keys,
+          max_length=TEXT_SETTINGS["kms.key_id"].dashboard_max_length,
+          pattern=TEXT_SETTINGS["kms.key_id"].pattern, restart=True, test="kms",
+          env=TEXT_SETTINGS["kms.key_id"].dashboard_env, aliases="key id arn"),
         S("kms", "region", "Key service region",
           "For the Amazon key service: the region the key is in, such as us-east-1.",
-          "text", grp, "", "maverick.kms_backends", subgroup=keys, pattern=_REGION,
+          "text", grp, TEXT_SETTINGS["kms.region"].default, "maverick.kms_backends", subgroup=keys,
+          pattern=TEXT_SETTINGS["kms.region"].pattern,
           restart=True, test="kms", aliases="region"),
         S("kms", "address", "Vault address",
           "For HashiCorp Vault: the web address of your Vault server.",
-          "text", grp, "", "maverick.kms_backends", subgroup=keys, pattern=_HTTPS,
-          max_length=300, restart=True, test="kms", aliases="vault address"),
+          "text", grp, TEXT_SETTINGS["kms.address"].default, "maverick.kms_backends", subgroup=keys,
+          pattern=TEXT_SETTINGS["kms.address"].pattern,
+          max_length=TEXT_SETTINGS["kms.address"].dashboard_max_length,
+          restart=True, test="kms", aliases="vault address"),
         S("kms", "mount", "Vault key area",
           "For HashiCorp Vault: the name of the area that holds the key.",
-          "text", grp, "transit", "maverick.kms_backends", subgroup=keys, pattern=_NAME,
+          "text", grp, TEXT_SETTINGS["kms.mount"].default, "maverick.kms_backends", subgroup=keys,
+          pattern=TEXT_SETTINGS["kms.mount"].pattern,
           restart=True, test="kms", aliases="vault mount transit"),
         S("kms", "dek_cache_ttl", "Remember unlocked keys for",
           "How long an unlocked data key is remembered before the key service is asked again. "
@@ -664,8 +670,10 @@ def _security(S) -> tuple:  # noqa: N803 -- the catalog's row type
         S("audit", "siem_dest", "Send the activity record to",
           "Your security monitoring service's address, starting with https://, tcp://, udp://, "
           "datadog:// or sentinel://.",
-          "text", grp, "", "maverick.cli", subgroup=custody, pattern=_SIEM,
-          max_length=300, test="siem", env=("MAVERICK_SIEM_DEST",), weaker="change",
+          "text", grp, TEXT_SETTINGS["audit.siem_dest"].default, "maverick.cli", subgroup=custody,
+          pattern=TEXT_SETTINGS["audit.siem_dest"].pattern,
+          max_length=TEXT_SETTINGS["audit.siem_dest"].dashboard_max_length, test="siem",
+          env=TEXT_SETTINGS["audit.siem_dest"].dashboard_env, weaker="change",
           warning="Activity records will be sent to a different place.",
           aliases="siem splunk syslog forward datadog sentinel azure"),
         S("audit", "siem_token", "Security monitoring access key",

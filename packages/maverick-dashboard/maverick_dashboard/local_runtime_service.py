@@ -520,6 +520,9 @@ def health(request):
     budget = Budget(max_wall_seconds=4, max_dollars=0, max_tool_calls=0)
     try:
         with httpx.Client(timeout=2, trust_env=False, follow_redirects=False) as client:
+            from maverick.governed_http import admit_client_request
+
+            admit_client_request(client, endpoint + "/health")
             with client.stream("GET", endpoint + "/health") as response:
                 responding = response.status_code == 200
         budget.check()

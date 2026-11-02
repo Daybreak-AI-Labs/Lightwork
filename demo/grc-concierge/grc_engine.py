@@ -14,10 +14,11 @@ import tempfile
 import threading
 import time
 import uuid
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+
+from local_store_lock import cross_process_lock as _cross_process_lock
 
 
 @dataclass(frozen=True)
@@ -190,46 +191,6 @@ def _checked_revision(value: object) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ValueError("expected_revision must be a non-negative integer")
     return value
-
-
-@contextmanager
-def _cross_process_lock(path: Path):
-    """Serialize a store's read/compare/write transaction across processes."""
-    lock_path = path.with_name(f"{path.name}.lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+b") as handle:
-        if os.name == "nt":  # pragma: no cover - exercised on Windows CI
-            import msvcrt
-
-            while True:
-                try:
-                    # ``msvcrt.locking`` needs a byte range. Two fresh
-                    # processes may both observe an empty sidecar; treat the
-                    # initialization write as part of the same retry loop so a
-                    # peer that wins and locks first cannot surface a transient
-                    # PermissionError to the CAS caller.
-                    if lock_path.stat().st_size == 0:
-                        handle.seek(0)
-                        handle.write(b"\0")
-                        handle.flush()
-                    handle.seek(0)
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                    break
-                except OSError:
-                    time.sleep(0.01)
-            try:
-                yield
-            finally:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        else:  # pragma: no cover - exercised on POSIX CI
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 class LocalStore:

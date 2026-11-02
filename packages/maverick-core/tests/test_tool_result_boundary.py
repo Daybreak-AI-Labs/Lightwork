@@ -16,6 +16,7 @@ from maverick.blackboard import Blackboard
 from maverick.budget import Budget
 from maverick.paths import tenant_scope
 from maverick.run_outcome import owned_task, task_stop
+from maverick.tool_results import ToolOutcome, ToolResultState, classify_tool_result
 from maverick.tools import Tool, ToolRegistry
 
 
@@ -62,6 +63,74 @@ def agent_boundary(monkeypatch, fn, *, shield=None):
             principal="user:alice")
 
     return agent, run, rows, seen
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("state", "content", "is_error", "disposition"),
+    [
+        (ToolResultState.SUCCEEDED, "ERROR is a document title", False, "completed"),
+        (ToolResultState.FAILED, "the operation failed", True, "tool_error"),
+        (ToolResultState.INDETERMINATE, "receipt not available", True, "execution_unknown"),
+    ],
+)
+async def test_explicit_tool_state_survives_screening_and_provider_boundary(
+    monkeypatch, state, content, is_error, disposition,
+):
+    agent, run, rows, _seen = agent_boundary(monkeypatch, lambda _args: ToolOutcome(state, content))
+    output = await run()
+
+    assert classify_tool_result(output) is state
+    assert content in output
+    assert rows[-1][1]["disposition"] == disposition
+    wire = Agent._make_tool_result("call", output)
+    assert type(wire["content"]) is str
+    assert wire.get("is_error", False) is is_error
+
+
+@pytest.mark.asyncio
+async def test_explicit_tool_state_is_not_lost_in_string_only_cache(monkeypatch):
+    monkeypatch.setenv("MAVERICK_TOOL_CACHE", "1")
+    monkeypatch.setattr("maverick.cache.tool.cacheable", lambda _tool: True)
+    calls = []
+
+    def read(_args):
+        calls.append(1)
+        return ToolOutcome(ToolResultState.SUCCEEDED, "ERROR is ordinary text")
+
+    reg = ToolRegistry()
+    reg.register(Tool(name="typed_read", description="test", input_schema={}, fn=read,
+                      parallel_safe=True))
+    first = await reg.run("typed_read", {})
+    second = await reg.run("typed_read", {})
+    assert classify_tool_result(first) is ToolResultState.SUCCEEDED
+    assert classify_tool_result(second) is ToolResultState.SUCCEEDED
+    assert calls == [1, 1]
+
+    plain_calls = []
+    reg.register(Tool(name="untyped_read_control", description="test", input_schema={},
+                      fn=lambda _args: plain_calls.append(1) or "plain", parallel_safe=True))
+    assert await reg.run("untyped_read_control", {}) == "plain"
+    assert await reg.run("untyped_read_control", {}) == "plain"
+    assert plain_calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_workspace_read_preserves_content_starting_with_status_marker(tmp_path):
+    from maverick.sandbox import LocalBackend
+    from maverick.tools.fs import read_file
+
+    (tmp_path / "note.txt").write_text("INDETERMINATE is a valid word", encoding="utf-8")
+    reg = ToolRegistry()
+    reg.register(read_file(LocalBackend(workdir=tmp_path)))
+
+    output = await reg.run("read_file", {"path": "note.txt"})
+    assert output == "INDETERMINATE is a valid word"
+    assert classify_tool_result(output) is ToolResultState.SUCCEEDED
+    assert "is_error" not in Agent._make_tool_result("call", output)
+
+    missing = await reg.run("read_file", {"path": "missing.txt"})
+    assert classify_tool_result(missing) is ToolResultState.FAILED
 
 
 @pytest.mark.asyncio
@@ -424,6 +493,35 @@ async def test_programmatic_execution_receives_full_screened_tail(monkeypatch):
 async def _full(run):
     with stream.execution_output_scope():
         return await run()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state, expected_execution", [
+    (ToolResultState.SUCCEEDED, True),
+    (ToolResultState.INDETERMINATE, False),
+])
+async def test_programmatic_execution_respects_explicit_result_state(monkeypatch, state, expected_execution):
+    from maverick.tools.code_exec import code_exec_tool
+
+    _approve_code(monkeypatch)
+    agent, run, _rows, _seen = agent_boundary(
+        monkeypatch, lambda _: ToolOutcome(state, "INDETERMINATE: input content"),
+    )
+    agent.ctx.sandbox = object()
+    captured = []
+
+    async def tool(_name, _args):
+        return await run()
+
+    agent._run_tool = tool
+    monkeypatch.setattr("maverick.tools.code_exec.sandbox_run",
+                        lambda *a, **kw: captured.append(kw["stdin"]) or (0, "ok", ""))
+    result = await code_exec_tool(agent).fn({"code": "print('ok')", "tool_calls": [{"name": "producer"}]})
+    assert bool(captured) is expected_execution
+    if expected_execution:
+        assert result == "ok" and "INDETERMINATE: input content" in captured[0]
+    else:
+        assert result.startswith("INDETERMINATE:")
 
 
 @pytest.mark.asyncio

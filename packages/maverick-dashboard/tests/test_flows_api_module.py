@@ -3,18 +3,20 @@
 These pin what keeps the move invisible to callers and tests: every name is
 still reachable as ``maverick_dashboard.api.<name>``, the router is included
 where the handlers used to be (same precedence), the routes keep the parent
-router's prefix and tag, and the handlers reach the auth helpers through
-``_api_seams`` so a patch on the api module applies to them.
+router's prefix and tag, and workflow dependencies are explicitly bound by
+the application composition root.
 """
 from __future__ import annotations
 
 import ast
+import dataclasses
 import pathlib
 
 import pytest
-from fastapi import HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.routing import APIRoute
-from maverick_dashboard import _api_seams, api, flows_api
+from fastapi.testclient import TestClient
+from maverick_dashboard import api, flow_dependencies, flows_api
 from starlette.requests import Request
 
 
@@ -78,25 +80,43 @@ def test_flow_routes_keep_the_api_prefix_and_tag_on_the_app():
     assert all(tags == ["v1"] and in_schema for _, tags, in_schema in served)
 
 
-def test_flows_api_reaches_the_facade_only_through_the_seams():
+def test_flows_api_receives_services_without_importing_the_api_facade():
     tree = ast.parse(pathlib.Path(flows_api.__file__).read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "api":
             raise AssertionError(f"flows_api imports api directly at line {node.lineno}")
     module_level = {n.module: {a.name for a in n.names} for n in tree.body if isinstance(n, ast.ImportFrom)}
-    assert {"require_permission", "caller_principal", "goal_owner_filter", "run_in_threadpool"} <= module_level["_api_seams"]
+    assert {"require_permission", "caller_principal", "goal_owner_filter", "run_in_threadpool"} <= module_level["flow_dependencies"]
     assert "auth" not in module_level and "_shared" not in module_level
-    for name in module_level["_api_seams"]:
-        assert callable(getattr(api, name)), f"seam {name} has nothing to resolve to on api"
-        assert callable(getattr(_api_seams, name))
+    for name in module_level["flow_dependencies"]:
+        assert callable(getattr(flow_dependencies, name))
 
 
-def test_seam_wrappers_resolve_the_current_api_attribute(monkeypatch):
-    assert _api_seams._api() is api
+def test_workflow_services_can_be_injected_without_changing_the_api(monkeypatch):
     calls: list[object] = []
-    monkeypatch.setattr(api, "caller_suites", lambda request: calls.append(request) or ["finance"])
-    assert _api_seams.caller_suites("req") == ["finance"]
+    services = dataclasses.replace(flow_dependencies._services(),
+        caller_suites=lambda request: calls.append(request) or ["finance"])
+    monkeypatch.setattr(flow_dependencies, "_dependencies", services)
+    assert flow_dependencies.caller_suites("req") == ["finance"]
     assert calls == ["req"]
+
+
+def test_request_dependencies_are_isolated_per_application():
+    defaults = flow_dependencies._services()
+    first = FastAPI()
+    second = FastAPI()
+    first.state.flow_dependencies = dataclasses.replace(defaults, caller_principal=lambda _: "user:first")
+    second.state.flow_dependencies = dataclasses.replace(defaults, caller_principal=lambda _: "user:second")
+
+    def install(app):
+        @app.get("/who", dependencies=[Depends(flow_dependencies.bind_request_services)])
+        def who(request: Request):
+            return {"principal": flow_dependencies.caller_principal(request)}
+
+    install(first)
+    install(second)
+    assert TestClient(first).get("/who").json() == {"principal": "user:first"}
+    assert TestClient(second).get("/who").json() == {"principal": "user:second"}
 
 
 @pytest.mark.asyncio

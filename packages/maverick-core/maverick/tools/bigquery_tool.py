@@ -18,6 +18,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool
 from .sql_safety import has_unconfirmed_statement_separator
 
@@ -57,7 +58,7 @@ def _op_query(sql: str, limit: int, confirm: bool) -> str:
     tok, proj = _config()
     import httpx
     url = f"https://bigquery.googleapis.com/bigquery/v2/projects/{proj}/queries"
-    r = httpx.post(url, headers={"Authorization": f"Bearer {tok}",
+    r = _governed_sender(httpx.post)(url, headers={"Authorization": f"Bearer {tok}",
                                  "Content-Type": "application/json"},
                    json={"query": sql, "useLegacySql": False}, timeout=120.0)
     try:

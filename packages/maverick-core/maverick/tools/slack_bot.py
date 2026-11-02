@@ -21,6 +21,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def _check(payload: dict, action: str) -> str | None:
 
 def _post(method: str, body: dict) -> dict:
     import httpx
-    r = httpx.post(f"{_API}/{method}", headers=_headers(), json=body, timeout=30.0)
+    r = _governed_sender(httpx.post)(f"{_API}/{method}", headers=_headers(), json=body, timeout=30.0)
     try:
         return r.json()
     except ValueError:
@@ -79,7 +80,7 @@ def _post(method: str, body: dict) -> dict:
 
 def _get(method: str, params: dict) -> dict:
     import httpx
-    r = httpx.get(f"{_API}/{method}", headers={
+    r = _governed_sender(httpx.get)(f"{_API}/{method}", headers={
         "Authorization": f"Bearer {_token()}",
     }, params=params, timeout=30.0)
     try:
@@ -114,7 +115,7 @@ def _op_upload(channel: str, filename: str, content: str) -> str:
     if not upload_url or not file_id:
         return f"ERROR: upload init returned no url/id: {g}"
     # Step 2: PUT the bytes (no auth header — pre-signed URL).
-    r = httpx.post(upload_url, content=content.encode("utf-8"), timeout=30.0)
+    r = _governed_sender(httpx.post)(upload_url, content=content.encode("utf-8"), timeout=30.0)
     if r.status_code >= 400:
         return f"ERROR: upload PUT {r.status_code}: {r.text[:300]}"
     # Step 3: complete the upload + share into the channel.

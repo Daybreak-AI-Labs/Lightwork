@@ -214,6 +214,11 @@ class _PinnedTransport:
             # rather than let the inner transport re-resolve an unvalidated name.
             raise BlockedHost(
                 f"unpinned host {request.url.host!r} != validated {self._host!r}")
+        # Check the original hostname on every request before rewriting it to
+        # the pinned address. The process-wide guard remains defense in depth.
+        from ..egress_guard import _check
+
+        _check(str(request.url))
         request.headers["Host"] = self._host_header
         request.extensions = {**request.extensions, "sni_hostname": self._host}
         request.url = request.url.copy_with(host=self._ip)
@@ -244,6 +249,9 @@ def safe_client(
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise BlockedHost(f"scheme {parsed.scheme!r} not allowed")
+    from ..egress_guard import _check
+
+    _check(url)
     host = parsed.hostname or ""
     ip = resolve_pinned_ip(host, require_public=require_public)
     host_header = host if not parsed.port else f"{host}:{parsed.port}"
@@ -296,6 +304,9 @@ class _AsyncPinnedTransport:
         if not _request_host_matches(request, self._host):
             raise BlockedHost(
                 f"unpinned host {request.url.host!r} != validated {self._host!r}")
+        from ..egress_guard import _check
+
+        _check(str(request.url))
         request.headers["Host"] = self._host_header
         request.extensions = {**request.extensions, "sni_hostname": self._host}
         request.url = request.url.copy_with(host=self._ip)
@@ -323,6 +334,9 @@ def pinned_async_transport(url: str) -> _AsyncPinnedTransport:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise BlockedHost(f"scheme {parsed.scheme!r} not allowed")
+    from ..egress_guard import _check
+
+    _check(url)
     host = parsed.hostname or ""
     ip = resolve_pinned_ip(host)
     host_header = host if not parsed.port else f"{host}:{parsed.port}"

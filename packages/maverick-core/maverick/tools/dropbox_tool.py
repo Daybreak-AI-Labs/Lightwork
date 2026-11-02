@@ -17,6 +17,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ def _token() -> str:
 
 def _rpc(path: str, body: dict) -> tuple[int, Any]:
     import httpx
-    r = httpx.post(f"{_RPC}{path}",
+    r = _governed_sender(httpx.post)(f"{_RPC}{path}",
                    headers={"Authorization": f"Bearer {_token()}",
                             "Content-Type": "application/json"},
                    json=body, timeout=30.0)
@@ -88,7 +89,7 @@ def _op_download(args: dict) -> str:
     path = _norm(args.get("path") or "")
     if not path:
         return "ERROR: download requires path"
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         f"{_CONTENT}/files/download",
         headers={
             "Authorization": f"Bearer {_token()}",
@@ -109,7 +110,7 @@ def _op_upload(args: dict) -> str:
         return "ERROR: upload requires path"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would upload to {path} ({len(content)} bytes). Re-run with confirm=true."
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         f"{_CONTENT}/files/upload",
         headers={
             "Authorization": f"Bearer {_token()}",

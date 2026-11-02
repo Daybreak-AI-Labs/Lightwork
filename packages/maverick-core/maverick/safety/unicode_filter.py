@@ -125,7 +125,7 @@ def has_dangerous_unicode(text: str) -> bool:
 
 # --- Native fast path (optional) -------------------------------------------
 # A Rust implementation (the ``maverick_native`` extension, built from
-# ``rust/mvk-scan``) does exactly this work GIL-free and far faster on the hot
+# ``rust/mvk-scan``) moves this work into Rust on the hot
 # shield path. It is OPTIONAL: when the wheel isn't installed the pure-Python
 # functions above are used unchanged, so behaviour is identical either way --
 # the native module is a drop-in accelerator, never a new dependency.

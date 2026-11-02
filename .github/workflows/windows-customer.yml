@@ -3,6 +3,7 @@ name: Windows desktop package
 on:
   pull_request:
     paths:
+      - 'vendor/**'
       - 'apps/desktop/**'
       - 'apps/desktop-runtime/**'
       - 'apps/desktop-oauth-return/**'

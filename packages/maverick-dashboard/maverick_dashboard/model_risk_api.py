@@ -41,7 +41,7 @@ _gateway_action_lock = threading.Lock()
 
 
 def _actor(request: Request) -> str:
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
 
     return _request_actor(request)
 
@@ -998,7 +998,7 @@ async def _extract_vendor_documents(
 
     if not documents:
         return []
-    from .api import _document_source_principal
+    from .request_identity import document_source_principal as _document_source_principal
 
     vendor = _module("ai_vendor_risk", "ai_vendor_risk")
     principal = _document_source_principal(request)

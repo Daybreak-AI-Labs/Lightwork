@@ -138,7 +138,7 @@ def _creation_authority(request, expected=None, *, write=False):
         access = digest([_workspace_authority(request, actor, tenant), auth.caller_role(request),
                          sorted(suites) if suites is not None else None, sorted(scopes) if scopes is not None else None])
         if write:
-            from .api import _require_scheduling
+            from .schedule_policy import require_scheduling as _require_scheduling
             if config.config_source_errors(include_tenant=True):
                 raise HTTPException(503, "Current schedule settings could not be checked. Your entered work is kept.")
             try:
@@ -409,9 +409,10 @@ def schedule_preview(request: Request, body: PreviewIn) -> dict:
 @router.post("/api/v1/schedules/add", status_code=201)
 async def schedule_add(request: Request, body: ScheduleAddIn) -> dict:
     """Arm a recurring schedule from plain choices."""
-    from .api import _require_scheduling, create_schedule
+    from .api import create_schedule
     from .api_schemas import ScheduleIn
     from .app import _require_same_origin, _world
+    from .schedule_policy import require_scheduling as _require_scheduling
 
     if body.review_reference:
         from starlette.concurrency import run_in_threadpool
@@ -496,8 +497,8 @@ def change_schedule(request: Request, identity: str, body: ScheduleChangeIn) -> 
     from maverick.job_queue import JobQueue
     from maverick.schedule_definitions import change_definition
 
-    from .api import _require_scheduling
     from .app import _require_same_origin
+    from .schedule_policy import require_scheduling as _require_scheduling
 
     require_permission(request, "operate")
     _require_same_origin(request)

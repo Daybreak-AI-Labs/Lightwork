@@ -18,6 +18,8 @@ def resume_env(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     world = world_model.WorldModel(world_model.DEFAULT_DB)
     monkeypatch.setattr(api, "_world", lambda: world)
+    from maverick_dashboard import _shared
+    monkeypatch.setattr(_shared, "_world", lambda: world)
     monkeypatch.setattr(api, "configured_goal_ceiling_dollars", lambda: 2.0)
     calls = []
 

@@ -234,6 +234,8 @@ def pip_install_command(
     constraint: Path,
     packages: list[CohortPackage],
     core_extra: str | None = None,
+    *,
+    editable: bool = False,
 ) -> list[str]:
     requirements = [
         (
@@ -243,6 +245,10 @@ def pip_install_command(
         )
         for package in packages
     ]
+    install_requirements = (
+        [argument for requirement in requirements for argument in ("-e", requirement)]
+        if editable else requirements
+    )
     return [
         python,
         "-m",
@@ -250,7 +256,7 @@ def pip_install_command(
         "install",
         "--constraint",
         str(constraint),
-        *requirements,
+        *install_requirements,
     ]
 
 
@@ -306,6 +312,36 @@ def verify_installed(
     subprocess.run([python, "-c", script], check=True)
 
 
+def native_source_path(root: Path) -> Path:
+    """Resolve the optional native source before starting installation."""
+    source = root / "rust" / "mvk-scan-py"
+    if not (source / "pyproject.toml").is_file() or not (source / "Cargo.toml").is_file():
+        raise ValueError(f"native extension source is incomplete: {source}")
+    return source
+
+
+def install_native_source(python: str, constraint: Path, root: Path) -> None:
+    """Build and verify the optional native extension from this checkout."""
+    source = native_source_path(root)
+    subprocess.run(
+        [python, "-m", "pip", "install", "--constraint", str(constraint), str(source)],
+        check=True,
+    )
+    script = (
+        "import maverick_native\n"
+        "from maverick import perceptual_hash\n"
+        "from maverick.safety import unicode_filter\n"
+        "if not callable(getattr(maverick_native, 'average_hash_from_pixels', None)):\n"
+        "    raise SystemExit('native image hash is unavailable')\n"
+        "if not callable(getattr(maverick_native, 'normalize', None)):\n"
+        "    raise SystemExit('native unicode scanner is unavailable')\n"
+        "if perceptual_hash._native is None or unicode_filter._native is None:\n"
+        "    raise SystemExit('native runtime wrappers did not load')\n"
+        "print('native scanner and image hash available:', maverick_native.__file__)\n"
+    )
+    subprocess.run([python, "-c", script], check=True)
+
+
 def _verify_wheel_outputs(
     wheel_dir: Path,
     version: str,
@@ -357,10 +393,18 @@ def main(argv: list[str] | None = None) -> int:
         metavar="DISTRIBUTION",
         help="install a deliberately reduced manifest subset",
     )
+    parser.add_argument(
+        "--native-source", action="store_true",
+        help="also build and verify the optional native extension (requires Rust)",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--wheel-dir", type=Path)
     mode.add_argument("--verify-only", action="store_true")
     mode.add_argument("--validate-only", action="store_true")
+    mode.add_argument(
+        "--editable", action="store_true",
+        help="install the selected local cohort in editable mode",
+    )
     args = parser.parse_args(argv)
 
     root = args.source_root.resolve()
@@ -378,6 +422,10 @@ def main(argv: list[str] | None = None) -> int:
         version, cohort = load_cohort(root, args.target_python)
         selected = select_packages(cohort, args.only)
         validate_core_extra(args.core_extra, selected, args.target_python)
+        if args.native_source and (args.verify_only or args.validate_only or args.wheel_dir is not None):
+            raise ValueError("--native-source requires a source or editable install")
+        if args.native_source:
+            native_source_path(root)
         if not args.verify_only:
             validate_source_metadata(version, selected, args.target_python)
         if not args.verify_only and not args.validate_only and not constraint.is_file():
@@ -417,10 +465,13 @@ def main(argv: list[str] | None = None) -> int:
                     constraint,
                     selected,
                     args.core_extra,
+                    editable=args.editable,
                 ),
                 check=True,
             )
             verify_installed(args.target_python, version, selected)
+            if args.native_source:
+                install_native_source(args.target_python, constraint, root)
     except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"release cohort installation failed: {exc}", file=sys.stderr)
         return 1

@@ -193,7 +193,10 @@ def execute_node(payload, dispatch):
         value = tool.fn(payload["sample"]["arguments"])
         # The actual host preserves transport failure/unknown outcome as ERROR.
         # Matching an expected error string must never qualify a failed call.
-        if isinstance(value, str) and value.startswith("ERROR:"):
+        from maverick.tool_results import ToolOutcome, ToolResultText, tool_result_failed
+
+        typed = isinstance(value, (ToolOutcome, ToolResultText))
+        if (tool_result_failed(value) if typed else isinstance(value, str) and value.startswith("ERROR:")):
             raise ValueError("NDJSON invocation did not complete with a confirmed result")
         return value
     finally:

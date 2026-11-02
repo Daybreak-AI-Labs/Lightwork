@@ -11,21 +11,26 @@ import math
 import time
 from datetime import datetime, timedelta, timezone
 
+from .config_contracts import BOOLEAN_SETTINGS, NUMBER_LIST_SETTINGS
+
 
 def policy():
     from . import config
     if config.config_source_errors(include_tenant=True):
         raise ValueError("Budget guidance policy is unavailable. Refresh the page and try again.")
     values = config.load_config().get("budget") or {}
-    thresholds = values.get("warning_thresholds", [.8, .95, 1.0])
-    if (not isinstance(thresholds, list) or not thresholds or len(thresholds) > 10
+    contract = NUMBER_LIST_SETTINGS["budget.warning_thresholds"]
+    thresholds = values.get("warning_thresholds", list(contract.default))
+    if (not isinstance(thresholds, list) or not thresholds or len(thresholds) > contract.max_items
             or any(isinstance(v, bool) or not isinstance(v, (int, float))
-                   or not math.isfinite(v) or not 0 < v <= 1 for v in thresholds)):
+                   or not math.isfinite(v) or not contract.minimum_exclusive < v <= contract.maximum
+                   for v in thresholds)):
         raise ValueError("Budget warning thresholds must be numbers greater than zero and at most one.")
     for key in ("guidance", "warnings"):
-        if type(values.get(key, True)) is not bool:
+        if type(values.get(key, BOOLEAN_SETTINGS[f"budget.{key}"].default)) is not bool:
             raise ValueError("Budget guidance and warnings must be enabled or disabled explicitly.")
-    return {"guidance": values.get("guidance", True), "warnings": values.get("warnings", True),
+    return {"guidance": values.get("guidance", BOOLEAN_SETTINGS["budget.guidance"].default),
+            "warnings": values.get("warnings", BOOLEAN_SETTINGS["budget.warnings"].default),
             "warning_thresholds": sorted(set(thresholds))}
 
 

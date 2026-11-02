@@ -90,21 +90,26 @@ export class DashboardConnections {
     assertDashboardTransport(new URL(connection.base), Boolean(connection.token));
     const generation = this.generation;
     const controller = new AbortController(); this.requests.add(controller);
+    let rejectAbort: (error: Error) => void = () => {};
+    const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
+    const onAbort = () => rejectAbort(new Error("Dashboard request was cancelled."));
+    controller.signal.addEventListener("abort", onAbort, {once: true});
     const timer = setTimeout(() => controller.abort(), 15000);
     try {
+      return await Promise.race([aborted, (async () => {
       // Without a token the dashboard accepts a local write only from its own address, and Node sends no Origin unless asked.
       const response = await fetch(connection.base + path, {method: body === undefined ? "GET" : "POST", redirect: "error",
         signal: controller.signal, headers: {Accept: "application/json", "Content-Type": "application/json",
           ...(body === undefined ? {} : {Origin: new URL(connection.base).origin}),
           ...(connection.token ? {Authorization: `Bearer ${connection.token}`} : {})},
         body: body === undefined ? undefined : JSON.stringify(body)});
+      if (generation !== this.generation || controller.signal.aborted) throw new Error("Dashboard connection changed; the prior response is no longer current.");
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) this.invalidate();
         await response.body?.cancel();
         throw new Error(response.status === 401 || response.status === 403 ? "Access changed. Configure or repair this dashboard connection." :
           `Dashboard request was not confirmed (HTTP ${response.status}). Review task status before any retry.`);
       }
-      if (generation !== this.generation || controller.signal.aborted) throw new Error("Dashboard connection changed; the prior response is no longer current.");
       if (response.status === 204) return null;
       if (!response.body || Number(response.headers.get("content-length") || 0) > 1024 * 1024) { await response.body?.cancel(); throw new Error("Dashboard response exceeds the supported size."); }
       const reader = response.body.getReader(); let size = 0; const parts: Uint8Array[] = [];
@@ -115,9 +120,10 @@ export class DashboardConnections {
       const bytes = new Uint8Array(size); let at = 0; for (const part of parts) { bytes.set(part, at); at += part.byteLength; }
       if (generation !== this.generation || controller.signal.aborted) throw new Error("Dashboard connection changed; the prior response is no longer current.");
       return JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(bytes));
+      })()]);
     } catch (error) {
       if (controller.signal.aborted) throw new Error("Dashboard request timed out or was cancelled; its outcome is unconfirmed. Check task status before another action.");
       throw error instanceof SyntaxError ? new Error("Dashboard response could not be verified.") : error;
-    } finally { clearTimeout(timer); this.requests.delete(controller); }
+    } finally { clearTimeout(timer); controller.signal.removeEventListener("abort", onAbort); this.requests.delete(controller); }
   }
 }

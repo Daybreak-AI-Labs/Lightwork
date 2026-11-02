@@ -34,10 +34,16 @@ _TOOLS_DIR = Path(importlib.util.find_spec("maverick.tools").origin).parent
 def test_every_catalog_key_is_read_by_the_kernel(setting):
     assert setting.top in KNOWN_SECTIONS, f"{setting.top} is not a known config table"
     reader = _source(setting.reader)
+    # Voice upload/concurrency keys are consumed by the API, but its helper
+    # reads the voice table through the shared voice-model configuration getter.
+    delegated_tables = ""
+    if setting.top == "voice" and setting.reader == "maverick_dashboard.api":
+        assert "from maverick.voice_models import _voice_cfg" in reader
+        delegated_tables = _source("maverick.voice_models")
     for part in setting.path[:-1]:
         # The table may be fetched through a config getter (get_budget_overrides,
         # get_billing_stripe) that the reader calls.
-        assert _quoted(reader, part) or _quoted(_CONFIG, part), (
+        assert _quoted(reader, part) or _quoted(_CONFIG, part) or _quoted(delegated_tables, part), (
             f"{setting.id}: table {part!r} is not read by {setting.reader}"
         )
     if setting.key_kind == "tool":

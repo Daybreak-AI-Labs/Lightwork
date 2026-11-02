@@ -5,10 +5,23 @@ import shlex
 import shutil
 import subprocess
 from pathlib import PurePosixPath
+from types import SimpleNamespace
 
 import pytest
 from maverick.sandbox import build_sandbox
 from maverick.sandbox.ssh import SSHBackend
+
+_LOCAL_WORKSPACE_TOOLS = {
+    "read_file", "write_file", "list_dir", "repo_map", "str_replace_editor",
+    "ast_edit", "dep_graph", "cross_repo_deps", "semantic_code_search",
+    "apply_patch", "preview_diff",
+    "read_pdf", "view_image", "view_video", "sql_query", "sql_query_read",
+    "pandas_query", "git_advanced", "file_watcher", "spreadsheet", "spreadsheet_read",
+    "a11y", "model3d_inspect", "image_content_classifier", "openapi_runner", "ocr",
+    "container_build", "ffmpeg", "pandoc", "office_convert", "wasm_run", "imagemagick",
+    "audio_understanding", "image_edit", "embedded_device", "transcribe_audio", "speak",
+    "workspace_snapshot", "html_to_app", "notebook_exec", "latex", "diagram",
+}
 
 
 def _patch_ssh_ok(monkeypatch, run_recorder=None):
@@ -183,3 +196,46 @@ def test_factory_ssh_without_host_raises(monkeypatch):
 
     with pytest.raises(ValueError, match="backend=ssh requires"):
         build_sandbox()
+
+
+def test_remote_workspace_omits_local_path_tools_for_ssh_subclasses(monkeypatch, tmp_path):
+    from maverick.tools import base_registry
+
+    class CustomSSHBackend(SSHBackend):
+        pass
+
+    monkeypatch.setattr(SSHBackend, "_verify_ssh", lambda self: None)
+    remote = CustomSSHBackend(host="example.com", workdir=tmp_path)
+    names = {tool.name for tool in base_registry(SimpleNamespace(), remote).all()}
+    assert not _LOCAL_WORKSPACE_TOOLS & names
+    assert "shell" in names
+
+
+def test_backend_can_declare_a_remote_workspace_without_using_ssh(tmp_path):
+    from maverick.tools import base_registry
+
+    sandbox = SimpleNamespace(workdir=tmp_path, workdir_is_local=False)
+    names = {tool.name for tool in base_registry(SimpleNamespace(), sandbox).all()}
+    assert not _LOCAL_WORKSPACE_TOOLS & names
+    assert "shell" in names
+
+
+def test_legacy_local_workspace_keeps_standard_tools(tmp_path):
+    from maverick.tools import base_registry
+
+    sandbox = SimpleNamespace(workdir=tmp_path)
+    names = [tool.name for tool in base_registry(SimpleNamespace(), sandbox).all()]
+    assert set(names) >= _LOCAL_WORKSPACE_TOOLS
+    # Registration order affects limited provider catalogs as well as schemas.
+    assert names[:10] == [
+        "read_file", "write_file", "list_dir", "shell", "ask_user",
+        "list_attachments", "read_tool_result", "read_attachment", "repo_map",
+        "str_replace_editor",
+    ]
+
+
+@pytest.mark.parametrize("invalid", [None, 0, "yes"])
+def test_invalid_workspace_declaration_does_not_enable_local_access(invalid):
+    from maverick.sandbox.sdk import workdir_is_local
+
+    assert not workdir_is_local(SimpleNamespace(workdir_is_local=invalid))

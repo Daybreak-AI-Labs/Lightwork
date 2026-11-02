@@ -433,7 +433,11 @@ class CodexCLIClient:
             )
             lines.append(_TOOL_PROTOCOL.format(tools=schemas))
         lines.append("\n## Conversation\n")
+        from .conversation import ConversationMessage
+
         for msg in messages or []:
+            if isinstance(msg, ConversationMessage):
+                msg = msg.to_anthropic()
             role = msg.get("role", "user") if isinstance(msg, dict) else "user"
             content = msg.get("content") if isinstance(msg, dict) else msg
             text = cls._flatten_content(content)

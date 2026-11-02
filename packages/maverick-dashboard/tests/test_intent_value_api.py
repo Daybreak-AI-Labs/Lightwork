@@ -236,19 +236,20 @@ def test_build_is_native_idempotent_draft_with_retained_manual_steps(context):
 
 
 def test_interrupted_native_save_resumes_same_reserved_draft(context, monkeypatch):
+    from maverick_dashboard import flows_api
     client, world = context
     seed(world, count=3)
     proposal = get(client, "/opportunities")["opportunities"][0]
-    real = api._save_flow_definition
+    real = flows_api._save_flow_definition
     calls = []
     def interrupted(*args, **kwargs):
         saved = real(*args, **kwargs)
         calls.append(saved)
         raise OSError("simulated interruption after native save")
-    monkeypatch.setattr(api, "_save_flow_definition", interrupted)
+    monkeypatch.setattr(flows_api, "_save_flow_definition", interrupted)
     path = BASE + "/opportunities/" + proposal["id"] + "/build"
     assert client.post(path, headers=headers(), json={"revision": proposal["revision"]}).status_code == 503
-    monkeypatch.setattr(api, "_save_flow_definition", real)
+    monkeypatch.setattr(flows_api, "_save_flow_definition", real)
     retry = client.post(path, headers=headers(), json={"revision": proposal["revision"]})
     assert retry.status_code == 200, retry.text
     assert len(calls) == len(store.list_flows()) == 1

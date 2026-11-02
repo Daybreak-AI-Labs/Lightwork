@@ -19,6 +19,7 @@ import os
 import time
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def _post(path: str, body: dict, app: bool = False) -> tuple[int, Any]:
     headers = {"DD-API-KEY": _api_key(), "Content-Type": "application/json"}
     if app:
         headers["DD-APPLICATION-KEY"] = _app_key()
-    r = httpx.post(f"https://api.{_site()}{path}", headers=headers,
+    r = _governed_sender(httpx.post)(f"https://api.{_site()}{path}", headers=headers,
                    json=body, timeout=30.0)
     try:
         return r.status_code, r.json()
@@ -81,7 +82,7 @@ def _post(path: str, body: dict, app: bool = False) -> tuple[int, Any]:
 def _get(path: str, params: dict | None = None) -> tuple[int, Any]:
     import httpx
     headers = {"DD-API-KEY": _api_key(), "DD-APPLICATION-KEY": _app_key()}
-    r = httpx.get(f"https://api.{_site()}{path}", headers=headers,
+    r = _governed_sender(httpx.get)(f"https://api.{_site()}{path}", headers=headers,
                   params=params or {}, timeout=30.0)
     try:
         return r.status_code, r.json()

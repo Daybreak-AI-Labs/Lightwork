@@ -32,6 +32,7 @@ import os
 import re
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ def _get(path: str, params: dict, *, accept: str | None = None) -> tuple[int, An
     headers = _headers()
     if accept:
         headers["Accept"] = accept
-    r = httpx.get(f"{_API}{path}", headers=headers, params=params, timeout=30.0)
+    r = _governed_sender(httpx.get)(f"{_API}{path}", headers=headers, params=params, timeout=30.0)
     try:
         data = r.json()
     except ValueError:

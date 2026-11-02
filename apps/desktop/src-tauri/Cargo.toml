@@ -39,3 +39,9 @@ tauri = { version = "2", features = ["test"] }
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 customer-runtime = []
+
+# Reviewed source fixes; provenance and regression coverage live in vendor/README.md.
+[patch.crates-io]
+glib = { path = "../../../vendor/rust/glib" }
+glib-macros = { path = "../../../vendor/rust/glib-macros" }
+gtk3-macros = { path = "../../../vendor/rust/gtk3-macros" }

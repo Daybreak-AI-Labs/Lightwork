@@ -259,13 +259,21 @@ jobs:
           "$parity_python" -I -m pip install --upgrade \
             'pip==26.2.2' 'setuptools==84.2.1' 'wheel==0.48.0' \
             'packaging==26.3' 'pytest==9.1.1' 'certifi==2026.10.23'
+          # Verify the same runtime without the optional extension first.
+          "$parity_python" -I -m pip install -e packages/maverick-core --no-deps
+          "$parity_python" -I - <<'PY'
+          from maverick import perceptual_hash as ph
+          from maverick.safety import unicode_filter as uf
+          assert ph._native is None and uf._native is None
+          assert ph.average_hash_from_pixels(ph.synthetic_gradient(), 64, 64) == ph.GRADIENT_HASH
+          assert uf.normalize('a\u200bb').cleaned == 'ab'
+          assert uf.has_dangerous_unicode('a\u200bb')
+          print('Python fallback paths verified without the extension')
+          PY
           # --no-index forces the install to use the wheel we just built; if no
           # wheel matches this OS/Python the install fails hard (not a silent skip).
           "$parity_python" -I -m pip install \
             --no-index --find-links dist maverick-native
-          # Make `maverick` importable so the shim under test loads (deps-free:
-          # maverick.safety.unicode_filter pulls only stdlib).
-          "$parity_python" -I -m pip install -e packages/maverick-core --no-deps
           "$parity_python" -I scripts/verify_constraint_closure.py \
             --allow-unconstrained maverick-native
           # HARD GATE: the parity tests self-skip when the native module is

@@ -19,6 +19,8 @@ def chat(monkeypatch, tmp_path):
     world = WorldModel(tmp_path / "world.db")
     monkeypatch.setattr(dashboard, "_world", lambda: world)
     monkeypatch.setattr(api, "_world", lambda: world)
+    from maverick_dashboard import _shared
+    monkeypatch.setattr(_shared, "_world", lambda: world)
     monkeypatch.setattr(dashboard, "require_provider_or_400", lambda: None)
     monkeypatch.setattr(dashboard, "check_goal_rate_limit", lambda request: None)
     runs = []

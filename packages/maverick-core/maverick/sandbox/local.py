@@ -248,7 +248,7 @@ def _create_windows_kill_job(proc: subprocess.Popen) -> int | None:
         if status != 0:
             raise OSError(f"NtResumeProcess failed with NTSTATUS 0x{status & 0xFFFFFFFF:08x}")
         return int(job)
-    except BaseException:
+    except BaseException:  # failure-policy: fail_closed -- close job and re-raise
         close_handle(job)
         raise
 
@@ -346,7 +346,7 @@ class LocalBackend:
         try:
             try:
                 windows_job = _create_windows_kill_job(proc)
-            except BaseException:
+            except BaseException:  # failure-policy: fail_closed -- reap child and re-raise
                 proc.kill()
                 proc.wait(timeout=5)
                 raise

@@ -20,6 +20,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ def _op_generate(model: str, prompt: str) -> str:
     model = model or _DEFAULT_MODEL
     url = f"{_base()}/publishers/google/models/{model}:generateContent"
     body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
-    r = httpx.post(url, headers=_headers(), json=body, timeout=120.0)
+    r = _governed_sender(httpx.post)(url, headers=_headers(), json=body, timeout=120.0)
     try:
         data = r.json()
     except ValueError:
@@ -87,7 +88,7 @@ def _op_predict(endpoint_id: str, instances: list) -> str:
         return "ERROR: predict requires endpoint_id and instances"
     import httpx
     url = f"{_base()}/endpoints/{endpoint_id}:predict"
-    r = httpx.post(url, headers=_headers(), json={"instances": instances}, timeout=120.0)
+    r = _governed_sender(httpx.post)(url, headers=_headers(), json={"instances": instances}, timeout=120.0)
     try:
         data = r.json()
     except ValueError:

@@ -96,12 +96,20 @@ current device revision before retrying.
 
 ## Evidence boundary
 
+The web contract suite runs with `npm test` in this directory. For the Kotlin
+authority validation cases, compile `android/LightworkConsent.kt` together with
+`tests/AndroidAuthorityTest.kt` using a Kotlin compiler and its
+`kotlinx-coroutines-core-jvm` library, then run
+`ai.lightwork.consent.AndroidAuthorityTestKt` on the JVM. This checks the
+authority boundary and does not qualify an Android device or host integration.
+
 The Python conformance suite proves canonical signing, exact authority checks,
 replay/idempotency behavior, bounded queues, renewal after offline expiry,
 key rotation/revocation, digest-only linking/rights payloads, signal validation,
 and audit-chain integrity locally. The representative Swift/Kotlin/JavaScript/
-BrightScript adapters are source contracts in this checkout; they have not
-been compiled, notarized, store-reviewed, or operated on physical devices here.
+BrightScript adapters are source contracts in this checkout; JVM or web
+contract checks do not establish that the adapters have been notarized,
+store-reviewed, or operated on physical devices.
 Live App Store/Play/Roku/Samsung/LG packaging, attestation-provider acceptance,
 IAB/CMP certification, AdTech interoperability, cross-device identity consent,
 privacy/legal review, recovery drills and scale testing remain deployment

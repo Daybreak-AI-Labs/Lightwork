@@ -358,7 +358,8 @@ _PACK_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}\.toml\Z")
 
 
 def _require_customizing(request: Request) -> None:
-    from .api import _require_pack_editing, _require_role_editing
+    from .editor_policy import require_pack_editing as _require_pack_editing
+    from .editor_policy import require_role_editing as _require_role_editing
     require_permission(request, "admin")
     _require_role_editing(request)
     _require_pack_editing(request)

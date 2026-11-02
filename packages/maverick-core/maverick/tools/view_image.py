@@ -56,7 +56,7 @@ def _guess_mime(source: str) -> str:
     return _MIME_BY_EXT.get(ext, "image/jpeg")
 
 
-def _load_image(source: str) -> tuple[bytes, str] | None:
+def _load_image(source: str, *, workdir: Path | None = None) -> tuple[bytes, str] | None:
     """Return (image_bytes, mime_type) for the source, or None on failure."""
     if source.startswith(("http://", "https://")):
         try:
@@ -91,7 +91,7 @@ def _load_image(source: str) -> tuple[bytes, str] | None:
         except Exception as e:
             log.warning("image fetch failed: %s", e)
             return None
-    workdir = Path.cwd().resolve()
+    workdir = (workdir or Path.cwd()).resolve()
     path = Path(os.path.expanduser(source))
     if not path.is_absolute():
         path = (workdir / path).resolve()
@@ -106,7 +106,7 @@ def _load_image(source: str) -> tuple[bytes, str] | None:
     return path.read_bytes(), _guess_mime(source)
 
 
-def _run_view_image(args: dict[str, Any]) -> str:
+def _run_view_image(args: dict[str, Any], sandbox: Any = None) -> str:
     source = (args.get("source") or "").strip()
     if not source:
         return "ERROR: source is required"
@@ -118,7 +118,8 @@ def _run_view_image(args: dict[str, Any]) -> str:
         or model_for_role("vision")
     )
 
-    loaded = _load_image(source)
+    workdir = Path(sandbox.workdir) if sandbox is not None else None
+    loaded = _load_image(source, workdir=workdir)
     if loaded is None:
         return f"ERROR: could not load image from {source!r}"
     image_bytes, mime = loaded
@@ -155,7 +156,7 @@ def _run_view_image(args: dict[str, Any]) -> str:
         return f"ERROR: vision call failed: {type(e).__name__}: {e}"
 
 
-def view_image() -> Tool:
+def view_image(sandbox: Any = None) -> Tool:
     """Factory: builds the view_image tool."""
     return Tool(
         name="view_image",
@@ -167,5 +168,5 @@ def view_image() -> Tool:
             "MAVERICK_VISION_MODEL env var."
         ),
         input_schema=_VIEW_IMAGE_INPUT_SCHEMA,
-        fn=_run_view_image,
+        fn=lambda args: _run_view_image(args, sandbox),
     )

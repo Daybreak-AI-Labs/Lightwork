@@ -55,7 +55,7 @@ def create_ai_entity_tasks_page_router(templates: Jinja2Templates) -> APIRouter:
     @router.get(PAGE_PATH, response_class=HTMLResponse, include_in_schema=False)
     async def workbench(request: Request) -> HTMLResponse:
         require_permission(request, "view")
-        from .api import module_activation_enabled
+        from .module_activation import module_activation_enabled
         workspace_selected = _tenant_selected() is not False
         if any(
             key not in {"theme", "density", "font", "lang"}

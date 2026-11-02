@@ -130,6 +130,7 @@ function validateAuthority(value) {
   for (const name of ["device_revision", "key_revision", "sdk_version", "public_client_revision", "policy_version"]) {
     requireRevision(input[name], name);
   }
+  if (input.sdk_version > 1_000_000) throw new TypeError("sdk_version is invalid");
   for (const name of [
     "application_authority_sha256", "public_client_record_sha256", "publication_sha256",
     "publication_bundle_sha256", "configuration_sha256", "policy_sha256", "standards_contract_sha256",

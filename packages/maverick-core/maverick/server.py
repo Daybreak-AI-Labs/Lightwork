@@ -525,12 +525,10 @@ class Server:
                 )
             except Exception:
                 log.exception("goal #%s dispatch failed", goal_id)
-                try:
-                    world.set_goal_status(goal_id, "blocked", result="internal error")
-                except Exception:  # pragma: no cover
-                    pass
-                # Don't leak internal error details to untrusted channel users.
-                return "⚠ An internal error occurred. Try again or check the logs."
+                # A transport failure may follow remote acceptance. Do not
+                # repaint a pending goal or suggest blind replay.
+                return (f"⚠ Task #{goal_id} may still be running. Check its status "
+                        "before trying again.")
 
             if dispatch_status == "queued":
                 # The worker may ask later. The durable channel receipt keeps
@@ -550,11 +548,10 @@ class Server:
                     "Check its status in Lightwork."
                 )
             elif dispatch_status in {None, "error"}:
-                # run_goal_in_thread uses this sentinel only for an unexpected
-                # local/worker crash; None means a dispatcher was unavailable.
-                # The async runner has already terminalized a pending goal. Keep
-                # the channel response generic and never fall back in-process.
-                return "An internal error occurred. Try again or check the logs."
+                # The dispatcher could not establish whether a remote owner
+                # accepted the task. Never advise an automatic replay.
+                return (f"Task #{goal_id} may still be running. Check its status "
+                        "before trying again.")
             else:
                 # LocalThreadDispatcher and gRPC wait for a terminal status. Read
                 # the result from the authoritative world rather than treating the

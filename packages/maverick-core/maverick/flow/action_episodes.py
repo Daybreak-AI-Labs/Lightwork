@@ -100,11 +100,14 @@ def _object(value: Any) -> dict:
 
 
 def _result_object(value: Any) -> dict:
-    from ..tool_results import tool_result_failed
+    from ..tool_results import ToolResultText, tool_result_failed
     from .action_recipe import require_complete_result
 
-    if type(value) is str:
-        if len(value.encode("utf-8")) > MAX_VALUE_BYTES or tool_result_failed(value):
+    if type(value) is str or isinstance(value, ToolResultText):
+        if tool_result_failed(value):
+            raise ValueError("capture excludes failed or oversized results")
+        value = str(value)
+        if len(value.encode("utf-8")) > MAX_VALUE_BYTES:
             raise ValueError("capture excludes failed or oversized results")
 
         def pairs(entries):

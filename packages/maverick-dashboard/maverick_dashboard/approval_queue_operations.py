@@ -9,7 +9,7 @@ from maverick.approval_vote_review import approval_review_identity
 from maverick.channel_approvals import card_content
 from maverick.safety.secret_detector import redact
 
-from . import auth
+from . import _shared, auth
 from .approval_authority import require_approval_authority
 from .content_access import require_approval_content
 from .identity_format import humanize_principal, role_label
@@ -36,7 +36,7 @@ def owned(request, approval_id: int, *, status: str | None = None):
         auth.require_api_key_scope(request, "approvals:decide")
     else:
         auth.require_permission(request, "operate")
-    world = api._world()
+    world = _shared._world()
     row = require_approval_content(request, approval_id, world)
     if status is not None:
         require_approval_authority(request, action="approval." + ("approve" if status == "approved" else "deny"),

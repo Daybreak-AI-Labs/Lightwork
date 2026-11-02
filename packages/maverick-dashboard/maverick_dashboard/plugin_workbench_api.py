@@ -34,8 +34,8 @@ def _authority(request, context=None):
 def _dependencies(request):
     from maverick.paths import data_dir
 
-    from .api import _can_access_flow
     from .app import _world
+    from .flows_api import _can_access_flow
 
     rows, coverage = [], []
     try:
@@ -226,7 +226,7 @@ def migrate_flow_plugin_pin(request: Request, body: MigrateFlowIn):
     from maverick.flow import store
     from maverick.plugin_execution_pins import flow_path
 
-    from .api import _can_access_flow
+    from .flows_api import _can_access_flow
 
     _authority(request, body.context)
     if not body.confirm:

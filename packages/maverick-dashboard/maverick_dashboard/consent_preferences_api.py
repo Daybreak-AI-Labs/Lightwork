@@ -293,7 +293,7 @@ def _ops():
 
 
 def _actor_sha256(request: Request) -> str:
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
 
     actor = _request_actor(request)
     return hashlib.sha256(actor.encode("utf-8")).hexdigest()

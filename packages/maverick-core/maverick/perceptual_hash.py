@@ -101,7 +101,7 @@ def synthetic_gradient() -> list[tuple[int, int, int]]:
 
 # --- Native fast path (optional) -------------------------------------------
 # A Rust implementation (the ``maverick_native`` extension, built from
-# ``rust/mvk-scan``) does the per-pixel luma loop GIL-free and far faster on the
+# ``rust/mvk-scan``) moves the per-pixel luma loop into Rust on the
 # computer-use hot path (every screenshot is hashed). It is OPTIONAL: when the
 # wheel isn't installed the pure-Python functions above are used unchanged, so
 # behaviour is identical either way -- the native module is a drop-in

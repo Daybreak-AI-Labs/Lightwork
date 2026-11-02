@@ -19,6 +19,7 @@ import os
 from typing import Any
 
 from ..fastjson import dumps_compact
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ def _op_get(path: str, params: dict) -> str:
     base, _t = _config()
     q = dict(params or {})
     q.setdefault("$format", "json")
-    r = httpx.get(f"{base}{_norm(path)}", headers=_headers(), params=q, timeout=30.0)
+    r = _governed_sender(httpx.get)(f"{base}{_norm(path)}", headers=_headers(), params=q, timeout=30.0)
     try:
         data = r.json()
     except ValueError:
@@ -83,7 +84,7 @@ def _op_post(path: str, body: dict, confirm: bool) -> str:
     # SAP Gateway requires a CSRF token + session cookie for writes; fetch it.
     token, cookie = None, ""
     try:
-        g = httpx.get(f"{base}{_norm(path)}", headers={**headers, "X-CSRF-Token": "Fetch"},
+        g = _governed_sender(httpx.get)(f"{base}{_norm(path)}", headers={**headers, "X-CSRF-Token": "Fetch"},
                       timeout=30.0)
         token = g.headers.get("x-csrf-token") or g.headers.get("X-CSRF-Token")
         cookie = g.headers.get("set-cookie", "")
@@ -93,7 +94,7 @@ def _op_post(path: str, body: dict, confirm: bool) -> str:
         headers["X-CSRF-Token"] = token
     if cookie:
         headers["Cookie"] = cookie
-    r = httpx.post(f"{base}{_norm(path)}", headers=headers, json=body or {}, timeout=30.0)
+    r = _governed_sender(httpx.post)(f"{base}{_norm(path)}", headers=headers, json=body or {}, timeout=30.0)
     try:
         data = r.json()
     except ValueError:

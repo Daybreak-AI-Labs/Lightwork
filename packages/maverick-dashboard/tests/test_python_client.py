@@ -608,6 +608,9 @@ def test_other_hosts_still_use_the_environment_proxy(monkeypatch):
     proxy_server = _loopback_server(Proxy)
     try:
         monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{proxy_server.server_address[1]}")
+        # urllib prefers the lowercase setting when both are present. Isolate
+        # this fixture from a developer workstation's configured proxy.
+        monkeypatch.delenv("http_proxy", raising=False)
         monkeypatch.delenv("NO_PROXY", raising=False)
         monkeypatch.delenv("no_proxy", raising=False)
         assert Lightwork("http://remote.example.test").spend()["episodes"] == []

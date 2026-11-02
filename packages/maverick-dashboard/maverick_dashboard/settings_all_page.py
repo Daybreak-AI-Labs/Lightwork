@@ -1040,23 +1040,23 @@ def _slug(name: str) -> str:
 
 def _module_rows() -> list[dict[str, Any]]:
     """In-app module switches, with their effective on/off state."""
-    from . import api
+    from . import module_activation
 
     try:
-        loaded = api._load_module_config()
+        loaded = module_activation._load_module_config()
     except Exception:
         loaded = None
     rows = []
-    for section, meta in sorted(api._MODULE_SWITCHES.items(), key=lambda kv: kv[1]["label"].lower()):
+    for section, meta in sorted(module_activation._MODULE_SWITCHES.items(), key=lambda kv: kv[1]["label"].lower()):
         enabled = (
-            api._module_activation_state(loaded, section)["enabled"] is True
+            module_activation._module_activation_state(loaded, section)["enabled"] is True
             if isinstance(loaded, dict) else None
         )
         rows.append({
             "section": section,
             "label": meta["label"],
             "enabled": enabled,
-            "needs": [api._MODULE_SWITCHES[p]["label"] for p in meta["requires"]],
+            "needs": [module_activation._MODULE_SWITCHES[p]["label"] for p in meta["requires"]],
         })
     return rows
 

@@ -76,7 +76,8 @@ def test_flow_designer_has_loss_and_double_submit_guards():
     assert "saveInFlight" in source and "syncSaveButtons" in source
     assert "FDCore.commitRawParams(rootFlow)" in source
     assert "if (n._paramsRaw !== undefined)" in source
-    assert "g.setAttribute('tabindex', '0')" in source
+    canvas = (TEMPLATES / "flow_designer_canvas.js").read_text(encoding="utf-8")
+    assert "g.setAttribute('tabindex', '0')" in canvas
     assert "If yes, go to" in source
     assert 'aria-describedby="fd-canvas-help"' in markup
 

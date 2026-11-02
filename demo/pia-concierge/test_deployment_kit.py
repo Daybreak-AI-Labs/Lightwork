@@ -10,7 +10,7 @@ HERE = Path(__file__).resolve().parent
 
 # The modules that make up the standalone SKU (mirrors Dockerfile COPY).
 _STANDALONE_MODULES = ("app.py", "backend.py", "capabilities.py",
-                       "pia_engine.py", "store.py", "mailsink.py",
+                       "pia_engine.py", "store.py", "mailsink.py", "mailsink_transport.py",
                        "onetrust_client.py", "ot_mock.py", "notice_check.py",
                        "contract_guard.py", "value_ledger.py",
                        "license_kit.py", "serve_standalone.py",

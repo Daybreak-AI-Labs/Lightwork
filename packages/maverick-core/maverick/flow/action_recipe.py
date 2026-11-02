@@ -164,6 +164,12 @@ Strings are JSON text here: a scalar string response must itself be quoted.
 Pass the returned typed value directly to resolve_step/validate_result; those
 functions do not interpret strings as JSON text again.
     """
+    from ..tool_results import ToolResultText, tool_result_failed
+
+    if isinstance(raw, ToolResultText):
+        if tool_result_failed(raw):
+            raise ValueError("tool result is not a completed success")
+        raw = str(raw)
     if type(raw) is str:
         if len(raw.encode("utf-8")) > MAX_ARTIFACT_BYTES:
             raise ValueError("tool result JSON exceeds size limit")

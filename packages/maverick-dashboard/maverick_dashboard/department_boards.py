@@ -109,7 +109,7 @@ def _overview(request, world, goals, days):
     from maverick.departments import department_title
     from maverick.domain import suites_for_domain
 
-    from .api import _board_day_list
+    from .board_data import _board_day_list
 
     dates, since, previous = _board_day_list(days)
     daily = {day.isoformat(): {"d": day.isoformat(), "started": 0, "delivered": 0} for day in dates}
@@ -146,7 +146,7 @@ def _spend(request, world, owner, days):
     from maverick.workforce_value import _is_done
     from maverick.world_model import _dec_field
 
-    from .api import _board_day_list
+    from .board_data import _board_day_list
 
     dates, since, previous = _board_day_list(days)
     columns = ("episode_id", "goal_id", "started_at", "ended_at", "outcome", "cost_dollars",

@@ -77,7 +77,7 @@ def create_third_party_executive_reports_page_router(
         if "report" in request.query_params and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", request.query_params["report"]):
             raise HTTPException(status_code=404, detail="executive report workbench unavailable")
         style_nonce = secrets.token_urlsafe(18)
-        from .api import module_activation_enabled
+        from .module_activation import module_activation_enabled
 
         response = templates.TemplateResponse(
             request,

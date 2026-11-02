@@ -432,6 +432,7 @@ class TestPackEditingAuthorization:
 
     def test_non_admin_cannot_see_recovery_controls(self, tmp_path, monkeypatch):
         import maverick_dashboard.api as api
+        import maverick_dashboard.auth as auth
 
         name = _clean_builtin_name()
         path = tmp_path / "domains" / f"{name}.toml"
@@ -439,6 +440,8 @@ class TestPackEditingAuthorization:
         path.write_text(f'name = "{name}"\nallow_tools = []\n', encoding="utf-8")
         monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
         monkeypatch.setattr(api, "is_dashboard_admin", lambda principal: False)
+        monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+        monkeypatch.setattr(auth, "is_dashboard_admin", lambda principal: False)
 
         assert "af-recover" not in client.get("/agents").text
         assert client.delete(f"/api/v1/agents/{name}/override").status_code == 403

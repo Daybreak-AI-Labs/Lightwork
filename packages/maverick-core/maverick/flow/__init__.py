@@ -8,6 +8,7 @@ still be a full agentic goal. OFF by default -- ``[flows] enable`` /
 """
 from __future__ import annotations
 
+from .expressions import eval_condition, render
 from .ir import (
     NODE_ACTION,
     NODE_AGENT,
@@ -21,7 +22,8 @@ from .ir import (
     FlowNode,
     single_agent_flow,
 )
-from .runner import FlowRunResult, eval_condition, render, run_flow
+from .run_state import FlowRunResult
+from .runner import run_flow
 
 
 def enabled() -> bool:

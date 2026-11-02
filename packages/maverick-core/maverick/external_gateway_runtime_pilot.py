@@ -258,6 +258,8 @@ class PinnedGatewayHTTPTransport:
                 timeout=timeout,
                 trust_env=False,
             ) as client:
+                from .governed_http import admit_client_request
+                admit_client_request(client, url)
                 with client.stream(
                     method,
                     url,

@@ -93,7 +93,7 @@ def approvals(request, terms, can_open_page) -> list[dict]:
     from . import auth
     if not auth.has_permission(request, "operate") or not can_open_page("/approvals"):
         return []
-    from .api import _world
+    from ._shared import _world
     from .content_access import can_read_approval
     from .identity_format import humanize
 

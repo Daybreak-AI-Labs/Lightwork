@@ -141,6 +141,7 @@ nav:
       - Encryption at rest: encryption.md
       - Regulated deployment: regulated-deployment.md
       - Compliance assessments: compliance-assessments.md
+      - Security framework catalogs: security-framework-catalog.md
       - Agent threat hunting: threat-hunting.md
       - Adaptive immunity: immune.md
       - Information-flow control: ifc.md

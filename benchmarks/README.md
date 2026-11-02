@@ -31,6 +31,24 @@ python benchmarks/harness.py benchmarks/longhorizon/research-report.md \
   --max-dollars 2.0 --tag local
 ```
 
+## Offline runtime measurements
+
+The opt-in `Runtime performance evidence` GitHub Actions workflow produces a
+JSON artifact with median and p95 measurements for a cold process import,
+registry assembly, an in-memory SQLite vector search, Unicode normalization,
+and an idle event-loop yield. It makes no provider calls and applies no timing
+thresholds. To run the same workloads locally with the core and knowledge
+packages installed:
+
+```bash
+python -m benchmarks.runtime_performance --samples 20 --output runtime-performance.json
+```
+
+The vectors are synthetic and the event-loop sample is idle, so the results do
+not predict production workload latency. Compare results only when host,
+interpreter, dependencies and configuration are equivalent; keep raw artifacts
+for review rather than treating machine-dependent timings as pass/fail gates.
+
 ## Suite
 
 | Benchmark | Class | Expected wall | Expected cost |

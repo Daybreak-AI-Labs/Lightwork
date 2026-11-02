@@ -1173,6 +1173,39 @@ def _tool_status(output: str) -> str:
     return "error" if _tool_call_failed(output) else "ok"
 
 
+def _preserve_tool_result_state(text: str, state: Any) -> str:
+    """Keep an explicitly classified result through framing and redaction."""
+    if state is None:
+        return text
+    from .tool_results import ToolResultText
+
+    return ToolResultText(text, state)
+
+
+def _blocked_tool_output_message(*, execution_unknown: bool, verdict: Any, reason: str) -> str:
+    """Describe screened output without claiming an unknown effect succeeded."""
+    if execution_unknown:
+        return (
+            "INDETERMINATE: the tool's external effect is unknown and its output "
+            "was withheld by Shield; reconcile state and do not retry"
+        )
+    return (
+        "⚠ Tool executed, but its output was BLOCKED by Shield "
+        f"({verdict.severity}): {reason}. Result withheld; "
+        "do not retry solely to recover the output."
+    )
+
+
+def _post_effect_control_stop(exc: BaseException, execution_unknown: bool) -> bool:
+    """Preserve stop signals and any uncertainty about an external effect."""
+    is_stop = type(exc).__name__ in {
+        "BudgetExceeded", "CancelledError", "GoalCancelled", "Halted", "KeyboardInterrupt", "SystemExit",
+    }
+    if is_stop and execution_unknown:
+        exc.tool_execution_unknown = True
+    return is_stop
+
+
 # A single runaway tool result (multi-MB shell stdout, a giant query/file dump)
 # would otherwise enter the CURRENT context window uncapped -- compaction only
 # trims results behind the recent window -- blowing tokens/budget in one turn.
@@ -1305,78 +1338,10 @@ def _last_assistant_text(messages: list[dict]) -> str:
 
 
 def _assemble_assistant_content(resp: Any, final_dropped_tools: bool) -> list[dict]:
-    """Rebuild the assistant message content blocks from an LLM response,
-    preserving Anthropic's exact thinking-block order/signatures (interleaved
-    blocks must be echoed back unmodified). Extracted verbatim from
-    _run_inner; see the inline council-fix notes for the ordering rules."""
-    assistant_content: list[dict] = []
-    ordered_blocks = getattr(resp, "content_blocks", None)
-    if final_dropped_tools:
-        # May 28 fix #2: the model emitted a FINAL: marker AND
-        # tool_use in the same turn; we discard the tool attempt and
-        # treat FINAL as the answer. Do NOT replay the model's blocks
-        # here. Dropping the interleaved tool_use would merge
-        # previously-separated thinking blocks into one consecutive
-        # run, and on a revision pass (verifier/patch reject ->
-        # continue) the re-sent turn 400s:
-        #   messages.N.content.M: `thinking`/`redacted_thinking`
-        #   blocks in the latest assistant message cannot be modified.
-        # The tool_use can't stay either (orphan with no
-        # tool_result). Omitting thinking from a turn is explicitly
-        # allowed (the API auto-filters prior-turn thinking), so emit
-        # a clean text-only turn. resp.text is non-empty here (guarded
-        # by `resp.text and resp.tool_calls` above).
-        assistant_content.append({"type": "text", "text": resp.text})
-    elif ordered_blocks:
-        # May 28 fix: replay the model's blocks in their ORIGINAL
-        # order, COMPLETE and UNMODIFIED. Anthropic rejects a
-        # rearranged thinking-block sequence on the next request —
-        # the bucket-by-type rebuild in the else branch reordered
-        # interleaved Opus 4.7 turns (thinking between tool_use) and
-        # triggered "thinking blocks in the latest assistant message
-        # cannot be modified". (The only tool_use-dropping case,
-        # FINAL, is handled above — here every block is kept so the
-        # tool_use blocks always have matching tool_results below.)
-        for blk in ordered_blocks:
-            assistant_content.append(dict(blk))
-    else:
-        # May 26 council fix: emit ONE thinking block per original
-        # block, preserving each block's exact signature. Concatenating
-        # text but keeping only the first signature corrupted multi-
-        # block interleaved thinking on Opus 4.7 — the signature is
-        # derived from the EXACT text of its block. Falls back to
-        # the legacy single-block path when thinking_blocks is empty
-        # but resp.thinking is set (older mocks / non-Anthropic).
-        thinking_blocks = getattr(resp, "thinking_blocks", None) or []
-        if thinking_blocks:
-            # May 26 council fix (API audit #2): include the block
-            # EVEN IF the text is empty as long as a signature is
-            # present. Anthropic still requires the signature-bearing
-            # block to be echoed back to maintain continuity. The old
-            # `if resp.thinking:` check at the elif below would drop
-            # empty-text-signature pairs entirely.
-            for tb_text, tb_sig in thinking_blocks:
-                if not tb_text and not tb_sig:
-                    continue
-                block_dict: dict = {"type": "thinking", "thinking": tb_text}
-                if tb_sig:
-                    block_dict["signature"] = tb_sig
-                assistant_content.append(block_dict)
-        elif resp.thinking or getattr(resp, "thinking_signature", None):
-            sig = getattr(resp, "thinking_signature", None)
-            thinking_block: dict = {
-                "type": "thinking", "thinking": resp.thinking or "",
-            }
-            if sig:
-                thinking_block["signature"] = sig
-            assistant_content.append(thinking_block)
-        if resp.text:
-            assistant_content.append({"type": "text", "text": resp.text})
-        for tc in resp.tool_calls:
-            assistant_content.append(
-                {"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.input}
-            )
-    return assistant_content
+    """Preserve ordered provider content when replaying an assistant turn."""
+    from .providers.conversation import assistant_content_from_response
+
+    return assistant_content_from_response(resp, final_dropped_tools=final_dropped_tools)
 
 
 @dataclass
@@ -3598,8 +3563,14 @@ class Agent:
             # post-effect processing so none of those failures can recast the
             # completed call as replay-safe.
             effect_completed = True
-            execution_unknown = getattr(output, "tool_execution_unknown", False)
+            from .tool_results import ToolResultState, ToolResultText, classify_tool_result
+
+            execution_unknown = bool(
+                getattr(output, "tool_execution_unknown", False)
+                or classify_tool_result(output) is ToolResultState.INDETERMINATE
+            )
             execution_status = _tool_status(output)
+            explicit_state = output.state if isinstance(output, ToolResultText) else None
             await _dispatch_hooks(HookContext(
                 event=HookEvent.POST_TOOL_USE,
                 tool_name=name,
@@ -3636,7 +3607,7 @@ class Agent:
                             # Withholding delivery must not recast a mutating call
                             # as failed/replay-safe in a trust receipt.
                             status=execution_status,
-                            disposition="output_withheld",
+                            disposition="execution_unknown" if execution_unknown else "output_withheld",
                             output_summary=_audit_summary(reason),
                         ):
                             return (
@@ -3644,10 +3615,8 @@ class Agent:
                                 "was withheld, but terminal audit evidence could "
                                 "not be written; reconcile state and do not retry"
                             )
-                        return (
-                            "⚠ Tool executed, but its output was BLOCKED by Shield "
-                            f"({out_verdict.severity}): {reason}. Result withheld; "
-                            "do not retry solely to recover the output."
+                        return _blocked_tool_output_message(
+                            execution_unknown=execution_unknown, verdict=out_verdict, reason=reason,
                         )
             from .safety.secret_detector import redact as _redact_secrets
             from .tool_result_stream import needs_complete_output, result_bytes
@@ -3695,13 +3664,13 @@ class Agent:
                     deliver(safe_name, complete_output)
             except Exception as exc:
                 log.warning("tool output observer failed (%s)", type(exc).__name__)
-            return framed + guard_note
+            return _preserve_tool_result_state(framed + guard_note, explicit_state)
         except BaseException as exc:
             if not terminal_attempted:
                 if effect_completed:
                     record_terminal(
                         status=execution_status,
-                        disposition="post_effect_failure",
+                        disposition="execution_unknown" if execution_unknown else "post_effect_failure",
                         output_summary=_audit_summary(
                             f"post-effect processing failed: {type(exc).__name__}"
                         ),
@@ -3725,17 +3694,10 @@ class Agent:
                 # treat them as non-retryable control flow.  Ordinary failures
                 # after a returned effect become an explicit reconciliation
                 # state and never expose the unprocessed tool output.
-                if type(exc).__name__ in {
-                    "BudgetExceeded",
-                    "CancelledError",
-                    "GoalCancelled",
-                    "Halted",
-                    "KeyboardInterrupt",
-                    "SystemExit",
-                }:
+                if _post_effect_control_stop(exc, execution_unknown):
                     raise
                 return (
-                    "INDETERMINATE: the tool completed, but post-effect "
+                    "INDETERMINATE: the tool's external effect may have occurred, but post-effect "
                     "processing failed; reconcile state and do not retry"
                 )
             raise
@@ -4187,7 +4149,7 @@ class Agent:
         tr: dict = {
             "type": "tool_result",
             "tool_use_id": tool_use_id,
-            "content": output,
+            "content": str(output),
         }
         # Frame-aware: `output` is the <tool_output …>-wrapped string, so inspect
         # the content inside it (a leading-ERROR check on the frame is always
@@ -4644,7 +4606,7 @@ class Agent:
         ):
             return None
         try:
-            from . import ai_evidence_gateway
+            from .ai_evidence import delivery as ai_evidence_gateway
             if ai_evidence_gateway.enabled():
                 return None
         except Exception:

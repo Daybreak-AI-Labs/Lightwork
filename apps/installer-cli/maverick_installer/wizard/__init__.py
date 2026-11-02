@@ -37,9 +37,17 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from maverick.config_contracts import (
+    BOOLEAN_SETTINGS,
+    CHOICE_SETTINGS,
+    INTEGER_SETTINGS,
+    NUMBER_LIST_SETTINGS,
+    TEXT_SETTINGS,
+)
+
 try:
     import tomllib  # Python 3.11+
-except ModuleNotFoundError:  # pragma: no cover -- Py 3.10 CI matrix
+except ModuleNotFoundError:  # pragma: no cover -- Py 3.11 CI matrix
     import tomli as tomllib  # type: ignore[no-redef]
 
 from rich.console import Console
@@ -1388,13 +1396,14 @@ def pick_approvals() -> dict[str, Any]:
         "has passed.[/dim]"
     )
     undo_seconds = _safe_int(
-        _q_text("  Seconds a decision can be undone (0 = act at once)", default="30"),
-        default=30,
+        _q_text("  Seconds a decision can be undone (0 = act at once)",
+                default=str(INTEGER_SETTINGS["approval.undo_grace_seconds"].default)),
+        default=INTEGER_SETTINGS["approval.undo_grace_seconds"].default,
     )
     require_ack = _q_confirm(
         "  Ask for an explicit confirmation before approving high or critical risk "
         "requests? (a ticked box for high, typing APPROVE for critical)",
-        default=True,
+        default=BOOLEAN_SETTINGS["approval.require_acknowledgement"].default,
     )
     separate = _q_select(
         "  Who approves a high or critical risk action someone asked for?",
@@ -1403,22 +1412,26 @@ def pick_approvals() -> dict[str, Any]:
             "always         - Always someone else, even if the request then waits and expires.",
             "never          - The person who asked may approve it.",
         ],
-        default="when_available - Someone else, whenever another approver is available (default).",
+        default=CHOICE_SETTINGS["approval.separate_approver"].default
+        + " - Someone else, whenever another approver is available (default).",
     ).split()[0]
     record_checks = _q_confirm(
         "  Keep a record of each approval check (when, risk, kind of action, agent and "
         "outcome; never the content) so you can preview a threshold change later?",
-        default=True,
+        default=BOOLEAN_SETTINGS["approval.record_checks"].default,
     )
     retention = _safe_int(
-        _q_text("  Days to keep that record", default="90"), default=90,
-    ) if record_checks else 90
+        _q_text("  Days to keep that record", default=str(INTEGER_SETTINGS["approval.check_retention_days"].default)),
+        default=INTEGER_SETTINGS["approval.check_retention_days"].default,
+    ) if record_checks else INTEGER_SETTINGS["approval.check_retention_days"].default
     return {
-        "undo_grace_seconds": max(0, min(undo_seconds, 3600)),
+        "undo_grace_seconds": max(INTEGER_SETTINGS["approval.undo_grace_seconds"].minimum,
+                                   min(undo_seconds, INTEGER_SETTINGS["approval.undo_grace_seconds"].maximum)),
         "require_acknowledgement": bool(require_ack),
         "separate_approver": separate,
         "record_checks": bool(record_checks),
-        "check_retention_days": max(1, min(retention, 3650)),
+        "check_retention_days": max(INTEGER_SETTINGS["approval.check_retention_days"].minimum,
+                                    min(retention, INTEGER_SETTINGS["approval.check_retention_days"].maximum)),
     }
 
 
@@ -1442,19 +1455,26 @@ def pick_budget() -> dict[str, Any]:
         "  Require a reviewed price before paid AI work? Recommended. "
         "You can add your contract's spending ceiling in Settings after installation. "
         "Choose No only if you accept that dollar limits may be under-counted",
-        default=True,
+        default=BOOLEAN_SETTINGS["budget.strict_pricing"].default,
     )
     budget["guidance"] = _q_confirm(
-        "  Show known budget headroom before work? This never changes execution limits.", default=True)
+        "  Show known budget headroom before work? This never changes execution limits.",
+        default=BOOLEAN_SETTINGS["budget.guidance"].default)
     budget["warnings"] = _q_confirm(
-        "  Show in-product warnings as tasks approach their limits?", default=True)
+        "  Show in-product warnings as tasks approach their limits?",
+        default=BOOLEAN_SETTINGS["budget.warnings"].default)
     if budget["warnings"]:
         import math
+        contract = NUMBER_LIST_SETTINGS["budget.warning_thresholds"]
         while True:
-            raw_thresholds = _q_text("  Warning thresholds, as fractions of the limit", default="0.8, 0.95, 1.0")
+            raw_thresholds = _q_text("  Warning thresholds, as fractions of the limit",
+                                     default=", ".join(str(value) for value in contract.default))
             try:
                 values = [float(part.strip()) for part in raw_thresholds.split(",")]
-                if not 1 <= len(values) <= 10 or any(not math.isfinite(value) or not 0 < value <= 1 for value in values):
+                if not 1 <= len(values) <= contract.max_items or any(
+                    not math.isfinite(value) or not contract.minimum_exclusive < value <= contract.maximum
+                    for value in values
+                ):
                     raise ValueError
             except (TypeError, ValueError):
                 console.print("[yellow]Enter one to ten finite numbers above 0 and at most 1, separated by commas.[/yellow]")
@@ -1606,24 +1626,24 @@ def pick_agent_test_rules() -> dict[str, Any]:
     new_needs_run = _q_confirm(
         "Require a passing run of every saved answer check before a brand-new specialist "
         "is published? (A reason does not skip this.)",
-        default=False,
+        default=BOOLEAN_SETTINGS["agent_tests.require_for_new_specialists"].default,
     )
     second_person = _q_confirm(
         "Should a second administrator approve publishing changed instructions without "
         "passing tests? (The person who asked cannot approve their own reason.)",
-        default=False,
+        default=BOOLEAN_SETTINGS["agent_tests.bypass_requires_second_person"].default,
     )
     tool_checks = _q_confirm(
         "Allow saved answer checks to test which tools a specialist calls? (Tools are "
         "replaced by test stubs that record the call and answer with a fixed result. "
         "No real tool, file, network call or shell command runs.)",
-        default=False,
+        default=BOOLEAN_SETTINGS["agent_tests.tool_checks"].default,
     )
     canary = _prompt_canary_percent()
     auto_rollback = bool(canary) and _q_confirm(
         "Roll a trial version back automatically when it fails clearly more often than the current "
         "version? (It needs at least 10 finished goals on the trial first.)",
-        default=False,
+        default=BOOLEAN_SETTINGS["agent_tests.canary_auto_rollback"].default,
     )
     return {"max_cases_per_specialist": limit, "require_for_new_specialists": new_needs_run,
             "bypass_requires_second_person": second_person, "tool_checks": tool_checks,
@@ -1632,32 +1652,34 @@ def pick_agent_test_rules() -> dict[str, Any]:
 
 
 def _prompt_canary_percent() -> int:
+    contract = INTEGER_SETTINGS["agent_tests.canary_percent"]
     while True:
         raw = _q_text(
             "When a changed specialist is published, what share of new goals should try it first? "
             "(0 publishes changes straight away; 1 to 50 is a trial share)",
-            default="0",
+            default=str(contract.default),
         ).strip()
         try:
             value = int(raw)
         except ValueError:
             value = -1
-        if 0 <= value <= 50:
+        if contract.minimum <= value <= contract.maximum:
             return value
         console.print("[yellow]Enter a whole number from 0 to 50.[/yellow]")
 
 
 def _prompt_check_limit() -> int:
+    contract = INTEGER_SETTINGS["agent_tests.max_cases_per_specialist"]
     while True:
         raw = _q_text(
             "How many saved answer checks may one specialist keep? (1 to 200; 20 is the default)",
-            default="20",
+            default=str(contract.default),
         ).strip()
         try:
             value = int(raw)
         except ValueError:
             value = 0
-        if 1 <= value <= 200:
+        if contract.minimum <= value <= contract.maximum:
             return value
         console.print("[yellow]Enter a whole number from 1 to 200.[/yellow]")
 
@@ -1880,13 +1902,13 @@ def pick_automation_import() -> dict[str, Any]:
         "lets Zapier/Notion trigger Lightwork. It calls third-party APIs and "
         "writes templates, so it's OFF by default.[/dim]"
     )
-    enable = _q_confirm("Enable automation import?", default=False)
+    enable = _q_confirm("Enable automation import?", default=BOOLEAN_SETTINGS["automation_import.enable"].default)
     if not enable:
         return {"enable": False}
     create_schedules = _q_confirm(
         "  Offer to recreate imported schedules (each reviewed after its draft is published)? "
         "(off = import the draft, then schedule it yourself in Automations)",
-        default=False,
+        default=BOOLEAN_SETTINGS["automation_import.create_schedules"].default,
     )
     return {"enable": True, "create_schedules": create_schedules}
 
@@ -2261,9 +2283,9 @@ def pick_durable() -> dict[str, Any]:
         "restart resumes from the last step instead of starting over. Adds a "
         "small write per step; OFF by default.[/dim]"
     )
-    if not _q_confirm("Enable durable execution (crash-resume)?", default=False):
+    if not _q_confirm("Enable durable execution (crash-resume)?", default=BOOLEAN_SETTINGS["durable.enabled"].default):
         return {"enabled": False}
-    return {"enabled": True, "keep_last": 5}
+    return {"enabled": True, "keep_last": INTEGER_SETTINGS["durable.keep_last"].default}
 
 
 def pick_workspace_journal() -> dict[str, Any]:
@@ -3598,19 +3620,9 @@ def pick_connectors() -> dict[str, str]:
 
 # ---------- monitoring and key management ----------
 
-_MONITORING_TRACE_DEFAULT = "http://localhost:4318/v1/traces"
+_MONITORING_TRACE_DEFAULT = TEXT_SETTINGS["observability.otel_endpoint"].runtime_default
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
-# The settings page's pattern for [observability] otel_endpoint (settings_catalog_runtime.py).
-# The installer does not import the dashboard, so the text is copied; a test keeps the two equal.
-_COLLECTOR_PATTERN = (r"(https://[^\s\"'<>?#]{1,300}|http://(localhost|127\.0\.0\.1|\[::1\])"
-                      r"(:[0-9]{1,5})?(/[^\s\"'<>?#]{0,300})?)?")
-# The settings page's patterns for the key service and the security monitoring address
-# (settings_catalog_access.py). Copied for the same reason; a test keeps each equal.
-_KEY_ID_PATTERN = r"[A-Za-z0-9:/._-]{1,300}"
-_REGION_PATTERN = r"[a-z]{2}(-[a-z]+)+-[0-9]{1,2}"
-_VAULT_ADDRESS_PATTERN = r"https://[^\s\"'<>?#]{1,300}"
-_VAULT_MOUNT_PATTERN = r"[A-Za-z0-9._-]{1,64}"
-_SIEM_PATTERN = r"(https?|tcp|udp|datadog|sentinel)://[^\s\"'<>]{1,300}"
+# Syntax is shared with dashboard settings through maverick.config_contracts.
 _SIEM_KINDS: list[tuple[str, str]] = [
     ("https", "A web address (https://)"),
     ("tcp", "Syslog over TCP (host:port)"),
@@ -3697,7 +3709,7 @@ def _collector_problem(address: str) -> str | None:
     if urlsplit(address).scheme == "http" and urlsplit(address).hostname not in _LOCAL_HOSTS:
         return ("Only a collector on this computer may use http://. Enter an https:// address, "
                 "so the traces are encrypted on the way.")
-    if re.fullmatch(_COLLECTOR_PATTERN, address) is None:
+    if not TEXT_SETTINGS["observability.otel_endpoint"].matches(address):
         return "Enter a collector address with no spaces, quotes, question marks or # in it."
     return None
 
@@ -3740,7 +3752,7 @@ def _pick_trace_collector() -> dict[str, Any]:
 
 
 def _key_name_problem(value: str) -> str | None:
-    if re.fullmatch(_KEY_ID_PATTERN, value) is None:
+    if not TEXT_SETTINGS["kms.key_id"].matches(value):
         return ("Enter the key name exactly as your key service shows it: letters, digits and "
                 ": / . _ - only, without spaces.")
     return None
@@ -3749,27 +3761,27 @@ def _key_name_problem(value: str) -> str | None:
 def _azure_key_problem(value: str) -> str | None:
     from maverick.kms_backends import _azure_key_parts
 
-    if re.fullmatch(_KEY_ID_PATTERN, value) is None or _azure_key_parts(value) is None:
+    if not TEXT_SETTINGS["kms.key_id"].matches(value) or _azure_key_parts(value) is None:
         return ("Enter the key's web address, such as https://<vault>.vault.azure.net/keys/<name>, "
                 "optionally with its version at the end.")
     return None
 
 
 def _region_problem(value: str) -> str | None:
-    if value and re.fullmatch(_REGION_PATTERN, value) is None:
+    if value and not TEXT_SETTINGS["kms.region"].matches(value):
         return "Enter a region name such as us-east-1, or leave the answer blank."
     return None
 
 
 def _vault_address_problem(value: str) -> str | None:
     problem = _web_address_problem(value, ("https",))
-    if problem is None and re.fullmatch(_VAULT_ADDRESS_PATTERN, value) is None:
+    if problem is None and not TEXT_SETTINGS["kms.address"].matches(value):
         return "Enter a web address with no spaces, quotes, question marks or # in it."
     return problem
 
 
 def _vault_mount_problem(value: str) -> str | None:
-    if value and re.fullmatch(_VAULT_MOUNT_PATTERN, value) is None:
+    if value and not TEXT_SETTINGS["kms.mount"].matches(value):
         return "Enter the name of the Vault key area: letters, digits and . _ - only."
     return None
 
@@ -3802,8 +3814,9 @@ def _pick_key_service(keys: dict[str, str]) -> dict[str, Any]:
         kms["address"] = _ask_until(
             "  Vault web address (https://...)", default="", check=_vault_address_problem)
         mount = _ask_until(
-            "  Vault key area", default="transit", check=_vault_mount_problem) or "transit"
-        if mount != "transit":
+            "  Vault key area", default=TEXT_SETTINGS["kms.mount"].runtime_default,
+            check=_vault_mount_problem) or TEXT_SETTINGS["kms.mount"].runtime_default
+        if mount != TEXT_SETTINGS["kms.mount"].runtime_default:
             kms["mount"] = mount
         token = _ask_credential("VAULT_TOKEN", "Vault access token")
         if not token:
@@ -3831,7 +3844,7 @@ def _siem_address_problem(address: str, kind: str) -> str | None:
     if scheme not in _SIEM_SCHEMES[kind]:
         return ("That address is not one of the kind you chose. Example: "
                 f"{_SIEM_ADDRESS_EXAMPLES[kind]}")
-    if re.fullmatch(_SIEM_PATTERN, address) is None:
+    if not TEXT_SETTINGS["audit.siem_dest"].matches(address):
         return "Lightwork cannot send to that address. Check it against the example."
     return None
 
@@ -4703,7 +4716,7 @@ def _cfg_agent_tests(values: dict[str, Any]) -> list[str]:
     # behaviour, so the table is written only where an answer differs.
     lines = []
     limit = int(values["max_cases_per_specialist"])
-    if limit != 20:
+    if limit != INTEGER_SETTINGS["agent_tests.max_cases_per_specialist"].default:
         lines.append(f"max_cases_per_specialist = {limit}")
     if values["require_for_new_specialists"]:
         lines.append("require_for_new_specialists = true")
@@ -4711,7 +4724,7 @@ def _cfg_agent_tests(values: dict[str, Any]) -> list[str]:
         lines.append("bypass_requires_second_person = true")
     if values.get("tool_checks"):
         lines.append("tool_checks = true")
-    canary = int(values.get("canary_percent", 0))
+    canary = int(values.get("canary_percent", INTEGER_SETTINGS["agent_tests.canary_percent"].default))
     if canary:
         lines.append(f"canary_percent = {canary}")
     if canary and values.get("canary_auto_rollback"):
@@ -5207,12 +5220,18 @@ def write_config(
     jd_hiring = bool(capability_config.pop("jd_hiring", True))
     require_passing_tests = bool(capability_config.pop("require_passing_tests", True))
     # Saved answer checks live under [agent_tests] (kernel: maverick.agent_tests_policy).
-    agent_tests = {"max_cases_per_specialist": capability_config.pop("max_cases_per_specialist", 20),
-                   "require_for_new_specialists": bool(capability_config.pop("require_for_new_specialists", False)),
-                   "bypass_requires_second_person": bool(capability_config.pop("bypass_requires_second_person", False)),
-                   "tool_checks": bool(capability_config.pop("tool_checks", False)),
-                   "canary_percent": capability_config.pop("canary_percent", 0),
-                   "canary_auto_rollback": bool(capability_config.pop("canary_auto_rollback", False))}
+    agent_tests = {
+        "max_cases_per_specialist": capability_config.pop(
+            "max_cases_per_specialist", INTEGER_SETTINGS["agent_tests.max_cases_per_specialist"].default),
+        "require_for_new_specialists": bool(capability_config.pop(
+            "require_for_new_specialists", BOOLEAN_SETTINGS["agent_tests.require_for_new_specialists"].default)),
+        "bypass_requires_second_person": bool(capability_config.pop(
+            "bypass_requires_second_person", BOOLEAN_SETTINGS["agent_tests.bypass_requires_second_person"].default)),
+        "tool_checks": bool(capability_config.pop("tool_checks", BOOLEAN_SETTINGS["agent_tests.tool_checks"].default)),
+        "canary_percent": capability_config.pop("canary_percent", INTEGER_SETTINGS["agent_tests.canary_percent"].default),
+        "canary_auto_rollback": bool(capability_config.pop(
+            "canary_auto_rollback", BOOLEAN_SETTINGS["agent_tests.canary_auto_rollback"].default)),
+    }
     # Practice mode lives under [practice] (kernel: maverick.practice), written only when off.
     practice_mode = bool(capability_config.pop("practice_mode", True))
     practice_cap = _safe_float(capability_config.pop("practice_daily_spend_cap", 1.0), default=1.0)

@@ -107,7 +107,7 @@ def _secret_for_tenant(tenant: str) -> str | None:
         assert_tenant_active(tenant)
         from ..paths import reset_tenant, set_tenant
         token = set_tenant(tenant)
-    except Exception:
+    except Exception:  # failure-policy: fail_closed -- no secret means no signed approval
         return None
     try:
         return _secret()
@@ -277,7 +277,7 @@ def current_flow_runtime_authority(
         from ..paths import current_tenant_id_strict
 
         workspace = current_tenant_id_strict() or "local"
-    except Exception as exc:
+    except Exception as exc:  # failure-policy: fail_closed -- workspace authority unavailable
         raise ApprovalCardError(
             "current flow workspace authority is unavailable"
         ) from exc
@@ -300,7 +300,7 @@ def current_flow_runtime_authority(
         pass
     except ApprovalCardError:
         raise
-    except Exception as exc:
+    except Exception as exc:  # failure-policy: fail_closed -- role authority unavailable
         raise ApprovalCardError(
             "current flow role authority is unavailable"
         ) from exc
@@ -333,7 +333,7 @@ def current_flow_runtime_authority(
                 for marker in ("_API_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
             )
         ]
-    except Exception as exc:
+    except Exception as exc:  # failure-policy: fail_closed -- credential authority unavailable
         raise ApprovalCardError(
             "current flow credential authority is unavailable"
         ) from exc
@@ -350,7 +350,7 @@ def current_flow_runtime_authority(
             "dashboard_dollar_cap": budget_override(),
             "environment_dollar_cap": os.environ.get("MAVERICK_BUDGET_DOLLARS"),
         }
-    except Exception as exc:
+    except Exception as exc:  # failure-policy: fail_closed -- budget authority unavailable
         raise ApprovalCardError(
             "current flow budget authority is unavailable"
         ) from exc
@@ -400,7 +400,7 @@ def require_current_flow_approver(actor: str) -> None:
             )
     except ApprovalCardError:
         raise
-    except Exception as exc:
+    except Exception as exc:  # failure-policy: fail_closed -- approver authority unavailable
         raise ApprovalCardError(
             "current flow approver authority is unavailable"
         ) from exc

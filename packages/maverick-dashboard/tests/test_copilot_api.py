@@ -934,12 +934,12 @@ def test_task_detail_denial_matches_missing_record(client, monkeypatch):
 
 def test_flow_run_detail_checks_owner_and_path_before_showing_state(client, monkeypatch):
     from maverick import flow
-    from maverick_dashboard import api, auth
+    from maverick_dashboard import api, auth, flows_api
 
     monkeypatch.setattr(flow, "enabled", lambda: True)
     monkeypatch.setattr(auth, "has_permission", lambda _request, permission: permission == "operate")
     run = SimpleNamespace(flow_id="my-flow", status="paused_approval", error="private connector output")
-    monkeypatch.setattr(api, "_load_owned_run", lambda _request, _run_id, **_kwargs: run)
+    monkeypatch.setattr(flows_api, "_load_owned_run", lambda _request, _run_id, **_kwargs: run)
     run_id = "a" * 32
     page = f"/flows/my-flow/runs/{run_id}"
     response = client.get("/api/v1/copilot/context", params={"page": page})
