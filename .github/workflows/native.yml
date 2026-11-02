@@ -165,6 +165,7 @@ jobs:
           args: --release --locked -m rust/mvk-scan-py/Cargo.toml --out dist-second
           maturin-version: v1.14.1
       - name: Require byte-reproducible native wheels
+        id: reproducible
         shell: bash
         run: |
           python -I -S - <<'PY'
@@ -213,6 +214,18 @@ jobs:
               f"sha256:{first[wheel_name]}"
           )
           PY
+      # When the two clean builds differ, keep both so the varying bytes can be
+      # inspected; a reproducible run uploads nothing extra.
+      - name: Keep both native builds when they differ
+        if: failure() && steps.reproducible.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: maverick-native-unreproducible-${{ matrix.os }}
+          path: |
+            dist-first/*.whl
+            dist-second/*.whl
+          if-no-files-found: warn
+          retention-days: 14
       - name: Install wheel + assert native engaged + run parity
         shell: bash
         run: |
