@@ -12,6 +12,12 @@ for candidate in python3.12 python3.11; do
     break
   fi
 done
+# The host python3 fallback can be below the floor (3.10 on Ubuntu 22.04);
+# stop here rather than inside pip's requires-python check.
+if ! "$python_bin" -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+  echo "post-create.sh: Lightwork needs Python 3.11 or 3.12, but $python_bin is $("$python_bin" -c 'import sys;print("%d.%d"%sys.version_info[:2])'). Install Python 3.11 or 3.12, then re-run." >&2
+  exit 1
+fi
 
 "$python_bin" -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] <= (3, 12) else "Lightwork requires Python 3.11 or 3.12 for development.")'
 "$python_bin" -m venv .venv

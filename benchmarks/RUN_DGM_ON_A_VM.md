@@ -12,8 +12,8 @@ Expected cost: VM ≈ pennies; the run ≈ $50–100 (LLM + Modal). Runtime ≈ 
 
 ## 1. Spin up the box
 
-Any on-demand Linux VM works. Simplest: a DigitalOcean **Basic Droplet**, Ubuntu
-22.04, 2 vCPU / 4 GB. (AWS Lightsail t3.medium, GCP e2-medium, or Hetzner CX22 are
+Any on-demand Linux VM with Python 3.11 or 3.12 works. Simplest: a DigitalOcean
+**Basic Droplet**, Ubuntu 24.04 (its `python3` is 3.12), 2 vCPU / 4 GB. (AWS Lightsail t3.medium, GCP e2-medium, or Hetzner CX22 are
 equivalent.) SSH in as a sudo user.
 
 ## 2. One-time setup (paste on the VM)

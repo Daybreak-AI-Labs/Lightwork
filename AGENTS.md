@@ -37,7 +37,7 @@ TypeScript plugin SDK (`sdks/plugin-ts`).
 Each rule is backed by a CI gate or a failure seen in practice.
 
 1. Never use a bare `import tomllib`; use the try/except `tomli` fallback
-   (portable bootstrap convention; CI greps for it).
+   (kept for helpers that run on older interpreters; CI greps for it).
 2. No `shell=True` outside `maverick/sandbox/`; use `sandbox.exec()` (CI greps
    for it).
 3. Never hard-code model ids; use `maverick.config.get_role_model(role)`.

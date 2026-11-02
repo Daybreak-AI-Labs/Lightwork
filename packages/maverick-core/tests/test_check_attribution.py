@@ -224,10 +224,34 @@ def test_the_ruleset_requires_every_blocking_check_and_the_queue():
                   "lint-pr-title", "no-ai-attribution"):
         assert check in contexts, check
     # One required context per (interpreter, slice) and per posture slice; the
-    # slice count is the COUNT in ci.yml's --shard.
-    for version in ("3.11", "3.12"):
+    # slice count is the COUNT in ci.yml's --shard. The interpreters are the
+    # floor (`test`) plus the rest of the window (`test-window`), and the
+    # Windows containment jobs cover the same ones.
+    import yaml
+
+    jobs = yaml.safe_load(_workflow("ci.yml"))["jobs"]
+
+    def _versions(floor: str, window: str) -> list[str]:
+        return [*jobs[floor]["strategy"]["matrix"]["python-version"],
+                *jobs[window]["strategy"]["matrix"]["python-version"]]
+
+    versions = _versions("test", "test-window")
+    assert versions == ["3.11", "3.12"]
+    assert _versions("windows-process-containment",
+                     "windows-process-containment-window") == versions
+    for version in versions:
         for shard in (1, 2, 3, 4):
             assert f"test ({version}, {shard})" in contexts
+        assert f"Windows process containment (Python {version})" in contexts
+    # A required context for an interpreter CI no longer runs never reports,
+    # so every pull request would wait on it.
+    stale = sorted(
+        context for context in contexts
+        if (context.startswith("test (") and context[len("test ("):].split(",")[0] not in versions)
+        or (context.startswith("Windows process containment (Python ")
+            and context[len("Windows process containment (Python "):-1] not in versions)
+    )
+    assert not stale, stale
     for shard in (1, 2, 3, 4):
         assert f"posture ({shard})" in contexts
     assert ruleset["bypass_actors"] == []

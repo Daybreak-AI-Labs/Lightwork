@@ -106,9 +106,12 @@ jobs:
         run: |
           python -m pip install 'vulture==2.16'
           python -m vulture
-      - name: Retain guarded TOML imports for bootstrap utilities
-        # Preserve the portable import convention for bootstrap utilities;
-        # the installed Lightwork runtime now requires Python 3.11+.
+      - name: Reject bare `import tomllib` (keep the tomli fallback)
+        # tomllib is 3.11+ stdlib. The supported floor is now 3.11, but the
+        # documented tomli fallback stays for helpers that still run on older
+        # interpreters (when the floor was 3.10, three PRs in a row broke CI by
+        # importing tomllib without it). Catch a bare import here so the
+        # mistake fails the lint job in seconds, not minutes into the matrix.
         #
         # Column-0 match only: the legit pattern indents the import
         # inside a try-block, so anything at column 0 is the mistake.
@@ -723,8 +726,8 @@ jobs:
 
   test-window:
     # The rest of the supported window. A pull request proves the floor
-    # (`test`, above) on 3.11; the rest of the window -- 3.12, and
-    # the 3.12 production-posture run (`posture`, gated the same way) -- moves
+    # (`test`, above) on 3.11; the rest of the window -- 3.12, and the
+    # 3.12 production-posture run (`posture`, gated the same way) -- moves
     # to the merge queue and pushes to main, where a version- or posture-
     # specific break still blocks the merge or goes red on main. So on
     # pull_request these legs start, skip every step and report success within

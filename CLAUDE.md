@@ -117,7 +117,8 @@ controls; the other packages build on it.
 Each of these fails the build (the `lint` job in `.github/workflows/ci.yml`):
 
 - A bare `import tomllib` at column 0 in `apps/`, `packages/` or `benchmarks/`.
-  Bootstrap utilities retain guarded imports even with the Python 3.11 floor; use
+  The supported floor (3.11) has `tomllib`, but the fallback is kept for
+  helpers that still run on older interpreters; use
   `try: import tomllib` / `except ModuleNotFoundError: import tomli as tomllib`.
 - `shell=True` outside `maverick/sandbox/` and tests (the grep also matches the
   literal in comments). Route shell through `sandbox.exec()` (kernel rule 4).

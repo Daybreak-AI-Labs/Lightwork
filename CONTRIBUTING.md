@@ -247,8 +247,8 @@ refused, history stays linear, and nobody can bypass the rules.
 | `no-ai-attribution` | `scripts/check_attribution.py` over the pull request's commits, title and description, the merge-queue commit and pushes to `main` |
 | `select-tests` | On a pull request, the test files the changed files can affect (`scripts/select_pr_tests.py`): a change to the kernel, a `conftest.py`, `pyproject.toml`, the requirements, `.github/` or `scripts/` selects the full suite; a package change selects its tests and every test naming its import package; other files select the tests naming them by path. The heavier jobs (`docker`, `postgres`, `audit`, `release-cohort`, `redteam`, `eval-smoke`, the benchmark gates, Windows containment) run on a pull request only when a changed file is under their inputs (`JOB_PREFIXES`) |
 | `test (3.11, 1/2/3/4)` | The test suite on Python 3.11, in four slices: the `select-tests` selection on a pull request, the full suite in the merge queue and on `main` |
-| `test (3.11, 1/2/3/4)`, `test (3.12, 1/2/3/4)` | The same slices on 3.11 and 3.12. On a pull request these report success without running; they run on the merge queue's commit and on `main` |
-| `posture (1/2/3/4)` | The full suite again on 3.12 under the production security defaults, gated like the 3.11 and 3.12 legs |
+| `test (3.12, 1/2/3/4)` | The same slices on 3.12. On a pull request these report success without running; they run on the merge queue's commit and on `main` |
+| `posture (1/2/3/4)` | The full suite again on 3.12 under the production security defaults, gated like the 3.12 legs |
 | `harness-overhead`, `governance-frontier-offline` | The tracked benchmark manifests verify against the current sources (regenerate them when a source they cover changes) |
 | `audit` | OSV Scanner, pip-audit, bandit, the license policy and the SBOM |
 | `release-cohort`, `redteam`, `eval-smoke`, `postgres`, `docker` | Release packaging, the shield red-team corpus, the evaluation harness, the Postgres backend and the container image |

@@ -74,17 +74,17 @@ Real-machine release testing must cover winget/brew/apt and elevation flows;
 after cancellation, use the safe retry path (or the platform package manager's
 repair/uninstall command) rather than assuming the machine was rolled back.
 
-The Rust lockfile is current for Tauri 2.11, but its Linux dependency graph
-still inherits Wry's GTK3 bindings. OSV Scanner 2.3.8 reports one
-medium-severity `glib` soundness advisory and sixteen unmaintained-crate
-advisories. They have no compatible lockfile-only resolution: current Tauri
-requires GTK/GLib 0.18, the `glib` fix begins at 0.20, and most of the
-maintenance advisories have no fixed release. The GLib/GTK-family findings are
-Linux-only. Five additional `unic-*` maintenance advisories arrive through
-Tauri's cross-platform `urlpattern` dependency; they describe abandoned crates
-rather than known exploitable defects and also have no fixed versions. Keep
-Linux bundles engineering-only, do not globally suppress the findings, and
-re-evaluate when Tauri/Wry adopts maintained dependencies.
+The Rust lockfile is current for Tauri 2.12, but its Linux dependency graph
+still inherits Wry's GTK3 bindings. OSV Scanner 2.3.8 reports two advisories:
+the medium-severity `glib` 0.18 soundness advisory (GHSA-wrw7-89jp-8q8g, also
+published as RUSTSEC-2024-0429) and the unmaintained build-time
+`proc-macro-error` (RUSTSEC-2024-0370) that the gtk/glib 0.18 macros pull in.
+They have no compatible lockfile-only resolution: Wry 0.57 pins webkit2gtk
+2.0.2, which requires GTK/GLib 0.18, and the `glib` fix begins at 0.20. Both
+findings are Linux-only. `osv-scanner.toml` carries narrow exceptions for
+exactly these two that expire on 2027-01-31; keep Linux bundles
+engineering-only and re-evaluate when webkit2gtk-rs and Wry move to gtk 0.19 /
+glib 0.20 or later.
 
 ## Local development
 

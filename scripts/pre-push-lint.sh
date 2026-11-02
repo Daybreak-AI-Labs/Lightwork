@@ -60,7 +60,7 @@ run "standalone demo support" python scripts/sync_standalone_support.py --check
 echo "== vulture (dead code) =="
 run "vulture" python -m vulture
 
-echo "== bare 'import tomllib' (portable bootstrap convention) =="
+echo "== bare 'import tomllib' (keep the tomli fallback) =="
 if grep -rn --include='*.py' -E '^import[[:space:]]+tomllib([[:space:]]|$)' apps packages benchmarks; then
   echo "  FAIL bare 'import tomllib' (use the try/except tomli fallback)"; fail=1
 else

@@ -52,8 +52,8 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\lightwork.exe dashboard
 ```
 
-`py -3.12` selects Python 3.12; use `py -3.11` instead if that is
-the supported version you have installed.
+`py -3.12` selects Python 3.12; use `py -3.11` instead if that is the
+supported version you have installed.
 
 Calling the virtual environment's executables by path avoids changing the
 PowerShell execution policy to run the activation script.
