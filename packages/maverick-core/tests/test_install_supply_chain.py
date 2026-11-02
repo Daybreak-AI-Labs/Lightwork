@@ -618,6 +618,8 @@ def test_go_java_and_standalone_demo_security_floors_are_explicit():
         "demo/pia-concierge/requirements-standalone.txt",
     ):
         assert "python-multipart>=0.0.32" in _read(path)
+    # The PIA demo pulls in httpx, whose CA bundle comes from certifi.
+    assert "certifi>=2026.10.18" in _read("demo/pia-concierge/requirements-standalone.txt")
 
 
 def test_ci_integration_docs_do_not_call_workdir_a_security_boundary():
