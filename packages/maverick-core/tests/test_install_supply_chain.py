@@ -577,18 +577,16 @@ def test_cross_ecosystem_osv_gate_is_pinned_complete_and_expiring():
 
     policy = tomllib.loads(_read("osv-scanner.toml"))
     ignored = policy["IgnoredVulns"]
-    expected = {
+    reasons = {item["id"]: item["reason"] for item in ignored}
+    assert set(reasons) == {
         "GHSA-wrw7-89jp-8q8g",
         "RUSTSEC-2024-0370",
-        "RUSTSEC-2025-0075",
-        "RUSTSEC-2025-0080",
-        "RUSTSEC-2025-0081",
-        "RUSTSEC-2025-0098",
-        "RUSTSEC-2025-0100",
+        "GHSA-gcqx-w48m-w2h4",
     }
-    assert {item["id"] for item in ignored} == expected
-    assert all(item["ignoreUntil"] == date(2026, 10, 31) for item in ignored)
-    assert all("Tauri" in item["reason"] for item in ignored)
+    assert all(item["ignoreUntil"] == date(2027, 1, 31) for item in ignored)
+    assert "Tauri" in reasons["GHSA-wrw7-89jp-8q8g"]
+    assert "Tauri" in reasons["RUSTSEC-2024-0370"]
+    assert reasons["GHSA-gcqx-w48m-w2h4"].startswith("Build-time only:")
 
 
 def test_go_java_and_standalone_demo_security_floors_are_explicit():
