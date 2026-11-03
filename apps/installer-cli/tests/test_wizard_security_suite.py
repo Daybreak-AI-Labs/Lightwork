@@ -1247,7 +1247,7 @@ def test_partial_progress_never_persists_oidc_secrets(tmp_path, monkeypatch):
         "client_secret": "private-client-value", "session_secret": "private-session-value"}}}  # pragma: allowlist secret
     wizard._save_partial(state)
     assert json.loads(path.read_text()) == {"deployment": "desktop"}
-    assert state["advanced"]["oidc"]["client_secret"] == "private-client-value"
+    assert state["advanced"]["oidc"]["client_secret"] == "private-client-value"  # pragma: allowlist secret
     if os.name != "nt":
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
     # Resume from a legacy file sanitizes it before returning the state.
